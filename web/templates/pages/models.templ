@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -116,64 +115,23 @@ func mixtureModelOptionsJSON(agents []models.LLMConfig) string {
 	return string(b)
 }
 
-func mixtureConfigAttr(agent models.LLMConfig) string {
-	return agent.MixtureConfigJSON
-}
-
 func mixtureAggregatorSummary(agent models.LLMConfig, agents []models.LLMConfig) string {
-	cfg, err := llmmixture.ParseConfig(agent.MixtureConfigJSON)
-	if err != nil {
+	if agent.MixtureAggregatorLabel != "" {
+		return agent.MixtureAggregatorLabel
+	}
+	for _, option := range agents {
+		if option.ID == agent.MixtureAggregatorID {
+			return option.Name
+		}
+	}
+	if agent.MixtureAggregatorID == "" {
 		return "Not configured"
 	}
-	names := map[string]string{}
-	for _, option := range agents {
-		names[option.ID] = option.Name
-	}
-	agg := cfg.Aggregator.Label
-	if agg == "" {
-		agg = names[cfg.Aggregator.AgentConfigID]
-	}
-	if agg == "" {
-		agg = "Missing aggregator"
-	}
-	return agg
+	return "Missing aggregator"
 }
 
 func mixtureReferenceCount(agent models.LLMConfig) int {
-	cfg, err := llmmixture.ParseConfig(agent.MixtureConfigJSON)
-	if err != nil {
-		return 0
-	}
-	return len(cfg.ReferenceModels)
-}
-
-func isCustomOpenAICompatibleModel(agent models.LLMConfig) bool {
-	if agent.Provider != models.ProviderOpenAICompatible {
-		return false
-	}
-	preset := strings.TrimSpace(agent.PresetSlug)
-	return preset == "" || strings.EqualFold(preset, "custom")
-}
-
-func customOAuthClientSecretAttr(agent models.LLMConfig) string {
-	if isCustomOpenAICompatibleModel(agent) && agent.AuthMethod == models.AuthMethodOAuth {
-		return agent.OAuthClientSecret
-	}
-	return ""
-}
-
-func customOAuthConfigAttr(agent models.LLMConfig) string {
-	if isCustomOpenAICompatibleModel(agent) && agent.AuthMethod == models.AuthMethodOAuth {
-		return agent.CustomAuthConfigJSON
-	}
-	return ""
-}
-
-func customRequestExtraAttr(agent models.LLMConfig, value string) string {
-	if isCustomOpenAICompatibleModel(agent) {
-		return value
-	}
-	return ""
+	return agent.MixtureReferenceCount
 }
 
 func showOAuthLocalhostFallback() bool {
@@ -244,30 +202,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 						data-model-model={ agent.Model }
 						data-search-card
 						data-search-text={ modelSearchText(agent) }
-						data-model-reasoning-effort={ agent.ReasoningEffort }
-						data-model-temperature={ fmt.Sprintf("%f", agent.Temperature) }
-						data-model-is-default={ fmt.Sprintf("%t", agent.IsDefault) }
-								data-model-auth-method={ string(agent.AuthMethod) }
-								data-model-api-key={ agent.APIKey }
-								data-model-has-api-key={ fmt.Sprintf("%t", agent.APIKey != "") }
-								data-model-max-workers={ fmt.Sprintf("%d", agent.MaxWorkers) }						data-model-worker-timeout={ fmt.Sprintf("%d", agent.WorkerTimeout) }
-						data-model-oauth-client-id={ agent.OAuthClientID }
-						data-model-oauth-client-secret={ customOAuthClientSecretAttr(agent) }
-						data-model-oauth-authorize-url={ agent.OAuthAuthorizeURL }
-						data-model-oauth-token-url={ agent.OAuthTokenURL }
-						data-model-oauth-scopes={ agent.OAuthScopes }
-							data-model-ollama-base-url={ agent.OllamaBaseURL }
-							data-model-base-url={ agent.BaseURL }
-							data-model-transport={ agent.Transport }
-							data-model-preset-slug={ agent.PresetSlug }
-							data-model-models-url={ agent.ModelsURL }
-							data-model-auth-header-name={ agent.AuthHeaderName }
-						data-model-auth-header-value-prefix={ agent.AuthHeaderValuePrefix }
-							data-model-extra-headers-json={ customRequestExtraAttr(agent, agent.ExtraHeadersJSON) }
-							data-model-extra-body-json={ customRequestExtraAttr(agent, agent.ExtraBodyJSON) }
-							data-model-custom-auth-config={ customOAuthConfigAttr(agent) }
-								data-model-auto-start-tasks={ fmt.Sprintf("%t", agent.AutoStartTasks) }
-								data-model-mixture-config-json={ mixtureConfigAttr(agent) }						onclick="editModelFromData(this)"					>
+						onclick="editModelFromData(this)"
+					>
 						<div class="card-body relative">
 							<!-- Kebab menu in top right -->
 							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
@@ -1813,6 +1749,57 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 				}
 
 			function editModelFromData(button) {
+				var id = button && button.dataset ? button.dataset.modelId : '';
+				if (!id) return;
+				window._modelEditRequestGeneration = (window._modelEditRequestGeneration || 0) + 1;
+				var generation = window._modelEditRequestGeneration;
+				window._modelEditRequestedID = id;
+				fetch(modelMutationURL('/models/' + encodeURIComponent(id) + '/edit-details'), {
+					credentials: 'same-origin',
+					headers: {'Accept': 'application/json'},
+					cache: 'no-store'
+				}).then(function(resp) {
+					if (!resp.ok) throw new Error('Could not load model configuration.');
+					return resp.json();
+				}).then(function(details) {
+					if (generation !== window._modelEditRequestGeneration || window._modelEditRequestedID !== id || details.id !== id) return;
+					populateModelEditForm({dataset: {
+						modelId: details.id,
+						modelName: details.name || '',
+						modelProvider: details.provider || '',
+						modelModel: details.model || '',
+						modelReasoningEffort: details.reasoning_effort || '',
+						modelTemperature: String(details.temperature || 0),
+						modelIsDefault: String(details.is_default === true),
+						modelApiKey: details.api_key || '',
+						modelAuthMethod: details.auth_method || 'cli',
+						modelMaxWorkers: String(details.max_workers || 0),
+						modelWorkerTimeout: String(details.worker_timeout || 0),
+						modelOauthClientId: details.oauth_client_id || '',
+						modelOauthClientSecret: details.oauth_client_secret || '',
+						modelOauthAuthorizeUrl: details.oauth_authorize_url || '',
+						modelOauthTokenUrl: details.oauth_token_url || '',
+						modelOauthScopes: details.oauth_scopes || '',
+						modelOllamaBaseUrl: details.ollama_base_url || '',
+						modelBaseUrl: details.base_url || '',
+						modelTransport: details.transport || '',
+						modelPresetSlug: details.preset_slug || '',
+						modelModelsUrl: details.models_url || '',
+						modelAuthHeaderName: details.auth_header_name || '',
+						modelAuthHeaderValuePrefix: details.auth_header_value_prefix || '',
+						modelExtraHeadersJson: details.extra_headers_json || '',
+						modelExtraBodyJson: details.extra_body_json || '',
+						modelCustomAuthConfig: details.custom_auth_config_json || '',
+						modelAutoStartTasks: String(details.auto_start_tasks === true),
+						modelMixtureConfigJson: details.mixture_config_json || ''
+					}});
+				}).catch(function(err) {
+					if (generation !== window._modelEditRequestGeneration || window._modelEditRequestedID !== id) return;
+					alert(err.message || 'Could not load model configuration.');
+				});
+			}
+
+			function populateModelEditForm(button) {
 				var id = button.dataset.modelId;
 				var name = button.dataset.modelName;
 					var dbProvider = button.dataset.modelProvider;
@@ -2152,6 +2139,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 				}
 
 				function closeModelModal() {
+					window._modelEditRequestGeneration = (window._modelEditRequestGeneration || 0) + 1;
+					window._modelEditRequestedID = '';
 					new_model_modal.close();
 				}
 
@@ -2184,6 +2173,8 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 				}
 
 				function openNewModelModal() {
+					window._modelEditRequestGeneration = (window._modelEditRequestGeneration || 0) + 1;
+					window._modelEditRequestedID = '';
 					var form = document.getElementById('model_form');
 					clearModelFormError();
 					document.getElementById('model_modal_title').textContent = 'New Model Configuration';

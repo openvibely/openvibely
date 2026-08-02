@@ -3,7 +3,6 @@ package pages
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"html"
 	"strings"
@@ -393,27 +392,17 @@ func TestModelsContent_ModelModalJavaScriptShape(t *testing.T) {
 	}
 }
 
-func TestModelsContent_DefaultCardCarriesCompleteEditData(t *testing.T) {
+func TestModelsContent_CardsCarryOnlyBoundedListData(t *testing.T) {
 	agents := []models.LLMConfig{
 		{
-			ID:             "default-model",
-			Name:           "Default OpenAI",
-			Provider:       models.ProviderOpenAI,
-			Model:          "gpt-5.5",
-			AuthMethod:     models.AuthMethodAPIKey,
-			APIKey:         "sk-default",
-			Temperature:    0.42,
-			IsDefault:      true,
-			AutoStartTasks: true,
+			ID: "default-model", Name: "Default OpenAI", Provider: models.ProviderOpenAI,
+			Model: "gpt-5.5", AuthMethod: models.AuthMethodAPIKey, APIKey: "sk-default",
+			Temperature: 0.42, IsDefault: true, AutoStartTasks: true,
 		},
 		{
-			ID:              "other-model",
-			Name:            "Other Claude",
-			Provider:        models.ProviderAnthropic,
-			Model:           "claude-sonnet-5",
-			AuthMethod:      models.AuthMethodOAuth,
-			Temperature:     0.9,
-			ReasoningEffort: "high",
+			ID: "other-model", Name: "Other Claude", Provider: models.ProviderAnthropic,
+			Model: "claude-sonnet-5", AuthMethod: models.AuthMethodOAuth,
+			Temperature: 0.9, ReasoningEffort: "high",
 		},
 	}
 	var buf bytes.Buffer
@@ -423,37 +412,26 @@ func TestModelsContent_DefaultCardCarriesCompleteEditData(t *testing.T) {
 	out := buf.String()
 
 	defaultCard := renderedModelCard(t, out, "default-model")
-	for _, want := range []string{
-		`onclick="editModelFromData(this)"`,
-		`data-model-name="Default OpenAI"`,
-		`data-model-provider="openai"`,
-		`data-model-model="gpt-5.5"`,
-		`data-model-auth-method="api_key"`,
-		`data-model-api-key="sk-default"`,
-		`data-model-temperature="0.420000"`,
-		`data-model-is-default="true"`,
-		`data-model-auto-start-tasks="true"`,
-	} {
-		if !strings.Contains(defaultCard, want) {
-			t.Fatalf("expected default model card edit data to contain %q in:\n%s", want, defaultCard)
-		}
-	}
-	if !strings.Contains(defaultCard, "Default</span>") {
-		t.Fatal("expected default badge to render without replacing card edit click target")
+	if !strings.Contains(defaultCard, `onclick="editModelFromData(this)"`) || !strings.Contains(defaultCard, "Default</span>") {
+		t.Fatal("expected default card to remain directly editable and display its default badge")
 	}
 	if strings.Contains(defaultCard, `data-model-set-default-url=`) {
-		t.Fatal("default card should not render a set-default action that can conflict with edit opening")
+		t.Fatal("default card should not render a set-default action")
+	}
+	for _, forbidden := range []string{"sk-default", "data-model-api-key", "data-model-auth-method", "data-model-auto-start-tasks", "data-model-reasoning-effort"} {
+		if strings.Contains(defaultCard, forbidden) {
+			t.Fatalf("bounded card leaked edit-only value %q", forbidden)
+		}
 	}
 
 	otherCard := renderedModelCard(t, out, "other-model")
-	if !strings.Contains(otherCard, `onclick="editModelFromData(this)"`) {
-		t.Fatal("expected non-default card to remain directly editable")
+	if !strings.Contains(otherCard, `onclick="editModelFromData(this)"`) || !strings.Contains(otherCard, "Reasoning effort: high") {
+		t.Fatal("expected non-default card display and edit action to remain intact")
 	}
-	if !strings.Contains(otherCard, `data-model-provider="anthropic"`) || !strings.Contains(otherCard, `data-model-auth-method="oauth"`) {
-		t.Fatal("expected non-default card to carry its own provider/auth edit data")
-	}
-	if !strings.Contains(otherCard, `data-model-reasoning-effort="high"`) {
-		t.Fatal("expected non-default card to carry its own reasoning effort edit data")
+	for _, want := range []string{"/edit-details", "details.id !== id", "populateModelEditForm", "modelReasoningEffort: details.reasoning_effort"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected lazy edit script to contain %q", want)
+		}
 	}
 }
 
@@ -561,66 +539,31 @@ func TestModelsContent_MixtureReferenceOrderingControls(t *testing.T) {
 	}
 }
 
-func TestModelsContent_MixtureEditHydratesSavedReferenceOrder(t *testing.T) {
+func TestModelsContent_MixtureEditHydratesSavedReferenceOrderLazily(t *testing.T) {
 	agents := []models.LLMConfig{
 		{ID: "ref-a", Name: "Reference A", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-a"},
 		{ID: "ref-b", Name: "Reference B", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-b"},
-		{ID: "mix", Name: "Ordered Mix", Provider: models.ProviderMixture, Model: "mixture", MixtureConfigJSON: `{"enabled":true,"reference_models":[{"agent_config_id":"ref-b"},{"agent_config_id":"ref-a"}],"aggregator":{"agent_config_id":"ref-a"}}`},
+		{ID: "mix", Name: "Ordered Mix", Provider: models.ProviderMixture, Model: "mixture", MixtureAggregatorID: "ref-a", MixtureReferenceCount: 2},
 	}
 	var buf bytes.Buffer
 	if err := ModelsContent(agents, nil, false).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render models content: %v", err)
 	}
 	out := buf.String()
-
-	cardStart := strings.Index(out, `data-model-id="mix"`)
-	if cardStart < 0 {
-		t.Fatal("expected rendered mixture model card")
+	cardMarkup := renderedModelCard(t, out, "mix")
+	if strings.Contains(cardMarkup, `data-model-mixture-config-json=`) || strings.Contains(cardMarkup, `reference_models`) {
+		t.Fatal("initial mixture card exposed full edit configuration")
 	}
-	cardMarkup := out[cardStart:]
-	if nextCard := strings.Index(cardMarkup[1:], `data-model-id=`); nextCard > 0 {
-		cardMarkup = cardMarkup[:nextCard+1]
-	}
-	if !strings.Contains(cardMarkup, `data-model-mixture-config-json=`) {
-		t.Fatal("expected mixture edit card to carry saved mixture config JSON")
-	}
-	refB := strings.Index(cardMarkup, `agent_config_id`)
-	refA := strings.LastIndex(cardMarkup, `agent_config_id`)
-	if refB < 0 || refA < 0 || refB == refA {
-		t.Fatalf("expected saved mixture config data to include ordered reference model IDs")
-	}
-	if strings.Index(cardMarkup, `ref-b`) < 0 || strings.Index(cardMarkup, `ref-a`) < 0 || strings.Index(cardMarkup, `ref-b`) > strings.Index(cardMarkup, `ref-a`) {
-		t.Fatalf("expected saved mixture config data to preserve reference order ref-b before ref-a")
-	}
-	if !strings.Contains(out, "renderMixtureReferenceOptions(selectedIDs);") {
-		t.Fatal("expected edit hydration to rebuild reference selector in saved order")
-	}
-	if strings.Contains(cardMarkup, `&quot;{`) || strings.Contains(cardMarkup, `\\u0022`) {
-		t.Fatalf("expected mixture edit config data to be raw attribute-escaped JSON, not double-encoded JSON string: %s", cardMarkup)
-	}
-	attrPrefix := `data-model-mixture-config-json="`
-	attrStart := strings.Index(cardMarkup, attrPrefix)
-	if attrStart < 0 {
-		t.Fatal("expected mixture edit card to include mixture config data attribute")
-	}
-	attrValue := cardMarkup[attrStart+len(attrPrefix):]
-	attrEnd := strings.Index(attrValue, `"`)
-	if attrEnd < 0 {
-		t.Fatalf("expected terminated mixture config data attribute: %s", cardMarkup)
-	}
-	var parsed struct {
-		Aggregator struct {
-			AgentConfigID string `json:"agent_config_id"`
-		} `json:"aggregator"`
-		ReferenceModels []struct {
-			AgentConfigID string `json:"agent_config_id"`
-		} `json:"reference_models"`
-	}
-	if err := json.Unmarshal([]byte(html.UnescapeString(attrValue[:attrEnd])), &parsed); err != nil {
-		t.Fatalf("expected browser-readable mixture config JSON data attribute: %v", err)
-	}
-	if parsed.Aggregator.AgentConfigID != "ref-a" || len(parsed.ReferenceModels) != 2 || parsed.ReferenceModels[0].AgentConfigID != "ref-b" || parsed.ReferenceModels[1].AgentConfigID != "ref-a" {
-		t.Fatalf("expected edit hydration data to preserve aggregator and ordered references, got %+v", parsed)
+	for _, want := range []string{
+		"modelMixtureConfigJson: details.mixture_config_json || ''",
+		"applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '');",
+		"renderMixtureReferenceOptions(selectedIDs);",
+		"generation !== window._modelEditRequestGeneration",
+		"window._modelEditRequestedID !== id",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected lazy ordered mixture hydration script to contain %q", want)
+		}
 	}
 	if strings.Index(out, "toggleProviderFields(model, reasoningEffort);") > strings.Index(out, "applyMixtureConfig(dbProvider === 'mixture' ? mixtureConfigJSON : '')") {
 		t.Fatal("expected edit mixture config hydration to run after provider field toggling")
@@ -1083,9 +1026,10 @@ func TestModelsContent_CustomOAuthEditLoadsRevealableSecretsAndHeaders(t *testin
 		"saved-token-header",
 		"saved-refresh-header",
 		"saved-refresh-parameter",
+		`{"saved_option":true}`,
 	} {
-		if !strings.Contains(out, value) {
-			t.Errorf("expected saved edit value %q in rendered model data", value)
+		if strings.Contains(out, value) {
+			t.Errorf("initial Models response leaked saved edit value %q", value)
 		}
 	}
 	for _, inputID := range []string{
@@ -1128,8 +1072,9 @@ func TestModelsContent_CustomOAuthEditLoadsRevealableSecretsAndHeaders(t *testin
 		strings.Contains(out, `name="custom_clear_signing_secret"`) {
 		t.Fatal("expected custom OAuth edit controls not to use blank-preserve or separate-clear behavior")
 	}
-	if !strings.Contains(out, "button.dataset.modelOauthClientSecret") ||
-		!strings.Contains(out, "button.dataset.modelExtraHeadersJson") ||
+	if !strings.Contains(out, "modelOauthClientSecret: details.oauth_client_secret || ''") ||
+		!strings.Contains(out, "modelExtraHeadersJson: details.extra_headers_json || ''") ||
+		!strings.Contains(out, "modelCustomAuthConfig: details.custom_auth_config_json || ''") ||
 		!strings.Contains(out, "cfg.signing_secret || ''") ||
 		!strings.Contains(out, "cfg.static_headers ? JSON.stringify") {
 		t.Fatal("expected edit script to populate all saved custom OAuth secret and header values")
