@@ -36,11 +36,16 @@ func TestTaskDetailBreadcrumbSupportsAutomationOrigin(t *testing.T) {
 	}
 	body := buf.String()
 	for _, want := range []string{
+		`id="task-automations-back-btn"`,
+		`data-automations-url="/automations?project_id=project-origin"`,
+		`id="task-automations-separator"`,
 		`data-automation-url-base="/automations/"`,
 		`from === 'automation'`,
 		`params.get('automation_id')`,
 		`params.get('automation_name')`,
 		`encodeURIComponent(automationID)`,
+		`automationsBtn.hidden = false`,
+		`automationsSeparator.hidden = false`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected Automation-origin breadcrumb support to contain %q", want)

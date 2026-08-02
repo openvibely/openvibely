@@ -44,6 +44,20 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 		<!-- Breadcrumb navigation -->
 		<div class="flex items-center gap-2 mb-6 flex-shrink-0 min-w-0">
 			<a
+				id="task-automations-back-btn"
+				href={ templ.SafeURL(fmt.Sprintf("/automations?project_id=%s", task.ProjectID)) }
+				hx-get={ fmt.Sprintf("/automations?project_id=%s", task.ProjectID) }
+				hx-target="#main-content"
+				hx-swap="innerHTML"
+				hx-push-url="true"
+				class="text-2xl text-base-content/50 hover:text-base-content/80 transition-colors flex-shrink-0"
+				data-automations-url={ fmt.Sprintf("/automations?project_id=%s", task.ProjectID) }
+				hidden
+			>
+				Automations
+			</a>
+			<span id="task-automations-separator" class="text-2xl text-base-content/30 flex-shrink-0" hidden>/</span>
+			<a
 				id="task-back-btn"
 				href={ templ.SafeURL(fmt.Sprintf("/tasks?project_id=%s", task.ProjectID)) }
 				hx-get={ fmt.Sprintf("/tasks?project_id=%s", task.ProjectID) }
@@ -67,6 +81,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 					var params = new URLSearchParams(window.location.search);
 					var from = params.get('from');
 					var btn = document.getElementById('task-back-btn');
+					var automationsBtn = document.getElementById('task-automations-back-btn');
+					var automationsSeparator = document.getElementById('task-automations-separator');
 					if (btn) {
 						var url = null;
 						var text = 'Tasks';
@@ -85,6 +101,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 							if (automationID) {
 								url = btn.dataset.automationUrlBase + encodeURIComponent(automationID) + '?project_id=' + encodeURIComponent(btn.dataset.projectId);
 								text = automationName || 'Automation';
+								if (automationsBtn && automationsSeparator) {
+									automationsBtn.hidden = false;
+									automationsSeparator.hidden = false;
+								}
 							}
 						}
 						if (url) {
