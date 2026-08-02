@@ -63,12 +63,12 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 		})
 	ctx := context.Background()
 
-	out, err := core.ExecuteGetIssue(ctx, json.RawMessage(`{"issue_number":7,"repo_url":"https://github.com/owner/repo"}`))
+	out, err := core.ExecuteGetIssue(ctx, json.RawMessage(`{"issue_number":7,"repo_url":"get"}`))
 	if err != nil || !jsonContains(t, out, `{"ok":true,"issue":{"Number":7,"Title":"shared"}}`) {
 		t.Fatalf("get issue output=%q err=%v", out, err)
 	}
-	if provider.getIssueNumber != 7 || len(resolved) != 1 || resolved[0] != "https://github.com/owner/repo" {
-		t.Fatalf("get issue wiring number=%d resolved=%v", provider.getIssueNumber, resolved)
+	if provider.getIssueNumber != 7 {
+		t.Fatalf("get issue number=%d, want 7", provider.getIssueNumber)
 	}
 
 	out, err = core.ExecuteGetProjectInbox(ctx, nil)
@@ -81,15 +81,18 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 	}
 
 	postprocessCalls := 0
-	postprocess := func(_ context.Context, _ *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
+	postprocess := func(_ context.Context, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
 		postprocessCalls++
+		if repo == nil || repo.FullName != "owner/repo" {
+			t.Fatalf("postprocess repo=%v, want owner/repo", repo)
+		}
 		return append(issues, GitHubIssue{Number: 9}), nil
 	}
-	out, err = core.ExecuteListMyAssignedIssues(ctx, json.RawMessage(`{}`), postprocess)
+	out, err = core.ExecuteListMyAssignedIssues(ctx, json.RawMessage(`{"repo_url":"my-assigned"}`), postprocess)
 	if err != nil || !strings.Contains(out, `"account":{"login":"Me"`) || !strings.Contains(out, `"Number":1`) || !strings.Contains(out, `"Number":9`) {
 		t.Fatalf("my assigned output=%q err=%v", out, err)
 	}
-	out, err = core.ExecuteListAssignedIssues(ctx, json.RawMessage(`{"assignee":" Dev-Bot "}`), postprocess)
+	out, err = core.ExecuteListAssignedIssues(ctx, json.RawMessage(`{"assignee":" Dev-Bot ","repo_url":"assigned"}`), postprocess)
 	if err != nil || !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":2`) || !strings.Contains(out, `"Number":9`) {
 		t.Fatalf("assigned output=%q err=%v", out, err)
 	}
@@ -97,17 +100,46 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 		t.Fatalf("postprocess calls=%d, want 2", postprocessCalls)
 	}
 
-	out, err = core.ExecuteListAssignedIssuesWithPRs(ctx, json.RawMessage(`{"assignee":"Dev-Bot"}`))
+	out, err = core.ExecuteListAssignedIssuesWithPRs(ctx, json.RawMessage(`{"assignee":"Dev-Bot","repo_url":"assigned-with-prs"}`))
 	if err != nil || !jsonContains(t, out, `{"skipped_without_pr":"Assigned issues without an associated pull request are skipped."}`) {
 		t.Fatalf("assigned with PRs output=%q err=%v", out, err)
 	}
-	out, err = core.ExecuteCommentOnIssue(ctx, json.RawMessage(`{"issue_number":8,"body":"hello"}`))
+	out, err = core.ExecuteCommentOnIssue(ctx, json.RawMessage(`{"issue_number":8,"body":"hello","repo_url":"comment"}`))
 	if err != nil || out != `{"issue_number":8,"ok":true}` || provider.commentNumber != 8 || provider.commentBody != "hello" {
 		t.Fatalf("comment output=%q request=%d/%q err=%v", out, provider.commentNumber, provider.commentBody, err)
 	}
-	out, err = core.ExecuteAddIssueLabels(ctx, json.RawMessage(`{"issue_number":8,"labels":["bug"]}`))
+	out, err = core.ExecuteAddIssueLabels(ctx, json.RawMessage(`{"issue_number":8,"labels":["bug"],"repo_url":"labels"}`))
 	if err != nil || out != `{"issue_number":8,"labels":["bug"],"ok":true}` || provider.labelNumber != 8 || len(provider.labels) != 1 || provider.labels[0] != "bug" {
 		t.Fatalf("labels output=%q request=%d/%v err=%v", out, provider.labelNumber, provider.labels, err)
+	}
+
+	wantResolved := []string{"get", "my-assigned", "assigned", "assigned-with-prs", "comment", "labels"}
+	if !reflect.DeepEqual(resolved, wantResolved) {
+		t.Fatalf("resolved repositories=%v, want %v", resolved, wantResolved)
+	}
+}
+
+func TestGitHubIssueActionCoreAssignedIssueValidationPrecedesRepoResolution(t *testing.T) {
+	resolveCalls := 0
+	core := NewGitHubIssueActionCore(&fakeGitHubIssueActionProvider{}, nil, "",
+		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
+		func(context.Context, string) (*GitHubRepoRef, error) {
+			resolveCalls++
+			return nil, nil
+		})
+
+	for _, execute := range []func(context.Context, json.RawMessage) (string, error){
+		func(ctx context.Context, input json.RawMessage) (string, error) {
+			return core.ExecuteListAssignedIssues(ctx, input, nil)
+		},
+		core.ExecuteListAssignedIssuesWithPRs,
+	} {
+		if _, err := execute(context.Background(), json.RawMessage(`{"repo_url":"ignored"}`)); err == nil || err.Error() != "assignee is required" {
+			t.Fatalf("error=%v, want assignee is required", err)
+		}
+	}
+	if resolveCalls != 0 {
+		t.Fatalf("resolve calls=%d, want 0", resolveCalls)
 	}
 }
 
