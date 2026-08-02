@@ -566,6 +566,9 @@ func (h *Handler) RunAutomationNow(c echo.Context) error {
 		}
 		return c.Redirect(http.StatusSeeOther, "/automations?project_id="+projectID)
 	}
+	if isHTMX(c) {
+		return h.GetAutomationLive(c)
+	}
 	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+projectID)
 }
 

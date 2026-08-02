@@ -84,6 +84,21 @@ func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testi
 	require.Nil(t, invocations[0].ScheduledFor)
 	require.Equal(t, fixture.task.ID, dispatches[0].TaskID)
 
+	liveAfterClaim, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	require.NotNil(t, liveAfterClaim)
+	triggerNode := automationNodeByKey(t, fixture.definition, "vision_suggestions")
+	var triggerLiveNode *models.AutomationLiveNode
+	for i := range liveAfterClaim.Nodes {
+		if liveAfterClaim.Nodes[i].ID == triggerNode.ID {
+			triggerLiveNode = &liveAfterClaim.Nodes[i]
+			break
+		}
+	}
+	require.NotNil(t, triggerLiveNode)
+	require.Equal(t, "running", triggerLiveNode.DisplayState, "Run now must immediately project its claimed invocation onto the Live canvas")
+	require.Equal(t, 1, triggerLiveNode.Counts.Running)
+
 	after, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
 	require.NoError(t, err)
 	require.Equal(t, before.RunAt, after.RunAt)
@@ -100,6 +115,16 @@ func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testi
 	require.NoError(t, err)
 	require.Equal(t, fixture.task.Prompt, execution.PromptSent)
 	require.True(t, execution.StartsNewContext, "manual dispatch must preserve the owned Schedule's clear-context setting")
+	liveAfterActivity, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	activityNodeFound := false
+	for _, node := range liveAfterActivity.Nodes {
+		if node.ID == triggerNode.ID {
+			activityNodeFound = true
+			require.Equal(t, 1, node.Counts.Running, "the invocation fallback must yield to its recorded activity without double counting")
+		}
+	}
+	require.True(t, activityNodeFound)
 	require.NoError(t, fixture.repo.MarkDispatchSubmitted(ctx, leased.ID, "manual-run-test", execution.ID))
 	_, err = fixture.repo.DB().Exec(`UPDATE executions SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, execution.ID)
 	require.NoError(t, err)

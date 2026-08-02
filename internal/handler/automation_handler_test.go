@@ -186,6 +186,8 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.NotContains(t, detail.Body.String(), "fill-base-200")
 	require.Contains(t, detail.Body.String(), "sse-automation-event")
 	require.Contains(t, detail.Body.String(), `document.addEventListener('visibilitychange'`)
+	require.Contains(t, detail.Body.String(), `id="automation-live-run-now-form"`)
+	require.Contains(t, detail.Body.String(), `onsubmit="event.preventDefault(); window.openVibelyAutomationLiveRefresh('POST', this.getAttribute('action')); return false;"`, "Run now must refresh the authoritative Live fragment through the ordered coordinator")
 	require.Contains(t, detail.Body.String(), `window.openVibelyAutomationLiveRefresh('GET')`, "returning to a visible tab must immediately refetch the local projection through the ordered coordinator")
 	require.Contains(t, detail.Body.String(), `window.openVibelyAutomationLiveRefresh('POST', root.dataset.externalRefreshUrl)`, "visible-tab reconciliation must use the ordered explicit cached external refresh endpoint")
 	require.NotContains(t, detail.Body.String(), `aria-label="Automation views"`)

@@ -1547,7 +1547,7 @@ func appendAutomationTransition(ctx context.Context, exec SQLExecutor, in Automa
 
 func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automationID, versionID string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, int, int, error) {
 	rows, err := r.db.QueryContext(ctx, `WITH ranked_activities AS (
-		SELECT a.node_id, a.work_item_id, a.id, a.status, a.completed_at, task_resource.resource_id AS task_id,
+		SELECT a.node_id, a.work_item_id, a.id, a.invocation_id, a.status, a.completed_at, task_resource.resource_id AS task_id,
 			ROW_NUMBER() OVER (PARTITION BY a.node_id, CASE
 				WHEN a.work_item_id IS NULL AND task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
 				ELSE 'activity:' || a.id END
@@ -1565,6 +1565,12 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 		FROM ranked_activities
 		WHERE (work_item_id IS NOT NULL OR task_id IS NULL OR activity_rank = 1)
 			AND (status IN ('pending','running','waiting','failed') OR (status = 'completed' AND completed_at >= ?))
+		UNION
+		SELECT i.trigger_node_id, 'running', 'invocation:' || i.id
+		FROM automation_invocations i
+		WHERE i.project_id = ? AND i.automation_id = ? AND i.version_id = ?
+			AND i.status IN ('claimed','dispatched','running')
+			AND NOT EXISTS (SELECT 1 FROM ranked_activities a WHERE a.invocation_id = i.id)
 		UNION
 		SELECT node_id,
 			CASE state WHEN 'active' THEN 'running' WHEN 'waiting' THEN 'waiting' WHEN 'blocked' THEN 'blocked' WHEN 'failed' THEN 'failed' END,
@@ -1588,6 +1594,7 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 			SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
 		FROM identity_state GROUP BY node_id`, projectID, automationID, versionID, recentCutoff.UTC(),
+		projectID, automationID, versionID,
 		projectID, automationID, versionID,
 		projectID, automationID, versionID, recentCutoff.UTC())
 	if err != nil {

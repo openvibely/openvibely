@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -889,6 +890,7 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 	navigationScript := baseHTML[navStart : navStart+navEnd]
 
 	projectID := "project-browser"
+	var automationARunNow atomic.Bool
 	cards := []models.AutomationCard{
 		{Automation: models.Automation{ID: "automation-a", Name: "Automation A", Description: "First", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"}},
 		{Automation: models.Automation{ID: "automation-b", Name: "Automation B", Description: "Second", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"}},
@@ -920,9 +922,15 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 	renderLive := func(id, name string) string {
 		nodes := []models.AutomationLiveNode{{AutomationNode: models.AutomationNode{ID: id + "-node", Name: "A very long automation node name that must wrap safely", NodeType: models.AutomationNodeAgentTask, PositionX: 20, PositionY: -90}, DisplayState: "idle"}}
 		if id == "automation-a" {
-			nodes = []models.AutomationLiveNode{
-				{AutomationNode: models.AutomationNode{ID: "first_step", Name: "First step", NodeType: models.AutomationNodeAgentTask, PositionX: 0, PositionY: 0}, DisplayState: "idle"},
+			node := models.AutomationLiveNode{
+				AutomationNode: models.AutomationNode{ID: "first_step", Name: "First step", NodeType: models.AutomationNodeAgentTask, PositionX: 0, PositionY: 0},
+				DisplayState:   "idle",
 			}
+			if automationARunNow.Load() {
+				node.DisplayState = "running"
+				node.Counts.Running = 1
+			}
+			nodes = []models.AutomationLiveNode{node}
 		}
 		graph := models.AutomationLiveGraph{
 			Automation:   models.Automation{ID: id, Name: name, Description: "Theme and navigation fixture", LifecycleState: models.AutomationActive},
@@ -1150,10 +1158,18 @@ window.addEventListener('DOMContentLoaded', function() {
     var liveLegend = liveLegendRow && liveLegendRow.querySelector('[aria-label="Graph status legend"]');
     var liveBadges = liveLegendRow && liveLegendRow.querySelector('[data-automation-live-badges]');
     if (!liveActions || !liveLegend || !liveBadges || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation card is missing its legend, status, health, or kebab menu');
-    if (!liveActions.closest('[data-automation-live-card-heading]')) fail('Live Automation kebab is not in the card heading row');
-    if (!liveBadges.closest('[data-automation-live-legend-row]')) fail('Live Automation status and health badges are not in the graph legend row');
-    click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Delete');
-    clickMenuRowRightEdge('#automation-live [data-automation-live-delete]', 'Live Automation Delete menu row');
+	    if (!liveActions.closest('[data-automation-live-card-heading]')) fail('Live Automation kebab is not in the card heading row');
+	    if (!liveBadges.closest('[data-automation-live-legend-row]')) fail('Live Automation status and health badges are not in the graph legend row');
+	    click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Run now');
+	    clickMenuRowRightEdge('#automation-live [data-automation-live-run-now]', 'Live Automation Run now menu row');
+	    await waitFor(function() {
+	      var current = document.querySelector('#automation-live [data-automation-live-node="first_step"]');
+	      return current && current.querySelector('.automation-graph-node--running') && current.textContent.includes('1 running');
+	    }, 'Run now Live canvas refresh');
+	    if (liveID() !== 'automation-a') fail('Run now navigated away from the Automation Live preview');
+	    await report('progress', 'live-run-now-refreshed');
+	    click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Delete');
+	    clickMenuRowRightEdge('#automation-live [data-automation-live-delete]', 'Live Automation Delete menu row');
     var liveDeleteModal = document.querySelector('#automation-live #delete-automation-modal');
     if (!liveDeleteModal || !liveDeleteModal.open) fail('Live Automation Delete did not open its confirmation dialog');
     click('#automation-live #delete-automation-modal button[aria-label="Close delete automation confirmation"]', 'Live Automation delete modal close button');
@@ -1496,6 +1512,13 @@ window.addEventListener('DOMContentLoaded', function() {
 			w.WriteHeader(http.StatusNoContent)
 		case "/automations/automation-a/builder":
 			_, _ = w.Write([]byte(renderBlankBuilder(1, "automation-a")))
+		case "/automations/automation-a/run-now":
+			if r.Method != http.MethodPost || r.Header.Get("HX-Request") != "true" {
+				http.Error(w, "Run now must use the ordered HTMX Live refresh", http.StatusBadRequest)
+				return
+			}
+			automationARunNow.Store(true)
+			_, _ = w.Write([]byte(renderLive("automation-a", "Automation A")))
 		case "/automations/automation-a/pause":
 			setAutomationLifecycle("automation-a", models.AutomationPaused)
 			_, _ = w.Write([]byte(renderPortfolio()))

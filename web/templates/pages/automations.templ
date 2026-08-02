@@ -397,7 +397,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					<input type="hidden" name="project_id" value={ currentProjectID }/>
 				</form>
 				if graph.Automation.LifecycleState == models.AutomationActive {
-					<form id="automation-live-run-now-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/run-now?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/></form>
+					<form id="automation-live-run-now-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/run-now?project_id=%s", graph.Automation.ID, currentProjectID)) } onsubmit="event.preventDefault(); window.openVibelyAutomationLiveRefresh('POST', this.getAttribute('action')); return false;"><input type="hidden" name="project_id" value={ currentProjectID }/></form>
 					<form id="automation-live-pause-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", graph.Automation.ID, currentProjectID)) }><input type="hidden" name="project_id" value={ currentProjectID }/></form>
 				}
 				if graph.Automation.LifecycleState == models.AutomationPaused {
