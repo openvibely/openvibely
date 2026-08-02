@@ -96,6 +96,13 @@ RUN npm install --global \
       "typescript@${TYPESCRIPT_VERSION}" \
  && rm -rf /root/.npm
 
+# Remove privilege-escalation surface: the runtime always runs as UID/GID
+# 10001:10001 and never needs sudo/su or any setuid/setgid helper.
+RUN dnf remove -y --setopt=protected_packages= sudo \
+ && dnf clean all \
+ && rm -rf /var/cache/dnf \
+ && find / -xdev -perm /6000 -type f -exec chmod a-s {} +
+
 RUN useradd -m -u 10001 -s /bin/bash openvibely \
  && mkdir -p \
       /data \
