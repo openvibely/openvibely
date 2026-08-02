@@ -113,7 +113,7 @@ RUN printf '%s\n' \
       'set -euo pipefail' \
       '' \
       'if [ ! -w /data ]; then' \
-      '  echo "error: /data must be writable by UID/GID 10001:10001; prepare bind-mount ownership or migrate the existing volume" >&2' \
+      '  echo "error: /data must be writable by UID/GID 10001:10001; prepare bind-mount ownership before starting the container" >&2' \
       '  exit 1' \
       'fi' \
       '' \

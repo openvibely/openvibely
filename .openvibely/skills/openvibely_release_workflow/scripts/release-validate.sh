@@ -523,6 +523,19 @@ fi
 rm -rf "$DRY_RUN_TMP"
 
 ###############################################################################
+# 8. Docker storage guidance
+###############################################################################
+
+section "Docker storage guidance"
+
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+if grep -Eiq 'migrat(e|ing|ion).*volume|volume.*migrat(e|ing|ion)' "${REPO_ROOT}/Dockerfile"; then
+    fail "docker: runtime guidance must not prescribe legacy volume migration"
+else
+    pass "docker: runtime guidance only states the current UID/GID ownership contract"
+fi
+
+###############################################################################
 # Results
 ###############################################################################
 
