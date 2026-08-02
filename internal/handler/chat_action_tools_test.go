@@ -686,6 +686,14 @@ func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 	if record == nil || record.PRNumber != 123 || record.IssueNumber == nil || *record.IssueNumber != 77 {
 		t.Fatalf("unexpected persisted PR record: %#v", record)
 	}
+
+	titleOut, err := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["github_open_pull_request"](ctx, json.RawMessage(`{"title":"`+task.Title+`"}`))
+	if err != nil {
+		t.Fatalf("github_open_pull_request by title returned error: %v", err)
+	}
+	if !strings.Contains(titleOut, `"task_id":"`+task.ID+`"`) || !strings.Contains(titleOut, `"reused_existing_record":true`) {
+		t.Fatalf("expected title selector to reuse task PR %s, got %s", task.ID, titleOut)
+	}
 }
 
 func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
@@ -732,6 +740,14 @@ func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
 	}
 	if !strings.Contains(out, `"replaced_branch":"`+task.WorktreeBranch+`"`) || !strings.Contains(out, `"expected_head_sha":"`+expected+`"`) {
 		t.Fatalf("unexpected tool output: %s", out)
+	}
+
+	titleOut, err := handler(ctx, json.RawMessage(`{"title":"`+task.Title+`","expected_head_sha":"`+expected+`","confirm_history_rewrite":true}`))
+	if err != nil {
+		t.Fatalf("github_replace_pull_request_branch by title returned error: %v", err)
+	}
+	if !strings.Contains(titleOut, `"task_id":"`+task.ID+`"`) || !strings.Contains(titleOut, `"replaced_branch":"`+task.WorktreeBranch+`"`) {
+		t.Fatalf("expected title selector to replace task PR branch %s, got %s", task.ID, titleOut)
 	}
 }
 
