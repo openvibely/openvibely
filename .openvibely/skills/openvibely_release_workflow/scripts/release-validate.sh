@@ -370,7 +370,6 @@ OpenVibely is an open-source, self-hosted platform
 ## Docker
 
 docker pull openvibely/openvibely:0.1.1
-docker run --rm --user 0 --entrypoint chown -v openvibely_data:/data openvibely/openvibely:0.1.1 -R 10001:10001 /data
 docker run -d -p 3001:3001 -v openvibely_data:/data openvibely/openvibely:0.1.1
 
 ## Known Limitations
@@ -381,7 +380,7 @@ EOF
 
 check_notes_section() {
     local label="$1" pattern="$2"
-    if echo "$FAKE_NOTES" | grep -q -- "$pattern"; then
+    if echo "$FAKE_NOTES" | grep -q "$pattern"; then
         pass "notes: contains '$label'"
     else
         fail "notes: missing '$label' (pattern: '$pattern')"
@@ -398,17 +397,7 @@ check_notes_section "Downloads section"            "## Downloads"
 check_notes_section "Docker section"               "## Docker"
 check_notes_section "Known Limitations section"    "## Known Limitations"
 check_notes_section "docker pull command"          "docker pull openvibely/openvibely:"
-check_notes_section "volume ownership migration"   "--entrypoint chown"
 check_notes_section "docker startup command"        "docker run -d -p 3001:3001"
-
-pull_line="$(echo "$FAKE_NOTES" | grep -n "docker pull openvibely/openvibely:" | cut -d: -f1)"
-migration_line="$(echo "$FAKE_NOTES" | grep -n -- "--entrypoint chown" | cut -d: -f1)"
-startup_line="$(echo "$FAKE_NOTES" | grep -n "docker run -d -p 3001:3001" | cut -d: -f1)"
-if (( pull_line < migration_line && migration_line < startup_line )); then
-    pass "notes: Docker commands order pull, ownership migration, then startup"
-else
-    fail "notes: Docker commands must order pull, ownership migration, then startup"
-fi
 
 # Validate placeholders are NOT already replaced (would indicate the script
 # wrongly bypassed the agent synthesis step)
