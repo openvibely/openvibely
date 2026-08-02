@@ -35,7 +35,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # =============================================================================
 # Stage 2: Coding/agent runtime — OpenVibely + common toolchains
 # =============================================================================
-FROM fedora:42
+FROM fedora:44
 
 LABEL org.opencontainers.image.title="OpenVibely Coding Agent" \
       org.opencontainers.image.description="OpenVibely agent runtime with common language toolchains and build utilities" \
@@ -60,7 +60,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
       golang \
       grep \
       gzip \
-      java-21-openjdk-devel \
+      java-25-openjdk-devel \
       jq \
       make \
       nodejs \
