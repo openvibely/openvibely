@@ -13,6 +13,106 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestAgentLibraryMaintenanceService_ProjectDeclarationsRetainPrecedenceAcrossContextChanges(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	projectAModel := &models.Project{Name: "Project A", RepoPath: t.TempDir()}
+	projectBModel := &models.Project{Name: "Project B", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, projectAModel); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	if err := projectRepo.Create(ctx, projectBModel); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	globalRoot := t.TempDir()
+	projectA := t.TempDir()
+	projectB := t.TempDir()
+	writeAgentRootDeclaration(t, globalRoot, "shared", "Global", "global", "")
+	writeAgentRootDeclaration(t, projectA, "shared", "Project A", "project", projectAModel.ID)
+	writeAgentRootDeclaration(t, projectB, "shared", "Project B", "project", projectBModel.ID)
+
+	svc := &AgentLibraryMaintenanceService{agentRepo: agentRepo, agentsRootPath: globalRoot}
+	assertAgent := func(projectRoot, wantName, wantProjectID string) {
+		t.Helper()
+		if err := svc.SyncRootDeclarations(ctx, projectRoot); err != nil {
+			t.Fatalf("sync %s: %v", wantName, err)
+		}
+		agent, err := agentRepo.GetByKey(ctx, "shared")
+		if err != nil || agent == nil {
+			t.Fatalf("get shared after %s: err=%v agent=%#v", wantName, err, agent)
+		}
+		if agent.Name != wantName || agent.Scope != models.AgentScopeProject || agent.ProjectID != wantProjectID {
+			t.Fatalf("shared declaration precedence after %s: %#v", wantName, agent)
+		}
+	}
+
+	assertAgent(projectA, "Project A", projectAModel.ID)
+	assertAgent(projectB, "Project B", projectBModel.ID)
+	readsAfterBothProjects := svc.DeclarationSyncMetrics()
+	assertAgent(projectA, "Project A", projectAModel.ID)
+	if got := svc.DeclarationSyncMetrics(); got != readsAfterBothProjects {
+		t.Fatalf("project switch reread unchanged declarations: before=%#v after=%#v", readsAfterBothProjects, got)
+	}
+
+	writeAgentRootDeclaration(t, globalRoot, "shared", "Changed Global", "global", "")
+	assertAgent(projectA, "Project A", projectAModel.ID)
+	if got := svc.DeclarationSyncMetrics(); got.ContentReads != readsAfterBothProjects.ContentReads+1 || got.Parses != readsAfterBothProjects.Parses+1 {
+		t.Fatalf("global change should read/parse only the changed global declaration: before=%#v after=%#v", readsAfterBothProjects, got)
+	}
+}
+
+func TestAgentLibraryMaintenanceService_ProtectedRepairUsesCachedDeclarations(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	root := t.TempDir()
+	if err := builtinskills.SyncTo(root); err != nil {
+		t.Fatalf("SyncTo: %v", err)
+	}
+	svc := &AgentLibraryMaintenanceService{agentRepo: agentRepo, lifecycleRepo: lifecycleRepo, agentsRootPath: root}
+	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
+		t.Fatalf("cold sync: %v", err)
+	}
+	cold := svc.DeclarationSyncMetrics()
+	if cold.ContentReads == 0 || cold.Parses == 0 {
+		t.Fatalf("protected declarations were not instrumented: %#v", cold)
+	}
+
+	goal, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindGoal)
+	if err != nil || goal == nil {
+		t.Fatalf("get goal: err=%v agent=%#v", err, goal)
+	}
+	goal.Name = "Broken Goal"
+	if err := agentRepo.Update(ctx, goal); err != nil {
+		t.Fatalf("corrupt goal: %v", err)
+	}
+	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
+		t.Fatalf("warm repair sync: %v", err)
+	}
+	if warm := svc.DeclarationSyncMetrics(); warm != cold {
+		t.Fatalf("warm protected repair reread/reparsed unchanged declarations: cold=%#v warm=%#v", cold, warm)
+	}
+	repaired, err := agentRepo.GetBySystemKind(ctx, models.AgentSystemKindGoal)
+	if err != nil || repaired == nil || repaired.Name == "Broken Goal" {
+		t.Fatalf("protected repair did not use cached declaration: err=%v agent=%#v", err, repaired)
+	}
+}
+
+func writeAgentRootDeclaration(t *testing.T, root, key, name, scope, projectID string) {
+	t.Helper()
+	dir := filepath.Join(root, "agents", key)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir declaration: %v", err)
+	}
+	content := "---\nkind: openvibely.agent_skill\nversion: 1\nagent:\n  key: " + key + "\n  name: " + name + "\n  scope: " + scope + "\n  project_id: " + projectID + "\n  selectable_as_primary: true\n---\n# " + name + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILLS.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write declaration: %v", err)
+	}
+}
+
 func TestAgentLibraryMaintenanceService_WarmSyncSkipsUnchangedDeclarationContent(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -37,8 +137,8 @@ func TestAgentLibraryMaintenanceService_WarmSyncSkipsUnchangedDeclarationContent
 		t.Fatalf("cold SyncRootDeclarations: %v", err)
 	}
 	cold := svc.DeclarationSyncMetrics()
-	if cold.ContentReads != 1 || cold.Parses != 1 {
-		t.Fatalf("expected one cold read/parse, got %#v", cold)
+	if cold.ContentReads != 3 || cold.Parses != 3 {
+		t.Fatalf("expected cold reads/parses for one ordinary and two protected declarations, got %#v", cold)
 	}
 	if _, err := db.Exec(`
 		CREATE TEMP TABLE declaration_write_counts (kind TEXT NOT NULL);

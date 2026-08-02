@@ -75,21 +75,29 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 
 	statementCounter.Reset()
 	statementCounter.SetEnabled(true)
+	warmDeclarationMetricsBefore := maintenance.DeclarationSyncMetrics()
 	instrumentedContext, _ := request()
 	if err := h.ListAgents(instrumentedContext); err != nil {
 		b.Fatal(err)
 	}
+	warmDeclarationMetricsAfter := maintenance.DeclarationSyncMetrics()
 	statementCounter.SetEnabled(false)
 	warmStatements := statementCounter.Statements()
 	warmAgentLists := countSQLStatements(warmStatements, "SELECT ", " FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC")
 	warmWrites := countSQLStatements(warmStatements, "INSERT ", "") + countSQLStatements(warmStatements, "UPDATE ", "") + countSQLStatements(warmStatements, "DELETE ", "")
 	warmAgentHookWrites := countSQLStatements(warmStatements, "INSERT ", "agents") + countSQLStatements(warmStatements, "UPDATE ", "agents") + countSQLStatements(warmStatements, "DELETE ", "agents") +
-		countSQLStatements(warmStatements, "INSERT ", "lifecycle_agent_hooks") + countSQLStatements(warmStatements, "UPDATE ", "lifecycle_agent_hooks") + countSQLStatements(warmStatements, "DELETE ", "lifecycle_agent_hooks")
+		countSQLStatements(warmStatements, "INSERT ", "agent_lifecycle_hooks") + countSQLStatements(warmStatements, "UPDATE ", "agent_lifecycle_hooks") + countSQLStatements(warmStatements, "DELETE ", "agent_lifecycle_hooks")
+	if warmDeclarationMetricsAfter != warmDeclarationMetricsBefore {
+		b.Fatalf("warm ListAgents read or parsed unchanged declarations: before=%#v after=%#v", warmDeclarationMetricsBefore, warmDeclarationMetricsAfter)
+	}
 	if warmAgentLists != 1 {
 		b.Fatalf("warm ListAgents executed %d full agent-list statements, want 1; statements: %q", warmAgentLists, warmStatements)
 	}
 	if warmAgentHookWrites != 0 {
 		b.Fatalf("warm ListAgents executed %d agent/hook writes, want 0; statements: %q", warmAgentHookWrites, warmStatements)
+	}
+	if warmWrites != 0 {
+		b.Fatalf("warm ListAgents executed %d SQLite writes, want 0; statements: %q", warmWrites, warmStatements)
 	}
 
 	b.Run("baseline", func(b *testing.B) {
@@ -144,6 +152,8 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 		b.ReportMetric(float64(len(warmStatements)), "sqlite-statements/op")
 		b.ReportMetric(float64(warmAgentLists), "agent-list-statements/op")
 		b.ReportMetric(float64(warmWrites), "sqlite-writes/op")
+		b.ReportMetric(float64(warmDeclarationMetricsAfter.ContentReads-warmDeclarationMetricsBefore.ContentReads), "declaration-reads/op")
+		b.ReportMetric(float64(warmDeclarationMetricsAfter.Parses-warmDeclarationMetricsBefore.Parses), "declaration-parses/op")
 		for i := 0; i < b.N; i++ {
 			c, _ := request()
 			if err := h.ListAgents(c); err != nil {
