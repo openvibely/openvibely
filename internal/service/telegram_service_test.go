@@ -4316,6 +4316,8 @@ func TestTelegramInboundUpdateResolvesProjectWhilePriorTurnSwitchesProject(t *te
 	runnerReady := make(chan ChannelChatRunRequest, 1)
 	invokeSwitch := make(chan struct{})
 	switchDone := make(chan error, 1)
+	secondResolvingProject := make(chan struct{})
+	allowSecondResolution := make(chan struct{})
 	svc.SetChannelChatRunner(func(runCtx context.Context, req ChannelChatRunRequest) {
 		runnerReady <- req
 		<-invokeSwitch
@@ -4331,15 +4333,30 @@ func TestTelegramInboundUpdateResolvesProjectWhilePriorTurnSwitchesProject(t *te
 	req := <-runnerReady
 	require.Equal(t, alpha.ID, req.ProjectID)
 
+	var resolutionBarrier sync.Once
+	svc.activeProjectReadHook = func(resolvingUserID int64) {
+		if resolvingUserID != userID {
+			return
+		}
+		resolutionBarrier.Do(func() {
+			close(secondResolvingProject)
+			<-allowSecondResolution
+		})
+	}
 	secondDone := make(chan bool, 1)
 	go func() {
 		secondDone <- svc.handleTelegramUpdate(ctx, tgbotapi.Update{UpdateID: 2, Message: &tgbotapi.Message{
 			From: &tgbotapi.User{ID: userID}, Chat: &tgbotapi.Chat{ID: userID}, Text: "/project",
 		}})
 	}()
+	<-secondResolvingProject
 	close(invokeSwitch)
-	require.True(t, <-secondDone)
 	require.NoError(t, <-switchDone)
+	close(allowSecondResolution)
+	resolvingProjectID, ok, _ := svc.cachedTelegramActiveProject(userID)
+	require.True(t, ok)
+	require.Equal(t, beta.ID, resolvingProjectID)
+	require.True(t, <-secondDone)
 
 	persistedProjectID, err := userProjectRepo.GetUserProject(ctx, fmt.Sprintf("%d", userID))
 	require.NoError(t, err)

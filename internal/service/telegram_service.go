@@ -100,6 +100,7 @@ type TelegramService struct {
 	userProjectsMu           sync.RWMutex
 	userProjects             map[int64]string // Maps Telegram user ID to active project ID
 	userProjectVersions      map[int64]uint64
+	activeProjectReadHook    func(int64) // deterministic project-resolution test barrier
 	lifecycleOpMu            sync.Mutex
 	lifecycleMu              sync.Mutex
 	ctx                      context.Context
@@ -1592,6 +1593,9 @@ func filterTelegramChatHistory(executions []models.Execution, currentExecID stri
 // getActiveProject returns the active project ID for a user.
 func (s *TelegramService) getActiveProject(userID int64) string {
 	projectID, ok, cacheVersion := s.cachedTelegramActiveProject(userID)
+	if s.activeProjectReadHook != nil {
+		s.activeProjectReadHook(userID)
+	}
 	if ok {
 		return projectID
 	}
