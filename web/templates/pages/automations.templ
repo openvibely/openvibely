@@ -583,7 +583,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						if (suppressNodeClickTimer) { clearTimeout(suppressNodeClickTimer); suppressNodeClickTimer = 0; }
 						suppressedNodeLink = null;
 						pan = {pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-task-link]')};
-						try { svg.setPointerCapture(event.pointerId); } catch (_) {}
+						try { (pan.nodeLink || svg).setPointerCapture(event.pointerId); } catch (_) {}
 					});
 					svg.addEventListener('pointermove', queuePan);
 					svg.addEventListener('pointerup', finishPan);

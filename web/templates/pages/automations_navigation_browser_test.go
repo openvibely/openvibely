@@ -1113,6 +1113,9 @@ window.addEventListener('DOMContentLoaded', function() {
 		    if (document.getElementById('automation-node-resources')) fail('Live still exposes the node resources sidebar');
 	    var liveSVG = document.querySelector('#automation-live [data-automation-canvas]');
 	    var liveTaskLink = document.querySelector('#automation-live [data-automation-task-link]');
+	    var liveCaptureOwner = '';
+	    liveSVG.setPointerCapture = function() { liveCaptureOwner = 'canvas'; };
+	    liveTaskLink.setPointerCapture = function() { liveCaptureOwner = 'task-link'; };
 	    var liveTaskRequests = 0;
 	    document.body.addEventListener('htmx:beforeRequest', function(event) {
 	      var path = event.detail && event.detail.requestConfig && event.detail.requestConfig.path;
@@ -1124,6 +1127,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		    var livePanX = liveLinkRect.left + liveLinkRect.width / 2;
 		    var livePanY = liveLinkRect.top + liveLinkRect.height / 2;
 	    liveTaskLink.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX, clientY:livePanY}));
+	    if (liveCaptureOwner !== 'task-link') fail('task-backed Live node did not retain pointer capture for native click navigation: ' + liveCaptureOwner);
 	    liveTaskLink.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+120, clientY:livePanY+60}));
 	    liveTaskLink.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+120, clientY:livePanY+60}));
 	    var dragAssociatedClick = new MouseEvent('click', {bubbles:true, cancelable:true, button:0, clientX:livePanX+120, clientY:livePanY+60});
