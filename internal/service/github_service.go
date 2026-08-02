@@ -983,6 +983,18 @@ func (s *GitHubService) createGitHubCommit(ctx context.Context, token string, re
 	return strings.TrimSpace(created.SHA), nil
 }
 
+func isGitHubNotFoundError(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "github api request failed (404)")
+}
+
+func isGitHubAlreadyExistsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "github api request failed (422)") && strings.Contains(msg, "already_exists")
+}
+
 func isGitHubRefMissingError(err error) bool {
 	if err == nil {
 		return false
@@ -1304,6 +1316,54 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 	}
 
 	return &GitHubPullRequest{Number: created.Number, URL: created.URL, State: created.State}, nil
+}
+
+func (s *GitHubService) EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, requested []string) error {
+	if repo == nil {
+		return fmt.Errorf("repository reference is required")
+	}
+	labels, err := cleanGitHubIssueLabels(requested)
+	if err != nil {
+		return err
+	}
+	if len(labels) == 0 {
+		return nil
+	}
+	token, err := s.createOperationAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+	for _, label := range labels {
+		endpoint := fmt.Sprintf("%s/repos/%s/%s/labels/%s", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(label))
+		req, err := s.newGitHubJSONRequest(ctx, http.MethodGet, endpoint, token, nil)
+		if err != nil {
+			return err
+		}
+		if err := s.doGitHubJSON(req, nil); err == nil {
+			continue
+		} else if !isGitHubNotFoundError(err) {
+			return fmt.Errorf("checking GitHub label %q: %w", label, err)
+		}
+
+		createEndpoint := fmt.Sprintf("%s/repos/%s/%s/labels", s.apiBaseURL, url.PathEscape(repo.Owner), url.PathEscape(repo.Name))
+		createReq, err := s.newGitHubJSONRequest(ctx, http.MethodPost, createEndpoint, token, map[string]any{"name": label, "color": "ededed"})
+		if err != nil {
+			return err
+		}
+		if err := s.doGitHubJSON(createReq, nil); err != nil {
+			if !isGitHubAlreadyExistsError(err) {
+				return fmt.Errorf("creating GitHub label %q: %w", label, err)
+			}
+			verifyReq, reqErr := s.newGitHubJSONRequest(ctx, http.MethodGet, endpoint, token, nil)
+			if reqErr != nil {
+				return reqErr
+			}
+			if verifyErr := s.doGitHubJSON(verifyReq, nil); verifyErr != nil {
+				return fmt.Errorf("verifying concurrently created GitHub label %q: %w", label, verifyErr)
+			}
+		}
+	}
+	return nil
 }
 
 func (s *GitHubService) CreateIssue(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreateIssueRequest) (*GitHubIssue, error) {

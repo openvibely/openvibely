@@ -21,6 +21,7 @@ type GitHubIssueRuntimeProvider interface {
 	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error
 	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
+	EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, labels []string) error
 	CreateIssue(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreateIssueRequest) (*GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error)
 	GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error)
@@ -125,6 +126,13 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
+			requiredLabels := []string(nil)
+			if automationBound && len(req.Labels) > 0 {
+				requiredLabels = append(requiredLabels, req.Labels...)
+				if err := opts.GitHub.EnsureIssueLabels(ctx, repo, requiredLabels); err != nil {
+					return "", fmt.Errorf("ensuring GitHub issue labels: %w", err)
+				}
+			}
 			activityKey := githubIssueCreationActivityKey(ctx, repo, req)
 			automationContext, hasAutomationContext := AutomationContextFromContext(ctx)
 			var reservedBindings []models.AutomationBinding
@@ -220,10 +228,17 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				}
 				return "", err
 			}
-			if dedupFingerprint != "" {
-				if issue == nil {
+			if issue == nil {
+				if dedupFingerprint != "" {
 					return "", fmt.Errorf("%w: GitHub issue creation returned no issue", repository.ErrAutomationExternalReconciliation)
 				}
+				return "", errors.New("GitHub issue creation returned no issue")
+			}
+			if missing := missingGitHubIssueLabels(requiredLabels, issue.Labels); len(missing) > 0 {
+				return "", fmt.Errorf("%w: created GitHub issue #%d is missing required category labels: %s",
+					repository.ErrAutomationExternalReconciliation, issue.Number, strings.Join(missing, ", "))
+			}
+			if dedupFingerprint != "" {
 				persistenceCtx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
 				completeErr := opts.AutomationRepo.CompleteGitHubIssueDedupLease(persistenceCtx, opts.ProjectID, repo.FullName, dedupFingerprint, dedupOwner, issue.Number)
 				cancel()
@@ -379,6 +394,24 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			return githubIssueRuntimeJSON(map[string]any{"ok": true, "result": result})
 		},
 	}
+}
+
+func missingGitHubIssueLabels(required, actual []string) []string {
+	present := make(map[string]bool, len(actual))
+	for _, label := range actual {
+		label = strings.ToLower(strings.TrimSpace(label))
+		if label != "" {
+			present[label] = true
+		}
+	}
+	missing := make([]string, 0)
+	for _, label := range required {
+		label = strings.TrimSpace(label)
+		if label != "" && !present[strings.ToLower(label)] {
+			missing = append(missing, label)
+		}
+	}
+	return missing
 }
 
 func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, req *githubCreateIssueRuntimeInput) (bool, error) {

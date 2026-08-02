@@ -3779,6 +3779,7 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 type fakeGitHubIssueRuntimeProvider struct {
 	resolveRepoFn        func(context.Context, string, string) (*GitHubRepoRef, error)
 	createIssueFn        func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
+	ensureIssueLabelsFn  func(context.Context, *GitHubRepoRef, []string) error
 	getIssueFn           func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error)
 	findPRFn             func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	addLabelsFn          func(context.Context, *GitHubRepoRef, int, []string) error
@@ -3840,9 +3841,20 @@ func (f *fakeGitHubIssueRuntimeProvider) CreatePullRequest(ctx context.Context, 
 	return &GitHubPullRequest{Number: 101, URL: "https://github.com/openvibely/openvibely/pull/101", State: "open"}, nil
 }
 
+func (f *fakeGitHubIssueRuntimeProvider) EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, labels []string) error {
+	if f.ensureIssueLabelsFn != nil {
+		return f.ensureIssueLabelsFn(ctx, repo, labels)
+	}
+	return nil
+}
+
 func (f *fakeGitHubIssueRuntimeProvider) CreateIssue(ctx context.Context, repo *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
 	if f.createIssueFn != nil {
-		return f.createIssueFn(ctx, repo, req)
+		issue, err := f.createIssueFn(ctx, repo, req)
+		if issue != nil && issue.Labels == nil {
+			issue.Labels = append([]string(nil), req.Labels...)
+		}
+		return issue, err
 	}
 	return &GitHubIssue{Number: 1, URL: "https://github.com/openvibely/openvibely/issues/1", Title: req.Title, Labels: req.Labels}, nil
 }

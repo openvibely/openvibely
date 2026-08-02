@@ -2049,6 +2049,78 @@ func TestMaintainedGitHubSDLCAppliesFinderCategoryLabels(t *testing.T) {
 	}
 }
 
+func TestMaintainedGitHubSDLCCategoryLabelsAreProvisionedAndVerified(t *testing.T) {
+	tests := []struct {
+		name               string
+		ensureErr          error
+		returnedLabels     []string
+		wantErr            string
+		wantCreateCalls    int32
+		wantProjectionRows int
+	}{
+		{name: "required label is visible", returnedLabels: []string{"bug"}, wantCreateCalls: 1, wantProjectionRows: 1},
+		{name: "provisioning failure prevents creation", ensureErr: errors.New("label permission denied"), wantErr: "ensuring GitHub issue labels", wantCreateCalls: 0},
+		{name: "provider omits required label", returnedLabels: []string{}, wantErr: "missing required category labels", wantCreateCalls: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+			ctx := context.Background()
+			projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+			fixture.project.RepoURL = "https://github.com/example/runtime.git"
+			require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+			bugFinder := automationNodeByKey(t, fixture.definition, "bug_finder")
+			var invocationID string
+			require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `INSERT INTO automation_invocations
+				(project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id,
+				 occurrence_key, status, started_at) VALUES (?, ?, ?, ?, 'manual', ?, ?, 'running', CURRENT_TIMESTAMP)
+				 RETURNING id`, fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID,
+				bugFinder.ID, fixture.schedule.ID, "labels:"+tt.name).Scan(&invocationID))
+			execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "category label test"}
+			require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+			binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID,
+				InvocationID: invocationID, NodeID: bugFinder.ID}
+			boundCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
+			boundCtx = withAutomationExecution(boundCtx, fixture.task.ID, execution.ID)
+
+			var ensureCalls, createCalls atomic.Int32
+			provider := &fakeGitHubIssueRuntimeProvider{
+				resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+					return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+				},
+				ensureIssueLabelsFn: func(_ context.Context, _ *GitHubRepoRef, labels []string) error {
+					ensureCalls.Add(1)
+					require.Equal(t, []string{"bug"}, labels)
+					return tt.ensureErr
+				},
+				createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+					createCalls.Add(1)
+					require.Equal(t, []string{"bug"}, req.Labels)
+					return &GitHubIssue{Number: 188, URL: "https://github.com/example/runtime/issues/188", Title: req.Title,
+						State: "open", Labels: tt.returnedLabels}, nil
+				},
+			}
+			handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID,
+				ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
+			output, err := handlers["github_create_issue"](boundCtx, json.RawMessage(`{"title":"Readable bug finding","body":"## Summary\\nA user-visible problem."}`))
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				require.Empty(t, output)
+			} else {
+				require.NoError(t, err)
+				require.Contains(t, output, `"Number":188`)
+			}
+			require.Equal(t, int32(1), ensureCalls.Load())
+			require.Equal(t, tt.wantCreateCalls, createCalls.Load())
+			var projectionRows int
+			require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activities
+				WHERE project_id = ? AND automation_id = ? AND activity_type = 'create_github_issue' AND status = 'completed'`,
+				fixture.project.ID, fixture.definition.Automation.ID).Scan(&projectionRows))
+			require.Equal(t, tt.wantProjectionRows, projectionRows)
+		})
+	}
+}
+
 func TestAutomationGitHubIssueCreationDoesNotReadExistingIssuesForDeduplication(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()

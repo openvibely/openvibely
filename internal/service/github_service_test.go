@@ -2015,6 +2015,77 @@ func TestGitHubIssueAPIMethods(t *testing.T) {
 	}
 }
 
+func TestGitHubServiceEnsureIssueLabelsReusesAndCreatesLabels(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+	var created int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/labels/bug":
+			_, _ = w.Write([]byte(`{"name":"bug","color":"d73a4a"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/openvibely/openvibely/labels/performance":
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/labels":
+			created++
+			body, _ := io.ReadAll(r.Body)
+			if got, want := string(body), `{"color":"ededed","name":"performance"}`; got != want {
+				t.Fatalf("unexpected create label payload: %s", got)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"name":"performance","color":"ededed"}`))
+		default:
+			t.Fatalf("unexpected label request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	if err := svc.EnsureIssueLabels(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, []string{"bug", "performance", "bug"}); err != nil {
+		t.Fatalf("EnsureIssueLabels returned error: %v", err)
+	}
+	if created != 1 {
+		t.Fatalf("expected one missing label to be created, got %d", created)
+	}
+}
+
+func TestGitHubServiceEnsureIssueLabelsFailsOnProvisioningDenial(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"Not Found"}`))
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
+	}))
+	defer server.Close()
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	err := svc.EnsureIssueLabels(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, []string{"performance"})
+	if err == nil || !strings.Contains(err.Error(), "creating GitHub label") {
+		t.Fatalf("expected provisioning denial, got %v", err)
+	}
+}
+
 func TestReplaceBranchHeadUsesAtomicForceWithLease(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

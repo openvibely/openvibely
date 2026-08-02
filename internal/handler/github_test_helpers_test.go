@@ -124,6 +124,10 @@ func (f *fakeGitHubService) CreatePullRequest(ctx context.Context, repo *service
 	return nil, fmt.Errorf("create PR not configured")
 }
 
+func (f *fakeGitHubService) EnsureIssueLabels(context.Context, *service.GitHubRepoRef, []string) error {
+	return nil
+}
+
 func (f *fakeGitHubService) CreateIssue(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
 	if f != nil && f.createIssueFn != nil {
 		return f.createIssueFn(ctx, repo, createReq)
