@@ -196,6 +196,14 @@ docker run -d -p 3001:3001 -v openvibely_data:/data openvibely/openvibely:${VERS
 
 Persistent data (database, repos, uploads) is stored in the \`/data\` volume. Mount a host path or named volume to preserve it across upgrades.
 
+The image runs as UID/GID \`10001:10001\`. When upgrading a volume created by an older scratch-based image, back it up and migrate ownership once before startup:
+
+\`\`\`bash
+docker run --rm --user 0 --entrypoint chown \\
+  -v openvibely_data:/data openvibely/openvibely:${VERSION} \\
+  -R 10001:10001 /data
+\`\`\`
+
 ## Known Limitations
 
 - **Linux desktop**: Native Linux desktop app builds (GTK/WebKit) are not included in this release; the Linux artifacts are server-only binaries. To run the desktop UI on Linux, use the web interface at \`http://localhost:3001\` after starting the server binary.

@@ -355,17 +355,12 @@ These are preserved from v0.1.0 and should appear in every release's notes unles
 
 ## Docker Image (manual step)
 
-Automated Docker image publishing is not wired to CI yet. After the GitHub release is created, publish the production and coding-agent images manually:
+Automated Docker image publishing is not wired to CI yet. After the GitHub release is created, publish the OpenVibely server and coding-agent image manually:
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile \
     -t openvibely/openvibely:<version> \
     -t openvibely/openvibely:latest \
-    --push .
-
-docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile-ext \
-    -t openvibely/openvibely-agent:<version> \
-    -t openvibely/openvibely-agent:latest \
     --push .
 ```
 

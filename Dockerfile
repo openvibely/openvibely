@@ -33,87 +33,96 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./cmd/server
 
 # =============================================================================
-# Stage 2: Collect Git/CLI tools and dynamic library dependencies
+# Stage 2: Coding/agent runtime — OpenVibely + common toolchains
 # =============================================================================
-FROM alpine:3.21 AS git-collector
-
-RUN apk add --no-cache git bash grep busybox binutils coreutils findutils sed gawk util-linux tzdata ca-certificates
-
-# Copy git + shell/tool binaries and discover all shared libraries they need.
-# This keeps the scratch runtime usable for model bash-style tool calls.
-RUN mkdir -p /git-dist/usr/bin /git-dist/bin /git-dist/usr/lib /git-dist/etc \
- && for bin in git bash sh grep sed awk find xargs ls cat cp mv rm mkdir pwd head tail wc sort uniq cut tr env printenv dirname basename; do \
-      path="$(command -v "$bin" 2>/dev/null || true)"; \
-      [ -n "$path" ] || continue; \
-      mkdir -p "/git-dist$(dirname "$path")"; \
-      cp "$path" "/git-dist$path"; \
-    done \
- # Ensure canonical shell paths exist for exec and debugging
- && bash_path="$(command -v bash 2>/dev/null || true)" \
- && [ -n "$bash_path" ] && cp -f "$bash_path" /git-dist/bin/bash || true \
- && sh_path="$(command -v sh 2>/dev/null || true)" \
- && [ -n "$sh_path" ] && cp -f "$sh_path" /git-dist/bin/sh || true \
- # Git exec-path helpers (git-remote-https, etc.)
- && GIT_EXEC_PATH="$(git --exec-path)" \
- && mkdir -p "/git-dist${GIT_EXEC_PATH}" \
- && cp -a "${GIT_EXEC_PATH}/"* "/git-dist${GIT_EXEC_PATH}/" \
- # Git templates (avoids: warning: templates not found in /usr/share/git-core/templates)
- && if [ -d /usr/share/git-core/templates ]; then \
-      mkdir -p /git-dist/usr/share/git-core/templates; \
-      cp -a /usr/share/git-core/templates/. /git-dist/usr/share/git-core/templates/; \
-    fi \
- # Resolve and copy libs + interpreter for all shipped executables
- && find /git-dist/bin /git-dist/usr/bin "/git-dist${GIT_EXEC_PATH}" -type f -executable 2>/dev/null | while read -r bin; do \
-      ldd "$bin" 2>/dev/null \
-      | awk '/=>/ {print $3}' \
-      | sort -u \
-      | while read -r lib; do \
-          [ -f "$lib" ] || continue; \
-          dir="/git-dist$(dirname "$lib")"; \
-          mkdir -p "$dir"; \
-          cp -n "$lib" "$dir/" 2>/dev/null || true; \
-        done; \
-      interp="$(readelf -l "$bin" 2>/dev/null | grep 'program interpreter' | sed 's/.*: \(.*\)]/\1/' || true)"; \
-      if [ -n "$interp" ] && [ -f "$interp" ]; then \
-        mkdir -p "/git-dist$(dirname "$interp")"; \
-        cp -n "$interp" "/git-dist$interp" 2>/dev/null || true; \
-      fi; \
-    done \
- # Minimal gitconfig for safe-directory behavior
- && printf '[safe]\n\tdirectory = *\n' > /git-dist/etc/gitconfig
-
-# =============================================================================
-# Stage 3: Minimal production/server runtime image from scratch
-# =============================================================================
-# Coding agents should use Dockerfile-ext; do not add language toolchains here.
-FROM scratch
+FROM fedora:44
 
 LABEL org.opencontainers.image.title="OpenVibely" \
-      org.opencontainers.image.description="AI-powered task scheduling and automation platform" \
+      org.opencontainers.image.description="AI coding agent platform with common language toolchains and build utilities" \
       org.opencontainers.image.url="https://github.com/openvibely/openvibely" \
       org.opencontainers.image.source="https://github.com/openvibely/openvibely" \
       org.opencontainers.image.licenses="MIT"
 
-# SSL certificates for HTTPS (LLM API calls, GitHub, etc.)
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-# Some git builds expect this exact path
-COPY --from=builder /etc/ssl/cert.pem /etc/ssl/cert.pem
+RUN dnf install -y --setopt=install_weak_deps=False \
+      bash \
+      binutils \
+      ca-certificates \
+      cargo \
+      coreutils \
+      curl \
+      diffutils \
+      file \
+      findutils \
+      gawk \
+      gcc \
+      gcc-c++ \
+      git \
+      golang \
+      grep \
+      gzip \
+      java-25-openjdk-devel \
+      jq \
+      make \
+      nodejs \
+      npm \
+      openssh-clients \
+      patch \
+      pkgconf-pkg-config \
+      procps-ng \
+      python3 \
+      python3-devel \
+      python3-pip \
+      ruby \
+      ruby-devel \
+      rust \
+      ripgrep \
+      sed \
+      shadow-utils \
+      tar \
+      tzdata \
+      unzip \
+      util-linux \
+      wget \
+      which \
+      xz \
+      zip \
+ && dnf clean all \
+ && rm -rf /var/cache/dnf
 
-# Timezone data for time.Local / schedule calculations
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+ARG COREPACK_VERSION=0.34.0
+ARG TYPESCRIPT_VERSION=5.9.3
+RUN npm install --global \
+      "corepack@${COREPACK_VERSION}" \
+      "typescript@${TYPESCRIPT_VERSION}" \
+ && rm -rf /root/.npm
 
-# Passwd/group so the app can run as non-root
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/group /etc/group
+RUN useradd -m -u 10001 -s /bin/bash openvibely \
+ && mkdir -p \
+      /data \
+      /tmp/openvibely-runtime \
+      /home/openvibely/go \
+ && chown -R openvibely:openvibely \
+      /data \
+      /tmp/openvibely-runtime \
+      /home/openvibely \
+ && chmod 700 /tmp/openvibely-runtime \
+ && printf '[safe]\n\tdirectory = *\n' > /etc/gitconfig
 
-# Git binary + all its shared library dependencies
-COPY --from=git-collector /git-dist/ /
+RUN printf '%s\n' \
+      '#!/usr/bin/env bash' \
+      'set -euo pipefail' \
+      '' \
+      'if [ ! -w /data ]; then' \
+      '  echo "error: /data must be writable by UID/GID 10001:10001; prepare bind-mount ownership or migrate the existing volume" >&2' \
+      '  exit 1' \
+      'fi' \
+      '' \
+      'exec "$@"' \
+      > /usr/local/bin/openvibely-entrypoint \
+ && chmod +x /usr/local/bin/openvibely-entrypoint
 
 # Application binary
 COPY --from=builder /out/openvibely /openvibely
-
-# Create a writable /tmp (needed by SQLite WAL, temp files, etc.)
-COPY --from=builder /tmp /tmp
 
 ENV PORT=3001 \
     OPENVIBELY_APP_DATA_DIR=/data \
@@ -121,7 +130,10 @@ ENV PORT=3001 \
     PROJECT_REPO_ROOT=/data/repos \
     ENVIRONMENT=production \
     GIT_EXEC_PATH=/usr/libexec/git-core \
-    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    HOME=/home/openvibely \
+    GOPATH=/home/openvibely/go \
+    XDG_RUNTIME_DIR=/tmp/openvibely-runtime \
+    PATH=/home/openvibely/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 EXPOSE 3001
 
@@ -129,4 +141,7 @@ VOLUME ["/data"]
 
 WORKDIR /data
 
-ENTRYPOINT ["/openvibely"]
+USER 10001:10001
+
+ENTRYPOINT ["/usr/local/bin/openvibely-entrypoint"]
+CMD ["/openvibely"]

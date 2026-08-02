@@ -1,8 +1,7 @@
-.PHONY: dev build build-desktop package-desktop-macos run migrate templ css clean install-tools test test-short test-cover docker-build-runtime docker-build-agent docker-check-agent-tools
+.PHONY: dev build build-desktop package-desktop-macos run migrate templ css clean install-tools test test-short test-cover docker-build docker-check-tools
 
 DOCKER ?= docker
-RUNTIME_IMAGE ?= openvibely/openvibely:local
-AGENT_IMAGE ?= openvibely/openvibely-agent:local
+IMAGE ?= openvibely/openvibely:local
 
 TEMPL_VERSION := $(shell go list -m -f '{{.Version}}' github.com/a-h/templ)
 SWAG_VERSION := $(shell go list -m -f '{{.Version}}' github.com/swaggo/swag)
@@ -78,19 +77,15 @@ test-cover:
 	@go tool cover -func=coverage.filtered.out | tail -1
 	@echo "Full HTML report: go tool cover -html=coverage.filtered.out"
 
-# Build the minimal production/server image published as openvibely/openvibely.
-docker-build-runtime:
-	$(DOCKER) build -t $(RUNTIME_IMAGE) -f Dockerfile .
-
-# Build the coding/agent image with common language toolchains.
-docker-build-agent:
-	$(DOCKER) build -t $(AGENT_IMAGE) -f Dockerfile-ext .
+# Build the published OpenVibely image with coding toolchains.
+docker-build:
+	$(DOCKER) build -t $(IMAGE) -f Dockerfile .
 
 # Verify the image is configured non-root and its coding toolchain works as that user.
-docker-check-agent-tools:
-	@test "$$($(DOCKER) image inspect --format '{{.Config.User}}' $(AGENT_IMAGE))" = "10001:10001"
-	@test "$$($(DOCKER) run --rm --entrypoint /usr/bin/sh $(AGENT_IMAGE) -c '. /etc/os-release; printf %s "$$VERSION_ID"')" = "44"
-	$(DOCKER) run --rm $(AGENT_IMAGE) bash -lc 'set -euo pipefail; test "$$(id -u)" = 10001; test "$$(id -g)" = 10001; test -w /data; go version; node --version; npm --version; corepack --version; tsc --version; python3 --version; python3 -m pip --version; venv="$$(mktemp -d)"; python3 -m venv "$$venv"; "$$venv/bin/python" --version; rm -rf "$$venv"; rustc --version; cargo --version; java -version; javac -version; ruby --version; git --version; rg --version | head -n 1; make --version | head -n 1; gcc --version | head -n 1; g++ --version | head -n 1; pkg-config --version'
+docker-check-tools:
+	@test "$$($(DOCKER) image inspect --format '{{.Config.User}}' $(IMAGE))" = "10001:10001"
+	@test "$$($(DOCKER) run --rm --entrypoint /usr/bin/sh $(IMAGE) -c '. /etc/os-release; printf %s "$$VERSION_ID"')" = "44"
+	$(DOCKER) run --rm $(IMAGE) bash -lc 'set -euo pipefail; test "$$(id -u)" = 10001; test "$$(id -g)" = 10001; test -w /data; go version; node --version; npm --version; corepack --version; tsc --version; python3 --version; python3 -m pip --version; venv="$$(mktemp -d)"; python3 -m venv "$$venv"; "$$venv/bin/python" --version; rm -rf "$$venv"; rustc --version; cargo --version; java -version; javac -version; ruby --version; git --version; rg --version | head -n 1; make --version | head -n 1; gcc --version | head -n 1; g++ --version | head -n 1; pkg-config --version'
 
 # Clean build artifacts
 clean:

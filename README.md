@@ -188,22 +188,31 @@ Runtime storage defaults to the same user app directory used by the web/server b
 
 ### Docker
 
-The repository keeps production deployment and coding-agent concerns in separate images:
+The default image is designed for the complete OpenVibely workflow:
 
 | Image definition | Purpose | Contents |
 |---|---|---|
-| `Dockerfile` | Production server/VPS image published as `openvibely/openvibely` | Minimal `scratch` runtime with OpenVibely, certificates, timezone data, Git, Bash, and basic shell utilities |
-| `Dockerfile-ext` | Coding and agent execution | Fedora-based runtime with Go, Node.js/npm/Corepack/TypeScript, Python/pip/venv, Rust/cargo, Java/JDK, Ruby, Git, ripgrep, and native build tools |
+| `Dockerfile` | Published OpenVibely server and coding-agent image | Fedora-based runtime with Go, Node.js/npm/Corepack/TypeScript, Python/pip/venv, Rust/cargo, Java/JDK, Ruby, Git, ripgrep, and native build tools |
 | `Dockerfile-dev` | Developing OpenVibely itself | Live-reload environment with the repository source, Air, templ, Swagger, Go, Node.js, and rootless Podman |
 
-Keep using the default `Dockerfile` for production deployments; language toolchains are intentionally excluded from that smaller attack surface. Build and verify the coding-capable image with:
+The server executes coding agents in the same image, so `openvibely/openvibely` includes the language runtimes and build tools those agents need. Build and verify it with:
 
 ```bash
-make docker-build-agent
-make docker-check-agent-tools
+make docker-build
+make docker-check-tools
 ```
 
-The coding image is configured to run entirely as UID/GID `10001:10001`; it does not start as root or change mounted-file ownership at startup. `/data` stores persistent application state and must be writable by that user. Fresh Docker named volumes inherit the image's prepared ownership. Before using a host bind mount, prepare it explicitly, for example `sudo chown -R 10001:10001 /host/openvibely-data`; startup fails with a clear error if the mount is not writable. Configure runtime paths through environment variables. See [`docs/environment.md`](./docs/environment.md) and <a href="https://docs.openvibely.ai/deployment" target="_blank" rel="noopener noreferrer">Deployment</a>.
+The image runs entirely as UID/GID `10001:10001`; it does not start as root or change mounted-file ownership at startup. `/data` stores persistent application state and must be writable by that user. Fresh Docker named volumes inherit the image's prepared ownership. Before using a host bind mount, prepare it explicitly, for example `sudo chown -R 10001:10001 /host/openvibely-data`; startup fails with a clear error if the mount is not writable.
+
+Older scratch-based releases ran as root. Before attaching an existing named volume from one of those releases, back it up and migrate its ownership once with the new image:
+
+```bash
+docker run --rm --user 0 --entrypoint chown \
+  -v openvibely_data:/data openvibely/openvibely:<version> \
+  -R 10001:10001 /data
+```
+
+Replace `openvibely_data` and `<version>` with the volume name and image version used by the deployment. Configure runtime paths through environment variables. See [`docs/environment.md`](./docs/environment.md) and <a href="https://docs.openvibely.ai/deployment" target="_blank" rel="noopener noreferrer">Deployment</a>.
 
 ## OAuth by Mode
 
