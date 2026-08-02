@@ -2311,6 +2311,35 @@ func newTelegramProjectSwitchFailureFixture(t *testing.T) (*TelegramService, *re
 	return svc, userProjectRepo, projectA, projectB, userID
 }
 
+func TestTelegramService_HandleStart_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	userProjectRepo := repository.NewTelegramUserProjectRepo(db)
+	ctx := context.Background()
+	previousProject := &models.Project{Name: "Previous Project", RepoPath: "/tmp/previous"}
+	require.NoError(t, projectRepo.Create(ctx, previousProject))
+
+	const userID = int64(198)
+	userKey := strconv.FormatInt(userID, 10)
+	require.NoError(t, userProjectRepo.SetUserProject(ctx, userKey, previousProject.ID))
+	svc := &TelegramService{
+		projectRepo:             projectRepo,
+		telegramUserProjectRepo: userProjectRepo,
+		userProjects:            map[int64]string{userID: previousProject.ID},
+		userProjectVersions:     make(map[int64]uint64),
+	}
+	installFailingTelegramUserProjectWrites(t, db)
+
+	response := svc.handleStart(userID)
+
+	require.Contains(t, response, "Error setting default project")
+	require.NotContains(t, response, "Welcome to *OpenVibely*")
+	require.Equal(t, previousProject.ID, svc.getActiveProject(userID))
+	savedProjectID, err := userProjectRepo.GetUserProject(ctx, userKey)
+	require.NoError(t, err)
+	require.Equal(t, previousProject.ID, savedProjectID)
+}
+
 func TestTelegramService_HandleProject_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
 	svc, userProjectRepo, projectA, _, userID := newTelegramProjectSwitchFailureFixture(t)
 

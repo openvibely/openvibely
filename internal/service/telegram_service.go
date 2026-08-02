@@ -534,11 +534,9 @@ func (s *TelegramService) handleStart(userID int64) string {
 		defaultProject = &projects[0]
 	}
 
-	s.cacheTelegramActiveProject(userID, defaultProject.ID)
-	if s.telegramUserProjectRepo != nil {
-		if err := s.telegramUserProjectRepo.SetUserProject(context.Background(), fmt.Sprintf("%d", userID), defaultProject.ID); err != nil {
-			applog.Infof("[telegram] failed to persist default project for user %d: %v", userID, err)
-		}
+	if err := s.setTelegramActiveProject(context.Background(), userID, defaultProject.ID); err != nil {
+		applog.Infof("[telegram] failed to set default project for user %d: %v", userID, err)
+		return fmt.Sprintf("Error setting default project: %v", err)
 	}
 
 	return fmt.Sprintf("Welcome to *OpenVibely*! 🚀\n\nYour active project is: *%s*\n\nJust send me any message and I'll help you manage tasks, answer questions about your project, or anything else — the same way the /chat page works in the web UI.\n\nExamples:\n- \"Create a task to fix the login bug\"\n- \"List my backlog tasks\"\n- \"What tasks are currently running?\"\n\nUse /project to view or change your active project.",
@@ -1402,7 +1400,7 @@ func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID i
 
 	if s.telegramUserProjectRepo != nil {
 		if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), projectID); err != nil {
-			applog.Infof("[telegram] runtime switch_project error persisting selection: %v", err)
+			applog.Infof("[telegram] error persisting active project selection: %v", err)
 			return fmt.Errorf("persist failed: %w", err)
 		}
 	}
