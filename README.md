@@ -193,7 +193,7 @@ The repository keeps production deployment and coding-agent concerns in separate
 | Image definition | Purpose | Contents |
 |---|---|---|
 | `Dockerfile` | Production server/VPS image published as `openvibely/openvibely` | Minimal `scratch` runtime with OpenVibely, certificates, timezone data, Git, Bash, and basic shell utilities |
-| `Dockerfile-ext` | Coding and agent execution | Fedora-based runtime with Go, Node.js/npm/Corepack, Python/pip/venv, Rust/cargo, Java/JDK, Ruby, Git, and native build tools |
+| `Dockerfile-ext` | Coding and agent execution | Fedora-based runtime with Go, Node.js/npm/Corepack/TypeScript, Python/pip/venv, Rust/cargo, Java/JDK, Ruby, Git, ripgrep, and native build tools |
 | `Dockerfile-dev` | Developing OpenVibely itself | Live-reload environment with the repository source, Air, templ, Swagger, Go, Node.js, and rootless Podman |
 
 Keep using the default `Dockerfile` for production deployments; language toolchains are intentionally excluded from that smaller attack surface. Build and verify the coding-capable image with:

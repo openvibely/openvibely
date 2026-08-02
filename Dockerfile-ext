@@ -75,6 +75,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
       ruby \
       ruby-devel \
       rust \
+      ripgrep \
       sed \
       shadow-utils \
       tar \
@@ -89,7 +90,10 @@ RUN dnf install -y --setopt=install_weak_deps=False \
  && rm -rf /var/cache/dnf
 
 ARG COREPACK_VERSION=0.34.0
-RUN npm install --global "corepack@${COREPACK_VERSION}" \
+ARG TYPESCRIPT_VERSION=5.9.3
+RUN npm install --global \
+      "corepack@${COREPACK_VERSION}" \
+      "typescript@${TYPESCRIPT_VERSION}" \
  && rm -rf /root/.npm
 
 RUN useradd -m -u 10001 -s /bin/bash openvibely \
