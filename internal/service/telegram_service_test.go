@@ -4246,3 +4246,105 @@ func TestTelegramService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
 	require.Equal(t, project2.ID, svc2.getActiveProject(userID),
 		"getActiveProject must return the newly-persisted project on next session")
 }
+
+func TestTelegramActiveProjectCacheConcurrentResolutionAndRuntimeSwitch(t *testing.T) {
+	svc, projectRepo, _ := newTestTelegramService(t)
+	ctx := context.Background()
+	alpha := &models.Project{Name: "Concurrent Alpha", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, alpha))
+	beta := &models.Project{Name: "Concurrent Beta"}
+	require.NoError(t, projectRepo.Create(ctx, beta))
+
+	const userID = int64(174)
+	svc.userProjectsMu.Lock()
+	started := make(chan struct{}, 2)
+	resolved := make(chan string, 1)
+	switched := make(chan error, 1)
+	go func() {
+		started <- struct{}{}
+		resolved <- svc.getActiveProject(userID)
+	}()
+	go func() {
+		started <- struct{}{}
+		switched <- svc.setTelegramActiveProject(ctx, userID, beta.ID)
+	}()
+	<-started
+	<-started
+	svc.userProjectsMu.Unlock()
+
+	require.NoError(t, <-switched)
+	resolvedProject := <-resolved
+	require.Contains(t, []string{alpha.ID, beta.ID}, resolvedProject)
+	projectID, ok, _ := svc.cachedTelegramActiveProject(userID)
+	require.True(t, ok)
+	require.Equal(t, beta.ID, projectID, "stale cache population must not overwrite switch_project")
+}
+
+func TestTelegramInboundUpdateResolvesProjectWhilePriorTurnSwitchesProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	alpha := &models.Project{Name: "Workflow Alpha", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, alpha))
+	beta := &models.Project{Name: "Workflow Beta"}
+	require.NoError(t, projectRepo.Create(ctx, beta))
+	workerSvc := NewWorkerService(nil, 0, projectRepo)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	userProjectRepo := repository.NewTelegramUserProjectRepo(db)
+
+	const userID = int64(174174)
+	svc := &TelegramService{
+		taskSvc:                 taskSvc,
+		projectRepo:             projectRepo,
+		llmConfigRepo:           llmConfigRepo,
+		taskRepo:                taskRepo,
+		execRepo:                execRepo,
+		chatAttachmentRepo:      repository.NewChatAttachmentRepo(db),
+		threadInputRepo:         repository.NewThreadInputRepo(db),
+		telegramUserProjectRepo: userProjectRepo,
+		settingsRepo:            repository.NewSettingsRepo(db),
+		scheduleRepo:            repository.NewScheduleRepo(db),
+		userProjects:            map[int64]string{userID: alpha.ID},
+		ctx:                     ctx,
+		sendMessageFunc:         func(int64, string) {},
+	}
+
+	runnerReady := make(chan ChannelChatRunRequest, 1)
+	invokeSwitch := make(chan struct{})
+	switchDone := make(chan error, 1)
+	svc.SetChannelChatRunner(func(runCtx context.Context, req ChannelChatRunRequest) {
+		runnerReady <- req
+		<-invokeSwitch
+		_, handled, isErr, err := req.RuntimeTools.Executor(runCtx, "switch_project", json.RawMessage(`{"project":"Workflow Beta"}`))
+		if err == nil && (!handled || isErr) {
+			err = fmt.Errorf("switch_project handled=%v isErr=%v", handled, isErr)
+		}
+		switchDone <- err
+	})
+
+	first := &tgbotapi.Message{From: &tgbotapi.User{ID: userID}, Chat: &tgbotapi.Chat{ID: userID}, Text: "first turn"}
+	require.True(t, svc.handleChatMessageUntilDurable(ctx, first))
+	req := <-runnerReady
+	require.Equal(t, alpha.ID, req.ProjectID)
+
+	secondDone := make(chan bool, 1)
+	go func() {
+		secondDone <- svc.handleTelegramUpdate(ctx, tgbotapi.Update{UpdateID: 2, Message: &tgbotapi.Message{
+			From: &tgbotapi.User{ID: userID}, Chat: &tgbotapi.Chat{ID: userID}, Text: "/project",
+		}})
+	}()
+	close(invokeSwitch)
+	require.True(t, <-secondDone)
+	require.NoError(t, <-switchDone)
+
+	persistedProjectID, err := userProjectRepo.GetUserProject(ctx, fmt.Sprintf("%d", userID))
+	require.NoError(t, err)
+	require.Equal(t, beta.ID, persistedProjectID)
+	cachedProjectID, ok, _ := svc.cachedTelegramActiveProject(userID)
+	require.True(t, ok)
+	require.Equal(t, persistedProjectID, cachedProjectID)
+}

@@ -97,7 +97,9 @@ type TelegramService struct {
 	newBotAPI                func(token string) (*tgbotapi.BotAPI, error)
 	previewMu                sync.Mutex
 	activePreviews           map[telegramPreviewKey]*telegramPreviewState
+	userProjectsMu           sync.RWMutex
 	userProjects             map[int64]string // Maps Telegram user ID to active project ID
+	userProjectVersions      map[int64]uint64
 	lifecycleOpMu            sync.Mutex
 	lifecycleMu              sync.Mutex
 	ctx                      context.Context
@@ -134,20 +136,21 @@ func NewTelegramService(
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &TelegramService{
-		bot:                bot,
-		taskSvc:            taskSvc,
-		projectRepo:        projectRepo,
-		llmConfigRepo:      llmConfigRepo,
-		taskRepo:           taskRepo,
-		execRepo:           execRepo,
-		scheduleRepo:       scheduleRepo,
-		chatAttachmentRepo: chatAttachmentRepo,
-		llmSvc:             llmSvc,
-		workerSvc:          workerSvc,
-		newBotAPI:          tgbotapi.NewBotAPI,
-		userProjects:       make(map[int64]string),
-		ctx:                ctx,
-		cancel:             cancel,
+		bot:                 bot,
+		taskSvc:             taskSvc,
+		projectRepo:         projectRepo,
+		llmConfigRepo:       llmConfigRepo,
+		taskRepo:            taskRepo,
+		execRepo:            execRepo,
+		scheduleRepo:        scheduleRepo,
+		chatAttachmentRepo:  chatAttachmentRepo,
+		llmSvc:              llmSvc,
+		workerSvc:           workerSvc,
+		newBotAPI:           tgbotapi.NewBotAPI,
+		userProjects:        make(map[int64]string),
+		userProjectVersions: make(map[int64]uint64),
+		ctx:                 ctx,
+		cancel:              cancel,
 	}, nil
 }
 
@@ -521,7 +524,7 @@ func (s *TelegramService) handleStart(userID int64) string {
 		defaultProject = &projects[0]
 	}
 
-	s.userProjects[userID] = defaultProject.ID
+	s.cacheTelegramActiveProject(userID, defaultProject.ID)
 	if s.telegramUserProjectRepo != nil {
 		if err := s.telegramUserProjectRepo.SetUserProject(context.Background(), fmt.Sprintf("%d", userID), defaultProject.ID); err != nil {
 			applog.Infof("[telegram] failed to persist default project for user %d: %v", userID, err)
@@ -588,7 +591,7 @@ func (s *TelegramService) handleProject(userID int64, args string) string {
 	}
 
 	// Update user's active project (in-memory + persistent)
-	s.userProjects[userID] = targetProject.ID
+	s.cacheTelegramActiveProject(userID, targetProject.ID)
 	if s.telegramUserProjectRepo != nil {
 		if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), targetProject.ID); err != nil {
 			applog.Infof("[telegram] failed to persist project selection for user %d: %v", userID, err)
@@ -1383,7 +1386,7 @@ func telegramSendToTaskActionResult(result string) (string, error) {
 }
 
 func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID int64, projectID string) error {
-	s.userProjects[userID] = projectID
+	s.cacheTelegramActiveProject(userID, projectID)
 	if s.telegramUserProjectRepo != nil {
 		if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), projectID); err != nil {
 			applog.Infof("[telegram] runtime switch_project error persisting selection: %v", err)
@@ -1586,39 +1589,71 @@ func filterTelegramChatHistory(executions []models.Execution, currentExecID stri
 	return result
 }
 
-// getActiveProject returns the active project ID for a user
+// getActiveProject returns the active project ID for a user.
 func (s *TelegramService) getActiveProject(userID int64) string {
-	if projectID, ok := s.userProjects[userID]; ok {
+	projectID, ok, cacheVersion := s.cachedTelegramActiveProject(userID)
+	if ok {
 		return projectID
 	}
 
-	// Check persisted project selection from DB
+	// Keep database and project-list reads outside the cache lock. The cache
+	// version prevents a concurrent explicit switch from being overwritten by
+	// the stale result of either lookup.
 	if s.telegramUserProjectRepo != nil {
 		savedProjectID, err := s.telegramUserProjectRepo.GetUserProject(context.Background(), fmt.Sprintf("%d", userID))
 		if err != nil {
 			applog.Infof("[telegram] error loading persisted project for user %d: %v", userID, err)
 		} else if savedProjectID != "" {
-			s.userProjects[userID] = savedProjectID
-			return savedProjectID
+			return s.populateTelegramActiveProject(userID, savedProjectID, cacheVersion)
 		}
 	}
 
-	// Try to get default project
 	projects, err := s.projectRepo.List(context.Background())
 	if err != nil || len(projects) == 0 {
 		return ""
 	}
 
+	projectID = projects[0].ID
 	for _, project := range projects {
 		if project.IsDefault {
-			s.userProjects[userID] = project.ID
-			return project.ID
+			projectID = project.ID
+			break
 		}
 	}
+	return s.populateTelegramActiveProject(userID, projectID, cacheVersion)
+}
 
-	// Use first project as fallback
-	s.userProjects[userID] = projects[0].ID
-	return projects[0].ID
+func (s *TelegramService) cachedTelegramActiveProject(userID int64) (string, bool, uint64) {
+	s.userProjectsMu.RLock()
+	defer s.userProjectsMu.RUnlock()
+	projectID, ok := s.userProjects[userID]
+	return projectID, ok, s.userProjectVersions[userID]
+}
+
+func (s *TelegramService) cacheTelegramActiveProject(userID int64, projectID string) {
+	s.userProjectsMu.Lock()
+	defer s.userProjectsMu.Unlock()
+	if s.userProjects == nil {
+		s.userProjects = make(map[int64]string)
+	}
+	if s.userProjectVersions == nil {
+		s.userProjectVersions = make(map[int64]uint64)
+	}
+	s.userProjects[userID] = projectID
+	s.userProjectVersions[userID]++
+}
+
+func (s *TelegramService) populateTelegramActiveProject(userID int64, projectID string, expectedVersion uint64) string {
+	s.userProjectsMu.Lock()
+	defer s.userProjectsMu.Unlock()
+	if currentProjectID, ok := s.userProjects[userID]; ok || s.userProjectVersions[userID] != expectedVersion {
+		return currentProjectID
+	}
+	if s.userProjects == nil {
+		s.userProjects = make(map[int64]string)
+	}
+	s.userProjects[userID] = projectID
+	return projectID
 }
 
 type telegramInputRichMessage struct {
