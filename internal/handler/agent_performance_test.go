@@ -21,8 +21,10 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
+type agentRefreshBenchmarkContextKey struct{}
+
 func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
-	db := testutil.NewTestDB(b)
+	db, statementCounter := testutil.NewStatementCountingTestDB(b)
 	agentRepo := repository.NewAgentRepo(db)
 	lifecycleRepo := repository.NewLifecycleRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
@@ -65,6 +67,29 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 	warmContext, _ := request()
 	if err := h.ListAgents(warmContext); err != nil {
 		b.Fatal(err)
+	}
+	convergenceContext, _ := request()
+	if err := h.ListAgents(convergenceContext); err != nil {
+		b.Fatal(err)
+	}
+
+	statementCounter.Reset()
+	statementCounter.SetEnabled(true)
+	instrumentedContext, _ := request()
+	if err := h.ListAgents(instrumentedContext); err != nil {
+		b.Fatal(err)
+	}
+	statementCounter.SetEnabled(false)
+	warmStatements := statementCounter.Statements()
+	warmAgentLists := countSQLStatements(warmStatements, "SELECT ", " FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC")
+	warmWrites := countSQLStatements(warmStatements, "INSERT ", "") + countSQLStatements(warmStatements, "UPDATE ", "") + countSQLStatements(warmStatements, "DELETE ", "")
+	warmAgentHookWrites := countSQLStatements(warmStatements, "INSERT ", "agents") + countSQLStatements(warmStatements, "UPDATE ", "agents") + countSQLStatements(warmStatements, "DELETE ", "agents") +
+		countSQLStatements(warmStatements, "INSERT ", "lifecycle_agent_hooks") + countSQLStatements(warmStatements, "UPDATE ", "lifecycle_agent_hooks") + countSQLStatements(warmStatements, "DELETE ", "lifecycle_agent_hooks")
+	if warmAgentLists != 1 {
+		b.Fatalf("warm ListAgents executed %d full agent-list statements, want 1; statements: %q", warmAgentLists, warmStatements)
+	}
+	if warmAgentHookWrites != 0 {
+		b.Fatalf("warm ListAgents executed %d agent/hook writes, want 0; statements: %q", warmAgentHookWrites, warmStatements)
 	}
 
 	b.Run("baseline", func(b *testing.B) {
@@ -116,6 +141,9 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 
 	b.Run("candidate", func(b *testing.B) {
 		b.ReportAllocs()
+		b.ReportMetric(float64(len(warmStatements)), "sqlite-statements/op")
+		b.ReportMetric(float64(warmAgentLists), "agent-list-statements/op")
+		b.ReportMetric(float64(warmWrites), "sqlite-writes/op")
 		for i := 0; i < b.N; i++ {
 			c, _ := request()
 			if err := h.ListAgents(c); err != nil {
@@ -128,6 +156,8 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 		b.Run("sqlite_query_wait/"+kind, func(b *testing.B) {
 			refresh := func() error {
 				c, _ := request()
+				refreshContext := context.WithValue(c.Request().Context(), agentRefreshBenchmarkContextKey{}, true)
+				c.SetRequest(c.Request().WithContext(refreshContext))
 				if kind == "candidate" {
 					return h.ListAgents(c)
 				}
@@ -171,32 +201,45 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 				return render(c, http.StatusOK, pages.AgentsContent(agents, buildAgentModelOptions(configs)))
 			}
 
-			waits := make([]time.Duration, 0, b.N)
+			const refreshWorkers = 10
+			const unrelatedQueriesPerBurst = 25
+			waits := make([]time.Duration, 0, b.N*unrelatedQueriesPerBurst)
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				started := make(chan struct{}, 10)
-				errs := make(chan error, 10)
+				firstRefreshStatement := make(chan struct{}, 1)
+				statementCounter.SetObserver(func(ctx context.Context, _ string) {
+					if marked, _ := ctx.Value(agentRefreshBenchmarkContextKey{}).(bool); marked {
+						select {
+						case firstRefreshStatement <- struct{}{}:
+						default:
+						}
+					}
+				})
+				errs := make(chan error, refreshWorkers)
 				var wg sync.WaitGroup
-				for worker := 0; worker < 10; worker++ {
+				for worker := 0; worker < refreshWorkers; worker++ {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						started <- struct{}{}
 						errs <- refresh()
 					}()
 				}
-				for worker := 0; worker < 10; worker++ {
-					<-started
+				select {
+				case <-firstRefreshStatement:
+				case <-time.After(10 * time.Second):
+					b.Fatal("refresh burst did not reach SQLite")
 				}
-				time.Sleep(5 * time.Millisecond)
-				startedAt := time.Now()
-				var count int
-				err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM projects`).Scan(&count)
-				waits = append(waits, time.Since(startedAt))
-				if err != nil {
-					b.Fatal(err)
+				for query := 0; query < unrelatedQueriesPerBurst; query++ {
+					startedAt := time.Now()
+					var count int
+					err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM projects`).Scan(&count)
+					waits = append(waits, time.Since(startedAt))
+					if err != nil {
+						b.Fatal(err)
+					}
 				}
 				wg.Wait()
+				statementCounter.SetObserver(nil)
 				close(errs)
 				for refreshErr := range errs {
 					if refreshErr != nil {
@@ -215,6 +258,21 @@ func BenchmarkListAgentsHTMXWarm100(b *testing.B) {
 			}
 		})
 	}
+}
+
+func countSQLStatements(statements []string, prefix, contains string) int {
+	count := 0
+	for _, statement := range statements {
+		normalized := strings.ToUpper(strings.TrimSpace(statement))
+		if prefix != "" && !strings.HasPrefix(normalized, strings.ToUpper(prefix)) {
+			continue
+		}
+		if contains != "" && !strings.Contains(normalized, strings.ToUpper(contains)) {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 func writeAgentBenchmarkDeclarations(b *testing.B, root, scope, projectID string, start, end int, prompt string) {

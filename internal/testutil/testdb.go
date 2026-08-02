@@ -3,20 +3,199 @@ package testutil
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/database"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
 
 var (
-	schemaOnce     sync.Once
-	cachedTemplate []byte
-	schemaErr      error
+	schemaOnce       sync.Once
+	cachedTemplate   []byte
+	schemaErr        error
+	countingDriverID atomic.Uint64
 )
+
+// SQLStatementCounter records complete database/sql query and exec operations.
+// Counting can be disabled around timed benchmarks to avoid measurement noise.
+type SQLStatementCounter struct {
+	mu         sync.Mutex
+	enabled    bool
+	statements []string
+	observer   func(context.Context, string)
+}
+
+func (c *SQLStatementCounter) SetEnabled(enabled bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.enabled = enabled
+}
+
+func (c *SQLStatementCounter) Reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.statements = nil
+}
+
+func (c *SQLStatementCounter) Statements() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.statements...)
+}
+
+func (c *SQLStatementCounter) SetObserver(observer func(context.Context, string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.observer = observer
+}
+
+func (c *SQLStatementCounter) record(ctx context.Context, query string) {
+	c.mu.Lock()
+	if c.enabled {
+		c.statements = append(c.statements, strings.TrimSpace(query))
+	}
+	observer := c.observer
+	c.mu.Unlock()
+	if observer != nil {
+		observer(ctx, query)
+	}
+}
+
+type statementCountingDriver struct {
+	inner   driver.Driver
+	counter *SQLStatementCounter
+}
+
+func (d *statementCountingDriver) Open(name string) (driver.Conn, error) {
+	conn, err := d.inner.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return &statementCountingConn{Conn: conn, counter: d.counter}, nil
+}
+
+type statementCountingConn struct {
+	driver.Conn
+	counter *SQLStatementCounter
+}
+
+func (c *statementCountingConn) Prepare(query string) (driver.Stmt, error) {
+	stmt, err := c.Conn.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	return &statementCountingStmt{Stmt: stmt, query: query, counter: c.counter}, nil
+}
+
+func (c *statementCountingConn) PrepareContext(ctx context.Context, query string) (driver.Stmt, error) {
+	if conn, ok := c.Conn.(driver.ConnPrepareContext); ok {
+		stmt, err := conn.PrepareContext(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		return &statementCountingStmt{Stmt: stmt, query: query, counter: c.counter}, nil
+	}
+	return c.Prepare(query)
+}
+
+func (c *statementCountingConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	conn, ok := c.Conn.(driver.ExecerContext)
+	if !ok {
+		return nil, driver.ErrSkip
+	}
+	c.counter.record(ctx, query)
+	return conn.ExecContext(ctx, query, args)
+}
+
+func (c *statementCountingConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	conn, ok := c.Conn.(driver.QueryerContext)
+	if !ok {
+		return nil, driver.ErrSkip
+	}
+	c.counter.record(ctx, query)
+	return conn.QueryContext(ctx, query, args)
+}
+
+func (c *statementCountingConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
+	if conn, ok := c.Conn.(driver.ConnBeginTx); ok {
+		return conn.BeginTx(ctx, opts)
+	}
+	return c.Conn.Begin()
+}
+
+func (c *statementCountingConn) Ping(ctx context.Context) error {
+	if conn, ok := c.Conn.(driver.Pinger); ok {
+		return conn.Ping(ctx)
+	}
+	return nil
+}
+
+func (c *statementCountingConn) CheckNamedValue(value *driver.NamedValue) error {
+	if conn, ok := c.Conn.(driver.NamedValueChecker); ok {
+		return conn.CheckNamedValue(value)
+	}
+	return driver.ErrSkip
+}
+
+func (c *statementCountingConn) ResetSession(ctx context.Context) error {
+	if conn, ok := c.Conn.(driver.SessionResetter); ok {
+		return conn.ResetSession(ctx)
+	}
+	return nil
+}
+
+func (c *statementCountingConn) IsValid() bool {
+	if conn, ok := c.Conn.(driver.Validator); ok {
+		return conn.IsValid()
+	}
+	return true
+}
+
+func (c *statementCountingConn) Serialize() ([]byte, error) {
+	return c.Conn.(serializer).Serialize()
+}
+
+func (c *statementCountingConn) Deserialize(data []byte) error {
+	return c.Conn.(serializer).Deserialize(data)
+}
+
+type statementCountingStmt struct {
+	driver.Stmt
+	query   string
+	counter *SQLStatementCounter
+}
+
+func (s *statementCountingStmt) Exec(args []driver.Value) (driver.Result, error) {
+	s.counter.record(context.Background(), s.query)
+	return s.Stmt.Exec(args)
+}
+
+func (s *statementCountingStmt) Query(args []driver.Value) (driver.Rows, error) {
+	s.counter.record(context.Background(), s.query)
+	return s.Stmt.Query(args)
+}
+
+func (s *statementCountingStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
+	if stmt, ok := s.Stmt.(driver.StmtExecContext); ok {
+		s.counter.record(ctx, s.query)
+		return stmt.ExecContext(ctx, args)
+	}
+	return nil, driver.ErrSkip
+}
+
+func (s *statementCountingStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
+	if stmt, ok := s.Stmt.(driver.StmtQueryContext); ok {
+		s.counter.record(ctx, s.query)
+		return stmt.QueryContext(ctx, args)
+	}
+	return nil, driver.ErrSkip
+}
 
 func init() {
 	// Set GO_TESTING environment variable to prevent real external API/CLI calls during tests
@@ -84,16 +263,29 @@ func initSchema() {
 func NewTestDB(t testing.TB) *sql.DB {
 	t.Helper()
 
-	db := buildTestDB(t)
+	db := buildTestDB(t, "sqlite")
 	t.Cleanup(func() { db.Close() })
 	return db
+}
+
+// NewStatementCountingTestDB creates a normal isolated SQLite test fixture and
+// exposes statement instrumentation for complete-path tests and benchmarks.
+func NewStatementCountingTestDB(t testing.TB) (*sql.DB, *SQLStatementCounter) {
+	t.Helper()
+
+	counter := &SQLStatementCounter{}
+	driverName := fmt.Sprintf("sqlite_statement_counter_%d", countingDriverID.Add(1))
+	sql.Register(driverName, &statementCountingDriver{inner: &sqlite.Driver{}, counter: counter})
+	db := buildTestDB(t, driverName)
+	t.Cleanup(func() { db.Close() })
+	return db, counter
 }
 
 // buildTestDB constructs a fresh isolated fixture and fails tb on error. It does
 // not register cleanup; callers own closing the returned database. NewTestDB
 // wraps it with a t.Cleanup close, while the benchmark closes each fixture
 // explicitly to measure per-iteration create/close cost accurately.
-func buildTestDB(tb testing.TB) *sql.DB {
+func buildTestDB(tb testing.TB, driverName string) *sql.DB {
 	tb.Helper()
 
 	schemaOnce.Do(initSchema)
@@ -103,7 +295,7 @@ func buildTestDB(tb testing.TB) *sql.DB {
 
 	// Open a raw SQLite connection (no migrations).
 	dsn := ":memory:?_loc=UTC"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open(driverName, dsn)
 	if err != nil {
 		tb.Fatalf("failed to open test database: %v", err)
 	}
