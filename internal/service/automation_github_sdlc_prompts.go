@@ -9,6 +9,16 @@ import (
 // They intentionally mirror the behavior of the bootstrap skill shipped when
 // the template was defined, but template execution does not depend on that
 // skill being installed or retained.
+const githubSDLCReadableIssueInstructions = `
+
+Start every issue body with this section before any technical analysis:
+## Summary
+In 2-4 plain-language sentences, explain what is wrong or being suggested, give one concrete example of what a user would notice, and explain why it matters. Write this for a product user who has not read the code and does not know internal tool or symbol names.
+
+After the Summary, preserve the detailed information needed by an implementation agent: inspected component, evidence and concrete failure paths, expected versus actual behavior, risk, suggested implementation direction, acceptance criteria, relevant file/symbol references, and regression cases. Technical detail is useful and must not be omitted; it just must not come before the Summary.
+
+Pass the required category label in the github_create_issue labels argument; do not rely on body text to communicate the category.`
+
 const githubSDLCDevInboxPrompt = `Check GitHub for implementation mailbox work and PR review feedback for this project.
 
 First call ` + "`" + `github_forward_pr_feedback_to_tasks` + "`" + ` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users on OpenVibely-created task PRs. This tool forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback. If the tool reports missing feedback dependencies, report that PR feedback routing is unavailable but continue normal issue inbox polling.
@@ -31,7 +41,7 @@ Read the issue and relevant project context, make the focused code or documentat
 
 const githubSDLCOfferingManagerPrompt = `Review the configured project vision/source files and identify small, reviewable feature gaps.
 
-Open GitHub suggestion issues only. Use ` + "`" + `github_create_issue` + "`" + ` with unprefixed labels such as ` + "`" + `suggestion` + "`" + ` and ` + "`" + `feature` + "`" + `. Do not create implementation tasks and do not modify code.
+Open GitHub suggestion issues only. Use ` + "`" + `github_create_issue` + "`" + ` with the unprefixed labels ` + "`" + `suggestion` + "`" + ` and ` + "`" + `feature` + "`" + `. Do not create implementation tasks and do not modify code.` + githubSDLCReadableIssueInstructions + `
 
 Include enough context for a human to approve, reject, or assign the issue. Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.`
 
@@ -39,7 +49,7 @@ const githubSDLCBugFinderPrompt = `You are the Bug Finder. Choose one focused pr
 
 Look only for likely correctness defects, edge-case failures, broken behavior, or missing tests that indicate a bug. Require a concrete failure path, explain expected versus actual behavior, and identify the regression coverage needed to prove the fix. Do not report performance-only opportunities or code duplication without a demonstrated correctness defect.
 
-Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `bug` + "`" + `. Include the inspected component, evidence, risk, and suggested acceptance criteria.
+Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `bug` + "`" + `.` + githubSDLCReadableIssueInstructions + `
 
 Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 
@@ -49,7 +59,7 @@ const githubSDLCOptimizationFinderPrompt = `You are the Optimization Finder. Cho
 
 Look only for measurable performance, latency, throughput, memory, build, or workflow efficiency bottlenecks. Require current evidence or a concrete measurement plan and define before-and-after criteria that would demonstrate improvement. Do not report correctness defects or code duplication unless they directly establish the measured optimization opportunity.
 
-Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `performance` + "`" + `. Include the inspected component, evidence, risk, and suggested acceptance criteria.
+Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `performance` + "`" + `.` + githubSDLCReadableIssueInstructions + `
 
 Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 
@@ -59,7 +69,7 @@ const githubSDLCRedundancyFinderPrompt = `You are the Redundancy Finder. Choose 
 
 Look only for demonstrated duplicated or redundant code, configuration, or workflow logic. Identify the repeated locations, explain why they represent the same responsibility, and propose the smallest safe consolidation without over-engineering. Do not report correctness defects or performance-only opportunities as redundancy findings.
 
-Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `duplication` + "`" + `. Include the inspected component, evidence, risk, and suggested acceptance criteria.
+Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `duplication` + "`" + `.` + githubSDLCReadableIssueInstructions + `
 
 Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 

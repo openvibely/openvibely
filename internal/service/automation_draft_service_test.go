@@ -91,6 +91,9 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	require.Contains(t, visionPrompt, "Native notification idempotency")
 	require.Contains(t, visionPrompt, "Do not modify code")
 	require.Contains(t, visionPrompt, "do not create implementation tasks")
+	require.Contains(t, visionPrompt, "## Summary")
+	require.Contains(t, visionPrompt, "Technical detail is useful and must not be omitted")
+	require.Contains(t, visionPrompt, "Make the title and message understandable to a product user")
 
 	roles := map[string]struct {
 		nodeKey       string
@@ -112,12 +115,15 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 		}
 		require.False(t, seenPrompts[prompt], "%s must not share a prompt body with another finder", role)
 		seenPrompts[prompt] = true
+		require.Contains(t, prompt, "## Summary", "%s Native notification must open with a readable summary", role)
+		require.Contains(t, prompt, "Technical detail is useful and must not be omitted")
+		require.Contains(t, prompt, "Make the title and message understandable to a product user")
 		require.Contains(t, prompt, "Choose one focused project component or workflow")
 		require.Contains(t, prompt, "create_notification")
 		require.Contains(t, prompt, "stable idempotency key")
 		require.Contains(t, prompt, "Do not list, search, or inspect GitHub issues for duplicate detection")
 		require.Contains(t, prompt, "Native notification idempotency")
-		require.Contains(t, prompt, "evidence, scope, risk, and acceptance criteria")
+		require.Contains(t, prompt, "acceptance criteria")
 		require.Contains(t, prompt, "Approval authorizes task creation only")
 	}
 
@@ -245,11 +251,15 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.NotContains(t, githubSDLCDevInboxPrompt, "Finally, call execute_tasks with that exact task ID")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not leave approved implementation work in Backlog")
 	for name, prompt := range map[string]string{
-		"offering manager":    githubSDLCOfferingManagerPrompt,
+		"vision suggestions":  githubSDLCOfferingManagerPrompt,
 		"bug finder":          githubSDLCBugFinderPrompt,
 		"optimization finder": githubSDLCOptimizationFinderPrompt,
 		"redundancy finder":   githubSDLCRedundancyFinderPrompt,
 	} {
+		require.Contains(t, prompt, "## Summary", "%s output must open with a readable summary", name)
+		require.Contains(t, prompt, "Technical detail is useful and must not be omitted", name)
+		require.Contains(t, prompt, "Write this for a product user", name)
+		require.Contains(t, prompt, "Pass the required category label", name)
 		require.Contains(t, prompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection", name)
 		require.Contains(t, prompt, "Do not require a repository-wide issue or pull-request listing/search before publication", name)
 		require.Contains(t, prompt, "Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated", name)

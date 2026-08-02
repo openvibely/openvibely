@@ -9,9 +9,19 @@ import (
 // They intentionally mirror the behavior of the bootstrap skill shipped when
 // the template was defined, but template execution does not depend on that
 // skill being installed or retained.
+const nativeSDLCReadableNotificationInstructions = `
+
+Make the title and message understandable to a product user without source-code or internal tool knowledge. Start every notification body with this section before any technical analysis:
+## Summary
+In 2-4 plain-language sentences, explain what is wrong or being suggested, give one concrete example of what a user would notice, and explain why it matters.
+
+After the Summary, preserve the detailed information needed by an implementation agent: inspected component, evidence and concrete failure paths, expected versus actual behavior, risk, suggested implementation direction, acceptance criteria, relevant file/symbol references, and regression cases. Technical detail is useful and must not be omitted; it just must not come before the Summary.`
+
 const nativeSDLCVisionSuggestionsPrompt = `Choose one focused project component or workflow to inspect this run. Compare that area with the configured project vision or source-of-truth files and identify small, reviewable gaps. Vary the component over time instead of repeatedly auditing the same files.
 
-Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with a generic type such as product_suggestion, a concise title and message, a detailed body with evidence, scope, risk, and acceptance criteria, structured metadata identifying the inspected area and evidence, and a stable idempotency key derived from the project-independent finding identity.
+Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection.` + nativeSDLCReadableNotificationInstructions + `
+
+Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with a generic type such as product_suggestion, the reader-first title, message, and body above, structured metadata identifying the inspected area and evidence, and a stable idempotency key derived from the project-independent finding identity.
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 
@@ -19,7 +29,9 @@ const nativeSDLCBugFinderPrompt = `You are the Bug Finder. Choose one focused pr
 
 Look only for likely correctness defects, edge-case failures, broken behavior, or missing regression coverage. Require a concrete failure path, explain expected versus actual behavior, and identify the regression coverage needed to prove the fix. Do not report performance-only opportunities or code duplication without a demonstrated correctness defect.
 
-Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with type bug_suggestion, a concise title and message, a detailed body with evidence, scope, risk, and acceptance criteria, structured metadata identifying the inspected component and evidence, and a stable idempotency key derived from the project-independent finding identity.
+Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection.` + nativeSDLCReadableNotificationInstructions + `
+
+Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with type bug_suggestion, the reader-first title, message, and body above, structured metadata identifying the inspected component and evidence, and a stable idempotency key derived from the project-independent finding identity.
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 
@@ -27,7 +39,9 @@ const nativeSDLCOptimizationFinderPrompt = `You are the Optimization Finder. Cho
 
 Look only for measurable performance, latency, throughput, memory, build, or workflow efficiency bottlenecks. Require current evidence or a concrete measurement plan and define before-and-after criteria that would demonstrate improvement. Do not report correctness defects or code duplication unless they directly establish the measured optimization opportunity.
 
-Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with type performance_suggestion, a concise title and message, a detailed body with evidence, scope, risk, and acceptance criteria, structured metadata identifying the inspected component and evidence, and a stable idempotency key derived from the project-independent finding identity.
+Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection.` + nativeSDLCReadableNotificationInstructions + `
+
+Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with type performance_suggestion, the reader-first title, message, and body above, structured metadata identifying the inspected component and evidence, and a stable idempotency key derived from the project-independent finding identity.
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 
@@ -35,7 +49,9 @@ const nativeSDLCRedundancyFinderPrompt = `You are the Redundancy Finder. Choose 
 
 Look only for demonstrated duplicated or redundant code, configuration, or workflow logic. Identify the repeated locations, explain why they represent the same responsibility, and propose the smallest safe consolidation without over-engineering. Do not report correctness defects or performance-only opportunities as redundancy findings.
 
-Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with type maintenance_suggestion, a concise title and message, a detailed body with evidence, scope, risk, and acceptance criteria, structured metadata identifying the inspected component and evidence, and a stable idempotency key derived from the project-independent finding identity.
+Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection.` + nativeSDLCReadableNotificationInstructions + `
+
+Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with type maintenance_suggestion, the reader-first title, message, and body above, structured metadata identifying the inspected component and evidence, and a stable idempotency key derived from the project-independent finding identity.
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 

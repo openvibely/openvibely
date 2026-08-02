@@ -391,6 +391,8 @@ func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIss
 	}
 	var configuredLabels []string
 	configured := false
+	var maintainedLabels []string
+	maintainedConfigured := false
 	actionAuthorized := false
 	for _, binding := range automationContext.Bindings {
 		current, err := opts.AutomationRepo.IsCurrentActiveBinding(ctx, opts.ProjectID, binding)
@@ -408,6 +410,17 @@ func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIss
 			return false, errors.New("github_create_issue is not authorized by the caller's Automation graph: every causal binding must authorize the action")
 		}
 		actionAuthorized = true
+		finderLabels, err := maintainedGitHubSDLCFinderLabels(ctx, opts, binding)
+		if err != nil {
+			return false, err
+		}
+		if len(finderLabels) > 0 {
+			if maintainedConfigured && strings.Join(maintainedLabels, "\x00") != strings.Join(finderLabels, "\x00") {
+				return false, errors.New("Automation bindings have conflicting GitHub finder categories")
+			}
+			maintainedLabels = finderLabels
+			maintainedConfigured = true
+		}
 		assignmentNode, err := opts.AutomationRepo.GetConnectedNodeByRole(ctx, opts.ProjectID, binding.AutomationID, binding.VersionID, issueNode.ID, "github_assignment", true)
 		if err != nil {
 			return false, err
@@ -442,7 +455,38 @@ func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIss
 		req.Labels = configuredLabels
 		req.Assignees = nil
 	}
+	if maintainedConfigured {
+		req.Labels = normalizeDraftReferences(append(append([]string{}, maintainedLabels...), req.Labels...))
+	}
 	return true, nil
+}
+
+func maintainedGitHubSDLCFinderLabels(ctx context.Context, opts githubIssueRuntimeOptions, binding models.AutomationBinding) ([]string, error) {
+	definition, err := opts.AutomationRepo.GetDefinition(ctx, opts.ProjectID, binding.AutomationID)
+	if err != nil {
+		return nil, err
+	}
+	if definition == nil || definition.Version.ID != binding.VersionID || definition.Version.AdapterKey != AutomationAdapterGitHubSDLC {
+		return nil, nil
+	}
+	for _, node := range definition.Nodes {
+		if node.ID != binding.NodeID {
+			continue
+		}
+		switch node.Role {
+		case "offering_manager":
+			return []string{"suggestion", "feature"}, nil
+		case "bug_finder":
+			return []string{"bug"}, nil
+		case "optimization_finder":
+			return []string{"performance"}, nil
+		case "redundancy_finder":
+			return []string{"duplication"}, nil
+		default:
+			return nil, nil
+		}
+	}
+	return nil, errors.New("Automation GitHub finder binding node was not found")
 }
 
 func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task, req *GitHubIssueActionRequest) (bool, error) {
