@@ -81,7 +81,7 @@ func initSchema() {
 // SQLite's native deserialize mechanism, which is dramatically faster than
 // replaying the schema-and-seed SQL for every fixture.
 // It automatically closes the database when the test finishes.
-func NewTestDB(t *testing.T) *sql.DB {
+func NewTestDB(t testing.TB) *sql.DB {
 	t.Helper()
 
 	db := buildTestDB(t)

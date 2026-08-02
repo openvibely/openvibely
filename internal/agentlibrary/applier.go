@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -98,10 +99,12 @@ func (a *RepoApplier) ApplyDeclaration(ctx context.Context, decl *SkillDeclarati
 			target.GeneratedStatus = existing.GeneratedStatus
 		}
 		target.CreatedAt = existing.CreatedAt
-		if err := a.Agents.Update(ctx, target); err != nil {
-			return nil, fmt.Errorf("update agent: %w", err)
+		if !agentConfigurationEqual(existing, target) {
+			if err := a.Agents.Update(ctx, target); err != nil {
+				return nil, fmt.Errorf("update agent: %w", err)
+			}
+			changes = append(changes, "agent:update:"+target.Key)
 		}
-		changes = append(changes, "agent:update:"+target.Key)
 	}
 
 	// Hooks are diffed by (when, skill_key). Existing hooks with a matching
@@ -123,6 +126,9 @@ func (a *RepoApplier) ApplyDeclaration(ctx context.Context, decl *SkillDeclarati
 				changes = append(changes, fmt.Sprintf("hook:create:%s:%s", want.When, want.SkillKey))
 			} else {
 				want.ID = match.ID
+				if hookConfigurationEqual(match, &want) {
+					continue
+				}
 				if err := a.Hooks.UpdateHook(ctx, &want); err != nil {
 					return nil, fmt.Errorf("update hook %s/%s: %w", want.When, want.SkillKey, err)
 				}
@@ -132,6 +138,52 @@ func (a *RepoApplier) ApplyDeclaration(ctx context.Context, decl *SkillDeclarati
 	}
 
 	return changes, nil
+}
+
+func agentConfigurationEqual(existing, target *models.Agent) bool {
+	if existing == nil || target == nil {
+		return existing == target
+	}
+	left, right := *existing, *target
+	left.ID, right.ID = "", ""
+	left.CreatedAt, right.CreatedAt = right.CreatedAt, right.CreatedAt
+	left.UpdatedAt, right.UpdatedAt = right.UpdatedAt, right.UpdatedAt
+	normalizeEmptyAgentSlices(&left)
+	normalizeEmptyAgentSlices(&right)
+	return reflect.DeepEqual(left, right)
+}
+
+func normalizeEmptyAgentSlices(agent *models.Agent) {
+	if len(agent.Tools) == 0 {
+		agent.Tools = nil
+	}
+	if len(agent.ToolConfig.ScopedFiles) == 0 {
+		agent.ToolConfig.ScopedFiles = nil
+	}
+	if len(agent.Plugins) == 0 {
+		agent.Plugins = nil
+	}
+	if len(agent.MCPServers) == 0 {
+		agent.MCPServers = nil
+	}
+	if len(agent.Skills) == 0 {
+		agent.Skills = nil
+	}
+	if len(agent.SourceRefs) == 0 {
+		agent.SourceRefs = nil
+	}
+}
+
+func hookConfigurationEqual(existing, target *models.AgentLifecycleHook) bool {
+	if existing == nil || target == nil {
+		return existing == target
+	}
+	left, right := *existing, *target
+	left.ID, right.ID = "", ""
+	left.AgentID, right.AgentID = "", ""
+	left.CreatedAt, right.CreatedAt = right.CreatedAt, right.CreatedAt
+	left.UpdatedAt, right.UpdatedAt = right.UpdatedAt, right.UpdatedAt
+	return reflect.DeepEqual(left, right)
 }
 
 // ArchiveAgent flips the agent's generated_status to archived. Protected
