@@ -401,45 +401,6 @@ func resolveChannelTaskReference(ctx context.Context, taskRepo *repository.TaskR
 	return nil, fmt.Errorf("no task_id or title provided")
 }
 
-func resolveChannelScheduleReference(ctx context.Context, taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, projectID, scheduleID, taskID, title string) (*models.Schedule, *models.Task, error) {
-	if scheduleRepo == nil {
-		return nil, nil, fmt.Errorf("schedule repository not available")
-	}
-	if strings.TrimSpace(scheduleID) != "" {
-		scheduleID = strings.TrimSpace(scheduleID)
-		schedule, err := scheduleRepo.GetByID(ctx, scheduleID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("error looking up schedule %s: %w", scheduleID, err)
-		}
-		if schedule == nil {
-			return nil, nil, fmt.Errorf("schedule %s not found", scheduleID)
-		}
-		if taskRepo == nil {
-			return nil, nil, fmt.Errorf("task repository not configured")
-		}
-		task, err := taskRepo.GetByID(ctx, schedule.TaskID)
-		if err != nil || task == nil {
-			return nil, nil, fmt.Errorf("task for schedule %s not found", scheduleID)
-		}
-		if task.ProjectID != projectID {
-			return nil, nil, fmt.Errorf("schedule %s belongs to a different project", scheduleID)
-		}
-		return schedule, task, nil
-	}
-	task, err := resolveChannelTaskReference(ctx, taskRepo, projectID, taskID, title)
-	if err != nil {
-		return nil, nil, err
-	}
-	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error listing schedules for task %s: %w", task.ID, err)
-	}
-	if len(schedules) == 0 {
-		return nil, nil, fmt.Errorf("no schedules found for task %q", task.Title)
-	}
-	return &schedules[0], task, nil
-}
-
 func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts channelTaskThreadSendOptions) string {
 	formatErr := opts.ErrorResult
 	if formatErr == nil {

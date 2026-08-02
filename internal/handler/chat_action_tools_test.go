@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
@@ -168,28 +169,79 @@ func TestCreateTaskRuntimeToolDecodesTypedChainConfigDirectly(t *testing.T) {
 }
 
 func TestScheduleTaskRuntimeToolExecutesTypedRequest(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
-	ctx := context.Background()
-	project := createProject(t, h, "Typed Schedule Project")
-	task := createTask(t, h, project.ID, "Schedule directly")
-	handler := h.chatActionHandlers(
-		streamingResponseParams{ExecID: "typed-schedule-exec", ProjectID: project.ID},
-		nil,
-		models.ChatModeOrchestrate,
-		chatcontrol.SurfaceWeb,
-	)["schedule_task"]
+	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
+		t.Run(string(surface), func(t *testing.T) {
+			h, _, _, _ := setupTestHandlerWithDB(t)
+			ctx := context.Background()
+			project := createProject(t, h, "Typed Schedule Project "+string(surface))
+			foreignProject := createProject(t, h, "Foreign Schedule Project "+string(surface))
+			task := createTask(t, h, project.ID, "Schedule directly")
+			require.NoError(t, h.taskRepo.UpdateStatus(ctx, task.ID, models.StatusCompleted))
+			task.Status = models.StatusCompleted
+			foreignTask := createTask(t, h, foreignProject.ID, "Foreign schedule")
+			handlers := h.chatActionHandlers(
+				streamingResponseParams{ExecID: "typed-schedule-exec", ProjectID: project.ID},
+				nil,
+				models.ChatModeOrchestrate,
+				surface,
+			)
 
-	out, err := handler(ctx, json.RawMessage(`{"task_id":"`+task.ID+`","time":"09:30","repeat":"weekly","days":["mon","wed"]}`))
-	require.NoError(t, err)
-	require.Contains(t, out, "Scheduled task")
+			out, err := handlers["schedule_task"](ctx, json.RawMessage(`{"task_id":"`+task.ID+`","time":"09:30","repeat":"weekly","days":["mon","wed"],"interval":2,"clear_context_on_start":false}`))
+			require.NoError(t, err)
+			require.Contains(t, out, "Scheduled task")
 
-	schedules, err := h.scheduleRepo.ListByTask(ctx, task.ID)
-	require.NoError(t, err)
-	require.Len(t, schedules, 1)
-	require.Equal(t, models.RepeatWeekly, schedules[0].RepeatType)
-	updated, err := h.taskRepo.GetByID(ctx, task.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.CategoryScheduled, updated.Category)
+			schedules, err := h.scheduleRepo.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Len(t, schedules, 1)
+			require.Equal(t, models.RepeatWeekly, schedules[0].RepeatType)
+			require.Equal(t, 2, schedules[0].RepeatInterval)
+			require.Contains(t, []time.Weekday{time.Monday, time.Wednesday}, schedules[0].RunAt.Local().Weekday())
+			require.False(t, schedules[0].ClearContextOnStart)
+			require.NotNil(t, schedules[0].NextRun)
+			require.WithinDuration(t, schedules[0].RunAt, *schedules[0].NextRun, time.Second)
+			updated, err := h.taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryScheduled, updated.Category)
+			require.Equal(t, models.StatusPending, updated.Status)
+
+			out, err = handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","interval":0}`))
+			require.NoError(t, err)
+			require.Contains(t, out, "between 1 and 365")
+			out, err = handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","interval":365,"days":["fri"],"enabled":false,"clear_context_on_start":true}`))
+			require.NoError(t, err)
+			require.Contains(t, out, "Updated schedule")
+			modified, err := h.scheduleRepo.GetByID(ctx, schedules[0].ID)
+			require.NoError(t, err)
+			require.Equal(t, 365, modified.RepeatInterval)
+			require.Equal(t, time.Friday, modified.RunAt.Local().Weekday())
+			require.False(t, modified.Enabled)
+			require.True(t, modified.ClearContextOnStart)
+			require.NotNil(t, modified.NextRun)
+			require.WithinDuration(t, modified.RunAt, *modified.NextRun, time.Second)
+
+			out, err = handlers["schedule_task"](ctx, json.RawMessage(`{"task_id":"`+foreignTask.ID+`","time":"09:30"}`))
+			require.NoError(t, err)
+			require.Contains(t, out, "different project")
+			foreignSchedule := &models.Schedule{TaskID: foreignTask.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+			require.NoError(t, h.scheduleRepo.Create(ctx, foreignSchedule))
+			out, err = handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+foreignSchedule.ID+`","enabled":false}`))
+			require.NoError(t, err)
+			require.Contains(t, out, "different project")
+			out, err = handlers["delete_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+foreignSchedule.ID+`"}`))
+			require.NoError(t, err)
+			require.Contains(t, out, "different project")
+
+			out, err = handlers["delete_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`"}`))
+			require.NoError(t, err)
+			require.Contains(t, out, "Deleted schedule")
+			remaining, err := h.scheduleRepo.ListByTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Empty(t, remaining)
+			updated, err = h.taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryBacklog, updated.Category)
+		})
+	}
 }
 
 func TestChatActionSummaryCollector_AppendsCreatedAndEdited(t *testing.T) {
