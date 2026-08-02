@@ -100,6 +100,7 @@ type TelegramService struct {
 	userProjectsMu           sync.RWMutex
 	userProjects             map[int64]string // Maps Telegram user ID to active project ID
 	userProjectVersions      map[int64]uint64
+	userProjectSwitchMu      sync.Mutex
 	activeProjectReadHook    func(int64) // deterministic project-resolution test barrier
 	lifecycleOpMu            sync.Mutex
 	lifecycleMu              sync.Mutex
@@ -599,12 +600,11 @@ func (s *TelegramService) handleProject(userID int64, args string) string {
 			targetName, strings.Join(availableNames, ", "))
 	}
 
-	// Update user's active project (in-memory + persistent)
-	s.cacheTelegramActiveProject(userID, targetProject.ID)
-	if s.telegramUserProjectRepo != nil {
-		if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), targetProject.ID); err != nil {
-			applog.Infof("[telegram] failed to persist project selection for user %d: %v", userID, err)
-		}
+	// Persist before publishing the switch to the active-project cache. A failed
+	// write must leave both the durable selection and live routing unchanged.
+	if err := s.setTelegramActiveProject(ctx, userID, targetProject.ID); err != nil {
+		applog.Infof("[telegram] failed to switch project for user %d: %v", userID, err)
+		return fmt.Sprintf("❌ Error switching project: %v", err)
 	}
 	return fmt.Sprintf("✅ Switched to project: *%s*", targetProject.Name)
 }
@@ -1395,13 +1395,18 @@ func telegramSendToTaskActionResult(result string) (string, error) {
 }
 
 func (s *TelegramService) setTelegramActiveProject(ctx context.Context, userID int64, projectID string) error {
-	s.cacheTelegramActiveProject(userID, projectID)
+	// Serialize explicit switches so an older persistence operation cannot finish
+	// after and overwrite a newer successful switch. Cache locks remain short-held.
+	s.userProjectSwitchMu.Lock()
+	defer s.userProjectSwitchMu.Unlock()
+
 	if s.telegramUserProjectRepo != nil {
 		if err := s.telegramUserProjectRepo.SetUserProject(ctx, fmt.Sprintf("%d", userID), projectID); err != nil {
 			applog.Infof("[telegram] runtime switch_project error persisting selection: %v", err)
 			return fmt.Errorf("persist failed: %w", err)
 		}
 	}
+	s.cacheTelegramActiveProject(userID, projectID)
 	return nil
 }
 
