@@ -598,7 +598,7 @@ func switchChannelProjectResult(ctx context.Context, projectRepo *repository.Pro
 	}
 	if switchProject != nil {
 		if err := switchProject(ctx, target); err != nil {
-			return fmt.Sprintf("Failed to switch project: %v", err), nil
+			return "", fmt.Errorf("failed to switch project: %w", err)
 		}
 	}
 	return fmt.Sprintf("Switched to project: %s. Future messages from this channel identity will use that project.", target.Name), nil

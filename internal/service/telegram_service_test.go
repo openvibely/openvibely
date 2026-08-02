@@ -2271,6 +2271,92 @@ func TestTelegramService_CheckAuthorization(t *testing.T) {
 
 // --- App Settings Tests ---
 
+func installFailingTelegramUserProjectWrites(t *testing.T, db *sql.DB) {
+	t.Helper()
+	_, err := db.Exec(`
+		CREATE TRIGGER fail_telegram_user_project_insert
+		BEFORE INSERT ON telegram_user_projects
+		BEGIN
+			SELECT RAISE(ABORT, 'forced telegram user project write failure');
+		END;
+		CREATE TRIGGER fail_telegram_user_project_update
+		BEFORE UPDATE ON telegram_user_projects
+		BEGIN
+			SELECT RAISE(ABORT, 'forced telegram user project write failure');
+		END;
+	`)
+	require.NoError(t, err)
+}
+
+func newTelegramProjectSwitchFailureFixture(t *testing.T) (*TelegramService, *repository.TelegramUserProjectRepo, *models.Project, *models.Project, int64) {
+	t.Helper()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	userProjectRepo := repository.NewTelegramUserProjectRepo(db)
+	ctx := context.Background()
+	projectA := &models.Project{Name: "Project A", RepoPath: "/tmp/a", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, projectA))
+	projectB := &models.Project{Name: "Project B", RepoPath: "/tmp/b"}
+	require.NoError(t, projectRepo.Create(ctx, projectB))
+
+	const userID = int64(197)
+	require.NoError(t, userProjectRepo.SetUserProject(ctx, strconv.FormatInt(userID, 10), projectA.ID))
+	svc := &TelegramService{
+		projectRepo:             projectRepo,
+		telegramUserProjectRepo: userProjectRepo,
+		userProjects:            map[int64]string{userID: projectA.ID},
+		userProjectVersions:     make(map[int64]uint64),
+	}
+	installFailingTelegramUserProjectWrites(t, db)
+	return svc, userProjectRepo, projectA, projectB, userID
+}
+
+func TestTelegramService_HandleProject_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
+	svc, userProjectRepo, projectA, _, userID := newTelegramProjectSwitchFailureFixture(t)
+
+	response := svc.handleProject(userID, "Project B")
+
+	require.Contains(t, response, "Error switching project")
+	require.NotContains(t, response, "Switched to project")
+	require.Equal(t, projectA.ID, svc.getActiveProject(userID))
+	savedProjectID, err := userProjectRepo.GetUserProject(context.Background(), strconv.FormatInt(userID, 10))
+	require.NoError(t, err)
+	require.Equal(t, projectA.ID, savedProjectID)
+}
+
+func TestTelegramService_NaturalLanguageProjectSwitch_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
+	svc, userProjectRepo, projectA, _, userID := newTelegramProjectSwitchFailureFixture(t)
+
+	response, handled := svc.handleNaturalLanguageProjectCommand(userID, "switch to project Project B")
+
+	require.True(t, handled)
+	require.Contains(t, response, "Error switching project")
+	require.NotContains(t, response, "Switched to project")
+	require.Equal(t, projectA.ID, svc.getActiveProject(userID))
+	savedProjectID, err := userProjectRepo.GetUserProject(context.Background(), strconv.FormatInt(userID, 10))
+	require.NoError(t, err)
+	require.Equal(t, projectA.ID, savedProjectID)
+}
+
+func TestTelegramService_RuntimeProjectSwitch_PersistenceFailureLeavesActiveProjectUnchanged(t *testing.T) {
+	svc, userProjectRepo, projectA, projectB, userID := newTelegramProjectSwitchFailureFixture(t)
+	ctx := context.Background()
+	runtime := svc.buildTelegramActionToolRuntime(projectA.ID, userID, userID, nil)
+	require.NotNil(t, runtime)
+
+	result, handled, isErr, err := runtime.Executor(ctx, "switch_project", json.RawMessage(`{"project":"Project B"}`))
+
+	require.ErrorContains(t, err, "persist failed")
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Empty(t, result)
+	require.Equal(t, projectA.ID, svc.getActiveProject(userID))
+	savedProjectID, getErr := userProjectRepo.GetUserProject(ctx, strconv.FormatInt(userID, 10))
+	require.NoError(t, getErr)
+	require.Equal(t, projectA.ID, savedProjectID)
+	require.NotEqual(t, projectB.ID, savedProjectID)
+}
+
 func TestTelegramService_HandleProject_PersistsSelection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)
