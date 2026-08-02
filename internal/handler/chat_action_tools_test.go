@@ -735,6 +735,81 @@ func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
 	}
 }
 
+func TestGitHubPRRuntimeToolsShareTargetRejections(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "GitHub PR target", RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create current project: %v", err)
+	}
+	otherProject := &models.Project{Name: "Other GitHub PR target", RepoURL: "https://github.com/example/other"}
+	if err := h.projectSvc.Create(ctx, otherProject); err != nil {
+		t.Fatalf("create other project: %v", err)
+	}
+	otherTask := &models.Task{ProjectID: otherProject.ID, Title: "Cross-project PR task", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := h.taskRepo.Create(ctx, otherTask); err != nil {
+		t.Fatalf("create cross-project task: %v", err)
+	}
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+
+	params := streamingResponseParams{ProjectID: project.ID}
+	handlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	for _, action := range []struct {
+		name  string
+		input func(taskID string) json.RawMessage
+	}{
+		{name: "github_open_pull_request", input: func(taskID string) json.RawMessage {
+			return json.RawMessage(`{"task_id":"` + taskID + `"}`)
+		}},
+		{name: "github_replace_pull_request_branch", input: func(taskID string) json.RawMessage {
+			return json.RawMessage(`{"task_id":"` + taskID + `","confirm_history_rewrite":true}`)
+		}},
+	} {
+		t.Run(action.name+"/missing_task", func(t *testing.T) {
+			_, err := handlers[action.name](ctx, action.input("missing-task"))
+			if err == nil || err.Error() != "task not found in current project" {
+				t.Fatalf("expected shared missing-task rejection, got %v", err)
+			}
+		})
+		t.Run(action.name+"/cross_project_task", func(t *testing.T) {
+			_, err := handlers[action.name](ctx, action.input(otherTask.ID))
+			if err == nil || err.Error() != "task not found in current project" {
+				t.Fatalf("expected shared cross-project rejection, got %v", err)
+			}
+		})
+	}
+
+	automationProject := &models.Project{Name: "Automation PR target"}
+	if err := h.projectSvc.Create(ctx, automationProject); err != nil {
+		t.Fatalf("create Automation project: %v", err)
+	}
+	automationTask := &models.Task{ProjectID: automationProject.ID, Title: "Automation PR task", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := h.taskRepo.Create(ctx, automationTask); err != nil {
+		t.Fatalf("create Automation task: %v", err)
+	}
+	automationCtx := service.WithAutomationContext(ctx, models.AutomationContext{ProjectID: automationProject.ID, OriginTask: true})
+	automationHandlers := h.chatActionHandlers(streamingResponseParams{ProjectID: automationProject.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	for _, action := range []struct {
+		name  string
+		input json.RawMessage
+	}{
+		{name: "github_open_pull_request", input: json.RawMessage(`{"task_id":"` + automationTask.ID + `"}`)},
+		{name: "github_replace_pull_request_branch", input: json.RawMessage(`{"task_id":"` + automationTask.ID + `","confirm_history_rewrite":true}`)},
+	} {
+		t.Run(action.name+"/automation_repository_required", func(t *testing.T) {
+			_, err := automationHandlers[action.name](automationCtx, action.input)
+			if err == nil || err.Error() != "Automation GitHub runtime requires a project repository URL or local Git checkout" {
+				t.Fatalf("expected shared Automation repository rejection, got %v", err)
+			}
+		})
+	}
+
+	_, err := handlers["github_replace_pull_request_branch"](ctx, json.RawMessage(`{"task_id":"missing-task"}`))
+	if err == nil || err.Error() != "confirm_history_rewrite must be true to replace pull request branch history" {
+		t.Fatalf("expected confirmation rejection before target resolution, got %v", err)
+	}
+}
+
 func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
