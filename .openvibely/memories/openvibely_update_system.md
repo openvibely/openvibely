@@ -4,16 +4,17 @@ type: project
 created: 2026-08-02
 updated: 2026-08-02
 source: task_turn
-source_id: 780f6066ceeb35bc37d2f3f4298ae777:df555f2581128a2c
+source_id: 780f6066ceeb35bc37d2f3f4298ae777:2f186f64098cda0d
 confidence: high
 title: OpenVibely Update System
 ---
 
-The OpenVibely update subsystem has a shared signed-update architecture across source, desktop, standalone binary, hosted, Docker-agent, and Docker-manual distributions. Commit `b9b7971e` fixed the standalone binary replacement crash window, commit `f8db3c44` moved Windows replacement into a sibling helper image, commit `c53e83f6` fixed Windows parent-exit detection, commit `17a27925` fixed failed-successor shutdown before rollback, commit `db4a98f2` moved the systemd update helper into an independently owned transient service, commit `08c7055f` fixed post-handoff systemd helper failure recovery, commit `34b1e309` moved the launchd helper into an independently owned submitted job, commits `f44375b3` through `3749d0fc` hardened helper handoff and authorization, commit `ce38c11f` added durable post-authorization phases and manager-owned recovery, and commit `195b56d8` made dead-helper lease transfer atomic. Commit `92e3292a` disables direct-`exec` automatic binary replacement because neither an ordinary child nor a sibling supervisor provides an independently managed top-level recovery actor. Automatic standalone binary updates now require systemd or launchd. Implementation and validation are complete, and a fresh separate strictly read-only audit of `195b56d8` found no material bugs, regressions, or missing runbook requirements; the workspace remained unchanged.
+The OpenVibely update subsystem has a shared signed-update architecture across source, desktop, standalone binary, hosted, Docker-agent, and Docker-manual distributions. Commit `b9b7971e` fixed the standalone binary replacement crash window, commit `f8db3c44` moved Windows replacement into a sibling helper image, commit `c53e83f6` fixed Windows parent-exit detection, commit `17a27925` fixed failed-successor shutdown before rollback, commit `db4a98f2` moved the systemd update helper into an independently owned transient service, commit `08c7055f` fixed post-handoff systemd helper failure recovery, commit `34b1e309` moved the launchd helper into an independently owned submitted job, commits `f44375b3` through `3749d0fc` hardened helper handoff and authorization, commit `ce38c11f` added durable post-authorization phases and manager-owned recovery, and commit `195b56d8` made dead-helper lease transfer atomic. Commit `92e3292a` disables direct-`exec` automatic binary replacement because neither an ordinary child nor a sibling supervisor provides an independently managed top-level recovery actor. Automatic standalone binary updates now require systemd or launchd. Commit `0ce908b8` adds representative real systemd and launchd lifecycle regressions for helper survival, successful replacement, and failed-validation rollback without deadlock. Commit `00022ca9` improves real-manager test cleanup registration and exact launchd helper-label tracking. Commit `5d546af3` surfaces launchd teardown failures and verifies exact application/helper labels and timeout environment overrides are absent after cleanup. Commit `3b286dcb` fixes persisted binary `restarting` recovery readiness ordering. Commit `739a7e3c` adds durable exact-label cleanup for terminal launchd updater and recovery jobs. Commit `deaab10b` extends that cleanup fence to both pre-claim settlement branches. Commit `44c52e44` persists the originating binary manager mode so launchd cleanup cannot be bypassed by restart-configuration drift. Commit `987d8578` reverted the unnecessary migration for pre-`origin_restart_mode` state, and commit `6004d908` removed the remaining unreleased `StateFailed` compatibility shim. Commit `99932aff` durably binds the exact originating restart target as well as manager mode, and rejects same-mode target drift before helper preparation, launch, ownership transfer, or shutdown. No database migrations or update-state compatibility migrations remain; malformed origin-less state fails closed. Implementation and validation are complete, and a fresh separate strictly read-only audit of checkpoint `99932aff` found no material bugs, regressions, or missing requirements while leaving the workspace unchanged.
 
 Durable architecture:
 - One immutable build identity supplies version, commit, build time, and artifact across server, desktop, Docker labels, update requests, health responses, release binaries, and macOS bundle metadata. Artifact plus validated container mode determines the distribution; runtime configuration cannot relabel an artifact.
 - Every distribution uses the privacy-limited signed daily update-check client. Source builds only check and do not expose installation. Packaged releases require Ed25519-signed canonical metadata, semantic-version and rollback checks, expiry, exact target/platform matching, size/digest verification, redirect isolation, persisted highest accepted version, jitter, and failure backoff. Metadata is revalidated before staging, when apply is requested, and again after draining immediately before desktop or binary installer ownership and apply.
+- A fresh source clone launched through `start.sh` defaults update checks to `POST https://openvibely.ai/api/updates/check` on the `stable` channel. `OPENVIBELY_UPDATE_SERVICE_URL` can override the base URL through the shell or repo `.env`; the client appends `/api/updates/check`.
 - Durable coordinator and drain state survive restart. Operations own an exact drain generation; duplicate ownership and concurrent apply are rejected, stale operation goroutines cannot mutate a replacement generation, and periodic checks cannot overwrite active transitions.
 - Admission closes before the active-work snapshot. Task, Chat, workflow, and Automation entry paths must retain queued input or return an explicit retryable maintenance response. Remote cancellation must succeed before admission reopens, and cancellation is rejected once replacement is non-cancellable.
 - Successful drain completion, cancellation, and lease expiry emit a coalesced reopen signal only after durable reset succeeds. The server consumes it to resume worker dispatch and scan both durable queued Chat and task-thread inputs; the same combined recovery runs at startup.
@@ -25,7 +26,7 @@ Durable architecture:
 - Update-check disabling is separate from recovery: `DISABLE_UPDATE_CHECKS=true` disables periodic checks but must not disable drain, hosted, or Docker-agent reconciliation.
 
 Earlier lifecycle and persistence fixes completed on 2026-08-02:
-- Recovery is deferred until its installer dependencies are ready: desktop recovery waits for Wails updater binding, binary recovery waits for `HealthURL` initialization, and manual Docker recovery resumes without an installer. Deferral does not consume the coordinator's one-time recovery guard.
+- Recovery is deferred until installer dependencies are ready: desktop recovery waits for Wails updater binding, binary recovery including persisted `restarting` reconciliation waits for `HealthURL` initialization, and manual Docker recovery resumes without an installer. Deferral occurs before the coordinator's one-time recovery guard is consumed.
 - Drain ownership, renewal, release, cancellation, expiry, and coordinator apply transitions fail closed when durable persistence fails. Hosted readiness persists a stable idempotency key before its remote claim, cancellation intent is persisted before admission reopens, and desktop rollback surfaces durable release failures.
 - Docker-agent request creation and cancellation use persisted idempotency keys. A crash after remote acceptance but before saving the request ID replays the same create request, and the coordinator preserves `applying` plus the owned drain while recovery is pending instead of entering rollback.
 - Hosted-managed updates cannot be cancelled through the local coordinator endpoint, and the Alerts UI hides the local Cancel action for Hosted distributions; Hosted administrator directives remain authoritative.
@@ -66,8 +67,7 @@ Latest coordinator drain-supervision fixes completed on 2026-08-02:
 Latest coordinator rollback-failure cleanup fixes completed on 2026-08-02:
 - Commit `ba88dda8` routes runtime rollback errors and desktop startup missing-record or rollback-error paths through exact-generation terminal cleanup instead of persisting `failed` while retaining an owned drain.
 - Cleanup durably releases only the persisted owned generation, records terminal `failed`, and retries transient drain-release or coordinator-persistence failures without retrying rollback or replacement side effects.
-- Restart recovery recognizes legacy persisted `failed` operations that still retain a matching owned generation and performs cleanup only, preserving the original failure result while reopening admission.
-- Regression coverage includes runtime rollback failure, transient cleanup persistence failure, missing desktop rollback records, desktop rollback errors, and restart recovery of legacy stranded `failed` operations.
+- Regression coverage includes runtime rollback failure, transient cleanup persistence failure, missing desktop rollback records, and desktop rollback errors.
 
 Latest restart-durability fixes completed on 2026-08-02:
 - Commit `5109589a` adds a lifecycle-scoped autonomous drain expiry supervisor. It reconciles persisted unowned drains after restart, retries durable reset failures, and no longer depends on unrelated `Status` or `Admit` calls to reopen admission.
@@ -164,13 +164,57 @@ Latest direct-exec fail-closed fix completed on 2026-08-02:
 - Only independently manager-owned systemd and launchd restart modes are supported for automatic standalone binary updates. The obsolete sibling-supervisor entrypoint and worker-only regression were removed, and operator documentation now reflects the supported contract.
 - Regression coverage proves unsupported exec replacement and recovery fail without helper publication, launch, or shutdown. Existing handoff tests use manager-owned modes.
 
-Current audit status on 2026-08-02:
-- A fresh separate strictly read-only audit of checkpoint `195b56d8` inspected the implementation and workspace directly while ignoring PRs.
-- The audit found no material bugs, regressions, or missing runbook requirements. It specifically confirmed race-safe dead-helper terminalization and recovery ownership transfer, manager-restarted original-helper exclusion, exact-identity fail-closed evidence handling, persistence and rollback boundaries, manager supervision, and Unix/Windows behavior.
-- No builds, tests, formatters, generators, edits, or other modifying commands were run during the audit; the workspace remained clean and unchanged at `195b56d851a31b1213718d60402ae446897421c9`.
+Latest real service-manager lifecycle coverage completed on 2026-08-02:
+- Commit `0ce908b8` adds production-path integration tests that build distinct predecessor and target fixture binaries, run the predecessor as an actual systemd unit or launchd job, invoke `BinaryInstaller.Apply`, and authorize the real manager-owned helper handoff.
+- Both native manager suites prove the helper survives actual application-unit/job shutdown. Successful validation durably completes replacement and relaunches target version `0.6.0`; failed validation durably publishes `rolled_back`, restores the predecessor, and relaunches version `0.5.0` without deadlock.
+- The tests are opt-in for ordinary local runs and mandatory in separate native Ubuntu systemd and macOS launchd CI jobs. Real launchd passed locally, and real systemd passed in an ephemeral privileged Ubuntu container running systemd as PID 1.
 
-Validation completed after commit `195b56d8` on 2026-08-02:
-- Deterministic lease-transfer regressions, repeated focused stress runs, the complete update suite, and the update race suite passed.
-- Native build, Linux and Windows update-package cross-compilation, and native/Linux/Windows scoped vet passed.
-- `make templ` produced zero updates, the uncached full repository suite passed, post-commit focused checks passed, and the worktree was clean.
-- Repository-wide `go vet ./...` remains blocked only by four pre-existing self-assignment diagnostics in untouched `internal/agentlibrary/applier.go`; the established non-failing macOS object-version linker warning also remains.
+Latest real service-manager lifecycle cleanup verification fix at checkpoint `5d546af3` on 2026-08-02:
+- Launchd lifecycle cleanup retains and reports every non-benign cleanup command failure instead of discarding errors. Launchd exit code 3 is accepted only for `bootout` or `remove` when the exact target is already absent.
+- Teardown queries every exact application and recorded helper target with `launchctl print` and both timeout overrides with `launchctl getenv`. Residual jobs, residual environment values, unreadable helper-label evidence, or indeterminate verification responses fail the lifecycle test.
+- Deterministic regressions prove command failures remain visible even when later verification reports absence, all exact job/environment queries run, and already-absent launchd cleanup succeeds.
+
+Latest binary restart recovery readiness fix at checkpoint `3b286dcb` on 2026-08-02:
+- Persisted binary `restarting` reconciliation consults the binary installer's `RecoveryReady` dependency before consuming the one-time recovery guard or entering dead-helper recovery. A recovery-only systemd or launchd helper therefore cannot be claimed or launched until the server has initialized its health URL.
+- Exact drain ownership remains closed while readiness is unavailable. A later `StartRecovery` call after server URL binding reuses the lifecycle context and starts reconciliation exactly once; terminal evidence that does not require a helper may still settle without installer readiness.
+- Regression coverage uses ambiguous `target_published` residue to prove there is no recovery claim or helper launch before readiness, then proves exactly one recovery launch and retained exact-generation ownership after readiness is enabled.
+
+Latest launchd terminal-job cleanup fix at checkpoint `739a7e3c` on 2026-08-02:
+- Launchd updater and recovery jobs use deterministic exact labels derived from the full SHA-256 durable operation identity, with separate helper and recovery roles.
+- A helper removes its own submitted job only after durable `cancelled`, `succeeded`, or `rolled_back` evidence exists. A cleanup failure returns nonzero while preserving terminal evidence, allowing launchd to retry the same job without replaying replacement side effects.
+- Coordinator terminal reconciliation independently removes both exact labels before releasing the owned drain generation. Transient removal failure retains `StateRestarting`, closed admission, and exact drain ownership until cleanup succeeds.
+- Regression coverage verifies success, rollback, cancellation, recovery settlement, exact-label construction and removal, already-absent handling, cleanup retry without replacement replay, and retained drain ownership on cleanup failure.
+
+Latest launchd pre-claim cleanup fix at checkpoint `deaab10b` on 2026-08-02:
+- Both binary restart reconciliation branches that prove a helper never claimed the durable handoff remove the deterministic updater and recovery launchd labels before releasing the exact drain generation.
+- Successful revocation of `prepared` evidence preserves the atomic claim race, while confirmed absence of both active and prepared evidence uses the same cleanup fence. A cleanup failure retains `StateRestarting`, closed admission, and exact drain ownership for autonomous retry.
+- Regression coverage exercises both branches, injects a transient cleanup failure, requires both exact operation labels, and proves settlement occurs only after cleanup retry succeeds.
+
+Latest persisted manager-origin fix at checkpoint `44c52e44` on 2026-08-02:
+- Binary staging persists `origin_restart_mode` in `LocalStagedUpdate` before coordinator persistence, and apply/recovery reject a current manager mode that differs from the staged operation origin.
+- Terminal and pre-claim settlement dispatch manager-job cleanup from the persisted origin rather than current runtime configuration. A prior launchd operation therefore removes both deterministic exact labels even when restart configuration is missing or has changed to systemd; cleanup failure retains `StateRestarting`, closed admission, and exact-generation drain ownership for autonomous retry.
+- Missing or unsupported persisted manager origin fails closed instead of being interpreted as no cleanup requirement. Systemd-origin operations require no launchd label cleanup.
+- Reload regressions cover terminal success and prepared pre-claim revocation under both missing configuration and launchd-to-systemd drift, including transient cleanup failure, exact-label retry, drain retention, and eventual settlement.
+
+Latest persisted manager-origin binding fix at checkpoint `99932aff` on 2026-08-02:
+- `LocalStagedUpdate` now persists both `origin_restart_mode` and `origin_restart_target` before coordinator persistence or helper launch.
+- Binary apply and ambiguous recovery require the current manager mode and exact restart target to match the durable operation origin before helper preparation, ownership transfer, launch, or application shutdown. Missing bindings and same-mode target drift fail closed, preventing recovery from stopping or restarting a different systemd unit or launchd target.
+- Terminal and pre-claim launchd cleanup remains dispatched from the persisted manager mode and exact operation identity, so cleanup still works when current installer configuration is missing or has changed manager mode.
+- Regression coverage verifies staging and coordinator JSON persistence, plus systemd and launchd apply/recovery rejection under same-mode target drift without helper launch or shutdown.
+
+Compatibility-shim cleanup at checkpoints `987d8578` and `6004d908` on 2026-08-02:
+- The branch had not been released, so intermediate PID/timestamp launchd labels and origin-less coordinator records were not valid upgrade predecessors. Commit `987d8578` reverted the `ddaaa390` manager-origin migration instead of adding identity-discovery support for an unreleased schema.
+- Commit `6004d908` removed the other unreleased compatibility path for `StateFailed` with an owned drain generation and deleted its legacy-only regression. The final state machine cannot durably create that shape: completion releases the drain and clears the generation before persisting terminal state; persistence failure remains supervised as `waiting_for_idle` and reload normalizes from durable idle drain state.
+- `origin_restart_mode` remains part of the final durable format because crash recovery and configuration drift require it. `BinaryInstaller.Stage` writes it before coordinator persistence or helper launch. Missing origin is treated as malformed fail-closed state, not migrated from mutable runtime configuration.
+- No database migrations or other update-state compatibility migrations remain in the task branch.
+
+Current audit status on 2026-08-02:
+- The same-manager restart-target drift defect found by the fresh strictly read-only audit of `6004d908` was fixed and validated at checkpoint `99932aff`.
+- A fresh separate strictly read-only audit of checkpoint `99932aff` inspected the implementation directly, including durable `OriginRestartTarget` persistence and same-mode systemd/launchd apply and recovery behavior, and found no material bugs, regressions, or missing requirements.
+- The audit ran no builds, tests, generators, formatters, edits, or other modifying commands; PRs were ignored and the workspace remained clean and unchanged at `99932aff8a84b9b9824be6bdce9ad716853b87d1`.
+
+Validation completed for checkpoint `99932aff` on 2026-08-02:
+- Focused staging, coordinator persistence reload, systemd/launchd apply, and systemd/launchd recovery regressions passed, including repeated focused runs.
+- The complete update package, update race suite, real launchd success/rollback lifecycle tests, native build, and full uncached repository suite passed.
+- Linux and Windows update-package compilation, native/Linux/Windows scoped vet, template idempotence, diff hygiene, and post-commit focused/build validation passed.
+- Repository-wide vet retained four known pre-existing self-assignment diagnostics in untouched `internal/agentlibrary/applier.go`; the established non-failing macOS object-version linker warning also remained.
