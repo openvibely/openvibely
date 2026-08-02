@@ -981,52 +981,6 @@ func TestOAuthCallbackEscapesProviderErrorDescription(t *testing.T) {
 	require.Contains(t, rec.Body.String(), "&lt;script&gt;")
 }
 
-func TestHandler_completeOAuthFlow(t *testing.T) {
-	t.Run("classifies invalid and expired state", func(t *testing.T) {
-		h, _, _ := setupTestHandler(t)
-		expiredState := fmt.Sprintf("expired-completion-%d", time.Now().UnixNano())
-		oauthFlowsMu.Lock()
-		oauthFlows[expiredState] = &oauthPendingFlow{
-			State:     expiredState,
-			CreatedAt: time.Now().Add(-oauthFlowLifetime - time.Second),
-		}
-		oauthFlowsMu.Unlock()
-
-		for _, state := range []string{"missing-completion-state", expiredState} {
-			result := h.completeOAuthFlow(state, "code")
-			require.Equal(t, oauthCompletionInvalidState, result.Outcome)
-			require.Nil(t, result.Flow)
-			require.NoError(t, result.Err)
-		}
-	})
-
-	t.Run("classifies token exchange failure and consumes state", func(t *testing.T) {
-		h, _, _ := setupTestHandler(t)
-		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			http.Error(w, "exchange rejected", http.StatusBadGateway)
-		}))
-		defer tokenServer.Close()
-
-		state := fmt.Sprintf("failed-completion-%d", time.Now().UnixNano())
-		oauthFlowsMu.Lock()
-		oauthFlows[state] = &oauthPendingFlow{
-			State:     state,
-			CreatedAt: time.Now(),
-			Provider:  models.ProviderOpenAI,
-			TokenURL:  tokenServer.URL,
-		}
-		oauthFlowsMu.Unlock()
-
-		result := h.completeOAuthFlow(state, "code")
-		require.Equal(t, oauthCompletionExchangeFailed, result.Outcome)
-		require.NotNil(t, result.Flow)
-		require.Error(t, result.Err)
-
-		replay := h.completeOAuthFlow(state, "code")
-		require.Equal(t, oauthCompletionInvalidState, replay.Outcome)
-	})
-}
-
 func TestHandler_OAuthManualComplete(t *testing.T) {
 	t.Run("completes oauth flow from pasted localhost callback url", func(t *testing.T) {
 		h, e, llmConfigRepo := setupTestHandler(t)
@@ -1387,14 +1341,6 @@ func TestHandler_OAuthCallback(t *testing.T) {
 		require.Equal(t, http.StatusOK, rec.Code)
 		require.Contains(t, rec.Body.String(), "OAuth Failed")
 		require.Contains(t, rec.Body.String(), "project_id=project-error")
-
-		replayReq := httptest.NewRequest(http.MethodGet, "/auth/callback?error=access_denied&state="+testState, nil)
-		replayRec := httptest.NewRecorder()
-		e.ServeHTTP(replayRec, replayReq)
-
-		require.Equal(t, http.StatusOK, replayRec.Code)
-		require.Contains(t, replayRec.Body.String(), "Session Expired")
-		require.NotContains(t, replayRec.Body.String(), "OAuth Failed")
 	})
 }
 

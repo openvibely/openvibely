@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/agentlibrary"
@@ -26,12 +29,29 @@ Agents are standalone user-managed configurations. Do not create, edit, archive,
 const bundledSkillCuratorDeclarationPath = "agents/skill_curator/SKILLS.md"
 const bundledGoalAgentDeclarationPath = "agents/goal/SKILLS.md"
 
+type AgentDeclarationSyncMetrics struct {
+	ContentReads uint64
+	Parses       uint64
+}
+
+type declarationFingerprint struct {
+	size       int64
+	modTime    int64
+	mode       os.FileMode
+	filesystem string
+}
+
 type AgentLibraryMaintenanceService struct {
 	taskRepo       *repository.TaskRepo
 	scheduleRepo   *repository.ScheduleRepo
 	agentRepo      *repository.AgentRepo
 	lifecycleRepo  *repository.LifecycleRepo
 	agentsRootPath string
+
+	declarationMu     sync.Mutex
+	declarationCache  map[string]declarationFingerprint
+	declarationReads  atomic.Uint64
+	declarationParses atomic.Uint64
 }
 
 func NewAgentLibraryMaintenanceService(taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, agentRepo *repository.AgentRepo) *AgentLibraryMaintenanceService {
@@ -50,69 +70,131 @@ func (s *AgentLibraryMaintenanceService) SetAgentsRootPath(root string) {
 	}
 }
 
-func (s *AgentLibraryMaintenanceService) SyncRootDeclarations(ctx context.Context, projectRoot string) error {
-	if s == nil || s.agentRepo == nil {
-		return nil
+func (s *AgentLibraryMaintenanceService) DeclarationSyncMetrics() AgentDeclarationSyncMetrics {
+	if s == nil {
+		return AgentDeclarationSyncMetrics{}
 	}
-	if err := s.EnsureGlobalAgents(ctx); err != nil {
-		return err
+	return AgentDeclarationSyncMetrics{
+		ContentReads: s.declarationReads.Load(),
+		Parses:       s.declarationParses.Load(),
 	}
-	applier := agentlibrary.NewRepoApplier(s.agentRepo, s.lifecycleRepo)
-	for _, root := range compactStrings([]string{s.agentsRootPath, projectRoot}) {
-		if err := syncRootDeclarationsFromRoot(ctx, root, applier); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
-func syncRootDeclarationsFromRoot(ctx context.Context, root string, applier *agentlibrary.RepoApplier) error {
+func (s *AgentLibraryMaintenanceService) SyncRootDeclarations(ctx context.Context, projectRoot string) error {
+	_, err := s.syncRootDeclarations(ctx, projectRoot)
+	return err
+}
+
+func (s *AgentLibraryMaintenanceService) syncRootDeclarations(ctx context.Context, projectRoot string) (bool, error) {
+	if s == nil || s.agentRepo == nil {
+		return false, nil
+	}
+	s.declarationMu.Lock()
+	defer s.declarationMu.Unlock()
+	if err := s.EnsureGlobalAgents(ctx); err != nil {
+		return false, err
+	}
+	if s.declarationCache == nil {
+		s.declarationCache = make(map[string]declarationFingerprint)
+	}
+	applier := agentlibrary.NewRepoApplier(s.agentRepo, s.lifecycleRepo)
+	changed := false
+	for _, root := range compactStrings([]string{s.agentsRootPath, projectRoot}) {
+		rootChanged, err := s.syncRootDeclarationsFromRoot(ctx, root, applier)
+		if err != nil {
+			return changed, err
+		}
+		changed = changed || rootChanged
+	}
+	return changed, nil
+}
+
+func (s *AgentLibraryMaintenanceService) syncRootDeclarationsFromRoot(ctx context.Context, root string, applier *agentlibrary.RepoApplier) (bool, error) {
 	if root == "" || applier == nil {
-		return nil
+		return false, nil
 	}
 	agentsDir := filepath.Join(root, "agents")
 	entries, err := os.ReadDir(agentsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return false, nil
 		}
-		return fmt.Errorf("read agents root %s: %w", agentsDir, err)
+		return false, fmt.Errorf("read agents root %s: %w", agentsDir, err)
 	}
+	changed := false
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		path := filepath.Join(agentsDir, entry.Name(), "SKILLS.md")
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				delete(s.declarationCache, path)
+				continue
+			}
+			return changed, fmt.Errorf("stat agent root declaration %s: %w", path, err)
+		}
+		fingerprint := fingerprintDeclaration(info)
+		if cached, ok := s.declarationCache[path]; ok && cached == fingerprint {
+			continue
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if os.IsNotExist(err) {
+				delete(s.declarationCache, path)
 				continue
 			}
-			return fmt.Errorf("read agent root declaration %s: %w", path, err)
+			return changed, fmt.Errorf("read agent root declaration %s: %w", path, err)
 		}
+		s.declarationReads.Add(1)
 		decl, body, err := agentlibrary.ParseDeclaration(string(data))
+		s.declarationParses.Add(1)
 		if err != nil {
-			// Not every hand-written SKILLS.md has active frontmatter yet. Keep the
-			// catalog readable and skip files that are pure narrative indexes.
+			s.declarationCache[path] = fingerprint
 			continue
 		}
 		if !decl.IsAgentRootDeclaration() || decl.Agent.Key == "" {
+			s.declarationCache[path] = fingerprint
 			continue
 		}
 		if decl.Agent.Key == "skill_curator" || decl.Agent.Key == "memory_curator" || decl.Agent.Key == "goal" {
-			// Protected system agents are repaired through their owning services. Generic
-			// root sync must not try to mutate protected system agents or reapply stale
-			// bundled declarations through the user/generated-agent importer path.
+			s.declarationCache[path] = fingerprint
 			continue
 		}
 		if decl.Agent.SystemPrompt == "" {
 			decl.Agent.SystemPrompt = strings.TrimSpace(body)
 		}
-		if _, err := applier.ApplyDeclaration(ctx, decl); err != nil {
-			return fmt.Errorf("apply agent root declaration %s: %w", path, err)
+		changes, err := applier.ApplyDeclaration(ctx, decl)
+		if err != nil {
+			return changed, fmt.Errorf("apply agent root declaration %s: %w", path, err)
+		}
+		s.declarationCache[path] = fingerprint
+		changed = changed || len(changes) > 0
+	}
+	return changed, nil
+}
+
+func fingerprintDeclaration(info os.FileInfo) declarationFingerprint {
+	fingerprint := declarationFingerprint{
+		size:    info.Size(),
+		modTime: info.ModTime().UnixNano(),
+		mode:    info.Mode(),
+	}
+	value := reflect.ValueOf(info.Sys())
+	if value.Kind() == reflect.Pointer && !value.IsNil() {
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return fingerprint
+	}
+	for _, name := range []string{"Dev", "Ino", "Gen", "Ctim", "Ctimespec", "Birthtimespec"} {
+		field := value.FieldByName(name)
+		if field.IsValid() && field.CanInterface() {
+			fingerprint.filesystem += fmt.Sprintf("%s=%v;", name, field.Interface())
 		}
 	}
-	return nil
+	return fingerprint
 }
 
 // EnsureGlobalAgents reconciles protected system agents owned by the agent

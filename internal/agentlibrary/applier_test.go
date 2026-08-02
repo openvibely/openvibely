@@ -60,6 +60,9 @@ func (s *memAgentStore) MarkArchived(_ context.Context, id, absorbedInto, reason
 
 type memHookStore struct {
 	hooksByAgent map[string][]models.AgentLifecycleHook
+	creates      int
+	updates      int
+	deletes      int
 }
 
 func newMemHookStore() *memHookStore {
@@ -71,12 +74,14 @@ func (s *memHookStore) HooksByAgent(_ context.Context, agentID string) ([]models
 }
 
 func (s *memHookStore) CreateHook(_ context.Context, h *models.AgentLifecycleHook) error {
+	s.creates++
 	h.ID = "hk_" + string(h.When) + "_" + h.SkillKey
 	s.hooksByAgent[h.AgentID] = append(s.hooksByAgent[h.AgentID], *h)
 	return nil
 }
 
 func (s *memHookStore) UpdateHook(_ context.Context, h *models.AgentLifecycleHook) error {
+	s.updates++
 	for i, existing := range s.hooksByAgent[h.AgentID] {
 		if existing.ID == h.ID {
 			s.hooksByAgent[h.AgentID][i] = *h
@@ -87,6 +92,7 @@ func (s *memHookStore) UpdateHook(_ context.Context, h *models.AgentLifecycleHoo
 }
 
 func (s *memHookStore) DeleteHook(_ context.Context, id string) error {
+	s.deletes++
 	for agentID, hs := range s.hooksByAgent {
 		out := make([]models.AgentLifecycleHook, 0, len(hs))
 		for _, h := range hs {
@@ -185,6 +191,35 @@ func TestRepoApplier_CreatesAgentAndHook(t *testing.T) {
 	h := hooks.hooksByAgent[stored.ID][0]
 	if h.When != models.LifecycleAfterComplete || h.OutputContract != models.OutputContractLearningSummary {
 		t.Fatalf("hook content unexpected: %+v", h)
+	}
+}
+
+func TestRepoApplier_UnchangedDeclarationPerformsNoWrites(t *testing.T) {
+	agents := newMemAgentStore()
+	hooks := newMemHookStore()
+	ap := NewRepoApplier(agents, hooks)
+	decl := newTestDeclaration()
+
+	if _, err := ap.ApplyDeclaration(context.Background(), decl); err != nil {
+		t.Fatalf("initial ApplyDeclaration: %v", err)
+	}
+	agents.updates = 0
+	hooks.creates = 0
+	hooks.updates = 0
+	hooks.deletes = 0
+
+	changes, err := ap.ApplyDeclaration(context.Background(), decl)
+	if err != nil {
+		t.Fatalf("warm ApplyDeclaration: %v", err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("expected no reported changes, got %v", changes)
+	}
+	if agents.updates != 0 {
+		t.Fatalf("expected zero agent updates, got %d", agents.updates)
+	}
+	if hooks.creates != 0 || hooks.updates != 0 || hooks.deletes != 0 {
+		t.Fatalf("expected zero hook writes, got creates=%d updates=%d deletes=%d", hooks.creates, hooks.updates, hooks.deletes)
 	}
 }
 

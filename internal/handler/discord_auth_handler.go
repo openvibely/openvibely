@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"net/http"
 	"regexp"
 	"strings"
@@ -18,7 +17,15 @@ func (h *Handler) ListDiscordAuthorizedUsers(c echo.Context) error {
 	if h.discordAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Discord auth not configured")
 	}
-	return h.discordAuthorizedUserCRUD().listUsers(c, c.QueryParam("project_id"))
+	projectID := c.QueryParam("project_id")
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	}
+	users, err := h.discordAuthRepo.ListByProject(c.Request().Context(), projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized users")
+	}
+	return render(c, http.StatusOK, components.DiscordAuthorizedUsersList(users, projectID))
 }
 
 // AddDiscordAuthorizedUser adds a new authorized Discord user.
@@ -26,29 +33,30 @@ func (h *Handler) AddDiscordAuthorizedUser(c echo.Context) error {
 	if h.discordAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Discord auth not configured")
 	}
-
 	projectID := c.FormValue("project_id")
-	return h.discordAuthorizedUserCRUD().createUser(c, projectID, func(ctx context.Context) error {
-		discordUserID := strings.TrimSpace(c.FormValue("discord_user_id"))
-		displayName := strings.TrimSpace(c.FormValue("display_name"))
-		if discordUserID == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Discord user ID is required")
-		}
-		if !discordNumericUserIDPattern.MatchString(discordUserID) {
-			return echo.NewHTTPError(http.StatusBadRequest, "Discord user ID must be the numeric ID copied from Discord Developer Mode")
-		}
-
-		user := &models.DiscordAuthorizedUser{
-			ProjectID:     projectID,
-			DiscordUserID: discordUserID,
-			DisplayName:   displayName,
-			AddedBy:       "web",
-		}
-		if user.DisplayName == "" {
-			user.DisplayName = discordUserID
-		}
-		return h.discordAuthRepo.Create(ctx, user)
-	})
+	if projectID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
+	}
+	discordUserID := strings.TrimSpace(c.FormValue("discord_user_id"))
+	displayName := strings.TrimSpace(c.FormValue("display_name"))
+	if discordUserID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "Discord user ID is required")
+	}
+	if !discordNumericUserIDPattern.MatchString(discordUserID) {
+		return echo.NewHTTPError(http.StatusBadRequest, "Discord user ID must be the numeric ID copied from Discord Developer Mode")
+	}
+	user := &models.DiscordAuthorizedUser{ProjectID: projectID, DiscordUserID: discordUserID, DisplayName: displayName, AddedBy: "web"}
+	if user.DisplayName == "" {
+		user.DisplayName = discordUserID
+	}
+	if err := h.discordAuthRepo.Create(c.Request().Context(), user); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to add authorized user: "+err.Error())
+	}
+	users, err := h.discordAuthRepo.ListByProject(c.Request().Context(), projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized users")
+	}
+	return render(c, http.StatusOK, components.DiscordAuthorizedUsersList(users, projectID))
 }
 
 // RemoveDiscordAuthorizedUser removes an authorized Discord user.
@@ -56,24 +64,24 @@ func (h *Handler) RemoveDiscordAuthorizedUser(c echo.Context) error {
 	if h.discordAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Discord auth not configured")
 	}
-	return h.discordAuthorizedUserCRUD().deleteUser(
-		c,
-		c.Param("id"),
-		c.QueryParam("project_id"),
-		func(ctx context.Context, id string) (string, bool, error) {
-			user, err := h.discordAuthRepo.GetByID(ctx, id)
-			if err != nil || user == nil {
-				return "", user != nil, err
-			}
-			return user.ProjectID, true, nil
-		},
-		h.discordAuthRepo.Delete,
-	)
-}
-
-func (h *Handler) discordAuthorizedUserCRUD() authorizedUserCRUD[models.DiscordAuthorizedUser] {
-	return authorizedUserCRUD[models.DiscordAuthorizedUser]{
-		list:   h.discordAuthRepo.ListByProject,
-		render: components.DiscordAuthorizedUsersList,
+	id := c.Param("id")
+	projectID := c.QueryParam("project_id")
+	user, err := h.discordAuthRepo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to find user")
 	}
+	if user == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "User not found")
+	}
+	if projectID == "" {
+		projectID = user.ProjectID
+	}
+	if err := h.discordAuthRepo.Delete(c.Request().Context(), id); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to remove user: "+err.Error())
+	}
+	users, err := h.discordAuthRepo.ListByProject(c.Request().Context(), projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized users")
+	}
+	return render(c, http.StatusOK, components.DiscordAuthorizedUsersList(users, projectID))
 }

@@ -13,6 +13,100 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestAgentLibraryMaintenanceService_WarmSyncSkipsUnchangedDeclarationContent(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	root := t.TempDir()
+	writeDeclaration := func(key, name string) {
+		t.Helper()
+		dir := filepath.Join(root, "agents", key)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir declaration: %v", err)
+		}
+		content := "---\nkind: openvibely.agent_skill\nversion: 1\nagent:\n  key: " + key + "\n  name: " + name + "\n  scope: global\n  selectable_as_primary: true\nlifecycle_hooks:\n  after_complete:\n    skill: validate_change\n    output_contract: activity_summary\n---\n# " + name + "\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILLS.md"), []byte(content), 0o644); err != nil {
+			t.Fatalf("write declaration: %v", err)
+		}
+	}
+	writeDeclaration("first", "First")
+	svc := &AgentLibraryMaintenanceService{agentRepo: agentRepo, lifecycleRepo: lifecycleRepo, agentsRootPath: root}
+
+	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
+		t.Fatalf("cold SyncRootDeclarations: %v", err)
+	}
+	cold := svc.DeclarationSyncMetrics()
+	if cold.ContentReads != 1 || cold.Parses != 1 {
+		t.Fatalf("expected one cold read/parse, got %#v", cold)
+	}
+	if _, err := db.Exec(`
+		CREATE TEMP TABLE declaration_write_counts (kind TEXT NOT NULL);
+		CREATE TEMP TRIGGER count_agent_updates AFTER UPDATE ON agents BEGIN
+			INSERT INTO declaration_write_counts(kind) VALUES ('agent_update');
+		END;
+		CREATE TEMP TRIGGER count_hook_inserts AFTER INSERT ON agent_lifecycle_hooks BEGIN
+			INSERT INTO declaration_write_counts(kind) VALUES ('hook_insert');
+		END;
+		CREATE TEMP TRIGGER count_hook_updates AFTER UPDATE ON agent_lifecycle_hooks BEGIN
+			INSERT INTO declaration_write_counts(kind) VALUES ('hook_update');
+		END;
+		CREATE TEMP TRIGGER count_hook_deletes AFTER DELETE ON agent_lifecycle_hooks BEGIN
+			INSERT INTO declaration_write_counts(kind) VALUES ('hook_delete');
+		END;
+	`); err != nil {
+		t.Fatalf("install declaration write instrumentation: %v", err)
+	}
+	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
+		t.Fatalf("warm SyncRootDeclarations: %v", err)
+	}
+	warm := svc.DeclarationSyncMetrics()
+	if warm != cold {
+		t.Fatalf("unchanged warm sync performed content I/O: cold=%#v warm=%#v", cold, warm)
+	}
+	var writes int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM declaration_write_counts`).Scan(&writes); err != nil {
+		t.Fatalf("count declaration writes: %v", err)
+	}
+	if writes != 0 {
+		t.Fatalf("unchanged warm sync performed %d agent or lifecycle-hook writes", writes)
+	}
+
+	declarationPath := filepath.Join(root, "agents", "first", "SKILLS.md")
+	info, err := os.Stat(declarationPath)
+	if err != nil {
+		t.Fatalf("stat unchanged declaration: %v", err)
+	}
+	writeDeclaration("first", "Other")
+	if err := os.Chtimes(declarationPath, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatalf("restore declaration mtime: %v", err)
+	}
+	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
+		t.Fatalf("changed SyncRootDeclarations: %v", err)
+	}
+	changed := svc.DeclarationSyncMetrics()
+	if changed.ContentReads != warm.ContentReads+1 || changed.Parses != warm.Parses+1 {
+		t.Fatalf("changed declaration not read and parsed once: warm=%#v changed=%#v", warm, changed)
+	}
+	agent, err := agentRepo.GetByKey(ctx, "first")
+	if err != nil || agent == nil || agent.Name != "Other" {
+		t.Fatalf("changed declaration not applied: err=%v agent=%#v", err, agent)
+	}
+
+	writeDeclaration("second", "Second")
+	if err := svc.SyncRootDeclarations(ctx, ""); err != nil {
+		t.Fatalf("added SyncRootDeclarations: %v", err)
+	}
+	added := svc.DeclarationSyncMetrics()
+	if added.ContentReads != changed.ContentReads+1 || added.Parses != changed.Parses+1 {
+		t.Fatalf("added declaration not read and parsed once: changed=%#v added=%#v", changed, added)
+	}
+	second, err := agentRepo.GetByKey(ctx, "second")
+	if err != nil || second == nil {
+		t.Fatalf("added declaration not materialized: err=%v agent=%#v", err, second)
+	}
+}
+
 func TestAgentLibraryMaintenanceService_SyncRootDeclarationsAppliesAgentMetadata(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	agentRepo := repository.NewAgentRepo(db)

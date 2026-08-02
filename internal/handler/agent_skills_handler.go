@@ -359,22 +359,29 @@ func (h *Handler) dialogSkillScope(c echo.Context, agent *models.Agent, requeste
 	return "project"
 }
 
-func (h *Handler) materializeDBAgentsToDisk(c echo.Context, agents []models.Agent) error {
+func (h *Handler) materializeDBAgentsToDisk(c echo.Context, agents []models.Agent) (bool, error) {
 	if h == nil || h.agentRepo == nil || h.agentSkillRoot == "" {
-		return nil
+		return false, nil
 	}
 	projectRoot := h.currentProjectSkillRoot(c)
 	usedKeys := h.usedAgentKeys(agents, projectRoot)
+	persistenceChanged := false
 	for i := range agents {
 		agent := agents[i]
+		originalKey := agent.Key
+		originalSkillCount := len(agent.Skills)
+		originalSelectable := agent.SelectableAsPrimary
 		if err := h.materializeAgentToDiskWithUsedKeys(c, &agent, projectRoot, usedKeys, false); err != nil {
-			return err
+			return persistenceChanged, err
 		}
 		if err := h.migrateLegacyAgentSkills(c, &agent, projectRoot); err != nil {
-			return err
+			return persistenceChanged, err
+		}
+		if agent.Key != originalKey || len(agent.Skills) != originalSkillCount || agent.SelectableAsPrimary != originalSelectable {
+			persistenceChanged = true
 		}
 	}
-	return nil
+	return persistenceChanged, nil
 }
 
 func (h *Handler) materializeAgentToDisk(c echo.Context, agent *models.Agent, projectRoot string) error {

@@ -462,7 +462,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string","pattern":"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$","description":"Time in exact 24-hour HH:MM format (00:00-23:59)."},"repeat":{"type":"string","enum":["once","daily","weekly","monthly","hours","hourly","minutes","seconds"]},"interval":{"type":"integer","minimum":1},"days":{"type":"array","description":"For weekly schedules, accepted weekday spellings are sun, mon, tue, wed, thu, fri, and sat.","items":{"type":"string","enum":["sun","mon","tue","wed","thu","fri","sat"]}},"clear_context_on_start":{"type":"boolean","description":"Clear prior model conversation context when each scheduled run starts; defaults to true."}},"required":["time"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"clear_context_on_start":{"type":"boolean","description":"Clear prior model conversation context when each scheduled run starts; defaults to true."}},"required":["time"],"additionalProperties":false}`),
 	},
 	{
 		Name:              "delete_schedule",
@@ -483,7 +483,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string","pattern":"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$","description":"Time in exact 24-hour HH:MM format (00:00-23:59)."},"repeat":{"type":"string","enum":["once","daily","weekly","monthly","hours","hourly","minutes","seconds"]},"interval":{"type":"integer","minimum":1},"days":{"type":"array","description":"For weekly schedules, accepted weekday spellings are sun, mon, tue, wed, thu, fri, and sat.","items":{"type":"string","enum":["sun","mon","tue","wed","thu","fri","sat"]}},"enabled":{"type":"boolean"},"clear_context_on_start":{"type":"boolean","description":"Whether each scheduled start clears prior model conversation context."}},"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"schedule_id":{"type":"string"},"task_id":{"type":"string"},"title":{"type":"string"},"time":{"type":"string"},"repeat":{"type":"string"},"interval":{"type":"integer","minimum":1},"days":{"type":"array","items":{"type":"string"}},"enabled":{"type":"boolean"},"clear_context_on_start":{"type":"boolean","description":"Whether each scheduled start clears prior model conversation context."}},"additionalProperties":false}`),
 	},
 
 	// --- Alerts and actionable notifications domain ---
