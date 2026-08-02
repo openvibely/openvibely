@@ -47,11 +47,10 @@ func TestAddSlackAuthorizedUser(t *testing.T) {
 	form := url.Values{}
 	form.Set("project_id", projectID)
 	form.Set("slack_user_id", "U12345")
-	form.Set("display_name", "Alice")
 
 	rec := postForm(e, "/channels/slack/authorized-users", form)
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, "Alice")
+	assertContains(t, rec, ">U12345<")
 	assertContains(t, rec, "ID: U12345")
 }
 

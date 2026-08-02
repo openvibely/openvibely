@@ -78,7 +78,6 @@ func TestAddTelegramAuthorizedUser_ByID(t *testing.T) {
 	form := url.Values{}
 	form.Set("project_id", projectID)
 	form.Set("user_id_or_username", "123456")
-	form.Set("display_name", "Test User")
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/authorized-users", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -90,8 +89,8 @@ func TestAddTelegramAuthorizedUser_ByID(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Test User") {
-		t.Error("expected user to appear in list")
+	if !strings.Contains(body, ">123456<") {
+		t.Error("expected numeric user ID display-name default")
 	}
 	if !strings.Contains(body, "ID: 123456") {
 		t.Error("expected user ID to be shown")
