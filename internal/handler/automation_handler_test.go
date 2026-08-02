@@ -168,7 +168,7 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.NotContains(t, detail.Body.String(), "Recent since")
 	require.NotContains(t, detail.Body.String(), "Node resources")
 	require.NotContains(t, detail.Body.String(), `id="automation-node-resources"`)
-	require.Contains(t, detail.Body.String(), fmt.Sprintf(`href="/tasks/%s?project_id=%s"`, task.ID, project.ID), "Schedule-backed nodes must open their scheduled task directly")
+	require.Contains(t, detail.Body.String(), fmt.Sprintf(`href="/tasks/%s?project_id=%s&amp;from=automation&amp;automation_id=%s&amp;automation_name=%s"`, task.ID, url.QueryEscape(project.ID), url.QueryEscape(definition.Automation.ID), url.QueryEscape(definition.Automation.Name)), "Schedule-backed nodes must open their scheduled task with a breadcrumb path back to the corresponding Automation")
 	require.Contains(t, detail.Body.String(), "Live automation graph")
 	require.Contains(t, detail.Body.String(), `class="automation-graph-node automation-graph-node--idle"`)
 	require.Contains(t, detail.Body.String(), `@keyframes automation-running-pulse`)

@@ -142,8 +142,8 @@ func TestAutomationLiveLinksOnlyTaskBackedNodesAndOmitsAuxiliarySurfaces(t *test
 		`data-automation-live-node="task-node"`,
 		`data-automation-live-node="action-node"`,
 		`data-automation-live-node="unbound-task-node"`,
-		`href="/tasks/scheduled-task?project_id=project-live"`,
-		`href="/tasks/follow-up-task?project_id=project-live"`,
+		`href="/tasks/scheduled-task?project_id=project-live&amp;from=automation&amp;automation_id=automation-live&amp;automation_name=Live+only"`,
+		`href="/tasks/follow-up-task?project_id=project-live&amp;from=automation&amp;automation_id=automation-live&amp;automation_name=Live+only"`,
 		`data-refresh-url="/automations/automation-live?project_id=project-live"`,
 		`window.openVibelyAutomationLiveRefresh = function(method, url)`,
 		`X-OpenVibely-Automation-Live-Generation`,
@@ -938,6 +938,9 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 			Nodes:        nodes,
 			RecentCutoff: time.Unix(1, 0),
 		}
+		if id == "automation-a" {
+			graph.Resources = []models.AutomationResourceSummary{{NodeID: "first_step", ResourceType: "task", ResourceID: "automation-a-task"}}
+		}
 		var out bytes.Buffer
 		if err := AutomationLiveContent(graph, projectID, true).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Automation live graph: %v", err)
@@ -1093,8 +1096,16 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (labelRect.left < nodeRect.left - 1 || labelRect.right > nodeRect.right + 1 || labelRect.top < nodeRect.top - 1 || labelRect.bottom > nodeRect.bottom + 1) fail('node label escapes its node bounds');
 	    if (getComputedStyle(label).overflow !== 'hidden') fail('long node label is not visibly bounded');
 	    if (!document.body.textContent.includes('No active work')) fail('zero counters did not collapse to a readable summary');
-    if (document.querySelector('[data-automation-view]')) fail('Live still exposes redundant Automation tabs');
+	    if (document.querySelector('[data-automation-view]')) fail('Live still exposes redundant Automation tabs');
 	    if (document.getElementById('automation-node-resources')) fail('Live still exposes the node resources sidebar');
+	    click('#automation-live [data-automation-task-link]', 'Automation-backed Task node');
+	    await waitFor(function() { return !!document.getElementById('task-detail-content'); }, 'Automation-backed Task detail');
+	    var automationTaskBack = document.getElementById('task-back-btn');
+	    if (!automationTaskBack || automationTaskBack.textContent.trim() !== 'Automation A') fail('Automation-backed Task breadcrumb does not name the corresponding Automation');
+	    if (automationTaskBack.getAttribute('href') !== '/automations/automation-a?project_id=project-browser') fail('Automation-backed Task breadcrumb has the wrong return path: ' + (automationTaskBack && automationTaskBack.getAttribute('href')));
+	    click('#task-back-btn', 'Automation breadcrumb from Task detail');
+	    await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A after Task breadcrumb');
+	    await report('progress', 'automation-task-breadcrumb-restored');
 	    window.openVibelyAutomationLiveRefresh('GET', '/automations/automation-a?project_id=project-browser&refresh_order=older');
 	    window.openVibelyAutomationLiveRefresh('GET', '/automations/automation-a?project_id=project-browser&refresh_order=newer');
 	    await waitFor(function() { return document.getElementById('automation-live') && document.getElementById('automation-live').textContent.includes('Newest Live response'); }, 'newest concurrent Live response');
@@ -1510,6 +1521,14 @@ window.addEventListener('DOMContentLoaded', function() {
 		case "/release-older-live-response":
 			close(releaseOlderLive)
 			w.WriteHeader(http.StatusNoContent)
+		case "/tasks/automation-a-task":
+			task := &models.Task{ID: "automation-a-task", ProjectID: projectID, Title: "Automation A task", Category: models.CategoryScheduled, Status: models.StatusPending}
+			var out bytes.Buffer
+			if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &out); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write(out.Bytes())
 		case "/automations/automation-a/builder":
 			_, _ = w.Write([]byte(renderBlankBuilder(1, "automation-a")))
 		case "/automations/automation-a/run-now":

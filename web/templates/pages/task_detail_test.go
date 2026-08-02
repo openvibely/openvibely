@@ -28,6 +28,26 @@ func TestTaskDetailContentIncludesAuthoritativeDynamicPageTitle(t *testing.T) {
 	}
 }
 
+func TestTaskDetailBreadcrumbSupportsAutomationOrigin(t *testing.T) {
+	task := &models.Task{ID: "task-automation-origin", ProjectID: "project-origin", Title: "Automation task"}
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "details", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{
+		`data-automation-url-base="/automations/"`,
+		`from === 'automation'`,
+		`params.get('automation_id')`,
+		`params.get('automation_name')`,
+		`encodeURIComponent(automationID)`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected Automation-origin breadcrumb support to contain %q", want)
+		}
+	}
+}
+
 func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 	tests := []struct {
 		name               string

@@ -55,6 +55,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				data-schedule-url={ fmt.Sprintf("/schedule?project_id=%s", task.ProjectID) }
 				data-chat-url={ fmt.Sprintf("/chat?project_id=%s", task.ProjectID) }
 				data-alerts-url={ fmt.Sprintf("/alerts?project_id=%s", task.ProjectID) }
+				data-project-id={ task.ProjectID }
+				data-automation-url-base="/automations/"
 			>
 				Tasks
 			</a>
@@ -77,6 +79,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 						} else if (from === 'alerts') {
 							url = btn.dataset.alertsUrl;
 							text = 'Alerts';
+						} else if (from === 'automation') {
+							var automationID = params.get('automation_id');
+							var automationName = params.get('automation_name');
+							if (automationID) {
+								url = btn.dataset.automationUrlBase + encodeURIComponent(automationID) + '?project_id=' + encodeURIComponent(btn.dataset.projectId);
+								text = automationName || 'Automation';
+							}
 						}
 						if (url) {
 							btn.setAttribute('href', url);

@@ -3,6 +3,7 @@ package pages
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -429,7 +430,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						}
 					}
 					for _, node := range graph.Nodes {
-						if taskURL := automationLiveNodeTaskURL(node, graph.Resources, currentProjectID); taskURL != "" {
+						if taskURL := automationLiveNodeTaskURL(node, graph.Resources, currentProjectID, graph.Automation.ID, graph.Automation.Name); taskURL != "" {
 							<a class="automation-graph-link" href={ templ.URL(taskURL) } hx-get={ taskURL } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" aria-label={ automationLiveNodeAria(node) } data-automation-task-link>
 								@automationLiveNodeShape(node)
 							</a>
@@ -1276,13 +1277,13 @@ func automationCardURL(card models.AutomationCard, currentProjectID string) stri
 	return fmt.Sprintf("/automations/%s?project_id=%s", card.Automation.ID, currentProjectID)
 }
 func automationCardSearchText(card models.AutomationCard) string { return strings.Join([]string{card.Automation.Name, card.Automation.Description, card.Version.AdapterKey, string(card.Automation.LifecycleState), string(card.Automation.HealthState)}, " ") }
-func automationLiveNodeTaskURL(node models.AutomationLiveNode, resources []models.AutomationResourceSummary, projectID string) string {
+func automationLiveNodeTaskURL(node models.AutomationLiveNode, resources []models.AutomationResourceSummary, projectID string, automationID string, automationName string) string {
 	if node.NodeType != models.AutomationNodeTrigger && node.NodeType != models.AutomationNodeAgentTask {
 		return ""
 	}
 	for _, resource := range resources {
 		if resource.NodeID == node.ID && resource.ResourceType == "task" && resource.ResourceID != "" {
-			return fmt.Sprintf("/tasks/%s?project_id=%s", resource.ResourceID, projectID)
+			return fmt.Sprintf("/tasks/%s?project_id=%s&from=automation&automation_id=%s&automation_name=%s", resource.ResourceID, url.QueryEscape(projectID), url.QueryEscape(automationID), url.QueryEscape(automationName))
 		}
 	}
 	return ""
