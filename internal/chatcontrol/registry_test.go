@@ -270,6 +270,39 @@ func TestListSchedulesRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
 	}
 }
 
+func TestScheduleMutationSchemasDocumentAcceptedInputGrammar(t *testing.T) {
+	for _, name := range []string{"schedule_task", "modify_schedule"} {
+		def := Get(name)
+		if def == nil {
+			t.Fatalf("%s action missing", name)
+		}
+		var schema struct {
+			Properties map[string]struct {
+				Pattern string   `json:"pattern"`
+				Enum    []string `json:"enum"`
+				Items   *struct {
+					Enum []string `json:"enum"`
+				} `json:"items"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		if got := schema.Properties["time"].Pattern; got != `^(?:[01][0-9]|2[0-3]):[0-5][0-9]$` {
+			t.Fatalf("%s time pattern = %q", name, got)
+		}
+		wantRepeats := []string{"once", "daily", "weekly", "monthly", "hours", "hourly", "minutes", "seconds"}
+		if got := schema.Properties["repeat"].Enum; !reflect.DeepEqual(got, wantRepeats) {
+			t.Fatalf("%s repeat enum = %v, want %v", name, got, wantRepeats)
+		}
+		wantDays := []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
+		days := schema.Properties["days"]
+		if days.Items == nil || !reflect.DeepEqual(days.Items.Enum, wantDays) {
+			t.Fatalf("%s weekday enum = %v, want %v", name, days.Items, wantDays)
+		}
+	}
+}
+
 func TestToolDefsForContext_Telegram(t *testing.T) {
 	defs := ToolDefsForContext(models.ChatModeOrchestrate, SurfaceTelegram, true)
 	names := toolDefNames(defs)
