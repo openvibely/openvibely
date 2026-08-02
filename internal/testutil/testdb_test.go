@@ -1,10 +1,52 @@
 package testutil
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
 )
+
+func TestStatementCountingTestDBRecordsCompleteOperations(t *testing.T) {
+	db, counter := NewStatementCountingTestDB(t)
+	if got := len(counter.Statements()); got != 0 {
+		t.Fatalf("setup statements = %d, want 0", got)
+	}
+
+	type markerKey struct{}
+	observed := make(chan struct{}, 1)
+	counter.SetObserver(func(ctx context.Context, _ string) {
+		if marked, _ := ctx.Value(markerKey{}).(bool); marked {
+			observed <- struct{}{}
+		}
+	})
+	counter.SetEnabled(true)
+	ctx := context.WithValue(context.Background(), markerKey{}, true)
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM projects").Scan(&count); err != nil {
+		t.Fatalf("query projects: %v", err)
+	}
+	if _, err := db.ExecContext(context.Background(), "UPDATE projects SET name = name WHERE 0"); err != nil {
+		t.Fatalf("exec no-op update: %v", err)
+	}
+	counter.SetEnabled(false)
+	if _, err := db.Exec("DELETE FROM projects WHERE 0"); err != nil {
+		t.Fatalf("disabled no-op delete: %v", err)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 2 {
+		t.Fatalf("recorded statements = %q, want one query and one exec", statements)
+	}
+	if statements[0] != "SELECT COUNT(*) FROM projects" || statements[1] != "UPDATE projects SET name = name WHERE 0" {
+		t.Fatalf("recorded statements = %q", statements)
+	}
+	select {
+	case <-observed:
+	default:
+		t.Fatal("context-aware statement observer was not called")
+	}
+}
 
 // TestNewTestDBPragmas verifies every fixture retains the production
 // connection-local pragmas and single-connection pool configuration.

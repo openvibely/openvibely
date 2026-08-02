@@ -20,6 +20,17 @@ func NewLLMConfigRepo(db *sql.DB) *LLMConfigRepo {
 
 const llmConfigColumns = `id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, created_at, updated_at, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, base_url, transport, preset_slug, models_url, auth_header_name, auth_header_value_prefix, extra_headers_json, extra_body_json, default_max_tokens, token_exchange_format, token_refresh_format, custom_auth_config_json, custom_auth_state_json, oauth_config_revision, mixture_config_json, auto_start_tasks`
 
+// llmConfigCardColumns is the bounded Models-page projection. Credential bodies,
+// edit-only endpoint settings, request JSON, custom-auth JSON, and full mixture
+// JSON are deliberately excluded from the initial response path.
+const llmConfigCardColumns = `id, name, provider, model, reasoning_effort,
+	CASE WHEN api_key != '' THEN 1 ELSE 0 END, temperature, is_default, auth_method,
+	CASE WHEN oauth_access_token != '' THEN 1 ELSE 0 END, oauth_expires_at,
+	max_workers, worker_timeout, substr(ollama_base_url, 1, 512), substr(base_url, 1, 512),
+	CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.agent_config_id'), ''), 1, 128) ELSE '' END,
+	CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.label'), ''), 1, 256) ELSE '' END,
+	CASE WHEN json_valid(mixture_config_json) AND json_type(mixture_config_json, '$.reference_models') = 'array' THEN json_array_length(mixture_config_json, '$.reference_models') ELSE 0 END`
+
 func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig) error {
 	return row.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.ReasoningEffort, &a.APIKey,
 		&a.MaxTokens, &a.Temperature, &a.IsDefault, &a.CreatedAt, &a.UpdatedAt,
@@ -35,7 +46,7 @@ func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig
 func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+llmConfigColumns+`
-		 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+			 FROM agent_configs ORDER BY is_default DESC, name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing models: %w", err)
 	}
@@ -46,6 +57,43 @@ func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
 		var a models.LLMConfig
 		if err := scanLLMConfig(rows, &a); err != nil {
 			return nil, fmt.Errorf("scanning model config: %w", err)
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
+}
+
+// ListCards returns the bounded configuration needed to render the Models page.
+// Boolean credential-presence expressions are represented as non-secret
+// sentinels so existing card status helpers retain their semantics.
+func (r *LLMConfigRepo) ListCards(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+llmConfigCardColumns+`
+			 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing model cards: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var (
+			a           models.LLMConfig
+			hasAPIKey   bool
+			hasOAuthKey bool
+		)
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.ReasoningEffort,
+			&hasAPIKey, &a.Temperature, &a.IsDefault, &a.AuthMethod,
+			&hasOAuthKey, &a.OAuthExpiresAt, &a.MaxWorkers, &a.WorkerTimeout,
+			&a.OllamaBaseURL, &a.BaseURL, &a.MixtureAggregatorID,
+			&a.MixtureAggregatorLabel, &a.MixtureReferenceCount); err != nil {
+			return nil, fmt.Errorf("scanning model card: %w", err)
+		}
+		if hasAPIKey {
+			a.APIKey = "present"
+		}
+		if hasOAuthKey {
+			a.OAuthAccessToken = "present"
 		}
 		configs = append(configs, a)
 	}

@@ -19,7 +19,7 @@ func BenchmarkNewTestDB(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		db := buildTestDB(b)
+		db := buildTestDB(b, "sqlite")
 		// Touch seeded data to confirm the fixture is usable, mirroring how
 		// real tests immediately query the database.
 		var count int

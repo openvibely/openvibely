@@ -1449,11 +1449,15 @@ func (h *Handler) ListAgents(c echo.Context) error {
 		applog.Infof("[handler] ListAgents error: %v", err)
 		return err
 	}
-	if err := h.materializeDBAgentsToDisk(c, agents); err != nil {
-		applog.Infof("[handler] ListAgents materialize DB agents warning: %v", err)
-	} else if agents, err = h.agentRepo.List(c.Request().Context()); err != nil {
-		applog.Infof("[handler] ListAgents reload after materialize error: %v", err)
-		return err
+	materialized, materializeErr := h.materializeDBAgentsToDisk(c, agents)
+	if materializeErr != nil {
+		applog.Infof("[handler] ListAgents materialize DB agents warning: %v", materializeErr)
+	} else if materialized {
+		agents, err = h.agentRepo.List(c.Request().Context())
+		if err != nil {
+			applog.Infof("[handler] ListAgents reload after materialize error: %v", err)
+			return err
+		}
 	}
 	// applog.Debugf("[handler] ListAgents found %d agents", len(agents))
 
