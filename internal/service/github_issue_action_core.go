@@ -69,12 +69,32 @@ func (c *GitHubIssueActionCore) request(input json.RawMessage) (GitHubIssueActio
 	return req, nil
 }
 
-func (c *GitHubIssueActionCore) ExecuteGetIssue(ctx context.Context, input json.RawMessage) (string, error) {
+func (c *GitHubIssueActionCore) requestAndRepo(ctx context.Context, input json.RawMessage, validate func(GitHubIssueActionRequest) error) (GitHubIssueActionRequest, *GitHubRepoRef, error) {
 	req, err := c.request(input)
 	if err != nil {
-		return "", err
+		return req, nil, err
+	}
+	if validate != nil {
+		if err := validate(req); err != nil {
+			return req, nil, err
+		}
 	}
 	repo, err := c.resolve(ctx, req.RepoURL)
+	if err != nil {
+		return req, nil, err
+	}
+	return req, repo, nil
+}
+
+func (c *GitHubIssueActionCore) postprocessAssignedIssues(ctx context.Context, repo *GitHubRepoRef, issues []GitHubIssue, postprocess GitHubAssignedIssuesPostprocessor) ([]GitHubIssue, error) {
+	if postprocess == nil {
+		return issues, nil
+	}
+	return postprocess(ctx, repo, issues)
+}
+
+func (c *GitHubIssueActionCore) ExecuteGetIssue(ctx context.Context, input json.RawMessage) (string, error) {
+	req, repo, err := c.requestAndRepo(ctx, input, nil)
 	if err != nil {
 		return "", err
 	}
@@ -126,11 +146,7 @@ func (c *GitHubIssueActionCore) ExecuteIsActorAuthorized(ctx context.Context, in
 }
 
 func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context, input json.RawMessage, postprocess GitHubAssignedIssuesPostprocessor) (string, error) {
-	req, err := c.request(input)
-	if err != nil {
-		return "", err
-	}
-	repo, err := c.resolve(ctx, req.RepoURL)
+	_, repo, err := c.requestAndRepo(ctx, input, nil)
 	if err != nil {
 		return "", err
 	}
@@ -138,25 +154,22 @@ func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context,
 	if err != nil {
 		return "", err
 	}
-	if postprocess != nil {
-		issues, err = postprocess(ctx, repo, issues)
-		if err != nil {
-			return "", err
-		}
+	issues, err = c.postprocessAssignedIssues(ctx, repo, issues, postprocess)
+	if err != nil {
+		return "", err
 	}
 	return githubIssueActionJSON(map[string]any{"ok": true, "account": user, "issues": issues})
 }
 
 func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, input json.RawMessage, postprocess GitHubAssignedIssuesPostprocessor) (string, error) {
-	req, err := c.request(input)
-	if err != nil {
-		return "", err
-	}
-	assignee := strings.TrimSpace(req.Assignee)
-	if assignee == "" {
-		return "", fmt.Errorf("assignee is required")
-	}
-	repo, err := c.resolve(ctx, req.RepoURL)
+	var assignee string
+	_, repo, err := c.requestAndRepo(ctx, input, func(req GitHubIssueActionRequest) error {
+		assignee = strings.TrimSpace(req.Assignee)
+		if assignee == "" {
+			return fmt.Errorf("assignee is required")
+		}
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
@@ -164,24 +177,20 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, i
 	if err != nil {
 		return "", err
 	}
-	if postprocess != nil {
-		issues, err = postprocess(ctx, repo, issues)
-		if err != nil {
-			return "", err
-		}
+	issues, err = c.postprocessAssignedIssues(ctx, repo, issues, postprocess)
+	if err != nil {
+		return "", err
 	}
 	return githubIssueActionJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": issues})
 }
 
 func (c *GitHubIssueActionCore) ExecuteListAssignedIssuesWithPRs(ctx context.Context, input json.RawMessage) (string, error) {
-	req, err := c.request(input)
-	if err != nil {
-		return "", err
-	}
-	if strings.TrimSpace(req.Assignee) == "" {
-		return "", fmt.Errorf("assignee is required")
-	}
-	repo, err := c.resolve(ctx, req.RepoURL)
+	req, repo, err := c.requestAndRepo(ctx, input, func(req GitHubIssueActionRequest) error {
+		if strings.TrimSpace(req.Assignee) == "" {
+			return fmt.Errorf("assignee is required")
+		}
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
@@ -193,11 +202,7 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssuesWithPRs(ctx context.Con
 }
 
 func (c *GitHubIssueActionCore) ExecuteCommentOnIssue(ctx context.Context, input json.RawMessage) (string, error) {
-	req, err := c.request(input)
-	if err != nil {
-		return "", err
-	}
-	repo, err := c.resolve(ctx, req.RepoURL)
+	req, repo, err := c.requestAndRepo(ctx, input, nil)
 	if err != nil {
 		return "", err
 	}
@@ -208,11 +213,7 @@ func (c *GitHubIssueActionCore) ExecuteCommentOnIssue(ctx context.Context, input
 }
 
 func (c *GitHubIssueActionCore) ExecuteAddIssueLabels(ctx context.Context, input json.RawMessage) (string, error) {
-	req, err := c.request(input)
-	if err != nil {
-		return "", err
-	}
-	repo, err := c.resolve(ctx, req.RepoURL)
+	req, repo, err := c.requestAndRepo(ctx, input, nil)
 	if err != nil {
 		return "", err
 	}
