@@ -188,7 +188,22 @@ Runtime storage defaults to the same user app directory used by the web/server b
 
 ### Docker
 
-VPS/Docker deployment uses the `Dockerfile`. For persistent runtime state, deploy with a durable data volume and configure runtime paths through environment variables. See [`docs/environment.md`](./docs/environment.md) and <a href="https://docs.openvibely.ai/deployment" target="_blank" rel="noopener noreferrer">Deployment</a>.
+The repository keeps production deployment and coding-agent concerns in separate images:
+
+| Image definition | Purpose | Contents |
+|---|---|---|
+| `Dockerfile` | Production server/VPS image published as `openvibely/openvibely` | Minimal `scratch` runtime with OpenVibely, certificates, timezone data, Git, Bash, and basic shell utilities |
+| `Dockerfile-ext` | Coding and agent execution | Fedora-based runtime with Go, Node.js/npm/Corepack, Python/pip/venv, Rust/cargo, Java/JDK, Ruby, Git, and native build tools |
+| `Dockerfile-dev` | Developing OpenVibely itself | Live-reload environment with the repository source, Air, templ, Swagger, Go, Node.js, and rootless Podman |
+
+Keep using the default `Dockerfile` for production deployments; language toolchains are intentionally excluded from that smaller attack surface. Build and verify the coding-capable image with:
+
+```bash
+make docker-build-agent
+make docker-check-agent-tools
+```
+
+The coding image runs OpenVibely as the non-root `openvibely` user and uses `/data` for persistent application state, just like the production image. For persistent runtime state, deploy with a durable data volume and configure runtime paths through environment variables. See [`docs/environment.md`](./docs/environment.md) and <a href="https://docs.openvibely.ai/deployment" target="_blank" rel="noopener noreferrer">Deployment</a>.
 
 ## OAuth by Mode
 

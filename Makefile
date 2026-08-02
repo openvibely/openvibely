@@ -1,4 +1,8 @@
-.PHONY: dev build build-desktop package-desktop-macos run migrate templ css clean install-tools test test-short test-cover
+.PHONY: dev build build-desktop package-desktop-macos run migrate templ css clean install-tools test test-short test-cover docker-build-runtime docker-build-agent docker-check-agent-tools
+
+DOCKER ?= docker
+RUNTIME_IMAGE ?= openvibely/openvibely:local
+AGENT_IMAGE ?= openvibely/openvibely-agent:local
 
 TEMPL_VERSION := $(shell go list -m -f '{{.Version}}' github.com/a-h/templ)
 SWAG_VERSION := $(shell go list -m -f '{{.Version}}' github.com/swaggo/swag)
@@ -73,6 +77,18 @@ test-cover:
 	@grep -v "_templ.go" coverage.out > coverage.filtered.out
 	@go tool cover -func=coverage.filtered.out | tail -1
 	@echo "Full HTML report: go tool cover -html=coverage.filtered.out"
+
+# Build the minimal production/server image published as openvibely/openvibely.
+docker-build-runtime:
+	$(DOCKER) build -t $(RUNTIME_IMAGE) -f Dockerfile .
+
+# Build the coding/agent image with common language toolchains.
+docker-build-agent:
+	$(DOCKER) build -t $(AGENT_IMAGE) -f Dockerfile-ext .
+
+# Verify the coding toolchain through the image's normal non-root entrypoint.
+docker-check-agent-tools:
+	$(DOCKER) run --rm $(AGENT_IMAGE) bash -lc 'set -euo pipefail; go version; node --version; npm --version; corepack --version; python3 --version; python3 -m pip --version; venv="$$(mktemp -d)"; python3 -m venv "$$venv"; "$$venv/bin/python" --version; rm -rf "$$venv"; rustc --version; cargo --version; java -version; javac -version; ruby --version; git --version; make --version | head -n 1; gcc --version | head -n 1; g++ --version | head -n 1; pkg-config --version'
 
 # Clean build artifacts
 clean:

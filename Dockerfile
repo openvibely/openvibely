@@ -83,8 +83,9 @@ RUN mkdir -p /git-dist/usr/bin /git-dist/bin /git-dist/usr/lib /git-dist/etc \
  && printf '[safe]\n\tdirectory = *\n' > /git-dist/etc/gitconfig
 
 # =============================================================================
-# Stage 3: Minimal runtime image from scratch
+# Stage 3: Minimal production/server runtime image from scratch
 # =============================================================================
+# Coding agents should use Dockerfile-ext; do not add language toolchains here.
 FROM scratch
 
 LABEL org.opencontainers.image.title="OpenVibely" \
