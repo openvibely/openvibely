@@ -618,38 +618,25 @@ func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandle
 	if opts.ScheduleRepo == nil {
 		return "Error scheduling task: schedule repository not available."
 	}
-	task, err := resolveChannelTaskReference(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
+	result, err := NewScheduleActionService(opts.TaskRepo, opts.ScheduleRepo).Create(ctx, opts.ProjectID, req)
 	if err != nil {
-		return fmt.Sprintf("Could not find task: %v", err)
-	}
-	hourVal, minuteVal, err := parseChannelScheduleTime(req.Time)
-	if err != nil {
-		return fmt.Sprintf("Invalid time %q (expected HH:MM).", req.Time)
-	}
-	repeatType := channelScheduleRepeatType(req.Repeat)
-	repeatInterval := 1
-	if req.Interval > 0 {
-		repeatInterval = req.Interval
-	}
-	if err := models.ValidateScheduleRepeatInterval(repeatInterval); err != nil {
-		return fmt.Sprintf("Invalid interval %d: %v.", repeatInterval, err)
-	}
-	runAt := channelScheduleRunAt(time.Now().Local(), hourVal, minuteVal, repeatType, req.Days)
-	clearContextOnStart := true
-	if req.ClearContextOnStart != nil {
-		clearContextOnStart = *req.ClearContextOnStart
-	}
-	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt.UTC(), RepeatType: repeatType, RepeatInterval: repeatInterval, Enabled: true, ClearContextOnStart: clearContextOnStart}
-	if err := opts.ScheduleRepo.Create(ctx, schedule); err != nil {
-		return fmt.Sprintf("Error scheduling task %q: %v", task.Title, err)
-	}
-	if task.Category != models.CategoryScheduled {
-		_ = opts.TaskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled)
-		if task.Status != models.StatusPending {
-			_ = opts.TaskRepo.UpdateStatus(ctx, task.ID, models.StatusPending)
+		actionErr, _ := err.(*ScheduleActionError)
+		switch {
+		case actionErr != nil && actionErr.Kind == ScheduleActionReferenceError:
+			return fmt.Sprintf("Could not find task: %v", err)
+		case actionErr != nil && actionErr.Kind == ScheduleActionTimeError:
+			return fmt.Sprintf("Invalid time %q (expected HH:MM).", req.Time)
+		case actionErr != nil && actionErr.Kind == ScheduleActionIntervalError:
+			return fmt.Sprintf("Invalid interval %d: %v.", req.Interval, err)
+		default:
+			title := req.Title
+			if result != nil && result.Task != nil {
+				title = result.Task.Title
+			}
+			return fmt.Sprintf("Error scheduling task %q: %v", title, err)
 		}
 	}
-	return fmt.Sprintf("Scheduled task %q [TASK_ID:%s] at %s (%s).", task.Title, task.ID, req.Time, channelScheduleRepeatDescription(repeatType, repeatInterval, req.Days))
+	return fmt.Sprintf("Scheduled task %q [TASK_ID:%s] at %s (%s).", result.Task.Title, result.Task.ID, req.Time, channelScheduleRepeatDescription(result.Schedule.RepeatType, result.Schedule.RepeatInterval, req.Days))
 }
 
 func runChannelDeleteSchedule(ctx context.Context, opts channelUtilityActionHandlerOptions, input json.RawMessage) string {
@@ -663,18 +650,19 @@ func runChannelDeleteSchedule(ctx context.Context, opts channelUtilityActionHand
 	if opts.ScheduleRepo == nil {
 		return "Error deleting schedule: schedule repository not available."
 	}
-	schedule, task, err := resolveChannelScheduleReference(ctx, opts.TaskRepo, opts.ScheduleRepo, opts.ProjectID, req.ScheduleID, req.TaskID, req.Title)
+	result, err := NewScheduleActionService(opts.TaskRepo, opts.ScheduleRepo).Delete(ctx, opts.ProjectID, req)
 	if err != nil {
-		return fmt.Sprintf("Could not find schedule: %v", err)
+		actionErr, _ := err.(*ScheduleActionError)
+		if actionErr != nil && actionErr.Kind == ScheduleActionReferenceError {
+			return fmt.Sprintf("Could not find schedule: %v", err)
+		}
+		title := req.Title
+		if result != nil && result.Task != nil {
+			title = result.Task.Title
+		}
+		return fmt.Sprintf("Error deleting schedule for task %q: %v", title, err)
 	}
-	if err := opts.ScheduleRepo.Delete(ctx, schedule.ID); err != nil {
-		return fmt.Sprintf("Error deleting schedule for task %q: %v", task.Title, err)
-	}
-	remaining, _ := opts.ScheduleRepo.ListByTask(ctx, task.ID)
-	if len(remaining) == 0 && task.Category == models.CategoryScheduled {
-		_ = opts.TaskRepo.UpdateCategory(ctx, task.ID, models.CategoryBacklog)
-	}
-	return fmt.Sprintf("Deleted schedule for task %q [TASK_ID:%s].", task.Title, task.ID)
+	return fmt.Sprintf("Deleted schedule for task %q [TASK_ID:%s].", result.Task.Title, result.Task.ID)
 }
 
 func runChannelModifySchedule(ctx context.Context, opts channelUtilityActionHandlerOptions, input json.RawMessage) string {
@@ -688,48 +676,30 @@ func runChannelModifySchedule(ctx context.Context, opts channelUtilityActionHand
 	if opts.ScheduleRepo == nil {
 		return "Error modifying schedule: schedule repository not available."
 	}
-	schedule, task, err := resolveChannelScheduleReference(ctx, opts.TaskRepo, opts.ScheduleRepo, opts.ProjectID, req.ScheduleID, req.TaskID, req.Title)
+	result, err := NewScheduleActionService(opts.TaskRepo, opts.ScheduleRepo).Modify(ctx, opts.ProjectID, req)
 	if err != nil {
-		return fmt.Sprintf("Could not find schedule: %v", err)
+		actionErr, _ := err.(*ScheduleActionError)
+		title := req.Title
+		if result != nil && result.Task != nil {
+			title = result.Task.Title
+		}
+		switch {
+		case actionErr != nil && actionErr.Kind == ScheduleActionReferenceError:
+			return fmt.Sprintf("Could not find schedule: %v", err)
+		case actionErr != nil && actionErr.Kind == ScheduleActionTimeError:
+			return fmt.Sprintf("Invalid time %q.", req.Time)
+		case actionErr != nil && actionErr.Kind == ScheduleActionRepeatError:
+			return fmt.Sprintf("Unknown repeat type %q.", req.Repeat)
+		case actionErr != nil && actionErr.Kind == ScheduleActionIntervalError:
+			return fmt.Sprintf("Invalid interval %d: %v.", *req.Interval, err)
+		default:
+			return fmt.Sprintf("Error updating schedule for task %q: %v", title, err)
+		}
 	}
-	changes, changed, errText := applyChannelScheduleChanges(schedule, req)
-	if errText != "" {
-		return errText
+	if len(result.Changes) == 0 {
+		return fmt.Sprintf("No changes specified for schedule on task %q.", result.Task.Title)
 	}
-	if !changed {
-		return fmt.Sprintf("No changes specified for schedule on task %q.", task.Title)
-	}
-	if err := opts.ScheduleRepo.Update(ctx, schedule); err != nil {
-		return fmt.Sprintf("Error updating schedule for task %q: %v", task.Title, err)
-	}
-	return fmt.Sprintf("Updated schedule for task %q [TASK_ID:%s]: %s.", task.Title, task.ID, strings.Join(changes, ", "))
-}
-
-func parseChannelScheduleTime(raw string) (int, int, error) {
-	var hourVal, minuteVal int
-	if _, err := fmt.Sscanf(raw, "%d:%d", &hourVal, &minuteVal); err != nil || hourVal < 0 || hourVal > 23 || minuteVal < 0 || minuteVal > 59 {
-		return 0, 0, fmt.Errorf("invalid time")
-	}
-	return hourVal, minuteVal, nil
-}
-
-func channelScheduleRepeatType(raw string) models.RepeatType {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "once":
-		return models.RepeatOnce
-	case "weekly":
-		return models.RepeatWeekly
-	case "monthly":
-		return models.RepeatMonthly
-	case "hours", "hourly":
-		return models.RepeatHours
-	case "minutes":
-		return models.RepeatMinutes
-	case "seconds":
-		return models.RepeatSeconds
-	default:
-		return models.RepeatDaily
-	}
+	return fmt.Sprintf("Updated schedule for task %q [TASK_ID:%s]: %s.", result.Task.Title, result.Task.ID, strings.Join(result.Changes, ", "))
 }
 
 func channelScheduleRepeatDescription(repeatType models.RepeatType, interval int, days []string) string {
@@ -740,112 +710,6 @@ func channelScheduleRepeatDescription(repeatType models.RepeatType, interval int
 		return fmt.Sprintf("weekly on %s", strings.Join(days, ", "))
 	}
 	return FormatRepeatPattern(repeatType, interval)
-}
-
-func channelScheduleRunAt(now time.Time, hourVal, minuteVal int, repeatType models.RepeatType, days []string) time.Time {
-	runAt := time.Date(now.Year(), now.Month(), now.Day(), hourVal, minuteVal, 0, 0, time.Local)
-	if repeatType == models.RepeatWeekly && len(days) > 0 {
-		if next := nextChannelScheduleWeekday(runAt, now, days); !next.IsZero() {
-			runAt = next
-		}
-	}
-	return runAt
-}
-
-func nextChannelScheduleWeekday(base, now time.Time, days []string) time.Time {
-	dayMap := map[string]time.Weekday{"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday, "wed": time.Wednesday, "thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday}
-	bestOffset := 8
-	for _, d := range days {
-		target, ok := dayMap[strings.ToLower(strings.TrimSpace(d))]
-		if !ok {
-			continue
-		}
-		offset := int(target - base.Weekday())
-		if offset < 0 {
-			offset += 7
-		}
-		if offset == 0 && base.Before(now) {
-			offset = 7
-		}
-		if offset < bestOffset {
-			bestOffset = offset
-		}
-	}
-	if bestOffset >= 8 {
-		return time.Time{}
-	}
-	return base.AddDate(0, 0, bestOffset)
-}
-
-func applyChannelScheduleChanges(schedule *models.Schedule, req ModifyScheduleRequest) ([]string, bool, string) {
-	if schedule == nil {
-		return nil, false, "Error modifying schedule: schedule not found."
-	}
-	changes := []string{}
-	timeChanged := false
-	if req.Time != "" {
-		hourVal, minuteVal, err := parseChannelScheduleTime(req.Time)
-		if err != nil {
-			return nil, false, fmt.Sprintf("Invalid time %q.", req.Time)
-		}
-		oldLocal := schedule.RunAt.Local()
-		schedule.RunAt = time.Date(oldLocal.Year(), oldLocal.Month(), oldLocal.Day(), hourVal, minuteVal, 0, 0, time.Local).UTC()
-		changes = append(changes, fmt.Sprintf("time→%s", req.Time))
-		timeChanged = true
-	}
-	if req.Repeat != "" {
-		switch strings.ToLower(strings.TrimSpace(req.Repeat)) {
-		case "once", "daily", "weekly", "monthly", "hours", "hourly", "minutes", "seconds":
-			schedule.RepeatType = channelScheduleRepeatType(req.Repeat)
-		default:
-			return nil, false, fmt.Sprintf("Unknown repeat type %q.", req.Repeat)
-		}
-		changes = append(changes, fmt.Sprintf("repeat→%s", req.Repeat))
-		timeChanged = true
-	}
-	if req.Interval != nil {
-		if err := models.ValidateScheduleRepeatInterval(*req.Interval); err != nil {
-			return nil, false, fmt.Sprintf("Invalid interval %d: %v.", *req.Interval, err)
-		}
-		schedule.RepeatInterval = *req.Interval
-		changes = append(changes, fmt.Sprintf("interval→%d", *req.Interval))
-		timeChanged = true
-	}
-	if len(req.Days) > 0 && schedule.RepeatType == models.RepeatWeekly {
-		now := time.Now().Local()
-		runAtLocal := schedule.RunAt.Local()
-		if next := nextChannelScheduleWeekday(runAtLocal, now, req.Days); !next.IsZero() {
-			schedule.RunAt = next.UTC()
-		}
-		changes = append(changes, fmt.Sprintf("days→%s", strings.Join(req.Days, ",")))
-		timeChanged = true
-	}
-	if req.Enabled != nil {
-		schedule.Enabled = *req.Enabled
-		if *req.Enabled {
-			changes = append(changes, "enabled→true")
-		} else {
-			changes = append(changes, "enabled→false")
-		}
-	}
-	if req.ClearContextOnStart != nil {
-		schedule.ClearContextOnStart = *req.ClearContextOnStart
-		changes = append(changes, fmt.Sprintf("clear_context_on_start→%t", *req.ClearContextOnStart))
-	}
-	if len(changes) == 0 {
-		return changes, false, ""
-	}
-	if timeChanged {
-		schedule.NextRun = schedule.ComputeNextRun(time.Now())
-	} else if req.Enabled != nil && *req.Enabled {
-		now := time.Now()
-		if schedule.NextRun == nil || schedule.NextRun.Before(now) {
-			if next := schedule.ComputeNextRun(now); next != nil {
-				schedule.NextRun = next
-			}
-		}
-	}
-	return changes, true, ""
 }
 
 func channelGetPersonalityResult(ctx context.Context, settingsRepo *repository.SettingsRepo) string {

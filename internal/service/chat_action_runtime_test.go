@@ -638,7 +638,11 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, schedules, 1)
+	require.Equal(t, 2, schedules[0].RepeatInterval)
+	require.Equal(t, time.Monday, schedules[0].RunAt.Local().Weekday())
 	require.True(t, schedules[0].ClearContextOnStart)
+	require.NotNil(t, schedules[0].NextRun)
+	require.WithinDuration(t, schedules[0].RunAt, *schedules[0].NextRun, time.Second)
 
 	oversizedModifyOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","interval":366}`))
 	require.NoError(t, err)
@@ -655,6 +659,48 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	modified, err := scheduleRepo.GetByID(ctx, schedules[0].ID)
 	require.NoError(t, err)
 	require.False(t, modified.ClearContextOnStart)
+	require.False(t, modified.Enabled)
+
+	lowerBoundOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","interval":0}`))
+	require.NoError(t, err)
+	require.Contains(t, lowerBoundOut, "between 1 and 365")
+	modifyDaysOut, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`","interval":365,"days":["fri"],"enabled":true,"clear_context_on_start":true}`))
+	require.NoError(t, err)
+	require.Contains(t, modifyDaysOut, "Updated schedule")
+	modified, err = scheduleRepo.GetByID(ctx, schedules[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, 365, modified.RepeatInterval)
+	require.Equal(t, time.Friday, modified.RunAt.Local().Weekday())
+	require.True(t, modified.Enabled)
+	require.True(t, modified.ClearContextOnStart)
+	require.NotNil(t, modified.NextRun)
+	require.WithinDuration(t, modified.RunAt, *modified.NextRun, time.Second)
+
+	foreign := &models.Project{Name: "Foreign Utility Actions"}
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	foreignTask := &models.Task{ProjectID: foreign.ID, Title: "Foreign scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, foreignTask))
+	foreignSchedule := &models.Schedule{TaskID: foreignTask.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, foreignSchedule))
+	for tool, payload := range map[string]string{
+		"schedule_task":   `{"task_id":"` + foreignTask.ID + `","time":"09:30"}`,
+		"modify_schedule": `{"schedule_id":"` + foreignSchedule.ID + `","enabled":false}`,
+		"delete_schedule": `{"schedule_id":"` + foreignSchedule.ID + `"}`,
+	} {
+		out, err := handlers[tool](ctx, json.RawMessage(payload))
+		require.NoError(t, err)
+		require.Contains(t, out, "different project")
+	}
+
+	deleteOut, err := handlers["delete_schedule"](ctx, json.RawMessage(`{"schedule_id":"`+schedules[0].ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, deleteOut, "Deleted schedule")
+	remaining, err := scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, remaining)
+	updatedTask, err = taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
 }
 
 func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {
