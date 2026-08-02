@@ -218,3 +218,7 @@ always_use:
 ## openvibely_docker_image_workflow
 
 [OpenVibely Docker Image Workflow](openvibely_docker_image_workflow/SKILL.md) — Safely change OpenVibely production and coding-agent images while keeping consumers, release publishing, documentation, runtime validation, and sandbox boundaries aligned.
+
+## audit_persistent_state_machine_durability
+
+[Audit Persistent State Machine Durability](audit_persistent_state_machine_durability/SKILL.md) — Audit persistence failures, irreversible side effects, cleanup, and restart recovery across durable state machines.

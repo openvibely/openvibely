@@ -2,7 +2,7 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-07-29
+updated: 2026-08-02
 source: consolidation
 source_id: memory_consolidation_2026_07_17
 confidence: high
@@ -22,7 +22,8 @@ Agent and catalog facts:
 - Standalone skills are filesystem-backed packages. `<root>/skills/SKILLS.md` headings are canonical handles and match `<root>/skills/<handle>/SKILL.md`.
 - An indexed standalone skill is unusable unless the matching package body exists in the checkout the running app loads; creating the package only inside an isolated task worktree leaves the main catalog pointing at a dead path.
 - Bundled-skill startup sync overwrites the embedded `SKILL.md` and merges the bundled index, but does not prune extra support files already present in the installed global package. A global skill may therefore retain `references/` or `templates/` added by an earlier import, update, or Skill Curator operation even when the current repository built-in package ships only `SKILL.md`; a fresh installation from that repository will not receive those absent support files.
-- Project scope overrides global scope for matching standalone or agent-owned skill keys. Product direction favors explicit import/index maintenance over automatic disk auto-discovery.
+- Project scope overrides global scope for matching standalone or agent-owned skill keys. Agent declaration reconciliation caches parsed declarations by filesystem fingerprint so unchanged warm Agents-page requests may scan metadata without rereading/reparsing content or rewriting agent/hook rows. Project-root switches reapply cached declarations to preserve project precedence, while removed or re-keyed project declarations restore any displaced cached global declaration.
+- Product direction favors explicit import/index maintenance over automatic disk auto-discovery.
 - `skill.enabled: false` disables a skill for task execution, lifecycle hooks, routing, `skill_view`, and context injection; management/admin listings still show disabled skills.
 - The bundled `openvibely_github_autonomous_sdlc_bootstrap` and `openvibely_native_autonomous_sdlc_bootstrap` standalone skills are disabled by default so lifecycle routing cannot select setup guidance for maintained Automation tasks. They remain shipped and management-visible for deliberate administrator re-enablement, and bundled startup sync overwrites stale installed enabled copies. Maintained Native/GitHub Automations execute their stored Automation-owned prompts and do not depend on these bootstrap packages at runtime.
 - Standalone top-level `always_use` metadata is catalog control data and does not appear in model-visible `<available_skills>` rendering.
@@ -54,7 +55,7 @@ Lifecycle facts:
 - Ordinary tasks may intentionally have no assigned primary agent. Explicit assigned primary agents skip standalone skill routing and use that agent's curated/default or manual skill selection.
 - Maintenance/system agents are excluded from auto-routing via `selectable_as_primary=false`.
 - Lifecycle visibility renders structured selected-skill and selected-memory route decisions as compact prompt-safe badges/pills; text summaries remain useful for non-route hook rows.
-- Known lifecycle-evidence gaps include prompt-safe lifecycle trace events and durable applied/blocked skill-mutation audit rows being persisted by the backend but not exposed from the task-detail Lifecycle tab, which currently renders execution summary cards. Selected-memory activity is also reduced to filenames even though richer prompt-safe context is available. Issues `#161` and `#168` propose bounded, on-demand prompt-safe lifecycle evidence views without changing lifecycle behavior; `#168` specifically covers trace and mutation evidence.
+- Known lifecycle-evidence gaps include prompt-safe lifecycle trace events and durable applied/blocked skill-mutation audit rows being persisted by the backend but not exposed from the task-detail Lifecycle tab, which currently renders execution summary cards. Selected-memory activity is also reduced to filenames even though richer prompt-safe context is available. Issues `#161`, `#168`, `#175`, and `#177` propose bounded, on-demand prompt-safe lifecycle evidence views without changing lifecycle behavior; `#168` specifically covers trace and mutation evidence, while `#175` and `#177` focus on exposing prompt-safe lifecycle trace details on task pages. Issue `#177` was opened as “Show lifecycle execution traces in task detail” with `suggestion` and `feature` labels.
 - Lifecycle output contracts constrain final stored/validated results, not the agent's working notes or tool use.
 - Lifecycle hook and task-mode terminal execution status writes must use a fresh short-timeout finalization context after hook/model work returns so LLM deadlines or cancellations do not leave rows `running`.
 

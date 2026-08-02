@@ -2,7 +2,7 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-07-29
+updated: 2026-08-02
 source: consolidation
 source_id: memory_consolidation_2026_07_29
 confidence: high
@@ -121,7 +121,7 @@ Responsive and shared UI contracts:
 - Left sidebar navigation preserves hover-only highlight behavior unless the product intentionally redesigns selected nav state.
 - Mobile sidebar navigation uses DaisyUI drawer checkbox `#sidebar-toggle`; selecting a nav option should close the drawer only after HTMX has accepted/sent the request. The mobile drawer overlay and panel must layer above sticky page content, with the panel above the overlay.
 - `/models` uses `LLMConfig`/`agent_configs`; `/agents` is plugin-first and has no `color` field.
-- Models create/edit API key fields and channel secret/API key/token fields use a shared masked secret-input templ pattern with an eye/reveal toggle. Saved model API keys may be rendered into card data and loaded into masked edit fields; hidden submit fields stay blank when unchanged so saves preserve existing keys.
+- The Models page initial full-page/HTMX render uses one compact `agent_configs` card projection rather than full model rows: it excludes secrets/tokens/client secrets, large request JSON, custom-auth state/config, and full mixture JSON while retaining bounded card fields, credential/OAuth status, and mixture summaries without N+1 reads. Opening Edit fetches at most one authorized full provider-specific model record through the edit-details route; modal hydration uses request-generation and returned-model-ID guards so stale/out-of-order responses cannot populate the wrong model. Secret reveal remains available only after this edit-detail hydration, and unchanged hidden secret inputs stay blank on submit so saves preserve existing credentials.
 - Reused modal/dialog DOM must reset unsaved draft edits and revealed secrets back to saved/masked state, including eye icon and `aria-pressed` state, before reopening Models, GitHub, Slack, Telegram, Discord, Email, and inbound webhook secret dialogs. GitHub private-key textarea reveal controls need top-aligned focus/active handling separate from centered one-line toggles.
 - Project-scoped settings pages preserve active project via the `project_id` URL query. Models create/edit forms should keep `project_id` on HTMX and native fallback submit URLs.
 - Models-page mutations must preserve active project context. Create, edit, set-default, delete, delete-with-reassign, and OAuth connect/completion paths derive URLs from the live `#project-selector.value` before falling back to `window.location.search`; OAuth pending-flow state persists `ProjectID` so success and provider-error callbacks return to `/models?project_id=...` rather than the Default project.
