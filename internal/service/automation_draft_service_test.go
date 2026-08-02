@@ -270,6 +270,9 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 		},
 	}
 	prompt := automationCompiledTaskPrompt(candidate, candidate.Nodes[0])
+	require.Contains(t, prompt, "Always call github_get_project_inbox and call github_list_assigned_issues for every returned Authorized User")
+	require.Contains(t, prompt, "also call github_list_my_assigned_issues")
+	require.Contains(t, prompt, "Deduplicate issues by repository plus issue number")
 	require.Contains(t, prompt, "or from a GitHub remote in its local checkout when that URL is blank")
 	require.NotContains(t, prompt, "restricted to this project's explicit repository URL")
 	require.Contains(t, prompt, "Set source_github_issue_number to the exact issue number returned by this inbox execution")

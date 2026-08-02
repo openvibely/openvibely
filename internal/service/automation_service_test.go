@@ -308,6 +308,10 @@ func TestGitHubSDLCRegistrationHydratesInitialSnapshotAcrossPause(t *testing.T) 
 	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
 
 	maintainedPrompt := githubSDLCDevInboxPrompt
+	require.Contains(t, maintainedPrompt, "Always call `github_get_project_inbox`")
+	require.Contains(t, maintainedPrompt, "call `github_list_assigned_issues` for every returned Authorized User")
+	require.Contains(t, maintainedPrompt, "also call `github_list_my_assigned_issues`")
+	require.Contains(t, maintainedPrompt, "Deduplicate issues by repository plus issue number")
 	task := models.Task{ProjectID: project.ID, Title: "GitHub Dev Inbox", Category: models.CategoryScheduled, Priority: 3, Status: models.StatusPending, Prompt: maintainedPrompt}
 	require.NoError(t, taskRepo.Create(ctx, &task))
 	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatHours, RepeatInterval: 1, Enabled: true}

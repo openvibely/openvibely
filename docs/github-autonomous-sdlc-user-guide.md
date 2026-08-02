@@ -19,12 +19,12 @@ Before creating the loop:
 
 1. Create or select the OpenVibely project for the repository. Configure its GitHub repository URL, or ensure the project's local checkout has a GitHub remote; the explicit project URL takes precedence when both exist.
 2. Configure GitHub in `/channels` using a PAT or GitHub App.
-3. Add the GitHub user or bot accounts OpenVibely should trust under `Authorized Users` in GitHub Runtime Settings.
-4. For PAT setups, assign GitHub issues to the PAT owner when you want OpenVibely scheduled tasks to notice them.
-5. For GitHub App setups, assign issues to one of the configured Authorized Users; do not assign issues to an organization installation account.
+3. Add every GitHub user or bot account OpenVibely should scan or trust under `Authorized Users` in GitHub Runtime Settings.
+4. Assign GitHub issues to the PAT owner or any configured Authorized User when you want OpenVibely scheduled tasks to notice them.
+5. For GitHub App setups, do not assign issues to an organization installation account; assign them to a configured real user or bot.
 6. Ensure the scheduled task's model/provider supports runtime tool calls.
 
-A PAT identifies a real GitHub user, so scheduled tasks can call `github_list_my_assigned_issues` to find issues assigned to that user. A GitHub App installation may be installed on an organization, which is not an issue assignee; use `github_get_project_inbox` to read the Authorized Users and pass those logins to `github_list_assigned_issues`.
+A PAT identifies a real GitHub user, so scheduled tasks call `github_list_my_assigned_issues` to find issues assigned to that user. They also scan every configured Authorized User through `github_get_project_inbox` and `github_list_assigned_issues`, regardless of authentication mode. A GitHub App installation may be installed on an organization, which is not an issue assignee, so App setups rely on configured real users or bots.
 
 For this Automation loop, do not pass `repo_url` overrides. Automation-bound GitHub tools use only the selected project's configured GitHub repository URL and fall back to a GitHub remote in that project's local checkout when the URL is blank. Pull request tools use that same project boundary because they publish task worktree branches through the configured GitHub token/API and persist task PR records.
 
@@ -70,7 +70,7 @@ Check GitHub for implementation mailbox work and PR review feedback for this pro
 
 First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users on OpenVibely-created task PRs. This tool forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback. If the tool reports missing feedback dependencies, report that PR feedback routing is unavailable but continue normal issue inbox polling.
 
-If this project uses a PAT, call `github_list_my_assigned_issues` to list open issues assigned to the PAT owner. If this project uses GitHub App mode or custom mailbox accounts, call `github_get_project_inbox` to get Authorized Users; pass each returned assignee login to `github_list_assigned_issues`. If GitHub credentials or Authorized Users are missing, stop and explain the missing configuration.
+Always call `github_get_project_inbox`, then call `github_list_assigned_issues` for every returned Authorized User. When PAT authentication is available, also call `github_list_my_assigned_issues` so issues assigned only to the PAT owner are included. Deduplicate issues by repository plus issue number before processing them. If GitHub credentials are missing, or neither a PAT owner nor an Authorized User can be scanned, stop and explain the missing configuration.
 
 For each returned issue, inspect it with `github_get_issue`. Treat assignment to the PAT owner or one of the configured Authorized Users as the user's approval to start implementation work, even when the issue has no associated PR yet. Do not call `github_list_assigned_issues_with_prs` as a default eligibility gate; use it only if you explicitly want a PR-associated-issues-only workflow.
 

@@ -766,11 +766,11 @@ func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOpti
 			}
 			if _, _, err := opts.AutomationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
 				Context: automationContext, Binding: binding, WorkItemKey: resourceID, WorkItemKind: "github_issue",
-				WorkItemTitle: issue.Title, WorkItemStatus: models.AutomationWorkItemActive,
+				WorkItemTitle: issue.Title, WorkItemStatus: models.AutomationWorkItemWaiting,
 				ActivityKey:  "invocation:" + sourceBinding.InvocationID + ":discover:" + resourceID,
 				ActivityType: "discover_assigned_issue", ActivityStatus: models.AutomationActivityCompleted,
 				Resources: resources, EventKey: resourceID + ":assigned", FromNodeID: assignmentNode.ID,
-				ToNodeID: devInboxNode.ID, Transition: models.AutomationTransitionEntered,
+				ToNodeID: devInboxNode.ID, Transition: models.AutomationTransitionWaiting,
 			}); err != nil {
 				return err
 			}

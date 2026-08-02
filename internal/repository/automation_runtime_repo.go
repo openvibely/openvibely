@@ -1572,11 +1572,16 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 			AND i.status IN ('claimed','dispatched','running')
 			AND NOT EXISTS (SELECT 1 FROM ranked_activities a WHERE a.invocation_id = i.id)
 		UNION
-		SELECT node_id,
-			CASE state WHEN 'active' THEN 'running' WHEN 'waiting' THEN 'waiting' WHEN 'blocked' THEN 'blocked' WHEN 'failed' THEN 'failed' END,
-			'work:' || work_item_id
-		FROM automation_work_item_positions
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state IN ('active','waiting','blocked','failed')
+		SELECT position.node_id,
+			CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
+				WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
+			'work:' || position.work_item_id
+		FROM automation_work_item_positions position
+		JOIN automation_nodes node ON node.id = position.node_id AND node.version_id = position.version_id
+			AND node.automation_id = position.automation_id AND node.project_id = position.project_id
+		WHERE position.project_id = ? AND position.automation_id = ? AND position.version_id = ?
+			AND position.state IN ('active','waiting','blocked','failed')
+			AND NOT (position.state = 'active' AND node.role = 'github_inbox')
 		UNION
 		SELECT to_node_id, 'recent', 'work:' || work_item_id
 		FROM automation_transitions
@@ -1646,11 +1651,15 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 		WHERE (work_item_id IS NOT NULL OR task_id IS NULL OR activity_rank = 1)
 			AND (status IN ('pending','running','waiting','failed') OR (status = 'completed' AND completed_at >= ?))
 		UNION
-		SELECT automation_id,
-			CASE state WHEN 'active' THEN 'running' WHEN 'waiting' THEN 'waiting' WHEN 'blocked' THEN 'blocked' WHEN 'failed' THEN 'failed' END,
-			'work:' || work_item_id
-		FROM automation_work_item_positions
-		WHERE project_id = ? AND state IN ('active','waiting','blocked','failed')
+		SELECT position.automation_id,
+			CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
+				WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
+			'work:' || position.work_item_id
+		FROM automation_work_item_positions position
+		JOIN automation_nodes node ON node.id = position.node_id AND node.version_id = position.version_id
+			AND node.automation_id = position.automation_id AND node.project_id = position.project_id
+		WHERE position.project_id = ? AND position.state IN ('active','waiting','blocked','failed')
+			AND NOT (position.state = 'active' AND node.role = 'github_inbox')
 		UNION
 		SELECT automation_id, 'recent', 'work:' || work_item_id
 		FROM automation_transitions

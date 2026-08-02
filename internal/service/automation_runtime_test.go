@@ -1202,6 +1202,42 @@ func TestAutomationRuntimeGitHubIssueTaskCreationAllowsLaterInboxInvocation(t *t
 	require.Len(t, filtered, 1)
 	require.NoError(t, recordGitHubAssignedIssues(inboxCtx, opts, repoRef, filtered))
 
+	var discoveredWorkItemID string
+	var discoveredWorkStatus models.AutomationWorkItemStatus
+	var discoveredPositionState models.AutomationTransitionState
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT work_item.id, work_item.status, position.state
+		FROM automation_work_items work_item
+		JOIN automation_work_item_positions position ON position.work_item_id = work_item.id
+		JOIN automation_nodes node ON node.id = position.node_id
+		WHERE work_item.project_id = ? AND work_item.automation_id = ? AND work_item.work_item_key = ?
+			AND node.role = 'github_inbox'`, fixture.project.ID, fixture.definition.Automation.ID,
+		githubIssueResourceID(repoRef, issue.Number)).Scan(&discoveredWorkItemID, &discoveredWorkStatus, &discoveredPositionState))
+	require.Equal(t, models.AutomationWorkItemWaiting, discoveredWorkStatus, "completed issue discovery must wait at the inbox rather than remain running")
+	require.Equal(t, models.AutomationTransitionWaiting, discoveredPositionState)
+	liveAfterDiscovery, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	devInbox := automationNodeByKey(t, fixture.definition, "dev_inbox")
+	for _, node := range liveAfterDiscovery.Nodes {
+		if node.ID == devInbox.ID {
+			require.Zero(t, node.Counts.Running)
+			require.Equal(t, 1, node.Counts.Waiting)
+		}
+	}
+	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE automation_work_item_positions SET state = 'active'
+		WHERE work_item_id = ? AND node_id = ? RETURNING work_item_id`, discoveredWorkItemID, devInbox.ID).Scan(new(string)))
+	legacyLive, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err)
+	for _, node := range legacyLive.Nodes {
+		if node.ID == devInbox.ID {
+			require.Zero(t, node.Counts.Running, "legacy active inbox positions must not leave the completed poll looking stuck")
+			require.Zero(t, node.Counts.Waiting, "legacy active inbox positions predate explicit waiting semantics and must not look actionable forever")
+		}
+	}
+	portfolioCounts, err := fixture.repo.PortfolioOperationalCounts(ctx, fixture.project.ID, time.Now().UTC().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Zero(t, portfolioCounts[fixture.definition.Automation.ID].Running)
+	require.Zero(t, portfolioCounts[fixture.definition.Automation.ID].Waiting)
+
 	producerAutomationCtx, ok := AutomationContextFromContext(producerCtx)
 	require.True(t, ok)
 	inboxAutomationCtx, ok := AutomationContextFromContext(inboxCtx)

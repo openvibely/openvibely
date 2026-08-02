@@ -283,7 +283,9 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 		"Do not call `execute_tasks` for a newly created Active task",
 		"For a reconciled existing task, call `execute_tasks` only when `list_tasks` shows category Backlog or status failed/cancelled",
 		"Never call `execute_tasks` for an Active pending, queued, running, or completed task",
-		"For PAT setups, use `github_list_my_assigned_issues` to find open issues assigned to the authenticated PAT user",
+		"Always read assignee candidates with `github_get_project_inbox` and call `github_list_assigned_issues` for every returned Authorized User",
+		"also use `github_list_my_assigned_issues` to include issues assigned only to the authenticated PAT user",
+		"Deduplicate issues by repository plus issue number",
 		"For GitHub App setups, do not treat the installation owner or organization as an issue assignee",
 	} {
 		if !strings.Contains(text, want) {
