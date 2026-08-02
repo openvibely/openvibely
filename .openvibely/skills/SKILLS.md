@@ -222,3 +222,7 @@ always_use:
 ## audit_persistent_state_machine_durability
 
 [Audit Persistent State Machine Durability](audit_persistent_state_machine_durability/SKILL.md) — Audit persistence failures, irreversible side effects, cleanup, and restart recovery across durable state machines.
+
+## openvibely_update_lifecycle_workflow
+
+[OpenVibely Update Lifecycle Workflow](openvibely_update_lifecycle_workflow/SKILL.md) — Implement, audit, and explain OpenVibely update staging, draining, admission, restart validation, rollback, and durable recovery.

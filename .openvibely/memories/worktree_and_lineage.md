@@ -33,6 +33,7 @@ Durable worktree model:
 - Cleanup policy supports after-merge, keep, and manual.
 - Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
 - Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.
+- Two task-chaining gaps are pending human review as actionable notifications. Notification `38ca36f9560012f297428201c8e74442` records that the UI persists `ChildModel` but child creation/activation does not consume it, while later `ChildAgentID` edits do not update an already blocked child and can leave stale execution configuration. Notification `0815c784f28c10a7bb6a6ab36bb058ad` records that chain handoff failures are reduced to application logs after the parent is completed, leaving no durable user-facing failure evidence and potentially leaving a pre-created child blocked indefinitely. These are pending suggestions only; no implementation task has been approved or created.
 
 Commit-message direction:
 - Task execution auto-commits use generated descriptive commit messages driven by the actual worktree diff. Generation happens while changes are still in the worktree for initial execution diff capture, later task-thread completion, post-execution safety capture, and merge-prep dirty-worktree commits. GitHub PR branch publication now uses API-backed synthesized branch commits rather than local `git add`/`git commit`/`git push`, but the synthesized commit message is still generated from the task worktree diff.
