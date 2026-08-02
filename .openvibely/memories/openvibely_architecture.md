@@ -44,6 +44,7 @@ Worker capacity settings:
 - Existing persisted finite limits, including `1`, must remain unchanged. There is intentionally no upgrade migration from `1` to `0` because historical implicit defaults cannot be distinguished reliably from an explicit user selection.
 - No environment/config override exists for the global worker limit; it is persisted in settings.
 - Task-thread follow-ups enforce finite global worker limits by atomically reserving global and project capacity before provider execution, while preserving cancellable queue waits, exact counter cleanup, and `0 = unlimited` behavior.
+- GitHub issue #192 tracks duplicated project worker-capacity snapshot assembly across `WorkerSettings`, HTMX `UpdateWorkerSettings`, `ProjectWorkerStats`, and `UpdateProjectWorkerLimit`. The bounded consolidation is one private snapshot builder returning the project list and `[]pages.ProjectWorkerStats`, while each handler retains its rendering, mutation, logging, and redirect behavior; focused parity coverage should continue exercising all four entry paths.
 
 Scheduling recurrence:
 - Schedule repeat intervals have a canonical bounded-positive contract of `1..365` for every recurrence unit. The invariant is enforced across browser create/update handlers, repositories, Automation persistence/compilation, web runtime tools, and channel construction paths. `Schedule.ComputeNextRun` rejects invalid, overflowed, legacy, or corrupt persisted intervals, and scheduler processing skips malformed schedules so they cannot block later valid work.
