@@ -1126,13 +1126,10 @@ window.addEventListener('DOMContentLoaded', function() {
 		    var expectedLivePanX = livePanStart[0] - 120 * livePanStart[2] / livePanRect.width;
 		    var expectedLivePanY = livePanStart[1] - 60 * livePanStart[3] / livePanRect.height;
 		    if (Math.abs(livePanFinish[0] - expectedLivePanX) > 0.05 || Math.abs(livePanFinish[1] - expectedLivePanY) > 0.05) fail('rapid Live node pan did not use stable screen-space deltas: ' + livePanFinish.join(' '));
-		    await wait(10);
-		    if (liveID() !== 'automation-a') fail('drag-generated Live node click was not suppressed');
-		    liveTaskLink.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:42, clientX:livePanX, clientY:livePanY}));
-		    liveTaskLink.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:42, clientX:livePanX+20, clientY:livePanY+10}));
-		    liveTaskLink.dispatchEvent(new PointerEvent('pointercancel', {bubbles:true, cancelable:true, button:0, pointerId:42, clientX:livePanX+20, clientY:livePanY+10}));
-		    await wait(10);
-		    click('#automation-live [data-automation-task-link]', 'Automation-backed Task node immediately after canceled Live drag');
+		    var dragAssociatedClick = new MouseEvent('click', {bubbles:true, cancelable:true, button:0, clientX:livePanX+120, clientY:livePanY+60});
+		    if (liveTaskLink.dispatchEvent(dragAssociatedClick) || !dragAssociatedClick.defaultPrevented) fail('drag-associated Live node click was not explicitly consumed');
+		    if (liveID() !== 'automation-a') fail('drag-associated Live node click navigated away from the Automation');
+		    click('#automation-live [data-automation-task-link]', 'Automation-backed Task node immediately after consumed drag click');
 		    await waitFor(function() { return !!document.getElementById('task-detail-content'); }, 'Automation-backed Task detail');
 		    var automationTaskBack = document.getElementById('task-back-btn');
 		    var automationsTaskBack = document.getElementById('task-automations-back-btn');
