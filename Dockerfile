@@ -43,7 +43,10 @@ LABEL org.opencontainers.image.title="OpenVibely" \
       org.opencontainers.image.source="https://github.com/openvibely/openvibely" \
       org.opencontainers.image.licenses="MIT"
 
-RUN dnf install -y --setopt=install_weak_deps=False \
+# Apply all pending Fedora security errata before installing toolchains so the
+# base layer's pre-installed packages (glibc, openssl, ...) are current too.
+RUN dnf -y upgrade --refresh --setopt=install_weak_deps=False \
+ && dnf install -y --setopt=install_weak_deps=False \
       bash \
       binutils \
       ca-certificates \
