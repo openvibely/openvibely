@@ -2637,6 +2637,10 @@ func (h *Handler) executeChatScheduleRequests(ctx context.Context, projectID str
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionTimeError:
 				applog.Infof("[handler] executeChatScheduleRequests invalid time: %s", req.Time)
 				results = append(results, fmt.Sprintf("- Invalid time %q for task \"%s\" (expected HH:MM, 00:00-23:59)", req.Time, result.Task.Title))
+			case actionErr != nil && actionErr.Kind == service.ScheduleActionRepeatError:
+				results = append(results, fmt.Sprintf("- Unknown repeat type %q for task \"%s\"", req.Repeat, result.Task.Title))
+			case actionErr != nil && actionErr.Kind == service.ScheduleActionDaysError:
+				results = append(results, fmt.Sprintf("- Invalid weekly days for task \"%s\": %v", result.Task.Title, err))
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionIntervalError:
 				results = append(results, fmt.Sprintf("- Invalid interval %d for task \"%s\" (%v)", req.Interval, result.Task.Title, err))
 			default:
@@ -2648,9 +2652,6 @@ func (h *Handler) executeChatScheduleRequests(ctx context.Context, projectID str
 				results = append(results, fmt.Sprintf("- Error scheduling task \"%s\": %v", title, err))
 			}
 			continue
-		}
-		if result.UnknownRepeat {
-			applog.Infof("[handler] executeChatScheduleRequests unknown repeat type %q, defaulting to daily", req.Repeat)
 		}
 		for _, warning := range result.Warnings {
 			applog.Infof("[handler] executeChatScheduleRequests task transition warning: %v", warning)
@@ -2728,6 +2729,8 @@ func (h *Handler) executeChatModifyScheduleRequests(ctx context.Context, project
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionRepeatError:
 				applog.Infof("[handler] executeChatModifyScheduleRequests unknown repeat type %q", req.Repeat)
 				results = append(results, fmt.Sprintf("- Unknown repeat type %q for schedule on task \"%s\"", req.Repeat, title))
+			case actionErr != nil && actionErr.Kind == service.ScheduleActionDaysError:
+				results = append(results, fmt.Sprintf("- Invalid weekly days for schedule on task \"%s\": %v", title, err))
 			case actionErr != nil && actionErr.Kind == service.ScheduleActionIntervalError:
 				results = append(results, fmt.Sprintf("- Invalid interval %d for schedule on task \"%s\" (%v)", *req.Interval, title, err))
 			default:
