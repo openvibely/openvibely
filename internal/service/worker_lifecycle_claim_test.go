@@ -253,7 +253,7 @@ func TestWorkerService_TaskClaimedBeforeLifecycleHooks(t *testing.T) {
 	// status visible at hook invocation time. The invoker blocks briefly
 	// to simulate a slow LLM-backed hook so the bug (status still pending
 	// during hook execution) would be visible without the fix.
-	hookEntered := make(chan struct{})
+	hookEntered := make(chan struct{}, 1)
 	releaseHook := make(chan struct{})
 	var (
 		mu                sync.Mutex
