@@ -100,7 +100,7 @@ func TestWailsInstallerRetainsAndRestoresCompleteBundle(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(installed, "Contents", "old")); err != nil || string(data) != "old" {
 		t.Fatalf("old bundle not restored: data=%q err=%v", data, err)
 	}
-	if target, err := os.Readlink(filepath.Join(installed, "Contents", "Frameworks", "old-link")); err != nil || target != "../old" {
+	if target, err := os.Readlink(filepath.Join(installed, "Contents", "Frameworks", "old-link")); err != nil || target != filepath.FromSlash("../old") {
 		t.Fatalf("bundle symlink not restored: target=%q err=%v", target, err)
 	}
 	if relaunched != installed {
@@ -378,10 +378,7 @@ func TestWailsInstallUnitRejectsEveryUpdaterOwnedDeletionBoundary(t *testing.T) 
 		Version:      "0.6.0",
 		OutcomeID:    "desktop-operation-1",
 	}
-	helperPath := staged.InstallPath + ".openvibely-helper"
-	if runtime.GOOS == "windows" {
-		helperPath += ".exe"
-	}
+	helperPath := packagedUpdateHelperPath(staged.InstallPath)
 	for _, boundary := range []string{
 		staged.ArtifactPath,
 		staged.BackupPath + ".partial",
@@ -397,6 +394,7 @@ func TestWailsInstallUnitRejectsEveryUpdaterOwnedDeletionBoundary(t *testing.T) 
 		binaryHelperCancelledPath(staged.InstallPath),
 		binaryHelperRecoveryReadyPath(staged.InstallPath),
 		binaryHelperRecoveryClaimPath(staged.InstallPath),
+		binaryHelperTransitionLeasePath(staged),
 		binaryHelperLeasePath(staged),
 	} {
 		t.Run(filepath.Base(boundary), func(t *testing.T) {
@@ -711,7 +709,7 @@ func TestBinaryInstallerPassesRelaunchContextOutsideCommandLineAndDurableState(t
 			t.Fatalf("relaunch context leaked into durable state %s", path)
 		}
 	}
-	if helper, err := os.ReadFile(current + ".openvibely-helper"); err != nil || string(helper) != "signed-original" {
+	if helper, err := os.ReadFile(packagedUpdateHelperPath(current)); err != nil || string(helper) != "signed-original" {
 		t.Fatalf("helper copy = %q, err = %v", helper, err)
 	}
 }
@@ -757,7 +755,7 @@ func TestBinaryInstallerRequiresAndRequestsShutdownAfterHelperStarts(t *testing.
 	if !started || !shutdown {
 		t.Fatalf("started=%v shutdown=%v", started, shutdown)
 	}
-	helperPath := current + ".openvibely-helper"
+	helperPath := packagedUpdateHelperPath(current)
 	if data, err := os.ReadFile(helperPath); err != nil || string(data) != "old" {
 		t.Fatalf("helper copy = %q, err = %v", data, err)
 	}
@@ -1061,7 +1059,7 @@ func TestBinaryInstallerRecoveryWaitsForDurableHelperReadiness(t *testing.T) {
 			t.Fatalf("recovery command %q lacks %q", command.Args, required)
 		}
 	}
-	helperPath := current + ".openvibely-helper"
+	helperPath := packagedUpdateHelperPath(current)
 	if data, err := os.ReadFile(helperPath); err != nil || string(data) != "published-target" {
 		t.Fatalf("recovery helper image=%q err=%v", data, err)
 	}

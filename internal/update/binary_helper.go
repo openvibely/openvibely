@@ -68,6 +68,10 @@ func binaryHelperRecoveryReadyPath(current string) string {
 func binaryHelperRecoveryClaimPath(current string) string {
 	return current + ".openvibely-recovery-claim.json"
 }
+func binaryHelperTransitionLeasePath(staged LocalStagedUpdate) string {
+	digest := sha256.Sum256([]byte(staged.OutcomeID))
+	return staged.InstallPath + ".openvibely-handoff-" + hex.EncodeToString(digest[:8]) + ".lock"
+}
 func binaryHelperLeasePath(staged LocalStagedUpdate) string {
 	digest := sha256.Sum256([]byte(staged.OutcomeID))
 	return staged.InstallPath + ".openvibely-helper-" + hex.EncodeToString(digest[:8]) + ".lock"
@@ -127,7 +131,12 @@ func claimBinaryHelperHandoff(ctx context.Context, staged LocalStagedUpdate) err
 }
 
 func authorizeBinaryHelperHandoff(staged LocalStagedUpdate) error {
-	if err := os.Rename(binaryHelperOutcomePath(staged.InstallPath), binaryHelperAuthorizedPath(staged.InstallPath)); err != nil {
+	lease, err := acquireBinaryHelperTransitionLease(staged)
+	if err != nil {
+		return fmt.Errorf("authorize binary helper handoff: %w", err)
+	}
+	defer lease.Close()
+	if err := renameBinaryHelperState(binaryHelperOutcomePath(staged.InstallPath), binaryHelperAuthorizedPath(staged.InstallPath)); err != nil {
 		if os.IsNotExist(err) {
 			outcome, readErr := readBinaryHelperOutcome(staged)
 			if readErr == nil && outcome.State == binaryOutcomeAuthorized {
@@ -143,7 +152,12 @@ func authorizeBinaryHelperHandoff(staged LocalStagedUpdate) error {
 }
 
 func cancelBinaryHelperHandoff(staged LocalStagedUpdate) (bool, error) {
-	if err := os.Rename(binaryHelperOutcomePath(staged.InstallPath), binaryHelperCancelledPath(staged.InstallPath)); err == nil {
+	lease, err := acquireBinaryHelperTransitionLease(staged)
+	if err != nil {
+		return false, fmt.Errorf("cancel binary helper handoff: %w", err)
+	}
+	defer lease.Close()
+	if err := renameBinaryHelperState(binaryHelperOutcomePath(staged.InstallPath), binaryHelperCancelledPath(staged.InstallPath)); err == nil {
 		return true, nil
 	} else if !os.IsNotExist(err) {
 		return false, fmt.Errorf("cancel binary helper handoff: %w", err)
@@ -159,6 +173,37 @@ func cancelBinaryHelperHandoff(staged LocalStagedUpdate) (bool, error) {
 		return true, nil
 	default:
 		return false, fmt.Errorf("binary helper handoff has invalid terminal race state %q", outcome.State)
+	}
+}
+
+func acquireBinaryHelperTransitionLease(staged LocalStagedUpdate) (*binaryHelperLease, error) {
+	// Serializing the two terminal renames is required on Windows, where
+	// concurrent MoveFileEx calls can otherwise both appear to claim the same
+	// pending path.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		lease, acquired, err := tryAcquireBinaryHelperLease(binaryHelperTransitionLeasePath(staged))
+		if err != nil {
+			return nil, err
+		}
+		if acquired {
+			return lease, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("timed out acquiring binary helper handoff lease")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func renameBinaryHelperState(source, destination string) error {
+	deadline := time.Now().Add(time.Second)
+	for {
+		err := os.Rename(source, destination)
+		if err == nil || os.IsNotExist(err) || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -295,6 +340,7 @@ func removeBinaryHelperOutcome(staged LocalStagedUpdate) error {
 		binaryHelperCancelledPath(staged.InstallPath),
 		binaryHelperRecoveryClaimPath(staged.InstallPath),
 		binaryHelperRecoveryReadyPath(staged.InstallPath),
+		binaryHelperTransitionLeasePath(staged),
 	} {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			result = errors.Join(result, err)
@@ -760,7 +806,8 @@ func installStagedBinary(current, staged, backup string, mode os.FileMode) error
 }
 
 func publishStagedBinary(current, staged string) error {
-	stagedFile, err := os.Open(staged)
+	// FlushFileBuffers requires a write-capable handle on Windows.
+	stagedFile, err := os.OpenFile(staged, os.O_RDWR, 0)
 	if err != nil {
 		return err
 	}

@@ -31,6 +31,14 @@ type LocalStagedUpdate struct {
 	OutcomeID       string `json:"outcome_id,omitempty"`
 }
 
+func packagedUpdateHelperPath(installPath string) string {
+	path := installPath + ".openvibely-helper"
+	if runtime.GOOS == "windows" {
+		path += ".exe"
+	}
+	return path
+}
+
 type WailsProvider struct {
 	Client  *Client
 	Current CurrentBuild
@@ -152,10 +160,7 @@ func (i *WailsInstaller) startDesktopHelper(ctx context.Context, staged LocalSta
 	if err != nil {
 		return err
 	}
-	helperPath := staged.InstallPath + ".openvibely-helper"
-	if runtime.GOOS == "windows" {
-		helperPath += ".exe"
-	}
+	helperPath := packagedUpdateHelperPath(staged.InstallPath)
 	info, err := os.Stat(executable)
 	if err != nil {
 		return err
@@ -313,10 +318,7 @@ func validateDesktopDataBoundaries(staged LocalStagedUpdate, protectedPaths []st
 	if len(protectedPaths) == 0 {
 		return errors.New("desktop protected data paths are required")
 	}
-	helperPath := staged.InstallPath + ".openvibely-helper"
-	if runtime.GOOS == "windows" {
-		helperPath += ".exe"
-	}
+	helperPath := packagedUpdateHelperPath(staged.InstallPath)
 	boundaries := []string{
 		staged.InstallPath,
 		staged.BackupPath,
@@ -335,6 +337,7 @@ func validateDesktopDataBoundaries(staged LocalStagedUpdate, protectedPaths []st
 			binaryHelperCancelledPath(staged.InstallPath),
 			binaryHelperRecoveryReadyPath(staged.InstallPath),
 			binaryHelperRecoveryClaimPath(staged.InstallPath),
+			binaryHelperTransitionLeasePath(staged),
 			binaryHelperLeasePath(staged),
 		} {
 			boundaries = append(boundaries, statePath, statePath+".tmp")
@@ -932,10 +935,7 @@ func (i *BinaryInstaller) Apply(ctx context.Context, value any) error {
 	if err := validateBinaryPaths(staged); err != nil {
 		return err
 	}
-	helperPath := staged.InstallPath + ".openvibely-helper"
-	if runtime.GOOS == "windows" {
-		helperPath += ".exe"
-	}
+	helperPath := packagedUpdateHelperPath(staged.InstallPath)
 	info, err := os.Stat(staged.InstallPath)
 	if err != nil {
 		return err
@@ -986,10 +986,7 @@ func (i *BinaryInstaller) RecoverBinaryRestart(ctx context.Context, staged Local
 	if err := validateBinaryPaths(staged); err != nil {
 		return err
 	}
-	helperPath := staged.InstallPath + ".openvibely-helper"
-	if runtime.GOOS == "windows" {
-		helperPath += ".exe"
-	}
+	helperPath := packagedUpdateHelperPath(staged.InstallPath)
 	info, err := os.Stat(staged.InstallPath)
 	if err != nil {
 		return err
