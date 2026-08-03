@@ -1127,8 +1127,9 @@ window.addEventListener('DOMContentLoaded', function() {
 		    var livePanX = liveLinkRect.left + liveLinkRect.width / 2;
 		    var livePanY = liveLinkRect.top + liveLinkRect.height / 2;
 	    liveTaskLink.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX, clientY:livePanY}));
-	    if (liveCaptureOwner !== 'task-link') fail('task-backed Live node did not retain pointer capture for native click navigation: ' + liveCaptureOwner);
+	    if (liveCaptureOwner) fail('task-backed Live node captured the pointer before drag intent: ' + liveCaptureOwner);
 	    liveTaskLink.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+120, clientY:livePanY+60}));
+	    if (liveCaptureOwner !== 'canvas') fail('task-backed Live node drag did not transfer pointer capture to the canvas: ' + liveCaptureOwner);
 	    liveTaskLink.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+120, clientY:livePanY+60}));
 	    var dragAssociatedClick = new MouseEvent('click', {bubbles:true, cancelable:true, button:0, clientX:livePanX+120, clientY:livePanY+60});
 	    var taskRequestsBeforeDragClick = liveTaskRequests;
