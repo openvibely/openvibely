@@ -142,6 +142,11 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	  (async function() {
 	    await waitFor(function() { return window.htmx && row('item-15'); }, 'Alerts hydration');
 	    htmx.process(document.body);
+		    await waitFor(function() {
+		      var card = document.getElementById('system-update-card');
+		      return card && !card.classList.contains('hidden');
+		    }, 'active system update card');
+		    var originalUpdateCard = document.getElementById('system-update-card');
 		    var root = document.getElementById('alerts-container');
 		    var originalScrollport = root;
 		    root.scrollTop = row('item-15').offsetTop - root.offsetTop - 70;
@@ -151,9 +156,11 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		    await fetch('/browser-add?kind=operational', {method:'POST'});
 		    htmx.trigger(document.body, 'alertUpdate');
 		    await waitFor(function() { return !!row('live-operational'); }, 'live operational alert refresh');
-		    await wait(250);
+		    await wait(1250);
 		    detectTransientTopJump = false;
 		    root = document.getElementById('alerts-container');
+		    if (document.getElementById('system-update-card') !== originalUpdateCard) fail('live operational alert replaced the active system update card');
+		    if (originalUpdateCard.classList.contains('hidden')) fail('active system update card became hidden after live operational refresh');
 		    if (root !== originalScrollport) fail('live operational alert replaced the Alerts scrollport');
 		    if (transientTopJump) fail('live operational alert painted the Alerts scrollport at the top before restoration');
 		    assertNear(row('item-14').getBoundingClientRect().top, liveAnchorTop, 'live operational alert visible anchor');
@@ -170,9 +177,11 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		    await fetch('/browser-add?kind=notification', {method:'POST'});
 		    htmx.trigger(document.body, 'alertUpdate');
 		    await waitFor(function() { return !!row('live-notification'); }, 'live actionable notification refresh');
-		    await wait(250);
+		    await wait(1250);
 		    detectTransientTopJump = false;
 		    root = document.getElementById('alerts-container');
+		    if (document.getElementById('system-update-card') !== originalUpdateCard) fail('live actionable notification replaced the active system update card');
+		    if (originalUpdateCard.classList.contains('hidden')) fail('active system update card became hidden after live notification refresh');
 		    if (root !== originalScrollport) fail('live actionable notification replaced the Alerts scrollport');
 		    if (transientTopJump) fail('live actionable notification painted the Alerts scrollport at the top before restoration');
 		    assertNear(row('item-14').getBoundingClientRect().top, liveAnchorTop, 'live actionable notification visible anchor');
@@ -265,6 +274,9 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 			page = strings.Replace(page, "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", style+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
+		case r.URL.Path == "/api/system/update" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"current_version":"0.3.0","state":"available","distribution":"standalone","channel":"stable","manual":false,"staged":true,"release":{"metadata":{"version":"0.4.0"},"target":{"image_ref":""},"apply_supported":true},"drain":{"active":{}}}`))
 		case r.URL.Path == "/browser-add" && r.Method == http.MethodPost:
 			prependAlert(r.URL.Query().Get("kind"))
 			w.WriteHeader(http.StatusNoContent)
