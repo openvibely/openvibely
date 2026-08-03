@@ -863,6 +863,16 @@ func runChannelChatQueuedInput(ctx context.Context, opts channelChatIngressQueue
 	return true
 }
 
+func cleanupChannelChatProvisionalTask(ctx context.Context, platform string, taskRepo *repository.TaskRepo, taskID, reason string) {
+	if taskRepo == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	cleanupCtx := context.WithoutCancel(ctx)
+	if err := taskRepo.Delete(cleanupCtx, taskID); err != nil {
+		applog.Infof("[%s] cleanup %s task failed task=%s: %v", platform, reason, taskID, err)
+	}
+}
+
 func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTurnOptions) (bool, []models.ChatAttachment) {
 	platform := strings.TrimSpace(opts.Platform)
 	if platform == "" {
@@ -894,9 +904,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		if err := opts.CreateTaskContext(ctx, opts.Task.ID); err != nil {
 			applog.Infof("[%s] create chat context failed task=%s: %v", platform, opts.Task.ID, err)
 			cleanupChannelChatAttachmentSourceDirs(opts.Attachments)
-			if delErr := opts.TaskRepo.Delete(ctx, opts.Task.ID); delErr != nil {
-				applog.Infof("[%s] cleanup chat task failed task=%s: %v", platform, opts.Task.ID, delErr)
-			}
+			cleanupChannelChatProvisionalTask(ctx, platform, opts.TaskRepo, opts.Task.ID, "chat context")
 			if opts.OnTaskContextFailure != nil {
 				opts.OnTaskContextFailure(ctx)
 			}
@@ -914,9 +922,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 	if err != nil {
 		applog.Infof("[%s] create execution failed: %v", platform, err)
 		cleanupChannelChatAttachmentSourceDirs(opts.Attachments)
-		if delErr := opts.TaskRepo.Delete(ctx, opts.Task.ID); delErr != nil {
-			applog.Infof("[%s] cleanup chat task failed task=%s after execution create failure: %v", platform, opts.Task.ID, delErr)
-		}
+		cleanupChannelChatProvisionalTask(ctx, platform, opts.TaskRepo, opts.Task.ID, "chat task after execution create failure")
 		if opts.OnExecutionCreateFailure != nil {
 			opts.OnExecutionCreateFailure(ctx)
 		}
@@ -927,9 +933,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 	}
 	if alreadyHandedOff {
 		cleanupChannelChatAttachmentSourceDirs(opts.Attachments)
-		if delErr := opts.TaskRepo.Delete(ctx, opts.Task.ID); delErr != nil {
-			applog.Infof("[%s] cleanup duplicate chat task failed task=%s: %v", platform, opts.Task.ID, delErr)
-		}
+		cleanupChannelChatProvisionalTask(ctx, platform, opts.TaskRepo, opts.Task.ID, "duplicate chat")
 		return true, nil
 	}
 

@@ -123,6 +123,7 @@ type SlackService struct {
 	ackSocketRequestFn             func(*socketmode.Client, socketmode.Request)
 	createQueuedInputFn            func(context.Context, *models.ThreadInput) (bool, error)
 	createExecutionFn              func(context.Context, *models.Execution) (bool, error)
+	preACKTimeout                  time.Duration
 }
 
 func NewSlackService(
@@ -160,6 +161,7 @@ func NewSlackService(
 		userProjects:            make(map[string]string),
 		processedMessageEvents:  make(map[string]time.Time),
 		processingMessageEvents: make(map[string]struct{}),
+		preACKTimeout:           slackPreACKTimeout,
 	}
 }
 
@@ -525,10 +527,24 @@ func (s *SlackService) handleSocketEvent(ctx context.Context, client *socketmode
 	if evt.Request == nil {
 		return
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithCancel(ctx)
+	timeout := s.preACKTimeout
+	if timeout <= 0 {
+		timeout = slackPreACKTimeout
+	}
+	preACKTimer := time.AfterFunc(timeout, cancel)
+	defer func() {
+		preACKTimer.Stop()
+		cancel()
+	}()
 
 	var ackOnce sync.Once
 	ack := func() {
 		ackOnce.Do(func() {
+			preACKTimer.Stop()
 			if s.ackSocketRequestFn != nil {
 				s.ackSocketRequestFn(client, *evt.Request)
 				return
@@ -552,13 +568,13 @@ func (s *SlackService) handleSocketEvent(ctx context.Context, client *socketmode
 	teamID := strings.TrimSpace(eventsAPIEvent.TeamID)
 	switch e := eventsAPIEvent.InnerEvent.Data.(type) {
 	case *slackevents.AppMentionEvent:
-		s.handleAppMention(ctx, teamID, *e, ack)
+		s.handleAppMention(requestCtx, teamID, *e, ack)
 	case slackevents.AppMentionEvent:
-		s.handleAppMention(ctx, teamID, e, ack)
+		s.handleAppMention(requestCtx, teamID, e, ack)
 	case *slackevents.MessageEvent:
-		s.handleMessageEvent(ctx, teamID, *e, ack)
+		s.handleMessageEvent(requestCtx, teamID, *e, ack)
 	case slackevents.MessageEvent:
-		s.handleMessageEvent(ctx, teamID, e, ack)
+		s.handleMessageEvent(requestCtx, teamID, e, ack)
 	default:
 		ack() // Events the integration intentionally does not support are terminal.
 	}
@@ -731,7 +747,7 @@ func (s *SlackService) processIncoming(ctx context.Context, msg slackIncomingMes
 		s.processIncomingMessageFn(msg)
 		onDurableHandoff()
 	} else {
-		s.processIncomingMessageWithHandoff(ctx, msg, onDurableHandoff)
+		s.processIncomingMessageWithHandoff(ctx, msg, onDurableHandoff, true)
 	}
 	if !handedOff {
 		s.finishIncomingMessage(msg, false)
@@ -1000,10 +1016,10 @@ func (s *SlackService) recordQueuedAttachmentFailure(ctx context.Context, projec
 }
 
 func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
-	s.processIncomingMessageWithHandoff(context.Background(), msg, func() {})
+	s.processIncomingMessageWithHandoff(context.Background(), msg, func() {}, false)
 }
 
-func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context, msg slackIncomingMessage, onDurableHandoff func()) {
+func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context, msg slackIncomingMessage, onDurableHandoff func(), asyncPreACKFailures bool) {
 	msg.Text = slackMessageTextOrAttachmentPrompt(msg.Text, len(msg.Files) > 0)
 	if msg.ChannelID == "" || msg.UserID == "" || strings.TrimSpace(msg.Text) == "" {
 		onDurableHandoff() // Valid envelope with unusable message content is terminal.
@@ -1018,15 +1034,17 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 	if parent == nil {
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithCancel(parent)
-	preACKTimer := time.AfterFunc(slackPreACKTimeout, cancel)
-	defer func() {
-		preACKTimer.Stop()
-		cancel()
-	}()
-	durableHandoff := func() {
-		preACKTimer.Stop()
-		onDurableHandoff()
+	ctx := parent
+	durableHandoff := onDurableHandoff
+	notifyPreACKFailure := func(notify func()) {
+		if notify == nil {
+			return
+		}
+		if asyncPreACKFailures {
+			go notify()
+			return
+		}
+		notify()
 	}
 	start := time.Now()
 
@@ -1099,19 +1117,25 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 			})
 		},
 		OnAttachmentDownloadFailed: func(_ context.Context, msgText string) {
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
+			notifyPreACKFailure(func() { _ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText) })
 		},
 		OnAttachmentStoreFailed: func(_ context.Context, msgText string) {
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
+			notifyPreACKFailure(func() { _ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText) })
 		},
 		OnModelSelectionFailed: func(_ context.Context, err error) {
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", err))
+			notifyPreACKFailure(func() {
+				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", err))
+			})
 		},
 		OnActiveLookupFailed: func(context.Context) {
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error checking active chat response. Please try again.")
+			notifyPreACKFailure(func() {
+				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error checking active chat response. Please try again.")
+			})
 		},
 		OnQueueFailure: func(context.Context) {
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error queueing your message. Please try again.")
+			notifyPreACKFailure(func() {
+				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error queueing your message. Please try again.")
+			})
 		},
 		OnQueued: func(context.Context) {
 			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Queued. I'll send this after the current response finishes.")
@@ -1153,13 +1177,19 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 			},
 			FilterChatHistory: filterSlackChatHistory,
 			OnTaskCreateFailure: func(context.Context) {
-				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				notifyPreACKFailure(func() {
+					_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				})
 			},
 			OnTaskContextFailure: func(context.Context) {
-				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				notifyPreACKFailure(func() {
+					_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				})
 			},
 			OnExecutionCreateFailure: func(context.Context) {
-				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				notifyPreACKFailure(func() {
+					_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				})
 			},
 			OnAttachmentLinkFailure: func(_ context.Context, msgText string) {
 				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)

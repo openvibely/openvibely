@@ -199,7 +199,7 @@ func slackSocketMessageEvent(envelopeID, timestamp string) socketmode.Event {
 	}
 }
 
-func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *repository.TaskRepo, *repository.ExecutionRepo, *repository.ThreadInputRepo, *repository.SlackInboundReceiptRepo, string) {
+func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *sql.DB, *repository.TaskRepo, *repository.ExecutionRepo, *repository.ThreadInputRepo, *repository.SlackInboundReceiptRepo, string) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -223,7 +223,7 @@ func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *repository.
 	svc.SetSlackInboundReceiptRepo(receiptRepo)
 	svc.setActiveProject(ctx, "T1", "U1", project.ID)
 	svc.postMessageFn = func(string, string, string) (string, error) { return "", nil }
-	return svc, taskRepo, execRepo, threadInputRepo, receiptRepo, project.ID
+	return svc, db, taskRepo, execRepo, threadInputRepo, receiptRepo, project.ID
 }
 
 func TestSlackInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
@@ -259,7 +259,7 @@ func TestSlackInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 }
 
 func TestSlackService_SocketEventFirstTurnPersistenceFailureRedelivery(t *testing.T) {
-	svc, taskRepo, execRepo, _, _, projectID := newSlackSocketIngressTestService(t)
+	svc, _, taskRepo, execRepo, _, _, projectID := newSlackSocketIngressTestService(t)
 	acks := 0
 	attempts := 0
 	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
@@ -294,7 +294,7 @@ func TestSlackService_SocketEventFirstTurnPersistenceFailureRedelivery(t *testin
 }
 
 func TestSlackService_SocketEventQueuedTurnPersistenceFailureRedelivery(t *testing.T) {
-	svc, taskRepo, execRepo, threadInputRepo, _, projectID := newSlackSocketIngressTestService(t)
+	svc, _, taskRepo, execRepo, threadInputRepo, _, projectID := newSlackSocketIngressTestService(t)
 	ctx := context.Background()
 	agent, err := svc.llmConfigRepo.GetDefault(ctx)
 	require.NoError(t, err)
@@ -355,7 +355,7 @@ func TestSlackService_SocketEventSuccessfulRedeliveryIsAcknowledgedWithoutDuplic
 }
 
 func TestSlackService_SocketEventSuccessfulRedeliveryAfterRestartIsAcknowledgedWithoutDuplicateTurn(t *testing.T) {
-	svc, taskRepo, _, threadInputRepo, receiptRepo, projectID := newSlackSocketIngressTestService(t)
+	svc, _, taskRepo, _, threadInputRepo, receiptRepo, projectID := newSlackSocketIngressTestService(t)
 	acks := 0
 	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
 	event := slackSocketMessageEvent("E1", "1710000000.100000")
@@ -376,7 +376,7 @@ func TestSlackService_SocketEventSuccessfulRedeliveryAfterRestartIsAcknowledgedW
 }
 
 func TestSlackService_SocketEventProjectLookupFailureIsNotAcknowledgedAndCanRetry(t *testing.T) {
-	svc, taskRepo, _, _, _, projectID := newSlackSocketIngressTestService(t)
+	svc, _, taskRepo, _, _, _, projectID := newSlackSocketIngressTestService(t)
 	acks := 0
 	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
 	svc.mu.Lock()
@@ -394,6 +394,130 @@ func TestSlackService_SocketEventProjectLookupFailureIsNotAcknowledgedAndCanRetr
 	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
+}
+
+func TestSlackService_SocketEventPreACKDeadlineBoundsSettingsAndReceiptReads(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*SlackService)
+	}{
+		{
+			name: "settings read",
+			setup: func(svc *SlackService) {
+				svc.slackInboundReceiptRepo = nil
+			},
+		},
+		{
+			name: "receipt read",
+			setup: func(svc *SlackService) {
+				svc.settingsRepo = nil
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, db, _, _, _, _, _ := newSlackSocketIngressTestService(t)
+			tc.setup(svc)
+			svc.preACKTimeout = 30 * time.Millisecond
+			acks := 0
+			svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+
+			tx, err := db.Begin()
+			require.NoError(t, err)
+			defer tx.Rollback()
+			_, err = tx.Exec(`SELECT 1`)
+			require.NoError(t, err)
+
+			done := make(chan struct{})
+			go func() {
+				svc.handleSocketEvent(context.Background(), nil, slackSocketMessageEvent("E1", "1710000000.100000"))
+				close(done)
+			}()
+
+			select {
+			case <-done:
+			case <-time.After(250 * time.Millisecond):
+				_ = tx.Rollback()
+				<-done
+				t.Fatal("socket event remained blocked beyond the pre-ACK deadline")
+			}
+			require.Equal(t, 0, acks)
+		})
+	}
+}
+
+func TestSlackService_SocketEventPreACKFailureCallbackDoesNotBlock(t *testing.T) {
+	svc, _, taskRepo, _, _, _, projectID := newSlackSocketIngressTestService(t)
+	svc.preACKTimeout = 30 * time.Millisecond
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	svc.createExecutionFn = func(context.Context, *models.Execution) (bool, error) {
+		return false, fmt.Errorf("simulated execution persistence failure")
+	}
+	callbackStarted := make(chan struct{}, 1)
+	releaseCallback := make(chan struct{})
+	svc.postMessageFn = func(string, string, string) (string, error) {
+		callbackStarted <- struct{}{}
+		<-releaseCallback
+		return "", nil
+	}
+
+	done := make(chan struct{})
+	go func() {
+		svc.handleSocketEvent(context.Background(), nil, slackSocketMessageEvent("E1", "1710000000.100000"))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		close(releaseCallback)
+		<-done
+		t.Fatal("pre-ACK failure notification blocked socket event handling")
+	}
+	select {
+	case <-callbackStarted:
+	case <-time.After(250 * time.Millisecond):
+		close(releaseCallback)
+		t.Fatal("expected asynchronous failure notification")
+	}
+	close(releaseCallback)
+	require.Equal(t, 0, acks)
+	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks)
+}
+
+func TestRunChannelChatFirstTurnDeadlineCleanupUsesNonCancelledContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "deadline cleanup"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	agent := &models.LLMConfig{ID: "agent-deadline-cleanup"}
+
+	deadlineCtx, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
+	defer cancel()
+	handled, _ := runChannelChatFirstTurn(deadlineCtx, channelChatIngressFirstTurnOptions{
+		Platform:  "slack",
+		ProjectID: project.ID,
+		Message:   "persist this",
+		Source:    "slack",
+		Task:      &models.Task{Title: "provisional"},
+		Agent:     agent,
+		TaskRepo:  taskRepo,
+		CreateTaskContext: func(ctx context.Context, _ string) error {
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		CreateExecution: func(context.Context, *models.Execution) (bool, error) {
+			return false, nil
+		},
+	})
+	require.True(t, handled)
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks, "deadline cleanup must remove the provisional task")
 }
 
 func TestSlackService_SocketEventTerminallyAcknowledgesIgnoredAndMalformedEvents(t *testing.T) {
