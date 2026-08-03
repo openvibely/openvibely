@@ -116,7 +116,7 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	}
 }
 
-func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
+func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -183,6 +183,21 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 			}
 		}
 	}
+	prependAlert := func(kind string) {
+		mu.Lock()
+		defer mu.Unlock()
+		alert := models.Alert{
+			ID:            "live-" + kind,
+			ProjectID:     "project-alerts-browser",
+			Title:         "Live " + kind,
+			Message:       strings.Repeat("New alert content ", 5),
+			DecisionState: models.AlertDecisionNotRequired,
+		}
+		if kind == "notification" {
+			alert.DecisionState = models.AlertDecisionPending
+		}
+		alerts = append([]models.Alert{alert}, alerts...)
+	}
 
 	runner := `<script>
 	window.handleDropdownToggle = function(event) { event.stopPropagation(); };
@@ -226,11 +241,59 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 	  (async function() {
 	    await waitFor(function() { return window.htmx && row('item-15'); }, 'Alerts hydration');
 	    htmx.process(document.body);
-	    var root = document.getElementById('alerts-container');
-	    var originalScrollport = root;
-	    root.scrollTop = row('item-15').offsetTop - root.offsetTop - 70;
-	    await wait(50);
-	    var stableTop = row('item-14').getBoundingClientRect().top;
+		    await waitFor(function() {
+		      var card = document.getElementById('system-update-card');
+		      return card && !card.classList.contains('hidden');
+		    }, 'active system update card');
+		    var originalUpdateCard = document.getElementById('system-update-card');
+		    var root = document.getElementById('alerts-container');
+		    var originalScrollport = root;
+		    root.scrollTop = row('item-15').offsetTop - root.offsetTop - 70;
+		    await wait(50);
+		    var liveAnchorTop = row('item-14').getBoundingClientRect().top;
+		    detectTransientTopJump = true;
+		    await fetch('/browser-add?kind=operational', {method:'POST'});
+		    htmx.trigger(document.body, 'alertUpdate');
+		    await waitFor(function() { return !!row('live-operational'); }, 'live operational alert refresh');
+		    await wait(1250);
+		    detectTransientTopJump = false;
+		    root = document.getElementById('alerts-container');
+		    if (document.getElementById('system-update-card') !== originalUpdateCard) fail('live operational alert replaced the active system update card');
+		    if (originalUpdateCard.classList.contains('hidden')) fail('active system update card became hidden after live operational refresh');
+		    if (root !== originalScrollport) fail('live operational alert replaced the Alerts scrollport');
+		    if (transientTopJump) fail('live operational alert painted the Alerts scrollport at the top before restoration');
+		    assertNear(row('item-14').getBoundingClientRect().top, liveAnchorTop, 'live operational alert visible anchor');
+		    if (root.scrollTop < 100) fail('live operational alert reset the Alerts scrollport');
+		    if (row('live-operational').contains(document.activeElement)) fail('live operational alert received focus');
+		    var liveSearch = document.querySelector('input[data-card-search="alerts"]');
+		    liveSearch.value = 'notification';
+		    liveSearch.dispatchEvent(new Event('input', {bubbles:true}));
+		    await wait(50);
+
+		    liveAnchorTop = row('item-14').getBoundingClientRect().top;
+		    transientTopJump = false;
+		    detectTransientTopJump = true;
+		    await fetch('/browser-add?kind=notification', {method:'POST'});
+		    htmx.trigger(document.body, 'alertUpdate');
+		    await waitFor(function() { return !!row('live-notification'); }, 'live actionable notification refresh');
+		    await wait(1250);
+		    detectTransientTopJump = false;
+		    root = document.getElementById('alerts-container');
+		    if (document.getElementById('system-update-card') !== originalUpdateCard) fail('live actionable notification replaced the active system update card');
+		    if (originalUpdateCard.classList.contains('hidden')) fail('active system update card became hidden after live notification refresh');
+		    if (root !== originalScrollport) fail('live actionable notification replaced the Alerts scrollport');
+		    if (transientTopJump) fail('live actionable notification painted the Alerts scrollport at the top before restoration');
+		    assertNear(row('item-14').getBoundingClientRect().top, liveAnchorTop, 'live actionable notification visible anchor');
+		    if (!row('live-notification').textContent.includes('pending')) fail('actionable notification state was not authoritatively refreshed');
+		    if (row('live-notification').contains(document.activeElement)) fail('live actionable notification received focus');
+		    liveSearch = document.querySelector('input[data-card-search="alerts"]');
+		    if (liveSearch.value !== 'notification') fail('card search state was not restored after live refresh');
+		    if (getComputedStyle(row('live-operational')).display !== 'none') fail('card search was not reapplied before live refresh settled');
+		    liveSearch.value = '';
+		    liveSearch.dispatchEvent(new Event('input', {bubbles:true}));
+		    await wait(50);
+
+		    var stableTop = row('item-14').getBoundingClientRect().top;
 	    detectTransientTopJump = true;
 	    await remove('item-15');
 	    await wait(250);
@@ -310,6 +373,12 @@ func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 			page = strings.Replace(page, "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
 			page = strings.Replace(page, "</head>", style+runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
+		case r.URL.Path == "/api/system/update" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"current_version":"0.3.0","state":"available","distribution":"standalone","channel":"stable","manual":false,"staged":true,"release":{"metadata":{"version":"0.4.0"},"target":{"image_ref":""},"apply_supported":true},"drain":{"active":{}}}`))
+		case r.URL.Path == "/browser-add" && r.Method == http.MethodPost:
+			prependAlert(r.URL.Query().Get("kind"))
+			w.WriteHeader(http.StatusNoContent)
 		case strings.HasPrefix(r.URL.Path, "/alerts/item-") && r.Method == http.MethodDelete:
 			deleteAlert(strings.TrimPrefix(r.URL.Path, "/alerts/"))
 			w.Header().Set("HX-Trigger", "alertUpdate")
