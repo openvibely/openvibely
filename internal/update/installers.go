@@ -575,6 +575,12 @@ func syncFilesystemTree(root string) error {
 }
 
 func syncDirectory(path string) error {
+	// Windows does not support flushing a directory handle: os.File.Sync
+	// returns ERROR_ACCESS_DENIED. File contents are synced before publication
+	// and MoveFileEx uses WRITE_THROUGH for replacements on Windows.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	directory, err := os.Open(path)
 	if err != nil {
 		return err

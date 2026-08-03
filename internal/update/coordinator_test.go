@@ -416,7 +416,20 @@ func TestCoordinatorBinaryAutoRestartDoesNotTreatPendingHelperAsRollback(t *test
 	if !drain.TakeOwnership(status.Generation) {
 		t.Fatal("take drain ownership")
 	}
-	coordinatorState := []byte(`{"state":"restarting","release":{"metadata":{"version":"0.6.0","channel":"stable","expires_at":"2099-01-01T00:00:00Z"}},"staged_local":{"artifact_path":"` + current + `.openvibely-new","install_path":"` + current + `","backup_path":"` + current + `.openvibely-backup","version":"0.6.0","previous_version":"0.5.0","outcome_id":"operation-1"},"operation_generation":"` + status.Generation + `"}`)
+	coordinatorState, err := json.Marshal(map[string]any{
+		"state": "restarting",
+		"release": map[string]any{"metadata": map[string]any{
+			"version": "0.6.0", "channel": "stable", "expires_at": "2099-01-01T00:00:00Z",
+		}},
+		"staged_local": LocalStagedUpdate{
+			ArtifactPath: current + ".openvibely-new", InstallPath: current, BackupPath: current + ".openvibely-backup",
+			Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1",
+		},
+		"operation_generation": status.Generation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(coordinatorPath, coordinatorState, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +488,20 @@ func TestCoordinatorBinaryPreparedHandoffCrashReleasesExactGeneration(t *testing
 	if !drain.TakeOwnership(status.Generation) {
 		t.Fatal("take drain ownership")
 	}
-	coordinatorState := []byte(`{"state":"restarting","release":{"metadata":{"version":"0.6.0","channel":"stable","expires_at":"2099-01-01T00:00:00Z"}},"staged_local":{"artifact_path":"` + current + `.openvibely-new","install_path":"` + current + `","backup_path":"` + current + `.openvibely-backup","version":"0.6.0","previous_version":"0.5.0","outcome_id":"operation-1"},"operation_generation":"` + status.Generation + `"}`)
+	coordinatorState, err := json.Marshal(map[string]any{
+		"state": "restarting",
+		"release": map[string]any{"metadata": map[string]any{
+			"version": "0.6.0", "channel": "stable", "expires_at": "2099-01-01T00:00:00Z",
+		}},
+		"staged_local": LocalStagedUpdate{
+			ArtifactPath: current + ".openvibely-new", InstallPath: current, BackupPath: current + ".openvibely-backup",
+			Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1",
+		},
+		"operation_generation": status.Generation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(coordinatorPath, coordinatorState, 0o600); err != nil {
 		t.Fatal(err)
 	}
