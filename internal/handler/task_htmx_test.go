@@ -138,6 +138,128 @@ func TestHandler_ListTasks_HTMXUpdate(t *testing.T) {
 	}
 }
 
+func TestHandler_ListTasks_HTMXUpdate_DefaultsDateSortsNewestFirstAndPreservesCookies(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+
+	createTask := func(title string, category models.TaskCategory) *models.Task {
+		t.Helper()
+		task := &models.Task{
+			ProjectID: "default",
+			Title:     title,
+			Category:  category,
+			Status:    models.StatusPending,
+			Prompt:    "test prompt",
+			Priority:  2,
+		}
+		if category == models.CategoryCompleted {
+			task.Status = models.StatusCompleted
+		}
+		if err := h.taskSvc.Create(ctx, task); err != nil {
+			t.Fatalf("create task %q: %v", title, err)
+		}
+		return task
+	}
+
+	oldBacklog := createTask("Zulu Backlog", models.CategoryBacklog)
+	newBacklog := createTask("Alpha Backlog", models.CategoryBacklog)
+	oldCompleted := createTask("Zulu Completed", models.CategoryCompleted)
+	legacyCompleted := createTask("Mike Legacy Completed", models.CategoryCompleted)
+	newCompleted := createTask("Alpha Completed", models.CategoryCompleted)
+
+	updates := []struct {
+		id          string
+		createdAt   string
+		updatedAt   string
+		completedAt any
+	}{
+		{oldBacklog.ID, "2024-01-01 10:00:00", "2024-01-01 10:00:00", nil},
+		{newBacklog.ID, "2024-01-02 10:00:00", "2024-01-02 10:00:00", nil},
+		{oldCompleted.ID, "2024-03-03 10:00:00", "2024-06-03 10:00:00", "2024-01-01 10:00:00"},
+		{legacyCompleted.ID, "2024-03-02 10:00:00", "2024-01-02 10:00:00", nil},
+		{newCompleted.ID, "2024-03-01 10:00:00", "2024-06-01 10:00:00", "2024-01-03 10:00:00"},
+	}
+	for _, update := range updates {
+		if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at = ?, updated_at = ?, completed_at = ? WHERE id = ?`,
+			update.createdAt, update.updatedAt, update.completedAt, update.id); err != nil {
+			t.Fatalf("set timestamps for task %s: %v", update.id, err)
+		}
+	}
+
+	renderBoard := func(cookies ...*http.Cookie) string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/tasks?project_id=default", nil)
+		req.Header.Set("HX-Request", "true")
+		req.Header.Set("HX-Target", "kanban-board")
+		for _, cookie := range cookies {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list tasks status = %d, body=%s", rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+
+	defaultBody := renderBoard()
+	assertTaskOrder(t, backlogDropZone(defaultBody), "Alpha Backlog", "Zulu Backlog")
+	assertTaskOrder(t, completedDropZone(defaultBody), "Alpha Completed", "Mike Legacy Completed", "Zulu Completed")
+	assertSortControlActive(t, defaultBody, "sort=created_desc")
+	assertSortControlActive(t, defaultBody, "sort=completed_desc")
+
+	explicitBody := renderBoard(
+		&http.Cookie{Name: backlogSortCookieName, Value: "title_desc"},
+		&http.Cookie{Name: completedSortCookieName, Value: "title_desc"},
+	)
+	assertTaskOrder(t, backlogDropZone(explicitBody), "Zulu Backlog", "Alpha Backlog")
+	assertTaskOrder(t, completedDropZone(explicitBody), "Zulu Completed", "Mike Legacy Completed", "Alpha Completed")
+	assertSortControlActive(t, explicitBody, "sort=title_desc")
+}
+
+func assertSortControlActive(t *testing.T, body string, sortQuery string) {
+	t.Helper()
+	start := strings.Index(body, sortQuery)
+	if start == -1 {
+		t.Fatalf("sort control %q not found", sortQuery)
+	}
+	end := strings.Index(body[start:], "</a>")
+	if end == -1 {
+		t.Fatalf("sort control %q has no closing anchor", sortQuery)
+	}
+	if control := body[start : start+end]; !strings.Contains(control, `class="text-sm min-h-11 active font-semibold"`) {
+		t.Fatalf("sort control %q is not rendered active: %s", sortQuery, control)
+	}
+}
+
+func assertTaskOrder(t *testing.T, body string, titles ...string) {
+	t.Helper()
+	previous := -1
+	for _, title := range titles {
+		position := strings.Index(body, title)
+		if position == -1 {
+			t.Fatalf("task %q not found in dropzone", title)
+		}
+		if position <= previous {
+			t.Fatalf("task %q at position %d is not after previous position %d", title, position, previous)
+		}
+		previous = position
+	}
+}
+
+func backlogDropZone(body string) string {
+	const backlogMarker = `data-category="backlog"`
+	start := strings.Index(body, backlogMarker)
+	if start == -1 {
+		return ""
+	}
+	body = body[start:]
+	if end := strings.Index(body, `data-category="active"`); end != -1 {
+		return body[:end]
+	}
+	return body
+}
+
 func TestHandler_ListTasks_NonHTMX(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

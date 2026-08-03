@@ -29,6 +29,8 @@ import (
 const (
 	backlogSortCookieName        = "backlog_sort"
 	completedSortCookieName      = "completed_sort"
+	defaultBacklogSort           = "created_desc"
+	defaultCompletedSort         = "completed_desc"
 	taskThreadWindowLimitDefault = 5
 	taskThreadWindowLimitMax     = 100
 )
@@ -46,10 +48,17 @@ func getSortPreference(c echo.Context, cookieName string) string {
 }
 
 func getSortPreferences(c echo.Context) taskSortPreferences {
-	return taskSortPreferences{
+	preferences := taskSortPreferences{
 		Backlog:   getSortPreference(c, backlogSortCookieName),
 		Completed: getCompletedSortPreference(c),
 	}
+	if preferences.Backlog == "" {
+		preferences.Backlog = defaultBacklogSort
+	}
+	if preferences.Completed == "" {
+		preferences.Completed = defaultCompletedSort
+	}
+	return preferences
 }
 
 // getCompletedSortPreference reads the completed-sort cookie and migrates
