@@ -7,8 +7,9 @@ import (
 )
 
 type SettingsRepo struct {
-	db            *sql.DB
-	queryObserver func(string)
+	db                    *sql.DB
+	queryObserver         func(string)
+	queryAcquiredObserver func(string)
 }
 
 func NewSettingsRepo(db *sql.DB) *SettingsRepo {
@@ -19,12 +20,20 @@ func NewSettingsRepo(db *sql.DB) *SettingsRepo {
 func (r *SettingsRepo) Get(ctx context.Context, key string) (string, error) {
 	const query = "SELECT value FROM app_settings WHERE key = ?"
 	r.observeQuery(query)
-	var value string
-	err := r.db.QueryRowContext(ctx, query, key).Scan(&value)
-	if err == sql.ErrNoRows {
-		return "", nil
+	rows, err := r.db.QueryContext(ctx, query, key)
+	if err != nil {
+		return "", err
 	}
-	return value, err
+	defer rows.Close()
+	r.observeQueryAcquired(query)
+	if !rows.Next() {
+		return "", rows.Err()
+	}
+	var value string
+	if err := rows.Scan(&value); err != nil {
+		return "", err
+	}
+	return value, rows.Err()
 }
 
 // GetMany retrieves a coherent snapshot of the requested settings in one query.
@@ -46,6 +55,7 @@ func (r *SettingsRepo) GetMany(ctx context.Context, keys []string) (map[string]s
 		return nil, err
 	}
 	defer rows.Close()
+	r.observeQueryAcquired(query)
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {
@@ -61,9 +71,21 @@ func (r *SettingsRepo) SetQueryObserver(observer func(string)) {
 	r.queryObserver = observer
 }
 
+// SetQueryAcquiredObserver installs test instrumentation that runs after a query
+// acquires a database connection and before its rows are consumed.
+func (r *SettingsRepo) SetQueryAcquiredObserver(observer func(string)) {
+	r.queryAcquiredObserver = observer
+}
+
 func (r *SettingsRepo) observeQuery(query string) {
 	if r.queryObserver != nil {
 		r.queryObserver(query)
+	}
+}
+
+func (r *SettingsRepo) observeQueryAcquired(query string) {
+	if r.queryAcquiredObserver != nil {
+		r.queryAcquiredObserver(query)
 	}
 }
 

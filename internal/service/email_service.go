@@ -215,6 +215,7 @@ type EmailService struct {
 	cancel                   context.CancelFunc
 	connectIMAP              func(ctx context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error)
 	sendMail                 func(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, inReplyTo, references string) error
+	configLoader             func(context.Context) (EmailRuntimeConfig, error)
 	processIncomingMessageFn func(context.Context, EmailInboundMessage) bool
 }
 
@@ -396,6 +397,9 @@ var emailRuntimeSettingKeys = []string{
 }
 
 func (s *EmailService) loadConfig(ctx context.Context) (EmailRuntimeConfig, error) {
+	if s.configLoader != nil {
+		return s.configLoader(ctx)
+	}
 	if s.settingsRepo == nil {
 		return EmailRuntimeConfig{}, fmt.Errorf("settings repository not configured")
 	}
