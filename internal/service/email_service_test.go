@@ -7,8 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/emersion/go-imap"
 	messagemail "github.com/emersion/go-message/mail"
@@ -575,6 +579,143 @@ func TestEmailService_SendOutboundMessage_NewEmailUsesSMTPWithoutReplyHeaders(t 
 	require.Empty(t, gotRefs)
 }
 
+func TestEmailService_OutboundPathsLoadOneCurrentSettingsSnapshot(t *testing.T) {
+	tests := []struct {
+		name string
+		send func(*EmailService, models.Task)
+	}{
+		{name: "direct outbound", send: func(svc *EmailService, _ models.Task) {
+			result := svc.SendOutboundMessage(context.Background(), "Person <person@example.com>", "Notice", "body")
+			require.True(t, result.OK, result.Error)
+		}},
+		{name: "thread reply", send: func(svc *EmailService, _ models.Task) {
+			svc.SendTaskCompletionToThread(context.Background(), "person@example.com", "<message@example.com>", "<root@example.com>", "Question", "Task", "done", "")
+		}},
+		{name: "chat reply", send: func(svc *EmailService, task models.Task) {
+			svc.SendChatResponse(context.Background(), task, "done", "")
+		}},
+		{name: "task notification", send: func(svc *EmailService, task models.Task) {
+			svc.SendTaskCompletionNotification(context.Background(), task, "done", "")
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			settingsRepo := repository.NewSettingsRepo(db)
+			for key, value := range map[string]string{
+				EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
+				EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSMTPPort: "2525", EmailSettingSendResponses: "true",
+			} {
+				require.NoError(t, settingsRepo.Set(ctx, key, value))
+			}
+			projectRepo := repository.NewProjectRepo(db)
+			projects, err := projectRepo.List(ctx)
+			require.NoError(t, err)
+			require.NotEmpty(t, projects)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			task := models.Task{ProjectID: projects[0].ID, Title: "Email task", Prompt: "request", Category: models.CategoryActive, Status: models.StatusCompleted, CreatedVia: models.TaskOriginEmail}
+			require.NoError(t, taskRepo.Create(ctx, &task))
+			contextRepo := repository.NewEmailTaskContextRepo(db)
+			require.NoError(t, contextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: task.ID, EmailFrom: "person@example.com", EmailMessageID: "<message@example.com>", EmailReferences: "<root@example.com>", EmailSubject: "Question"}))
+			svc := NewEmailService(settingsRepo, projectRepo, repository.NewLLMConfigRepo(db), taskRepo, repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), contextRepo)
+
+			var settingsSelects atomic.Int64
+			settingsRepo.SetQueryObserver(func(query string) {
+				if strings.Contains(query, "FROM app_settings") {
+					settingsSelects.Add(1)
+				}
+			})
+			var smtpCalls atomic.Int64
+			svc.sendMail = func(_ context.Context, cfg EmailRuntimeConfig, to, subject, body, inReplyTo, references string) error {
+				smtpCalls.Add(1)
+				assert.Equal(t, "smtp.example.com", cfg.SMTPHost)
+				assert.Equal(t, 2525, cfg.SMTPPort)
+				assert.Equal(t, "person@example.com", to)
+				if tt.name != "direct outbound" {
+					assert.Equal(t, "Re: Question", subject)
+					assert.Equal(t, "<message@example.com>", inReplyTo)
+					assert.Equal(t, "<root@example.com> <message@example.com>", references)
+				}
+				return nil
+			}
+
+			tt.send(svc, task)
+			assert.Equal(t, int64(1), smtpCalls.Load())
+			assert.Equal(t, int64(1), settingsSelects.Load())
+		})
+	}
+}
+
+func TestEmailService_SettingsSnapshotsArePartialFreshAndPerOperation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	for key, value := range map[string]string{
+		EmailSettingProvider: EmailProviderGmail,
+		EmailSettingAddress:  " Bot@Example.com ",
+		EmailSettingPassword: "abcd efgh ijkl mnop",
+	} {
+		require.NoError(t, settingsRepo.Set(ctx, key, value))
+	}
+	svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	var configs []EmailRuntimeConfig
+	svc.sendMail = func(_ context.Context, cfg EmailRuntimeConfig, _, _, _, _, _ string) error {
+		configs = append(configs, cfg)
+		return nil
+	}
+
+	require.True(t, svc.SendOutboundMessage(ctx, "person@example.com", "first", "body").OK)
+	require.Len(t, configs, 1)
+	assert.Equal(t, "bot@example.com", configs[0].Address)
+	assert.Equal(t, "abcdefghijklmnop", configs[0].Password)
+	assert.Equal(t, "smtp.gmail.com", configs[0].SMTPHost)
+	assert.Equal(t, 587, configs[0].SMTPPort)
+	assert.Equal(t, 15*time.Second, configs[0].PollInterval)
+	assert.True(t, configs[0].SendResponses)
+	assert.False(t, configs[0].SkipAttachments)
+	assert.True(t, configs[0].MarkExistingSeenOnStart)
+
+	for key, value := range map[string]string{
+		EmailSettingProvider: EmailProviderCustom, EmailSettingPassword: "custom secret", EmailSettingIMAPHost: "imap.changed.example.com",
+		EmailSettingSMTPHost: "smtp.changed.example.com", EmailSettingIMAPPort: "1993", EmailSettingSMTPPort: "2465",
+	} {
+		require.NoError(t, settingsRepo.Set(ctx, key, value))
+	}
+	require.True(t, svc.SendOutboundMessage(ctx, "person@example.com", "second", "body").OK)
+	require.Len(t, configs, 2)
+	assert.Equal(t, EmailProviderCustom, configs[1].Provider)
+	assert.Equal(t, "custom secret", configs[1].Password)
+	assert.Equal(t, "imap.changed.example.com", configs[1].IMAPHost)
+	assert.Equal(t, 1993, configs[1].IMAPPort)
+	assert.Equal(t, "smtp.changed.example.com", configs[1].SMTPHost)
+	assert.Equal(t, 2465, configs[1].SMTPPort)
+
+	for _, key := range emailRuntimeSettingKeys {
+		require.NoError(t, settingsRepo.Set(ctx, key, ""))
+	}
+	removed := svc.SendOutboundMessage(ctx, "person@example.com", "third", "body")
+	assert.False(t, removed.OK)
+	assert.Contains(t, removed.Error, "not fully configured")
+	assert.Len(t, configs, 2, "removed settings must be visible without a stale SMTP handoff")
+}
+
+func TestEmailService_SettingsSnapshotHonorsCancellation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	svc := NewEmailService(repository.NewSettingsRepo(db), repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+	called := false
+	svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string) error {
+		called = true
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := svc.SendOutboundMessage(ctx, "person@example.com", "subject", "body")
+	assert.False(t, result.OK)
+	assert.False(t, called)
+}
+
 func TestEmailService_SendOutboundMessage_ValidationAndMissingConfig(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	svc := NewEmailService(repository.NewSettingsRepo(db), repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
@@ -584,6 +725,160 @@ func TestEmailService_SendOutboundMessage_ValidationAndMissingConfig(t *testing.
 	missing := svc.SendOutboundMessage(context.Background(), "person@example.com", "Subject", "body")
 	require.False(t, missing.OK)
 	require.Contains(t, missing.Error, "email channel is not fully configured")
+}
+
+func BenchmarkEmailServiceSettingsBurst(b *testing.B) {
+	for _, legacy := range []bool{true, false} {
+		name := "candidate"
+		if legacy {
+			name = "baseline"
+		}
+		b.Run(name, func(b *testing.B) {
+			db := testutil.NewTestDB(b)
+			ctx := context.Background()
+			settingsRepo := repository.NewSettingsRepo(db)
+			for key, value := range map[string]string{
+				EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
+				EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true",
+			} {
+				require.NoError(b, settingsRepo.Set(ctx, key, value))
+			}
+			svc := NewEmailService(settingsRepo, repository.NewProjectRepo(db), repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), repository.NewEmailTaskContextRepo(db))
+			svc.sendMail = func(context.Context, EmailRuntimeConfig, string, string, string, string, string) error { return nil }
+			var settingsSelects atomic.Int64
+			settingsRepo.SetQueryObserver(func(query string) {
+				if strings.Contains(query, "FROM app_settings") {
+					settingsSelects.Add(1)
+				}
+			})
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for n := 0; n < 100; n++ {
+					if legacy {
+						cfg, err := loadEmailConfigPointReadsForBenchmark(ctx, settingsRepo)
+						require.NoError(b, err)
+						require.NoError(b, svc.sendMail(ctx, cfg, "person@example.com", "Notice", "body", "", ""))
+					} else {
+						require.True(b, svc.SendOutboundMessage(ctx, "person@example.com", "Notice", "body").OK)
+					}
+				}
+				for n := 0; n < 100; n++ {
+					if legacy {
+						gate, err := loadEmailConfigPointReadsForBenchmark(ctx, settingsRepo)
+						require.NoError(b, err)
+						if gate.SendResponses {
+							cfg, err := loadEmailConfigPointReadsForBenchmark(ctx, settingsRepo)
+							require.NoError(b, err)
+							require.NoError(b, svc.sendMail(ctx, cfg, "person@example.com", "Re: Question", "body", "<message@example.com>", "<root@example.com> <message@example.com>"))
+						}
+					} else {
+						svc.SendTaskCompletionToThread(ctx, "person@example.com", "<message@example.com>", "<root@example.com>", "Question", "Task", "done", "")
+					}
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(settingsSelects.Load())/float64(b.N), "settings_selects/op")
+		})
+	}
+}
+
+func BenchmarkEmailServiceSettingsContention(b *testing.B) {
+	for _, legacy := range []bool{true, false} {
+		name := "candidate"
+		if legacy {
+			name = "baseline"
+		}
+		b.Run(name, func(b *testing.B) {
+			db := testutil.NewTestDB(b)
+			ctx := context.Background()
+			settingsRepo := repository.NewSettingsRepo(db)
+			for key, value := range map[string]string{
+				EmailSettingProvider: EmailProviderCustom, EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret",
+				EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true",
+			} {
+				require.NoError(b, settingsRepo.Set(ctx, key, value))
+			}
+			entered := make(chan struct{}, 1)
+			settingsRepo.SetQueryObserver(func(query string) {
+				if strings.Contains(query, "FROM app_settings") {
+					select {
+					case entered <- struct{}{}:
+					default:
+					}
+				}
+			})
+			waits := make([]time.Duration, 0, b.N*100)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for len(entered) > 0 {
+					<-entered
+				}
+				start := make(chan struct{})
+				var workers sync.WaitGroup
+				workers.Add(100)
+				for n := 0; n < 100; n++ {
+					go func() {
+						defer workers.Done()
+						<-start
+						if legacy {
+							_, _ = loadEmailConfigPointReadsForBenchmark(ctx, settingsRepo)
+						} else {
+							_, _ = emailRuntimeConfigSnapshotForBenchmark(ctx, settingsRepo)
+						}
+					}()
+				}
+				close(start)
+				<-entered
+				waitResults := make(chan time.Duration, 100)
+				var unrelated sync.WaitGroup
+				unrelated.Add(100)
+				for n := 0; n < 100; n++ {
+					go func() {
+						defer unrelated.Done()
+						waitStart := time.Now()
+						var value string
+						err := db.QueryRowContext(ctx, "SELECT value FROM app_settings WHERE key = ?", EmailSettingAddress).Scan(&value)
+						require.NoError(b, err)
+						waitResults <- time.Since(waitStart)
+					}()
+				}
+				unrelated.Wait()
+				close(waitResults)
+				for wait := range waitResults {
+					waits = append(waits, wait)
+				}
+				workers.Wait()
+			}
+			b.StopTimer()
+			sort.Slice(waits, func(i, j int) bool { return waits[i] < waits[j] })
+			if len(waits) > 0 {
+				b.ReportMetric(float64(waits[len(waits)/2].Nanoseconds()), "median_wait_ns")
+				b.ReportMetric(float64(waits[(len(waits)-1)*95/100].Nanoseconds()), "p95_wait_ns")
+			}
+		})
+	}
+}
+
+func emailRuntimeConfigSnapshotForBenchmark(ctx context.Context, settingsRepo *repository.SettingsRepo) (EmailRuntimeConfig, error) {
+	values, err := settingsRepo.GetMany(ctx, emailRuntimeSettingKeys)
+	if err != nil {
+		return EmailRuntimeConfig{}, err
+	}
+	return emailRuntimeConfigFromValues(values), nil
+}
+
+func loadEmailConfigPointReadsForBenchmark(ctx context.Context, settingsRepo *repository.SettingsRepo) (EmailRuntimeConfig, error) {
+	values := make(map[string]string, len(emailRuntimeSettingKeys))
+	for _, key := range emailRuntimeSettingKeys {
+		value, err := settingsRepo.Get(ctx, key)
+		if err != nil {
+			return EmailRuntimeConfig{}, err
+		}
+		values[key] = value
+	}
+	return emailRuntimeConfigFromValues(values), nil
 }
 
 func TestEmailService_CompleteExecutionUsesSharedChatPromotion(t *testing.T) {

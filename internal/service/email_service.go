@@ -381,11 +381,33 @@ func (cfg EmailRuntimeConfig) Configured() bool {
 	return strings.TrimSpace(cfg.Address) != "" && strings.TrimSpace(cfg.Password) != "" && strings.TrimSpace(cfg.IMAPHost) != "" && strings.TrimSpace(cfg.SMTPHost) != ""
 }
 
+var emailRuntimeSettingKeys = []string{
+	EmailSettingProvider,
+	EmailSettingAddress,
+	EmailSettingPassword,
+	EmailSettingIMAPHost,
+	EmailSettingIMAPPort,
+	EmailSettingSMTPHost,
+	EmailSettingSMTPPort,
+	EmailSettingPollIntervalSeconds,
+	EmailSettingSendResponses,
+	EmailSettingSkipAttachments,
+	EmailSettingMarkExistingSeenOnStart,
+}
+
 func (s *EmailService) loadConfig(ctx context.Context) (EmailRuntimeConfig, error) {
 	if s.settingsRepo == nil {
 		return EmailRuntimeConfig{}, fmt.Errorf("settings repository not configured")
 	}
-	get := func(key string) string { val, _ := s.settingsRepo.Get(ctx, key); return strings.TrimSpace(val) }
+	values, err := s.settingsRepo.GetMany(ctx, emailRuntimeSettingKeys)
+	if err != nil {
+		return EmailRuntimeConfig{}, err
+	}
+	return emailRuntimeConfigFromValues(values), nil
+}
+
+func emailRuntimeConfigFromValues(values map[string]string) EmailRuntimeConfig {
+	get := func(key string) string { return strings.TrimSpace(values[key]) }
 	provider := NormalizeEmailProvider(get(EmailSettingProvider))
 	if provider == "" {
 		provider = EmailProviderCustom
@@ -413,7 +435,7 @@ func (s *EmailService) loadConfig(ctx context.Context) (EmailRuntimeConfig, erro
 		preset := emailProviderPresets[provider]
 		cfg.IMAPHost, cfg.IMAPPort, cfg.SMTPHost, cfg.SMTPPort = preset.IMAPHost, preset.IMAPPort, preset.SMTPHost, preset.SMTPPort
 	}
-	return cfg, nil
+	return cfg
 }
 
 func (s *EmailService) pollLoop(ctx context.Context, cfg EmailRuntimeConfig) {
@@ -1100,17 +1122,22 @@ func (s *EmailService) IsSendResponsesEnabled(ctx context.Context) bool {
 }
 
 func (s *EmailService) SendTaskCompletionToThread(ctx context.Context, to, inboundMessageID, references, subject, taskTitle, output, errMsg string) {
-	if !s.IsSendResponsesEnabled(ctx) || strings.TrimSpace(to) == "" {
+	cfg, err := s.loadConfig(ctx)
+	if err != nil || !cfg.SendResponses || strings.TrimSpace(to) == "" {
 		return
 	}
 	body := buildEmailCompletionBody(taskTitle, output, errMsg)
-	if err := s.sendReply(ctx, to, subject, body, inboundMessageID, appendEmailReference(references, inboundMessageID)); err != nil {
+	if err := s.sendReply(ctx, cfg, to, subject, body, inboundMessageID, appendEmailReference(references, inboundMessageID)); err != nil {
 		applog.Infof("[email] send thread reply failed: %v", err)
 	}
 }
 
 func (s *EmailService) SendChatResponse(ctx context.Context, task models.Task, output, errMsg string) {
-	if s.emailTaskContextRepo == nil || !s.IsSendResponsesEnabled(ctx) {
+	if s.emailTaskContextRepo == nil {
+		return
+	}
+	cfg, err := s.loadConfig(ctx)
+	if err != nil || !cfg.SendResponses {
 		return
 	}
 	etc, err := s.emailTaskContextRepo.GetByTaskID(ctx, task.ID)
@@ -1118,7 +1145,7 @@ func (s *EmailService) SendChatResponse(ctx context.Context, task models.Task, o
 		return
 	}
 	body := buildEmailChatBody(output, errMsg)
-	if err := s.sendReply(ctx, etc.EmailFrom, etc.EmailSubject, body, etc.EmailMessageID, appendEmailReference(etc.EmailReferences, etc.EmailMessageID)); err != nil {
+	if err := s.sendReply(ctx, cfg, etc.EmailFrom, etc.EmailSubject, body, etc.EmailMessageID, appendEmailReference(etc.EmailReferences, etc.EmailMessageID)); err != nil {
 		applog.Infof("[email] send chat response failed task=%s: %v", task.ID, err)
 	}
 }
@@ -1129,7 +1156,11 @@ func (s *EmailService) SendTaskCompletionNotification(ctx context.Context, task 
 			task = *loaded
 		}
 	}
-	if task.CreatedVia != models.TaskOriginEmail || task.Category == models.CategoryChat || s.emailTaskContextRepo == nil || !s.IsSendResponsesEnabled(ctx) {
+	if task.CreatedVia != models.TaskOriginEmail || task.Category == models.CategoryChat || s.emailTaskContextRepo == nil {
+		return
+	}
+	cfg, err := s.loadConfig(ctx)
+	if err != nil || !cfg.SendResponses {
 		return
 	}
 	etc, err := s.emailTaskContextRepo.GetByTaskID(ctx, task.ID)
@@ -1137,16 +1168,12 @@ func (s *EmailService) SendTaskCompletionNotification(ctx context.Context, task 
 		return
 	}
 	body := buildEmailCompletionBody(task.Title, output, errMsg)
-	if err := s.sendReply(ctx, etc.EmailFrom, etc.EmailSubject, body, etc.EmailMessageID, appendEmailReference(etc.EmailReferences, etc.EmailMessageID)); err != nil {
+	if err := s.sendReply(ctx, cfg, etc.EmailFrom, etc.EmailSubject, body, etc.EmailMessageID, appendEmailReference(etc.EmailReferences, etc.EmailMessageID)); err != nil {
 		applog.Infof("[email] send task notification failed task=%s: %v", task.ID, err)
 	}
 }
 
-func (s *EmailService) sendReply(ctx context.Context, to, subject, body, inReplyTo, references string) error {
-	cfg, err := s.loadConfig(ctx)
-	if err != nil {
-		return err
-	}
+func (s *EmailService) sendReply(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, inReplyTo, references string) error {
 	if !cfg.Configured() {
 		return fmt.Errorf("email channel is not fully configured")
 	}
