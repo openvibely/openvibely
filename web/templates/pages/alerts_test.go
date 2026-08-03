@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -96,6 +97,69 @@ func TestAlertsContent_DeleteActionsDoNotDependOnHxConfirm(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected single-alert delete flow to preserve viewport and focus with %q", want)
+		}
+	}
+}
+
+func TestAlertsContent_InspectCopyIncludesSafeStructuredDetailsForAllAlertKinds(t *testing.T) {
+	decidedAt := time.Date(2026, time.August, 4, 10, 11, 12, 0, time.UTC)
+	claimedAt := decidedAt.Add(time.Minute)
+	claimExpiresAt := claimedAt.Add(15 * time.Minute)
+	implementationTaskID := "implementation-task-1"
+	sourceTaskID := "source-task-1"
+	executionID := "execution-1"
+	operationalTaskID := "operational-task-1"
+	createdAt := time.Date(2026, time.August, 4, 9, 8, 7, 0, time.UTC)
+	updatedAt := createdAt.Add(2 * time.Hour)
+	alerts := []models.Alert{
+		{
+			ID: "operational-1", ProjectID: "hidden-project", IdempotencyKey: "hidden-idempotency-key",
+			TaskID: &operationalTaskID, ExecutionID: &executionID, Type: models.AlertTaskFailed,
+			Severity: models.SeverityError, Title: "Build failed", Message: "Compiler exited",
+			Source: "task-runner", DecisionState: models.AlertDecisionNotRequired,
+			ProcessingState: models.AlertProcessingNotApplicable, IsRead: true,
+			CreatedAt: createdAt, UpdatedAt: updatedAt,
+		},
+		{
+			ID: "notification-1", ProjectID: "hidden-project", IdempotencyKey: "hidden-idempotency-key",
+			SourceTaskID: &sourceTaskID, Type: models.AlertCustom, Severity: models.SeverityWarning,
+			Title: "Review change", Message: "Approval requested", Body: "Check the proposed patch.",
+			Source: "review-agent", Metadata: map[string]any{"attempt": float64(2), "nested": map[string]any{"safe": true}},
+			DecisionState: models.AlertDecisionApproved, DecidedAt: &decidedAt,
+			ProcessingState: models.AlertProcessingFailed, Claimant: "inbox-agent", ClaimedAt: &claimedAt,
+			ClaimExpiresAt: &claimExpiresAt, ImplementationTaskID: &implementationTaskID,
+			ProcessingError: "worker unavailable", CreatedAt: createdAt, UpdatedAt: updatedAt,
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := AlertsContent(alerts, "hidden-project", 1).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render alerts content: %v", err)
+	}
+	html := buf.String()
+
+	for _, required := range []string{
+		`<summary class="cursor-pointer text-sm font-medium">Inspect alert</summary>`,
+		`<summary class="cursor-pointer text-sm font-medium">Inspect notification</summary>`,
+		`data-alert-copy`, `aria-label="Copy inspected alert details"`, `aria-label="Copy inspected notification details"`,
+		`onclick="copyAlertDetails(this)"`, `data-alert-copy-text`, `aria-live="polite"`,
+		`navigator.clipboard.writeText(text)`, `Copied`, `Copy failed`,
+		"ID: operational-1", "Title: Build failed", "Message: Compiler exited", "Severity: error",
+		"Type: task_failed", "Source: task-runner", "Read: yes", "Task ID: operational-task-1",
+		"Execution ID: execution-1", "Created at: 2026-08-04T09:08:07Z", "Updated at: 2026-08-04T11:08:07Z",
+		"ID: notification-1", "Body:\nCheck the proposed patch.", "Decision state: approved",
+		"Processing state: failed", "Decided at: 2026-08-04T10:11:12Z", "Claimant: inbox-agent",
+		"Claimed at: 2026-08-04T10:12:12Z", "Claim expires at: 2026-08-04T10:27:12Z",
+		"Source task ID: source-task-1", "Implementation task ID: implementation-task-1",
+		"Processing error:\nworker unavailable", "Metadata:\n{\n  &#34;attempt&#34;: 2,\n  &#34;nested&#34;: {\n    &#34;safe&#34;: true\n  }\n}",
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("inspect copy markup missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"Project ID: hidden-project", "Idempotency key: hidden-idempotency-key"} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("inspect copy leaked hidden value %q", forbidden)
 		}
 	}
 }

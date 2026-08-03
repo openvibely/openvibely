@@ -17,6 +17,105 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	createdAt := time.Date(2026, time.August, 4, 9, 8, 7, 0, time.UTC)
+	implementationTaskID := "implementation-task-1"
+	alerts := []models.Alert{
+		{
+			ID: "operational-1", Title: "Build failed", Message: "Compiler exited", Type: models.AlertTaskFailed,
+			Severity: models.SeverityError, Source: "task-runner", DecisionState: models.AlertDecisionNotRequired,
+			ProcessingState: models.AlertProcessingNotApplicable, CreatedAt: createdAt, UpdatedAt: createdAt,
+		},
+		{
+			ID: "notification-1", Title: "Review change", Body: "Check the patch.", Type: models.AlertCustom,
+			Severity: models.SeverityWarning, Source: "review-agent", DecisionState: models.AlertDecisionPending,
+			ProcessingState: models.AlertProcessingFailed, ProcessingError: "worker unavailable",
+			ImplementationTaskID: &implementationTaskID, Metadata: map[string]any{"attempt": float64(2)},
+			CreatedAt: createdAt, UpdatedAt: createdAt,
+		},
+	}
+	var rendered bytes.Buffer
+	if err := AlertsContent(alerts, "project-alerts-browser", 2).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render Alerts content: %v", err)
+	}
+
+	runner := `<script>
+	window.addEventListener('DOMContentLoaded', function() {
+	  function report(status, message) { fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+	  function fail(message) { throw new Error(message); }
+	  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+	  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
+	  (async function() {
+	    var copied = [];
+	    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied.push(text); return Promise.resolve(); }}});
+	    var operational = document.querySelector('#alert-operational-1 [data-alert-copy]');
+	    var notification = document.querySelector('#alert-notification-1 [data-alert-copy]');
+	    if (!operational || !notification) fail('missing inspect copy buttons');
+	    operational.click();
+	    await wait(0);
+	    if (operational.textContent.trim() !== 'Copied') fail('success feedback was not shown');
+	    if (!copied[0] || !copied[0].includes('OpenVibely alert\nID: operational-1') || !copied[0].includes('Message: Compiler exited')) fail('operational alert clipboard text was incomplete');
+	    if (copied[0].includes('project-alerts-browser')) fail('clipboard text leaked project identity');
+	    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function() { return Promise.reject(new Error('denied')); }}});
+	    notification.click();
+	    await wait(0);
+	    if (notification.textContent.trim() !== 'Copy failed') fail('failure feedback was not shown');
+	    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied.push(text); return Promise.resolve(); }}});
+	    notification.click();
+	    await wait(0);
+	    if (!copied[1] || !copied[1].includes('OpenVibely notification\nID: notification-1') || !copied[1].includes('Implementation task ID: implementation-task-1') || !copied[1].includes('Metadata:\n{\n  "attempt": 2\n}')) fail('notification clipboard text was incomplete');
+	    report('pass', '');
+	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+	});
+	</script>`
+	page := "<!doctype html><html><head>" + runner + "</head><body>" + rendered.String() + "</body></html>"
+
+	browserResult := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/browser-result" {
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(page))
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "alerts-copy-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	profileDir, err := os.MkdirTemp("", "openvibely-alerts-copy-browser-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(profileDir)
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--no-first-run", "--no-default-browser-check",
+		"--user-data-dir="+profileDir, server.URL,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(10 * time.Second):
+		outcome = "fail:timed out waiting for browser result"
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("Alerts inspect copy browser regression failed: %s\nChrome stderr:\n%s", outcome, stderr)
+	}
+}
+
 func TestAlertsSingleDeletePreservesViewportInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
