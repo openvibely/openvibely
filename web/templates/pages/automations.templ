@@ -552,7 +552,14 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						apply();
 					}
 					function queuePan(event) {
-						if (!pan || event.pointerId !== pan.pointerId) return;
+						if (!pan || pan.input !== 'pointer' || event.pointerId !== pan.pointerId) return;
+						pan.pending = {x:event.clientX, y:event.clientY};
+						if (!pan.dragged && Math.hypot(event.clientX-pan.clientX, event.clientY-pan.clientY) > 4) pan.dragged = true;
+						if (!panFrame) panFrame = requestAnimationFrame(applyPan);
+					}
+					function queueMousePan(event) {
+						if (!pan || pan.input !== 'mouse') return;
+						if (!(event.buttons & 1)) { cancelMousePan(); return; }
 						pan.pending = {x:event.clientX, y:event.clientY};
 						if (!pan.dragged && Math.hypot(event.clientX-pan.clientX, event.clientY-pan.clientY) > 4) pan.dragged = true;
 						if (!panFrame) panFrame = requestAnimationFrame(applyPan);
@@ -561,17 +568,20 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						window.removeEventListener('pointermove', queuePan);
 						window.removeEventListener('pointerup', finishPan);
 						window.removeEventListener('pointercancel', finishPan);
+						window.removeEventListener('mousemove', queueMousePan);
+						window.removeEventListener('mouseup', finishMousePan);
+						window.removeEventListener('blur', cancelMousePan);
 					}
-					function finishPan(event) {
-						if (!pan || event.pointerId !== pan.pointerId) return;
+					function completePan(eventType, clientX, clientY, includePosition) {
+						if (!pan) return;
 						stopPanTracking();
-						pan.pending = {x:event.clientX, y:event.clientY};
+						if (includePosition) pan.pending = {x:clientX, y:clientY};
 						if (panFrame) { cancelAnimationFrame(panFrame); panFrame = 0; }
 						applyPan();
 						var dragged = pan.dragged;
 						var nodeLink = pan.nodeLink;
 						pan = null;
-						if (dragged && nodeLink && event.type === 'pointerup') {
+						if (dragged && nodeLink && eventType === 'up') {
 							suppressedNodeLink = nodeLink;
 							if (suppressNodeClickTimer) clearTimeout(suppressNodeClickTimer);
 							suppressNodeClickTimer = setTimeout(function() {
@@ -580,22 +590,46 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 							}, 0);
 						}
 					}
+					function finishPan(event) {
+						if (!pan || pan.input !== 'pointer' || event.pointerId !== pan.pointerId) return;
+						completePan(event.type === 'pointerup' ? 'up' : 'cancel', event.clientX, event.clientY, true);
+					}
+					function finishMousePan(event) {
+						if (!pan || pan.input !== 'mouse' || event.button !== 0) return;
+						completePan('up', event.clientX, event.clientY, true);
+					}
+					function cancelMousePan() {
+						if (!pan || pan.input !== 'mouse') return;
+						completePan('cancel', 0, 0, false);
+					}
 					function zoom(factor) { var cx=box[0]+box[2]/2, cy=box[1]+box[3]/2; box[2]=Math.max(300,Math.min(4000,box[2]*factor)); box[3]=Math.max(200,Math.min(2500,box[3]*factor)); box[0]=cx-box[2]/2; box[1]=cy-box[3]/2; apply(); }
 					svg.addEventListener('wheel', function(event) { if (!event.ctrlKey && !event.metaKey) return; event.preventDefault(); zoom(event.deltaY > 0 ? 1.12 : .88); }, {passive:false});
 					svg.addEventListener('dragstart', function(event) {
 						if (event.target.closest('[data-automation-task-link]')) event.preventDefault();
 					});
 					svg.addEventListener('pointerdown', function(event) {
+						if (document.documentElement.dataset.runtime === 'desktop') return;
 						if (event.button !== 0) return;
 						var rect = svg.getBoundingClientRect();
 						if (!rect.width || !rect.height) return;
 						if (suppressNodeClickTimer) { clearTimeout(suppressNodeClickTimer); suppressNodeClickTimer = 0; }
 						suppressedNodeLink = null;
-						pan = {pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-task-link]')};
+						pan = {input:'pointer', pointerId:event.pointerId, clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-task-link]')};
 						window.addEventListener('pointermove', queuePan);
 						window.addEventListener('pointerup', finishPan);
 						window.addEventListener('pointercancel', finishPan);
 						if (!pan.nodeLink) { try { svg.setPointerCapture(event.pointerId); } catch (_) {} }
+					});
+					svg.addEventListener('mousedown', function(event) {
+						if (document.documentElement.dataset.runtime !== 'desktop' || event.button !== 0) return;
+						var rect = svg.getBoundingClientRect();
+						if (!rect.width || !rect.height) return;
+						if (suppressNodeClickTimer) { clearTimeout(suppressNodeClickTimer); suppressNodeClickTimer = 0; }
+						suppressedNodeLink = null;
+						pan = {input:'mouse', clientX:event.clientX, clientY:event.clientY, box:box.slice(), unitsX:box[2]/rect.width, unitsY:box[3]/rect.height, pending:null, dragged:false, nodeLink:event.target.closest('[data-automation-task-link]')};
+						window.addEventListener('mousemove', queueMousePan);
+						window.addEventListener('mouseup', finishMousePan);
+						window.addEventListener('blur', cancelMousePan);
 					});
 					svg.addEventListener('click', function(event) {
 						var nodeLink = event.target.closest('[data-automation-task-link]');
