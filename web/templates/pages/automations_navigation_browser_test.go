@@ -1129,8 +1129,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	    liveTaskLink.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX, clientY:livePanY}));
 	    if (liveCaptureOwner) fail('task-backed Live node captured the pointer before drag intent: ' + liveCaptureOwner);
 	    liveTaskLink.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+120, clientY:livePanY+60}));
-	    if (liveCaptureOwner !== 'canvas') fail('task-backed Live node drag did not transfer pointer capture to the canvas: ' + liveCaptureOwner);
-	    liveTaskLink.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+120, clientY:livePanY+60}));
+	    if (liveCaptureOwner) fail('task-backed Live node drag captured the pointer instead of using window tracking: ' + liveCaptureOwner);
+	    window.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+180, clientY:livePanY+90}));
+	    window.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+180, clientY:livePanY+90}));
 	    var dragAssociatedClick = new MouseEvent('click', {bubbles:true, cancelable:true, button:0, clientX:livePanX+120, clientY:livePanY+60});
 	    var taskRequestsBeforeDragClick = liveTaskRequests;
 	    if (liveTaskLink.dispatchEvent(dragAssociatedClick) || !dragAssociatedClick.defaultPrevented) fail('drag-associated Live node click was not explicitly consumed');
@@ -1138,8 +1139,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (liveID() !== 'automation-a') fail('drag-associated Live node click navigated away from the Automation');
 	    await wait(0);
 	    var livePanFinish = liveSVG.getAttribute('viewBox').split(/\s+/).map(Number);
-	    var expectedLivePanX = livePanStart[0] - 120 * livePanStart[2] / livePanRect.width;
-	    var expectedLivePanY = livePanStart[1] - 60 * livePanStart[3] / livePanRect.height;
+	    var expectedLivePanX = livePanStart[0] - 180 * livePanStart[2] / livePanRect.width;
+	    var expectedLivePanY = livePanStart[1] - 90 * livePanStart[3] / livePanRect.height;
 	    if (Math.abs(livePanFinish[0] - expectedLivePanX) > 0.05 || Math.abs(livePanFinish[1] - expectedLivePanY) > 0.05) fail('rapid Live node pan did not use stable screen-space deltas: ' + livePanFinish.join(' '));
 	    click('#automation-live [data-automation-task-link]', 'Automation-backed Task node after drag suppression expires');
 	    await waitFor(function() { return liveTaskRequests === taskRequestsBeforeDragClick + 1; }, 'one intentional Automation-backed Task request');
