@@ -3,8 +3,8 @@ name: openvibely_architecture
 type: project
 created: 2026-05-09
 updated: 2026-08-02
-source: consolidation
-source_id: memory_consolidation_2026_08_02
+source: task_turn
+source_id: 780f6066ceeb35bc37d2f3f4298ae777:a33b1a41750f7dae
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -13,11 +13,11 @@ OpenVibely is an open-source Go application for automated task scheduling and AI
 
 Dual mode architecture:
 - `internal/server.Start(ctx, cfg)` wires the shared backend and returns a server instance with bound address, base URL, and shutdown handle.
-- Local web/server and desktop release-binary runs default DB/repos/uploads and related runtime state to the same user app-data directory, specifically `$HOME/.openvibely` unless an env override applies.
+- Local web/server release-binary runs default DB/repos/uploads and related runtime state to `$HOME/.openvibely` unless an env override applies. Desktop runs default user data to the OS application-data directory: macOS `~/Library/Application Support/OpenVibely`, Windows `%LOCALAPPDATA%\OpenVibely` with `%APPDATA%` fallback, and Linux `$XDG_DATA_HOME/openvibely` with `~/.local/share/openvibely` fallback.
 - Hosted/Docker deployments use explicit env-driven storage such as mounted `/data` paths rather than local `$HOME/.openvibely` behavior.
 - Desktop mode (`cmd/desktop`) uses `config.LoadWithMode(ModeDesktop)`, ephemeral port `PORT=0`, local repo paths, and Wails WebView loading from the server base URL.
 - `make package-desktop-macos` builds a raw intermediate executable and packages it as `OpenVibely.app/Contents/MacOS/OpenVibely`; release packaging pitfalls belong with release-discipline memory.
-- `OPENVIBELY_APP_DATA_DIR` is the shared override for the local app-data root when users need web/server and desktop to point at the same runtime state. It is read as a literal path; shell `~` expansion is not performed.
+- `OPENVIBELY_APP_DATA_DIR` overrides the local app-data root and can deliberately point web/server and desktop at the same runtime state. It is read as a literal path; shell `~` expansion is not performed. Wails update staging, apply, and rollback require the configured desktop app-data root to be absolute and outside both the live and backup application bundles after symlink resolution.
 - Env vars override mode defaults. `DATABASE_PATH`, `PROJECT_REPO_ROOT`, and related storage env vars remain explicit paths; `DATABASE_PATH` overrides database location even when `OPENVIBELY_APP_DATA_DIR` is set.
 - Desktop defaults to localhost OAuth callback flow (`APP_BASE_URL` unset). Provider OAuth callback selection is independent of where the authorization page opens; hosted workspaces may retain a public `APP_BASE_URL` while forcing `OAUTH_REDIRECT_MODE=localhost_manual` for providers whose registered clients reject non-localhost redirects.
 - Desktop/Wails GUI launches, especially on macOS, may not inherit the user's interactive shell `PATH`; task execution relies on centralized environment/PATH construction rather than hardcoded developer-tool paths.
@@ -36,7 +36,7 @@ Storage and runtime-state pitfalls:
 - Local storage migrations preserve existing user state by moving/copying the old local database, SQLite sidecars, repos, uploads, and related runtime directories into `$HOME/.openvibely` when no explicit storage override is set. `OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION` skips this migration.
 - `OPENVIBELY_RUNTIME_DIR` is a deprecated `start.sh`-only alias for `OPENVIBELY_APP_DATA_DIR`; it is not read by the binary directly.
 - Release binaries use stable app-owned storage rather than source-checkout/current-working-directory paths such as `./openvibely.db` or `./repos`.
-- Web/server and desktop local runs are expected to use the same database by default unless env vars explicitly separate them.
+- Web/server and desktop local runs use separate platform-appropriate data roots by default; an explicit `OPENVIBELY_APP_DATA_DIR` override can make them share the same database and runtime state.
 - Local runtime-state diagnosis depends on the active process, port, and database path because multiple local/server/desktop instances may use different configured storage roots.
 
 Worker capacity settings:
