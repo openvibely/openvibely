@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
@@ -102,6 +103,7 @@ type streamingResponseParams struct {
 	// Tests that inspect steering recovery before a later queued turn starts
 	// suppress the asynchronous promotion launched during finalization.
 	suppressQueuedTurnPromotion bool
+	updateWorkDone              func()
 }
 
 func streamingTransportScope(params streamingResponseParams) string {
@@ -202,7 +204,27 @@ func (h *Handler) buildStreamingResponseActionRuntime(ctx context.Context, param
 	return llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, genericRT)
 }
 
+func (h *Handler) startStreamingResponse(params streamingResponseParams) error {
+	class := update.WorkChat
+	if params.IsTaskFollowup {
+		class = update.WorkTask
+	}
+	if params.updateWorkDone == nil && h.updateWorkTracker != nil {
+		done, err := h.updateWorkTracker.Start(class)
+		if err != nil {
+			h.completeWithFailure(context.Background(), params.ExecID, params.TaskID, update.ErrDraining.Error(), 0, params.ChannelReply)
+			return update.ErrDraining
+		}
+		params.updateWorkDone = done
+	}
+	go h.processStreamingResponse(params)
+	return nil
+}
+
 func (h *Handler) processStreamingResponse(params streamingResponseParams) {
+	if params.updateWorkDone != nil {
+		defer params.updateWorkDone()
+	}
 	// Memory recall is injected for task-thread followups through the full task
 	// lifecycle path below. Interactive chat uses a recall-only lifecycle path so
 	// relevant project memory reaches Chat without triggering after_complete memory
@@ -1218,6 +1240,19 @@ func (h *Handler) startNextQueuedTurnAfter(ctx context.Context, completed stream
 }
 
 func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadInput) {
+	var updateWorkDone func()
+	if h.updateWorkTracker != nil {
+		var err error
+		updateWorkDone, err = h.updateWorkTracker.Start(update.WorkChat)
+		if err != nil {
+			return
+		}
+		defer func() {
+			if updateWorkDone != nil {
+				updateWorkDone()
+			}
+		}()
+	}
 	agent, unstartable, err := h.resolveQueuedInputAgent(ctx, input)
 	if err != nil {
 		applog.Infof("[handler] startQueuedChatInput input=%s agent=%s load error: %v", input.ID, input.AgentConfigID, err)
@@ -1326,7 +1361,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		})
 	}
 
-	go h.processStreamingResponse(streamingResponseParams{
+	h.startStreamingResponse(streamingResponseParams{
 		ExecID:      exec.ID,
 		TaskID:      task.ID,
 		Message:     input.Content,
@@ -1339,7 +1374,9 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		ChatMode:         chatMode,
 		Surface:          surfaceForThreadInput(input),
 		ChannelReply:     channelReplyFromThreadInput(input),
+		updateWorkDone:   updateWorkDone,
 	})
+	updateWorkDone = nil
 }
 
 func (h *Handler) queuedChatHistory(ctx context.Context, input models.ThreadInput, currentExecID string) ([]models.Execution, error) {
@@ -1463,6 +1500,19 @@ func (h *Handler) RetryLatestFailedTaskThreadFollowup(ctx context.Context, taskI
 }
 
 func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID string, failed models.Execution) error {
+	var updateWorkDone func()
+	if h.updateWorkTracker != nil {
+		var err error
+		updateWorkDone, err = h.updateWorkTracker.Start(update.WorkTask)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if updateWorkDone != nil {
+				updateWorkDone()
+			}
+		}()
+	}
 	task, err := h.taskRepo.GetByID(ctx, taskID)
 	if err != nil || task == nil {
 		if err == nil {
@@ -1536,7 +1586,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 			automationContext = &value
 		}
 	}
-	go h.processStreamingResponse(streamingResponseParams{
+	h.startStreamingResponse(streamingResponseParams{
 		ExecID:            exec.ID,
 		TaskID:            taskID,
 		Message:           failed.PromptSent,
@@ -1550,7 +1600,9 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		InputOrigin:       models.TaskOriginWeb,
 		Task:              task,
 		AutomationContext: automationContext,
+		updateWorkDone:    updateWorkDone,
 	})
+	updateWorkDone = nil
 	return nil
 }
 
@@ -1572,6 +1624,19 @@ func (h *Handler) applySwarmChildFollowupRetryStart(ctx context.Context, task *m
 }
 
 func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.ThreadInput) error {
+	var updateWorkDone func()
+	if h.updateWorkTracker != nil {
+		var err error
+		updateWorkDone, err = h.updateWorkTracker.Start(update.WorkTask)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if updateWorkDone != nil {
+				updateWorkDone()
+			}
+		}()
+	}
 	task, err := h.taskRepo.GetByID(ctx, input.TaskID)
 	if err != nil || task == nil {
 		if err == nil {
@@ -1671,7 +1736,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			automationContext = &value
 		}
 	}
-	go h.processStreamingResponse(streamingResponseParams{
+	h.startStreamingResponse(streamingResponseParams{
 		ExecID:            exec.ID,
 		TaskID:            exec.TaskID,
 		Message:           input.Content,
@@ -1688,7 +1753,9 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		InputOriginAgent:  input.OriginAgent,
 		Task:              task,
 		AutomationContext: automationContext,
+		updateWorkDone:    updateWorkDone,
 	})
+	updateWorkDone = nil
 	return nil
 }
 

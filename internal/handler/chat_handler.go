@@ -319,7 +319,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	personalityContext := h.getPersonalityContext(c.Request().Context(), projectID)
 	workDir := h.resolveWorkDir(c.Request().Context(), projectID)
 
-	go h.processStreamingResponse(streamingResponseParams{
+	if err := h.startStreamingResponse(streamingResponseParams{
 		ExecID:           exec.ID,
 		TaskID:           task.ID,
 		Message:          message,
@@ -333,7 +333,10 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		IsTaskFollowup:   false,
 		ChatMode:         chatMode,
 		Surface:          chatcontrol.SurfaceWeb,
-	})
+	}); err != nil {
+		c.Response().Header().Set("Retry-After", "30")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
 	return render(c, http.StatusOK, templ.Join(
 		userMsg,
 		agentMsg,

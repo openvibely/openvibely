@@ -24,7 +24,63 @@ import (
 	"github.com/openvibely/openvibely/internal/database"
 )
 
+type updateStarterProbe struct {
+	recovery, checks int
+}
+
+func (p *updateStarterProbe) StartRecovery(context.Context) { p.recovery++ }
+func (p *updateStarterProbe) StartChecks(context.Context)   { p.checks++ }
+
+func TestStartUpdateCoordinatorAlwaysRunsRecoveryAndChecks(t *testing.T) {
+	probe := &updateStarterProbe{}
+	startUpdateCoordinator(context.Background(), probe)
+	if probe.recovery != 1 || probe.checks != 1 {
+		t.Fatalf("recovery=%d checks=%d", probe.recovery, probe.checks)
+	}
+}
+
+func TestDesktopUpdateProtectedPathsIncludeIndependentStorageOverrides(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("OPENVIBELY_DESKTOP_CONFIG_FILE", filepath.Join(root, "config", "config.env"))
+	t.Setenv("OPENVIBELY_PLUGIN_ROOT", filepath.Join(root, "plugins"))
+	cfg := &config.Config{
+		Mode:                config.ModeDesktop,
+		AppDataDir:          filepath.Join(root, "app-data"),
+		DatabasePath:        filepath.Join(root, "database", "openvibely.db"),
+		ProjectRepoRoot:     filepath.Join(root, "projects"),
+		UpdatePublicKeyFile: filepath.Join(root, "trust", "keys.json"),
+	}
+	paths, err := desktopUpdateProtectedPaths(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		cfg.AppDataDir,
+		cfg.DatabasePath,
+		cfg.ProjectRepoRoot,
+		config.DesktopConfigFilePath(),
+		os.Getenv("OPENVIBELY_PLUGIN_ROOT"),
+		cfg.UpdatePublicKeyFile,
+	} {
+		expected, err = filepath.Abs(expected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, path := range paths {
+			if path == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("protected paths %#v omit %q", paths, expected)
+		}
+	}
+}
+
 func TestRequestLoggerOmitsSensitiveRequestData(t *testing.T) {
+
 	var output bytes.Buffer
 	e := echo.New()
 	e.Use(middleware.LoggerWithConfig(requestLoggerConfig(&output)))

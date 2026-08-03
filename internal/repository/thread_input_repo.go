@@ -380,6 +380,49 @@ func (r *ThreadInputRepo) FindOldestQueuedForChat(ctx context.Context, projectID
 	return r.findOldestQueued(ctx, models.ThreadInputScopeChat, projectID, "")
 }
 
+func (r *ThreadInputRepo) ListRecoverableQueuedChatProjectIDsAfter(ctx context.Context, afterProjectID string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT ti.project_id
+		FROM thread_inputs ti
+		LEFT JOIN executions guarded ON guarded.id = ti.run_execution_id
+		WHERE ti.scope = 'chat'
+		  AND ti.input_mode = 'queued'
+		  AND ti.input_status = 'pending'
+		  AND COALESCE(ti.project_id, '') != ''
+		  AND ti.project_id > ?
+		  AND (ti.run_execution_id IS NULL OR guarded.status IN ('completed', 'failed', 'cancelled'))
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM executions active
+		    JOIN tasks active_task ON active_task.id = active.task_id
+		    WHERE active_task.project_id = ti.project_id
+		      AND active_task.category = 'chat'
+		      AND active.status = 'running'
+		  )
+		GROUP BY ti.project_id
+		ORDER BY ti.project_id
+		LIMIT ?`, afterProjectID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing recoverable queued chat project ids: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning recoverable queued chat project id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("listing recoverable queued chat project ids: %w", err)
+	}
+	return ids, nil
+}
+
 func (r *ThreadInputRepo) ListRecoverableQueuedTaskIDs(ctx context.Context, limit int) ([]string, error) {
 	return r.ListRecoverableQueuedTaskIDsAfter(ctx, "", limit)
 }

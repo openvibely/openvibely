@@ -9,6 +9,43 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestAlertsContent_SystemUpdateShowsExactDockerDigestAndLiveProgress(t *testing.T) {
+	var buf bytes.Buffer
+	if err := AlertsContent(nil, "project-1", 0).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	for _, required := range []string{"system-update-digest", "image_ref", "setInterval(refreshSystemUpdateCard, 1000)", "data.distribution === 'hosted' || (data.state !== 'waiting_for_idle'"} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("system update UI missing %q", required)
+		}
+	}
+}
+
+func TestAlertsContent_SystemUpdateUsesSingleAcceptanceActionAndExplainsDrain(t *testing.T) {
+	var buf bytes.Buffer
+	if err := AlertsContent(nil, "project-1", 0).Render(context.Background(), &buf); err != nil {
+		t.Fatal(err)
+	}
+	html := buf.String()
+	for _, required := range []string{
+		`id="system-update-accept"`,
+		`Update OpenVibely`,
+		`The replacement is downloaded and verified before approval. After you accept, OpenVibely waits for active work to finish, restarts, validates the new version, and rolls back automatically if needed.`,
+		`data.staged`,
+		`systemUpdateAction('apply')`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("single-action update UI missing %q", required)
+		}
+	}
+	for _, removed := range []string{`id="system-update-stage"`, `id="system-update-apply"`, `Stage update`, `Apply update`} {
+		if strings.Contains(html, removed) {
+			t.Fatalf("two-step update UI still contains %q", removed)
+		}
+	}
+}
+
 func TestAlertsContent_DeleteActionsDoNotDependOnHxConfirm(t *testing.T) {
 	alerts := []models.Alert{{ID: "alert-1", Title: "Disk full", ProjectID: "project-1"}}
 

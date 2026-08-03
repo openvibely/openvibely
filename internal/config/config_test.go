@@ -165,7 +165,6 @@ func TestLoadWithMode_DesktopDefaults(t *testing.T) {
 		defer os.Setenv(k, prev)
 	}
 
-	serverCfg := LoadWithMode(ModeServer)
 	cfg := LoadWithMode(ModeDesktop)
 	if cfg.Mode != ModeDesktop {
 		t.Fatalf("expected mode desktop, got %s", cfg.Mode)
@@ -177,14 +176,8 @@ func TestLoadWithMode_DesktopDefaults(t *testing.T) {
 	if cfg.AppDataDir == "" {
 		t.Fatal("desktop mode should default AppDataDir")
 	}
-	if cfg.AppDataDir != serverCfg.AppDataDir {
-		t.Fatalf("desktop and server should default to the same AppDataDir; desktop=%q server=%q", cfg.AppDataDir, serverCfg.AppDataDir)
-	}
-	if cfg.DatabasePath != serverCfg.DatabasePath {
-		t.Fatalf("desktop and server should default to the same DB; desktop=%q server=%q", cfg.DatabasePath, serverCfg.DatabasePath)
-	}
-	if cfg.ProjectRepoRoot != serverCfg.ProjectRepoRoot {
-		t.Fatalf("desktop and server should default to the same repo root; desktop=%q server=%q", cfg.ProjectRepoRoot, serverCfg.ProjectRepoRoot)
+	if cfg.AppDataDir != desktopDataDir() {
+		t.Fatalf("desktop AppDataDir=%q want platform application-data directory %q", cfg.AppDataDir, desktopDataDir())
 	}
 	if cfg.DatabasePath != filepath.Join(cfg.AppDataDir, "openvibely.db") {
 		t.Fatalf("expected desktop DB under AppDataDir, got %s", cfg.DatabasePath)
@@ -193,7 +186,7 @@ func TestLoadWithMode_DesktopDefaults(t *testing.T) {
 		t.Fatalf("expected desktop repo root under AppDataDir, got %s", cfg.ProjectRepoRoot)
 	}
 
-	// DB path should be inside the shared app-data dir, not relative.
+	// DB path should be inside the platform app-data dir, not relative.
 	if cfg.DatabasePath == "./openvibely.db" {
 		t.Fatal("desktop mode should not use relative default DB path")
 	}

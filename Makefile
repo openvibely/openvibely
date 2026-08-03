@@ -2,6 +2,7 @@
 
 DOCKER ?= docker
 IMAGE ?= openvibely/openvibely:local
+VERSION ?= dev-unknown
 
 TEMPL_VERSION := $(shell go list -m -f '{{.Version}}' github.com/a-h/templ)
 SWAG_VERSION := $(shell go list -m -f '{{.Version}}' github.com/swaggo/swag)
@@ -49,7 +50,7 @@ package-desktop-macos: build-desktop
 	@mkdir -p bin/OpenVibely.app/Contents/Resources
 	@cp bin/openvibely-desktop bin/OpenVibely.app/Contents/MacOS/OpenVibely
 	@chmod +x bin/OpenVibely.app/Contents/MacOS/OpenVibely
-	@printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '<key>CFBundleName</key><string>OpenVibely</string>' '<key>CFBundleDisplayName</key><string>OpenVibely</string>' '<key>CFBundleIdentifier</key><string>com.openvibely.desktop</string>' '<key>CFBundleVersion</key><string>1.0.0</string>' '<key>CFBundleShortVersionString</key><string>1.0.0</string>' '<key>CFBundlePackageType</key><string>APPL</string>' '<key>CFBundleExecutable</key><string>OpenVibely</string>' '<key>LSMinimumSystemVersion</key><string>12.0</string>' '</dict>' '</plist>' > bin/OpenVibely.app/Contents/Info.plist
+	@printf '%s\n' '<?xml version="1.0" encoding="UTF-8"?>' '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' '<plist version="1.0">' '<dict>' '<key>CFBundleName</key><string>OpenVibely</string>' '<key>CFBundleDisplayName</key><string>OpenVibely</string>' '<key>CFBundleIdentifier</key><string>com.openvibely.desktop</string>' '<key>CFBundleVersion</key><string>$(VERSION)</string>' '<key>CFBundleShortVersionString</key><string>$(VERSION)</string>' '<key>CFBundlePackageType</key><string>APPL</string>' '<key>CFBundleExecutable</key><string>OpenVibely</string>' '<key>LSMinimumSystemVersion</key><string>12.0</string>' '</dict>' '</plist>' > bin/OpenVibely.app/Contents/Info.plist
 	@echo 'Created bin/OpenVibely.app (launch this from Finder for no Terminal window)'
 
 # Run the server

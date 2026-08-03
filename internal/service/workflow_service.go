@@ -13,6 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/update"
 	"github.com/openvibely/openvibely/internal/util"
 )
 
@@ -22,6 +23,7 @@ type WorkflowService struct {
 	taskRepo      *repository.TaskRepo
 	llmSvc        *LLMService
 	alertSvc      *AlertService
+	updateTracker *update.WorkTracker
 
 	mu             sync.Mutex
 	runningEngines map[string]context.CancelFunc // workflowExecID -> cancel
@@ -44,6 +46,9 @@ func NewWorkflowService(
 
 func (s *WorkflowService) SetAlertService(alertSvc *AlertService) {
 	s.alertSvc = alertSvc
+}
+func (s *WorkflowService) SetUpdateWorkTracker(tracker *update.WorkTracker) {
+	s.updateTracker = tracker
 }
 
 // --- Template Operations ---
@@ -230,6 +235,20 @@ func (s *WorkflowService) resolveAgentForRole(ctx context.Context, projectID str
 
 // ExecuteWorkflow starts executing a workflow for a given task
 func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID, taskID string) (*models.WorkflowExecution, error) {
+	done := func() {}
+	transferred := false
+	if s.updateTracker != nil {
+		var err error
+		done, err = s.updateTracker.Start(update.WorkWorkflow)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if !transferred {
+				done()
+			}
+		}()
+	}
 	workflow, err := s.workflowRepo.GetWorkflow(ctx, workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("get workflow: %w", err)
@@ -273,7 +292,9 @@ func (s *WorkflowService) ExecuteWorkflow(ctx context.Context, workflowID, taskI
 	s.runningEngines[we.ID] = cancel
 	s.mu.Unlock()
 
+	transferred = true
 	go func() {
+		defer done()
 		defer func() {
 			s.mu.Lock()
 			delete(s.runningEngines, we.ID)

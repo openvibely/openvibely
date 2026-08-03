@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
+	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/builtinskills"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/database"
@@ -31,6 +32,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/update"
 
 	_ "github.com/openvibely/openvibely/docs" // Swagger docs
 )
@@ -44,7 +46,9 @@ type Instance struct {
 	BaseURL string
 	// Shutdown gracefully stops all background services, the HTTP server, and the DB.
 	// It is safe to call multiple times.
-	Shutdown func()
+	Shutdown          func()
+	ShutdownRequested <-chan struct{}
+	UpdateCoordinator *update.Coordinator
 }
 
 func migrateLegacyStorage(cfg *config.Config) error {
@@ -347,6 +351,44 @@ func configureMethodOverride(e *echo.Echo) {
 	}))
 }
 
+func desktopUpdateProtectedPaths(cfg *config.Config) ([]string, error) {
+	paths := []string{cfg.AppDataDir, cfg.DatabasePath, cfg.ProjectRepoRoot}
+	if cfg.Mode == config.ModeDesktop {
+		paths = append(paths, config.DesktopConfigFilePath())
+		if pluginRoot := strings.TrimSpace(os.Getenv("OPENVIBELY_PLUGIN_ROOT")); pluginRoot != "" {
+			paths = append(paths, pluginRoot)
+		}
+	}
+	if keyFile := strings.TrimSpace(cfg.UpdatePublicKeyFile); keyFile != "" {
+		paths = append(paths, keyFile)
+	}
+	resolved := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return nil, err
+		}
+		absolute = filepath.Clean(absolute)
+		if _, exists := seen[absolute]; exists {
+			continue
+		}
+		seen[absolute] = struct{}{}
+		resolved = append(resolved, absolute)
+	}
+	return resolved, nil
+}
+
+type updateCoordinatorStarter interface {
+	StartRecovery(context.Context)
+	StartChecks(context.Context)
+}
+
+func startUpdateCoordinator(ctx context.Context, coordinator updateCoordinatorStarter) {
+	coordinator.StartRecovery(ctx)
+	coordinator.StartChecks(ctx)
+}
+
 // Start wires the full OpenVibely backend and starts serving HTTP on cfg.Port.
 // It blocks until the HTTP listener is bound and background services are started,
 // then returns an Instance with the bound address and a shutdown handle.
@@ -399,6 +441,11 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 	applog.Infof("database initialized")
+	var databaseSchema int
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version_id), 0) FROM goose_db_version WHERE is_applied = 1`).Scan(&databaseSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("reading database schema version: %w", err)
+	}
 
 	// Event broadcasters for real-time UI updates
 	broadcaster := events.NewBroadcaster()
@@ -467,6 +514,112 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workerSvc.SetLLMConfigRepo(llmConfigRepo)
 	workerSvc.SetExecutionRepo(execRepo)
 	workerSvc.SetAutomationRepo(automationRepo)
+	updateTracker := update.NewWorkTracker()
+	updateDrain := update.NewDrainManager(
+		updateTracker.Active,
+		func() int {
+			var total int
+			_ = db.QueryRowContext(context.Background(), `SELECT
+				(SELECT COUNT(*) FROM tasks WHERE status IN ('pending','queued')) +
+				(SELECT COUNT(*) FROM thread_inputs WHERE input_status = 'pending' AND input_mode = 'queued')`).Scan(&total)
+			return total
+		},
+		2*time.Second,
+		time.Now,
+	)
+	updateDrain.SetWorkTracker(updateTracker)
+	if err := updateDrain.SetPersistence(filepath.Join(cfg.AppDataDir, "update-drain.json")); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("restoring update drain: %w", err)
+	}
+	workerSvc.SetUpdateWorkTracker(updateTracker)
+	llmSvc.SetUpdateWorkTracker(updateTracker)
+	workerSvc.SetAdmissionGate(updateDrain.Admit)
+	updateKeys, err := update.DecodePublicKeys(buildinfo.ReleaseKeyID, buildinfo.ReleasePublicKey, cfg.UpdatePublicKeyFile)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("loading update trust root: %w", err)
+	}
+	currentBuild := buildinfo.Current(cfg.BuildArtifact)
+	currentBuild.Artifact = cfg.BuildArtifact
+	updateClient := update.NewClient(update.ClientConfig{
+		ServiceURL: cfg.UpdateServiceURL,
+		Channel:    cfg.UpdateChannel,
+		StatePath:  filepath.Join(cfg.AppDataDir, "update-state.json"),
+		PublicKeys: updateKeys,
+	})
+	current := update.CurrentBuild{Build: currentBuild, Distribution: cfg.Distribution}
+	var updateInstaller update.Installer
+	var binaryUpdateInstaller *update.BinaryInstaller
+	shutdownRequested := make(chan struct{}, 1)
+	var hostedUpdateController *update.HostedController
+	switch {
+	case cfg.BuildArtifact == buildinfo.ArtifactBinary && cfg.ManagedUpdateError == "":
+		executable, execErr := os.Executable()
+		if execErr != nil {
+			db.Close()
+			return nil, fmt.Errorf("resolving update executable: %w", execErr)
+		}
+		workingDirectory, workdirErr := os.Getwd()
+		if workdirErr != nil {
+			db.Close()
+			return nil, fmt.Errorf("resolving update working directory: %w", workdirErr)
+		}
+		binaryUpdateInstaller = &update.BinaryInstaller{Client: updateClient, Current: current, Executable: executable, Arguments: append([]string(nil), os.Args...), WorkingDirectory: workingDirectory, Shutdown: func() {
+			select {
+			case shutdownRequested <- struct{}{}:
+			default:
+			}
+		}}
+		updateInstaller = binaryUpdateInstaller
+	case cfg.UpdateMode == buildinfo.ModeDockerAgent && cfg.ManagedUpdateError == "":
+		agentAPI, apiErr := update.NewAgentHTTPClient(cfg.DockerAgentURL, cfg.DockerAgentToken, nil)
+		if apiErr != nil {
+			db.Close()
+			return nil, fmt.Errorf("configuring Docker update agent: %w", apiErr)
+		}
+		dockerInstaller := &update.DockerAgentInstaller{API: agentAPI, Client: updateClient, Current: current, Drain: updateDrain, StatePath: filepath.Join(cfg.AppDataDir, "docker-update-request.json")}
+		if err := dockerInstaller.Load(); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("restoring Docker update request: %w", err)
+		}
+		updateInstaller = dockerInstaller
+	case cfg.UpdateMode == buildinfo.ModeHosted:
+		agentAPI, apiErr := update.NewAgentHTTPClient(cfg.HostedSSOControlURL, cfg.HostedAgentToken, nil)
+		if apiErr != nil {
+			db.Close()
+			return nil, fmt.Errorf("configuring Hosted update controller: %w", apiErr)
+		}
+		hostedUpdateController = update.NewHostedController(agentAPI, updateDrain, current, filepath.Join(cfg.AppDataDir, "hosted-update.json"))
+		if err := hostedUpdateController.Restore(); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("restoring Hosted update controller: %w", err)
+		}
+	}
+	updateCoordinator := update.NewCoordinator(
+		updateClient,
+		current,
+		cfg.UpdateChannel,
+		updateDrain,
+		updateInstaller,
+		cfg.UpdateMode == buildinfo.ModeDockerManual,
+		cfg.ManagedUpdateError,
+		workerSvc.ResumeDispatch,
+	)
+	updateCoordinator.SetUpdateNotificationsEnabled(!cfg.DisableUpdateNotifications)
+	protectedDataPaths, protectedPathsErr := desktopUpdateProtectedPaths(cfg)
+	if protectedPathsErr != nil {
+		db.Close()
+		return nil, fmt.Errorf("resolving desktop update data boundaries: %w", protectedPathsErr)
+	}
+	updateCoordinator.SetProtectedDataPaths(protectedDataPaths)
+	if hostedUpdateController != nil {
+		updateCoordinator.SetManagedStateProvider(hostedUpdateController.Lifecycle)
+	}
+	if err := updateCoordinator.SetPersistence(filepath.Join(cfg.AppDataDir, "update-coordinator.json")); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("restoring update coordinator: %w", err)
+	}
 
 	projectSvc := service.NewProjectService(projectRepo)
 	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, broadcaster)
@@ -477,9 +630,12 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	llmSvc.SetTaskGoalService(taskGoalSvc)
 	workerSvc.SetTaskGoalService(taskGoalSvc)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	schedulerSvc.SetUpdateWorkTracker(updateTracker)
 	schedulerSvc.SetAutomationRepo(automationRepo)
 	automationDispatcher := service.NewAutomationDispatcher(automationRepo, taskRepo, workerSvc)
+	automationDispatcher.SetUpdateWorkTracker(updateTracker)
 	automationReconciler := service.NewAutomationReconciler(automationRepo, execRepo, workerSvc)
+	automationReconciler.SetUpdateWorkTracker(updateTracker)
 	alertSvc := service.NewAlertService(alertRepo, broadcaster)
 	automationRegistry := service.NewAutomationAdapterRegistry()
 	automationRegistrationSvc := service.NewAutomationRegistrationService(automationRepo, automationRegistry)
@@ -489,6 +645,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
 	workflowRepo := repository.NewWorkflowRepo(db)
 	workflowSvc := service.NewWorkflowService(workflowRepo, llmConfigRepo, taskRepo, llmSvc)
+	workflowSvc.SetUpdateWorkTracker(updateTracker)
 	workflowSvc.SetAlertService(alertSvc)
 	collisionRepo := repository.NewCollisionRepo(db)
 	collisionSvc := service.NewCollisionService(collisionRepo, taskRepo, projectRepo, llmConfigRepo)
@@ -891,9 +1048,14 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		hostedPendingStore = auth.NewPendingStore(srvCtx, time.Now)
 	}
 
+	updateDrain.StartExpirySupervisor(srvCtx)
 	workerSvc.Start(srvCtx)
 	automationReconciler.Start(srvCtx)
 	automationDispatcher.Start(srvCtx)
+	startUpdateCoordinator(srvCtx, updateCoordinator)
+	if hostedUpdateController != nil {
+		hostedUpdateController.Start(srvCtx)
+	}
 
 	// HTTP Server
 	e := echo.New()
@@ -994,6 +1156,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetDesktopMode(cfg.Mode == config.ModeDesktop)
 	h.SetAppBaseURL(cfg.AppBaseURL)
 	h.SetAuthMode(cfg.AuthMode)
+	h.SetSystemHealth(currentBuild, cfg.UpdateMode, cfg.Distribution, cfg.HostedAgentToken, cfg.DockerAgentToken, databaseSchema, updateDrain)
+	h.SetManagedUpdateError(cfg.ManagedUpdateError)
+	h.SetUpdateCoordinator(updateCoordinator)
+	h.SetUpdateWorkTracker(updateTracker)
 	h.SetAuthConfig(authCfg)
 	if cfg.AuthMode == auth.AuthModeHostedSSO {
 		h.SetHostedSSO(hostedSSOClient, hostedPendingStore, cfg.HostedSSOKey, cfg.HostedSSOInstanceID, cfg.AppBaseURL)
@@ -1006,9 +1172,20 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	if telegramSvc != nil {
 		llmSvc.SetTelegramService(telegramSvc)
 	}
-	h.RecoverQueuedTaskThreadInputs(context.Background())
-	// Start scheduler scans only after durable queued task-thread inputs have
-	// been offered for promotion. Repository admission guards remain authoritative
+	go func() {
+		for {
+			select {
+			case <-srvCtx.Done():
+				return
+			case <-updateDrain.Reopened():
+				workerSvc.ResumeDispatch()
+				h.RecoverQueuedInputs(srvCtx)
+			}
+		}
+	}()
+	h.RecoverQueuedInputs(context.Background())
+	// Start scheduler scans only after durable queued Chat and task-thread inputs
+	// have been offered for promotion. Repository admission guards remain authoritative
 	// if recovery and a later scan overlap.
 	schedulerSvc.Start(srvCtx)
 	h.RegisterRoutes(e)
@@ -1031,6 +1208,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		host = "127.0.0.1"
 	}
 	baseURL := fmt.Sprintf("http://%s:%s", host, port)
+	if binaryUpdateInstaller != nil {
+		binaryUpdateInstaller.HealthURL = baseURL + "/api/system/health"
+		updateCoordinator.StartRecovery(srvCtx)
+	}
 
 	shutdownOnce := make(chan struct{})
 	shutdownDone := make(chan struct{})
@@ -1078,8 +1259,10 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	}()
 
 	return &Instance{
-		BoundAddr: boundAddr,
-		BaseURL:   baseURL,
-		Shutdown:  shutdownFn,
+		BoundAddr:         boundAddr,
+		BaseURL:           baseURL,
+		Shutdown:          shutdownFn,
+		ShutdownRequested: shutdownRequested,
+		UpdateCoordinator: updateCoordinator,
 	}, nil
 }

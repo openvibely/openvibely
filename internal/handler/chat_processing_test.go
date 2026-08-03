@@ -2023,6 +2023,33 @@ func TestHandler_WorkerCompletionPromotesQueuedTaskThreadInput(t *testing.T) {
 	}
 }
 
+func TestHandler_RecoverQueuedInputsPromotesChatAfterDrain(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Recover Chat Queue After Drain")
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued chat after drain", ChatMode: models.ChatModeOrchestrate}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+	started := make(chan string, 1)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "recovered"
+	mock.TextOnly = "recovered"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) { started <- call.Prompt }
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.RecoverQueuedInputs(ctx)
+	select {
+	case got := <-started:
+		require.Equal(t, queued.Content, got)
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued Chat input was not resumed after drain")
+	}
+	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ThreadInputApplied, stored.InputStatus)
+}
+
 func TestHandler_RecoverQueuedTaskThreadInputsDrainsMoreThanOneBatch(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

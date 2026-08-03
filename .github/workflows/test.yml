@@ -83,3 +83,24 @@ jobs:
         run: |
           grep -v "_templ.go" coverage.out > coverage.filtered.out
           go tool cover -func=coverage.filtered.out | tail -1
+
+  packaged-update-native:
+    name: Packaged update (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run native packaged-update tests
+        shell: bash
+        run: go test ./internal/update -count=1 -timeout 120s

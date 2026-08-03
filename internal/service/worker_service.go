@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/memory"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
 var ErrTaskAlreadyQueuedOrRunning = errors.New("task is already queued or running")
@@ -78,6 +79,8 @@ type WorkerService struct {
 	beforeOrdinaryTaskClaim          func(models.Task) // deterministic pre-claim test barrier
 	afterOrdinaryTaskClaim           func(models.Task) // deterministic persisted-claim test barrier
 	currentCatalog                   atomic.Value      // stores *agentskills.Catalog for hook skill resolution
+	admissionOpen                    func() bool
+	updateTracker                    *update.WorkTracker
 }
 
 // SetLifecycleRunner attaches the lifecycle runner so the worker can invoke
@@ -179,6 +182,17 @@ func (w *WorkerService) SetLLMConfigRepo(llmConfigRepo *repository.LLMConfigRepo
 	w.llmConfigRepo = llmConfigRepo
 }
 
+func (w *WorkerService) SetUpdateWorkTracker(tracker *update.WorkTracker) { w.updateTracker = tracker }
+
+func (w *WorkerService) SetAdmissionGate(open func() bool) {
+	w.mu.Lock()
+	w.admissionOpen = open
+	w.mu.Unlock()
+}
+
+// ResumeDispatch offers all queued durable work for admission after a drain ends.
+func (w *WorkerService) ResumeDispatch() { w.dispatchNext() }
+
 func (w *WorkerService) Start(ctx context.Context) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -277,6 +291,9 @@ func (w *WorkerService) dispatchNext() {
 	if w.ctx == nil {
 		return // not started yet
 	}
+	if w.admissionOpen != nil && !w.admissionOpen() {
+		return
+	}
 
 	i := 0
 	for i < len(w.queue) {
@@ -342,18 +359,32 @@ func (w *WorkerService) dispatchNext() {
 			continue
 		}
 
+		// Reserve update active-work accounting synchronously before launching the
+		// goroutine so a concurrently starting drain cannot observe a false zero.
+		workDone := func() {}
+		if w.updateTracker != nil {
+			var err error
+			workDone, err = w.updateTracker.Start(update.WorkTask)
+			if err != nil {
+				w.releaseProjectSlot(task.ProjectID)
+				w.releaseModelSlot(agentConfigID)
+				return
+			}
+		}
+
 		// Remove from queue (shift remaining)
 		w.queue = append(w.queue[:i], w.queue[i+1:]...)
 		delete(w.prepared, task.ID)
 
 		// Dispatch
 		w.wg.Add(1)
-		go w.executeTask(task, agentConfigID, prepared, isPrepared)
+		go w.executeTask(task, agentConfigID, prepared, isPrepared, workDone)
 	}
 }
 
-func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prepared preparedAutomationDispatch, isPrepared bool) {
+func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prepared preparedAutomationDispatch, isPrepared bool, workDone func()) {
 	defer w.wg.Done()
+	defer workDone()
 
 	applog.Infof("[worker] executing task=%s %q (project: %s, model: %s)", task.ID, task.Title, task.ProjectID, agentConfigID)
 
@@ -914,6 +945,9 @@ func (w *WorkerService) TryAcquireModelSlot(agentConfigID string) bool {
 func (w *WorkerService) tryAcquireGlobalProjectSlot(projectID string) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if w.admissionOpen != nil && !w.admissionOpen() {
+		return false
+	}
 
 	running := int(atomic.LoadInt32(&w.totalRunning))
 	if !hasGlobalWorkerCapacity(w.numWorkers, running) {

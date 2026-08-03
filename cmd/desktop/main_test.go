@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/config"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
 // TestEnsureDesktopPATHMakesGoLocatable reproduces the "bash: go: command not
@@ -68,6 +69,18 @@ func TestEnsureDesktopPATHMakesGoLocatable(t *testing.T) {
 	}
 }
 
+func TestEnsureDesktopPluginRootUsesExternalApplicationData(t *testing.T) {
+	t.Setenv("OPENVIBELY_PLUGIN_ROOT", "")
+	appData := filepath.Join(t.TempDir(), "OpenVibely Data")
+	if err := ensureDesktopPluginRoot(&config.Config{AppDataDir: appData}); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(appData, ".openvibely", "plugins")
+	if got := os.Getenv("OPENVIBELY_PLUGIN_ROOT"); got != want {
+		t.Fatalf("desktop plugin root = %q, want %q", got, want)
+	}
+}
+
 func TestRunDesktopLaunchesNativeWindow(t *testing.T) {
 	cfg := &config.Config{Mode: config.ModeDesktop}
 
@@ -87,7 +100,7 @@ func TestRunDesktopLaunchesNativeWindow(t *testing.T) {
 				},
 			}, nil
 		},
-		func(url string, onShutdown func()) error {
+		func(url string, onShutdown func(), _ *update.Coordinator) error {
 			launched = true
 			launchedURL = url
 			onShutdown()
@@ -122,7 +135,7 @@ func TestRunDesktopStartFailure(t *testing.T) {
 		func(context.Context, *config.Config) (*desktopBackend, error) {
 			return nil, startErr
 		},
-		func(string, func()) error {
+		func(string, func(), *update.Coordinator) error {
 			launched = true
 			return nil
 		},

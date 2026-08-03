@@ -123,6 +123,31 @@ definitions:
           $ref: '#/definitions/handler.ProjectResponse'
         type: array
     type: object
+  handler.SystemHealthResponse:
+    properties:
+      artifact:
+        type: string
+      build_time:
+        type: string
+      commit:
+        type: string
+      database_schema:
+        type: integer
+      distribution:
+        type: string
+      drain_state:
+        type: string
+      ready:
+        type: boolean
+      schema_version:
+        type: integer
+      status:
+        type: string
+      update_mode:
+        type: string
+      version:
+        type: string
+    type: object
   models.AccountLimitView:
     properties:
       label:
@@ -947,6 +972,114 @@ definitions:
         type: string
       taskTitle:
         type: string
+    type: object
+  update.ActiveWork:
+    properties:
+      automation_activities:
+        type: integer
+      chat_executions:
+        type: integer
+      task_executions:
+        type: integer
+      workflow_executions:
+        type: integer
+    type: object
+  update.CoordinatorSnapshot:
+    properties:
+      channel:
+        type: string
+      configuration_error:
+        type: string
+      current_version:
+        type: string
+      distribution:
+        type: string
+      drain:
+        $ref: '#/definitions/update.DrainStatus'
+      error:
+        type: string
+      manual:
+        type: boolean
+      release:
+        $ref: '#/definitions/update.VerifiedRelease'
+      staged:
+        type: boolean
+      state:
+        type: string
+    type: object
+  update.DrainStatus:
+    properties:
+      active:
+        $ref: '#/definitions/update.ActiveWork'
+      expires_at:
+        type: string
+      generation:
+        type: string
+      queued_total:
+        type: integer
+      state:
+        type: string
+    type: object
+  update.ReleaseMetadata:
+    properties:
+      channel:
+        type: string
+      commit:
+        type: string
+      database_compatibility:
+        type: string
+      expires_at:
+        type: string
+      minimum_hosted_version:
+        type: string
+      minimum_updater_version:
+        type: string
+      published_at:
+        type: string
+      release_notes_url:
+        type: string
+      schema_version:
+        type: integer
+      targets:
+        items:
+          $ref: '#/definitions/update.Target'
+        type: array
+      version:
+        type: string
+    type: object
+  update.Target:
+    properties:
+      arch:
+        type: string
+      filename:
+        type: string
+      filetype:
+        type: string
+      id:
+        type: string
+      image_ref:
+        type: string
+      kind:
+        type: string
+      os:
+        type: string
+      sha256:
+        type: string
+      size:
+        type: integer
+      url:
+        type: string
+    type: object
+  update.VerifiedRelease:
+    properties:
+      action:
+        type: string
+      apply_supported:
+        type: boolean
+      metadata:
+        $ref: '#/definitions/update.ReleaseMetadata'
+      target:
+        $ref: '#/definitions/update.Target'
     type: object
   viewmodels.LifecycleExecutionEventView:
     properties:
@@ -2316,6 +2449,89 @@ paths:
       summary: Toggle schedule enabled state
       tags:
       - schedules
+  /api/system/health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handler.SystemHealthResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handler.SystemHealthResponse'
+      summary: System health and build identity
+      tags:
+      - system
+  /api/system/update:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/update.CoordinatorSnapshot'
+        "204":
+          description: No Content
+      summary: Get system update state
+      tags:
+      - system
+  /api/system/update/apply:
+    post:
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/update.CoordinatorSnapshot'
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Accept a system update
+      tags:
+      - system
+  /api/system/update/cancel:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/update.CoordinatorSnapshot'
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Cancel a system update
+      tags:
+      - system
+  /api/system/update/events:
+    get:
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+        "204":
+          description: No Content
+      summary: Stream system update events
+      tags:
+      - system
   /api/tasks/{id}/lifecycle-executions:
     get:
       description: Returns lifecycle hook invocations (routing, before-run preparation,

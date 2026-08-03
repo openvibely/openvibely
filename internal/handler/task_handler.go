@@ -2102,7 +2102,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	// loading, system/goal/personality context building, and worktree resolution out of the
 	// HTTP handler and into the background goroutine, eliminating the per-execution O(N) block
 	// that caused visible UI hangs on tasks with many prior executions.
-	go h.processStreamingResponse(streamingResponseParams{
+	if err := h.startStreamingResponse(streamingResponseParams{
 		ExecID:            exec.ID,
 		TaskID:            taskID,
 		Message:           message,
@@ -2114,7 +2114,10 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		DeferHistoryLoad:  true,
 		AttachmentContext: attachmentContext,
 		Task:              task,
-	})
+	}); err != nil {
+		c.Response().Header().Set("Retry-After", "30")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
 
 	return render(c, http.StatusOK, templ.Join(
 		components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments),

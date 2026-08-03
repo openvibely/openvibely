@@ -9,10 +9,12 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/auth"
+	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/update"
 	echoSwagger "github.com/swaggo/echo-swagger"
 )
 
@@ -97,6 +99,17 @@ type Handler struct {
 	hostedSSOInstanceID        string
 	appBaseURL                 string
 	desktopMode                bool
+	buildIdentity              buildinfo.Build
+	updateMode                 string
+	distribution               string
+	hostedAgentToken           string
+	dockerAgentToken           string
+	databaseSchema             int
+	drainManager               *update.DrainManager
+	updateCoordinator          *update.Coordinator
+	updateWorkTracker          *update.WorkTracker
+	systemReady                bool
+	managedUpdateError         string
 	pendingRemovalHook         func(string)
 	pendingPublicationHook     func(string)
 	githubRuntimeHook          func()
@@ -519,6 +532,15 @@ func parseIntClamped(value string, min, max int) int {
 }
 
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
+	// Machine-readable readiness and immutable build identity.
+	e.GET("/api/system/health", h.SystemHealth)
+
+	// Machine-readable system update state and administrator actions.
+	e.GET("/api/system/update", h.SystemUpdate)
+	e.POST("/api/system/update/apply", h.ApplySystemUpdate)
+	e.POST("/api/system/update/cancel", h.CancelSystemUpdate)
+	e.GET("/api/system/update/events", h.SystemUpdateEvents)
+
 	// Swagger API documentation
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 

@@ -145,7 +145,7 @@ check_entrypoint_accepts() {
                 bash "${SCRIPT_DIR}/${script}" "$input" 2>&1)"
             ;;
         release-build.sh)
-            output="$(DRY_RUN=1 SKIP_GENERATE=1 PATH="${ENTRYPOINT_MOCK_BIN}:$PATH" \
+            output="$(DRY_RUN=1 SKIP_GENERATE=1 OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true PATH="${ENTRYPOINT_MOCK_BIN}:$PATH" \
                 bash "${SCRIPT_DIR}/${script}" "$input" "$dist_dir" 2>&1)"
             ;;
         release-notes.sh)
@@ -160,6 +160,7 @@ check_entrypoint_accepts() {
             ;;
         release.sh)
             output="$(DRY_RUN=1 SKIP_GH_AUTH_CHECK=1 SKIP_GENERATE=1 AUTO_CONFIRM=1 \
+                OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true \
                 DIST_DIR="$dist_dir" PATH="${ENTRYPOINT_MOCK_BIN}:$PATH" \
                 bash "${SCRIPT_DIR}/${script}" "$input" 2>&1)"
             ;;
@@ -262,10 +263,10 @@ check_artifact_name "$VERSION" "OpenVibely_<version>_darwin_arm64.app.zip" \
     "OpenVibely_0.1.1_darwin_arm64.app.zip"
 
 # Server tarballs (lowercase openvibely)
-check_artifact_name "$VERSION" "openvibely_<version>_darwin_amd64_server.tar.gz" \
-    "openvibely_0.1.1_darwin_amd64_server.tar.gz"
-check_artifact_name "$VERSION" "openvibely_<version>_darwin_arm64_server.tar.gz" \
-    "openvibely_0.1.1_darwin_arm64_server.tar.gz"
+check_artifact_name "$VERSION" "openvibely_<version>_darwin_amd64_server.zip" \
+    "openvibely_0.1.1_darwin_amd64_server.zip"
+check_artifact_name "$VERSION" "openvibely_<version>_darwin_arm64_server.zip" \
+    "openvibely_0.1.1_darwin_arm64_server.zip"
 check_artifact_name "$VERSION" "openvibely_<version>_linux_amd64_server.tar.gz" \
     "openvibely_0.1.1_linux_amd64_server.tar.gz"
 check_artifact_name "$VERSION" "openvibely_<version>_linux_arm64_server.tar.gz" \
@@ -279,6 +280,10 @@ check_artifact_name "$VERSION" "openvibely_<version>_windows_amd64_server.zip" \
 check_artifact_name "$VERSION" "openvibely_<version>_windows_amd64_desktop-cli.zip" \
     "openvibely_0.1.1_windows_amd64_desktop-cli.zip"
 
+# Linux desktop tarball
+check_artifact_name "$VERSION" "openvibely_<version>_linux_amd64_desktop.tar.gz" \
+    "openvibely_0.1.1_linux_amd64_desktop.tar.gz"
+
 # SHA256SUMS (no version in the filename)
 SUMS_NAME="SHA256SUMS"
 if [[ "$SUMS_NAME" == "SHA256SUMS" ]]; then
@@ -288,7 +293,36 @@ else
 fi
 
 ###############################################################################
-# 3. Tag format
+# 5. Official artifact signing contracts
+###############################################################################
+
+section "Official artifact signing contracts"
+BUILD_SCRIPT="${SCRIPT_DIR}/release-build.sh"
+for required in OPENVIBELY_MACOS_SIGN_IDENTITY OPENVIBELY_MACOS_NOTARY_PROFILE OPENVIBELY_WINDOWS_SIGN_COMMAND OPENVIBELY_WINDOWS_VERIFY_COMMAND; do
+    if grep -q "${required}.*required" "$BUILD_SCRIPT"; then
+        pass "official build requires ${required}"
+    else
+        fail "official build does not require ${required}"
+    fi
+done
+for required_call in 'codesign --force --deep --options runtime --timestamp' 'xcrun stapler staple' 'notarize_macos_binary_archive' 'sign_windows_binary "$TMP_BIN/server_windows_amd64.exe"' 'sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe"' 'Official releases require a Windows desktop build' 'Official releases require a Linux desktop build' 'linux_amd64_desktop.tar.gz'; do
+    if grep -Fq "$required_call" "$BUILD_SCRIPT"; then
+        pass "release build contains signing step: ${required_call}"
+    else
+        fail "release build lacks signing step: ${required_call}"
+    fi
+done
+PUBLISH_SCRIPT="${SCRIPT_DIR}/release-publish.sh"
+for required_artifact in 'require_release_artifact "OpenVibely_${VERSION}_darwin_amd64.app.zip"' 'require_release_artifact "OpenVibely_${VERSION}_darwin_arm64.app.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_amd64_desktop-cli.zip"' 'require_release_artifact "openvibely_${VERSION}_linux_amd64_desktop.tar.gz"'; do
+    if grep -Fq "$required_artifact" "$PUBLISH_SCRIPT"; then
+        pass "release publish requires desktop artifact: ${required_artifact}"
+    else
+        fail "release publish can omit required desktop artifact: ${required_artifact}"
+    fi
+done
+
+###############################################################################
+# 6. Tag format
 ###############################################################################
 
 section "Tag and release title format"
@@ -492,7 +526,30 @@ esac
 EOF
 chmod +x "${MOCK_BIN}/uname"
 
-DRY_RUN_OUTPUT="$(DRY_RUN=1 PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" 2>&1)"
+DRY_RUN_OUTPUT="$(DRY_RUN=1 OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" 2>&1)"
+
+if DRY_RUN=1 PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" >/dev/null 2>&1; then
+    fail "release build: accepted missing embedded trust root"
+else
+    pass "release build: requires embedded release trust root"
+fi
+if DRY_RUN=1 OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" >/dev/null 2>&1; then
+    fail "release build: accepted missing Windows signing hooks"
+else
+    pass "release build: requires Windows signing and timestamp verification hooks"
+fi
+if DRY_RUN=1 OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" >/dev/null 2>&1; then
+    fail "release build: accepted missing macOS signing credentials"
+else
+    pass "release build: requires macOS signing and notarization credentials"
+fi
+for required in 'codesign --force' 'notarytool submit' 'stapler staple' 'codesign --verify' 'spctl --assess'; do
+    if grep -q -- "$required" "${SCRIPT_DIR}/release-build.sh"; then
+        pass "release build: includes $required"
+    else
+        fail "release build: missing $required"
+    fi
+done
 
 if [[ ! -e "$DRY_RUN_DIST" ]]; then
     pass "dry run: does not create the output directory"
@@ -513,7 +570,7 @@ EOF
 chmod +x "${MOCK_BIN}/gh"
 
 FULL_DRY_RUN_DIST="${DRY_RUN_TMP}/full-dist/9.9.9"
-if DRY_RUN=1 SKIP_GH_AUTH_CHECK=1 DIST_DIR="$FULL_DRY_RUN_DIST" PATH="${MOCK_BIN}:$PATH" \
+if DRY_RUN=1 SKIP_GH_AUTH_CHECK=1 DIST_DIR="$FULL_DRY_RUN_DIST" OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true PATH="${MOCK_BIN}:$PATH" \
     bash "${SCRIPT_DIR}/release.sh" 9.9.9 >/dev/null 2>&1; then
     pass "dry run: full release rehearsal completes without real artifacts"
 else
@@ -525,6 +582,15 @@ rm -rf "$DRY_RUN_TMP"
 ###############################################################################
 # 8. Docker storage guidance
 ###############################################################################
+
+section "Docker publication identity"
+for publish_script in "${SCRIPT_DIR}/release-publish.sh" "${SCRIPT_DIR}/release.sh"; do
+    if grep -q -- '--build-arg VERSION=' "$publish_script" && grep -q -- '--build-arg COMMIT=' "$publish_script" && grep -q -- '--build-arg BUILD_TIME=' "$publish_script"; then
+        pass "docker: $(basename "$publish_script") passes immutable build identity"
+    else
+        fail "docker: $(basename "$publish_script") must pass VERSION, COMMIT, and BUILD_TIME build args"
+    fi
+done
 
 section "Docker storage guidance"
 

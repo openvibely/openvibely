@@ -173,15 +173,25 @@ HOST_ARCH="$(uname -m)"
 if [[ "$HOST_OS" == "Darwin" ]]; then
     log "Build host: macOS ($HOST_ARCH) — macOS desktop app bundles supported."
 else
-    warn "Build host: $HOST_OS — macOS desktop .app bundles CANNOT be built. Linux/Windows server artifacts only."
+    warn "Build host: $HOST_OS — macOS desktop .app bundles require artifacts from a macOS release job."
 fi
 
 # Windows CGO cross-compiler check
 if command -v x86_64-w64-mingw32-gcc &>/dev/null; then
     log "mingw-w64 cross-compiler present — Windows desktop-cli build supported."
+elif [[ -n "${OPENVIBELY_WINDOWS_DESKTOP_BINARY:-}" ]]; then
+    log "Windows desktop-cli prebuilt artifact configured."
 else
-    warn "mingw-w64 not found (x86_64-w64-mingw32-gcc). Windows desktop-cli build will be skipped."
+    warn "mingw-w64 not found and OPENVIBELY_WINDOWS_DESKTOP_BINARY is unset. Official release-build will fail."
     warn "Install on macOS with: brew install mingw-w64"
+fi
+
+if [[ "$HOST_OS" == "Linux" ]]; then
+    log "Native Linux host — Linux desktop build supported when GTK/WebKit development dependencies are installed."
+elif [[ -n "${OPENVIBELY_LINUX_DESKTOP_BINARY:-}" ]]; then
+    log "Linux desktop prebuilt artifact configured."
+else
+    warn "Non-Linux host and OPENVIBELY_LINUX_DESKTOP_BINARY is unset. Official release-build will fail."
 fi
 
 # Docker check

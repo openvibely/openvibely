@@ -180,11 +180,11 @@ Desktop mode defaults:
 | Setting | Desktop default | Env override |
 |---|---|---|
 | Port | `0` (ephemeral) | `PORT` |
-| DB path | `~/.openvibely/openvibely.db` | `DATABASE_PATH` or `OPENVIBELY_APP_DATA_DIR` |
-| Repo root | `~/.openvibely/repos` | `PROJECT_REPO_ROOT` or `OPENVIBELY_APP_DATA_DIR` |
+| DB path | Platform app-data directory (`~/Library/Application Support/OpenVibely` on macOS, `%LOCALAPPDATA%\OpenVibely` on Windows, `$XDG_DATA_HOME/openvibely` on Linux) | `DATABASE_PATH` or `OPENVIBELY_APP_DATA_DIR` |
+| Repo root | `<platform app-data directory>/repos` | `PROJECT_REPO_ROOT` or `OPENVIBELY_APP_DATA_DIR` |
 | Local repo paths | enabled | `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` |
 
-Runtime storage defaults to the same user app directory used by the web/server binary so desktop and web share the same DB by default. The desktop wrapper still reads its optional `config.env` from the OS desktop config directory, and all env vars still work as overrides in desktop mode.
+Desktop user data is stored outside the replaceable application install unit in the OS application-data directory. Updates and rollbacks replace only the signed OpenVibely `.app` bundle on macOS or desktop executable on Windows/Linux; databases, projects, memories, skills, agents, configuration, credentials, plugins, and other user data are never copied, replaced, deleted, or rolled back. All storage environment variables still work as explicit external overrides in desktop mode, but must resolve outside the install and backup boundaries.
 
 ### Docker
 

@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/openvibely/openvibely/internal/auth"
+	"github.com/openvibely/openvibely/internal/buildinfo"
 )
 
 // RuntimeMode distinguishes web/server deployments from desktop app mode.
@@ -29,41 +30,52 @@ const (
 
 type Config struct {
 	// Mode is the runtime mode (server or desktop).
-	Mode                     RuntimeMode
-	Port                     string
-	DatabasePath             string
-	DatabaseURL              string
-	AnthropicKey             string
-	TelegramToken            string
-	DiscordToken             string
-	Environment              string
-	EnvironmentExplicitlySet bool
-	GitHubAppID              string
-	GitHubAppSlug            string
-	GitHubAppPrivateKey      string
-	SlackClientID            string
-	SlackClientSecret        string
-	SlackAppToken            string
-	SlackBotToken            string
-	AppBaseURL               string
-	ProjectRepoRoot          string
-	AppDataDir               string
-	EnableLocalRepoPath      bool
-	AuthEnabled              bool
-	AuthMode                 auth.AuthMode
-	AuthUsername             string
-	AuthPassword             string
-	AuthSessionSecret        string
-	AuthSessionTTL           time.Duration
-	HostedSSOEnabled         bool
-	HostedSSORequested       bool
-	HostedSSOControlURL      string
-	HostedSSOInstanceID      string
-	HostedSSOKey             []byte
-	hostedSSOSwitchSet       bool
-	hostedSSOSwitchOK        bool
-	environmentInput         string
-	environmentInputRead     bool
+	Mode                       RuntimeMode
+	Port                       string
+	DatabasePath               string
+	DatabaseURL                string
+	AnthropicKey               string
+	TelegramToken              string
+	DiscordToken               string
+	Environment                string
+	EnvironmentExplicitlySet   bool
+	BuildArtifact              string
+	UpdateMode                 string
+	Distribution               string
+	UpdateServiceURL           string
+	UpdateChannel              string
+	UpdatePublicKeyFile        string
+	DisableUpdateNotifications bool
+	HostedAgentToken           string
+	DockerAgentURL             string
+	DockerAgentToken           string
+	ManagedUpdateError         string
+	GitHubAppID                string
+	GitHubAppSlug              string
+	GitHubAppPrivateKey        string
+	SlackClientID              string
+	SlackClientSecret          string
+	SlackAppToken              string
+	SlackBotToken              string
+	AppBaseURL                 string
+	ProjectRepoRoot            string
+	AppDataDir                 string
+	EnableLocalRepoPath        bool
+	AuthEnabled                bool
+	AuthMode                   auth.AuthMode
+	AuthUsername               string
+	AuthPassword               string
+	AuthSessionSecret          string
+	AuthSessionTTL             time.Duration
+	HostedSSOEnabled           bool
+	HostedSSORequested         bool
+	HostedSSOControlURL        string
+	HostedSSOInstanceID        string
+	HostedSSOKey               []byte
+	hostedSSOSwitchSet         bool
+	hostedSSOSwitchOK          bool
+	environmentInput           string
+	environmentInputRead       bool
 }
 
 // Load builds a Config from environment variables in server mode.
@@ -103,42 +115,64 @@ func LoadWithMode(mode RuntimeMode) *Config {
 	if authMode == auth.AuthModeHostedSSO {
 		appBaseURL = rawAppBaseURL
 	}
+	defaultArtifact := buildinfo.ArtifactSource
+	if mode == ModeDesktop {
+		defaultArtifact = buildinfo.ArtifactDesktop
+	}
+	artifact := buildinfo.Current(defaultArtifact).Artifact
+	updateMode := strings.TrimSpace(os.Getenv("OPENVIBELY_UPDATE_MODE"))
+	if updateMode == "" {
+		if artifact == buildinfo.ArtifactContainer {
+			updateMode = buildinfo.ModeDockerManual
+		} else {
+			updateMode = buildinfo.ModeNone
+		}
+	}
 
 	return (&Config{
-		Mode:                     mode,
-		Port:                     getEnv("PORT", defaults.Port),
-		DatabasePath:             getEnv("DATABASE_PATH", defaultDBPath),
-		DatabaseURL:              getEnv("DATABASE_URL", ""),
-		AnthropicKey:             getEnv("ANTHROPIC_API_KEY", ""),
-		TelegramToken:            getEnv("TELEGRAM_BOT_TOKEN", ""),
-		DiscordToken:             getEnv("DISCORD_BOT_TOKEN", ""),
-		Environment:              getEnv("ENVIRONMENT", "development"),
-		EnvironmentExplicitlySet: environmentSet,
-		GitHubAppID:              getEnv("GITHUB_APP_ID", ""),
-		GitHubAppSlug:            getEnv("GITHUB_APP_SLUG", ""),
-		GitHubAppPrivateKey:      getEnv("GITHUB_APP_PRIVATE_KEY", ""),
-		SlackClientID:            getEnv("SLACK_CLIENT_ID", ""),
-		SlackClientSecret:        getEnv("SLACK_CLIENT_SECRET", ""),
-		SlackAppToken:            getEnv("SLACK_APP_TOKEN", ""),
-		SlackBotToken:            getEnv("SLACK_BOT_TOKEN", ""),
-		AppBaseURL:               appBaseURL,
-		ProjectRepoRoot:          getEnv("PROJECT_REPO_ROOT", defaultRepoRoot),
-		AppDataDir:               appDataDir,
-		EnableLocalRepoPath:      enableLocalRepo,
-		AuthEnabled:              localAuthEnabled,
-		AuthMode:                 authMode,
-		AuthUsername:             getEnv("AUTH_USERNAME", ""),
-		AuthPassword:             getEnv("AUTH_PASSWORD", ""),
-		AuthSessionSecret:        getEnv("AUTH_SESSION_SECRET", ""),
-		AuthSessionTTL:           ResolveAuthSessionTTL(getEnv("AUTH_SESSION_TTL", "")),
-		HostedSSOEnabled:         authMode == auth.AuthModeHostedSSO,
-		HostedSSORequested:       hostedSet && hostedOK && hostedEnabled,
-		HostedSSOControlURL:      getEnv("OPENVIBELY_HOSTED_CONTROL_URL", ""),
-		HostedSSOInstanceID:      getEnv("OPENVIBELY_HOSTED_INSTANCE_ID", ""),
-		hostedSSOSwitchSet:       hostedSet,
-		hostedSSOSwitchOK:        hostedOK,
-		environmentInput:         environmentRaw,
-		environmentInputRead:     true,
+		Mode:                       mode,
+		Port:                       getEnv("PORT", defaults.Port),
+		DatabasePath:               getEnv("DATABASE_PATH", defaultDBPath),
+		DatabaseURL:                getEnv("DATABASE_URL", ""),
+		AnthropicKey:               getEnv("ANTHROPIC_API_KEY", ""),
+		TelegramToken:              getEnv("TELEGRAM_BOT_TOKEN", ""),
+		DiscordToken:               getEnv("DISCORD_BOT_TOKEN", ""),
+		Environment:                getEnv("ENVIRONMENT", "development"),
+		EnvironmentExplicitlySet:   environmentSet,
+		BuildArtifact:              artifact,
+		UpdateMode:                 updateMode,
+		UpdateServiceURL:           getEnv("OPENVIBELY_UPDATE_SERVICE_URL", "https://openvibely.ai"),
+		UpdateChannel:              getEnv("OPENVIBELY_UPDATE_CHANNEL", "stable"),
+		UpdatePublicKeyFile:        getEnv("OPENVIBELY_UPDATE_PUBLIC_KEY_FILE", ""),
+		DisableUpdateNotifications: resolveBoolDefault(os.Getenv("DISABLE_UPDATE_NOTIFICATIONS"), packagedUpdateNotificationsDisabledByDefault(artifact)),
+		HostedAgentToken:           getEnv("OPENVIBELY_HOSTED_AGENT_TOKEN", ""),
+		DockerAgentURL:             getEnv("OPENVIBELY_DOCKER_AGENT_URL", ""),
+		DockerAgentToken:           getEnv("OPENVIBELY_DOCKER_AGENT_TOKEN", ""),
+		GitHubAppID:                getEnv("GITHUB_APP_ID", ""),
+		GitHubAppSlug:              getEnv("GITHUB_APP_SLUG", ""),
+		GitHubAppPrivateKey:        getEnv("GITHUB_APP_PRIVATE_KEY", ""),
+		SlackClientID:              getEnv("SLACK_CLIENT_ID", ""),
+		SlackClientSecret:          getEnv("SLACK_CLIENT_SECRET", ""),
+		SlackAppToken:              getEnv("SLACK_APP_TOKEN", ""),
+		SlackBotToken:              getEnv("SLACK_BOT_TOKEN", ""),
+		AppBaseURL:                 appBaseURL,
+		ProjectRepoRoot:            getEnv("PROJECT_REPO_ROOT", defaultRepoRoot),
+		AppDataDir:                 appDataDir,
+		EnableLocalRepoPath:        enableLocalRepo,
+		AuthEnabled:                localAuthEnabled,
+		AuthMode:                   authMode,
+		AuthUsername:               getEnv("AUTH_USERNAME", ""),
+		AuthPassword:               getEnv("AUTH_PASSWORD", ""),
+		AuthSessionSecret:          getEnv("AUTH_SESSION_SECRET", ""),
+		AuthSessionTTL:             ResolveAuthSessionTTL(getEnv("AUTH_SESSION_TTL", "")),
+		HostedSSOEnabled:           authMode == auth.AuthModeHostedSSO,
+		HostedSSORequested:         hostedSet && hostedOK && hostedEnabled,
+		HostedSSOControlURL:        getEnv("OPENVIBELY_HOSTED_CONTROL_URL", ""),
+		HostedSSOInstanceID:        getEnv("OPENVIBELY_HOSTED_INSTANCE_ID", ""),
+		hostedSSOSwitchSet:         hostedSet,
+		hostedSSOSwitchOK:          hostedOK,
+		environmentInput:           environmentRaw,
+		environmentInputRead:       true,
 	}).NormalizeForMode()
 }
 
@@ -172,6 +206,26 @@ func (c *Config) NormalizeForMode() *Config {
 	if c.Mode == ModeDesktop && os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH") == "" {
 		c.EnableLocalRepoPath = true
 	}
+	if c.BuildArtifact == "" {
+		defaultArtifact := buildinfo.ArtifactSource
+		if c.Mode == ModeDesktop {
+			defaultArtifact = buildinfo.ArtifactDesktop
+		}
+		c.BuildArtifact = buildinfo.Current(defaultArtifact).Artifact
+	}
+	if c.UpdateMode == "" {
+		if c.BuildArtifact == buildinfo.ArtifactContainer {
+			c.UpdateMode = buildinfo.ModeDockerManual
+		} else {
+			c.UpdateMode = buildinfo.ModeNone
+		}
+	}
+	if c.UpdateServiceURL == "" {
+		c.UpdateServiceURL = "https://openvibely.ai"
+	}
+	if c.UpdateChannel == "" {
+		c.UpdateChannel = "stable"
+	}
 	return c
 }
 
@@ -192,7 +246,11 @@ func defaultsForMode(mode RuntimeMode) modeDefaults {
 		ProjectRepoRoot: filepath.Join(appDataDir, "repos"),
 	}
 	if mode == ModeDesktop {
+		appDataDir = desktopDataDir()
 		defaults.Port = "0"
+		defaults.AppDataDir = appDataDir
+		defaults.DatabasePath = filepath.Join(appDataDir, "openvibely.db")
+		defaults.ProjectRepoRoot = filepath.Join(appDataDir, "repos")
 		defaults.EnableLocalRepoPath = true
 	}
 	return defaults
@@ -211,10 +269,9 @@ func serverDataDir() string {
 	return base
 }
 
-// desktopDataDir returns the OS-conventional desktop config directory for
-// OpenVibely. Runtime storage defaults intentionally use serverDataDir for both
-// web/server and desktop modes so both apps share the same DB unless explicitly
-// configured otherwise.
+// desktopDataDir returns the OS-conventional application-data directory for
+// OpenVibely desktop user data. It intentionally lives outside the replaceable
+// application bundle so updates and rollbacks cannot copy, replace, or delete it.
 func desktopDataDir() string {
 	var base string
 	switch runtime.GOOS {
@@ -258,11 +315,25 @@ func parseStrictBool(value string) (bool, bool) {
 	}
 }
 
+func packagedUpdateNotificationsDisabledByDefault(artifact string) bool {
+	return artifact == buildinfo.ArtifactBinary || artifact == buildinfo.ArtifactDesktop
+}
+
+func resolveBoolDefault(value string, fallback bool) bool {
+	if parsed, ok := parseEnvBool(value); ok {
+		return parsed
+	}
+	return fallback
+}
+
 // Validate checks startup configuration, including hosted SSO's fail-closed
 // security contract. It also decodes the hosted HMAC key exactly once.
 func (c *Config) Validate() error {
 	if c == nil {
 		return errors.New("configuration is nil")
+	}
+	if err := c.ValidateUpdate(); err != nil {
+		return err
 	}
 	if c.hostedSSOSwitchSet && !c.hostedSSOSwitchOK {
 		return errors.New("OPENVIBELY_HOSTED_SSO_ENABLED must be exactly true or false")
@@ -310,6 +381,93 @@ func (c *Config) Validate() error {
 	c.AppBaseURL = application
 	c.HostedSSOKey = key
 	return nil
+}
+
+func (c *Config) ValidateUpdate() error {
+	if c == nil {
+		return errors.New("configuration is nil")
+	}
+	if c.BuildArtifact == "" {
+		defaultArtifact := buildinfo.ArtifactSource
+		if c.Mode == ModeDesktop {
+			defaultArtifact = buildinfo.ArtifactDesktop
+		}
+		c.BuildArtifact = buildinfo.Current(defaultArtifact).Artifact
+	}
+	if c.UpdateMode == "" {
+		if c.BuildArtifact == buildinfo.ArtifactContainer {
+			c.UpdateMode = buildinfo.ModeDockerManual
+		} else {
+			c.UpdateMode = buildinfo.ModeNone
+		}
+	}
+	if c.UpdateServiceURL == "" {
+		c.UpdateServiceURL = "https://openvibely.ai"
+	}
+	if c.UpdateChannel == "" {
+		c.UpdateChannel = "stable"
+	}
+	distribution, err := buildinfo.ResolveDistribution(c.BuildArtifact, c.UpdateMode)
+	if err != nil {
+		return fmt.Errorf("OPENVIBELY_UPDATE_MODE: %w", err)
+	}
+	c.Distribution = distribution
+	if err := validateUpdateOrigin(c.UpdateServiceURL); err != nil {
+		return fmt.Errorf("OPENVIBELY_UPDATE_SERVICE_URL: %w", err)
+	}
+	if strings.TrimSpace(c.UpdateChannel) == "" {
+		return errors.New("OPENVIBELY_UPDATE_CHANNEL must not be empty")
+	}
+	switch c.UpdateMode {
+	case buildinfo.ModeHosted:
+		if strings.TrimSpace(c.HostedSSOControlURL) == "" {
+			return errors.New("OPENVIBELY_HOSTED_CONTROL_URL is required in hosted update mode")
+		}
+		if err := validateUpdateOrigin(c.HostedSSOControlURL); err != nil {
+			return fmt.Errorf("OPENVIBELY_HOSTED_CONTROL_URL: %w", err)
+		}
+		if err := validateIdentifier(c.HostedSSOInstanceID, 128, "OPENVIBELY_HOSTED_INSTANCE_ID"); err != nil {
+			return err
+		}
+		if strings.TrimSpace(c.HostedAgentToken) == "" {
+			return errors.New("OPENVIBELY_HOSTED_AGENT_TOKEN is required in hosted update mode")
+		}
+	case buildinfo.ModeDockerAgent:
+		if strings.TrimSpace(c.DockerAgentURL) == "" || strings.TrimSpace(c.DockerAgentToken) == "" {
+			c.ManagedUpdateError = "docker-agent mode requires OPENVIBELY_DOCKER_AGENT_URL and OPENVIBELY_DOCKER_AGENT_TOKEN"
+		} else if err := validateAgentURL(c.DockerAgentURL); err != nil {
+			c.ManagedUpdateError = err.Error()
+		} else {
+			c.ManagedUpdateError = ""
+		}
+	default:
+		c.ManagedUpdateError = ""
+	}
+	return nil
+}
+
+func validateUpdateOrigin(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !u.IsAbs() || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("must be an absolute HTTPS origin without path, query, fragment, or userinfo")
+	}
+	if u.Scheme == "https" {
+		return nil
+	}
+	if u.Scheme == "http" {
+		host := u.Hostname()
+		if strings.EqualFold(host, "localhost") || (net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback()) {
+			return nil
+		}
+	}
+	return errors.New("HTTPS is required except for loopback development origins")
+}
+
+func validateAgentURL(raw string) error {
+	if strings.HasPrefix(raw, "unix:///") && len(raw) > len("unix:///") {
+		return nil
+	}
+	return validateUpdateOrigin(raw)
 }
 
 func validateIdentifier(value string, max int, name string) error {

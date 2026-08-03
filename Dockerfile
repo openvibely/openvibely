@@ -26,9 +26,14 @@ RUN swag init -g cmd/server/main.go -o docs \
  && sed -i '/LeftDelim:/d' docs/docs.go \
  && sed -i '/RightDelim:/d' docs/docs.go
 
-# Build static binary
+# Build static binary with immutable container identity.
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=1970-01-01T00:00:00Z
+ARG RELEASE_TRUST_ID=
+ARG RELEASE_TRUST_VALUE=
 RUN CGO_ENABLED=0 GOOS=linux go build \
-    -ldflags="-s -w" \
+    -ldflags="-s -w -X github.com/openvibely/openvibely/internal/buildinfo.Version=${VERSION} -X github.com/openvibely/openvibely/internal/buildinfo.Commit=${COMMIT} -X github.com/openvibely/openvibely/internal/buildinfo.BuildTime=${BUILD_TIME} -X github.com/openvibely/openvibely/internal/buildinfo.Artifact=container -X github.com/openvibely/openvibely/internal/buildinfo.ReleaseKeyID=${RELEASE_TRUST_ID} -X github.com/openvibely/openvibely/internal/buildinfo.ReleasePublicKey=${RELEASE_TRUST_VALUE}" \
     -o /out/openvibely \
     ./cmd/server
 
@@ -37,10 +42,16 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # =============================================================================
 FROM fedora:44
 
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG BUILD_TIME=1970-01-01T00:00:00Z
 LABEL org.opencontainers.image.title="OpenVibely" \
       org.opencontainers.image.description="AI coding agent platform with common language toolchains and build utilities" \
       org.opencontainers.image.url="https://github.com/openvibely/openvibely" \
       org.opencontainers.image.source="https://github.com/openvibely/openvibely" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${BUILD_TIME}" \
       org.opencontainers.image.licenses="MIT"
 
 # Apply all pending Fedora security errata before installing toolchains so the
@@ -138,6 +149,7 @@ ENV PORT=3001 \
     OPENVIBELY_APP_DATA_DIR=/data \
     DATABASE_PATH=/data/openvibely.db \
     PROJECT_REPO_ROOT=/data/repos \
+    OPENVIBELY_UPDATE_MODE=docker-manual \
     ENVIRONMENT=production \
     GIT_EXEC_PATH=/usr/libexec/git-core \
     HOME=/home/openvibely \
@@ -146,6 +158,8 @@ ENV PORT=3001 \
     PATH=/home/openvibely/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 EXPOSE 3001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 CMD ["/openvibely", "healthcheck"]
 
 VOLUME ["/data"]
 

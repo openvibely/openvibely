@@ -9,23 +9,28 @@
 # Produces in dist_dir (default: ./dist/<version>):
 #   OpenVibely_<version>_darwin_amd64.app.zip
 #   OpenVibely_<version>_darwin_arm64.app.zip
-#   openvibely_<version>_darwin_amd64_server.tar.gz
-#   openvibely_<version>_darwin_arm64_server.tar.gz
+#   openvibely_<version>_darwin_amd64_server.zip
+#   openvibely_<version>_darwin_arm64_server.zip
 #   openvibely_<version>_linux_amd64_server.tar.gz
 #   openvibely_<version>_linux_arm64_server.tar.gz
 #   openvibely_<version>_windows_amd64_server.zip
-#   openvibely_<version>_windows_amd64_desktop-cli.zip  (requires mingw-w64)
+#   openvibely_<version>_windows_amd64_desktop-cli.zip
+#   openvibely_<version>_linux_amd64_desktop.tar.gz
 #   SHA256SUMS
 #
 # Environment variables:
 #   DRY_RUN=1          Print commands without executing build steps.
 #   SKIP_GENERATE=1    Skip templ generate + swagger (if already done).
-#   DIST_DIR=<path>    Override distribution output directory.
+#   DIST_DIR=<path>                       Override distribution output directory.
+#   OPENVIBELY_MACOS_SIGN_IDENTITY      Developer ID Application identity.
+#   OPENVIBELY_MACOS_NOTARY_PROFILE     notarytool keychain profile.
+#   OPENVIBELY_WINDOWS_SIGN_COMMAND     Executable invoked with each Windows binary path.
+#   OPENVIBELY_WINDOWS_VERIFY_COMMAND   Executable that fails unless that binary is Authenticode signed and timestamped.
 #
 # Known limitations (matches v0.1.0):
-#   - Linux desktop (GTK/WebKit) artifacts are not built from macOS; install
-#     Linux desktop deps and build natively on Linux if needed.
-#   - Windows desktop-cli requires mingw-w64 (brew install mingw-w64 on macOS).
+#   - Linux desktop requires native GTK/WebKit development dependencies or an
+#     explicit OPENVIBELY_LINUX_DESKTOP_BINARY produced by the Linux release job.
+#   - Windows desktop requires mingw-w64 or OPENVIBELY_WINDOWS_DESKTOP_BINARY.
 #   - Docker image publishing is a separate step (release-publish.sh).
 
 set -euo pipefail
@@ -68,6 +73,28 @@ if ! is_valid_release_version "$VERSION"; then
     fail "Invalid semver: '$RAW_VERSION'. Expected X.Y.Z or vX.Y.Z."
 fi
 
+RELEASE_KEY_ID="${OPENVIBELY_RELEASE_KEY_ID:-}"
+RELEASE_PUBLIC_KEY="${OPENVIBELY_RELEASE_PUBLIC_KEY:-}"
+[[ -n "$RELEASE_KEY_ID" ]] || fail "OPENVIBELY_RELEASE_KEY_ID is required for official release artifacts."
+[[ "$RELEASE_KEY_ID" =~ ^[A-Za-z0-9._-]{1,128}$ ]] || fail "OPENVIBELY_RELEASE_KEY_ID must be a canonical key identifier."
+[[ -n "$RELEASE_PUBLIC_KEY" ]] || fail "OPENVIBELY_RELEASE_PUBLIC_KEY is required for official release artifacts."
+[[ "$RELEASE_PUBLIC_KEY" =~ ^[A-Za-z0-9+/]{43}=$ ]] || fail "OPENVIBELY_RELEASE_PUBLIC_KEY must be a canonical base64-encoded 32-byte Ed25519 public key."
+HOST_OS="$(uname -s)"
+WINDOWS_SIGN_COMMAND="${OPENVIBELY_WINDOWS_SIGN_COMMAND:-}"
+WINDOWS_VERIFY_COMMAND="${OPENVIBELY_WINDOWS_VERIFY_COMMAND:-}"
+WINDOWS_DESKTOP_BINARY="${OPENVIBELY_WINDOWS_DESKTOP_BINARY:-}"
+LINUX_DESKTOP_BINARY="${OPENVIBELY_LINUX_DESKTOP_BINARY:-}"
+[[ -n "$WINDOWS_SIGN_COMMAND" ]] || fail "OPENVIBELY_WINDOWS_SIGN_COMMAND is required for official Windows release artifacts."
+[[ "${DRY_RUN:-0}" == "1" || -x "$WINDOWS_SIGN_COMMAND" ]] || fail "OPENVIBELY_WINDOWS_SIGN_COMMAND must name an executable signing hook."
+[[ -n "$WINDOWS_VERIFY_COMMAND" ]] || fail "OPENVIBELY_WINDOWS_VERIFY_COMMAND is required for official Windows release validation."
+[[ "${DRY_RUN:-0}" == "1" || -x "$WINDOWS_VERIFY_COMMAND" ]] || fail "OPENVIBELY_WINDOWS_VERIFY_COMMAND must name an executable verification hook."
+if [[ "$HOST_OS" == "Darwin" ]]; then
+    MACOS_SIGN_IDENTITY="${OPENVIBELY_MACOS_SIGN_IDENTITY:-}"
+    MACOS_NOTARY_PROFILE="${OPENVIBELY_MACOS_NOTARY_PROFILE:-}"
+    [[ -n "$MACOS_SIGN_IDENTITY" ]] || fail "OPENVIBELY_MACOS_SIGN_IDENTITY is required for macOS release artifacts."
+    [[ -n "$MACOS_NOTARY_PROFILE" ]] || fail "OPENVIBELY_MACOS_NOTARY_PROFILE is required for macOS notarization."
+fi
+
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || fail "Not in a git repository.")"
 DIST_DIR="${2:-${DIST_DIR:-${REPO_ROOT}/dist/${VERSION}}}"
 
@@ -108,18 +135,38 @@ fi
 # 3. Helper: build binary
 ###############################################################################
 
-LDFLAGS="-s -w -X main.Version=${VERSION}"
+BUILD_COMMIT="$(git rev-parse HEAD)"
+BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 build_binary() {
     local output="$1" pkg="$2" goos="$3" goarch="$4"
     local cgo="${5:-0}"
     local cc="${6:-}"
+    local artifact="binary"
+    [[ "$pkg" == "./cmd/desktop" ]] && artifact="desktop"
+    local ldflags="-s -w -X github.com/openvibely/openvibely/internal/buildinfo.Version=${VERSION} -X github.com/openvibely/openvibely/internal/buildinfo.Commit=${BUILD_COMMIT} -X github.com/openvibely/openvibely/internal/buildinfo.BuildTime=${BUILD_TIME} -X github.com/openvibely/openvibely/internal/buildinfo.Artifact=${artifact} -X github.com/openvibely/openvibely/internal/buildinfo.ReleaseKeyID=${RELEASE_KEY_ID} -X github.com/openvibely/openvibely/internal/buildinfo.ReleasePublicKey=${RELEASE_PUBLIC_KEY}"
 
     log "Building $goos/$goarch → $output (CGO_ENABLED=${cgo})"
     local cmd=(env GOOS="$goos" GOARCH="$goarch" CGO_ENABLED="$cgo")
     [[ -n "$cc" ]] && cmd+=(CC="$cc")
-    cmd+=(go build -ldflags="$LDFLAGS" -o "$output" "$pkg")
+    cmd+=(go build -ldflags="$ldflags" -o "$output" "$pkg")
     run "${cmd[@]}"
+}
+
+sign_windows_binary() {
+    local binary="$1"
+    log "Authenticode signing and timestamping $(basename "$binary")..."
+    run "$WINDOWS_SIGN_COMMAND" "$binary"
+    run "$WINDOWS_VERIFY_COMMAND" "$binary"
+}
+
+notarize_macos_binary_archive() {
+    local binary="$1" archive="$2"
+    log "Developer ID signing $(basename "$binary")..."
+    run codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$binary"
+    run codesign --verify --strict --verbose=2 "$binary"
+    run ditto -c -k --keepParent "$binary" "$archive"
+    run xcrun notarytool submit "$archive" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
 }
 
 ###############################################################################
@@ -149,13 +196,11 @@ build_binary "$TMP_BIN/server_linux_arm64" ./cmd/server linux arm64
 
 # windows/amd64 server
 build_binary "$TMP_BIN/server_windows_amd64.exe" ./cmd/server windows amd64
+sign_windows_binary "$TMP_BIN/server_windows_amd64.exe"
 
 ###############################################################################
 # 5. macOS desktop app bundles
 ###############################################################################
-
-HOST_OS="$(uname -s)"
-HOST_ARCH="$(uname -m)"
 
 build_macos_app() {
     local goarch="$1"
@@ -171,6 +216,7 @@ build_macos_app() {
     local zip_name="OpenVibely_${VERSION}_darwin_${goarch}.app.zip"
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}[DRY-RUN]${NC} Would assemble ${app_name}/Contents/MacOS/OpenVibely"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would sign and notarize ${app_name}, then staple and verify it"
         echo -e "${YELLOW}[DRY-RUN]${NC} Would package ${DIST_DIR}/${zip_name} with ${app_name} as the archive root"
         return
     fi
@@ -196,16 +242,25 @@ build_macos_app() {
 </plist>
 PLIST
 
+    log "Signing and notarizing ${app_name}..."
+    run codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$app_dir"
+    local notary_zip="${TMP_BIN}/OpenVibely_${goarch}_notary.zip"
+    run ditto -c -k --keepParent "$app_dir" "$notary_zip"
+    run xcrun notarytool submit "$notary_zip" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+    run xcrun stapler staple "$app_dir"
+    run codesign --verify --deep --strict --verbose=2 "$app_dir"
+    run spctl --assess --type execute --verbose=2 "$app_dir"
+
     log "Packaging $zip_name..."
-    run bash -c "cd '${staging_dir}' && zip -r '${DIST_DIR}/${zip_name}' '${app_name}' -x '*.DS_Store'"
+    run ditto -c -k --keepParent "$app_dir" "${DIST_DIR}/${zip_name}"
     log "Created: $zip_name"
 }
 
 if [[ "$HOST_OS" == "Darwin" ]]; then
     # Build for both architectures
     # macOS SDK supports CGO cross-compile between amd64 ↔ arm64
-    build_macos_app amd64 || warn "darwin/amd64 desktop build failed — skipping"
-    build_macos_app arm64 || warn "darwin/arm64 desktop build failed — skipping"
+    build_macos_app amd64
+    build_macos_app arm64
 else
     warn "Skipping macOS desktop app bundles — build host is $HOST_OS, not macOS."
     warn "To build macOS desktop artifacts, run this script on a macOS machine."
@@ -218,16 +273,48 @@ fi
 if command -v x86_64-w64-mingw32-gcc &>/dev/null; then
     log "Building Windows desktop-cli (amd64 with mingw-w64)..."
     build_binary "$TMP_BIN/desktop_windows_amd64.exe" ./cmd/desktop windows amd64 1 x86_64-w64-mingw32-gcc
-    WINDOWS_DESKTOP_OK=1
+elif [[ -n "$WINDOWS_DESKTOP_BINARY" ]]; then
+    [[ "${DRY_RUN:-0}" == "1" || -f "$WINDOWS_DESKTOP_BINARY" ]] || fail "OPENVIBELY_WINDOWS_DESKTOP_BINARY does not exist."
+    run cp "$WINDOWS_DESKTOP_BINARY" "$TMP_BIN/desktop_windows_amd64.exe"
+elif [[ "${DRY_RUN:-0}" == "1" ]]; then
+    echo -e "${YELLOW}[DRY-RUN]${NC} Would require mingw-w64 or OPENVIBELY_WINDOWS_DESKTOP_BINARY"
 else
-    warn "mingw-w64 not found — skipping Windows desktop-cli build."
-    warn "Install with: brew install mingw-w64  (macOS) or apt install mingw-w64  (Linux)"
-    WINDOWS_DESKTOP_OK=0
+    fail "Official releases require a Windows desktop build: install mingw-w64 or set OPENVIBELY_WINDOWS_DESKTOP_BINARY."
+fi
+sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe"
+
+if [[ "$HOST_OS" == "Linux" ]]; then
+    log "Building Linux desktop (amd64)..."
+    build_binary "$TMP_BIN/desktop_linux_amd64" ./cmd/desktop linux amd64 1
+elif [[ -n "$LINUX_DESKTOP_BINARY" ]]; then
+    [[ "${DRY_RUN:-0}" == "1" || -f "$LINUX_DESKTOP_BINARY" ]] || fail "OPENVIBELY_LINUX_DESKTOP_BINARY does not exist."
+    run cp "$LINUX_DESKTOP_BINARY" "$TMP_BIN/desktop_linux_amd64"
+elif [[ "${DRY_RUN:-0}" == "1" ]]; then
+    echo -e "${YELLOW}[DRY-RUN]${NC} Would require a native Linux build or OPENVIBELY_LINUX_DESKTOP_BINARY"
+else
+    fail "Official releases require a Linux desktop build; run on Linux or set OPENVIBELY_LINUX_DESKTOP_BINARY."
 fi
 
 ###############################################################################
 # 7. Package server tarballs and zips
 ###############################################################################
+
+package_macos_server_zip() {
+    local goarch="$1"
+    local src_bin="$TMP_BIN/server_darwin_${goarch}"
+    local artifact="openvibely_${VERSION}_darwin_${goarch}_server.zip"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would Developer ID sign and notarize $artifact"
+        return
+    fi
+    [[ "$HOST_OS" == "Darwin" ]] || fail "Official macOS server archives must be built, signed, and notarized on macOS."
+    local pkg_dir="${TMP_BIN}/pkg_darwin_${goarch}"
+    mkdir -p "$pkg_dir"
+    cp "$src_bin" "$pkg_dir/openvibely"
+    chmod +x "$pkg_dir/openvibely"
+    notarize_macos_binary_archive "$pkg_dir/openvibely" "${DIST_DIR}/${artifact}"
+    log "Created signed and notarized: $artifact"
+}
 
 package_server_tar() {
     local goos="$1" goarch="$2"
@@ -265,24 +352,32 @@ package_server_zip() {
     log "Created: $artifact"
 }
 
-package_server_tar darwin amd64
-package_server_tar darwin arm64
+package_macos_server_zip amd64
+package_macos_server_zip arm64
 package_server_tar linux  amd64
 package_server_tar linux  arm64
 package_server_zip windows amd64
 
-if [[ "$WINDOWS_DESKTOP_OK" == "1" ]]; then
-    win_desktop_artifact="openvibely_${VERSION}_windows_amd64_desktop-cli.zip"
-    if [[ "${DRY_RUN:-0}" == "1" ]]; then
-        echo -e "${YELLOW}[DRY-RUN]${NC} Would package $win_desktop_artifact"
-    else
-        log "Packaging $win_desktop_artifact..."
-        local_pkg="${TMP_BIN}/pkg_win_desktop"
-        mkdir -p "$local_pkg"
-        cp "$TMP_BIN/desktop_windows_amd64.exe" "$local_pkg/openvibely-desktop.exe"
-        bash -c "cd '${local_pkg}' && zip '${DIST_DIR}/${win_desktop_artifact}' openvibely-desktop.exe"
-        log "Created: $win_desktop_artifact"
-    fi
+win_desktop_artifact="openvibely_${VERSION}_windows_amd64_desktop-cli.zip"
+linux_desktop_artifact="openvibely_${VERSION}_linux_amd64_desktop.tar.gz"
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    echo -e "${YELLOW}[DRY-RUN]${NC} Would package $win_desktop_artifact"
+    echo -e "${YELLOW}[DRY-RUN]${NC} Would package $linux_desktop_artifact"
+else
+    log "Packaging $win_desktop_artifact..."
+    local_pkg="${TMP_BIN}/pkg_win_desktop"
+    mkdir -p "$local_pkg"
+    cp "$TMP_BIN/desktop_windows_amd64.exe" "$local_pkg/openvibely-desktop.exe"
+    bash -c "cd '${local_pkg}' && zip '${DIST_DIR}/${win_desktop_artifact}' openvibely-desktop.exe"
+    log "Created: $win_desktop_artifact"
+
+    log "Packaging $linux_desktop_artifact..."
+    linux_pkg="${TMP_BIN}/pkg_linux_desktop"
+    mkdir -p "$linux_pkg"
+    cp "$TMP_BIN/desktop_linux_amd64" "$linux_pkg/openvibely-desktop"
+    chmod +x "$linux_pkg/openvibely-desktop"
+    tar -czf "${DIST_DIR}/${linux_desktop_artifact}" -C "$linux_pkg" openvibely-desktop
+    log "Created: $linux_desktop_artifact"
 fi
 
 ###############################################################################

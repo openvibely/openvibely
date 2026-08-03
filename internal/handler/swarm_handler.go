@@ -164,7 +164,7 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 	if updatedTask, getErr := h.taskRepo.GetByID(ctx, task.ID); getErr == nil && updatedTask != nil {
 		task = updatedTask
 	}
-	go h.processStreamingResponse(streamingResponseParams{
+	if err := h.startStreamingResponse(streamingResponseParams{
 		ExecID:           exec.ID,
 		TaskID:           task.ID,
 		Message:          message,
@@ -174,7 +174,10 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 		InputOrigin:      models.TaskOriginWeb,
 		DeferHistoryLoad: true,
 		Task:             task,
-	})
+	}); err != nil {
+		c.Response().Header().Set("Retry-After", "30")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "started", "execution_id": exec.ID})
 }
 

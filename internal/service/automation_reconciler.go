@@ -9,6 +9,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/automationobs"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
 // AutomationReconciler repairs Automation projections and resubmits durable
@@ -21,10 +22,15 @@ type AutomationReconciler struct {
 	interval       time.Duration
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
+	updateTracker  *update.WorkTracker
 }
 
 func NewAutomationReconciler(automationRepo *repository.AutomationRepo, executionRepo *repository.ExecutionRepo, workerSvc *WorkerService) *AutomationReconciler {
 	return &AutomationReconciler{automationRepo: automationRepo, executionRepo: executionRepo, workerSvc: workerSvc, interval: 15 * time.Second}
+}
+
+func (r *AutomationReconciler) SetUpdateWorkTracker(tracker *update.WorkTracker) {
+	r.updateTracker = tracker
 }
 
 func (r *AutomationReconciler) Start(ctx context.Context) {
@@ -71,6 +77,13 @@ func (r *AutomationReconciler) reconcile(ctx context.Context) {
 }
 
 func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
+	if r.updateTracker != nil {
+		done, err := r.updateTracker.Start(update.WorkAutomation)
+		if err != nil {
+			return nil
+		}
+		defer done()
+	}
 	terminal, err := r.automationRepo.ListTerminalUnfinalizedDispatches(ctx, 100)
 	if err != nil {
 		return err

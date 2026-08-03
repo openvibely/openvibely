@@ -6,6 +6,7 @@ require (
 	github.com/a-h/templ v0.3.1020
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/coder/websocket v1.8.15
+	github.com/cyberphone/json-canonicalization v0.0.0-20241213102144-19d51d7fe467
 	github.com/emersion/go-imap v1.2.1
 	github.com/emersion/go-message v0.18.2
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
@@ -18,7 +19,9 @@ require (
 	github.com/swaggo/echo-swagger v1.5.2
 	github.com/swaggo/swag v1.16.6
 	github.com/wailsapp/wails/v3 v3.0.0-alpha2.119
+	golang.org/x/mod v0.38.0
 	golang.org/x/sync v0.22.0
+	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.55.0
 )
@@ -63,9 +66,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
-	golang.org/x/mod v0.38.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect

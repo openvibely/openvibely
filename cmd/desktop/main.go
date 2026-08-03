@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"strings"
@@ -15,19 +16,34 @@ import (
 
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/server"
+	"github.com/openvibely/openvibely/internal/update"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 type desktopBackend struct {
-	BaseURL  string
-	Shutdown func()
+	BaseURL           string
+	Shutdown          func()
+	UpdateCoordinator *update.Coordinator
 }
 
 type desktopStarter func(context.Context, *config.Config) (*desktopBackend, error)
-type desktopLauncher func(baseURL string, onShutdown func()) error
+type desktopLauncher func(baseURL string, onShutdown func(), coordinator *update.Coordinator) error
 
 func main() {
 	log.SetOutput(os.Stderr)
+	if len(os.Args) > 1 && os.Args[1] == "desktop-update-helper" {
+		cfg, err := update.ParseDesktopHelperArgs(os.Args[2:])
+		if err == nil {
+			err = update.LoadDesktopHelperRelaunch(os.Stdin, &cfg)
+		}
+		if err == nil {
+			err = update.RunDesktopHelper(context.Background(), cfg)
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	setDesktopOAuthDefaults()
 	loadDesktopConfigFile()
 
@@ -45,6 +61,17 @@ func main() {
 	if err := runDesktop(cfg, startDesktopBackend, launchNativeWindow); err != nil {
 		log.Fatalf("[desktop] failed: %v", err)
 	}
+}
+
+func ensureDesktopPluginRoot(cfg *config.Config) error {
+	if strings.TrimSpace(os.Getenv("OPENVIBELY_PLUGIN_ROOT")) != "" {
+		return nil
+	}
+	root := filepath.Join(cfg.AppDataDir, ".openvibely", "plugins")
+	if err := os.Setenv("OPENVIBELY_PLUGIN_ROOT", root); err != nil {
+		return fmt.Errorf("configure desktop plugin data root: %w", err)
+	}
+	return nil
 }
 
 func setDesktopOAuthDefaults() {
@@ -77,6 +104,10 @@ func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher
 		return fmt.Errorf("desktop config is nil")
 	}
 
+	if err := ensureDesktopPluginRoot(cfg); err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	backend, err := start(ctx, cfg)
@@ -97,7 +128,7 @@ func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher
 		})
 	}
 
-	if err := launch(backend.BaseURL, shutdown); err != nil {
+	if err := launch(backend.BaseURL, shutdown, backend.UpdateCoordinator); err != nil {
 		shutdown()
 		return fmt.Errorf("failed to launch native desktop window: %w", err)
 	}
@@ -113,12 +144,13 @@ func startDesktopBackend(ctx context.Context, cfg *config.Config) (*desktopBacke
 		return nil, err
 	}
 	return &desktopBackend{
-		BaseURL:  inst.BaseURL,
-		Shutdown: inst.Shutdown,
+		BaseURL:           inst.BaseURL,
+		Shutdown:          inst.Shutdown,
+		UpdateCoordinator: inst.UpdateCoordinator,
 	}, nil
 }
 
-func launchNativeWindow(baseURL string, onShutdown func()) error {
+func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.Coordinator) error {
 	app := application.New(application.Options{
 		Name:        "OpenVibely",
 		Description: "OpenVibely desktop application",
@@ -127,6 +159,17 @@ func launchNativeWindow(baseURL string, onShutdown func()) error {
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
 	})
+	if coordinator == nil {
+		return fmt.Errorf("desktop update coordinator is unavailable")
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve desktop working directory: %w", err)
+	}
+	coordinator.SetDesktopRelaunchContext(baseURL+"/api/system/health", os.Args, workingDirectory, app.Quit)
+	if err := coordinator.BindWailsUpdater(app.Updater); err != nil {
+		return fmt.Errorf("configure Wails updater: %w", err)
+	}
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "main",

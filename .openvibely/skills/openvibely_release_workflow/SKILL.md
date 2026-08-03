@@ -62,7 +62,7 @@ Before a real non-dry-run release, confirm the exact commit that will receive th
 | `docker` *(optional)* | Build and push Docker image | https://docker.com |
 | `x86_64-w64-mingw32-gcc` *(optional)* | Cross-compile Windows desktop-cli | `brew install mingw-w64` |
 
-**macOS-only:** macOS desktop `.app` bundles can only be built on a macOS host. Server artifacts for all platforms can be cross-compiled from any OS.
+**Platform builds:** macOS desktop `.app` bundles require a macOS host. Linux desktop binaries require a native Linux build job or `OPENVIBELY_LINUX_DESKTOP_BINARY`. Windows desktop binaries require `mingw-w64` or `OPENVIBELY_WINDOWS_DESKTOP_BINARY`. Official release builds fail if any required desktop artifact is unavailable.
 
 ### Missing tools — install before proceeding
 
@@ -75,7 +75,7 @@ brew install gh
 brew install mingw-w64
 ```
 
-After installing `gh`, run `gh auth status`; if unauthenticated, run `gh auth login` or ask the user to complete GitHub authentication. If the user has already requested the real release and later completes `gh` authentication or another credential step, treat the original release request as still active: verify auth and preflight, then continue the release pipeline. Do not stop with a status-only summary asking whether to proceed unless a new hard blocker remains or the user explicitly changed the request to dry-run/status mode. For optional tools, install them when the requested release artifact or Docker step depends on them; otherwise document the skipped capability in the release summary.
+After installing `gh`, run `gh auth status`; if unauthenticated, run `gh auth login` or ask the user to complete GitHub authentication. If the user has already requested the real release and later completes `gh` authentication or another credential step, treat the original release request as still active: verify auth and preflight, then continue the release pipeline. Do not stop with a status-only summary asking whether to proceed unless a new hard blocker remains or the user explicitly changed the request to dry-run/status mode. For platform-specific desktop builds, install the required compiler when practical or supply the corresponding signed/prebuilt artifact hook. Official releases cannot omit Windows or Linux desktop artifacts; the build stops if either cannot be produced.
 
 ---
 
@@ -91,7 +91,7 @@ Run `release-preflight.sh <version>` first, or let `release.sh` run it automatic
 6. **Tag collision** — fails if `v<version>` already exists locally or in GitHub releases.
 7. **Previous tag** — finds latest `v*` tag for changelog range.
 8. **Commit count** — lists unreleased commits for review.
-9. **Build capability** — reports whether macOS desktop, Windows desktop-cli, and Docker are available on the current host.
+9. **Build capability** — reports whether macOS, Windows, and Linux desktop artifacts can be built locally or must be supplied by their native release jobs, plus Docker availability.
 
 ---
 
@@ -133,7 +133,22 @@ git log --oneline -3
 # 1. Preflight
 bash $SCRIPTS/release-preflight.sh 0.1.1
 
-# 2. Build artifacts
+# 2. Build artifacts. Official artifacts require the embedded Ed25519 trust
+#    root. macOS builds require a Developer ID identity and notarytool profile.
+#    Windows builds require external Authenticode sign and verification hooks;
+#    the signing hook must timestamp, and verification must fail when absent.
+#    Credentials are supplied by the release environment and are never generated.
+export OPENVIBELY_RELEASE_KEY_ID=openvibely-release-1
+export OPENVIBELY_RELEASE_PUBLIC_KEY='<base64-encoded-32-byte-Ed25519-public-key>'
+export OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Example (TEAMID)'
+export OPENVIBELY_MACOS_NOTARY_PROFILE='openvibely-notary'
+export OPENVIBELY_WINDOWS_SIGN_COMMAND='/secure/path/to/authenticode-sign-and-timestamp'
+export OPENVIBELY_WINDOWS_VERIFY_COMMAND='/secure/path/to/verify-authenticode-and-timestamp'
+# On a non-Windows/non-Linux release coordinator, provide binaries built by
+# the corresponding native release jobs. The build fails if either desktop
+# artifact cannot be produced.
+export OPENVIBELY_WINDOWS_DESKTOP_BINARY='/secure/path/to/openvibely-desktop.exe'
+export OPENVIBELY_LINUX_DESKTOP_BINARY='/secure/path/to/openvibely-desktop'
 bash $SCRIPTS/release-build.sh 0.1.1 ./dist/0.1.1
 
 # 2b. Verify archive contents, especially macOS .app zips
@@ -200,12 +215,13 @@ Use the preferred style from `references/release-note-style.md` when rewriting r
 |----------|-------------|
 | `OpenVibely_<version>_darwin_amd64.app.zip` | macOS desktop app bundle (Intel) |
 | `OpenVibely_<version>_darwin_arm64.app.zip` | macOS desktop app bundle (Apple Silicon) |
-| `openvibely_<version>_darwin_amd64_server.tar.gz` | macOS server binary (Intel) |
-| `openvibely_<version>_darwin_arm64_server.tar.gz` | macOS server binary (Apple Silicon) |
+| `openvibely_<version>_darwin_amd64_server.zip` | macOS server binary (Intel) |
+| `openvibely_<version>_darwin_arm64_server.zip` | macOS server binary (Apple Silicon) |
 | `openvibely_<version>_linux_amd64_server.tar.gz` | Linux server binary (x86_64) |
 | `openvibely_<version>_linux_arm64_server.tar.gz` | Linux server binary (ARM64) |
 | `openvibely_<version>_windows_amd64_server.zip` | Windows server binary zip |
-| `openvibely_<version>_windows_amd64_desktop-cli.zip` | Windows desktop binary zip (requires mingw-w64) |
+| `openvibely_<version>_windows_amd64_desktop-cli.zip` | Signed Windows desktop binary zip |
+| `openvibely_<version>_linux_amd64_desktop.tar.gz` | Linux desktop binary tarball |
 | `SHA256SUMS` | SHA-256 checksums for all artifacts |
 
 **Casing rule:** Desktop macOS bundles use `OpenVibely_` (capitalized). All server/binary artifacts use `openvibely_` (lowercase).
@@ -224,7 +240,7 @@ bin/OpenVibely.app/
 
 Treat `bin/openvibely-desktop` as a staging/intermediate Unix executable, not the user-facing desktop app and not a release asset by itself. It exists so the bundle can copy it into `Contents/MacOS/OpenVibely`; the useful macOS artifact is the `.app` bundle, packaged as `.app.zip` for GitHub releases.
 
-The release build creates one `.app.zip` per macOS architecture in `dist/<version>/`: `OpenVibely_<version>_darwin_amd64.app.zip` for Intel and `OpenVibely_<version>_darwin_arm64.app.zip` for Apple Silicon. The desktop binary starts the OpenVibely backend on localhost and opens it in a native macOS WebView window; it is not Electron. Unless signing/notarization has been added and verified in the scripts, treat these as unsigned app bundles and tell users they may need Finder right-click → Open on first launch.
+The release script signs macOS bundles with hardened runtime and a secure timestamp, notarizes them, staples the notarization ticket, and verifies both the signature and Gatekeeper assessment before packaging.
 
 ### macOS app archive verification
 
@@ -347,8 +363,8 @@ Before publishing, verify the docs changes are included in the release branch/ta
 
 These are preserved from v0.1.0 and should appear in every release's notes unless resolved:
 
-1. **Linux desktop** — GTK/WebKit dependencies prevent cross-compilation from macOS. Linux server artifacts are included; desktop artifacts are not. Build natively on Linux with `libgtk-4-dev`, `libwebkitgtk-6.0-dev`, etc.
-2. **Windows desktop-cli** — Artifact is an executable zip, not an installer. Requires `mingw-w64` cross-compiler for CGO-enabled Wails build; skipped if unavailable.
+1. **Linux desktop** — Built natively on Linux with GTK/WebKit dependencies or supplied through `OPENVIBELY_LINUX_DESKTOP_BINARY`; an official release fails if the artifact is unavailable.
+2. **Windows desktop-cli** — Artifact is a signed executable zip, not an installer. Build it with `mingw-w64` or supply it through `OPENVIBELY_WINDOWS_DESKTOP_BINARY`; an official release fails if the artifact is unavailable.
 3. **Docker / VPS storage** — Mount `/data` as a persistent volume; do not rely on the container filesystem for database or repos.
 
 ---
@@ -415,12 +431,13 @@ After a successful run:
 dist/<version>/
 ├── OpenVibely_<version>_darwin_amd64.app.zip
 ├── OpenVibely_<version>_darwin_arm64.app.zip
-├── openvibely_<version>_darwin_amd64_server.tar.gz
-├── openvibely_<version>_darwin_arm64_server.tar.gz
+├── openvibely_<version>_darwin_amd64_server.zip
+├── openvibely_<version>_darwin_arm64_server.zip
 ├── openvibely_<version>_linux_amd64_server.tar.gz
 ├── openvibely_<version>_linux_arm64_server.tar.gz
 ├── openvibely_<version>_windows_amd64_server.zip
-├── openvibely_<version>_windows_amd64_desktop-cli.zip  (if mingw-w64 present)
+├── openvibely_<version>_windows_amd64_desktop-cli.zip
+├── openvibely_<version>_linux_amd64_desktop.tar.gz
 ├── SHA256SUMS
 └── RELEASE_NOTES.md
 ```
@@ -440,7 +457,7 @@ bash .openvibely/skills/openvibely_release_workflow/scripts/release-validate.sh
 Tests cover:
 - Semver normalization (strip `v` prefix)
 - Semver validation (valid and invalid inputs)
-- Artifact naming conventions (all eight artifact patterns)
+- Artifact naming conventions (all required server and desktop artifact patterns)
 - Tag format (`v<version>`)
 - Release title format (`OpenVibely <version>`)
 - Release branch naming (`release/v<version>`)

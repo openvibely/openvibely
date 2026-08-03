@@ -25,6 +25,7 @@ import (
 	llmstream "github.com/openvibely/openvibely/internal/llm/stream"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/update"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 )
 
@@ -75,6 +76,7 @@ type LLMService struct {
 	githubPRFeedbackRepo      *repository.GitHubPRFeedbackRepo
 	automationRegistrationSvc *AutomationRegistrationService
 	automationRepo            *repository.AutomationRepo
+	updateTracker             *update.WorkTracker
 
 	// automationHandoffBeforeFinalAdmission is a deterministic test barrier for
 	// the commit-to-submission lifecycle race. Production leaves it nil.
@@ -163,6 +165,8 @@ func (s *LLMService) SetUsageRepo(repo *repository.UsageRepo) {
 func (s *LLMService) SetBroadcaster(b *events.Broadcaster) {
 	s.broadcaster = b
 }
+
+func (s *LLMService) SetUpdateWorkTracker(tracker *update.WorkTracker) { s.updateTracker = tracker }
 
 func (s *LLMService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 	s.executionStreamHub = hub
@@ -1955,6 +1959,13 @@ func (s *LLMService) callAgentDirect(ctx context.Context, message string, attach
 }
 
 func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent, disableTools bool) (string, int, error) {
+	if s.updateTracker != nil {
+		done, err := s.updateTracker.Start(update.WorkChat)
+		if err != nil {
+			return "", 0, err
+		}
+		defer done()
+	}
 	applog.Infof("[agent-svc] CallAgentDirect agent=%s model=%s message_len=%d workDir=%s disable_tools=%v agent_def=%t", agent.Name, agent.Model, len(message), workDir, disableTools, agentDef != nil)
 
 	adapter, err := s.ensureRoutingStrategy().resolveAdapter(agent.Provider)

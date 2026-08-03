@@ -8,6 +8,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
 // staleQueuedTaskTimeout is how long a task can stay in "queued" status before
@@ -37,6 +38,7 @@ type SchedulerService struct {
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
 	lastCleanupAt  time.Time
+	updateTracker  *update.WorkTracker
 }
 
 func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *repository.TaskRepo, workerSvc *WorkerService) *SchedulerService {
@@ -51,6 +53,10 @@ func NewSchedulerService(scheduleRepo *repository.ScheduleRepo, taskRepo *reposi
 // SetWorktreeService sets the worktree service for automatic cleanup.
 func (s *SchedulerService) SetAutomationRepo(repo *repository.AutomationRepo) {
 	s.automationRepo = repo
+}
+
+func (s *SchedulerService) SetUpdateWorkTracker(tracker *update.WorkTracker) {
+	s.updateTracker = tracker
 }
 
 func (s *SchedulerService) SetWorktreeService(wts *WorktreeService) {
@@ -111,6 +117,13 @@ func (s *SchedulerService) run(ctx context.Context) {
 
 // checkDueTasks finds scheduled tasks whose next_run has passed and submits them.
 func (s *SchedulerService) checkDueTasks(ctx context.Context) {
+	if s.updateTracker != nil {
+		done, err := s.updateTracker.Start(update.WorkAutomation)
+		if err != nil {
+			return
+		}
+		defer done()
+	}
 	now := time.Now().UTC()
 	applog.Infof("[scheduler] checkDueTasks now=%s", now.Format("2006-01-02 15:04:05"))
 

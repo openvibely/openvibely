@@ -44,6 +44,30 @@ func (h *Handler) PromoteQueuedTaskThreadInput(taskID string) {
 	}, "")
 }
 
+func (h *Handler) RecoverQueuedInputs(ctx context.Context) {
+	if h.threadInputRepo == nil {
+		return
+	}
+	const batchSize = 100
+	afterProjectID := ""
+	for {
+		ids, err := h.threadInputRepo.ListRecoverableQueuedChatProjectIDsAfter(ctx, afterProjectID, batchSize)
+		if err != nil {
+			applog.Infof("[handler] RecoverQueuedInputs chat list error: %v", err)
+			break
+		}
+		for _, projectID := range ids {
+			applog.Infof("[handler] RecoverQueuedInputs promoting stranded queued Chat input project=%s", projectID)
+			h.PromoteQueuedChatInput(projectID)
+		}
+		if len(ids) < batchSize {
+			break
+		}
+		afterProjectID = ids[len(ids)-1]
+	}
+	h.RecoverQueuedTaskThreadInputs(ctx)
+}
+
 func (h *Handler) RecoverQueuedTaskThreadInputs(ctx context.Context) {
 	if h.threadInputRepo == nil {
 		return

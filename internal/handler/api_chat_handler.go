@@ -430,7 +430,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	// This ensures consistent behavior (runtime action tools, proper completion ordering,
 	// ChatResponseDone broadcast) regardless of whether the message came from web, API, or Telegram.
 	// The client receives 201 immediately and polls GET /api/chat/message/:id for the result.
-	go h.processStreamingResponse(streamingResponseParams{
+	if err := h.startStreamingResponse(streamingResponseParams{
 		ExecID:           exec.ID,
 		TaskID:           task.ID,
 		Message:          message,
@@ -443,7 +443,10 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		ImageAttachments: imageAttachments,
 		IsTaskFollowup:   false,
 		Surface:          chatcontrol.SurfaceAPI,
-	})
+	}); err != nil {
+		c.Response().Header().Set("Retry-After", "30")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
 
 	applog.Infof("[handler] APIChatMessage exec=%s accepted for async processing status=%s", exec.ID, execStatus)
 	// Return 201 immediately with the message ID for polling

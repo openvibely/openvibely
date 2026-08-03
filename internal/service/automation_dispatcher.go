@@ -10,6 +10,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
 // AutomationDispatcher is a durable adapter into WorkerService. It owns no
@@ -23,6 +24,7 @@ type AutomationDispatcher struct {
 	lease          time.Duration
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
+	updateTracker  *update.WorkTracker
 }
 
 func NewAutomationDispatcher(automationRepo *repository.AutomationRepo, taskRepo *repository.TaskRepo, workerSvc *WorkerService) *AutomationDispatcher {
@@ -34,6 +36,10 @@ func NewAutomationDispatcher(automationRepo *repository.AutomationRepo, taskRepo
 		interval:       time.Second,
 		lease:          time.Minute,
 	}
+}
+
+func (d *AutomationDispatcher) SetUpdateWorkTracker(tracker *update.WorkTracker) {
+	d.updateTracker = tracker
 }
 
 func (d *AutomationDispatcher) Start(ctx context.Context) {
@@ -87,6 +93,13 @@ func (d *AutomationDispatcher) drain(ctx context.Context) {
 }
 
 func (d *AutomationDispatcher) DispatchOne(ctx context.Context) (bool, error) {
+	if d.updateTracker != nil {
+		done, err := d.updateTracker.Start(update.WorkAutomation)
+		if err != nil {
+			return false, nil
+		}
+		defer done()
+	}
 	now := time.Now().UTC()
 	dispatch, err := d.automationRepo.LeaseNextDispatch(ctx, d.claimant, now, d.lease)
 	if err != nil || dispatch == nil {

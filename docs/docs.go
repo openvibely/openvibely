@@ -1943,6 +1943,134 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/system/health": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "System health and build identity",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handler.SystemHealthResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handler.SystemHealthResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/system/update": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Get system update state",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/update.CoordinatorSnapshot"
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/api/system/update/apply": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Accept a system update",
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/update.CoordinatorSnapshot"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/system/update/cancel": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Cancel a system update",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/update.CoordinatorSnapshot"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/system/update/events": {
+            "get": {
+                "produces": [
+                    "text/event-stream"
+                ],
+                "tags": [
+                    "system"
+                ],
+                "summary": "Stream system update events",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
         "/api/tasks/{id}/lifecycle-executions": {
             "get": {
                 "description": "Returns lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task.",
@@ -2571,6 +2699,44 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/handler.ProjectResponse"
                     }
+                }
+            }
+        },
+        "handler.SystemHealthResponse": {
+            "type": "object",
+            "properties": {
+                "artifact": {
+                    "type": "string"
+                },
+                "build_time": {
+                    "type": "string"
+                },
+                "commit": {
+                    "type": "string"
+                },
+                "database_schema": {
+                    "type": "integer"
+                },
+                "distribution": {
+                    "type": "string"
+                },
+                "drain_state": {
+                    "type": "string"
+                },
+                "ready": {
+                    "type": "boolean"
+                },
+                "schema_version": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "update_mode": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "string"
                 }
             }
         },
@@ -3760,6 +3926,171 @@ const docTemplate = `{
                 },
                 "taskTitle": {
                     "type": "string"
+                }
+            }
+        },
+        "update.ActiveWork": {
+            "type": "object",
+            "properties": {
+                "automation_activities": {
+                    "type": "integer"
+                },
+                "chat_executions": {
+                    "type": "integer"
+                },
+                "task_executions": {
+                    "type": "integer"
+                },
+                "workflow_executions": {
+                    "type": "integer"
+                }
+            }
+        },
+        "update.CoordinatorSnapshot": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string"
+                },
+                "configuration_error": {
+                    "type": "string"
+                },
+                "current_version": {
+                    "type": "string"
+                },
+                "distribution": {
+                    "type": "string"
+                },
+                "drain": {
+                    "$ref": "#/definitions/update.DrainStatus"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "manual": {
+                    "type": "boolean"
+                },
+                "release": {
+                    "$ref": "#/definitions/update.VerifiedRelease"
+                },
+                "staged": {
+                    "type": "boolean"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "update.DrainStatus": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "$ref": "#/definitions/update.ActiveWork"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "generation": {
+                    "type": "string"
+                },
+                "queued_total": {
+                    "type": "integer"
+                },
+                "state": {
+                    "type": "string"
+                }
+            }
+        },
+        "update.ReleaseMetadata": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string"
+                },
+                "commit": {
+                    "type": "string"
+                },
+                "database_compatibility": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "minimum_hosted_version": {
+                    "type": "string"
+                },
+                "minimum_updater_version": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "release_notes_url": {
+                    "type": "string"
+                },
+                "schema_version": {
+                    "type": "integer"
+                },
+                "targets": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/update.Target"
+                    }
+                },
+                "version": {
+                    "type": "string"
+                }
+            }
+        },
+        "update.Target": {
+            "type": "object",
+            "properties": {
+                "arch": {
+                    "type": "string"
+                },
+                "filename": {
+                    "type": "string"
+                },
+                "filetype": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_ref": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "os": {
+                    "type": "string"
+                },
+                "sha256": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "update.VerifiedRelease": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "apply_supported": {
+                    "type": "boolean"
+                },
+                "metadata": {
+                    "$ref": "#/definitions/update.ReleaseMetadata"
+                },
+                "target": {
+                    "$ref": "#/definitions/update.Target"
                 }
             }
         },

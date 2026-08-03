@@ -254,7 +254,7 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 		return c.NoContent(http.StatusOK)
 	}
 
-	go h.processStreamingResponse(streamingResponseParams{
+	if err := h.startStreamingResponse(streamingResponseParams{
 		ExecID:          exec.ID,
 		TaskID:          taskID,
 		Message:         reviewMessage,
@@ -265,7 +265,10 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 		SystemContext:   combineContexts(combineContexts(systemContext, worktreeContext), personalityContext),
 		WorkDir:         workDir,
 		IsTaskFollowup:  true,
-	})
+	}); err != nil {
+		c.Response().Header().Set("Retry-After", "30")
+		return echo.NewHTTPError(http.StatusServiceUnavailable, err.Error())
+	}
 
 	// Clear the review comments after submission
 	if err := h.reviewCommentRepo.DeleteByTask(c.Request().Context(), taskID); err != nil {

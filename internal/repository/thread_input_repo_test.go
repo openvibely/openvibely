@@ -179,6 +179,42 @@ func TestThreadInputRepo_ListRecoverableQueuedTaskIDsFindsPendingInputsBehindTer
 	}
 }
 
+func TestThreadInputRepo_ListRecoverableQueuedChatProjectIDs(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: project.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued while draining", ChatMode: models.ChatModeOrchestrate}
+	if err := repo.CreateQueued(ctx, queued); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+
+	ids, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedChatProjectIDsAfter: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != project.ID {
+		t.Fatalf("recoverable chat project ids = %#v, want [%s]", ids, project.ID)
+	}
+
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Active Chat", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: "active"}
+	if err := NewTaskRepo(db, nil).Create(ctx, chatTask); err != nil {
+		t.Fatalf("create active chat task: %v", err)
+	}
+	active := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := NewExecutionRepo(db).Create(ctx, active); err != nil {
+		t.Fatalf("create active chat execution: %v", err)
+	}
+	ids, err = repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, "", 10)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedChatProjectIDsAfter active: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Fatalf("recoverable chat projects with active execution = %#v, want none", ids)
+	}
+}
+
 func TestThreadInputRepo_ClaimQueuedForTaskExecutionRequiresNoActiveExecution(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
