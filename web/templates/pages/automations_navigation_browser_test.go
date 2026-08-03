@@ -1130,6 +1130,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (liveCaptureOwner) fail('task-backed Live node captured the pointer before drag intent: ' + liveCaptureOwner);
 	    liveTaskLink.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+120, clientY:livePanY+60}));
 	    if (liveCaptureOwner) fail('task-backed Live node drag captured the pointer instead of using window tracking: ' + liveCaptureOwner);
+	    var liveNativeDrag = new DragEvent('dragstart', {bubbles:true, cancelable:true, clientX:livePanX+120, clientY:livePanY+60});
+	    if (liveTaskLink.dispatchEvent(liveNativeDrag) || !liveNativeDrag.defaultPrevented) fail('task-backed Live node allowed native link dragging to interrupt canvas panning');
 	    window.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+180, clientY:livePanY+90}));
 	    window.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, button:0, pointerId:41, clientX:livePanX+180, clientY:livePanY+90}));
 	    var dragAssociatedClick = new MouseEvent('click', {bubbles:true, cancelable:true, button:0, clientX:livePanX+120, clientY:livePanY+60});
