@@ -1354,6 +1354,11 @@ func TestBinaryHelperAtomicReplacementPreservesPermissionsAndValidatesVersion(t 
 	if err := os.WriteFile(current, []byte("old"), 0o751); err != nil {
 		t.Fatal(err)
 	}
+	originalInfo, err := os.Stat(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedPermissions := originalInfo.Mode().Perm()
 	if err := os.WriteFile(staged, []byte("new"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1370,8 +1375,11 @@ func TestBinaryHelperAtomicReplacementPreservesPermissionsAndValidatesVersion(t 
 	if string(data) != "new" {
 		t.Fatalf("current = %q", data)
 	}
-	info, _ := os.Stat(current)
-	if info.Mode().Perm() != 0o751 {
+	info, err := os.Stat(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != expectedPermissions {
 		t.Fatalf("permissions = %o", info.Mode().Perm())
 	}
 	old, _ := os.ReadFile(backup)
@@ -1382,7 +1390,7 @@ func TestBinaryHelperAtomicReplacementPreservesPermissionsAndValidatesVersion(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if backupInfo.Mode().Perm() != 0o751 {
+	if backupInfo.Mode().Perm() != expectedPermissions {
 		t.Fatalf("backup permissions = %o", backupInfo.Mode().Perm())
 	}
 }
