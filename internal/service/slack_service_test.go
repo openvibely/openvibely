@@ -24,6 +24,7 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
+	"github.com/slack-go/slack/socketmode"
 	"github.com/stretchr/testify/require"
 )
 
@@ -177,6 +178,168 @@ func TestSlackService_HandleOAuthCallbackInvalidState(t *testing.T) {
 	err := svc.HandleOAuthCallback(context.Background(), "code-1", "wrong-state", "http://localhost:8080/channels/slack/callback")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid oauth state")
+}
+
+func slackSocketMessageEvent(envelopeID, timestamp string) socketmode.Event {
+	request := &socketmode.Request{EnvelopeID: envelopeID}
+	return socketmode.Event{
+		Type:    socketmode.EventTypeEventsAPI,
+		Request: request,
+		Data: slackevents.EventsAPIEvent{
+			Type:   slackevents.CallbackEvent,
+			TeamID: "T1",
+			InnerEvent: slackevents.EventsAPIInnerEvent{Data: slackevents.MessageEvent{
+				ChannelType: "im",
+				User:        "U1",
+				Channel:     "D1",
+				Text:        "persist this",
+				TimeStamp:   timestamp,
+			}},
+		},
+	}
+}
+
+func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *repository.TaskRepo, *repository.ExecutionRepo, *repository.ThreadInputRepo, string) {
+	t.Helper()
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	project := &models.Project{Name: "Slack durable handoff"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	workerSvc := NewWorkerService(llmSvc, 0, nil)
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, repository.NewSlackUserProjectRepo(db), repository.NewSlackTaskContextRepo(db), nil)
+	svc.SetThreadInputRepo(threadInputRepo)
+	svc.setActiveProject(ctx, "T1", "U1", project.ID)
+	svc.postMessageFn = func(string, string, string) (string, error) { return "", nil }
+	return svc, taskRepo, execRepo, threadInputRepo, project.ID
+}
+
+func TestSlackService_SocketEventFirstTurnPersistenceFailureRedelivery(t *testing.T) {
+	svc, taskRepo, execRepo, _, projectID := newSlackSocketIngressTestService(t)
+	acks := 0
+	attempts := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	svc.createExecutionFn = func(ctx context.Context, execution *models.Execution) (bool, error) {
+		attempts++
+		if attempts == 1 {
+			return false, fmt.Errorf("transient execution persistence failure")
+		}
+		return false, execRepo.Create(ctx, execution)
+	}
+
+	event := slackSocketMessageEvent("E1", "1710000000.100000")
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 0, acks)
+	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks)
+
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 1, acks)
+	require.Equal(t, 2, attempts)
+	tasks, err = taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 2, acks)
+	require.Equal(t, 2, attempts)
+	tasks, err = taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+}
+
+func TestSlackService_SocketEventQueuedTurnPersistenceFailureRedelivery(t *testing.T) {
+	svc, taskRepo, execRepo, threadInputRepo, projectID := newSlackSocketIngressTestService(t)
+	ctx := context.Background()
+	agent, err := svc.llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	activeTask := &models.Task{ProjectID: projectID, Title: "active", Prompt: "active", Category: models.CategoryChat, Status: models.StatusRunning, AgentID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, activeTask))
+	activeExecution := &models.Execution{TaskID: activeTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, execRepo.Create(ctx, activeExecution))
+
+	acks := 0
+	attempts := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	svc.createQueuedInputFn = func(ctx context.Context, input *models.ThreadInput) (bool, error) {
+		attempts++
+		if attempts == 1 {
+			return false, fmt.Errorf("transient queued input persistence failure")
+		}
+		return false, threadInputRepo.CreateQueued(ctx, input)
+	}
+
+	event := slackSocketMessageEvent("E1", "1710000000.100000")
+	svc.handleSocketEvent(ctx, nil, event)
+	require.Equal(t, 0, acks)
+	inputs, err := threadInputRepo.ListPendingForChat(ctx, projectID)
+	require.NoError(t, err)
+	require.Empty(t, inputs)
+
+	svc.handleSocketEvent(ctx, nil, event)
+	require.Equal(t, 1, acks)
+	require.Equal(t, 2, attempts)
+	inputs, err = threadInputRepo.ListPendingForChat(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+
+	svc.handleSocketEvent(ctx, nil, event)
+	require.Equal(t, 2, acks)
+	require.Equal(t, 2, attempts)
+	inputs, err = threadInputRepo.ListPendingForChat(ctx, projectID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+}
+
+func TestSlackService_SocketEventSuccessfulRedeliveryIsAcknowledgedWithoutDuplicateTurn(t *testing.T) {
+	svc := NewSlackService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	acks := 0
+	accepted := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	svc.processIncomingMessageResultFn = func(slackIncomingMessage) bool {
+		accepted++
+		return true
+	}
+
+	event := slackSocketMessageEvent("E1", "1710000000.100000")
+	svc.handleSocketEvent(context.Background(), nil, event)
+	svc.handleSocketEvent(context.Background(), nil, event)
+
+	require.Equal(t, 2, acks, "a previously accepted redelivery is terminally acknowledged")
+	require.Equal(t, 1, accepted)
+}
+
+func TestSlackService_SocketEventTerminallyAcknowledgesIgnoredAndMalformedEvents(t *testing.T) {
+	svc := NewSlackService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+
+	svc.handleSocketEvent(context.Background(), nil, socketmode.Event{
+		Type:    socketmode.EventTypeEventsAPI,
+		Request: &socketmode.Request{EnvelopeID: "malformed"},
+		Data:    "not an events API event",
+	})
+	svc.handleSocketEvent(context.Background(), nil, socketmode.Event{
+		Type:    socketmode.EventTypeEventsAPI,
+		Request: &socketmode.Request{EnvelopeID: "ignored"},
+		Data: slackevents.EventsAPIEvent{
+			Type:       slackevents.CallbackEvent,
+			InnerEvent: slackevents.EventsAPIInnerEvent{Data: struct{}{}},
+		},
+	})
+
+	require.Equal(t, 2, acks)
 }
 
 func TestSlackService_EventFilteringAcceptsDMAppMentionsAndChannelMessageMentions(t *testing.T) {
