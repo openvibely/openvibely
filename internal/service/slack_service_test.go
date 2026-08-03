@@ -199,7 +199,7 @@ func slackSocketMessageEvent(envelopeID, timestamp string) socketmode.Event {
 	}
 }
 
-func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *repository.TaskRepo, *repository.ExecutionRepo, *repository.ThreadInputRepo, string) {
+func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *repository.TaskRepo, *repository.ExecutionRepo, *repository.ThreadInputRepo, *repository.SlackInboundReceiptRepo, string) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -211,6 +211,7 @@ func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *repository.
 	attachmentRepo := repository.NewAttachmentRepo(db)
 	settingsRepo := repository.NewSettingsRepo(db)
 	threadInputRepo := repository.NewThreadInputRepo(db)
+	receiptRepo := repository.NewSlackInboundReceiptRepo(db)
 	project := &models.Project{Name: "Slack durable handoff"}
 	require.NoError(t, projectRepo.Create(ctx, project))
 	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
@@ -219,13 +220,46 @@ func newSlackSocketIngressTestService(t *testing.T) (*SlackService, *repository.
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	svc := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, repository.NewSlackUserProjectRepo(db), repository.NewSlackTaskContextRepo(db), nil)
 	svc.SetThreadInputRepo(threadInputRepo)
+	svc.SetSlackInboundReceiptRepo(receiptRepo)
 	svc.setActiveProject(ctx, "T1", "U1", project.ID)
 	svc.postMessageFn = func(string, string, string) (string, error) { return "", nil }
-	return svc, taskRepo, execRepo, threadInputRepo, project.ID
+	return svc, taskRepo, execRepo, threadInputRepo, receiptRepo, project.ID
+}
+
+func TestSlackInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	receipts := repository.NewSlackInboundReceiptRepo(db)
+	eventKey := "T1|D1|1710000000.100000|U1"
+
+	alreadyHandedOff, err := receipts.WithHandoff(ctx, eventKey, func(repository.SQLExecutor) error {
+		return fmt.Errorf("simulated durable row failure")
+	})
+	require.Error(t, err)
+	require.False(t, alreadyHandedOff)
+	exists, err := receipts.Exists(ctx, eventKey)
+	require.NoError(t, err)
+	require.False(t, exists, "failed durable work must roll back its receipt")
+
+	persistCalls := 0
+	alreadyHandedOff, err = receipts.WithHandoff(ctx, eventKey, func(repository.SQLExecutor) error {
+		persistCalls++
+		return nil
+	})
+	require.NoError(t, err)
+	require.False(t, alreadyHandedOff)
+
+	alreadyHandedOff, err = receipts.WithHandoff(ctx, eventKey, func(repository.SQLExecutor) error {
+		persistCalls++
+		return nil
+	})
+	require.NoError(t, err)
+	require.True(t, alreadyHandedOff)
+	require.Equal(t, 1, persistCalls)
 }
 
 func TestSlackService_SocketEventFirstTurnPersistenceFailureRedelivery(t *testing.T) {
-	svc, taskRepo, execRepo, _, projectID := newSlackSocketIngressTestService(t)
+	svc, taskRepo, execRepo, _, _, projectID := newSlackSocketIngressTestService(t)
 	acks := 0
 	attempts := 0
 	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
@@ -260,7 +294,7 @@ func TestSlackService_SocketEventFirstTurnPersistenceFailureRedelivery(t *testin
 }
 
 func TestSlackService_SocketEventQueuedTurnPersistenceFailureRedelivery(t *testing.T) {
-	svc, taskRepo, execRepo, threadInputRepo, projectID := newSlackSocketIngressTestService(t)
+	svc, taskRepo, execRepo, threadInputRepo, _, projectID := newSlackSocketIngressTestService(t)
 	ctx := context.Background()
 	agent, err := svc.llmConfigRepo.GetDefault(ctx)
 	require.NoError(t, err)
@@ -320,6 +354,48 @@ func TestSlackService_SocketEventSuccessfulRedeliveryIsAcknowledgedWithoutDuplic
 	require.Equal(t, 1, accepted)
 }
 
+func TestSlackService_SocketEventSuccessfulRedeliveryAfterRestartIsAcknowledgedWithoutDuplicateTurn(t *testing.T) {
+	svc, taskRepo, _, threadInputRepo, receiptRepo, projectID := newSlackSocketIngressTestService(t)
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	event := slackSocketMessageEvent("E1", "1710000000.100000")
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 1, acks)
+
+	restarted := NewSlackService(svc.settingsRepo, svc.projectRepo, svc.llmConfigRepo, svc.taskRepo, svc.execRepo, svc.scheduleRepo, svc.taskSvc, svc.llmSvc, svc.workerSvc, svc.slackUserProjectRepo, svc.slackTaskContextRepo, svc.slackAuthRepo)
+	restarted.SetThreadInputRepo(threadInputRepo)
+	restarted.SetSlackInboundReceiptRepo(receiptRepo)
+	restarted.postMessageFn = func(string, string, string) (string, error) { return "", nil }
+	restarted.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	restarted.handleSocketEvent(context.Background(), nil, event)
+
+	require.Equal(t, 2, acks)
+	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+}
+
+func TestSlackService_SocketEventProjectLookupFailureIsNotAcknowledgedAndCanRetry(t *testing.T) {
+	svc, taskRepo, _, _, _, projectID := newSlackSocketIngressTestService(t)
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	svc.mu.Lock()
+	delete(svc.userProjects, slackUserProjectKey("T1", "U1"))
+	svc.mu.Unlock()
+
+	failedCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	event := slackSocketMessageEvent("E1", "1710000000.100000")
+	svc.handleSocketEvent(failedCtx, nil, event)
+	require.Equal(t, 0, acks)
+
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 1, acks)
+	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+}
+
 func TestSlackService_SocketEventTerminallyAcknowledgesIgnoredAndMalformedEvents(t *testing.T) {
 	svc := NewSlackService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	acks := 0
@@ -338,8 +414,12 @@ func TestSlackService_SocketEventTerminallyAcknowledgesIgnoredAndMalformedEvents
 			InnerEvent: slackevents.EventsAPIInnerEvent{Data: struct{}{}},
 		},
 	})
+	svc.handleSocketEvent(context.Background(), nil, socketmode.Event{
+		Type:    socketmode.EventTypeSlashCommand,
+		Request: &socketmode.Request{EnvelopeID: "unsupported-request"},
+	})
 
-	require.Equal(t, 2, acks)
+	require.Equal(t, 3, acks)
 }
 
 func TestSlackService_EventFilteringAcceptsDMAppMentionsAndChannelMessageMentions(t *testing.T) {
@@ -2739,6 +2819,8 @@ func TestSlackService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
 
 	// Assert getActiveProject reflects the change (loads from DB when cache is cold after the switch).
 	svc2 := NewSlackService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, slackUserProjectRepo, slackTaskContextRepo, nil)
-	require.Equal(t, project2.ID, svc2.getActiveProject(ctx, "T1", "U1"),
+	activeProjectID, err := svc2.getActiveProject(ctx, "T1", "U1")
+	require.NoError(t, err)
+	require.Equal(t, project2.ID, activeProjectID,
 		"getActiveProject must return the newly-persisted project on next session")
 }

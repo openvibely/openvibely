@@ -89,6 +89,7 @@ type SlackService struct {
 	workerSvc                *WorkerService
 	slackUserProjectRepo     *repository.SlackUserProjectRepo
 	slackTaskContextRepo     *repository.SlackTaskContextRepo
+	slackInboundReceiptRepo  *repository.SlackInboundReceiptRepo
 	threadInputRepo          *repository.ThreadInputRepo
 	customPersonalityRepo    *repository.CustomPersonalityRepo
 	slackAuthRepo            *repository.SlackAuthRepo
@@ -176,6 +177,10 @@ func (s *SlackService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 
 func (s *SlackService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 	s.threadInputRepo = repo
+}
+
+func (s *SlackService) SetSlackInboundReceiptRepo(repo *repository.SlackInboundReceiptRepo) {
+	s.slackInboundReceiptRepo = repo
 }
 
 func (s *SlackService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
@@ -517,7 +522,7 @@ func (s *SlackService) runSocketLoop(ctx context.Context, client *socketmode.Cli
 }
 
 func (s *SlackService) handleSocketEvent(ctx context.Context, client *socketmode.Client, evt socketmode.Event) {
-	if evt.Type != socketmode.EventTypeEventsAPI || evt.Request == nil {
+	if evt.Request == nil {
 		return
 	}
 
@@ -532,6 +537,10 @@ func (s *SlackService) handleSocketEvent(ctx context.Context, client *socketmode
 				_ = client.Ack(*evt.Request)
 			}
 		})
+	}
+	if evt.Type != socketmode.EventTypeEventsAPI {
+		ack() // Unsupported request-bearing envelopes are terminally ignored.
+		return
 	}
 
 	eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
@@ -690,6 +699,19 @@ func (s *SlackService) processIncoming(ctx context.Context, msg slackIncomingMes
 	}
 	if !claimed {
 		return
+	}
+	if s.slackInboundReceiptRepo != nil && strings.TrimSpace(msg.EventKey) != "" {
+		alreadyHandedOff, err := s.slackInboundReceiptRepo.Exists(ctx, msg.EventKey)
+		if err != nil {
+			applog.Infof("[slack] check durable event receipt failed key=%s: %v", msg.EventKey, err)
+			s.finishIncomingMessage(msg, false)
+			return
+		}
+		if alreadyHandedOff {
+			s.finishIncomingMessage(msg, true)
+			ack()
+			return
+		}
 	}
 
 	handedOff := false
@@ -1008,7 +1030,11 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 	}
 	start := time.Now()
 
-	projectID := s.getActiveProject(ctx, msg.TeamID, msg.UserID)
+	projectID, err := s.getActiveProject(ctx, msg.TeamID, msg.UserID)
+	if err != nil {
+		applog.Infof("[slack] active project lookup failed user=%s team=%s: %v", msg.UserID, msg.TeamID, err)
+		return
+	}
 	if projectID == "" {
 		durableHandoff()
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "No active project found. Please create a project first in the web UI.")
@@ -1058,7 +1084,20 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 		NewQueuedInput: func() *models.ThreadInput {
 			return &models.ThreadInput{SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID}
 		},
-		CreateQueuedInput: s.createQueuedInputFn,
+		CreateQueuedInput: func(ctx context.Context, input *models.ThreadInput) (bool, error) {
+			if s.createQueuedInputFn != nil {
+				return s.createQueuedInputFn(ctx, input)
+			}
+			if s.threadInputRepo == nil {
+				return false, fmt.Errorf("thread input repository is not configured")
+			}
+			if s.slackInboundReceiptRepo == nil || strings.TrimSpace(msg.EventKey) == "" {
+				return false, s.threadInputRepo.CreateQueued(ctx, input)
+			}
+			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(exec repository.SQLExecutor) error {
+				return s.threadInputRepo.CreateQueuedWithExecutor(ctx, exec, input)
+			})
+		},
 		OnAttachmentDownloadFailed: func(_ context.Context, msgText string) {
 			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
 		},
@@ -1079,9 +1118,19 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 		},
 		OnDurableHandoff: durableHandoff,
 		FirstTurn: channelChatIngressFirstTurnOptions{
-			Task:            &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
-			ReplyContext:    ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
-			CreateExecution: s.createExecutionFn,
+			Task:         &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
+			ReplyContext: ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
+			CreateExecution: func(ctx context.Context, execution *models.Execution) (bool, error) {
+				if s.createExecutionFn != nil {
+					return s.createExecutionFn(ctx, execution)
+				}
+				if s.slackInboundReceiptRepo == nil || strings.TrimSpace(msg.EventKey) == "" {
+					return false, s.execRepo.Create(ctx, execution)
+				}
+				return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(exec repository.SQLExecutor) error {
+					return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+				})
+			},
 			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
 				return s.buildSlackActionToolRuntimeForTask(projectID, taskID, slackActionContext{
 					TeamID:    msg.TeamID,
@@ -1255,31 +1304,38 @@ func (s *SlackService) setActiveProject(ctx context.Context, teamID, userID, pro
 	return nil
 }
 
-func (s *SlackService) getActiveProject(ctx context.Context, teamID, userID string) string {
+func (s *SlackService) getActiveProject(ctx context.Context, teamID, userID string) (string, error) {
 	key := slackUserProjectKey(teamID, userID)
 
 	s.mu.RLock()
 	if projectID, ok := s.userProjects[key]; ok {
 		s.mu.RUnlock()
-		return projectID
+		return projectID, nil
 	}
 	s.mu.RUnlock()
 
 	if s.slackUserProjectRepo != nil {
-		if saved, err := s.slackUserProjectRepo.GetUserProject(ctx, teamID, userID); err == nil && saved != "" {
+		saved, err := s.slackUserProjectRepo.GetUserProject(ctx, teamID, userID)
+		if err != nil {
+			return "", fmt.Errorf("load saved Slack project: %w", err)
+		}
+		if saved != "" {
 			s.mu.Lock()
 			s.userProjects[key] = saved
 			s.mu.Unlock()
-			return saved
+			return saved, nil
 		}
 	}
 
 	if s.projectRepo == nil {
-		return ""
+		return "", nil
 	}
 	projects, err := s.projectRepo.List(ctx)
-	if err != nil || len(projects) == 0 {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("list Slack projects: %w", err)
+	}
+	if len(projects) == 0 {
+		return "", nil
 	}
 	selected := projects[0].ID
 	for _, p := range projects {
@@ -1291,7 +1347,7 @@ func (s *SlackService) getActiveProject(ctx context.Context, teamID, userID stri
 	s.mu.Lock()
 	s.userProjects[key] = selected
 	s.mu.Unlock()
-	return selected
+	return selected, nil
 }
 
 func slackUserProjectKey(teamID, userID string) string {

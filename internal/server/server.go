@@ -793,6 +793,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	slackSvc.SetAlertService(alertSvc)
 	slackSvc.SetTaskGoalService(taskGoalSvc)
 	slackSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
+	slackSvc.SetSlackInboundReceiptRepo(repository.NewSlackInboundReceiptRepo(db))
 	slackSvc.SetAgentRepo(agentRepo)
 	emailSvc := service.NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, scheduleRepo, taskSvc, llmSvc, workerSvc, emailAuthRepo, emailTaskContextRepo)
 	channelMessageRouter := service.NewChannelMessageRouter(channelTargetRepo, settingsRepo)
