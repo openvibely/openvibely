@@ -24,7 +24,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 			hx-trigger="alertUpdate from:body"
 			hx-target="this"
 			hx-select="#alerts-content"
-			hx-swap="outerHTML"
+			hx-swap="outerHTML show:none"
 		>
 		@layout.PageTitle("Alerts")
 		<div class="flex items-center justify-between mb-6">
@@ -50,7 +50,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 										hx-post={ fmt.Sprintf("/alerts/read-all?project_id=%s", currentProjectID) }
 										hx-target="#alerts-content"
 										hx-select="#alerts-content"
-										hx-swap="outerHTML"
+										hx-swap="outerHTML show:none"
 									>
 										Mark all as read
 									</a>
@@ -159,7 +159,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 			htmx.ajax('DELETE', url, {
 				target: target || '#alerts-content',
 				select: '#alerts-content',
-				swap: 'outerHTML'
+				swap: 'outerHTML show:none'
 			});
 			return false;
 		}
@@ -208,10 +208,17 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 
 				var rows = alertRows(root);
 				var rootRect = root.getBoundingClientRect();
-				var anchors = visibleAlertRows(rows).map(function(row) {
+				var viewportTop = Math.max(rootRect.top, 0);
+				var viewportBottom = Math.min(rootRect.bottom, window.innerHeight);
+				var renderedRows = visibleAlertRows(rows);
+				var viewportRows = renderedRows.filter(function(row) {
+					var rect = row.getBoundingClientRect();
+					return rect.bottom > viewportTop && rect.top < viewportBottom;
+				});
+				var anchors = (viewportRows.length ? viewportRows : renderedRows).map(function(row) {
 					return {id: row.dataset.alertId || '', top: row.getBoundingClientRect().top};
 				}).sort(function(a, b) {
-					return Math.abs(a.top - rootRect.top) - Math.abs(b.top - rootRect.top);
+					return Math.abs(a.top - viewportTop) - Math.abs(b.top - viewportTop);
 				});
 				var activeDelete = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-alert-delete]');
 				var activeRow = activeDelete && activeDelete.closest('[data-alert-scroll-anchor]');
@@ -231,6 +238,8 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				var root = document.getElementById('alerts-container');
 				var saved = state.swap;
 				if (!swappedTarget || swappedTarget.id !== 'alerts-content' || !root || !saved) return;
+				state.swap = null;
+				swappedTarget.openVibelyAlertsViewportSwap = saved;
 
 				if (typeof window.refreshCardSearches === 'function') {
 					window.refreshCardSearches(root);
@@ -257,9 +266,9 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 			document.body.addEventListener('htmx:afterSettle', function(event) {
 				var settledTarget = event.detail && event.detail.target;
 				var root = document.getElementById('alerts-container');
-				var saved = state.swap;
+				var saved = settledTarget && settledTarget.openVibelyAlertsViewportSwap;
 				if (!settledTarget || settledTarget.id !== 'alerts-content' || !root || !saved) return;
-				state.swap = null;
+				delete settledTarget.openVibelyAlertsViewportSwap;
 
 				var focusTarget = null;
 				for (var j = 0; j < saved.focusIDs.length; j++) {
@@ -361,8 +370,8 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 					}
 					if alert.DecisionState == models.AlertDecisionPending {
 						<div class="mt-4 flex flex-wrap gap-2" onclick="event.stopPropagation()">
-							<button class="btn btn-success btn-sm" hx-post={ fmt.Sprintf("/alerts/%s/approve?project_id=%s", alert.ID, currentProjectID) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML">Approve</button>
-							<button class="btn btn-error btn-outline btn-sm" hx-post={ fmt.Sprintf("/alerts/%s/reject?project_id=%s", alert.ID, currentProjectID) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML">Reject</button>
+							<button class="btn btn-success btn-sm" hx-post={ fmt.Sprintf("/alerts/%s/approve?project_id=%s", alert.ID, currentProjectID) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML show:none">Approve</button>
+							<button class="btn btn-error btn-outline btn-sm" hx-post={ fmt.Sprintf("/alerts/%s/reject?project_id=%s", alert.ID, currentProjectID) } hx-target="#alerts-content" hx-select="#alerts-content" hx-swap="outerHTML show:none">Reject</button>
 						</div>
 					}
 				</div>
@@ -373,7 +382,7 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 							hx-post={ fmt.Sprintf("/alerts/%s/read?project_id=%s", alert.ID, currentProjectID) }
 							hx-target="#alerts-content"
 							hx-select="#alerts-content"
-							hx-swap="outerHTML"
+							hx-swap="outerHTML show:none"
 							title="Mark as read"
 						>
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
