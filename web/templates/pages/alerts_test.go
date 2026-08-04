@@ -141,7 +141,9 @@ func TestAlertsContent_InspectCopyIncludesSafeStructuredDetailsForAllAlertKinds(
 	for _, required := range []string{
 		`<summary class="cursor-pointer text-sm font-medium">Inspect alert</summary>`,
 		`<summary class="cursor-pointer text-sm font-medium">Inspect notification</summary>`,
-		`data-alert-copy`, `class="btn btn-xs btn-ghost btn-square"`,
+		`class="relative mt-3 min-w-0 max-w-full pr-8"`,
+		`class="btn btn-xs btn-ghost btn-square absolute right-0 top-0"`,
+		`data-alert-copy`,
 		`aria-label="Copy inspected alert details"`, `aria-label="Copy inspected notification details"`,
 		`title="Copy details"`, `data-alert-copy-icon`, `data-alert-copy-success-icon`, `data-alert-copy-error-icon`,
 		`data-alert-copy-feedback class="sr-only" aria-live="polite"`,
@@ -164,6 +166,20 @@ func TestAlertsContent_InspectCopyIncludesSafeStructuredDetailsForAllAlertKinds(
 		if strings.Contains(html, forbidden) {
 			t.Fatalf("inspect copy leaked hidden value %q", forbidden)
 		}
+	}
+	operationalStart := strings.Index(html, `id="alert-operational-1"`)
+	notificationStart := strings.Index(html, `id="alert-notification-1"`)
+	if operationalStart < 0 || notificationStart <= operationalStart {
+		t.Fatal("rendered alert card boundaries missing")
+	}
+	operationalCard := html[operationalStart:notificationStart]
+	if strings.Contains(operationalCard, `class="mt-3 flex justify-end"`) {
+		t.Fatal("inspect copy button must not consume a separate layout row")
+	}
+	copyPayloadIndex := strings.Index(operationalCard, `data-alert-copy-text`)
+	copyButtonIndex := strings.Index(operationalCard, `class="btn btn-xs btn-ghost btn-square absolute right-0 top-0"`)
+	if copyPayloadIndex < 0 || copyButtonIndex < 0 || copyButtonIndex < copyPayloadIndex {
+		t.Fatal("inspect copy button must render after the inspected content")
 	}
 }
 
