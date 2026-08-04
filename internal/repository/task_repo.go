@@ -281,6 +281,11 @@ func (r *TaskRepo) Create(ctx context.Context, t *models.Task) error {
 	return r.createWithExecutor(ctx, r.db, t)
 }
 
+// CreateWithExecutor persists a task using the caller's transaction.
+func (r *TaskRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor, t *models.Task) error {
+	return r.createWithExecutor(ctx, exec, t)
+}
+
 func (r *TaskRepo) CreateWithGoal(ctx context.Context, t *models.Task, goal *models.TaskGoal) error {
 	if goal == nil || strings.TrimSpace(goal.Objective) == "" {
 		return r.Create(ctx, t)

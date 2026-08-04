@@ -624,6 +624,101 @@ func TestSlackService_SocketEventCleanupFailureRetainsRetryAdmissionUntilCompens
 	require.Equal(t, 2, persistAttempts)
 }
 
+func TestSlackService_SocketEventAttachmentStagingAndCleanupRespectPreACKDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		blockStage   bool
+		blockCleanup bool
+	}{
+		{name: "staging", blockStage: true},
+		{name: "cleanup", blockCleanup: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, taskRepo, execRepo, _, _, projectID := newSlackSocketIngressTestService(t)
+			ctx := context.Background()
+			if tc.blockStage {
+				agent, err := svc.llmConfigRepo.GetDefault(ctx)
+				require.NoError(t, err)
+				activeTask := &models.Task{ProjectID: projectID, Title: "active attachment turn", Prompt: "active", Category: models.CategoryChat, Status: models.StatusRunning, AgentID: &agent.ID}
+				require.NoError(t, taskRepo.Create(ctx, activeTask))
+				require.NoError(t, execRepo.Create(ctx, &models.Execution{TaskID: activeTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}))
+			}
+
+			svc.preACKTimeout = 30 * time.Millisecond
+			acks := 0
+			svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+			release := make(chan struct{})
+			svc.downloadSlackAttachmentsFn = func(context.Context, []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error) {
+				return "", nil, []models.ChatAttachment{{FileName: "queued.txt", FilePath: filepath.Join(t.TempDir(), "queued.txt")}}, nil
+			}
+			svc.savePendingAttachmentsFn = func([]models.ChatAttachment) (string, error) {
+				if tc.blockStage {
+					<-release
+				}
+				return "pending-session", nil
+			}
+			if tc.blockCleanup {
+				svc.createFirstTurnExecutionFn = func(context.Context, repository.SQLExecutor, *models.Execution) error {
+					return fmt.Errorf("simulated attachment first-turn persistence failure")
+				}
+				svc.cleanupAttachmentSourcesFn = func([]models.ChatAttachment) { <-release }
+			}
+
+			event := slackSocketMessageEvent("E-attachment", "1710000000.200000")
+			message := event.Data.(slackevents.EventsAPIEvent).InnerEvent.Data.(slackevents.MessageEvent)
+			message.Message = &slack.Msg{Files: []slack.File{{ID: "F1", Name: "queued.txt", URLPrivateDownload: "https://files.slack.com/queued.txt"}}}
+			eventsAPI := event.Data.(slackevents.EventsAPIEvent)
+			eventsAPI.InnerEvent.Data = message
+			event.Data = eventsAPI
+
+			done := make(chan struct{})
+			started := time.Now()
+			go func() {
+				svc.handleSocketEvent(ctx, nil, event)
+				close(done)
+			}()
+			select {
+			case <-done:
+				require.Less(t, time.Since(started), 250*time.Millisecond)
+			case <-time.After(250 * time.Millisecond):
+				close(release)
+				<-done
+				t.Fatal("attachment filesystem work outlived the pre-ACK deadline")
+			}
+			require.Equal(t, 0, acks)
+			close(release)
+		})
+	}
+}
+
+func TestSlackService_SocketEventRestartAfterFirstTurnPartialPersistenceLeavesNoOrphan(t *testing.T) {
+	svc, db, taskRepo, _, threadInputRepo, receiptRepo, projectID := newSlackSocketIngressTestService(t)
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	svc.createFirstTurnExecutionFn = func(context.Context, repository.SQLExecutor, *models.Execution) error {
+		return fmt.Errorf("simulated process interruption before execution persistence")
+	}
+	event := slackSocketMessageEvent("E-restart", "1710000000.300000")
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 0, acks)
+	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks, "atomic first-turn failure must not leave a provisional task")
+
+	restarted := NewSlackService(svc.settingsRepo, svc.projectRepo, svc.llmConfigRepo, svc.taskRepo, svc.execRepo, svc.scheduleRepo, svc.taskSvc, svc.llmSvc, svc.workerSvc, svc.slackUserProjectRepo, svc.slackTaskContextRepo, svc.slackAuthRepo)
+	restarted.SetThreadInputRepo(threadInputRepo)
+	restarted.SetSlackInboundReceiptRepo(receiptRepo)
+	restarted.SetChatAttachmentRepo(repository.NewChatAttachmentRepo(db))
+	restarted.postMessageFn = func(string, string, string) (string, error) { return "", nil }
+	restarted.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	restarted.handleSocketEvent(context.Background(), nil, event)
+
+	require.Equal(t, 1, acks)
+	tasks, err = taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+}
+
 func TestRunChannelChatFirstTurnDeadlineCleanupUsesNonCancelledContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

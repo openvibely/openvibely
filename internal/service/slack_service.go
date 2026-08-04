@@ -124,7 +124,11 @@ type SlackService struct {
 	ackSocketRequestFn             func(*socketmode.Client, socketmode.Request)
 	createQueuedInputFn            func(context.Context, *models.ThreadInput) (bool, error)
 	createExecutionFn              func(context.Context, *models.Execution) (bool, error)
+	createFirstTurnExecutionFn     func(context.Context, repository.SQLExecutor, *models.Execution) error
 	deleteProvisionalTaskFn        func(context.Context, string) error
+	downloadSlackAttachmentsFn     func(context.Context, []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error)
+	savePendingAttachmentsFn       func([]models.ChatAttachment) (string, error)
+	cleanupAttachmentSourcesFn     func([]models.ChatAttachment)
 	preACKTimeout                  time.Duration
 	cleanupRetryDelay              time.Duration
 }
@@ -1120,6 +1124,32 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 	}
 
 	msg.Files = s.resolveSlackIncomingFilesForRouting(ctx, msg.Files)
+	var createDurableFirstTurn func(context.Context, *models.Task, *models.Execution) (bool, error)
+	if s.createExecutionFn == nil && s.slackInboundReceiptRepo != nil && strings.TrimSpace(msg.EventKey) != "" {
+		createDurableFirstTurn = func(ctx context.Context, task *models.Task, execution *models.Execution) (bool, error) {
+			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(exec repository.SQLExecutor) error {
+				if err := s.taskRepo.CreateWithExecutor(ctx, exec, task); err != nil {
+					return err
+				}
+				if s.slackTaskContextRepo != nil {
+					if err := s.slackTaskContextRepo.UpsertWithExecutor(ctx, exec, &models.SlackTaskContext{
+						TaskID:         task.ID,
+						SlackTeamID:    msg.TeamID,
+						SlackChannelID: msg.ChannelID,
+						SlackThreadTS:  msg.ThreadTS,
+						SlackUserID:    msg.UserID,
+					}); err != nil {
+						return err
+					}
+				}
+				execution.TaskID = task.ID
+				if s.createFirstTurnExecutionFn != nil {
+					return s.createFirstTurnExecutionFn(ctx, exec, execution)
+				}
+				return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+			})
+		}
+	}
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform:              "slack",
 		ProjectID:             projectID,
@@ -1144,12 +1174,14 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 			if len(msg.Files) == 0 {
 				return channelChatIngressDownloadResult{}, nil
 			}
-			attCtx, imgAtts, chatAtts, err := s.downloadSlackAttachments(ctx, msg.Files)
+			attCtx, imgAtts, chatAtts, err := s.downloadSlackAttachmentsBounded(ctx, msg.Files)
 			return channelChatIngressDownloadResult{AttachmentContext: attCtx, ImageAttachments: imgAtts, ChatAttachments: chatAtts}, err
 		},
-		IncomingAttachmentsNeedVision: func() bool { return slackIncomingFilesRequireVision(msg.Files) },
-		SavePendingAttachments:        s.saveChatAttachmentsToPendingSession,
-		FindActiveExecution:           s.execRepo.FindLatestActiveChatExecution,
+		IncomingAttachmentsNeedVision:     func() bool { return slackIncomingFilesRequireVision(msg.Files) },
+		SavePendingAttachmentsWithContext: s.saveChatAttachmentsToPendingSessionBounded,
+		CleanupAttachmentSources:          s.cleanupSlackAttachmentSourcesBounded,
+		CleanupPendingSession:             s.cleanupSlackPendingSessionBounded,
+		FindActiveExecution:               s.execRepo.FindLatestActiveChatExecution,
 		RecordAttachmentFailure: func(ctx context.Context, agentID, msgText string) {
 			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
 		},
@@ -1196,8 +1228,9 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 		},
 		OnDurableHandoff: durableHandoff,
 		FirstTurn: channelChatIngressFirstTurnOptions{
-			Task:         &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
-			ReplyContext: ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
+			Task:                   &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
+			CreateDurableFirstTurn: createDurableFirstTurn,
+			ReplyContext:           ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
 			CreateExecution: func(ctx context.Context, execution *models.Execution) (bool, error) {
 				if s.createExecutionFn != nil {
 					return s.createExecutionFn(ctx, execution)
@@ -1913,6 +1946,92 @@ func (s *SlackService) slackClientForFiles() *slack.Client {
 		return nil
 	}
 	return slack.New(botToken, slack.OptionHTTPClient(s.httpClient))
+}
+
+func (s *SlackService) cleanupSlackAttachmentSourcesBounded(ctx context.Context, attachments []models.ChatAttachment) {
+	done := make(chan struct{})
+	go func() {
+		cleanup := s.cleanupAttachmentSourcesFn
+		if cleanup == nil {
+			cleanup = cleanupSlackAttachmentSourceDirs
+		}
+		cleanup(attachments)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (s *SlackService) cleanupSlackPendingSessionBounded(ctx context.Context, sessionID string) {
+	done := make(chan struct{})
+	go func() {
+		_ = os.RemoveAll(filepath.Join(s.uploadsDir, "chat", "pending", sessionID))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (s *SlackService) downloadSlackAttachmentsBounded(ctx context.Context, files []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error) {
+	type result struct {
+		attachmentContext string
+		images            []models.Attachment
+		attachments       []models.ChatAttachment
+		err               error
+	}
+	results := make(chan result, 1)
+	go func() {
+		download := s.downloadSlackAttachmentsFn
+		if download == nil {
+			download = s.downloadSlackAttachments
+		}
+		attachmentContext, images, attachments, err := download(ctx, files)
+		results <- result{attachmentContext: attachmentContext, images: images, attachments: attachments, err: err}
+	}()
+	select {
+	case completed := <-results:
+		return completed.attachmentContext, completed.images, completed.attachments, completed.err
+	case <-ctx.Done():
+		go func() {
+			completed := <-results
+			if completed.err == nil {
+				cleanupSlackAttachmentSourceDirs(completed.attachments)
+			}
+		}()
+		return "", nil, nil, ctx.Err()
+	}
+}
+
+func (s *SlackService) saveChatAttachmentsToPendingSessionBounded(ctx context.Context, attachments []models.ChatAttachment) (string, error) {
+	type result struct {
+		sessionID string
+		err       error
+	}
+	results := make(chan result, 1)
+	go func() {
+		save := s.savePendingAttachmentsFn
+		if save == nil {
+			save = s.saveChatAttachmentsToPendingSession
+		}
+		sessionID, err := save(attachments)
+		results <- result{sessionID: sessionID, err: err}
+	}()
+	select {
+	case completed := <-results:
+		return completed.sessionID, completed.err
+	case <-ctx.Done():
+		go func() {
+			completed := <-results
+			if completed.sessionID != "" {
+				_ = os.RemoveAll(filepath.Join(s.uploadsDir, "chat", "pending", completed.sessionID))
+			}
+		}()
+		return "", ctx.Err()
+	}
 }
 
 func (s *SlackService) saveChatAttachmentsToPendingSession(attachments []models.ChatAttachment) (string, error) {
