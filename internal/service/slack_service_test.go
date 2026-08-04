@@ -778,6 +778,52 @@ func TestSlackService_SocketEventTerminallyAcknowledgesIgnoredAndMalformedEvents
 	require.Equal(t, 3, acks)
 }
 
+func TestSlackService_SocketEventTerminallyAcknowledgesSupportedEventsWithoutStableTimestamp(t *testing.T) {
+	svc := NewSlackService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	acks := 0
+	accepted := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	svc.processIncomingMessageResultFn = func(slackIncomingMessage) bool {
+		accepted++
+		return true
+	}
+
+	for _, event := range []socketmode.Event{
+		{
+			Type:    socketmode.EventTypeEventsAPI,
+			Request: &socketmode.Request{EnvelopeID: "missing-app-mention-timestamp"},
+			Data: slackevents.EventsAPIEvent{
+				Type:   slackevents.CallbackEvent,
+				TeamID: "T1",
+				InnerEvent: slackevents.EventsAPIInnerEvent{Data: slackevents.AppMentionEvent{
+					User:    "U1",
+					Channel: "C1",
+					Text:    "<@UBOT> malformed mention",
+				}},
+			},
+		},
+		{
+			Type:    socketmode.EventTypeEventsAPI,
+			Request: &socketmode.Request{EnvelopeID: "missing-message-timestamp"},
+			Data: slackevents.EventsAPIEvent{
+				Type:   slackevents.CallbackEvent,
+				TeamID: "T1",
+				InnerEvent: slackevents.EventsAPIInnerEvent{Data: slackevents.MessageEvent{
+					ChannelType: "im",
+					User:        "U1",
+					Channel:     "D1",
+					Text:        "malformed message",
+				}},
+			},
+		},
+	} {
+		svc.handleSocketEvent(context.Background(), nil, event)
+	}
+
+	require.Equal(t, 2, acks)
+	require.Zero(t, accepted, "events without a stable identity must not create work")
+}
+
 func TestSlackService_EventFilteringAcceptsDMAppMentionsAndChannelMessageMentions(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)

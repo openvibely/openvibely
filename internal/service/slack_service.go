@@ -617,6 +617,12 @@ func (s *SlackService) handleAppMention(ctx context.Context, teamID string, even
 		threadTS = strings.TrimSpace(event.TimeStamp)
 	}
 
+	eventKey := slackIncomingEventKey(teamID, event.Channel, event.TimeStamp, event.User)
+	if eventKey == "" {
+		ack()
+		return
+	}
+
 	s.processIncoming(ctx, slackIncomingMessage{
 		TeamID:    teamID,
 		ChannelID: strings.TrimSpace(event.Channel),
@@ -624,7 +630,7 @@ func (s *SlackService) handleAppMention(ctx context.Context, teamID string, even
 		UserID:    strings.TrimSpace(event.User),
 		Text:      text,
 		Source:    "slack",
-		EventKey:  slackIncomingEventKey(teamID, event.Channel, event.TimeStamp, event.User),
+		EventKey:  eventKey,
 		Files:     files,
 	}, ack)
 }
@@ -670,6 +676,12 @@ func (s *SlackService) handleMessageEvent(ctx context.Context, teamID string, ev
 		eventTS = strings.TrimSpace(event.Message.Timestamp)
 	}
 
+	eventKey := slackIncomingEventKey(teamID, event.Channel, eventTS, event.User)
+	if eventKey == "" {
+		ack()
+		return
+	}
+
 	s.processIncoming(ctx, slackIncomingMessage{
 		TeamID:    teamID,
 		ChannelID: strings.TrimSpace(event.Channel),
@@ -677,7 +689,7 @@ func (s *SlackService) handleMessageEvent(ctx context.Context, teamID string, ev
 		UserID:    strings.TrimSpace(event.User),
 		Text:      text,
 		Source:    "slack",
-		EventKey:  slackIncomingEventKey(teamID, event.Channel, eventTS, event.User),
+		EventKey:  eventKey,
 		Files:     files,
 	}, ack)
 }
