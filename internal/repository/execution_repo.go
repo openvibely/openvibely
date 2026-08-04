@@ -190,10 +190,9 @@ func (r *ExecutionRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor
 	}
 	err := exec.QueryRowContext(ctx,
 		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
-		 VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)
-		 RETURNING id, started_at`,
-		e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).
-		Scan(&e.ID, &e.StartedAt)
+			 VALUES (COALESCE(NULLIF(?, ''), lower(hex(randomblob(16)))), ?, NULLIF(?, ''), ?, ?, ?, ?)
+			 RETURNING id, started_at`,
+		e.ID, e.TaskID, e.AgentConfigID, e.Status, e.PromptSent, isFollowup, e.StartsNewContext).Scan(&e.ID, &e.StartedAt)
 	if err != nil {
 		return fmt.Errorf("creating execution: %w", err)
 	}

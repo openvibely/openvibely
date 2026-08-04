@@ -258,6 +258,59 @@ func TestSlackInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 	require.Equal(t, 1, persistCalls)
 }
 
+func TestSlackService_SocketEventFirstTurnAttachmentPersistenceFailureRedelivery(t *testing.T) {
+	svc, db, taskRepo, _, _, receiptRepo, projectID := newSlackSocketIngressTestService(t)
+	svc.SetUploadsDir(t.TempDir())
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	downloads := 0
+	var downloadedPaths []string
+	svc.downloadSlackAttachmentsFn = func(context.Context, []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error) {
+		downloads++
+		dir := t.TempDir()
+		path := filepath.Join(dir, "evidence.txt")
+		downloadedPaths = append(downloadedPaths, path)
+		require.NoError(t, os.WriteFile(path, []byte("durable evidence"), 0o600))
+		return "\nFile: evidence.txt\n", nil, []models.ChatAttachment{{
+			FileName: "evidence.txt", FilePath: path, MediaType: "text/plain", FileSize: 16,
+		}}, nil
+	}
+
+	event := slackSocketMessageEvent("E-attachment-persist", "1710000000.400000")
+	message := event.Data.(slackevents.EventsAPIEvent).InnerEvent.Data.(slackevents.MessageEvent)
+	message.Message = &slack.Msg{Files: []slack.File{{ID: "F1", Name: "evidence.txt", Mimetype: "text/plain", URLPrivateDownload: "https://files.slack.com/evidence.txt"}}}
+	eventsAPI := event.Data.(slackevents.EventsAPIEvent)
+	eventsAPI.InnerEvent.Data = message
+	event.Data = eventsAPI
+
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 0, acks, "attachment persistence failure must remain retryable")
+	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks)
+	received, err := receiptRepo.Exists(context.Background(), slackIncomingEventKey("T1", "D1", "1710000000.400000", "U1"))
+	require.NoError(t, err)
+	require.False(t, received)
+	require.Len(t, downloadedPaths, 1)
+	require.NoFileExists(t, downloadedPaths[0], "failed atomic handoff must remove the published attachment")
+
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	svc.SetChatAttachmentRepo(chatAttachmentRepo)
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 1, acks)
+	require.Equal(t, 2, downloads)
+	tasks, err = taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	executions, err := svc.execRepo.ListByTask(context.Background(), tasks[0].ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	attachments, err := chatAttachmentRepo.ListByExecution(context.Background(), executions[0].ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 1)
+	require.FileExists(t, attachments[0].FilePath)
+}
+
 func TestSlackService_SocketEventFirstTurnPersistenceFailureRedelivery(t *testing.T) {
 	svc, _, taskRepo, execRepo, _, _, projectID := newSlackSocketIngressTestService(t)
 	acks := 0

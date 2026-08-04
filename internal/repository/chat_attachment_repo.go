@@ -19,13 +19,17 @@ func NewChatAttachmentRepo(db *sql.DB) *ChatAttachmentRepo {
 }
 
 func (r *ChatAttachmentRepo) Create(ctx context.Context, att *models.ChatAttachment) error {
+	return r.CreateWithExecutor(ctx, r.db, att)
+}
+
+// CreateWithExecutor persists a chat attachment using the caller's transaction.
+func (r *ChatAttachmentRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor, att *models.ChatAttachment) error {
 	query := `
-		INSERT INTO chat_attachments (execution_id, file_name, file_path, media_type, file_size)
-		VALUES (?, ?, ?, ?, ?)
-		RETURNING id, created_at
-	`
-	err := r.db.QueryRowContext(ctx, query,
-		att.ExecutionID,
+			INSERT INTO chat_attachments (execution_id, file_name, file_path, media_type, file_size)
+			VALUES (?, ?, ?, ?, ?)
+			RETURNING id, created_at
+		`
+	err := exec.QueryRowContext(ctx, query, att.ExecutionID,
 		att.FileName,
 		att.FilePath,
 		att.MediaType,

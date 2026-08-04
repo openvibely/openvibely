@@ -117,7 +117,8 @@ type channelChatIngressFirstTurnOptions struct {
 
 	CreateTaskContext          func(context.Context, string) error
 	CreateExecution            func(context.Context, *models.Execution) (bool, error)
-	CreateDurableFirstTurn     func(context.Context, *models.Task, *models.Execution) (bool, error)
+	PrepareDurableAttachments  func(context.Context, string, []models.ChatAttachment) ([]models.ChatAttachment, error)
+	CreateDurableFirstTurn     func(context.Context, *models.Task, *models.Execution, []models.ChatAttachment) (bool, error)
 	CleanupProvisionalTask     func(context.Context, string, string)
 	CleanupAttachmentSources   func(context.Context, []models.ChatAttachment)
 	CompleteExecution          func(context.Context, string, string, string, string, int, int64)
@@ -933,11 +934,33 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		opts.Task.CreatedVia = opts.Source
 	}
 	exec := &models.Execution{AgentConfigID: opts.Agent.ID, Status: models.ExecRunning, PromptSent: opts.Message}
+	linkedAttachments := opts.Attachments
+	attachmentsDurablyLinked := false
 	if opts.CreateDurableFirstTurn != nil {
-		alreadyHandedOff, err := opts.CreateDurableFirstTurn(ctx, opts.Task, exec)
+		if len(opts.Attachments) > 0 {
+			if opts.PrepareDurableAttachments == nil {
+				applog.Infof("[%s] durable first-turn attachment preparation is unavailable", platform)
+				cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, opts.Attachments)
+				if opts.OnAttachmentLinkFailure != nil {
+					opts.OnAttachmentLinkFailure(ctx, "Failed to process attachment: unable to store attachment. Please try again.")
+				}
+				return true, nil
+			}
+			exec.ID = generateChannelChatPendingSessionID()
+			prepared, err := opts.PrepareDurableAttachments(ctx, exec.ID, opts.Attachments)
+			if err != nil {
+				applog.Infof("[%s] prepare durable first-turn attachments failed: %v", platform, err)
+				if opts.OnAttachmentLinkFailure != nil {
+					opts.OnAttachmentLinkFailure(ctx, "Failed to process attachment: unable to store attachment. Please try again.")
+				}
+				return true, nil
+			}
+			linkedAttachments = prepared
+		}
+		alreadyHandedOff, err := opts.CreateDurableFirstTurn(ctx, opts.Task, exec, linkedAttachments)
 		if err != nil {
 			applog.Infof("[%s] create durable first turn failed: %v", platform, err)
-			cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, opts.Attachments)
+			cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, linkedAttachments)
 			if opts.OnExecutionCreateFailure != nil {
 				opts.OnExecutionCreateFailure(ctx)
 			}
@@ -947,9 +970,10 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 			opts.OnDurableHandoff()
 		}
 		if alreadyHandedOff {
-			cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, opts.Attachments)
+			cleanupChannelChatAttachmentSources(ctx, opts.CleanupAttachmentSources, linkedAttachments)
 			return true, nil
 		}
+		attachmentsDurablyLinked = len(linkedAttachments) > 0
 	} else {
 		if err := opts.TaskRepo.Create(ctx, opts.Task); err != nil {
 			applog.Infof("[%s] create chat task failed: %v", platform, err)
@@ -997,9 +1021,8 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		}
 	}
 
-	linkedAttachments := opts.Attachments
-	hasLinkedAttachments := false
-	if len(linkedAttachments) > 0 {
+	hasLinkedAttachments := attachmentsDurablyLinked
+	if len(linkedAttachments) > 0 && !attachmentsDurablyLinked {
 		linkFn := opts.LinkAttachments
 		if linkFn == nil {
 			linkFn = func(ctx context.Context, execID string, atts []models.ChatAttachment) ([]models.ChatAttachment, error) {
@@ -1023,9 +1046,9 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 			return true, nil
 		}
 		hasLinkedAttachments = true
-		if opts.AttachmentContextAndImages != nil {
-			opts.AttachmentContext, opts.ImageAttachments = opts.AttachmentContextAndImages(linkedAttachments)
-		}
+	}
+	if hasLinkedAttachments && opts.AttachmentContextAndImages != nil {
+		opts.AttachmentContext, opts.ImageAttachments = opts.AttachmentContextAndImages(linkedAttachments)
 	}
 
 	if opts.ChatBroadcaster != nil {
@@ -1240,6 +1263,43 @@ func saveChannelChatAttachmentsToPendingSession(uploadsDir, fallbackName string,
 	}
 	cleanupChannelChatAttachmentDirs(cleanupDirs)
 	return sessionID, nil
+}
+
+func publishChannelChatAttachmentFiles(execID string, attachments []models.ChatAttachment, opts channelChatAttachmentLinkOptions) ([]models.ChatAttachment, error) {
+	if len(attachments) == 0 {
+		return nil, nil
+	}
+	platform := strings.TrimSpace(opts.Platform)
+	if platform == "" {
+		platform = "channel"
+	}
+	execDir := filepath.Join(opts.UploadsDir, "chat", execID)
+	if err := os.MkdirAll(execDir, 0755); err != nil {
+		cleanupChannelChatAttachmentSourceDirs(attachments)
+		return nil, fmt.Errorf("storing %s attachment: %w", channelChatAttachmentDisplayPlatform(platform), err)
+	}
+	cleanupDirs := make(map[string]struct{})
+	published := make([]models.ChatAttachment, 0, len(attachments))
+	for i := range attachments {
+		att := attachments[i]
+		cleanupDirs[filepath.Dir(att.FilePath)] = struct{}{}
+		destPath := filepath.Join(execDir, uniqueChannelChatTempFilename(execDir, safeChannelChatAttachmentFileName(att.FileName, opts.FallbackName)))
+		if err := moveOrCopyFile(att.FilePath, destPath); err != nil {
+			_ = os.RemoveAll(execDir)
+			cleanupChannelChatAttachmentDirs(cleanupDirs)
+			cleanupChannelChatAttachmentSourceDirs(attachments[i+1:])
+			return nil, fmt.Errorf("storing %s attachment %s: %w", channelChatAttachmentDisplayPlatform(platform), att.FileName, err)
+		}
+		absPath, err := filepath.Abs(destPath)
+		if err != nil {
+			absPath = destPath
+		}
+		att.FilePath = absPath
+		att.ExecutionID = execID
+		published = append(published, att)
+	}
+	cleanupChannelChatAttachmentDirs(cleanupDirs)
+	return published, nil
 }
 
 func linkChannelChatAttachmentsToExecution(ctx context.Context, execID string, attachments []models.ChatAttachment, opts channelChatAttachmentLinkOptions) ([]models.ChatAttachment, error) {

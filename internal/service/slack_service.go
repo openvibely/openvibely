@@ -1146,9 +1146,9 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 	}
 
 	msg.Files = s.resolveSlackIncomingFilesForRouting(ctx, msg.Files)
-	var createDurableFirstTurn func(context.Context, *models.Task, *models.Execution) (bool, error)
+	var createDurableFirstTurn func(context.Context, *models.Task, *models.Execution, []models.ChatAttachment) (bool, error)
 	if s.createExecutionFn == nil && s.slackInboundReceiptRepo != nil && strings.TrimSpace(msg.EventKey) != "" {
-		createDurableFirstTurn = func(ctx context.Context, task *models.Task, execution *models.Execution) (bool, error) {
+		createDurableFirstTurn = func(ctx context.Context, task *models.Task, execution *models.Execution, attachments []models.ChatAttachment) (bool, error) {
 			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(exec repository.SQLExecutor) error {
 				if err := s.taskRepo.CreateWithExecutor(ctx, exec, task); err != nil {
 					return err
@@ -1166,9 +1166,22 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 				}
 				execution.TaskID = task.ID
 				if s.createFirstTurnExecutionFn != nil {
-					return s.createFirstTurnExecutionFn(ctx, exec, execution)
+					if err := s.createFirstTurnExecutionFn(ctx, exec, execution); err != nil {
+						return err
+					}
+				} else if err := s.execRepo.CreateWithExecutor(ctx, exec, execution); err != nil {
+					return err
 				}
-				return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+				if len(attachments) > 0 && s.chatAttachmentRepo == nil {
+					return fmt.Errorf("chat attachment repository is unavailable")
+				}
+				for i := range attachments {
+					attachments[i].ExecutionID = execution.ID
+					if err := s.chatAttachmentRepo.CreateWithExecutor(ctx, exec, &attachments[i]); err != nil {
+						return err
+					}
+				}
+				return nil
 			})
 		}
 	}
@@ -1250,9 +1263,10 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 		},
 		OnDurableHandoff: durableHandoff,
 		FirstTurn: channelChatIngressFirstTurnOptions{
-			Task:                   &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
-			CreateDurableFirstTurn: createDurableFirstTurn,
-			ReplyContext:           ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
+			Task:                      &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
+			PrepareDurableAttachments: s.publishSlackFirstTurnAttachmentsBounded,
+			CreateDurableFirstTurn:    createDurableFirstTurn,
+			ReplyContext:              ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
 			CreateExecution: func(ctx context.Context, execution *models.Execution) (bool, error) {
 				if s.createExecutionFn != nil {
 					return s.createExecutionFn(ctx, execution)
@@ -1971,6 +1985,32 @@ func (s *SlackService) slackClientForFiles(ctx context.Context) *slack.Client {
 		return nil
 	}
 	return slack.New(botToken, slack.OptionHTTPClient(s.httpClient))
+}
+
+func (s *SlackService) publishSlackFirstTurnAttachmentsBounded(ctx context.Context, execID string, attachments []models.ChatAttachment) ([]models.ChatAttachment, error) {
+	type result struct {
+		attachments []models.ChatAttachment
+		err         error
+	}
+	results := make(chan result, 1)
+	go func() {
+		published, err := publishChannelChatAttachmentFiles(execID, attachments, channelChatAttachmentLinkOptions{
+			Platform: "slack", UploadsDir: s.uploadsDir, FallbackName: "slack-attachment",
+		})
+		results <- result{attachments: published, err: err}
+	}()
+	select {
+	case completed := <-results:
+		return completed.attachments, completed.err
+	case <-ctx.Done():
+		go func() {
+			completed := <-results
+			if completed.err == nil {
+				cleanupSlackAttachmentSourceDirs(completed.attachments)
+			}
+		}()
+		return nil, ctx.Err()
+	}
 }
 
 func (s *SlackService) cleanupSlackAttachmentSourcesBounded(ctx context.Context, attachments []models.ChatAttachment) {
