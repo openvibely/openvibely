@@ -141,8 +141,11 @@ func TestAlertsContent_InspectCopyIncludesSafeStructuredDetailsForAllAlertKinds(
 	for _, required := range []string{
 		`<summary class="cursor-pointer text-sm font-medium">Inspect alert</summary>`,
 		`<summary class="cursor-pointer text-sm font-medium">Inspect notification</summary>`,
-		`data-alert-copy`, `aria-label="Copy inspected alert details"`, `aria-label="Copy inspected notification details"`,
-		`onclick="copyAlertDetails(this)"`, `data-alert-copy-text`, `aria-live="polite"`,
+		`data-alert-copy`, `class="btn btn-xs btn-ghost btn-square"`,
+		`aria-label="Copy inspected alert details"`, `aria-label="Copy inspected notification details"`,
+		`title="Copy details"`, `data-alert-copy-icon`, `data-alert-copy-success-icon`, `data-alert-copy-error-icon`,
+		`data-alert-copy-feedback class="sr-only" aria-live="polite"`,
+		`onclick="copyAlertDetails(this)"`, `data-alert-copy-text`,
 		`navigator.clipboard.writeText(text)`, `Copied`, `Copy failed`,
 		"ID: operational-1", "Title: Build failed", "Message: Compiler exited", "Severity: error",
 		"Type: task_failed", "Source: task-runner", "Read: yes", "Task ID: operational-task-1",
