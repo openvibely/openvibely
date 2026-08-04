@@ -361,7 +361,7 @@ func (r *TaskRepo) withImmediateTx(ctx context.Context, fn func(sqlExecutor) err
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return err
 	}
-	tx := &manualTx{conn: conn}
+	tx := &manualTx{conn: conn, ctx: ctx}
 	defer tx.Rollback()
 	if err := fn(tx); err != nil {
 		return err
