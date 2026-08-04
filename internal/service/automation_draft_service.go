@@ -614,12 +614,14 @@ func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) [
 			}
 			targetRole := "create_notification"
 			targetName := "Create notification"
+			capability := "create_notification"
 			if candidate.AdapterKey == AutomationAdapterGitHubSDLC {
 				targetRole = "create_github_issue"
 				targetName = "Create GitHub issue"
+				capability = "github_create_issue"
 			}
-			if len(out) != 1 || nodes[out[0].To].Role != targetRole {
-				add("producer_target", fmt.Sprintf("Producer node %q needs exactly one %s target.", node.Key, targetName))
+			if automationDraftNodePromptReferences(node, capability) && (len(out) != 1 || nodes[out[0].To].Role != targetRole) {
+				add("producer_target", fmt.Sprintf("Producer node %q needs exactly one %s target because its prompt uses %s.", node.Key, targetName, capability))
 			}
 		case "loop_auditor":
 			if len(in) != 0 {
@@ -727,6 +729,11 @@ func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) [
 		issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_cycle", Message: "Executable Automation handoffs must not contain a cycle."})
 	}
 	return issues
+}
+
+func automationDraftNodePromptReferences(node models.AutomationDraftNode, capability string) bool {
+	prompt, _ := node.Config["prompt"].(string)
+	return strings.Contains(strings.ToLower(prompt), strings.ToLower(capability))
 }
 
 func customAutomationEdgeConditionState(condition map[string]any) (string, bool) {

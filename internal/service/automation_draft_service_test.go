@@ -45,6 +45,19 @@ func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
 			candidate, err := drafts.TemplateCandidate(adapterKey)
 			require.NoError(t, err)
 
+			customizedProducer, err := drafts.TemplateCandidate(adapterKey)
+			require.NoError(t, err)
+			for _, node := range append([]models.AutomationDraftNode(nil), customizedProducer.Nodes...) {
+				if node.Key != "vision_suggestions" {
+					customizedProducer = automationCandidateWithoutNode(customizedProducer, node.Key)
+				}
+			}
+			customizedProducer.Nodes[0].Config["prompt"] = "Review the local project notes and summarize one improvement. Do not publish anything or use GitHub."
+			require.Empty(t, drafts.ValidateCandidate(customizedProducer), "a capability-free customized producer may run as a standalone schedule")
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				require.NotContains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(customizedProducer, models.AutomationCapabilitySnapshot{})), "github_unavailable")
+			}
+
 			for _, key := range []string{"vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder", "auditor"} {
 				withoutOneTemplateNode := automationCandidateWithoutNode(candidate, key)
 				require.Empty(t, drafts.ValidateCandidate(withoutOneTemplateNode), key)

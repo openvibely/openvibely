@@ -206,7 +206,15 @@ func automationUsesGitHub(candidate models.AutomationDraftCandidate) bool {
 	for _, node := range candidate.Nodes {
 		if candidate.AdapterKey == AutomationAdapterGitHubSDLC {
 			switch node.Role {
-			case "offering_manager", "bug_finder", "optimization_finder", "redundancy_finder", "create_github_issue", "github_assignment", "github_inbox", "implementation", "open_pull_request", "pull_request_review", "loop_auditor":
+			case "offering_manager", "bug_finder", "optimization_finder", "redundancy_finder":
+				if automationDraftNodePromptReferences(node, "github_create_issue") {
+					return true
+				}
+			case "loop_auditor":
+				if automationDraftNodePromptReferences(node, "github") {
+					return true
+				}
+			case "create_github_issue", "github_assignment", "github_inbox", "implementation", "open_pull_request", "pull_request_review":
 				return true
 			}
 			continue
