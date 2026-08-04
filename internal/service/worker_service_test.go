@@ -752,6 +752,77 @@ func TestLLMConfigRepo_MaxWorkersDefaultZero(t *testing.T) {
 	}
 }
 
+func TestWorkerService_NewProjectTasksRespectGlobalLimit(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	newProject := &models.Project{Name: "new-project-global-limit"}
+	if err := projectRepo.Create(ctx, newProject); err != nil {
+		t.Fatalf("Create new project: %v", err)
+	}
+
+	worker := NewWorkerService(nil, 2, projectRepo)
+	worker.SetTaskRepo(taskRepo)
+	worker.Start(ctx)
+
+	claimed := make(chan string, 3)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	defer func() {
+		releaseOnce.Do(func() { close(release) })
+		worker.Stop()
+	}()
+	worker.afterOrdinaryTaskClaim = func(task models.Task) {
+		claimed <- task.ID
+		<-release
+	}
+
+	taskSvc := NewTaskService(taskRepo, nil, worker)
+	tasks := []*models.Task{
+		{ProjectID: "default", Title: "existing-project-running", Prompt: "hold first global slot", Category: models.CategoryActive},
+		{ProjectID: newProject.ID, Title: "new-project-running", Prompt: "hold second global slot", Category: models.CategoryActive},
+		{ProjectID: newProject.ID, Title: "new-project-queued", Prompt: "wait for global capacity", Category: models.CategoryActive},
+	}
+	for _, task := range tasks {
+		if err := taskSvc.Create(ctx, task); err != nil {
+			t.Fatalf("Create task %q: %v", task.Title, err)
+		}
+	}
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-claimed:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for two globally admitted tasks")
+		}
+	}
+	select {
+	case id := <-claimed:
+		t.Fatalf("third task %s was admitted past the global worker limit", id)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if got := worker.TotalRunning(); got != 2 {
+		t.Fatalf("TotalRunning = %d, want 2", got)
+	}
+	if got := worker.ProjectRunning(newProject.ID); got != 1 {
+		t.Fatalf("new project running count = %d, want 1", got)
+	}
+	queued, err := taskRepo.GetByID(ctx, tasks[2].ID)
+	if err != nil {
+		t.Fatalf("Get queued task: %v", err)
+	}
+	if queued.Status != models.StatusPending || queued.Category != models.CategoryActive {
+		t.Fatalf("excess active task state = %s/%s, want active/pending", queued.Category, queued.Status)
+	}
+	if got := worker.QueueSize(); got != 1 {
+		t.Fatalf("QueueSize = %d, want 1", got)
+	}
+}
+
 func TestWorkerService_TryAcquireProjectSlot(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	projectRepo := repository.NewProjectRepo(db)

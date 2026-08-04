@@ -78,6 +78,7 @@ type WorkerService struct {
 	afterCompleteRuntimeToolProvider func(context.Context, models.Task) *llmcontracts.RuntimeTools
 	beforeOrdinaryTaskClaim          func(models.Task) // deterministic pre-claim test barrier
 	afterOrdinaryTaskClaim           func(models.Task) // deterministic persisted-claim test barrier
+	beforeQueuedAutomationTaskClaim  func(models.Task) // deterministic prepared-dispatch test barrier
 	currentCatalog                   atomic.Value      // stores *agentskills.Catalog for hook skill resolution
 	admissionOpen                    func() bool
 	updateTracker                    *update.WorkTracker
@@ -259,7 +260,7 @@ func (w *WorkerService) Submit(task models.Task) {
 // worker queue. It owns no execution, capacity, lifecycle, or completion path of
 // its own; those remain in WorkerService and LLMService.
 func (w *WorkerService) SubmitPrepared(envelope models.AutomationDispatchEnvelope, executionID string) error {
-	if envelope.DispatchID == "" || envelope.Task.ID == "" || executionID == "" {
+	if envelope.DispatchID == "" || envelope.Task.ID == "" {
 		return fmt.Errorf("complete prepared automation dispatch is required")
 	}
 	if envelope.Task.Category == models.CategoryChat {
@@ -310,26 +311,33 @@ func (w *WorkerService) dispatchNext() {
 		if w.taskRepo != nil {
 			dbTask, err := w.taskRepo.GetByID(context.Background(), task.ID)
 			validStatus := dbTask != nil && dbTask.Status == models.StatusPending
-			if isPrepared {
+			if isPrepared && prepared.ExecutionID != "" {
 				validStatus = dbTask != nil && dbTask.Status == models.StatusRunning
 			}
 			if err != nil || dbTask == nil || !validStatus ||
 				(dbTask.Category != models.CategoryActive && dbTask.Category != models.CategoryScheduled) {
 				w.queue = append(w.queue[:i], w.queue[i+1:]...)
+				if isPrepared && prepared.ExecutionID == "" && w.automationRepo != nil {
+					if abandonErr := w.automationRepo.AbandonQueuedDispatch(context.Background(), prepared.Envelope.DispatchID, "Automation task was cancelled or is no longer runnable"); abandonErr != nil {
+						applog.Infof("[worker] abandoning queued automation dispatch=%s failed: %v", prepared.Envelope.DispatchID, abandonErr)
+					}
+				}
 				delete(w.pending, task.ID)
 				delete(w.prepared, task.ID)
 				applog.Infof("[worker] pruned stale task=%s %q from queue", task.ID, task.Title)
 				continue
 			}
-			if !isPrepared {
-				// Ordinary submissions are admission hints keyed by Task ID. The
-				// persisted Task is authoritative at dispatch time so a queued root
-				// cannot run replaced prompt, Agent, or topology data under the
-				// current Automation graph. The scheduled occurrence's context boundary
-				// is runtime-only, so preserve it across the persisted task refresh.
+			if !isPrepared || prepared.ExecutionID == "" {
+				// Queued submissions are admission hints keyed by Task ID. The
+				// persisted Task is authoritative at dispatch time so queued work
+				// cannot run replaced prompt, Agent, or topology data. The scheduled
+				// occurrence's context boundary is runtime-only, so preserve it for
+				// ordinary submissions across the persisted task refresh.
 				startsNewContext := task.StartsNewContext
 				task = *dbTask
-				task.StartsNewContext = startsNewContext
+				if !isPrepared {
+					task.StartsNewContext = startsNewContext
+				}
 			}
 
 			// Dependency gating: chained tasks must wait for parent to reach terminal state.
@@ -391,14 +399,18 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	taskCtx, taskCancel := context.WithCancel(w.ctx)
 	if isPrepared {
 		taskCtx = WithAutomationContext(taskCtx, prepared.Envelope.Context)
-		taskCtx = withPreparedAutomationExecution(taskCtx, prepared.ExecutionID)
-		taskCtx = withTaskPreClaimed(taskCtx)
+		if prepared.ExecutionID != "" {
+			taskCtx = withPreparedAutomationExecution(taskCtx, prepared.ExecutionID)
+			taskCtx = withTaskPreClaimed(taskCtx)
+		}
 	}
 	w.RegisterCancel(task.ID, taskCancel)
 
 	var executionErr error
-	claimed := w.taskRepo == nil || isPrepared
-	completionAttempted := w.taskRepo == nil || isPrepared
+	var preparedTerminalStatus models.ExecutionStatus
+	var preparedTerminalMessage string
+	claimed := w.taskRepo == nil || (isPrepared && prepared.ExecutionID != "")
+	completionAttempted := w.taskRepo == nil || (isPrepared && prepared.ExecutionID != "")
 	logOutcome := true
 
 	defer func() {
@@ -421,6 +433,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 			}
 		}
 
+		wasCancelled := errors.Is(taskCtx.Err(), context.Canceled)
 		w.DeregisterCancel(task.ID)
 		taskCancel()
 
@@ -433,17 +446,31 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		w.releaseProjectSlot(task.ProjectID)
 		w.releaseModelSlot(agentConfigID)
 
-		if isPrepared && w.automationRepo != nil {
-			status := models.ExecFailed
-			message := "automation execution did not reach a terminal state"
-			execRepo := w.execRepo
-			if execRepo == nil && w.llmSvc != nil {
-				execRepo = w.llmSvc.execRepo
-			}
-			if execRepo != nil {
-				if current, err := execRepo.GetByID(context.Background(), prepared.ExecutionID); err == nil && current != nil {
-					status = current.Status
-					message = current.ErrorMessage
+		if isPrepared && prepared.ExecutionID != "" && w.automationRepo != nil {
+			status := preparedTerminalStatus
+			message := preparedTerminalMessage
+			if status == "" {
+				status = models.ExecFailed
+				message = "automation execution did not reach a terminal state"
+				if executionErr != nil {
+					message = executionErr.Error()
+				}
+				if wasCancelled {
+					status = models.ExecCancelled
+					message = "automation task cancelled during execution setup"
+				}
+				execRepo := w.execRepo
+				if execRepo == nil && w.llmSvc != nil {
+					execRepo = w.llmSvc.execRepo
+				}
+				if execRepo != nil {
+					if current, err := execRepo.GetByID(context.Background(), prepared.ExecutionID); err == nil && current != nil {
+						switch current.Status {
+						case models.ExecCompleted, models.ExecFailed, models.ExecCancelled:
+							status = current.Status
+							message = current.ErrorMessage
+						}
+					}
 				}
 			}
 			if err := w.automationRepo.CompleteDispatch(context.Background(), prepared.Envelope.DispatchID, prepared.ExecutionID, status, message); err != nil {
@@ -485,6 +512,43 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	// while returning the exact Task/current-graph state admitted by that claim.
 	// If claim fails (task already running/completed/cancelled), skip — the
 	// task either was already promoted or shouldn't run.
+	if isPrepared && prepared.ExecutionID == "" {
+		if w.beforeQueuedAutomationTaskClaim != nil {
+			w.beforeQueuedAutomationTaskClaim(task)
+		}
+		claim, claimErr := w.taskRepo.ClaimQueuedAutomationDispatch(taskCtx, prepared.Envelope.DispatchID)
+		if claimErr != nil {
+			applog.Infof("[worker] queued automation task=%s claim failed: %v", task.ID, claimErr)
+			logOutcome = false
+			return
+		}
+		prepared.ExecutionID = claim.Execution.ID
+		claimed = true
+		completionAttempted = true
+		task = claim.Task
+		taskCtx = withPreparedAutomationExecution(taskCtx, claim.Execution.ID)
+		taskCtx = withTaskPreClaimed(taskCtx)
+
+		// Capacity was reserved from the queue refresh. If the Task assignment
+		// changed before the atomic claim, transfer the model reservation before
+		// lifecycle hooks or provider execution use the admitted Task.
+		claimedAgentConfigID := w.resolveAgentConfigID(taskCtx, task)
+		if claimedAgentConfigID != agentConfigID {
+			w.releaseModelSlot(agentConfigID)
+			agentConfigID = ""
+			if err := w.AcquireModelSlot(taskCtx, claimedAgentConfigID); err != nil {
+				executionErr = fmt.Errorf("acquiring claimed automation task model capacity: %w", err)
+				preparedTerminalStatus = models.ExecFailed
+				preparedTerminalMessage = executionErr.Error()
+				if errors.Is(err, context.Canceled) {
+					preparedTerminalStatus = models.ExecCancelled
+					preparedTerminalMessage = "automation task cancelled during model capacity transfer"
+				}
+				return
+			}
+			agentConfigID = claimedAgentConfigID
+		}
+	}
 	if w.taskRepo != nil && !isPrepared {
 		if w.beforeOrdinaryTaskClaim != nil {
 			w.beforeOrdinaryTaskClaim(task)

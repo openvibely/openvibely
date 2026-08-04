@@ -124,6 +124,17 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 		applog.Infof("[automation-reconciler] completed %d invocation projection(s)", completed)
 	}
 
+	abandoned, err := r.automationRepo.ListAbandonedQueuedDispatches(ctx, 100)
+	if err != nil {
+		return err
+	}
+	for _, dispatch := range abandoned {
+		if err := r.automationRepo.AbandonQueuedDispatch(ctx, dispatch.ID, "Automation task was cancelled or is no longer runnable"); err != nil {
+			return err
+		}
+		applog.Infof("[automation-reconciler] abandoned queued dispatch=%s", dispatch.ID)
+	}
+
 	recoverable, err := r.automationRepo.ListRecoverablePreparedDispatches(ctx, 100)
 	if err != nil {
 		return err
