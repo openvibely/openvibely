@@ -9,7 +9,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 )
@@ -63,6 +65,129 @@ func TestHandler_CancelTask(t *testing.T) {
 	}
 	if updatedTask.Category != models.CategoryBacklog {
 		t.Errorf("expected task category to be %s, got %s", models.CategoryBacklog, updatedTask.Category)
+	}
+}
+
+func TestHandler_CancelTask_CancelsAndPublishesEveryRunningExecution(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := tc.CreateTask(project.ID).
+		WithStatus(models.StatusRunning).
+		WithCategory(models.CategoryActive).
+		Build()
+	hub := events.NewExecutionStreamHub()
+	tc.handler.SetExecutionStreamHub(hub)
+
+	executions := []string{
+		tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).Build().ID,
+		tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).Build().ID,
+	}
+	subs := make([]events.ExecutionStreamSubscriber, 0, len(executions))
+	for _, execID := range executions {
+		sub, _, err := hub.Subscribe(execID)
+		if err != nil {
+			t.Fatalf("subscribe execution %s: %v", execID, err)
+		}
+		subs = append(subs, sub)
+	}
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/cancel").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	for i, execID := range executions {
+		updated, err := tc.execRepo.GetByID(ctx, execID)
+		if err != nil {
+			t.Fatalf("get execution %s: %v", execID, err)
+		}
+		if updated == nil || updated.Status != models.ExecCancelled || updated.ErrorMessage != "cancelled" {
+			t.Fatalf("execution %s after cancel = %+v", execID, updated)
+		}
+		select {
+		case event, ok := <-subs[i]:
+			if !ok || event.ExecID != execID || event.Type != events.ExecutionStreamDone || event.Status != "cancelled" {
+				t.Fatalf("execution %s terminal event = %+v, open=%v", execID, event, ok)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for execution %s terminal event", execID)
+		}
+		if _, ok := <-subs[i]; ok {
+			t.Fatalf("execution %s subscriber remained open", execID)
+		}
+	}
+	if hub.SubscriberCount() != 0 {
+		t.Fatalf("subscriber count after cancellation = %d", hub.SubscriberCount())
+	}
+}
+
+func TestHandler_CancelRunningExecutionRepositoryErrorIsBestEffortForTaskAndChat(t *testing.T) {
+	tests := []struct {
+		name         string
+		category     models.TaskCategory
+		path         func(taskID, projectID string) string
+		wantCode     int
+		wantCategory models.TaskCategory
+	}{
+		{
+			name:         "task cancel",
+			category:     models.CategoryActive,
+			path:         func(taskID, _ string) string { return "/tasks/" + taskID + "/cancel" },
+			wantCode:     http.StatusOK,
+			wantCategory: models.CategoryBacklog,
+		},
+		{
+			name:         "chat stop",
+			category:     models.CategoryChat,
+			path:         func(_, projectID string) string { return "/chat/stop?project_id=" + projectID },
+			wantCode:     http.StatusOK,
+			wantCategory: models.CategoryChat,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			ctx := context.Background()
+			project := tc.CreateProject().Build()
+			agent := tc.CreateLLMConfig().Build()
+			task := tc.CreateTask(project.ID).
+				WithStatus(models.StatusRunning).
+				WithCategory(test.category).
+				Build()
+			exec := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).Build()
+			if _, err := tc.db.ExecContext(ctx, `
+				CREATE TRIGGER fail_running_execution_cancel
+				BEFORE UPDATE OF status ON executions
+				WHEN OLD.id = '`+exec.ID+`' AND NEW.status = 'cancelled'
+				BEGIN
+					SELECT RAISE(ABORT, 'forced execution cancellation failure');
+				END;
+			`); err != nil {
+				t.Fatalf("create failure trigger: %v", err)
+			}
+
+			rec := tc.HTMX().Post(test.path(task.ID, project.ID)).Execute()
+			if rec.Code != test.wantCode {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			updatedTask, err := tc.taskRepo.GetByID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("get task: %v", err)
+			}
+			if updatedTask == nil || updatedTask.Status != models.StatusCancelled || updatedTask.Category != test.wantCategory {
+				t.Fatalf("task after best-effort execution cancellation failure = %+v", updatedTask)
+			}
+			updatedExec, err := tc.execRepo.GetByID(ctx, exec.ID)
+			if err != nil {
+				t.Fatalf("get execution: %v", err)
+			}
+			if updatedExec == nil || updatedExec.Status != models.ExecRunning {
+				t.Fatalf("execution after forced repository error = %+v", updatedExec)
+			}
+		})
 	}
 }
 

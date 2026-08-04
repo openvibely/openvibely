@@ -1499,6 +1499,10 @@ func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
 		ex.PromptSent = "active chat"
 	})
 	require.NoError(t, h.execRepo.UpdateOutput(ctx, activeExec.ID, "partial output"))
+	hub := events.NewExecutionStreamHub()
+	h.SetExecutionStreamHub(hub)
+	sub, _, err := hub.Subscribe(activeExec.ID)
+	require.NoError(t, err)
 	cancelled := false
 	h.workerSvc.RegisterCancel(activeTask.ID, func() { cancelled = true })
 
@@ -1526,6 +1530,19 @@ func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
 	assert.Equal(t, models.ExecCancelled, updatedExec.Status)
 	assert.Equal(t, "partial output", updatedExec.Output)
 	assert.Equal(t, "cancelled", updatedExec.ErrorMessage)
+	select {
+	case event, ok := <-sub:
+		require.True(t, ok)
+		assert.Equal(t, events.ExecutionStreamEvent{
+			ExecID: activeExec.ID,
+			Type:   events.ExecutionStreamDone,
+			Status: "cancelled",
+		}, event)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ChatStop terminal event")
+	}
+	_, ok := <-sub
+	assert.False(t, ok, "ChatStop should close the execution subscriber")
 }
 
 func TestHandler_Chat_HidesComposerSteeringAffordanceWhileActive(t *testing.T) {

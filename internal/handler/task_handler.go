@@ -1443,16 +1443,7 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	} else if models.IsSwarmChildRole(task.SwarmRole) {
 		h.notifySwarmChildTerminal(c.Request().Context(), taskID)
 	}
-	if h.execRepo != nil {
-		if cancelledIDs, err := h.execRepo.CancelRunningByTaskReturningIDs(c.Request().Context(), taskID); err != nil {
-			applog.Infof("[handler] CancelTask error cancelling running executions task=%s: %v", taskID, err)
-		} else if len(cancelledIDs) > 0 {
-			applog.Infof("[handler] CancelTask cancelled %d running executions task=%s", len(cancelledIDs), taskID)
-			for _, id := range cancelledIDs {
-				h.publishExecutionTerminal(id, models.ExecCancelled, "cancelled")
-			}
-		}
-	}
+	h.cancelRunningExecutionsAndPublish(c.Request().Context(), taskID, "CancelTask")
 	applog.Infof("[handler] CancelTask cancelled task=%s", taskID)
 
 	// Return the full kanban board for HTMX requests
