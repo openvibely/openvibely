@@ -50,12 +50,20 @@ func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
 				require.Empty(t, drafts.ValidateCandidate(withoutOneTemplateNode), key)
 			}
 
-			visionOnly := candidate
-			for _, node := range candidate.Nodes {
-				if node.Key != "vision_suggestions" {
-					visionOnly = automationCandidateWithoutNode(visionOnly, node.Key)
+			for _, producerKey := range []string{"vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder"} {
+				producerOnly := candidate
+				for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
+					if node.Key != producerKey {
+						producerOnly = automationCandidateWithoutNode(producerOnly, node.Key)
+					}
 				}
+				producerIssues := drafts.ValidateCandidate(producerOnly)
+				require.Contains(t, issueCodes(producerIssues), "producer_target", producerKey)
+
+				withoutProducer := automationCandidateWithoutNode(candidate, producerKey)
+				require.Empty(t, drafts.ValidateCandidate(withoutProducer), producerKey)
 			}
+
 			reconnected := candidate
 			reconnected.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
 			reconnected.Edges[0].Key = "user_reconnected_edge"

@@ -608,7 +608,20 @@ func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) [
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: code, Message: message})
 		}
 		switch node.Role {
-		case "offering_manager", "bug_finder", "optimization_finder", "redundancy_finder", "loop_auditor":
+		case "offering_manager", "bug_finder", "optimization_finder", "redundancy_finder":
+			if len(in) != 0 {
+				add("schedule_parents", fmt.Sprintf("Schedule node %q cannot have an incoming connection.", node.Key))
+			}
+			targetRole := "create_notification"
+			targetName := "Create notification"
+			if candidate.AdapterKey == AutomationAdapterGitHubSDLC {
+				targetRole = "create_github_issue"
+				targetName = "Create GitHub issue"
+			}
+			if len(out) != 1 || nodes[out[0].To].Role != targetRole {
+				add("producer_target", fmt.Sprintf("Producer node %q needs exactly one %s target.", node.Key, targetName))
+			}
+		case "loop_auditor":
 			if len(in) != 0 {
 				add("schedule_parents", fmt.Sprintf("Schedule node %q cannot have an incoming connection.", node.Key))
 			}

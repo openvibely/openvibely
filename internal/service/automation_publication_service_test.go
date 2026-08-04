@@ -103,9 +103,16 @@ func TestGitHubSDLCReducedGraphRequiresSetupOnlyForRetainedGitHubRuntimeNodes(t 
 
 	for _, retainedKey := range []string{"vision_suggestions", "auditor"} {
 		reduced := candidate
-		for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
-			if node.Key != retainedKey {
-				reduced = automationCandidateWithoutNode(reduced, node.Key)
+		if retainedKey == "vision_suggestions" {
+			reduced = automationCandidateWithoutNode(reduced, "bug_finder")
+			reduced = automationCandidateWithoutNode(reduced, "optimization_finder")
+			reduced = automationCandidateWithoutNode(reduced, "redundancy_finder")
+			reduced = automationCandidateWithoutNode(reduced, "auditor")
+		} else {
+			for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
+				if node.Key != retainedKey {
+					reduced = automationCandidateWithoutNode(reduced, node.Key)
+				}
 			}
 		}
 		_, err = h.compiler.Save(context.Background(), AutomationSaveRequest{
@@ -173,19 +180,19 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 			require.NotEqual(t, visionScheduleID, automationResourceID(t, restored.Definition, "vision_suggestions", "schedule"))
 			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE created_via = ?`, repository.AutomationCompilerTaskCreatedVia(initial.Definition.Automation.ID, "vision_suggestions")))
 
-			producerOnly := fullCandidate
-			for _, node := range append([]models.AutomationDraftNode(nil), producerOnly.Nodes...) {
-				if node.Key != "bug_finder" {
-					producerOnly = automationCandidateWithoutNode(producerOnly, node.Key)
+			auditorOnly := fullCandidate
+			for _, node := range append([]models.AutomationDraftNode(nil), auditorOnly.Nodes...) {
+				if node.Key != "auditor" {
+					auditorOnly = automationCandidateWithoutNode(auditorOnly, node.Key)
 				}
 			}
 			reduced, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
-				Source: "manual", CreatedVia: "web", Candidate: producerOnly})
+				Source: "manual", CreatedVia: "web", Candidate: auditorOnly})
 			require.NoError(t, err, "a template may be reduced to any valid remaining graph")
 			require.Len(t, reduced.Definition.Nodes, 1)
-			require.Equal(t, "bug_finder", reduced.Definition.Nodes[0].NodeKey)
+			require.Equal(t, "auditor", reduced.Definition.Nodes[0].NodeKey)
 			for _, resource := range reduced.Definition.Resources {
-				require.Equal(t, "bug_finder", resource.NodeKey)
+				require.Equal(t, "auditor", resource.NodeKey)
 			}
 
 			_, err = h.db.ExecContext(ctx, `UPDATE tasks SET created_via = ? WHERE id = ?`, repository.AutomationCompilerTaskCreatedVia(repository.NewID(), "vision_suggestions"), visionTaskID)
@@ -196,7 +203,7 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 			current, err := h.automationRepo.GetDefinition(ctx, h.project.ID, initial.Definition.Automation.ID)
 			require.NoError(t, err)
 			require.Len(t, current.Nodes, 1, "failed restore must leave the reduced graph current")
-			require.Equal(t, "bug_finder", current.Nodes[0].NodeKey)
+			require.Equal(t, "auditor", current.Nodes[0].NodeKey)
 		})
 	}
 }
