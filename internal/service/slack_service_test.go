@@ -397,6 +397,50 @@ func TestSlackService_SocketEventProjectLookupFailureIsNotAcknowledgedAndCanRetr
 	require.Len(t, tasks, 1)
 }
 
+func TestSlackService_SocketEventBotUserIDLookupFailureDoesNotAcknowledgeChannelMention(t *testing.T) {
+	svc, db, taskRepo, _, _, _, projectID := newSlackSocketIngressTestService(t)
+	ctx := context.Background()
+	require.NoError(t, svc.settingsRepo.Set(ctx, SlackSettingBotUserID, "UBOT"))
+	svc.preACKTimeout = 30 * time.Millisecond
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+
+	event := socketmode.Event{
+		Type:    socketmode.EventTypeEventsAPI,
+		Request: &socketmode.Request{EnvelopeID: "E-channel-mention"},
+		Data: slackevents.EventsAPIEvent{
+			Type:   slackevents.CallbackEvent,
+			TeamID: "T1",
+			InnerEvent: slackevents.EventsAPIInnerEvent{Data: slackevents.MessageEvent{
+				ChannelType: "channel",
+				User:        "U1",
+				Channel:     "C1",
+				Text:        "<@UBOT> persist this",
+				TimeStamp:   "1710000000.150000",
+			}},
+		},
+	}
+
+	blockingTx, err := db.Begin()
+	require.NoError(t, err)
+	defer blockingTx.Rollback()
+	_, err = blockingTx.Exec(`SELECT 1`)
+	require.NoError(t, err)
+
+	svc.handleSocketEvent(ctx, nil, event)
+	require.Equal(t, 0, acks, "transient bot-user-ID lookup failure must remain retryable")
+	require.NoError(t, blockingTx.Rollback())
+	tasks, err := taskRepo.ListByProject(ctx, projectID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks)
+
+	svc.handleSocketEvent(ctx, nil, event)
+	require.Equal(t, 1, acks)
+	tasks, err = taskRepo.ListByProject(ctx, projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+}
+
 func TestSlackService_SocketEventPreACKDeadlineBoundsSettingsAndReceiptReads(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

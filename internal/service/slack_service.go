@@ -599,7 +599,12 @@ func (s *SlackService) handleAppMention(ctx context.Context, teamID string, even
 		ack()
 		return
 	}
-	botUserID := strings.TrimSpace(s.getSetting(ctx, SlackSettingBotUserID))
+	botUserIDValue, err := s.getSettingValue(ctx, SlackSettingBotUserID)
+	if err != nil {
+		applog.Infof("[slack] bot user ID lookup failed: %v", err)
+		return
+	}
+	botUserID := strings.TrimSpace(botUserIDValue)
 	if botUserID != "" && strings.TrimSpace(event.User) == botUserID {
 		ack()
 		return
@@ -650,7 +655,12 @@ func (s *SlackService) handleMessageEvent(ctx context.Context, teamID string, ev
 		ack()
 		return
 	}
-	botUserID := strings.TrimSpace(s.getSetting(ctx, SlackSettingBotUserID))
+	botUserIDValue, err := s.getSettingValue(ctx, SlackSettingBotUserID)
+	if err != nil {
+		applog.Infof("[slack] bot user ID lookup failed: %v", err)
+		return
+	}
+	botUserID := strings.TrimSpace(botUserIDValue)
 	if botUserID != "" && strings.TrimSpace(event.User) == botUserID {
 		ack()
 		return
@@ -2273,11 +2283,15 @@ func generateOAuthState() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func (s *SlackService) getSetting(ctx context.Context, key string) string {
+func (s *SlackService) getSettingValue(ctx context.Context, key string) (string, error) {
 	if s.settingsRepo == nil {
-		return ""
+		return "", nil
 	}
-	val, _ := s.settingsRepo.Get(ctx, key)
+	return s.settingsRepo.Get(ctx, key)
+}
+
+func (s *SlackService) getSetting(ctx context.Context, key string) string {
+	val, _ := s.getSettingValue(ctx, key)
 	return val
 }
 
