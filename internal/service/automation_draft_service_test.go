@@ -24,6 +24,7 @@ func TestAutomationPromptCapabilityUseIgnoresNegatedMentions(t *testing.T) {
 		{name: "positive tool instruction", prompt: "Call github_create_issue with the completed proposal.", capability: "github_create_issue", want: true},
 		{name: "negated tool instruction", prompt: "Do not call github_create_issue. Summarize the proposal locally.", capability: "github_create_issue"},
 		{name: "positive GitHub work", prompt: "Review stale labels and unexpected GitHub assignments.", capability: "github", want: true},
+		{name: "post-capability unrelated negation", prompt: "Review unexpected GitHub assignments without modifying code.", capability: "github", want: true},
 		{name: "negated GitHub work", prompt: "Review local project notes only; do not use GitHub.", capability: "github"},
 		{name: "negative then positive", prompt: "Do not call github_create_issue during research. After review, call github_create_issue once.", capability: "github_create_issue", want: true},
 		{name: "unrelated negation", prompt: "Do not modify code, then call github_create_issue with the proposal.", capability: "github_create_issue", want: true},

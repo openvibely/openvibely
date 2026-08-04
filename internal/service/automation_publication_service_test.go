@@ -144,6 +144,19 @@ func TestGitHubSDLCReducedGraphRequiresSetupOnlyForRetainedGitHubRuntimeNodes(t 
 		require.ErrorContains(t, err, "Configure the selected GitHub authentication mode", retainedKey)
 	}
 
+	genuineAuditor, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+	for _, node := range append([]models.AutomationDraftNode(nil), genuineAuditor.Nodes...) {
+		if node.Key != "auditor" {
+			genuineAuditor = automationCandidateWithoutNode(genuineAuditor, node.Key)
+		}
+	}
+	genuineAuditor.Nodes[0].Config["prompt"] = "Review unexpected GitHub assignments without modifying code."
+	_, err = h.compiler.Save(context.Background(), AutomationSaveRequest{
+		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: genuineAuditor,
+	})
+	require.ErrorContains(t, err, "Configure the selected GitHub authentication mode")
+
 	terminalOnly := candidate
 	for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
 		if node.Key != "completed" {

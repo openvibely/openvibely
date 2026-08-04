@@ -747,17 +747,31 @@ func automationDraftNodePromptUsesCapability(node models.AutomationDraftNode, ca
 		}
 	})
 	for _, clause := range clauses {
-		if !strings.Contains(clause, capability) {
-			continue
-		}
-		negated := false
-		for _, phrase := range []string{"do not", "don't", "never", "must not", "without", "avoid"} {
-			if strings.Contains(clause, phrase) {
-				negated = true
+		search := clause
+		for {
+			index := strings.Index(search, capability)
+			if index < 0 {
 				break
 			}
+			if !automationCapabilityMentionNegated(search[:index]) {
+				return true
+			}
+			search = search[index+len(capability):]
 		}
-		if !negated {
+	}
+	return false
+}
+
+func automationCapabilityMentionNegated(prefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	for _, negation := range []string{"do not", "don't", "never", "must not", "without", "avoid"} {
+		index := strings.LastIndex(prefix, negation)
+		if index < 0 {
+			continue
+		}
+		governingText := strings.TrimSpace(prefix[index+len(negation):])
+		switch governingText {
+		case "", "use", "using", "call", "calling", "invoke", "invoking", "access", "accessing", "publish with", "publishing with", "work with", "working with":
 			return true
 		}
 	}
