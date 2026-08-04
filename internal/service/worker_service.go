@@ -407,6 +407,8 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	w.RegisterCancel(task.ID, taskCancel)
 
 	var executionErr error
+	var preparedTerminalStatus models.ExecutionStatus
+	var preparedTerminalMessage string
 	claimed := w.taskRepo == nil || (isPrepared && prepared.ExecutionID != "")
 	completionAttempted := w.taskRepo == nil || (isPrepared && prepared.ExecutionID != "")
 	logOutcome := true
@@ -444,16 +446,20 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		w.releaseModelSlot(agentConfigID)
 
 		if isPrepared && prepared.ExecutionID != "" && w.automationRepo != nil {
-			status := models.ExecFailed
-			message := "automation execution did not reach a terminal state"
-			execRepo := w.execRepo
-			if execRepo == nil && w.llmSvc != nil {
-				execRepo = w.llmSvc.execRepo
-			}
-			if execRepo != nil {
-				if current, err := execRepo.GetByID(context.Background(), prepared.ExecutionID); err == nil && current != nil {
-					status = current.Status
-					message = current.ErrorMessage
+			status := preparedTerminalStatus
+			message := preparedTerminalMessage
+			if status == "" {
+				status = models.ExecFailed
+				message = "automation execution did not reach a terminal state"
+				execRepo := w.execRepo
+				if execRepo == nil && w.llmSvc != nil {
+					execRepo = w.llmSvc.execRepo
+				}
+				if execRepo != nil {
+					if current, err := execRepo.GetByID(context.Background(), prepared.ExecutionID); err == nil && current != nil {
+						status = current.Status
+						message = current.ErrorMessage
+					}
 				}
 			}
 			if err := w.automationRepo.CompleteDispatch(context.Background(), prepared.Envelope.DispatchID, prepared.ExecutionID, status, message); err != nil {
@@ -521,8 +527,11 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 			agentConfigID = ""
 			if err := w.AcquireModelSlot(taskCtx, claimedAgentConfigID); err != nil {
 				executionErr = fmt.Errorf("acquiring claimed automation task model capacity: %w", err)
-				if updateErr := w.taskRepo.UpdateStatus(context.Background(), task.ID, models.StatusFailed); updateErr != nil {
-					applog.Infof("[worker] automation task=%s failed status update after model capacity error: %v", task.ID, updateErr)
+				preparedTerminalStatus = models.ExecFailed
+				preparedTerminalMessage = executionErr.Error()
+				if errors.Is(err, context.Canceled) {
+					preparedTerminalStatus = models.ExecCancelled
+					preparedTerminalMessage = "automation task cancelled during model capacity transfer"
 				}
 				return
 			}
