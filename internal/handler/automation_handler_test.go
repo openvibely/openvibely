@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
@@ -21,6 +22,33 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
+
+func TestAutomationBuilderFormUpdatesExplicitCapabilityIntent(t *testing.T) {
+	candidate, err := service.NewAutomationDraftService(nil, service.NewAutomationAdapterRegistry()).TemplateCandidate(service.AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+	vision := automationCandidateNodeIndexHandler(t, candidate, "vision_suggestions")
+
+	apply := func(values url.Values) {
+		req := httptest.NewRequest(http.MethodPost, "/automations/builder", strings.NewReader(values.Encode()))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+		applyAutomationDraftFormValues(echo.New().NewContext(req, httptest.NewRecorder()), &candidate)
+	}
+	apply(url.Values{"node_vision_suggestions_required_capabilities": {""}})
+	require.Empty(t, candidate.Nodes[vision].Config["required_capabilities"])
+	apply(url.Values{"node_vision_suggestions_required_capabilities": {"", "github_create_issue"}})
+	require.Equal(t, []string{"github_create_issue"}, candidate.Nodes[vision].Config["required_capabilities"])
+}
+
+func automationCandidateNodeIndexHandler(t *testing.T, candidate models.AutomationDraftCandidate, key string) int {
+	t.Helper()
+	for i := range candidate.Nodes {
+		if candidate.Nodes[i].Key == key {
+			return i
+		}
+	}
+	t.Fatalf("node %q not found", key)
+	return -1
+}
 
 func TestAutomationPortfolioCardKebabPausesAndResumesInPlace(t *testing.T) {
 	tc := NewTestContext(t)

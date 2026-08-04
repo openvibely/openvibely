@@ -14,75 +14,46 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAutomationPromptCapabilityUseIgnoresNegatedMentions(t *testing.T) {
-	for _, test := range []struct {
-		name       string
-		prompt     string
-		capability string
-		want       bool
-	}{
-		{name: "positive tool instruction", prompt: "Call github_create_issue with the completed proposal.", capability: "github_create_issue", want: true},
-		{name: "negated tool instruction", prompt: "Do not call github_create_issue. Summarize the proposal locally.", capability: "github_create_issue"},
-		{name: "negated backtick tool instruction", prompt: "Do not call `github_create_issue`. Summarize the proposal locally.", capability: "github_create_issue"},
-		{name: "negated natural tool instruction", prompt: "Do not call the github_create_issue tool. Summarize the proposal locally.", capability: "github_create_issue"},
-		{name: "positive GitHub work", prompt: "Review stale labels and unexpected GitHub assignments.", capability: "github", want: true},
-		{name: "post-capability unrelated negation", prompt: "Review unexpected GitHub assignments without modifying code.", capability: "github", want: true},
-		{name: "negated GitHub work", prompt: "Review local project notes only; do not use GitHub.", capability: "github"},
-		{name: "negative then positive", prompt: "Do not call github_create_issue during research. After review, call github_create_issue once.", capability: "github_create_issue", want: true},
-		{name: "unrelated negation", prompt: "Do not modify code, then call github_create_issue with the proposal.", capability: "github_create_issue", want: true},
-		{name: "non-negating without", prompt: "Without delay, use GitHub to review stale assignments.", capability: "github", want: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			node := models.AutomationDraftNode{Config: map[string]any{"prompt": test.prompt}}
-			require.Equal(t, test.want, automationDraftNodePromptUsesCapability(node, test.capability))
-		})
-	}
-}
-
-func TestGitHubSDLCCapabilityValidationTracksRetainedRuntimePrompts(t *testing.T) {
+func TestGitHubSDLCCapabilityValidationTracksExplicitIntent(t *testing.T) {
 	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
 	require.NoError(t, err)
-
-	for _, retainedKey := range []string{"vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder", "auditor"} {
-		reduced := candidate
-		for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
-			if node.Key != retainedKey {
-				reduced = automationCandidateWithoutNode(reduced, node.Key)
-			}
-		}
-		require.Contains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(reduced, models.AutomationCapabilitySnapshot{})), "github_unavailable", retainedKey)
-	}
-
-	terminalOnly := candidate
-	for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
-		if node.Key != "completed" {
-			terminalOnly = automationCandidateWithoutNode(terminalOnly, node.Key)
-		}
-	}
-	require.NotContains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(terminalOnly, models.AutomationCapabilitySnapshot{})), "github_unavailable")
 
 	for _, test := range []struct {
 		key    string
 		prompt string
 	}{
-		{key: "vision_suggestions", prompt: "Do not call github_create_issue. Review local project notes and summarize one improvement."},
-		{key: "vision_suggestions", prompt: "Do not call `github_create_issue`. Review local project notes and summarize one improvement."},
-		{key: "vision_suggestions", prompt: "Do not call the github_create_issue tool. Review local project notes and summarize one improvement."},
-		{key: "auditor", prompt: "Review local project notes only; do not use GitHub."},
+		{key: "vision_suggestions", prompt: "Open an issue for each actionable finding."},
+		{key: "auditor", prompt: "Review pull requests and repository assignments for stale work."},
 	} {
-		customized, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
-		require.NoError(t, err)
-		for _, node := range append([]models.AutomationDraftNode(nil), customized.Nodes...) {
+		reduced := candidate
+		for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
 			if node.Key != test.key {
-				customized = automationCandidateWithoutNode(customized, node.Key)
+				reduced = automationCandidateWithoutNode(reduced, node.Key)
 			}
 		}
-		customized.Nodes[0].Config["prompt"] = test.prompt
-		issues := drafts.ValidateCandidateWithCapabilities(customized, models.AutomationCapabilitySnapshot{})
+		reduced.Nodes[0].Config["prompt"] = test.prompt
+		issues := drafts.ValidateCandidateWithCapabilities(reduced, models.AutomationCapabilitySnapshot{})
+		require.Contains(t, issueCodes(issues), "github_unavailable", test.key)
+		if test.key == "vision_suggestions" {
+			require.Contains(t, issueCodes(issues), "producer_target")
+		}
+
+		reduced.Nodes[0].Config["required_capabilities"] = []string{}
+		issues = drafts.ValidateCandidateWithCapabilities(reduced, models.AutomationCapabilitySnapshot{})
 		require.NotContains(t, issueCodes(issues), "github_unavailable", test.key)
 		require.NotContains(t, issueCodes(issues), "producer_target", test.key)
 	}
+
+	invalid, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+	invalid.Nodes[0].Config["required_capabilities"] = []string{"delete_repository"}
+	require.Contains(t, issueCodes(drafts.ValidateCandidate(invalid)), "required_capabilities")
+
+	missing, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+	delete(missing.Nodes[0].Config, "required_capabilities")
+	require.Contains(t, issueCodes(drafts.ValidateCandidate(missing)), "required_capabilities")
 }
 
 func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
@@ -99,7 +70,8 @@ func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
 					customizedProducer = automationCandidateWithoutNode(customizedProducer, node.Key)
 				}
 			}
-			customizedProducer.Nodes[0].Config["prompt"] = "Review the local project notes and summarize one improvement. Do not publish anything or use GitHub."
+			customizedProducer.Nodes[0].Config["prompt"] = "Review the local project notes and summarize one improvement."
+			customizedProducer.Nodes[0].Config["required_capabilities"] = []string{}
 			require.Empty(t, drafts.ValidateCandidate(customizedProducer), "a capability-free customized producer may run as a standalone schedule")
 			if adapterKey == AutomationAdapterGitHubSDLC {
 				require.NotContains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(customizedProducer, models.AutomationCapabilitySnapshot{})), "github_unavailable")

@@ -143,6 +143,9 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 			config["repeat_interval"] = 1
 			config["enabled"] = true
 			config["clear_context_on_start"] = true
+			if capability := maintainedNodeOptionalCapability(adapter.Key, node.Role); capability != "" {
+				config["required_capabilities"] = []string{capability}
+			}
 			if node.AllowedResources["task"] {
 				config["category"] = string(models.CategoryScheduled)
 			}
@@ -539,6 +542,36 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 	return issues
 }
 
+func maintainedNodeOptionalCapability(adapterKey, role string) string {
+	switch role {
+	case "offering_manager", "bug_finder", "optimization_finder", "redundancy_finder":
+		if adapterKey == AutomationAdapterNativeSDLC {
+			return "create_notification"
+		}
+		if adapterKey == AutomationAdapterGitHubSDLC {
+			return "github_create_issue"
+		}
+	case "loop_auditor":
+		if adapterKey == AutomationAdapterGitHubSDLC {
+			return "github"
+		}
+	}
+	return ""
+}
+
+func automationDraftNodeRequiresCapability(node models.AutomationDraftNode, capability string) bool {
+	values, valid := draftStringSlice(node.Config["required_capabilities"])
+	if !valid {
+		return false
+	}
+	for _, value := range values {
+		if value == capability {
+			return true
+		}
+	}
+	return false
+}
+
 func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) []models.AutomationValidationIssue {
 	if len(candidate.Nodes) == 0 {
 		return []models.AutomationValidationIssue{{Code: "empty_graph", Message: "Keep at least one runnable node before saving."}}
@@ -620,8 +653,8 @@ func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) [
 				targetName = "Create GitHub issue"
 				capability = "github_create_issue"
 			}
-			if automationDraftNodePromptUsesCapability(node, capability) && (len(out) != 1 || nodes[out[0].To].Role != targetRole) {
-				add("producer_target", fmt.Sprintf("Producer node %q needs exactly one %s target because its prompt uses %s.", node.Key, targetName, capability))
+			if automationDraftNodeRequiresCapability(node, capability) && (len(out) != 1 || nodes[out[0].To].Role != targetRole) {
+				add("producer_target", fmt.Sprintf("Producer node %q needs exactly one %s target because it is configured to use %s.", node.Key, targetName, capability))
 			}
 		case "loop_auditor":
 			if len(in) != 0 {
@@ -729,59 +762,6 @@ func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) [
 		issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_cycle", Message: "Executable Automation handoffs must not contain a cycle."})
 	}
 	return issues
-}
-
-func automationDraftNodePromptUsesCapability(node models.AutomationDraftNode, capability string) bool {
-	prompt, _ := node.Config["prompt"].(string)
-	capability = strings.ToLower(strings.TrimSpace(capability))
-	if capability == "" {
-		return false
-	}
-	prompt = strings.NewReplacer(" but ", ";", " however ", ";", " instead ", ";").Replace(strings.ToLower(prompt))
-	clauses := strings.FieldsFunc(prompt, func(r rune) bool {
-		switch r {
-		case '.', '!', '?', ';', ',', '\n', '\r':
-			return true
-		default:
-			return false
-		}
-	})
-	for _, clause := range clauses {
-		search := clause
-		for {
-			index := strings.Index(search, capability)
-			if index < 0 {
-				break
-			}
-			if !automationCapabilityMentionNegated(search[:index]) {
-				return true
-			}
-			search = search[index+len(capability):]
-		}
-	}
-	return false
-}
-
-func automationCapabilityMentionNegated(prefix string) bool {
-	prefix = strings.TrimSpace(prefix)
-	for _, negation := range []string{"do not", "don't", "never", "must not", "without", "avoid"} {
-		index := strings.LastIndex(prefix, negation)
-		if index < 0 {
-			continue
-		}
-		governingText := strings.TrimSpace(prefix[index+len(negation):])
-		governingText = strings.Trim(governingText, "`'\"()[]{} ")
-		words := strings.Fields(governingText)
-		if len(words) > 1 && (words[len(words)-1] == "a" || words[len(words)-1] == "an" || words[len(words)-1] == "the") {
-			words = words[:len(words)-1]
-		}
-		governingText = strings.Join(words, " ")
-		switch governingText {
-		case "", "use", "using", "call", "calling", "invoke", "invoking", "access", "accessing", "publish with", "publishing with", "work with", "working with":
-			return true
-		}
-	}
-	return false
 }
 
 func customAutomationEdgeConditionState(condition map[string]any) (string, bool) {
@@ -1322,6 +1302,10 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 			allowed[key] = true
 		}
 	}
+	optionalCapability := maintainedNodeOptionalCapability(adapter.Key, canonical.Role)
+	if optionalCapability != "" {
+		allowed["required_capabilities"] = true
+	}
 	if canonical.AllowedResources["schedule"] {
 		for _, key := range []string{"target_node_key", "run_at", "repeat_type", "repeat_interval", "enabled", "clear_context_on_start"} {
 			allowed[key] = true
@@ -1349,6 +1333,12 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		}
 		if unsafeAutomationConfigValue(key, value) {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsafe_config", Message: fmt.Sprintf("Configuration field %q contains an unsupported value.", key)})
+		}
+	}
+	if optionalCapability != "" {
+		values, valid := draftStringSlice(node.Config["required_capabilities"])
+		if !valid || len(values) > 1 || len(values) == 1 && values[0] != optionalCapability {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "required_capabilities", Message: fmt.Sprintf("Required capabilities for node %q must be empty or contain only %q.", node.Key, optionalCapability)})
 		}
 	}
 	if usesTaskConfiguration {

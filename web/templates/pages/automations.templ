@@ -904,12 +904,16 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
 				for _, node := range page.Result.Candidate.Nodes {
 					<section class="rounded-box border border-base-300 bg-base-100 p-4"><div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Delete node</button></div></div><label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
-						if automationDraftHasConfig(node, "prompt") {
-							<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea>
-								if page.Result.Candidate.AdapterKey == "custom" && node.Type == models.AutomationNodeTrigger {
-									<span class="label-text-alt mt-1">This is the work performed by the scheduled task. A connected Task is a separate downstream handoff that starts after this task completes.</span>
+							if automationDraftHasConfig(node, "prompt") {
+								<label class="form-control mt-3"><span class="label-text">Task prompt</span><textarea class="textarea textarea-bordered h-28" name={ "node_" + node.Key + "_prompt" } maxlength="20000">{ automationDraftStringConfig(node, "prompt") }</textarea>
+									if page.Result.Candidate.AdapterKey == "custom" && node.Type == models.AutomationNodeTrigger {
+										<span class="label-text-alt mt-1">This is the work performed by the scheduled task. A connected Task is a separate downstream handoff that starts after this task completes.</span>
+									}
+								</label>
+								if capability := automationDraftOptionalCapability(page.Result.Candidate.AdapterKey, node); capability != "" {
+									<input type="hidden" name={ "node_" + node.Key + "_required_capabilities" } value=""/>
+									<label class="label mt-3 cursor-pointer justify-start gap-3"><input type="checkbox" class="checkbox" name={ "node_" + node.Key + "_required_capabilities" } value={ capability } checked?={ automationDraftStringSliceContains(node, "required_capabilities", capability) }/><span class="label-text">{ automationDraftOptionalCapabilityLabel(capability) }</span></label>
 								}
-							</label>
 								<div class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-3">
 									<label class="form-control"><span class="label-text">Primary Agent</span><select class="select select-bordered" name={ "node_" + node.Key + "_agent_ref" }><option value="" selected?={ automationDraftStringConfig(node, "agent_ref") == "" }>Default (no primary Agent)</option>
 										for _, agent := range page.Capabilities.Agents {
@@ -1022,13 +1026,15 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							var priority = builder.querySelector('[name="' + prefix + 'priority"]');
 							var agentRef = builder.querySelector('[name="' + prefix + 'agent_ref"]');
 							var skills = builder.querySelector('select[name="' + prefix + 'skills"]');
-							var sourceFiles = builder.querySelector('select[name="' + prefix + 'source_files"]');
-							if (prompt) node.config.prompt = prompt.value;
+								var sourceFiles = builder.querySelector('select[name="' + prefix + 'source_files"]');
+								var requiredCapability = builder.querySelector('input[type="checkbox"][name="' + prefix + 'required_capabilities"]');
+								if (prompt) node.config.prompt = prompt.value;
 							if (category) node.config.category = category.value;
 							if (priority) node.config.priority = Number(priority.value);
 							if (agentRef) node.config.agent_ref = agentRef.value;
 							if (skills) node.config.skills = Array.from(skills.selectedOptions).map(function(option) { return option.value; });
-							if (sourceFiles) node.config.source_files = Array.from(sourceFiles.selectedOptions).map(function(option) { return option.value; });
+								if (sourceFiles) node.config.source_files = Array.from(sourceFiles.selectedOptions).map(function(option) { return option.value; });
+								if (requiredCapability) node.config.required_capabilities = requiredCapability.checked ? [requiredCapability.value] : [];
 						}
 						if (node.config && Object.prototype.hasOwnProperty.call(node.config, 'run_at')) {
 							var runAt = builder.querySelector('[name="' + prefix + 'run_at"]');
@@ -1356,6 +1362,24 @@ func automationDraftStringSliceConfig(node models.AutomationDraftNode, key strin
 func automationDraftStringSliceContains(node models.AutomationDraftNode, key, expected string) bool { switch values := node.Config[key].(type) { case []string: for _, value := range values { if value == expected { return true } }; case []any: for _, value := range values { if text, ok := value.(string); ok && text == expected { return true } } }; return false }
 func automationDraftIntConfig(node models.AutomationDraftNode, key string) int { switch value := node.Config[key].(type) { case int: return value; case float64: return int(value); case json.Number: parsed, _ := value.Int64(); return int(parsed) }; return 0 }
 func automationDraftBoolConfig(node models.AutomationDraftNode, key string) bool { value, _ := node.Config[key].(bool); return value }
+func automationDraftOptionalCapability(adapterKey string, node models.AutomationDraftNode) string {
+	switch node.Role {
+	case "offering_manager", "bug_finder", "optimization_finder", "redundancy_finder":
+		if adapterKey == "native_sdlc" { return "create_notification" }
+		if adapterKey == "github_sdlc" { return "github_create_issue" }
+	case "loop_auditor":
+		if adapterKey == "github_sdlc" { return "github" }
+	}
+	return ""
+}
+func automationDraftOptionalCapabilityLabel(capability string) string {
+	switch capability {
+	case "create_notification": return "This schedule creates notifications through its connected action"
+	case "github_create_issue": return "This schedule creates GitHub issues through its connected action"
+	case "github": return "This schedule uses GitHub"
+	default: return capability
+	}
+}
 func automationDraftHasNode(nodes []models.AutomationDraftNode, key string) bool { for _, node := range nodes { if node.Key == key { return true } }; return false }
 func automationDraftNodeName(nodes []models.AutomationDraftNode, key string) string { for _, node := range nodes { if node.Key == key { return node.Name } }; return key }
 func automationDraftNodeRole(nodes []models.AutomationDraftNode, key string) string { for _, node := range nodes { if node.Key == key { return node.Role } }; return "" }

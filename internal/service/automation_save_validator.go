@@ -207,11 +207,11 @@ func automationUsesGitHub(candidate models.AutomationDraftCandidate) bool {
 		if candidate.AdapterKey == AutomationAdapterGitHubSDLC {
 			switch node.Role {
 			case "offering_manager", "bug_finder", "optimization_finder", "redundancy_finder":
-				if automationDraftNodePromptUsesCapability(node, "github_create_issue") {
+				if automationDraftNodeRequiresCapability(node, "github_create_issue") {
 					return true
 				}
 			case "loop_auditor":
-				if automationDraftNodePromptUsesCapability(node, "github") {
+				if automationDraftNodeRequiresCapability(node, "github") {
 					return true
 				}
 			case "create_github_issue", "github_assignment", "github_inbox", "implementation", "open_pull_request", "pull_request_review":
