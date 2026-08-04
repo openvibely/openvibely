@@ -178,15 +178,12 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				};
 				if (!text || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
 					setFeedback('Copy failed', true);
-					if (window.showToast) window.showToast('Could not copy alert body', 'failed');
 					return;
 				}
 				navigator.clipboard.writeText(text).then(function() {
 					setFeedback('Copied', false);
-					if (window.showToast) window.showToast('Alert body copied', 'completed');
 				}).catch(function() {
 					setFeedback('Copy failed', true);
-					if (window.showToast) window.showToast('Could not copy alert body', 'failed');
 				});
 			}
 			function openAlertTaskDialog(taskId) {

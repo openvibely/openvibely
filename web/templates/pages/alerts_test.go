@@ -147,6 +147,10 @@ func TestAlertsContent_InspectCopyCopiesOnlyBodyForAllAlertKinds(t *testing.T) {
 		}
 	}
 
+	if strings.Contains(html, `showToast('Alert body copied'`) || strings.Contains(html, `showToast('Could not copy alert body'`) {
+		t.Fatal("copy feedback must remain local to the copy button without redundant toasts")
+	}
+
 	operationalStart := strings.Index(html, `id="alert-operational-1"`)
 	notificationStart := strings.Index(html, `id="alert-notification-1"`)
 	emptyStart := strings.Index(html, `id="alert-empty-body-1"`)
