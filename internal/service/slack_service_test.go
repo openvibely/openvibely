@@ -361,6 +361,70 @@ func TestSlackService_SocketEventFirstTurnAttachmentPersistenceFailureRedelivery
 	require.FileExists(t, attachments[0].FilePath)
 }
 
+func TestSlackService_SocketEventRepeatedAttachmentDownloadFailureRedelivery(t *testing.T) {
+	svc, db, taskRepo, _, _, receiptRepo, projectID := newSlackSocketIngressTestService(t)
+	svc.SetUploadsDir(t.TempDir())
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	downloads := 0
+	recovered := false
+	svc.downloadSlackAttachmentsFn = func(context.Context, []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error) {
+		downloads++
+		if !recovered {
+			return "", nil, nil, fmt.Errorf("transient Slack attachment download failure")
+		}
+		dir := t.TempDir()
+		path := filepath.Join(dir, "recovered.txt")
+		require.NoError(t, os.WriteFile(path, []byte("recovered evidence"), 0o600))
+		return "\nFile: recovered.txt\n", nil, []models.ChatAttachment{{
+			FileName: "recovered.txt", FilePath: path, MediaType: "text/plain", FileSize: 18,
+		}}, nil
+	}
+
+	event := slackSocketMessageEvent("E-attachment-download", "1710000000.410000")
+	message := event.Data.(slackevents.EventsAPIEvent).InnerEvent.Data.(slackevents.MessageEvent)
+	message.Message = &slack.Msg{Files: []slack.File{{ID: "F-download", Name: "recovered.txt", Mimetype: "text/plain", URLPrivateDownload: "https://files.slack.com/recovered.txt"}}}
+	eventsAPI := event.Data.(slackevents.EventsAPIEvent)
+	eventsAPI.InnerEvent.Data = message
+	event.Data = eventsAPI
+	eventKey := slackIncomingEventKey("T1", "D1", "1710000000.410000", "U1")
+
+	for attempt := 0; attempt < 2; attempt++ {
+		svc.handleSocketEvent(context.Background(), nil, event)
+		require.Equal(t, 0, acks)
+		tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+		require.NoError(t, err)
+		require.Empty(t, tasks, "download failures must not persist retry-visible failure turns")
+		received, err := receiptRepo.Exists(context.Background(), eventKey)
+		require.NoError(t, err)
+		require.False(t, received)
+	}
+
+	recovered = true
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	svc.SetChatAttachmentRepo(chatAttachmentRepo)
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 1, acks)
+	require.Equal(t, 3, downloads)
+	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	executions, err := svc.execRepo.ListByTask(context.Background(), tasks[0].ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+	attachments, err := chatAttachmentRepo.ListByExecution(context.Background(), executions[0].ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 1)
+	require.FileExists(t, attachments[0].FilePath)
+	received, err := receiptRepo.Exists(context.Background(), eventKey)
+	require.NoError(t, err)
+	require.True(t, received)
+
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 2, acks)
+	require.Equal(t, 3, downloads, "durable duplicate must not download or create another turn")
+}
+
 func TestSlackService_SocketEventFirstTurnPersistenceFailureRedelivery(t *testing.T) {
 	svc, _, taskRepo, execRepo, _, _, projectID := newSlackSocketIngressTestService(t)
 	acks := 0

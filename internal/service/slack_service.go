@@ -1151,6 +1151,12 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 	}
 
 	msg.Files = s.resolveSlackIncomingFilesForRouting(ctx, msg.Files)
+	var recordAttachmentFailure func(context.Context, string, string)
+	if !asyncPreACKFailures {
+		recordAttachmentFailure = func(ctx context.Context, agentID, msgText string) {
+			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
+		}
+	}
 	var createDurableFirstTurn func(context.Context, *models.Task, *models.Execution, []models.ChatAttachment) (bool, error)
 	if s.createExecutionFn == nil && s.slackInboundReceiptRepo != nil && strings.TrimSpace(msg.EventKey) != "" {
 		createDurableFirstTurn = func(ctx context.Context, task *models.Task, execution *models.Execution, attachments []models.ChatAttachment) (bool, error) {
@@ -1222,9 +1228,7 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 		CleanupAttachmentSources:          s.cleanupSlackAttachmentSourcesBounded,
 		CleanupPendingSession:             s.cleanupSlackPendingSessionBounded,
 		FindActiveExecution:               s.execRepo.FindLatestActiveChatExecution,
-		RecordAttachmentFailure: func(ctx context.Context, agentID, msgText string) {
-			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
-		},
+		RecordAttachmentFailure:           recordAttachmentFailure,
 		NewQueuedInput: func() *models.ThreadInput {
 			return &models.ThreadInput{SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID}
 		},
