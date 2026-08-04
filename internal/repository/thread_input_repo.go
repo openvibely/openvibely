@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -1077,10 +1078,15 @@ func (r *ThreadInputRepo) WithImmediateTx(ctx context.Context, fn func(SQLExecut
 		return err
 	}
 	defer conn.Close()
+	restoreBusyTimeout, err := boundSQLiteBusyTimeoutToContext(ctx, conn)
+	if err != nil {
+		return err
+	}
+	defer restoreBusyTimeout()
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return err
 	}
-	tx := &manualTx{conn: conn}
+	tx := &manualTx{conn: conn, ctx: ctx}
 	defer tx.Rollback()
 	if err := fn(tx); err != nil {
 		return err
@@ -1088,8 +1094,38 @@ func (r *ThreadInputRepo) WithImmediateTx(ctx context.Context, fn func(SQLExecut
 	return tx.Commit()
 }
 
+const sqliteBusyTimeoutRestoreReserve = 20 * time.Millisecond
+
+func boundSQLiteBusyTimeoutToContext(ctx context.Context, conn *sql.Conn) (func(), error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return func() {}, nil
+	}
+	var previousMS int
+	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&previousMS); err != nil {
+		return nil, err
+	}
+	remaining := time.Until(deadline) - sqliteBusyTimeoutRestoreReserve
+	boundedMS := int(remaining / time.Millisecond)
+	if boundedMS < 1 {
+		boundedMS = 1
+	}
+	if previousMS > 0 && previousMS <= boundedMS {
+		return func() {}, nil
+	}
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout=%d`, boundedMS)); err != nil {
+		return nil, err
+	}
+	return func() {
+		restoreCtx, cancel := context.WithTimeout(context.Background(), sqliteBusyTimeoutRestoreReserve)
+		defer cancel()
+		_, _ = conn.ExecContext(restoreCtx, fmt.Sprintf(`PRAGMA busy_timeout=%d`, previousMS))
+	}, nil
+}
+
 type manualTx struct {
 	conn *sql.Conn
+	ctx  context.Context
 	done bool
 }
 
@@ -1109,8 +1145,10 @@ func (t *manualTx) Commit() error {
 	if t.done {
 		return nil
 	}
-	t.done = true
-	_, err := t.conn.ExecContext(context.Background(), `COMMIT`)
+	_, err := t.conn.ExecContext(t.ctx, `COMMIT`)
+	if err == nil {
+		t.done = true
+	}
 	return err
 }
 
@@ -1119,7 +1157,13 @@ func (t *manualTx) Rollback() error {
 		return nil
 	}
 	t.done = true
-	_, err := t.conn.ExecContext(context.Background(), `ROLLBACK`)
+	rollbackCtx := t.ctx
+	cancel := func() {}
+	if rollbackCtx.Err() != nil {
+		rollbackCtx, cancel = context.WithTimeout(context.WithoutCancel(t.ctx), sqliteBusyTimeoutRestoreReserve)
+	}
+	defer cancel()
+	_, err := t.conn.ExecContext(rollbackCtx, `ROLLBACK`)
 	return err
 }
 

@@ -564,6 +564,66 @@ func TestSlackService_SocketEventDeadlineCleanupDoesNotBlockAndRemovesProvisiona
 	require.Len(t, tasks, 1)
 }
 
+func TestSlackService_SocketEventCleanupFailureRetainsRetryAdmissionUntilCompensationSucceeds(t *testing.T) {
+	svc, _, taskRepo, execRepo, _, _, projectID := newSlackSocketIngressTestService(t)
+	svc.cleanupRetryDelay = 5 * time.Millisecond
+	acks := 0
+	persistAttempts := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	svc.createExecutionFn = func(ctx context.Context, execution *models.Execution) (bool, error) {
+		persistAttempts++
+		if persistAttempts == 1 {
+			return false, fmt.Errorf("simulated first-turn persistence failure")
+		}
+		return false, execRepo.Create(ctx, execution)
+	}
+
+	firstDeleteFailed := make(chan struct{})
+	secondDeleteStarted := make(chan struct{})
+	releaseDelete := make(chan struct{})
+	deleteAttempts := 0
+	svc.deleteProvisionalTaskFn = func(ctx context.Context, taskID string) error {
+		deleteAttempts++
+		if deleteAttempts == 1 {
+			close(firstDeleteFailed)
+			return fmt.Errorf("simulated cleanup failure")
+		}
+		close(secondDeleteStarted)
+		<-releaseDelete
+		return taskRepo.Delete(ctx, taskID)
+	}
+
+	event := slackSocketMessageEvent("E1", "1710000000.100000")
+	svc.handleSocketEvent(context.Background(), nil, event)
+	select {
+	case <-firstDeleteFailed:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("first cleanup attempt did not fail")
+	}
+	select {
+	case <-secondDeleteStarted:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("cleanup was not retried autonomously")
+	}
+
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 0, acks)
+	require.Equal(t, 1, persistAttempts, "redelivery must remain excluded after cleanup failure")
+	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1, "failed cleanup must not release admission while the provisional task remains")
+
+	close(releaseDelete)
+	require.Eventually(t, func() bool {
+		tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+		return err == nil && len(tasks) == 0
+	}, time.Second, 10*time.Millisecond)
+
+	svc.handleSocketEvent(context.Background(), nil, event)
+	require.Equal(t, 1, acks)
+	require.Equal(t, 2, persistAttempts)
+}
+
 func TestRunChannelChatFirstTurnDeadlineCleanupUsesNonCancelledContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

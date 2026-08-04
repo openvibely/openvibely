@@ -124,7 +124,9 @@ type SlackService struct {
 	ackSocketRequestFn             func(*socketmode.Client, socketmode.Request)
 	createQueuedInputFn            func(context.Context, *models.ThreadInput) (bool, error)
 	createExecutionFn              func(context.Context, *models.Execution) (bool, error)
+	deleteProvisionalTaskFn        func(context.Context, string) error
 	preACKTimeout                  time.Duration
+	cleanupRetryDelay              time.Duration
 }
 
 func NewSlackService(
@@ -164,6 +166,7 @@ func NewSlackService(
 		processingMessageEvents: make(map[string]struct{}),
 		cleanupMessageEvents:    make(map[string]struct{}),
 		preACKTimeout:           slackPreACKTimeout,
+		cleanupRetryDelay:       100 * time.Millisecond,
 	}
 }
 
@@ -847,6 +850,26 @@ func (s *SlackService) finishIncomingMessageCleanup(msg slackIncomingMessage) {
 	delete(s.processingMessageEvents, key)
 }
 
+func (s *SlackService) cleanupProvisionalTaskUntilSuccess(msg slackIncomingMessage, taskID, reason string) {
+	deleteTask := s.deleteProvisionalTaskFn
+	if deleteTask == nil {
+		deleteTask = s.taskRepo.Delete
+	}
+	delay := s.cleanupRetryDelay
+	if delay <= 0 {
+		delay = 100 * time.Millisecond
+	}
+	for {
+		if err := deleteTask(context.Background(), taskID); err == nil {
+			s.finishIncomingMessageCleanup(msg)
+			return
+		} else {
+			applog.Infof("[slack] cleanup %s task failed task=%s; retrying: %v", reason, taskID, err)
+		}
+		time.Sleep(delay)
+	}
+}
+
 func slackIncomingFilesFromAppMention(event slackevents.AppMentionEvent) []slackIncomingFile {
 	files := slackIncomingFilesFromSlackFiles(event.Files)
 	files = append(files, slackIncomingFilesFromAttachments(event.Attachments)...)
@@ -1207,10 +1230,7 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 					return
 				}
 				s.beginIncomingMessageCleanup(msg)
-				go func() {
-					defer s.finishIncomingMessageCleanup(msg)
-					cleanupChannelChatProvisionalTask(context.Background(), "slack", s.taskRepo, taskID, reason)
-				}()
+				go s.cleanupProvisionalTaskUntilSuccess(msg, taskID, reason)
 			},
 			CompleteExecution: channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 			LinkAttachments:   s.linkAttachmentsToExecution, AttachmentContextAndImages: slackAttachmentContextAndImages,
