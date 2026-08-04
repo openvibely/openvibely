@@ -810,6 +810,64 @@ func TestSlackService_SocketEventPreACKFailureCallbackDoesNotBlock(t *testing.T)
 	}, time.Second, 10*time.Millisecond, "asynchronous failure cleanup must remove the provisional task")
 }
 
+func TestSlackService_SocketEventAttachmentPublicationFailureCallbackDoesNotBlock(t *testing.T) {
+	svc, _, taskRepo, _, _, _, projectID := newSlackSocketIngressTestService(t)
+	svc.preACKTimeout = 30 * time.Millisecond
+	uploadsFile := filepath.Join(t.TempDir(), "not-a-directory")
+	require.NoError(t, os.WriteFile(uploadsFile, []byte("occupied"), 0o600))
+	svc.SetUploadsDir(uploadsFile)
+
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	svc.downloadSlackAttachmentsFn = func(context.Context, []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "evidence.txt")
+		require.NoError(t, os.WriteFile(path, []byte("evidence"), 0o600))
+		return "\nFile: evidence.txt\n", nil, []models.ChatAttachment{{
+			FileName: "evidence.txt", FilePath: path, MediaType: "text/plain", FileSize: 8,
+		}}, nil
+	}
+	callbackStarted := make(chan struct{}, 1)
+	releaseCallback := make(chan struct{})
+	svc.postMessageFn = func(string, string, string) (string, error) {
+		callbackStarted <- struct{}{}
+		<-releaseCallback
+		return "", nil
+	}
+
+	event := slackSocketMessageEvent("E-attachment-publication", "1710000000.420000")
+	message := event.Data.(slackevents.EventsAPIEvent).InnerEvent.Data.(slackevents.MessageEvent)
+	message.Message = &slack.Msg{Files: []slack.File{{ID: "F-publication", Name: "evidence.txt", Mimetype: "text/plain", URLPrivateDownload: "https://files.slack.com/evidence.txt"}}}
+	eventsAPI := event.Data.(slackevents.EventsAPIEvent)
+	eventsAPI.InnerEvent.Data = message
+	event.Data = eventsAPI
+
+	done := make(chan struct{})
+	go func() {
+		svc.handleSocketEvent(context.Background(), nil, event)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		close(releaseCallback)
+		<-done
+		t.Fatal("attachment publication failure notification blocked socket event handling")
+	}
+	select {
+	case <-callbackStarted:
+	case <-time.After(250 * time.Millisecond):
+		close(releaseCallback)
+		t.Fatal("expected attachment publication failure notification")
+	}
+	close(releaseCallback)
+	require.Equal(t, 0, acks)
+	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks)
+}
+
 func TestSlackService_SocketEventDeadlineCleanupDoesNotBlockAndRemovesProvisionalTask(t *testing.T) {
 	svc, db, taskRepo, execRepo, _, _, projectID := newSlackSocketIngressTestService(t)
 	svc.preACKTimeout = 30 * time.Millisecond

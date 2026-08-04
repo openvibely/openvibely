@@ -1332,7 +1332,9 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 				})
 			},
 			OnAttachmentLinkFailure: func(_ context.Context, msgText string) {
-				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
+				notifyPreACKFailure(func() {
+					_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
+				})
 			},
 			OnRunnerUnavailable: func(_ context.Context, msgText string, _ int) {
 				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, msgText)
