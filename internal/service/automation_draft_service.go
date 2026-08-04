@@ -620,7 +620,7 @@ func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) [
 				targetName = "Create GitHub issue"
 				capability = "github_create_issue"
 			}
-			if automationDraftNodePromptReferences(node, capability) && (len(out) != 1 || nodes[out[0].To].Role != targetRole) {
+			if automationDraftNodePromptUsesCapability(node, capability) && (len(out) != 1 || nodes[out[0].To].Role != targetRole) {
 				add("producer_target", fmt.Sprintf("Producer node %q needs exactly one %s target because its prompt uses %s.", node.Key, targetName, capability))
 			}
 		case "loop_auditor":
@@ -731,9 +731,37 @@ func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) [
 	return issues
 }
 
-func automationDraftNodePromptReferences(node models.AutomationDraftNode, capability string) bool {
+func automationDraftNodePromptUsesCapability(node models.AutomationDraftNode, capability string) bool {
 	prompt, _ := node.Config["prompt"].(string)
-	return strings.Contains(strings.ToLower(prompt), strings.ToLower(capability))
+	capability = strings.ToLower(strings.TrimSpace(capability))
+	if capability == "" {
+		return false
+	}
+	prompt = strings.NewReplacer(" but ", ";", " however ", ";", " instead ", ";").Replace(strings.ToLower(prompt))
+	clauses := strings.FieldsFunc(prompt, func(r rune) bool {
+		switch r {
+		case '.', '!', '?', ';', ',', '\n', '\r':
+			return true
+		default:
+			return false
+		}
+	})
+	for _, clause := range clauses {
+		if !strings.Contains(clause, capability) {
+			continue
+		}
+		negated := false
+		for _, phrase := range []string{"do not", "don't", "never", "must not", "without", "avoid"} {
+			if strings.Contains(clause, phrase) {
+				negated = true
+				break
+			}
+		}
+		if !negated {
+			return true
+		}
+	}
+	return false
 }
 
 func customAutomationEdgeConditionState(condition map[string]any) (string, bool) {

@@ -14,6 +14,28 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAutomationPromptCapabilityUseIgnoresNegatedMentions(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		prompt     string
+		capability string
+		want       bool
+	}{
+		{name: "positive tool instruction", prompt: "Call github_create_issue with the completed proposal.", capability: "github_create_issue", want: true},
+		{name: "negated tool instruction", prompt: "Do not call github_create_issue. Summarize the proposal locally.", capability: "github_create_issue"},
+		{name: "positive GitHub work", prompt: "Review stale labels and unexpected GitHub assignments.", capability: "github", want: true},
+		{name: "negated GitHub work", prompt: "Review local project notes only; do not use GitHub.", capability: "github"},
+		{name: "negative then positive", prompt: "Do not call github_create_issue during research. After review, call github_create_issue once.", capability: "github_create_issue", want: true},
+		{name: "unrelated negation", prompt: "Do not modify code, then call github_create_issue with the proposal.", capability: "github_create_issue", want: true},
+		{name: "non-negating without", prompt: "Without delay, use GitHub to review stale assignments.", capability: "github", want: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			node := models.AutomationDraftNode{Config: map[string]any{"prompt": test.prompt}}
+			require.Equal(t, test.want, automationDraftNodePromptUsesCapability(node, test.capability))
+		})
+	}
+}
+
 func TestGitHubSDLCCapabilityValidationTracksRetainedRuntimePrompts(t *testing.T) {
 	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
@@ -36,6 +58,26 @@ func TestGitHubSDLCCapabilityValidationTracksRetainedRuntimePrompts(t *testing.T
 		}
 	}
 	require.NotContains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(terminalOnly, models.AutomationCapabilitySnapshot{})), "github_unavailable")
+
+	for _, test := range []struct {
+		key    string
+		prompt string
+	}{
+		{key: "vision_suggestions", prompt: "Do not call github_create_issue. Review local project notes and summarize one improvement."},
+		{key: "auditor", prompt: "Review local project notes only; do not use GitHub."},
+	} {
+		customized, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+		require.NoError(t, err)
+		for _, node := range append([]models.AutomationDraftNode(nil), customized.Nodes...) {
+			if node.Key != test.key {
+				customized = automationCandidateWithoutNode(customized, node.Key)
+			}
+		}
+		customized.Nodes[0].Config["prompt"] = test.prompt
+		issues := drafts.ValidateCandidateWithCapabilities(customized, models.AutomationCapabilitySnapshot{})
+		require.NotContains(t, issueCodes(issues), "github_unavailable", test.key)
+		require.NotContains(t, issueCodes(issues), "producer_target", test.key)
+	}
 }
 
 func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {

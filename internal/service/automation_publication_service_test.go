@@ -101,20 +101,28 @@ func TestGitHubSDLCReducedGraphRequiresSetupOnlyForRetainedGitHubRuntimeNodes(t 
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
 	require.NoError(t, err)
 
-	customizedProducer, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
-	require.NoError(t, err)
-	for _, node := range append([]models.AutomationDraftNode(nil), customizedProducer.Nodes...) {
-		if node.Key != "vision_suggestions" {
-			customizedProducer = automationCandidateWithoutNode(customizedProducer, node.Key)
+	for _, test := range []struct {
+		key    string
+		prompt string
+	}{
+		{key: "vision_suggestions", prompt: "Do not call github_create_issue. Review local project notes and summarize one improvement."},
+		{key: "auditor", prompt: "Review local project notes only; do not use GitHub."},
+	} {
+		customized, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+		require.NoError(t, err)
+		for _, node := range append([]models.AutomationDraftNode(nil), customized.Nodes...) {
+			if node.Key != test.key {
+				customized = automationCandidateWithoutNode(customized, node.Key)
+			}
 		}
+		customized.Nodes[0].Config["prompt"] = test.prompt
+		customizedResult, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
+			ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: customized,
+		})
+		require.NoError(t, err, test.key)
+		require.Len(t, customizedResult.Definition.Nodes, 1)
+		require.Equal(t, test.key, customizedResult.Definition.Nodes[0].NodeKey)
 	}
-	customizedProducer.Nodes[0].Config["prompt"] = "Review local project notes and summarize one improvement without publishing it or using GitHub."
-	customizedResult, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
-		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: customizedProducer,
-	})
-	require.NoError(t, err)
-	require.Len(t, customizedResult.Definition.Nodes, 1)
-	require.Equal(t, "vision_suggestions", customizedResult.Definition.Nodes[0].NodeKey)
 
 	for _, retainedKey := range []string{"vision_suggestions", "auditor"} {
 		reduced := candidate
