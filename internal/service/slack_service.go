@@ -1138,7 +1138,12 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "No active project found. Please create a project first in the web UI.")
 		return
 	}
-	if !s.checkAuthorization(ctx, projectID, msg.UserID) {
+	authorized, authErr := s.checkAuthorizationResult(ctx, projectID, msg.UserID)
+	if authErr != nil {
+		applog.Infof("[slack] authorization lookup failed user=%s team=%s project=%s: %v", msg.UserID, msg.TeamID, projectID, authErr)
+		return
+	}
+	if !authorized {
 		durableHandoff()
 		applog.Infof("[slack] unauthorized access blocked for user=%s team=%s project=%s", msg.UserID, msg.TeamID, projectID)
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "You are not authorized to use Slack access for this project. Contact the project owner to get access.")
@@ -1435,7 +1440,11 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
-			if !s.checkAuthorization(ctx, project.ID, actionCtx.UserID) {
+			authorized, err := s.checkAuthorizationResult(ctx, project.ID, actionCtx.UserID)
+			if err != nil {
+				return fmt.Errorf("check Slack authorization: %w", err)
+			}
+			if !authorized {
 				return fmt.Errorf("Slack user %q is not authorized to use project %q", actionCtx.UserID, project.Name)
 			}
 			return s.setActiveProject(ctx, actionCtx.TeamID, actionCtx.UserID, project.ID)
@@ -1516,34 +1525,40 @@ func slackUserProjectKey(teamID, userID string) string {
 }
 
 func (s *SlackService) checkAuthorization(ctx context.Context, projectID, slackUserID string) bool {
+	authorized, err := s.checkAuthorizationResult(ctx, projectID, slackUserID)
+	if err != nil {
+		applog.Infof("[slack] authorization lookup failed user=%s project=%s: %v", slackUserID, projectID, err)
+		return false
+	}
+	return authorized
+}
+
+func (s *SlackService) checkAuthorizationResult(ctx context.Context, projectID, slackUserID string) (bool, error) {
 	if s.slackAuthRepo == nil {
-		return true
+		return true, nil
 	}
 
 	if strings.TrimSpace(projectID) == "" {
 		authorized, err := s.slackAuthRepo.IsAuthorizedAnywhere(ctx, slackUserID)
 		if err != nil {
-			applog.Infof("[slack] auth check error for user=%s anywhere: %v", slackUserID, err)
-			return true
+			return false, fmt.Errorf("check Slack authorization anywhere: %w", err)
 		}
-		return authorized
+		return authorized, nil
 	}
 
 	authorized, err := s.slackAuthRepo.IsAuthorized(ctx, projectID, slackUserID)
 	if err != nil {
-		applog.Infof("[slack] auth check error for user=%s project=%s: %v", slackUserID, projectID, err)
-		return true
+		return false, fmt.Errorf("check Slack authorization for project: %w", err)
 	}
 	if authorized {
-		return true
+		return true, nil
 	}
 
 	authorizedAnywhere, err := s.slackAuthRepo.IsAuthorizedAnywhere(ctx, slackUserID)
 	if err != nil {
-		applog.Infof("[slack] auth check error for user=%s fallback-anywhere: %v", slackUserID, err)
-		return true
+		return false, fmt.Errorf("check Slack fallback authorization: %w", err)
 	}
-	return authorizedAnywhere
+	return authorizedAnywhere, nil
 }
 
 func sanitizeSlackText(text string) string {

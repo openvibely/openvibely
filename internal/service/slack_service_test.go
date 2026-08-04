@@ -258,6 +258,56 @@ func TestSlackInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 	require.Equal(t, 1, persistCalls)
 }
 
+func TestSlackService_SocketEventAuthorizationFailureRedelivery(t *testing.T) {
+	svc, db, taskRepo, _, _, _, projectID := newSlackSocketIngressTestService(t)
+	ctx := context.Background()
+	svc.slackAuthRepo = repository.NewSlackAuthRepo(db)
+	require.NoError(t, svc.slackAuthRepo.Create(ctx, &models.SlackAuthorizedUser{
+		ProjectID: projectID, SlackUserID: "U1", DisplayName: "Authorized user", AddedBy: "test",
+	}))
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	event := slackSocketMessageEvent("E-auth-retry", "1710000000.450000")
+
+	require.NoError(t, func() error {
+		_, err := db.ExecContext(ctx, `ALTER TABLE slack_authorized_users RENAME TO slack_authorized_users_unavailable`)
+		return err
+	}())
+	svc.handleSocketEvent(ctx, nil, event)
+	require.Equal(t, 0, acks, "authorization lookup failure must remain retryable")
+	tasks, err := taskRepo.ListByProject(ctx, projectID, "")
+	require.NoError(t, err)
+	require.Empty(t, tasks, "authorization lookup failure must not create durable work")
+
+	require.NoError(t, func() error {
+		_, err := db.ExecContext(ctx, `ALTER TABLE slack_authorized_users_unavailable RENAME TO slack_authorized_users`)
+		return err
+	}())
+	svc.handleSocketEvent(ctx, nil, event)
+	require.Equal(t, 1, acks)
+	tasks, err = taskRepo.ListByProject(ctx, projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+
+	svc.handleSocketEvent(ctx, nil, event)
+	require.Equal(t, 2, acks, "successful redelivery must be durably deduplicated")
+	tasks, err = taskRepo.ListByProject(ctx, projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+
+	deniedEvent := slackSocketMessageEvent("E-auth-denied", "1710000000.460000")
+	deniedAPI := deniedEvent.Data.(slackevents.EventsAPIEvent)
+	deniedMessage := deniedAPI.InnerEvent.Data.(slackevents.MessageEvent)
+	deniedMessage.User = "U_DENIED"
+	deniedAPI.InnerEvent.Data = deniedMessage
+	deniedEvent.Data = deniedAPI
+	svc.handleSocketEvent(ctx, nil, deniedEvent)
+	require.Equal(t, 3, acks, "successful negative authorization must be terminally acknowledged")
+	tasks, err = taskRepo.ListByProject(ctx, projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1, "denied event must not create durable work")
+}
+
 func TestSlackService_SocketEventFirstTurnAttachmentPersistenceFailureRedelivery(t *testing.T) {
 	svc, db, taskRepo, _, _, receiptRepo, projectID := newSlackSocketIngressTestService(t)
 	svc.SetUploadsDir(t.TempDir())
