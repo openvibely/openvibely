@@ -115,11 +115,17 @@ func recordAlertCreatedProjection(ctx context.Context, exec SQLExecutor, alert *
 		var notificationNode, approvalNode string
 		var err error
 		if adapterKey == "native_sdlc" {
-			notificationNode, err = automationNodeIDByKey(ctx, exec, alert.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, "notification")
+			notificationNode, err = automationTargetNodeIDByRole(ctx, exec, alert.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, sourceBinding.NodeID, "create_notification")
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("create_notification is not authorized by the caller's Automation graph")
+			}
 			if err != nil {
 				return err
 			}
-			approvalNode, err = automationNodeIDByKey(ctx, exec, alert.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, "approval")
+			approvalNode, err = automationTargetNodeIDByRole(ctx, exec, alert.ProjectID, sourceBinding.AutomationID, sourceBinding.VersionID, notificationNode, "native_approval")
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("create_notification is not authorized by the caller's Automation graph")
+			}
 			if err != nil {
 				return err
 			}

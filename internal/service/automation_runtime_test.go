@@ -2964,6 +2964,46 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	require.Equal(t, fixture.project.RepoPath, provider.resolvedPath, "Automation external refresh must fall back to the project's local Git remote")
 }
 
+func TestAutomationRuntimeNativeNotificationRequiresProducerActionEdge(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Native notification producer authorization")
+	ctx := context.Background()
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	candidate = automationCandidateWithoutEdge(candidate, "vision_to_notification")
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{
+		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate,
+	})
+	require.NoError(t, err)
+
+	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo.SetAutomationRepo(h.automationRepo)
+	alertSvc := NewAlertService(alertRepo, nil)
+	create := func(nodeKey, key string) (*models.Alert, error) {
+		node := automationNodeByKey(t, saved.Definition, nodeKey)
+		boundCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+			AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: node.ID,
+		}}})
+		return alertSvc.CreateActionable(boundCtx, &models.Alert{
+			ProjectID: h.project.ID, Type: "suggestion", Title: nodeKey, IdempotencyKey: key,
+		})
+	}
+
+	_, err = create("vision_suggestions", "disconnected-native-producer")
+	require.ErrorContains(t, err, "not authorized")
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND idempotency_key = ?`, h.project.ID, "disconnected-native-producer"))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ?`, saved.Definition.Automation.ID))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_activities WHERE automation_id = ?`, saved.Definition.Automation.ID))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ?`, saved.Definition.Automation.ID))
+
+	alert, err := create("bug_finder", "connected-native-producer")
+	require.NoError(t, err)
+	require.NotNil(t, alert)
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM alerts WHERE id = ?`, alert.ID))
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ?`, saved.Definition.Automation.ID))
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_activities WHERE automation_id = ? AND activity_type = 'create_notification'`, saved.Definition.Automation.ID))
+	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ?`, saved.Definition.Automation.ID))
+}
+
 func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Native ownership replacement")
 	ctx := context.Background()
