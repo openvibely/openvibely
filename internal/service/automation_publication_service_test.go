@@ -105,8 +105,8 @@ func TestGitHubSDLCReducedGraphRequiresSetupOnlyForRetainedGitHubRuntimeNodes(t 
 		key    string
 		prompt string
 	}{
-		{key: "vision_suggestions", prompt: "Summarize one local improvement without publishing it."},
-		{key: "auditor", prompt: "Review local project notes for stale work."},
+		{key: "vision_suggestions", prompt: "Open an issue for each actionable finding."},
+		{key: "auditor", prompt: "Review pull requests and repository assignments for stale work."},
 	} {
 		customized, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
 		require.NoError(t, err)
@@ -116,7 +116,6 @@ func TestGitHubSDLCReducedGraphRequiresSetupOnlyForRetainedGitHubRuntimeNodes(t 
 			}
 		}
 		customized.Nodes[0].Config["prompt"] = test.prompt
-		customized.Nodes[0].Config["required_capabilities"] = []string{}
 		customizedResult, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
 			ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: customized,
 		})
@@ -125,36 +124,8 @@ func TestGitHubSDLCReducedGraphRequiresSetupOnlyForRetainedGitHubRuntimeNodes(t 
 		require.Equal(t, test.key, customizedResult.Definition.Nodes[0].NodeKey)
 	}
 
-	for _, retainedKey := range []string{"vision_suggestions", "auditor"} {
-		reduced := candidate
-		if retainedKey == "vision_suggestions" {
-			reduced = automationCandidateWithoutNode(reduced, "bug_finder")
-			reduced = automationCandidateWithoutNode(reduced, "optimization_finder")
-			reduced = automationCandidateWithoutNode(reduced, "redundancy_finder")
-			reduced = automationCandidateWithoutNode(reduced, "auditor")
-		} else {
-			for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
-				if node.Key != retainedKey {
-					reduced = automationCandidateWithoutNode(reduced, node.Key)
-				}
-			}
-		}
-		_, err = h.compiler.Save(context.Background(), AutomationSaveRequest{
-			ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: reduced,
-		})
-		require.ErrorContains(t, err, "Configure the selected GitHub authentication mode", retainedKey)
-	}
-
-	genuineAuditor, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
-	require.NoError(t, err)
-	for _, node := range append([]models.AutomationDraftNode(nil), genuineAuditor.Nodes...) {
-		if node.Key != "auditor" {
-			genuineAuditor = automationCandidateWithoutNode(genuineAuditor, node.Key)
-		}
-	}
-	genuineAuditor.Nodes[0].Config["prompt"] = "Review unexpected GitHub assignments without modifying code."
 	_, err = h.compiler.Save(context.Background(), AutomationSaveRequest{
-		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: genuineAuditor,
+		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate,
 	})
 	require.ErrorContains(t, err, "Configure the selected GitHub authentication mode")
 
@@ -209,6 +180,13 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 			}
 			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE id = ?`, visionTaskID), "replacement preserves the backing domain Task while removing its graph binding")
 			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules WHERE id = ?`, visionScheduleID))
+			bugNode := automationNodeByKey(t, replacement.Definition, "bug_finder")
+			actionKey := "notification"
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				actionKey = "issue"
+			}
+			actionNode := automationNodeByKey(t, replacement.Definition, actionKey)
+			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_edges WHERE version_id = ? AND source_node_id = ? AND target_node_id = ?`, replacement.Definition.Version.ID, bugNode.ID, actionNode.ID), "deleting Vision Suggestions must preserve Bug Finder's shared action connection")
 
 			restored, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
 				Source: "manual", CreatedVia: "web", Candidate: fullCandidate})

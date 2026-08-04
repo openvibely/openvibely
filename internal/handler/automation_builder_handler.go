@@ -203,9 +203,6 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 				if values, exists := automationDraftFormValues(c, prefix+"source_files"); exists {
 					node.Config["source_files"] = values
 				}
-				if values, exists := automationDraftFormValues(c, prefix+"required_capabilities"); exists {
-					node.Config["required_capabilities"] = values
-				}
 			}
 		}
 		if _, ok := node.Config["run_at"]; ok {

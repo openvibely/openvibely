@@ -14,46 +14,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGitHubSDLCCapabilityValidationTracksExplicitIntent(t *testing.T) {
+func TestGitHubSDLCCapabilityValidationFollowsRetainedGraph(t *testing.T) {
 	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
 	require.NoError(t, err)
 
-	for _, test := range []struct {
-		key    string
-		prompt string
-	}{
-		{key: "vision_suggestions", prompt: "Open an issue for each actionable finding."},
-		{key: "auditor", prompt: "Review pull requests and repository assignments for stale work."},
-	} {
+	for _, node := range candidate.Nodes {
+		require.NotContains(t, node.Config, "required_capabilities", node.Key)
+	}
+
+	for _, retainedKey := range []string{"vision_suggestions", "auditor"} {
 		reduced := candidate
 		for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
-			if node.Key != test.key {
+			if node.Key != retainedKey {
 				reduced = automationCandidateWithoutNode(reduced, node.Key)
 			}
 		}
-		reduced.Nodes[0].Config["prompt"] = test.prompt
-		issues := drafts.ValidateCandidateWithCapabilities(reduced, models.AutomationCapabilitySnapshot{})
-		require.Contains(t, issueCodes(issues), "github_unavailable", test.key)
-		if test.key == "vision_suggestions" {
-			require.Contains(t, issueCodes(issues), "producer_target")
-		}
-
-		reduced.Nodes[0].Config["required_capabilities"] = []string{}
-		issues = drafts.ValidateCandidateWithCapabilities(reduced, models.AutomationCapabilitySnapshot{})
-		require.NotContains(t, issueCodes(issues), "github_unavailable", test.key)
-		require.NotContains(t, issueCodes(issues), "producer_target", test.key)
+		require.Empty(t, drafts.ValidateCandidate(reduced), retainedKey)
+		require.NotContains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(reduced, models.AutomationCapabilitySnapshot{})), "github_unavailable", retainedKey)
 	}
 
-	invalid, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
-	require.NoError(t, err)
-	invalid.Nodes[0].Config["required_capabilities"] = []string{"delete_repository"}
-	require.Contains(t, issueCodes(drafts.ValidateCandidate(invalid)), "required_capabilities")
-
-	missing, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
-	require.NoError(t, err)
-	delete(missing.Nodes[0].Config, "required_capabilities")
-	require.Contains(t, issueCodes(drafts.ValidateCandidate(missing)), "required_capabilities")
+	require.Contains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(candidate, models.AutomationCapabilitySnapshot{})), "github_unavailable")
 }
 
 func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
@@ -71,8 +52,7 @@ func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
 				}
 			}
 			customizedProducer.Nodes[0].Config["prompt"] = "Review the local project notes and summarize one improvement."
-			customizedProducer.Nodes[0].Config["required_capabilities"] = []string{}
-			require.Empty(t, drafts.ValidateCandidate(customizedProducer), "a capability-free customized producer may run as a standalone schedule")
+			require.Empty(t, drafts.ValidateCandidate(customizedProducer), "a customized producer may run as a standalone schedule")
 			if adapterKey == AutomationAdapterGitHubSDLC {
 				require.NotContains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(customizedProducer, models.AutomationCapabilitySnapshot{})), "github_unavailable")
 			}
@@ -90,7 +70,7 @@ func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
 					}
 				}
 				producerIssues := drafts.ValidateCandidate(producerOnly)
-				require.Contains(t, issueCodes(producerIssues), "producer_target", producerKey)
+				require.Empty(t, producerIssues, producerKey)
 
 				withoutProducer := automationCandidateWithoutNode(candidate, producerKey)
 				require.Empty(t, drafts.ValidateCandidate(withoutProducer), producerKey)
@@ -993,7 +973,7 @@ func TestAutomationCandidateWithoutNodeDeepCopiesMutableData(t *testing.T) {
 		Nodes: []models.AutomationDraftNode{
 			{
 				Key:      "kept",
-				Config:   map[string]any{"required_capabilities": []string{"github"}, "nested": map[string]any{"values": []any{"original"}}},
+				Config:   map[string]any{"list": []string{"original"}, "nested": map[string]any{"values": []any{"original"}}},
 				Position: position,
 			},
 			{Key: "removed", Config: map[string]any{}},
@@ -1007,14 +987,14 @@ func TestAutomationCandidateWithoutNodeDeepCopiesMutableData(t *testing.T) {
 	}
 
 	reduced := automationCandidateWithoutNode(source, "removed")
-	reduced.Nodes[0].Config["required_capabilities"].([]string)[0] = "changed"
+	reduced.Nodes[0].Config["list"].([]string)[0] = "changed"
 	reduced.Nodes[0].Config["nested"].(map[string]any)["values"].([]any)[0] = "changed"
 	reduced.Nodes[0].Position.X = 99
 	reduced.Edges[0].Condition["nested"].(map[string]any)["value"] = "changed"
 	reduced.Assumptions[0] = "changed assumption"
 	reduced.Warnings[0] = "changed warning"
 
-	require.Equal(t, []string{"github"}, source.Nodes[0].Config["required_capabilities"])
+	require.Equal(t, []string{"original"}, source.Nodes[0].Config["list"])
 	require.Equal(t, "original", source.Nodes[0].Config["nested"].(map[string]any)["values"].([]any)[0])
 	require.Equal(t, float64(10), source.Nodes[0].Position.X)
 	require.Equal(t, "original", source.Edges[0].Condition["nested"].(map[string]any)["value"])
