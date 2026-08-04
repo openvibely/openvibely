@@ -433,6 +433,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 			}
 		}
 
+		wasCancelled := errors.Is(taskCtx.Err(), context.Canceled)
 		w.DeregisterCancel(task.ID)
 		taskCancel()
 
@@ -451,14 +452,24 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 			if status == "" {
 				status = models.ExecFailed
 				message = "automation execution did not reach a terminal state"
+				if executionErr != nil {
+					message = executionErr.Error()
+				}
+				if wasCancelled {
+					status = models.ExecCancelled
+					message = "automation task cancelled during execution setup"
+				}
 				execRepo := w.execRepo
 				if execRepo == nil && w.llmSvc != nil {
 					execRepo = w.llmSvc.execRepo
 				}
 				if execRepo != nil {
 					if current, err := execRepo.GetByID(context.Background(), prepared.ExecutionID); err == nil && current != nil {
-						status = current.Status
-						message = current.ErrorMessage
+						switch current.Status {
+						case models.ExecCompleted, models.ExecFailed, models.ExecCancelled:
+							status = current.Status
+							message = current.ErrorMessage
+						}
 					}
 				}
 			}
