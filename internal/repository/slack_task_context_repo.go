@@ -18,10 +18,15 @@ func NewSlackTaskContextRepo(db *sql.DB) *SlackTaskContextRepo {
 }
 
 func (r *SlackTaskContextRepo) Upsert(ctx context.Context, stc *models.SlackTaskContext) error {
+	return r.UpsertWithExecutor(ctx, r.db, stc)
+}
+
+// UpsertWithExecutor persists Slack task context using the caller's transaction.
+func (r *SlackTaskContextRepo) UpsertWithExecutor(ctx context.Context, exec SQLExecutor, stc *models.SlackTaskContext) error {
 	if stc == nil {
 		return fmt.Errorf("slack task context is nil")
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := exec.ExecContext(ctx,
 		`INSERT INTO slack_task_context (task_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id, updated_at)
 		 VALUES (?, ?, ?, ?, ?, datetime('now'))
 		 ON CONFLICT(task_id) DO UPDATE SET

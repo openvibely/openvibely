@@ -76,6 +76,58 @@ func TestTaskGoalRepo_BlockedAuditAndStaleGoalGuard(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_ImmediateTransactionCommitUsesCallerContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	err := repo.withImmediateTx(ctx, func(sqlExecutor) error {
+		cancel()
+		return nil
+	})
+	if err == nil {
+		t.Fatal("commit succeeded after the caller context was canceled")
+	}
+}
+
+func TestTaskRepo_CreateWithGoalCommitDoesNotPanic(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createGoalTestProject(t, ctx, db)
+	repo := NewTaskRepo(db, nil)
+	goalRepo := NewTaskGoalRepo(db)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Commit goal", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "prompt", Priority: 2}
+	goal := &models.TaskGoal{GoalID: "goal-commit", Objective: "commit both rows", Status: models.TaskGoalStatusActive}
+	var createErr error
+	if didPanic := func() (didPanic bool) {
+		defer func() {
+			didPanic = recover() != nil
+		}()
+		createErr = repo.CreateWithGoal(ctx, task, goal)
+		return false
+	}(); didPanic {
+		t.Fatal("CreateWithGoal panicked while committing the task and goal transaction")
+	}
+	if createErr != nil {
+		t.Fatalf("create with goal: %v", createErr)
+	}
+	storedTask, err := repo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if storedTask == nil {
+		t.Fatal("committed task was not found")
+	}
+	storedGoal, err := goalRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	if storedGoal == nil || storedGoal.GoalID != "goal-commit" {
+		t.Fatalf("committed goal = %+v", storedGoal)
+	}
+}
+
 func TestTaskRepo_CreateWithGoalAtomic(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

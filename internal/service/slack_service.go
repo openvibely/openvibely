@@ -47,7 +47,7 @@ const (
 	SlackBotTokenSourceManual = "manual"
 
 	defaultSlackAPIBaseURL  = "https://slack.com/api"
-	slackProcessTimeout     = 5 * time.Minute
+	slackPreACKTimeout      = 2500 * time.Millisecond
 	slackChatHistoryLimit   = 50
 	slackMaxFileSize        = 10 << 20
 	slackMaxTextFileSize    = 100 * 1024
@@ -89,6 +89,7 @@ type SlackService struct {
 	workerSvc                *WorkerService
 	slackUserProjectRepo     *repository.SlackUserProjectRepo
 	slackTaskContextRepo     *repository.SlackTaskContextRepo
+	slackInboundReceiptRepo  *repository.SlackInboundReceiptRepo
 	threadInputRepo          *repository.ThreadInputRepo
 	customPersonalityRepo    *repository.CustomPersonalityRepo
 	slackAuthRepo            *repository.SlackAuthRepo
@@ -106,17 +107,30 @@ type SlackService struct {
 	httpClient   *http.Client
 	oauthBaseURL string
 
-	mu                       sync.RWMutex
-	botClient                *slack.Client
-	socketClient             *socketmode.Client
-	running                  bool
-	ctx                      context.Context
-	cancel                   context.CancelFunc
-	userProjects             map[string]string
-	processedMessageEvents   map[string]time.Time
-	postMessageFn            func(channelID, threadTS, text string) (string, error)
-	openConversationFn       func(userID string) (string, error)
-	processIncomingMessageFn func(msg slackIncomingMessage)
+	mu                             sync.RWMutex
+	botClient                      *slack.Client
+	socketClient                   *socketmode.Client
+	running                        bool
+	ctx                            context.Context
+	cancel                         context.CancelFunc
+	userProjects                   map[string]string
+	processedMessageEvents         map[string]time.Time
+	processingMessageEvents        map[string]struct{}
+	cleanupMessageEvents           map[string]struct{}
+	postMessageFn                  func(channelID, threadTS, text string) (string, error)
+	openConversationFn             func(userID string) (string, error)
+	processIncomingMessageFn       func(msg slackIncomingMessage)
+	processIncomingMessageResultFn func(msg slackIncomingMessage) bool
+	ackSocketRequestFn             func(*socketmode.Client, socketmode.Request)
+	createQueuedInputFn            func(context.Context, *models.ThreadInput) (bool, error)
+	createExecutionFn              func(context.Context, *models.Execution) (bool, error)
+	createFirstTurnExecutionFn     func(context.Context, repository.SQLExecutor, *models.Execution) error
+	deleteProvisionalTaskFn        func(context.Context, string) error
+	downloadSlackAttachmentsFn     func(context.Context, []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error)
+	savePendingAttachmentsFn       func([]models.ChatAttachment) (string, error)
+	cleanupAttachmentSourcesFn     func([]models.ChatAttachment)
+	preACKTimeout                  time.Duration
+	cleanupRetryDelay              time.Duration
 }
 
 func NewSlackService(
@@ -149,10 +163,14 @@ func NewSlackService(
 		httpClient: &http.Client{
 			Timeout: 20 * time.Second,
 		},
-		oauthBaseURL:           defaultSlackAPIBaseURL,
-		uploadsDir:             "uploads",
-		userProjects:           make(map[string]string),
-		processedMessageEvents: make(map[string]time.Time),
+		oauthBaseURL:            defaultSlackAPIBaseURL,
+		uploadsDir:              "uploads",
+		userProjects:            make(map[string]string),
+		processedMessageEvents:  make(map[string]time.Time),
+		processingMessageEvents: make(map[string]struct{}),
+		cleanupMessageEvents:    make(map[string]struct{}),
+		preACKTimeout:           slackPreACKTimeout,
+		cleanupRetryDelay:       100 * time.Millisecond,
 	}
 }
 
@@ -170,6 +188,10 @@ func (s *SlackService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 
 func (s *SlackService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 	s.threadInputRepo = repo
+}
+
+func (s *SlackService) SetSlackInboundReceiptRepo(repo *repository.SlackInboundReceiptRepo) {
+	s.slackInboundReceiptRepo = repo
 }
 
 func (s *SlackService) SetChatAttachmentRepo(repo *repository.ChatAttachmentRepo) {
@@ -511,49 +533,82 @@ func (s *SlackService) runSocketLoop(ctx context.Context, client *socketmode.Cli
 }
 
 func (s *SlackService) handleSocketEvent(ctx context.Context, client *socketmode.Client, evt socketmode.Event) {
-	switch evt.Type {
-	case socketmode.EventTypeEventsAPI:
-		if evt.Request != nil {
-			client.Ack(*evt.Request)
-		}
+	if evt.Request == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	requestCtx, cancel := context.WithCancel(ctx)
+	timeout := s.preACKTimeout
+	if timeout <= 0 {
+		timeout = slackPreACKTimeout
+	}
+	preACKTimer := time.AfterFunc(timeout, cancel)
+	defer func() {
+		preACKTimer.Stop()
+		cancel()
+	}()
 
-		eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
-		if !ok {
-			return
-		}
-		if eventsAPIEvent.Type != slackevents.CallbackEvent {
-			return
-		}
+	var ackOnce sync.Once
+	ack := func() {
+		ackOnce.Do(func() {
+			preACKTimer.Stop()
+			if s.ackSocketRequestFn != nil {
+				s.ackSocketRequestFn(client, *evt.Request)
+				return
+			}
+			if client != nil {
+				_ = client.Ack(*evt.Request)
+			}
+		})
+	}
+	if evt.Type != socketmode.EventTypeEventsAPI {
+		ack() // Unsupported request-bearing envelopes are terminally ignored.
+		return
+	}
 
-		teamID := strings.TrimSpace(eventsAPIEvent.TeamID)
-		switch e := eventsAPIEvent.InnerEvent.Data.(type) {
-		case *slackevents.AppMentionEvent:
-			s.handleAppMention(ctx, teamID, *e)
-		case slackevents.AppMentionEvent:
-			s.handleAppMention(ctx, teamID, e)
-		case *slackevents.MessageEvent:
-			s.handleMessageEvent(ctx, teamID, *e)
-		case slackevents.MessageEvent:
-			s.handleMessageEvent(ctx, teamID, e)
-		}
+	eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
+	if !ok || eventsAPIEvent.Type != slackevents.CallbackEvent {
+		ack() // Malformed and unsupported envelopes are terminally ignored.
+		return
+	}
+
+	teamID := strings.TrimSpace(eventsAPIEvent.TeamID)
+	switch e := eventsAPIEvent.InnerEvent.Data.(type) {
+	case *slackevents.AppMentionEvent:
+		s.handleAppMention(requestCtx, teamID, *e, ack)
+	case slackevents.AppMentionEvent:
+		s.handleAppMention(requestCtx, teamID, e, ack)
+	case *slackevents.MessageEvent:
+		s.handleMessageEvent(requestCtx, teamID, *e, ack)
+	case slackevents.MessageEvent:
+		s.handleMessageEvent(requestCtx, teamID, e, ack)
+	default:
+		ack() // Events the integration intentionally does not support are terminal.
 	}
 }
 
-func (s *SlackService) handleAppMention(ctx context.Context, teamID string, event slackevents.AppMentionEvent) {
+func (s *SlackService) handleAppMention(ctx context.Context, teamID string, event slackevents.AppMentionEvent, ackFns ...func()) {
+	ack := firstSlackAck(ackFns)
 	if strings.TrimSpace(event.User) == "" {
+		ack()
 		return
 	}
 	if strings.TrimSpace(event.BotID) != "" {
+		ack()
 		return
 	}
 	botUserID := strings.TrimSpace(s.getSetting(ctx, SlackSettingBotUserID))
 	if botUserID != "" && strings.TrimSpace(event.User) == botUserID {
+		ack()
 		return
 	}
 
 	files := slackIncomingFilesFromAppMention(event)
 	text := slackMessageTextOrAttachmentPrompt(sanitizeSlackText(event.Text), len(files) > 0)
 	if text == "" {
+		ack()
 		return
 	}
 
@@ -562,40 +617,53 @@ func (s *SlackService) handleAppMention(ctx context.Context, teamID string, even
 		threadTS = strings.TrimSpace(event.TimeStamp)
 	}
 
-	s.processIncoming(slackIncomingMessage{
+	eventKey := slackIncomingEventKey(teamID, event.Channel, event.TimeStamp, event.User)
+	if eventKey == "" {
+		ack()
+		return
+	}
+
+	s.processIncoming(ctx, slackIncomingMessage{
 		TeamID:    teamID,
 		ChannelID: strings.TrimSpace(event.Channel),
 		ThreadTS:  threadTS,
 		UserID:    strings.TrimSpace(event.User),
 		Text:      text,
 		Source:    "slack",
-		EventKey:  slackIncomingEventKey(teamID, event.Channel, event.TimeStamp, event.User),
+		EventKey:  eventKey,
 		Files:     files,
-	})
+	}, ack)
 }
 
-func (s *SlackService) handleMessageEvent(ctx context.Context, teamID string, event slackevents.MessageEvent) {
+func (s *SlackService) handleMessageEvent(ctx context.Context, teamID string, event slackevents.MessageEvent, ackFns ...func()) {
+	ack := firstSlackAck(ackFns)
 	channelType := strings.TrimSpace(event.ChannelType)
 	if strings.TrimSpace(event.User) == "" {
+		ack()
 		return
 	}
 	if strings.TrimSpace(event.BotID) != "" {
+		ack()
 		return
 	}
 	if subtype := strings.TrimSpace(event.SubType); subtype != "" && subtype != "file_share" {
+		ack()
 		return
 	}
 	botUserID := strings.TrimSpace(s.getSetting(ctx, SlackSettingBotUserID))
 	if botUserID != "" && strings.TrimSpace(event.User) == botUserID {
+		ack()
 		return
 	}
 	if channelType != "im" && !slackMessageMentionsBot(event, botUserID) {
+		ack()
 		return
 	}
 
 	files := slackIncomingFilesFromMessage(event.Message)
 	text := slackMessageTextOrAttachmentPrompt(sanitizeSlackText(event.Text), len(files) > 0)
 	if text == "" {
+		ack()
 		return
 	}
 
@@ -608,16 +676,22 @@ func (s *SlackService) handleMessageEvent(ctx context.Context, teamID string, ev
 		eventTS = strings.TrimSpace(event.Message.Timestamp)
 	}
 
-	s.processIncoming(slackIncomingMessage{
+	eventKey := slackIncomingEventKey(teamID, event.Channel, eventTS, event.User)
+	if eventKey == "" {
+		ack()
+		return
+	}
+
+	s.processIncoming(ctx, slackIncomingMessage{
 		TeamID:    teamID,
 		ChannelID: strings.TrimSpace(event.Channel),
 		ThreadTS:  threadTS,
 		UserID:    strings.TrimSpace(event.User),
 		Text:      text,
 		Source:    "slack",
-		EventKey:  slackIncomingEventKey(teamID, event.Channel, eventTS, event.User),
+		EventKey:  eventKey,
 		Files:     files,
-	})
+	}, ack)
 }
 
 type slackIncomingMessage struct {
@@ -647,15 +721,58 @@ type slackIncomingFile struct {
 	Thumb1024          string
 }
 
-func (s *SlackService) processIncoming(msg slackIncomingMessage) {
-	if !s.claimIncomingMessage(msg) {
+func firstSlackAck(ackFns []func()) func() {
+	if len(ackFns) > 0 && ackFns[0] != nil {
+		return ackFns[0]
+	}
+	return func() {}
+}
+
+func (s *SlackService) processIncoming(ctx context.Context, msg slackIncomingMessage, ack func()) {
+	claimed, durableDuplicate := s.claimIncomingMessage(msg)
+	if durableDuplicate {
+		ack()
 		return
 	}
-	if s.processIncomingMessageFn != nil {
+	if !claimed {
+		return
+	}
+	if s.slackInboundReceiptRepo != nil && strings.TrimSpace(msg.EventKey) != "" {
+		alreadyHandedOff, err := s.slackInboundReceiptRepo.Exists(ctx, msg.EventKey)
+		if err != nil {
+			applog.Infof("[slack] check durable event receipt failed key=%s: %v", msg.EventKey, err)
+			s.finishIncomingMessage(msg, false)
+			return
+		}
+		if alreadyHandedOff {
+			s.finishIncomingMessage(msg, true)
+			ack()
+			return
+		}
+	}
+
+	handedOff := false
+	onDurableHandoff := func() {
+		if handedOff {
+			return
+		}
+		handedOff = true
+		s.finishIncomingMessage(msg, true)
+		ack()
+	}
+	if s.processIncomingMessageResultFn != nil {
+		if s.processIncomingMessageResultFn(msg) {
+			onDurableHandoff()
+		}
+	} else if s.processIncomingMessageFn != nil {
 		s.processIncomingMessageFn(msg)
-		return
+		onDurableHandoff()
+	} else {
+		s.processIncomingMessageWithHandoff(ctx, msg, onDurableHandoff, true)
 	}
-	s.processIncomingMessage(msg)
+	if !handedOff {
+		s.finishIncomingMessage(msg, false)
+	}
 }
 
 const slackEventDedupeTTL = 10 * time.Minute
@@ -675,10 +792,10 @@ func slackIncomingEventKey(teamID, channelID, eventTS, userID string) string {
 	}, "|")
 }
 
-func (s *SlackService) claimIncomingMessage(msg slackIncomingMessage) bool {
+func (s *SlackService) claimIncomingMessage(msg slackIncomingMessage) (claimed bool, durableDuplicate bool) {
 	key := strings.TrimSpace(msg.EventKey)
 	if key == "" {
-		return true
+		return true, false
 	}
 
 	now := time.Now()
@@ -688,17 +805,85 @@ func (s *SlackService) claimIncomingMessage(msg slackIncomingMessage) bool {
 	if s.processedMessageEvents == nil {
 		s.processedMessageEvents = make(map[string]time.Time)
 	}
+	if s.processingMessageEvents == nil {
+		s.processingMessageEvents = make(map[string]struct{})
+	}
 	if processedAt, ok := s.processedMessageEvents[key]; ok && processedAt.After(cutoff) {
 		applog.Infof("[slack] ignoring duplicate Slack message event key=%s", key)
-		return false
+		return false, true
+	}
+	if _, ok := s.processingMessageEvents[key]; ok {
+		return false, false
 	}
 	for eventKey, processedAt := range s.processedMessageEvents {
 		if processedAt.Before(cutoff) {
 			delete(s.processedMessageEvents, eventKey)
 		}
 	}
-	s.processedMessageEvents[key] = now
-	return true
+	s.processingMessageEvents[key] = struct{}{}
+	return true, false
+}
+
+func (s *SlackService) finishIncomingMessage(msg slackIncomingMessage, durable bool) {
+	key := strings.TrimSpace(msg.EventKey)
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !durable {
+		if _, cleanupPending := s.cleanupMessageEvents[key]; cleanupPending {
+			return
+		}
+		delete(s.processingMessageEvents, key)
+		return
+	}
+	delete(s.processingMessageEvents, key)
+	s.processedMessageEvents[key] = time.Now()
+}
+
+func (s *SlackService) beginIncomingMessageCleanup(msg slackIncomingMessage) {
+	key := strings.TrimSpace(msg.EventKey)
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cleanupMessageEvents == nil {
+		s.cleanupMessageEvents = make(map[string]struct{})
+	}
+	s.cleanupMessageEvents[key] = struct{}{}
+}
+
+func (s *SlackService) finishIncomingMessageCleanup(msg slackIncomingMessage) {
+	key := strings.TrimSpace(msg.EventKey)
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.cleanupMessageEvents, key)
+	delete(s.processingMessageEvents, key)
+}
+
+func (s *SlackService) cleanupProvisionalTaskUntilSuccess(msg slackIncomingMessage, taskID, reason string) {
+	deleteTask := s.deleteProvisionalTaskFn
+	if deleteTask == nil {
+		deleteTask = s.taskRepo.Delete
+	}
+	delay := s.cleanupRetryDelay
+	if delay <= 0 {
+		delay = 100 * time.Millisecond
+	}
+	for {
+		if err := deleteTask(context.Background(), taskID); err == nil {
+			s.finishIncomingMessageCleanup(msg)
+			return
+		} else {
+			applog.Infof("[slack] cleanup %s task failed task=%s; retrying: %v", reason, taskID, err)
+		}
+		time.Sleep(delay)
+	}
 }
 
 func slackIncomingFilesFromAppMention(event slackevents.AppMentionEvent) []slackIncomingFile {
@@ -901,31 +1086,82 @@ func (s *SlackService) recordQueuedAttachmentFailure(ctx context.Context, projec
 }
 
 func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
+	s.processIncomingMessageWithHandoff(context.Background(), msg, func() {}, false)
+}
+
+func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context, msg slackIncomingMessage, onDurableHandoff func(), asyncPreACKFailures bool) {
 	msg.Text = slackMessageTextOrAttachmentPrompt(msg.Text, len(msg.Files) > 0)
 	if msg.ChannelID == "" || msg.UserID == "" || strings.TrimSpace(msg.Text) == "" {
+		onDurableHandoff() // Valid envelope with unusable message content is terminal.
 		return
 	}
 	if s.taskRepo == nil || s.execRepo == nil || s.llmConfigRepo == nil || s.llmSvc == nil || s.taskSvc == nil || s.projectRepo == nil {
 		applog.Infof("[slack] incoming message ignored: service dependencies are not fully configured")
+		onDurableHandoff() // Configuration errors are not transient event persistence failures.
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), slackProcessTimeout)
-	defer cancel()
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx := parent
+	durableHandoff := onDurableHandoff
+	notifyPreACKFailure := func(notify func()) {
+		if notify == nil {
+			return
+		}
+		if asyncPreACKFailures {
+			go notify()
+			return
+		}
+		notify()
+	}
 	start := time.Now()
 
-	projectID := s.getActiveProject(ctx, msg.TeamID, msg.UserID)
+	projectID, err := s.getActiveProject(ctx, msg.TeamID, msg.UserID)
+	if err != nil {
+		applog.Infof("[slack] active project lookup failed user=%s team=%s: %v", msg.UserID, msg.TeamID, err)
+		return
+	}
 	if projectID == "" {
+		durableHandoff()
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "No active project found. Please create a project first in the web UI.")
 		return
 	}
 	if !s.checkAuthorization(ctx, projectID, msg.UserID) {
+		durableHandoff()
 		applog.Infof("[slack] unauthorized access blocked for user=%s team=%s project=%s", msg.UserID, msg.TeamID, projectID)
 		_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "You are not authorized to use Slack access for this project. Contact the project owner to get access.")
 		return
 	}
 
 	msg.Files = s.resolveSlackIncomingFilesForRouting(ctx, msg.Files)
+	var createDurableFirstTurn func(context.Context, *models.Task, *models.Execution) (bool, error)
+	if s.createExecutionFn == nil && s.slackInboundReceiptRepo != nil && strings.TrimSpace(msg.EventKey) != "" {
+		createDurableFirstTurn = func(ctx context.Context, task *models.Task, execution *models.Execution) (bool, error) {
+			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(exec repository.SQLExecutor) error {
+				if err := s.taskRepo.CreateWithExecutor(ctx, exec, task); err != nil {
+					return err
+				}
+				if s.slackTaskContextRepo != nil {
+					if err := s.slackTaskContextRepo.UpsertWithExecutor(ctx, exec, &models.SlackTaskContext{
+						TaskID:         task.ID,
+						SlackTeamID:    msg.TeamID,
+						SlackChannelID: msg.ChannelID,
+						SlackThreadTS:  msg.ThreadTS,
+						SlackUserID:    msg.UserID,
+					}); err != nil {
+						return err
+					}
+				}
+				execution.TaskID = task.ID
+				if s.createFirstTurnExecutionFn != nil {
+					return s.createFirstTurnExecutionFn(ctx, exec, execution)
+				}
+				return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+			})
+		}
+	}
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform:              "slack",
 		ProjectID:             projectID,
@@ -950,39 +1186,74 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 			if len(msg.Files) == 0 {
 				return channelChatIngressDownloadResult{}, nil
 			}
-			attCtx, imgAtts, chatAtts, err := s.downloadSlackAttachments(ctx, msg.Files)
+			attCtx, imgAtts, chatAtts, err := s.downloadSlackAttachmentsBounded(ctx, msg.Files)
 			return channelChatIngressDownloadResult{AttachmentContext: attCtx, ImageAttachments: imgAtts, ChatAttachments: chatAtts}, err
 		},
-		IncomingAttachmentsNeedVision: func() bool { return slackIncomingFilesRequireVision(msg.Files) },
-		SavePendingAttachments:        s.saveChatAttachmentsToPendingSession,
-		FindActiveExecution:           s.execRepo.FindLatestActiveChatExecution,
+		IncomingAttachmentsNeedVision:     func() bool { return slackIncomingFilesRequireVision(msg.Files) },
+		SavePendingAttachmentsWithContext: s.saveChatAttachmentsToPendingSessionBounded,
+		CleanupAttachmentSources:          s.cleanupSlackAttachmentSourcesBounded,
+		CleanupPendingSession:             s.cleanupSlackPendingSessionBounded,
+		FindActiveExecution:               s.execRepo.FindLatestActiveChatExecution,
 		RecordAttachmentFailure: func(ctx context.Context, agentID, msgText string) {
 			s.recordQueuedAttachmentFailure(ctx, projectID, agentID, msg, msgText)
 		},
 		NewQueuedInput: func() *models.ThreadInput {
 			return &models.ThreadInput{SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID}
 		},
+		CreateQueuedInput: func(ctx context.Context, input *models.ThreadInput) (bool, error) {
+			if s.createQueuedInputFn != nil {
+				return s.createQueuedInputFn(ctx, input)
+			}
+			if s.threadInputRepo == nil {
+				return false, fmt.Errorf("thread input repository is not configured")
+			}
+			if s.slackInboundReceiptRepo == nil || strings.TrimSpace(msg.EventKey) == "" {
+				return false, s.threadInputRepo.CreateQueued(ctx, input)
+			}
+			return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(exec repository.SQLExecutor) error {
+				return s.threadInputRepo.CreateQueuedWithExecutor(ctx, exec, input)
+			})
+		},
 		OnAttachmentDownloadFailed: func(_ context.Context, msgText string) {
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
+			notifyPreACKFailure(func() { _ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText) })
 		},
 		OnAttachmentStoreFailed: func(_ context.Context, msgText string) {
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
+			notifyPreACKFailure(func() { _ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText) })
 		},
 		OnModelSelectionFailed: func(_ context.Context, err error) {
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", err))
+			notifyPreACKFailure(func() {
+				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, fmt.Sprintf("Error selecting model: %v", err))
+			})
 		},
 		OnActiveLookupFailed: func(context.Context) {
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error checking active chat response. Please try again.")
+			notifyPreACKFailure(func() {
+				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error checking active chat response. Please try again.")
+			})
 		},
 		OnQueueFailure: func(context.Context) {
-			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error queueing your message. Please try again.")
+			notifyPreACKFailure(func() {
+				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error queueing your message. Please try again.")
+			})
 		},
 		OnQueued: func(context.Context) {
 			_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Queued. I'll send this after the current response finishes.")
 		},
+		OnDurableHandoff: durableHandoff,
 		FirstTurn: channelChatIngressFirstTurnOptions{
-			Task:         &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
-			ReplyContext: ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
+			Task:                   &models.Task{Title: fmt.Sprintf("Slack %s: %s", time.Now().Format("15:04:05.000"), util.Truncate(msg.Text, 47)), CreatedVia: models.TaskOriginSlack},
+			CreateDurableFirstTurn: createDurableFirstTurn,
+			ReplyContext:           ChannelReplyContext{Source: models.TaskOriginSlack, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID},
+			CreateExecution: func(ctx context.Context, execution *models.Execution) (bool, error) {
+				if s.createExecutionFn != nil {
+					return s.createExecutionFn(ctx, execution)
+				}
+				if s.slackInboundReceiptRepo == nil || strings.TrimSpace(msg.EventKey) == "" {
+					return false, s.execRepo.Create(ctx, execution)
+				}
+				return s.slackInboundReceiptRepo.WithHandoff(ctx, msg.EventKey, func(exec repository.SQLExecutor) error {
+					return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+				})
+			},
 			RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
 				return s.buildSlackActionToolRuntimeForTask(projectID, taskID, slackActionContext{
 					TeamID:    msg.TeamID,
@@ -998,6 +1269,14 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 				}
 				return s.slackTaskContextRepo.Upsert(ctx, &models.SlackTaskContext{TaskID: taskID, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID})
 			},
+			CleanupProvisionalTask: func(ctx context.Context, taskID, reason string) {
+				if !asyncPreACKFailures {
+					cleanupChannelChatProvisionalTask(ctx, "slack", s.taskRepo, taskID, reason)
+					return
+				}
+				s.beginIncomingMessageCleanup(msg)
+				go s.cleanupProvisionalTaskUntilSuccess(msg, taskID, reason)
+			},
 			CompleteExecution: channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 			LinkAttachments:   s.linkAttachmentsToExecution, AttachmentContextAndImages: slackAttachmentContextAndImages,
 			ListChatHistory: func(ctx context.Context, projectID string) ([]models.Execution, error) {
@@ -1005,13 +1284,19 @@ func (s *SlackService) processIncomingMessage(msg slackIncomingMessage) {
 			},
 			FilterChatHistory: filterSlackChatHistory,
 			OnTaskCreateFailure: func(context.Context) {
-				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				notifyPreACKFailure(func() {
+					_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				})
 			},
 			OnTaskContextFailure: func(context.Context) {
-				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				notifyPreACKFailure(func() {
+					_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				})
 			},
 			OnExecutionCreateFailure: func(context.Context) {
-				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				notifyPreACKFailure(func() {
+					_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "Error processing your message. Please try again.")
+				})
 			},
 			OnAttachmentLinkFailure: func(_ context.Context, msgText string) {
 				_ = s.sendSlackMessage(msg.ChannelID, msg.ThreadTS, "⚠️ "+msgText)
@@ -1156,31 +1441,38 @@ func (s *SlackService) setActiveProject(ctx context.Context, teamID, userID, pro
 	return nil
 }
 
-func (s *SlackService) getActiveProject(ctx context.Context, teamID, userID string) string {
+func (s *SlackService) getActiveProject(ctx context.Context, teamID, userID string) (string, error) {
 	key := slackUserProjectKey(teamID, userID)
 
 	s.mu.RLock()
 	if projectID, ok := s.userProjects[key]; ok {
 		s.mu.RUnlock()
-		return projectID
+		return projectID, nil
 	}
 	s.mu.RUnlock()
 
 	if s.slackUserProjectRepo != nil {
-		if saved, err := s.slackUserProjectRepo.GetUserProject(ctx, teamID, userID); err == nil && saved != "" {
+		saved, err := s.slackUserProjectRepo.GetUserProject(ctx, teamID, userID)
+		if err != nil {
+			return "", fmt.Errorf("load saved Slack project: %w", err)
+		}
+		if saved != "" {
 			s.mu.Lock()
 			s.userProjects[key] = saved
 			s.mu.Unlock()
-			return saved
+			return saved, nil
 		}
 	}
 
 	if s.projectRepo == nil {
-		return ""
+		return "", nil
 	}
 	projects, err := s.projectRepo.List(ctx)
-	if err != nil || len(projects) == 0 {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("list Slack projects: %w", err)
+	}
+	if len(projects) == 0 {
+		return "", nil
 	}
 	selected := projects[0].ID
 	for _, p := range projects {
@@ -1192,7 +1484,7 @@ func (s *SlackService) getActiveProject(ctx context.Context, teamID, userID stri
 	s.mu.Lock()
 	s.userProjects[key] = selected
 	s.mu.Unlock()
-	return selected
+	return selected, nil
 }
 
 func slackUserProjectKey(teamID, userID string) string {
@@ -1666,6 +1958,92 @@ func (s *SlackService) slackClientForFiles() *slack.Client {
 		return nil
 	}
 	return slack.New(botToken, slack.OptionHTTPClient(s.httpClient))
+}
+
+func (s *SlackService) cleanupSlackAttachmentSourcesBounded(ctx context.Context, attachments []models.ChatAttachment) {
+	done := make(chan struct{})
+	go func() {
+		cleanup := s.cleanupAttachmentSourcesFn
+		if cleanup == nil {
+			cleanup = cleanupSlackAttachmentSourceDirs
+		}
+		cleanup(attachments)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (s *SlackService) cleanupSlackPendingSessionBounded(ctx context.Context, sessionID string) {
+	done := make(chan struct{})
+	go func() {
+		_ = os.RemoveAll(filepath.Join(s.uploadsDir, "chat", "pending", sessionID))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func (s *SlackService) downloadSlackAttachmentsBounded(ctx context.Context, files []slackIncomingFile) (string, []models.Attachment, []models.ChatAttachment, error) {
+	type result struct {
+		attachmentContext string
+		images            []models.Attachment
+		attachments       []models.ChatAttachment
+		err               error
+	}
+	results := make(chan result, 1)
+	go func() {
+		download := s.downloadSlackAttachmentsFn
+		if download == nil {
+			download = s.downloadSlackAttachments
+		}
+		attachmentContext, images, attachments, err := download(ctx, files)
+		results <- result{attachmentContext: attachmentContext, images: images, attachments: attachments, err: err}
+	}()
+	select {
+	case completed := <-results:
+		return completed.attachmentContext, completed.images, completed.attachments, completed.err
+	case <-ctx.Done():
+		go func() {
+			completed := <-results
+			if completed.err == nil {
+				cleanupSlackAttachmentSourceDirs(completed.attachments)
+			}
+		}()
+		return "", nil, nil, ctx.Err()
+	}
+}
+
+func (s *SlackService) saveChatAttachmentsToPendingSessionBounded(ctx context.Context, attachments []models.ChatAttachment) (string, error) {
+	type result struct {
+		sessionID string
+		err       error
+	}
+	results := make(chan result, 1)
+	go func() {
+		save := s.savePendingAttachmentsFn
+		if save == nil {
+			save = s.saveChatAttachmentsToPendingSession
+		}
+		sessionID, err := save(attachments)
+		results <- result{sessionID: sessionID, err: err}
+	}()
+	select {
+	case completed := <-results:
+		return completed.sessionID, completed.err
+	case <-ctx.Done():
+		go func() {
+			completed := <-results
+			if completed.sessionID != "" {
+				_ = os.RemoveAll(filepath.Join(s.uploadsDir, "chat", "pending", completed.sessionID))
+			}
+		}()
+		return "", ctx.Err()
+	}
 }
 
 func (s *SlackService) saveChatAttachmentsToPendingSession(attachments []models.ChatAttachment) (string, error) {
