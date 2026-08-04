@@ -1632,6 +1632,54 @@ func TestHandler_UpdateTask(t *testing.T) {
 	}
 }
 
+func TestHandler_UpdateTask_DetailCategoryTransitionsRefreshCompletedAt(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	task := createTask(t, tc.handler, "default", "Recompleted Through Detail Edit", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+	})
+	other := createTask(t, tc.handler, "default", "Previously Completed Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+	})
+
+	_, err := tc.db.ExecContext(ctx, `UPDATE tasks SET completed_at = ? WHERE id = ?`, "2000-01-01 00:00:00", task.ID)
+	require.NoError(t, err)
+	_, err = tc.db.ExecContext(ctx, `UPDATE tasks SET completed_at = ? WHERE id = ?`, "2020-01-01 00:00:00", other.ID)
+	require.NoError(t, err)
+
+	updateCategory := func(category models.TaskCategory) {
+		t.Helper()
+		form := url.Values{}
+		form.Set("title", task.Title)
+		form.Set("category", string(category))
+		form.Set("priority", "0")
+		form.Set("prompt", task.Prompt)
+		rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
+		assertCode(t, rec, http.StatusOK)
+	}
+
+	updateCategory(models.CategoryBacklog)
+	movedToBacklog, err := tc.handler.taskSvc.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, movedToBacklog)
+	assert.Equal(t, models.CategoryBacklog, movedToBacklog.Category)
+	assert.Nil(t, movedToBacklog.CompletedAt, "leaving Completed through Task Detail must clear completed_at")
+
+	updateCategory(models.CategoryCompleted)
+	recompleted, err := tc.handler.taskSvc.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, recompleted)
+	require.NotNil(t, recompleted.CompletedAt, "entering Completed through Task Detail must set completed_at")
+	assert.True(t, recompleted.CompletedAt.After(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)))
+
+	completedTasks, err := tc.handler.taskSvc.ListByProjectWithCategorySorts(ctx, "default", string(models.CategoryCompleted), "", "completed_desc")
+	require.NoError(t, err)
+	require.Len(t, completedTasks, 2)
+	assert.Equal(t, task.ID, completedTasks[0].ID, "recompleted task should sort ahead of older completions")
+}
+
 func TestHandler_UpdateTask_NonRunningOnly(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
