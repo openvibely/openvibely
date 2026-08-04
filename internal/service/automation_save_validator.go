@@ -204,6 +204,13 @@ func (v *AutomationSaveValidator) capabilityIssues(ctx context.Context, projectI
 
 func automationUsesGitHub(candidate models.AutomationDraftCandidate) bool {
 	for _, node := range candidate.Nodes {
+		if candidate.AdapterKey == AutomationAdapterGitHubSDLC {
+			switch node.Role {
+			case "offering_manager", "bug_finder", "optimization_finder", "redundancy_finder", "create_github_issue", "github_assignment", "github_inbox", "implementation", "open_pull_request", "pull_request_review", "loop_auditor":
+				return true
+			}
+			continue
+		}
 		switch node.Role {
 		case "create_github_issue", "github_assignment", "github_inbox", "open_pull_request", "pull_request_review":
 			return true

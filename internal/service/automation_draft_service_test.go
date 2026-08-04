@@ -14,6 +14,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestGitHubSDLCCapabilityValidationTracksRetainedRuntimePrompts(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+
+	for _, retainedKey := range []string{"vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder", "auditor"} {
+		reduced := candidate
+		for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
+			if node.Key != retainedKey {
+				reduced = automationCandidateWithoutNode(reduced, node.Key)
+			}
+		}
+		require.Contains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(reduced, models.AutomationCapabilitySnapshot{})), "github_unavailable", retainedKey)
+	}
+
+	terminalOnly := candidate
+	for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
+		if node.Key != "completed" {
+			terminalOnly = automationCandidateWithoutNode(terminalOnly, node.Key)
+		}
+	}
+	require.NotContains(t, issueCodes(drafts.ValidateCandidateWithCapabilities(terminalOnly, models.AutomationCapabilitySnapshot{})), "github_unavailable")
+}
+
 func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
 	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {

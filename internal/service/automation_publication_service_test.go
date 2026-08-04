@@ -96,22 +96,36 @@ func seedExistingVisionDriverAutomation(t *testing.T, h automationSaveHarness) (
 	return definition, candidate
 }
 
-func TestGitHubSDLCReducedGraphWithoutGitHubRolesDoesNotRequireGitHubSetup(t *testing.T) {
-	h := newAutomationSaveHarness(t, "Reduced GitHub graph without GitHub capabilities")
+func TestGitHubSDLCReducedGraphRequiresSetupOnlyForRetainedGitHubRuntimeNodes(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Reduced GitHub graph capability requirements")
 	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
 	require.NoError(t, err)
-	for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
-		if node.Key != "vision_suggestions" {
-			candidate = automationCandidateWithoutNode(candidate, node.Key)
+
+	for _, retainedKey := range []string{"vision_suggestions", "auditor"} {
+		reduced := candidate
+		for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
+			if node.Key != retainedKey {
+				reduced = automationCandidateWithoutNode(reduced, node.Key)
+			}
 		}
+		_, err = h.compiler.Save(context.Background(), AutomationSaveRequest{
+			ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: reduced,
+		})
+		require.ErrorContains(t, err, "Configure the selected GitHub authentication mode", retainedKey)
 	}
 
+	terminalOnly := candidate
+	for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
+		if node.Key != "completed" {
+			terminalOnly = automationCandidateWithoutNode(terminalOnly, node.Key)
+		}
+	}
 	result, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
-		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate,
+		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: terminalOnly,
 	})
 	require.NoError(t, err)
 	require.Len(t, result.Definition.Nodes, 1)
-	require.Equal(t, "vision_suggestions", result.Definition.Nodes[0].NodeKey)
+	require.Equal(t, "completed", result.Definition.Nodes[0].NodeKey)
 }
 
 func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *testing.T) {
