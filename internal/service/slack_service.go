@@ -116,6 +116,7 @@ type SlackService struct {
 	userProjects                   map[string]string
 	processedMessageEvents         map[string]time.Time
 	processingMessageEvents        map[string]struct{}
+	cleanupMessageEvents           map[string]struct{}
 	postMessageFn                  func(channelID, threadTS, text string) (string, error)
 	openConversationFn             func(userID string) (string, error)
 	processIncomingMessageFn       func(msg slackIncomingMessage)
@@ -161,6 +162,7 @@ func NewSlackService(
 		userProjects:            make(map[string]string),
 		processedMessageEvents:  make(map[string]time.Time),
 		processingMessageEvents: make(map[string]struct{}),
+		cleanupMessageEvents:    make(map[string]struct{}),
 		preACKTimeout:           slackPreACKTimeout,
 	}
 }
@@ -810,10 +812,39 @@ func (s *SlackService) finishIncomingMessage(msg slackIncomingMessage, durable b
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.processingMessageEvents, key)
-	if durable {
-		s.processedMessageEvents[key] = time.Now()
+	if !durable {
+		if _, cleanupPending := s.cleanupMessageEvents[key]; cleanupPending {
+			return
+		}
+		delete(s.processingMessageEvents, key)
+		return
 	}
+	delete(s.processingMessageEvents, key)
+	s.processedMessageEvents[key] = time.Now()
+}
+
+func (s *SlackService) beginIncomingMessageCleanup(msg slackIncomingMessage) {
+	key := strings.TrimSpace(msg.EventKey)
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cleanupMessageEvents == nil {
+		s.cleanupMessageEvents = make(map[string]struct{})
+	}
+	s.cleanupMessageEvents[key] = struct{}{}
+}
+
+func (s *SlackService) finishIncomingMessageCleanup(msg slackIncomingMessage) {
+	key := strings.TrimSpace(msg.EventKey)
+	if key == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.cleanupMessageEvents, key)
+	delete(s.processingMessageEvents, key)
 }
 
 func slackIncomingFilesFromAppMention(event slackevents.AppMentionEvent) []slackIncomingFile {
@@ -1169,6 +1200,17 @@ func (s *SlackService) processIncomingMessageWithHandoff(parent context.Context,
 					return nil
 				}
 				return s.slackTaskContextRepo.Upsert(ctx, &models.SlackTaskContext{TaskID: taskID, SlackTeamID: msg.TeamID, SlackChannelID: msg.ChannelID, SlackThreadTS: msg.ThreadTS, SlackUserID: msg.UserID})
+			},
+			CleanupProvisionalTask: func(ctx context.Context, taskID, reason string) {
+				if !asyncPreACKFailures {
+					cleanupChannelChatProvisionalTask(ctx, "slack", s.taskRepo, taskID, reason)
+					return
+				}
+				s.beginIncomingMessageCleanup(msg)
+				go func() {
+					defer s.finishIncomingMessageCleanup(msg)
+					cleanupChannelChatProvisionalTask(context.Background(), "slack", s.taskRepo, taskID, reason)
+				}()
 			},
 			CompleteExecution: channelCompletionFunc("slack", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 			LinkAttachments:   s.linkAttachmentsToExecution, AttachmentContextAndImages: slackAttachmentContextAndImages,

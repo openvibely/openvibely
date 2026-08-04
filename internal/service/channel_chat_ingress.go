@@ -116,6 +116,7 @@ type channelChatIngressFirstTurnOptions struct {
 
 	CreateTaskContext          func(context.Context, string) error
 	CreateExecution            func(context.Context, *models.Execution) (bool, error)
+	CleanupProvisionalTask     func(context.Context, string, string)
 	CompleteExecution          func(context.Context, string, string, string, string, int, int64)
 	LinkAttachments            func(context.Context, string, []models.ChatAttachment) ([]models.ChatAttachment, error)
 	AttachmentContextAndImages func([]models.ChatAttachment) (string, []models.Attachment)
@@ -863,6 +864,14 @@ func runChannelChatQueuedInput(ctx context.Context, opts channelChatIngressQueue
 	return true
 }
 
+func cleanupChannelChatProvisionalTaskWithOptions(ctx context.Context, opts channelChatIngressFirstTurnOptions, platform, taskID, reason string) {
+	if opts.CleanupProvisionalTask != nil {
+		opts.CleanupProvisionalTask(ctx, taskID, reason)
+		return
+	}
+	cleanupChannelChatProvisionalTask(ctx, platform, opts.TaskRepo, taskID, reason)
+}
+
 func cleanupChannelChatProvisionalTask(ctx context.Context, platform string, taskRepo *repository.TaskRepo, taskID, reason string) {
 	if taskRepo == nil || strings.TrimSpace(taskID) == "" {
 		return
@@ -904,7 +913,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 		if err := opts.CreateTaskContext(ctx, opts.Task.ID); err != nil {
 			applog.Infof("[%s] create chat context failed task=%s: %v", platform, opts.Task.ID, err)
 			cleanupChannelChatAttachmentSourceDirs(opts.Attachments)
-			cleanupChannelChatProvisionalTask(ctx, platform, opts.TaskRepo, opts.Task.ID, "chat context")
+			cleanupChannelChatProvisionalTaskWithOptions(ctx, opts, platform, opts.Task.ID, "chat context")
 			if opts.OnTaskContextFailure != nil {
 				opts.OnTaskContextFailure(ctx)
 			}
@@ -922,7 +931,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 	if err != nil {
 		applog.Infof("[%s] create execution failed: %v", platform, err)
 		cleanupChannelChatAttachmentSourceDirs(opts.Attachments)
-		cleanupChannelChatProvisionalTask(ctx, platform, opts.TaskRepo, opts.Task.ID, "chat task after execution create failure")
+		cleanupChannelChatProvisionalTaskWithOptions(ctx, opts, platform, opts.Task.ID, "chat task after execution create failure")
 		if opts.OnExecutionCreateFailure != nil {
 			opts.OnExecutionCreateFailure(ctx)
 		}
@@ -933,7 +942,7 @@ func runChannelChatFirstTurn(ctx context.Context, opts channelChatIngressFirstTu
 	}
 	if alreadyHandedOff {
 		cleanupChannelChatAttachmentSourceDirs(opts.Attachments)
-		cleanupChannelChatProvisionalTask(ctx, platform, opts.TaskRepo, opts.Task.ID, "duplicate chat")
+		cleanupChannelChatProvisionalTaskWithOptions(ctx, opts, platform, opts.Task.ID, "duplicate chat")
 		return true, nil
 	}
 

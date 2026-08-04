@@ -274,14 +274,15 @@ func TestSlackService_SocketEventFirstTurnPersistenceFailureRedelivery(t *testin
 	event := slackSocketMessageEvent("E1", "1710000000.100000")
 	svc.handleSocketEvent(context.Background(), nil, event)
 	require.Equal(t, 0, acks)
-	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
-	require.NoError(t, err)
-	require.Empty(t, tasks)
+	require.Eventually(t, func() bool {
+		tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+		return err == nil && len(tasks) == 0
+	}, time.Second, 10*time.Millisecond, "failed first-turn cleanup must finish before retry admission")
 
 	svc.handleSocketEvent(context.Background(), nil, event)
 	require.Equal(t, 1, acks)
 	require.Equal(t, 2, attempts)
-	tasks, err = taskRepo.ListByProject(context.Background(), projectID, "")
+	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
 
@@ -482,9 +483,85 @@ func TestSlackService_SocketEventPreACKFailureCallbackDoesNotBlock(t *testing.T)
 	}
 	close(releaseCallback)
 	require.Equal(t, 0, acks)
+	require.Eventually(t, func() bool {
+		tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+		return err == nil && len(tasks) == 0
+	}, time.Second, 10*time.Millisecond, "asynchronous failure cleanup must remove the provisional task")
+}
+
+func TestSlackService_SocketEventDeadlineCleanupDoesNotBlockAndRemovesProvisionalTask(t *testing.T) {
+	svc, db, taskRepo, execRepo, _, _, projectID := newSlackSocketIngressTestService(t)
+	svc.preACKTimeout = 30 * time.Millisecond
+	acks := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+
+	var blockingTx *sql.Tx
+	attempts := 0
+	cleanupBlocked := make(chan struct{})
+	svc.createExecutionFn = func(ctx context.Context, execution *models.Execution) (bool, error) {
+		attempts++
+		if attempts > 1 {
+			return false, execRepo.Create(ctx, execution)
+		}
+		var err error
+		blockingTx, err = db.Begin()
+		require.NoError(t, err)
+		_, err = blockingTx.Exec(`SELECT 1`)
+		require.NoError(t, err)
+		<-ctx.Done()
+		close(cleanupBlocked)
+		return false, ctx.Err()
+	}
+
+	done := make(chan struct{})
+	started := time.Now()
+	go func() {
+		svc.handleSocketEvent(context.Background(), nil, slackSocketMessageEvent("E1", "1710000000.100000"))
+		close(done)
+	}()
+
+	select {
+	case <-cleanupBlocked:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("execution persistence did not reach deadline cleanup")
+	}
+	select {
+	case <-done:
+		if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+			t.Fatalf("socket event returned after %s, want bounded pre-ACK handling", elapsed)
+		}
+	case <-time.After(250 * time.Millisecond):
+		require.NoError(t, blockingTx.Rollback())
+		<-done
+		t.Fatal("blocked provisional-task cleanup extended socket handling beyond its deadline")
+	}
+	require.Equal(t, 0, acks)
+
+	redeliveryDone := make(chan struct{})
+	go func() {
+		svc.handleSocketEvent(context.Background(), nil, slackSocketMessageEvent("E1-redelivery", "1710000000.100000"))
+		close(redeliveryDone)
+	}()
+	select {
+	case <-redeliveryDone:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("redelivery blocked while provisional-task cleanup was pending")
+	}
+	require.Equal(t, 0, acks)
+	require.Equal(t, 1, attempts, "redelivery must not race ahead of provisional-task cleanup")
+
+	require.NoError(t, blockingTx.Rollback())
+	require.Eventually(t, func() bool {
+		tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
+		return err == nil && len(tasks) == 0
+	}, time.Second, 10*time.Millisecond, "detached compensation must remove the provisional task")
+
+	svc.handleSocketEvent(context.Background(), nil, slackSocketMessageEvent("E1-retry", "1710000000.100000"))
+	require.Equal(t, 1, acks)
+	require.Equal(t, 2, attempts)
 	tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
 	require.NoError(t, err)
-	require.Empty(t, tasks)
+	require.Len(t, tasks, 1)
 }
 
 func TestRunChannelChatFirstTurnDeadlineCleanupUsesNonCancelledContext(t *testing.T) {
