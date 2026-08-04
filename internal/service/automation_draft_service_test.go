@@ -14,34 +14,52 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMaintainedSDLCTemplatesAllowDeletingOptionalProducerBranches(t *testing.T) {
+func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
 	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
 	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
 		t.Run(adapterKey, func(t *testing.T) {
 			candidate, err := drafts.TemplateCandidate(adapterKey)
 			require.NoError(t, err)
-			for _, producerKey := range []string{"vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder"} {
-				candidate = automationCandidateWithoutNode(candidate, producerKey)
+
+			for _, key := range []string{"vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder", "auditor"} {
+				withoutOneTemplateNode := automationCandidateWithoutNode(candidate, key)
+				require.Empty(t, drafts.ValidateCandidate(withoutOneTemplateNode), key)
 			}
 
-			require.Empty(t, drafts.ValidateCandidate(candidate))
+			visionOnly := candidate
+			for _, node := range candidate.Nodes {
+				if node.Key != "vision_suggestions" {
+					visionOnly = automationCandidateWithoutNode(visionOnly, node.Key)
+				}
+			}
+			reconnected := candidate
+			reconnected.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+			reconnected.Edges[0].Key = "user_reconnected_edge"
+			require.Empty(t, drafts.ValidateCandidate(reconnected))
 
-			missingRequired := automationCandidateWithoutNode(candidate, "completed")
-			issues := drafts.ValidateCandidate(missingRequired)
-			require.Contains(t, issueCodes(issues), "missing_node")
-			require.Contains(t, issues[0].Message, "completed")
-
-			candidateWithMissingEdge, err := drafts.TemplateCandidate(adapterKey)
-			require.NoError(t, err)
-			requiredEdgeKey := "implementation_to_completed"
+			stranded := automationCandidateWithoutNode(candidate, "completed")
+			issues := drafts.ValidateCandidate(stranded)
+			require.NotContains(t, issueCodes(issues), "missing_node")
+			require.NotContains(t, issueCodes(issues), "missing_edge")
 			if adapterKey == AutomationAdapterGitHubSDLC {
-				requiredEdgeKey = "review_to_completed"
+				require.Contains(t, issueCodes(issues), "pull_request_review_target")
+			} else {
+				require.Contains(t, issueCodes(issues), "native_implementation_target")
 			}
-			candidateWithMissingEdge = automationCandidateWithoutEdge(candidateWithMissingEdge, requiredEdgeKey)
-			edgeIssues := drafts.ValidateCandidate(candidateWithMissingEdge)
-			require.Contains(t, issueCodes(edgeIssues), "missing_edge")
-			require.Contains(t, edgeIssues[0].Message, requiredEdgeKey)
-			require.Contains(t, edgeIssues[0].Message, "completed")
+
+			missingTerminalEdge := candidate
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				missingTerminalEdge = automationCandidateWithoutEdge(missingTerminalEdge, "review_to_completed")
+			} else {
+				missingTerminalEdge = automationCandidateWithoutEdge(missingTerminalEdge, "implementation_to_completed")
+			}
+			edgeIssues := drafts.ValidateCandidate(missingTerminalEdge)
+			require.NotContains(t, issueCodes(edgeIssues), "missing_edge")
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				require.Contains(t, issueCodes(edgeIssues), "pull_request_review_target")
+			} else {
+				require.Contains(t, issueCodes(edgeIssues), "native_implementation_target")
+			}
 		})
 	}
 }

@@ -132,6 +132,21 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 			}
 			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE id = ?`, visionTaskID), "replacement preserves the backing domain Task while removing its graph binding")
 			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules WHERE id = ?`, visionScheduleID))
+
+			producerOnly := candidate
+			for _, node := range append([]models.AutomationDraftNode(nil), producerOnly.Nodes...) {
+				if node.Key != "bug_finder" {
+					producerOnly = automationCandidateWithoutNode(producerOnly, node.Key)
+				}
+			}
+			reduced, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
+				Source: "manual", CreatedVia: "web", Candidate: producerOnly})
+			require.NoError(t, err, "a template may be reduced to any valid remaining graph")
+			require.Len(t, reduced.Definition.Nodes, 1)
+			require.Equal(t, "bug_finder", reduced.Definition.Nodes[0].NodeKey)
+			for _, resource := range reduced.Definition.Resources {
+				require.Equal(t, "bug_finder", resource.NodeKey)
+			}
 		})
 	}
 }

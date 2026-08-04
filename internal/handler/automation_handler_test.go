@@ -971,9 +971,9 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 	}).Execute()
 	require.Equal(t, http.StatusOK, invalid.Code, invalid.Body.String())
 	require.Empty(t, invalid.Header().Get("HX-Redirect"))
-	require.Contains(t, invalid.Body.String(), "Required node")
-	require.Contains(t, invalid.Body.String(), "completed")
-	require.Contains(t, invalid.Body.String(), "Restore it before saving")
+	require.Contains(t, invalid.Body.String(), "Human review node")
+	require.Contains(t, invalid.Body.String(), "review")
+	require.Contains(t, invalid.Body.String(), "terminal Outcome")
 }
 
 func TestAutomationBrowserRejectsForgedNewVisionDriverCandidateAndAllowsExistingEdit(t *testing.T) {

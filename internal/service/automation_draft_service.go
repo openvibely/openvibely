@@ -397,6 +397,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		automationobs.Event("automation.graph.limit_reached", automationobs.String("adapter_key", candidate.AdapterKey), automationobs.String("limit", "nodes_or_edges"))
 	}
 
+	flexibleTemplate := adapter.Key == AutomationAdapterNativeSDLC || adapter.Key == AutomationAdapterGitHubSDLC
 	canonicalNodes := make(map[string]AutomationAdapterNode, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
 		canonicalNodes[node.Key] = node
@@ -441,9 +442,11 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		}
 		issues = append(issues, validateAutomationNodeConfig(adapter, canonical, node)...)
 	}
-	for key, canonical := range canonicalNodes {
-		if !seenNodes[key] && !canonical.Optional {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "missing_node", Message: fmt.Sprintf("Required node %q is missing. Restore it before saving.", key)})
+	if !flexibleTemplate {
+		for key := range canonicalNodes {
+			if !seenNodes[key] {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "missing_node", Message: fmt.Sprintf("Required node %q is missing. Restore it before saving.", key)})
+			}
 		}
 	}
 
@@ -467,7 +470,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Graph edge references an invalid node."})
 			continue
 		}
-		if adapter.DynamicTopology {
+		if adapter.DynamicTopology || flexibleTemplate {
 			conditionState, hasCondition := customAutomationEdgeConditionState(edge.Condition)
 			fromNode := draftNodes[edge.From]
 			switch fromNode.Role {
@@ -513,16 +516,197 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Edge conditions are fixed by the registered adapter."})
 		}
 	}
-	for key, canonical := range canonicalEdges {
-		if seenCanonicalEdges[key] || !seenNodes[canonical.From] || !seenNodes[canonical.To] {
-			continue
+	if !flexibleTemplate {
+		for key, canonical := range canonicalEdges {
+			if seenCanonicalEdges[key] || !seenNodes[canonical.From] || !seenNodes[canonical.To] {
+				continue
+			}
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: canonical.From, Code: "missing_edge", Message: fmt.Sprintf("Required connection %q from node %q to node %q is missing. Restore that connection before saving.", key, canonical.From, canonical.To)})
 		}
-		issues = append(issues, models.AutomationValidationIssue{NodeKey: canonical.From, Code: "missing_edge", Message: fmt.Sprintf("Required connection %q from node %q to node %q is missing. Restore that connection before saving.", key, canonical.From, canonical.To)})
 	}
 	if adapter.DynamicTopology {
 		issues = append(issues, validateCustomAutomationTopology(candidate)...)
+	} else if flexibleTemplate {
+		issues = append(issues, validateMaintainedSDLCTopology(candidate)...)
 	}
 	sortAutomationValidationIssues(issues)
+	return issues
+}
+
+func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) []models.AutomationValidationIssue {
+	if len(candidate.Nodes) == 0 {
+		return []models.AutomationValidationIssue{{Code: "empty_graph", Message: "Keep at least one runnable node before saving."}}
+	}
+	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
+	incoming := make(map[string][]models.AutomationDraftEdge, len(candidate.Nodes))
+	outgoing := make(map[string][]models.AutomationDraftEdge, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		nodes[node.Key] = node
+	}
+	for _, edge := range candidate.Edges {
+		if _, ok := nodes[edge.From]; !ok {
+			continue
+		}
+		if _, ok := nodes[edge.To]; !ok || edge.From == edge.To {
+			continue
+		}
+		outgoing[edge.From] = append(outgoing[edge.From], edge)
+		incoming[edge.To] = append(incoming[edge.To], edge)
+	}
+
+	isProducer := func(role string) bool {
+		return role == "offering_manager" || role == "bug_finder" || role == "optimization_finder" || role == "redundancy_finder"
+	}
+	var issues []models.AutomationValidationIssue
+	for _, edge := range candidate.Edges {
+		from, fromOK := nodes[edge.From]
+		to, toOK := nodes[edge.To]
+		if !fromOK || !toOK || edge.From == edge.To {
+			continue
+		}
+		supported := false
+		if candidate.AdapterKey == AutomationAdapterNativeSDLC {
+			supported = isProducer(from.Role) && to.Role == "create_notification" ||
+				from.Role == "create_notification" && to.Role == "native_approval" ||
+				from.Role == "native_approval" && (to.Role == "rejected" || to.Role == "native_inbox") ||
+				from.Role == "native_inbox" && to.Role == "implementation" ||
+				from.Role == "implementation" && to.Role == "completed"
+		} else {
+			supported = isProducer(from.Role) && to.Role == "create_github_issue" ||
+				from.Role == "create_github_issue" && to.Role == "github_assignment" ||
+				from.Role == "github_assignment" && to.Role == "github_inbox" ||
+				from.Role == "github_inbox" && to.Role == "implementation" ||
+				from.Role == "implementation" && to.Role == "open_pull_request" ||
+				from.Role == "open_pull_request" && to.Role == "pull_request_review" ||
+				from.Role == "pull_request_review" && to.Role == "completed"
+		}
+		if !supported {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: from.Key, Code: "unsupported_handoff", Message: fmt.Sprintf("Connection %q from node %q to node %q is not a supported runtime handoff.", edge.Key, from.Key, to.Key)})
+			continue
+		}
+		if from.Role == "native_approval" {
+			state, _ := customAutomationEdgeConditionState(edge.Condition)
+			expected := "approved"
+			if to.Role == "rejected" {
+				expected = "rejected"
+			}
+			if state != expected {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: from.Key, Code: "unsupported_condition", Message: fmt.Sprintf("Connection %q to node %q must use the %q result.", edge.Key, to.Key, expected)})
+			}
+		}
+	}
+
+	for _, node := range candidate.Nodes {
+		in, out := incoming[node.Key], outgoing[node.Key]
+		add := func(code, message string) {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: code, Message: message})
+		}
+		switch node.Role {
+		case "offering_manager", "bug_finder", "optimization_finder", "redundancy_finder", "loop_auditor":
+			if len(in) != 0 {
+				add("schedule_parents", fmt.Sprintf("Schedule node %q cannot have an incoming connection.", node.Key))
+			}
+		case "create_notification":
+			if len(in) == 0 || len(out) != 1 || nodes[out[0].To].Role != "native_approval" {
+				add("notification_connections", fmt.Sprintf("Node %q needs at least one producer source and exactly one Human approval target.", node.Key))
+			}
+		case "native_approval":
+			if len(in) == 0 {
+				add("approval_source", fmt.Sprintf("Human approval node %q needs a Create notification source.", node.Key))
+			}
+			states := map[string]int{}
+			for _, edge := range out {
+				state, _ := customAutomationEdgeConditionState(edge.Condition)
+				states[state]++
+			}
+			if states["approved"] > 1 || states["rejected"] > 1 {
+				add("approval_branches", fmt.Sprintf("Human approval node %q may have at most one target for each result.", node.Key))
+			}
+		case "native_inbox":
+			if len(in) != 1 || nodes[in[0].From].Role != "native_approval" {
+				add("native_inbox_source", fmt.Sprintf("Approved inbox node %q needs exactly one approved Human approval source.", node.Key))
+			}
+			if len(out) != 1 || nodes[out[0].To].Role != "implementation" {
+				add("native_inbox_target", fmt.Sprintf("Approved inbox node %q needs exactly one implementation target.", node.Key))
+			}
+		case "create_github_issue":
+			if len(in) == 0 || len(out) != 1 || nodes[out[0].To].Role != "github_assignment" {
+				add("github_issue_connections", fmt.Sprintf("Node %q needs at least one producer source and exactly one Human assignment target.", node.Key))
+			}
+		case "github_assignment":
+			if len(in) == 0 {
+				add("github_assignment_source", fmt.Sprintf("Human assignment node %q needs a Create GitHub issue source.", node.Key))
+			}
+			if len(out) != 1 || nodes[out[0].To].Role != "github_inbox" {
+				add("github_assignment_target", fmt.Sprintf("Human assignment node %q needs exactly one assigned GitHub inbox target.", node.Key))
+			}
+		case "github_inbox":
+			if len(in) != 1 || nodes[in[0].From].Role != "github_assignment" {
+				add("github_inbox_source", fmt.Sprintf("GitHub inbox node %q needs exactly one Human assignment source.", node.Key))
+			}
+			if len(out) != 1 || nodes[out[0].To].Role != "implementation" {
+				add("github_inbox_target", fmt.Sprintf("GitHub inbox node %q needs exactly one implementation target.", node.Key))
+			}
+		case "implementation":
+			if candidate.AdapterKey == AutomationAdapterNativeSDLC {
+				if len(in) != 1 || nodes[in[0].From].Role != "native_inbox" {
+					add("native_implementation_source", fmt.Sprintf("Implementation node %q needs exactly one Approved inbox source.", node.Key))
+				}
+				if len(out) != 1 || nodes[out[0].To].Type != models.AutomationNodeOutcome {
+					add("native_implementation_target", fmt.Sprintf("Implementation node %q needs exactly one terminal Outcome.", node.Key))
+				}
+			} else {
+				if len(in) != 1 || nodes[in[0].From].Role != "github_inbox" {
+					add("github_implementation_source", fmt.Sprintf("Implementation node %q needs exactly one GitHub inbox source.", node.Key))
+				}
+				if len(out) != 1 || nodes[out[0].To].Role != "open_pull_request" {
+					add("github_implementation_target", fmt.Sprintf("Implementation node %q needs exactly one Open pull request target.", node.Key))
+				}
+			}
+		case "open_pull_request":
+			if len(in) != 1 || nodes[in[0].From].Role != "implementation" {
+				add("pull_request_source", fmt.Sprintf("Open pull request node %q needs exactly one implementation source.", node.Key))
+			}
+			if len(out) != 1 || nodes[out[0].To].Role != "pull_request_review" {
+				add("pull_request_target", fmt.Sprintf("Open pull request node %q needs exactly one Human review target.", node.Key))
+			}
+		case "pull_request_review":
+			if len(in) != 1 || nodes[in[0].From].Role != "open_pull_request" {
+				add("pull_request_review_source", fmt.Sprintf("Human review node %q needs exactly one Open pull request source.", node.Key))
+			}
+			if len(out) != 1 || nodes[out[0].To].Type != models.AutomationNodeOutcome {
+				add("pull_request_review_target", fmt.Sprintf("Human review node %q needs exactly one terminal Outcome.", node.Key))
+			}
+		case "completed", "rejected":
+			if len(out) != 0 {
+				add("outcome_terminal", fmt.Sprintf("Outcome node %q must be the end of a path.", node.Key))
+			}
+		}
+	}
+
+	indegree := make(map[string]int, len(nodes))
+	queue := make([]string, 0, len(nodes))
+	for key := range nodes {
+		indegree[key] = len(incoming[key])
+		if indegree[key] == 0 {
+			queue = append(queue, key)
+		}
+	}
+	visited := 0
+	for len(queue) > 0 {
+		key := queue[0]
+		queue = queue[1:]
+		visited++
+		for _, edge := range outgoing[key] {
+			indegree[edge.To]--
+			if indegree[edge.To] == 0 {
+				queue = append(queue, edge.To)
+			}
+		}
+	}
+	if visited != len(nodes) {
+		issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_cycle", Message: "Executable Automation handoffs must not contain a cycle."})
+	}
 	return issues
 }
 
