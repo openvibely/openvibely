@@ -332,6 +332,24 @@ func (h *Handler) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 	h.executionStreamHub = hub
 }
 
+func (h *Handler) cancelRunningExecutionsAndPublish(ctx context.Context, taskID, operation string) {
+	if h == nil || h.execRepo == nil {
+		return
+	}
+	cancelledIDs, err := h.execRepo.CancelRunningByTaskReturningIDs(ctx, taskID)
+	if err != nil {
+		applog.Infof("[handler] %s error cancelling running executions task=%s: %v", operation, taskID, err)
+		return
+	}
+	if len(cancelledIDs) == 0 {
+		return
+	}
+	applog.Infof("[handler] %s cancelled %d running executions task=%s", operation, len(cancelledIDs), taskID)
+	for _, id := range cancelledIDs {
+		h.publishExecutionTerminal(id, models.ExecCancelled, "cancelled")
+	}
+}
+
 func (h *Handler) publishExecutionTerminal(execID string, status models.ExecutionStatus, errMsg string) {
 	if h == nil || h.executionStreamHub == nil || execID == "" {
 		return

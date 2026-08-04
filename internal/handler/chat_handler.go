@@ -373,16 +373,7 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		applog.Infof("[handler] ChatStop error preserving chat category task=%s: %v", activeChatExec.TaskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to preserve chat history")
 	}
-	if h.execRepo != nil {
-		if cancelledIDs, err := h.execRepo.CancelRunningByTaskReturningIDs(c.Request().Context(), activeChatExec.TaskID); err != nil {
-			applog.Infof("[handler] ChatStop error cancelling running executions task=%s: %v", activeChatExec.TaskID, err)
-		} else if len(cancelledIDs) > 0 {
-			applog.Infof("[handler] ChatStop cancelled %d running executions task=%s", len(cancelledIDs), activeChatExec.TaskID)
-			for _, id := range cancelledIDs {
-				h.publishExecutionTerminal(id, models.ExecCancelled, "cancelled")
-			}
-		}
-	}
+	h.cancelRunningExecutionsAndPublish(c.Request().Context(), activeChatExec.TaskID, "ChatStop")
 	if isHTMX(c) {
 		return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false))
 	}
