@@ -141,7 +141,7 @@ func TestAlertsContent_InspectCopyIncludesSafeStructuredDetailsForAllAlertKinds(
 	for _, required := range []string{
 		`<summary class="cursor-pointer text-sm font-medium">Inspect alert</summary>`,
 		`<summary class="cursor-pointer text-sm font-medium">Inspect notification</summary>`,
-		`class="relative mt-3 min-w-0 max-w-full pr-8"`,
+		`class="relative mt-3 min-h-6 min-w-0 max-w-full pr-8"`,
 		`class="btn btn-xs btn-ghost btn-square absolute right-0 top-0"`,
 		`data-alert-copy`,
 		`aria-label="Copy inspected alert details"`, `aria-label="Copy inspected notification details"`,

@@ -40,7 +40,12 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 		t.Fatalf("render Alerts content: %v", err)
 	}
 
-	runner := `<script>
+	runner := `<style>
+	.hidden { display: none; }
+	details > div { position: relative; margin-top: 0.75rem; padding-right: 2rem; }
+	[data-alert-copy] { position: absolute; right: 0; top: 0; width: 1.5rem; height: 1.5rem; }
+	.min-h-6 { min-height: 1.5rem; }
+	</style><script>
 	window.addEventListener('DOMContentLoaded', function() {
 	  function report(status, message) { fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
 	  function fail(message) { throw new Error(message); }
@@ -52,6 +57,17 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	    var operational = document.querySelector('#alert-operational-1 [data-alert-copy]');
 	    var notification = document.querySelector('#alert-notification-1 [data-alert-copy]');
 	    if (!operational || !notification) fail('missing inspect copy buttons');
+	    var operationalDetails = operational.closest('details');
+	    var operationalContent = operational.parentElement;
+	    var operationalSource = operationalDetails && operationalDetails.nextElementSibling;
+	    if (!operationalDetails || !operationalContent || !operationalSource) fail('missing operational inspect geometry elements');
+	    operationalDetails.open = true;
+	    var contentRect = operationalContent.getBoundingClientRect();
+	    var copyRect = operational.getBoundingClientRect();
+	    var sourceRect = operationalSource.getBoundingClientRect();
+	    if (contentRect.height < copyRect.height) fail('empty inspect content did not reserve copy button height');
+	    if (copyRect.bottom > contentRect.bottom + 0.5) fail('copy button overflowed empty inspect content');
+	    if (copyRect.bottom > sourceRect.top + 0.5) fail('copy button overlapped source row');
 	    operational.click();
 	    await wait(0);
 	    if (operational.textContent.trim() !== 'Copied') fail('success feedback was not shown');
