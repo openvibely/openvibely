@@ -593,6 +593,88 @@ func (r *AutomationRepo) RenewDispatchLease(ctx context.Context, dispatchID, cla
 	return nil
 }
 
+func (r *AutomationRepo) MarkDispatchQueued(ctx context.Context, dispatchID, claimant string) error {
+	result, err := r.db.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = NULL,
+		claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND status = 'processing' AND claimed_by = ?`, dispatchID, claimant)
+	if err != nil {
+		return err
+	}
+	if changed, _ := result.RowsAffected(); changed != 1 {
+		return ErrAutomationDispatchLease
+	}
+	return nil
+}
+
+func (r *AutomationRepo) AbandonQueuedDispatch(ctx context.Context, dispatchID, message string) error {
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
+	var invocationID string
+	if err := conn.QueryRowContext(ctx, `SELECT invocation_id FROM automation_dispatch_outbox
+		WHERE id = ? AND status = 'submitted' AND execution_id IS NULL`, dispatchID).Scan(&invocationID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	message = strings.TrimSpace(message)
+	if _, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'failed', last_error = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ?`, message, dispatchID); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE automation_invocations SET status = 'cancelled', error_message = ?,
+		completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?`, message, invocationID); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatchID); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func (r *AutomationRepo) ListAbandonedQueuedDispatches(ctx context.Context, limit int) ([]models.AutomationDispatch, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT d.id, d.invocation_id, d.task_id, '', d.status, d.attempts,
+		d.claimed_by, d.claim_expires_at, d.next_attempt_at, d.last_error, d.created_at, d.updated_at
+		FROM automation_dispatch_outbox d JOIN tasks t ON t.id = d.task_id
+		WHERE d.status = 'submitted' AND d.execution_id IS NULL
+		AND (t.status != 'pending' OR t.category NOT IN ('active','scheduled'))
+		ORDER BY d.updated_at, d.id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []models.AutomationDispatch
+	for rows.Next() {
+		var value models.AutomationDispatch
+		if err := rows.Scan(&value.ID, &value.InvocationID, &value.TaskID, &value.ExecutionID, &value.Status,
+			&value.Attempts, &value.ClaimedBy, &value.ClaimExpiresAt, &value.NextAttemptAt, &value.LastError,
+			&value.CreatedAt, &value.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
+	return out, rows.Err()
+}
+
 func (r *AutomationRepo) MarkDispatchSubmitted(ctx context.Context, dispatchID, claimant, executionID string) error {
 	result, err := r.db.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = ?,
 		claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
@@ -2329,10 +2411,12 @@ func (r *AutomationRepo) ListRecoverablePreparedDispatches(ctx context.Context, 
 	rows, err := r.db.QueryContext(ctx, `SELECT d.id, d.invocation_id, d.task_id, COALESCE(d.execution_id, ''),
 		d.status, d.attempts, d.claimed_by, d.claim_expires_at, d.next_attempt_at, d.last_error, d.created_at, d.updated_at
 		FROM automation_dispatch_outbox d
-		JOIN executions e ON e.id = d.execution_id AND e.dispatch_id = d.id
+		LEFT JOIN executions e ON e.id = d.execution_id AND e.dispatch_id = d.id
 		JOIN tasks t ON t.id = d.task_id
 		JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
-		WHERE d.status = 'submitted' AND e.status = 'running' AND t.status = 'running'
+		WHERE d.status = 'submitted' AND (
+			(d.execution_id IS NULL AND t.status = 'pending') OR
+			(d.execution_id IS NOT NULL AND e.status = 'running' AND t.status = 'running'))
 		ORDER BY d.updated_at, d.id LIMIT ?`, limit)
 	if err != nil {
 		return nil, err

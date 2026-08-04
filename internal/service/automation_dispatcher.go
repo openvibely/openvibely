@@ -118,29 +118,34 @@ func (d *AutomationDispatcher) DispatchOne(ctx context.Context) (bool, error) {
 		}
 		return fail(err)
 	}
-	execution, err := d.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, d.claimant)
-	if err != nil {
-		return fail(err)
-	}
-	if execution.Status == models.ExecCompleted || execution.Status == models.ExecFailed || execution.Status == models.ExecCancelled {
-		if err := d.automationRepo.CompleteDispatch(context.WithoutCancel(ctx), dispatch.ID, execution.ID, execution.Status, execution.ErrorMessage); err != nil {
+	if dispatch.ExecutionID != "" {
+		execution, err := d.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, d.claimant)
+		if err != nil {
 			return fail(err)
+		}
+		if execution.Status == models.ExecCompleted || execution.Status == models.ExecFailed || execution.Status == models.ExecCancelled {
+			if err := d.automationRepo.CompleteDispatch(context.WithoutCancel(ctx), dispatch.ID, execution.ID, execution.Status, execution.ErrorMessage); err != nil {
+				return fail(err)
+			}
+			return true, nil
+		}
+		if err := d.workerSvc.SubmitPrepared(*envelope, execution.ID); err != nil && !errors.Is(err, ErrTaskAlreadyQueuedOrRunning) {
+			return fail(err)
+		}
+		if err := d.automationRepo.MarkDispatchSubmitted(context.WithoutCancel(ctx), dispatch.ID, d.claimant, execution.ID); err != nil {
+			applog.Infof("[automation-dispatcher] legacy submit acknowledgement failed dispatch=%s execution=%s: %v", dispatch.ID, execution.ID, err)
 		}
 		return true, nil
 	}
-	if err := d.workerSvc.SubmitPrepared(*envelope, execution.ID); err != nil {
-		if !errors.Is(err, ErrTaskAlreadyQueuedOrRunning) {
-			return fail(err)
-		}
-		// The same task is already inside the existing worker pipeline. Treat the
-		// durable execution as submitted; startup reconciliation will resubmit it
-		// if the in-memory entry was an ordinary/stale queue item.
+	if err := d.automationRepo.MarkDispatchQueued(context.WithoutCancel(ctx), dispatch.ID, d.claimant); err != nil {
+		return fail(err)
 	}
-	if err := d.automationRepo.MarkDispatchSubmitted(context.WithoutCancel(ctx), dispatch.ID, d.claimant, execution.ID); err != nil {
-		// The prepared task is already in the existing worker pipeline. Do not
-		// enqueue a second copy merely because the acknowledgement write raced
-		// terminal completion; reconciliation uses dispatch/execution identity.
-		applog.Infof("[automation-dispatcher] submit acknowledgement failed dispatch=%s execution=%s: %v", dispatch.ID, execution.ID, err)
+	if err := d.workerSvc.SubmitPrepared(*envelope, ""); err != nil {
+		if !errors.Is(err, ErrTaskAlreadyQueuedOrRunning) {
+			return true, err
+		}
+		// The durable submitted dispatch is recoverable. An existing task queue
+		// entry will either admit it or be pruned before reconciliation retries.
 	}
 	return true, nil
 }

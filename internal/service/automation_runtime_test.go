@@ -620,6 +620,69 @@ func TestAutomationRuntimeOverlappingInvocationsProjectConcurrently(t *testing.T
 	require.Equal(t, 2, graph.ActiveInvocations)
 }
 
+func TestAutomationRuntimePreparedDispatchWaitsPendingForGlobalCapacity(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	llmConfigRepo := repository.NewLLMConfigRepo(fixture.repo.DB())
+	agent := models.LLMConfig{Name: "Automation capacity worker", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, &agent))
+	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET agent_id = ? WHERE id = ? RETURNING id`, agent.ID, fixture.task.ID).Scan(new(string)))
+
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	execRepo.SetAutomationRepo(fixture.repo)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, fixture.taskRepo, projectRepo, fixture.schedRepo, repository.NewAttachmentRepo(fixture.repo.DB()))
+	mockLLM := testutil.NewMockLLMCaller()
+	mockLLM.Response = "automation capacity run completed"
+	mockLLM.TextOnly = mockLLM.Response
+	llmSvc.SetLLMCaller(mockLLM)
+	llmSvc.SetAutomationRepo(fixture.repo)
+
+	worker := NewWorkerService(llmSvc, 2, projectRepo)
+	worker.SetTaskRepo(fixture.taskRepo)
+	worker.SetLLMConfigRepo(llmConfigRepo)
+	worker.SetExecutionRepo(execRepo)
+	worker.SetAutomationRepo(fixture.repo)
+	worker.Start(ctx)
+	defer worker.Stop()
+
+	otherProject := automationTestProject(t, projectRepo, "Existing capacity holder")
+	require.True(t, worker.TryAcquireProjectSlot(otherProject.ID))
+	require.True(t, worker.TryAcquireProjectSlot(otherProject.ID))
+	defer func() {
+		for worker.TotalRunning() > 0 {
+			worker.ReleaseProjectSlot(otherProject.ID)
+		}
+	}()
+
+	_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	require.NotNil(t, dispatch)
+	dispatcher := NewAutomationDispatcher(fixture.repo, fixture.taskRepo, worker)
+	dispatched, err := dispatcher.DispatchOne(ctx)
+	require.NoError(t, err)
+	require.True(t, dispatched)
+
+	storedTask, err := fixture.taskRepo.GetByID(ctx, fixture.task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, storedTask.Status, "capacity-waiting Automation work must remain visually queued")
+	var executionCount int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM executions WHERE dispatch_id = ?`, dispatch.ID).Scan(&executionCount))
+	require.Zero(t, executionCount, "capacity-waiting Automation work must not have a running execution")
+	require.Equal(t, 2, worker.TotalRunning())
+
+	worker.ReleaseProjectSlot(otherProject.ID)
+	worker.ReleaseProjectSlot(otherProject.ID)
+	worker.dispatchNext()
+	require.Eventually(t, func() bool {
+		var status string
+		return fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&status) == nil && status == "completed"
+	}, 5*time.Second, 20*time.Millisecond)
+	require.Equal(t, 1, mockLLM.CallCount())
+}
+
 func TestAutomationRuntimePreparedDispatchUsesExistingWorkerPipeline(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -707,6 +770,57 @@ func TestAutomationRuntimeReclaimedDispatchAlreadyQueuedIsAcknowledged(t *testin
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status, execution_id FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&status, &storedExecutionID))
 	require.Equal(t, "submitted", status)
 	require.Equal(t, execution.ID, storedExecutionID)
+}
+
+func TestAutomationRuntimeReconcilerAbandonsCancelledCapacityQueuedDispatch(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	leased, err := fixture.repo.LeaseNextDispatch(ctx, "owner", time.Now().UTC(), time.Minute)
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.MarkDispatchQueued(ctx, leased.ID, "owner"))
+	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, fixture.task.ID, models.StatusCancelled))
+
+	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
+	require.NoError(t, reconciler.ReconcileOnce(ctx))
+	var dispatchStatus string
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&dispatchStatus))
+	require.Equal(t, "failed", dispatchStatus)
+	var invocationStatus string
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).Scan(&invocationStatus))
+	require.Equal(t, "cancelled", invocationStatus)
+	var reservations int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations))
+	require.Zero(t, reservations)
+}
+
+func TestAutomationRuntimeReconcilerResubmitsCapacityQueuedPreparedDispatch(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	_, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	require.NotNil(t, dispatch)
+	leased, err := fixture.repo.LeaseNextDispatch(ctx, "owner", time.Now().UTC(), time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, dispatch.ID, leased.ID)
+	require.NoError(t, fixture.repo.MarkDispatchQueued(ctx, dispatch.ID, "owner"))
+
+	storedTask, err := fixture.taskRepo.GetByID(ctx, fixture.task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, storedTask.Status)
+	worker := NewWorkerService(nil, 1, nil)
+	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), worker)
+	require.NoError(t, reconciler.ReconcileOnce(ctx))
+	select {
+	case submitted := <-worker.Submitted():
+		require.Equal(t, fixture.task.ID, submitted.ID)
+	default:
+		t.Fatal("expected reconciler to resubmit the capacity-queued prepared dispatch")
+	}
+	var executionCount int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM executions WHERE dispatch_id = ?`, dispatch.ID).Scan(&executionCount))
+	require.Zero(t, executionCount)
 }
 
 func TestAutomationRuntimeReconcilerResubmitsAcknowledgedPreparedExecution(t *testing.T) {

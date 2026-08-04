@@ -259,7 +259,7 @@ func (w *WorkerService) Submit(task models.Task) {
 // worker queue. It owns no execution, capacity, lifecycle, or completion path of
 // its own; those remain in WorkerService and LLMService.
 func (w *WorkerService) SubmitPrepared(envelope models.AutomationDispatchEnvelope, executionID string) error {
-	if envelope.DispatchID == "" || envelope.Task.ID == "" || executionID == "" {
+	if envelope.DispatchID == "" || envelope.Task.ID == "" {
 		return fmt.Errorf("complete prepared automation dispatch is required")
 	}
 	if envelope.Task.Category == models.CategoryChat {
@@ -310,12 +310,17 @@ func (w *WorkerService) dispatchNext() {
 		if w.taskRepo != nil {
 			dbTask, err := w.taskRepo.GetByID(context.Background(), task.ID)
 			validStatus := dbTask != nil && dbTask.Status == models.StatusPending
-			if isPrepared {
+			if isPrepared && prepared.ExecutionID != "" {
 				validStatus = dbTask != nil && dbTask.Status == models.StatusRunning
 			}
 			if err != nil || dbTask == nil || !validStatus ||
 				(dbTask.Category != models.CategoryActive && dbTask.Category != models.CategoryScheduled) {
 				w.queue = append(w.queue[:i], w.queue[i+1:]...)
+				if isPrepared && prepared.ExecutionID == "" && w.automationRepo != nil {
+					if abandonErr := w.automationRepo.AbandonQueuedDispatch(context.Background(), prepared.Envelope.DispatchID, "Automation task was cancelled or is no longer runnable"); abandonErr != nil {
+						applog.Infof("[worker] abandoning queued automation dispatch=%s failed: %v", prepared.Envelope.DispatchID, abandonErr)
+					}
+				}
 				delete(w.pending, task.ID)
 				delete(w.prepared, task.ID)
 				applog.Infof("[worker] pruned stale task=%s %q from queue", task.ID, task.Title)
@@ -391,14 +396,16 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	taskCtx, taskCancel := context.WithCancel(w.ctx)
 	if isPrepared {
 		taskCtx = WithAutomationContext(taskCtx, prepared.Envelope.Context)
-		taskCtx = withPreparedAutomationExecution(taskCtx, prepared.ExecutionID)
-		taskCtx = withTaskPreClaimed(taskCtx)
+		if prepared.ExecutionID != "" {
+			taskCtx = withPreparedAutomationExecution(taskCtx, prepared.ExecutionID)
+			taskCtx = withTaskPreClaimed(taskCtx)
+		}
 	}
 	w.RegisterCancel(task.ID, taskCancel)
 
 	var executionErr error
-	claimed := w.taskRepo == nil || isPrepared
-	completionAttempted := w.taskRepo == nil || isPrepared
+	claimed := w.taskRepo == nil || (isPrepared && prepared.ExecutionID != "")
+	completionAttempted := w.taskRepo == nil || (isPrepared && prepared.ExecutionID != "")
 	logOutcome := true
 
 	defer func() {
@@ -433,7 +440,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 		w.releaseProjectSlot(task.ProjectID)
 		w.releaseModelSlot(agentConfigID)
 
-		if isPrepared && w.automationRepo != nil {
+		if isPrepared && prepared.ExecutionID != "" && w.automationRepo != nil {
 			status := models.ExecFailed
 			message := "automation execution did not reach a terminal state"
 			execRepo := w.execRepo
@@ -485,6 +492,20 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	// while returning the exact Task/current-graph state admitted by that claim.
 	// If claim fails (task already running/completed/cancelled), skip — the
 	// task either was already promoted or shouldn't run.
+	if isPrepared && prepared.ExecutionID == "" {
+		execution, claimErr := w.taskRepo.ClaimQueuedAutomationDispatch(taskCtx, prepared.Envelope.DispatchID)
+		if claimErr != nil {
+			applog.Infof("[worker] queued automation task=%s claim failed: %v", task.ID, claimErr)
+			logOutcome = false
+			return
+		}
+		prepared.ExecutionID = execution.ID
+		claimed = true
+		completionAttempted = true
+		task.Status = models.StatusRunning
+		taskCtx = withPreparedAutomationExecution(taskCtx, execution.ID)
+		taskCtx = withTaskPreClaimed(taskCtx)
+	}
 	if w.taskRepo != nil && !isPrepared {
 		if w.beforeOrdinaryTaskClaim != nil {
 			w.beforeOrdinaryTaskClaim(task)
