@@ -29,6 +29,8 @@ import (
 const (
 	backlogSortCookieName        = "backlog_sort"
 	completedSortCookieName      = "completed_sort"
+	defaultBacklogSort           = "created_desc"
+	defaultCompletedSort         = "completed_desc"
 	taskThreadWindowLimitDefault = 5
 	taskThreadWindowLimitMax     = 100
 )
@@ -46,10 +48,17 @@ func getSortPreference(c echo.Context, cookieName string) string {
 }
 
 func getSortPreferences(c echo.Context) taskSortPreferences {
-	return taskSortPreferences{
+	preferences := taskSortPreferences{
 		Backlog:   getSortPreference(c, backlogSortCookieName),
 		Completed: getCompletedSortPreference(c),
 	}
+	if preferences.Backlog == "" {
+		preferences.Backlog = defaultBacklogSort
+	}
+	if preferences.Completed == "" {
+		preferences.Completed = defaultCompletedSort
+	}
+	return preferences
 }
 
 // getCompletedSortPreference reads the completed-sort cookie and migrates
@@ -1149,11 +1158,10 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	}
 
 	task.Title = c.FormValue("title")
-	if stopActiveViaCategoryUpdate {
-		task.Category = oldCategory
-	} else {
-		task.Category = newCategory
-	}
+	// Category transitions must go through UpdateCategory after the generic field
+	// update so completed_at, display order, events, and execution lifecycle stay
+	// consistent with drag/drop transitions.
+	task.Category = oldCategory
 	task.Prompt = c.FormValue("prompt")
 	task.Tag = models.TaskTag(c.FormValue("tag"))
 	if p, err := strconv.Atoi(c.FormValue("priority")); err == nil {
@@ -1233,6 +1241,12 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 		applog.Infof("[handler] UpdateTask category changed from Active while %s, cancelling id=%s", oldStatus, taskID)
 		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, newCategory); err != nil {
 			applog.Infof("[handler] UpdateTask error stopping active task: %v", err)
+			return err
+		}
+	} else if oldCategory != newCategory {
+		applog.Infof("[handler] UpdateTask category changed %s->%s id=%s", oldCategory, newCategory, taskID)
+		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, newCategory); err != nil {
+			applog.Infof("[handler] UpdateTask error changing category: %v", err)
 			return err
 		}
 	}
