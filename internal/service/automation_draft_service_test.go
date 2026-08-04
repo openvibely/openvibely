@@ -987,7 +987,43 @@ func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t 
 	require.Contains(t, issueCodes(svc.ValidateCandidate(candidate)), "invalid_json")
 }
 
+func TestAutomationCandidateWithoutNodeDeepCopiesMutableData(t *testing.T) {
+	position := &models.AutomationDraftPoint{X: 10, Y: 20}
+	source := models.AutomationDraftCandidate{
+		Nodes: []models.AutomationDraftNode{
+			{
+				Key:      "kept",
+				Config:   map[string]any{"required_capabilities": []string{"github"}, "nested": map[string]any{"values": []any{"original"}}},
+				Position: position,
+			},
+			{Key: "removed", Config: map[string]any{}},
+		},
+		Edges: []models.AutomationDraftEdge{
+			{Key: "kept_edge", From: "kept", To: "kept", Condition: map[string]any{"nested": map[string]any{"value": "original"}}},
+			{Key: "removed_edge", From: "removed", To: "kept"},
+		},
+		Assumptions: []string{"original assumption"},
+		Warnings:    []string{"original warning"},
+	}
+
+	reduced := automationCandidateWithoutNode(source, "removed")
+	reduced.Nodes[0].Config["required_capabilities"].([]string)[0] = "changed"
+	reduced.Nodes[0].Config["nested"].(map[string]any)["values"].([]any)[0] = "changed"
+	reduced.Nodes[0].Position.X = 99
+	reduced.Edges[0].Condition["nested"].(map[string]any)["value"] = "changed"
+	reduced.Assumptions[0] = "changed assumption"
+	reduced.Warnings[0] = "changed warning"
+
+	require.Equal(t, []string{"github"}, source.Nodes[0].Config["required_capabilities"])
+	require.Equal(t, "original", source.Nodes[0].Config["nested"].(map[string]any)["values"].([]any)[0])
+	require.Equal(t, float64(10), source.Nodes[0].Position.X)
+	require.Equal(t, "original", source.Edges[0].Condition["nested"].(map[string]any)["value"])
+	require.Equal(t, []string{"original assumption"}, source.Assumptions)
+	require.Equal(t, []string{"original warning"}, source.Warnings)
+}
+
 func automationCandidateWithoutNode(candidate models.AutomationDraftCandidate, key string) models.AutomationDraftCandidate {
+	candidate = cloneAutomationDraftCandidate(candidate)
 	nodes := make([]models.AutomationDraftNode, 0, len(candidate.Nodes))
 	for _, node := range candidate.Nodes {
 		if node.Key != key {
@@ -1003,6 +1039,55 @@ func automationCandidateWithoutNode(candidate models.AutomationDraftCandidate, k
 	candidate.Nodes = nodes
 	candidate.Edges = edges
 	return candidate
+}
+
+func cloneAutomationDraftCandidate(candidate models.AutomationDraftCandidate) models.AutomationDraftCandidate {
+	cloned := candidate
+	cloned.Nodes = make([]models.AutomationDraftNode, len(candidate.Nodes))
+	for i, node := range candidate.Nodes {
+		cloned.Nodes[i] = node
+		cloned.Nodes[i].Config = cloneAutomationDraftMap(node.Config)
+		if node.Position != nil {
+			position := *node.Position
+			cloned.Nodes[i].Position = &position
+		}
+	}
+	cloned.Edges = make([]models.AutomationDraftEdge, len(candidate.Edges))
+	for i, edge := range candidate.Edges {
+		cloned.Edges[i] = edge
+		cloned.Edges[i].Condition = cloneAutomationDraftMap(edge.Condition)
+	}
+	cloned.Assumptions = append([]string(nil), candidate.Assumptions...)
+	cloned.Warnings = append([]string(nil), candidate.Warnings...)
+	return cloned
+}
+
+func cloneAutomationDraftMap(values map[string]any) map[string]any {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]any, len(values))
+	for key, value := range values {
+		cloned[key] = cloneAutomationDraftValue(value)
+	}
+	return cloned
+}
+
+func cloneAutomationDraftValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneAutomationDraftMap(typed)
+	case []any:
+		cloned := make([]any, len(typed))
+		for i, item := range typed {
+			cloned[i] = cloneAutomationDraftValue(item)
+		}
+		return cloned
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return value
+	}
 }
 
 func automationCandidateWithoutEdge(candidate models.AutomationDraftCandidate, key string) models.AutomationDraftCandidate {
