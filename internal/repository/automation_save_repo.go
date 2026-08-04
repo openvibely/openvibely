@@ -206,6 +206,46 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 	taskRepo := NewTaskRepo(r.db, nil)
 	taskIDs := make(map[string]string, len(in.Tasks))
 	for _, write := range in.Tasks {
+		restoreMaintainedTask := in.ExpectedCurrentGraphID != "" &&
+			(in.Candidate.AdapterKey == "native_sdlc" || in.Candidate.AdapterKey == "github_sdlc")
+		if write.ExistingTaskID == "" && restoreMaintainedTask {
+			createdVia := AutomationCompilerTaskCreatedVia(in.AutomationID, write.NodeKey)
+			rows, err := conn.QueryContext(ctx, `SELECT id FROM tasks WHERE project_id = ? AND created_via = ? ORDER BY id LIMIT 2`, in.ProjectID, createdVia)
+			if err != nil {
+				return nil, nil, fmt.Errorf("finding preserved task for node %q: %w", write.NodeKey, err)
+			}
+			var preservedTaskIDs []string
+			for rows.Next() {
+				var taskID string
+				if err := rows.Scan(&taskID); err != nil {
+					rows.Close()
+					return nil, nil, fmt.Errorf("scanning preserved task for node %q: %w", write.NodeKey, err)
+				}
+				preservedTaskIDs = append(preservedTaskIDs, taskID)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return nil, nil, fmt.Errorf("reading preserved tasks for node %q: %w", write.NodeKey, err)
+			}
+			if err := rows.Close(); err != nil {
+				return nil, nil, fmt.Errorf("closing preserved task lookup for node %q: %w", write.NodeKey, err)
+			}
+			if len(preservedTaskIDs) > 1 {
+				return nil, nil, fmt.Errorf("more than one preserved task exists for node %q", write.NodeKey)
+			}
+			if len(preservedTaskIDs) == 1 {
+				var bindings, schedules int
+				if err := conn.QueryRowContext(ctx, `SELECT
+					(SELECT COUNT(*) FROM automation_definition_resources WHERE resource_type = 'task' AND resource_id = ?),
+					(SELECT COUNT(*) FROM schedules WHERE task_id = ?)`, preservedTaskIDs[0], preservedTaskIDs[0]).Scan(&bindings, &schedules); err != nil {
+					return nil, nil, fmt.Errorf("checking preserved task ownership for node %q: %w", write.NodeKey, err)
+				}
+				if bindings != 0 || schedules != 0 {
+					return nil, nil, fmt.Errorf("preserved task for node %q is still bound to another resource", write.NodeKey)
+				}
+				write.ExistingTaskID = preservedTaskIDs[0]
+			}
+		}
 		if write.ExistingTaskID != "" {
 			var projectID string
 			if err := conn.QueryRowContext(ctx, `SELECT project_id FROM tasks WHERE id = ?`, write.ExistingTaskID).Scan(&projectID); err != nil {

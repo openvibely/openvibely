@@ -132,6 +132,7 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 			}
 			candidate, err := h.drafts.TemplateCandidate(adapterKey)
 			require.NoError(t, err)
+			fullCandidate := candidate
 
 			initial, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
 			require.NoError(t, err, "the unmodified maintained template must still save")
@@ -151,7 +152,14 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE id = ?`, visionTaskID), "replacement preserves the backing domain Task while removing its graph binding")
 			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules WHERE id = ?`, visionScheduleID))
 
-			producerOnly := candidate
+			restored, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
+				Source: "manual", CreatedVia: "web", Candidate: fullCandidate})
+			require.NoError(t, err, "restoring a maintained node must reuse its preserved backing Task")
+			require.Equal(t, visionTaskID, automationResourceID(t, restored.Definition, "vision_suggestions", "task"))
+			require.NotEqual(t, visionScheduleID, automationResourceID(t, restored.Definition, "vision_suggestions", "schedule"))
+			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE created_via = ?`, repository.AutomationCompilerTaskCreatedVia(initial.Definition.Automation.ID, "vision_suggestions")))
+
+			producerOnly := fullCandidate
 			for _, node := range append([]models.AutomationDraftNode(nil), producerOnly.Nodes...) {
 				if node.Key != "bug_finder" {
 					producerOnly = automationCandidateWithoutNode(producerOnly, node.Key)
@@ -165,6 +173,16 @@ func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *tes
 			for _, resource := range reduced.Definition.Resources {
 				require.Equal(t, "bug_finder", resource.NodeKey)
 			}
+
+			_, err = h.db.ExecContext(ctx, `UPDATE tasks SET created_via = ? WHERE id = ?`, repository.AutomationCompilerTaskCreatedVia(repository.NewID(), "vision_suggestions"), visionTaskID)
+			require.NoError(t, err)
+			_, err = h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
+				Source: "manual", CreatedVia: "web", Candidate: fullCandidate})
+			require.ErrorContains(t, err, "task with this name already exists", "restore must not adopt a task whose durable origin belongs to another Automation")
+			current, err := h.automationRepo.GetDefinition(ctx, h.project.ID, initial.Definition.Automation.ID)
+			require.NoError(t, err)
+			require.Len(t, current.Nodes, 1, "failed restore must leave the reduced graph current")
+			require.Equal(t, "bug_finder", current.Nodes[0].NodeKey)
 		})
 	}
 }
