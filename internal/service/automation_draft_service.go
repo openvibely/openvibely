@@ -441,9 +441,9 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		}
 		issues = append(issues, validateAutomationNodeConfig(adapter, canonical, node)...)
 	}
-	for key := range canonicalNodes {
-		if !seenNodes[key] {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "missing_node", Message: "Add this required node before saving."})
+	for key, canonical := range canonicalNodes {
+		if !seenNodes[key] && !canonical.Optional {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: key, Code: "missing_node", Message: fmt.Sprintf("Required node %q is missing. Restore it before saving.", key)})
 		}
 	}
 
@@ -513,10 +513,11 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			issues = append(issues, models.AutomationValidationIssue{Code: "unsupported_condition", Message: "Edge conditions are fixed by the registered adapter."})
 		}
 	}
-	for key := range canonicalEdges {
-		if !seenCanonicalEdges[key] {
-			issues = append(issues, models.AutomationValidationIssue{Code: "missing_edge", Message: "Add every required transition before saving."})
+	for key, canonical := range canonicalEdges {
+		if seenCanonicalEdges[key] || !seenNodes[canonical.From] || !seenNodes[canonical.To] {
+			continue
 		}
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: canonical.From, Code: "missing_edge", Message: fmt.Sprintf("Required connection %q from node %q to node %q is missing. Restore that connection before saving.", key, canonical.From, canonical.To)})
 	}
 	if adapter.DynamicTopology {
 		issues = append(issues, validateCustomAutomationTopology(candidate)...)

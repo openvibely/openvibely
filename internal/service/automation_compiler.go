@@ -84,7 +84,7 @@ func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, 
 		return plan, normalized, nil
 	}
 	adapter, _ := c.validator.registry.Get(normalized.AdapterKey)
-	resourceNodes := adapter.Nodes
+	resourceNodes := automationPresentAdapterNodes(adapter, normalized)
 	if adapter.DynamicTopology {
 		resourceNodes = nil
 		for _, node := range normalized.Nodes {
@@ -107,6 +107,20 @@ func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, 
 		}
 	}
 	return plan, normalized, nil
+}
+
+func automationPresentAdapterNodes(adapter AutomationAdapter, candidate models.AutomationDraftCandidate) []AutomationAdapterNode {
+	present := make(map[string]bool, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		present[node.Key] = true
+	}
+	nodes := make([]AutomationAdapterNode, 0, len(adapter.Nodes))
+	for _, node := range adapter.Nodes {
+		if present[node.Key] {
+			nodes = append(nodes, node)
+		}
+	}
+	return nodes
 }
 
 func customAutomationNodeMaterializesTask(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) bool {
@@ -181,7 +195,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	for _, node := range candidate.Nodes {
 		candidateNodes[node.Key] = node
 	}
-	resourceNodes := adapter.Nodes
+	resourceNodes := automationPresentAdapterNodes(adapter, candidate)
 	if adapter.DynamicTopology {
 		resourceNodes = make([]AutomationAdapterNode, 0, len(candidate.Nodes))
 		for _, node := range candidate.Nodes {

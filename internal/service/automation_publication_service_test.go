@@ -96,6 +96,46 @@ func seedExistingVisionDriverAutomation(t *testing.T, h automationSaveHarness) (
 	return definition, candidate
 }
 
+func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *testing.T) {
+	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
+		t.Run(adapterKey, func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Optional producer "+adapterKey)
+			ctx := context.Background()
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				projectRepo := repository.NewProjectRepo(h.db)
+				h.project.RepoURL = "https://github.com/example/automation.git"
+				require.NoError(t, projectRepo.Update(ctx, &h.project))
+				settingsRepo := repository.NewSettingsRepo(h.db)
+				require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+				require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
+				githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+				require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
+				h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
+			}
+			candidate, err := h.drafts.TemplateCandidate(adapterKey)
+			require.NoError(t, err)
+
+			initial, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err, "the unmodified maintained template must still save")
+			visionTaskID := automationResourceID(t, initial.Definition, "vision_suggestions", "task")
+			visionScheduleID := automationResourceID(t, initial.Definition, "vision_suggestions", "schedule")
+
+			candidate = automationCandidateWithoutNode(candidate, "vision_suggestions")
+			replacement, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: initial.Definition.Automation.ID,
+				Source: "manual", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err)
+			for _, node := range replacement.Definition.Nodes {
+				require.NotEqual(t, "vision_suggestions", node.NodeKey)
+			}
+			for _, resource := range replacement.Definition.Resources {
+				require.NotEqual(t, "vision_suggestions", resource.NodeKey)
+			}
+			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE id = ?`, visionTaskID), "replacement preserves the backing domain Task while removing its graph binding")
+			require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules WHERE id = ?`, visionScheduleID))
+		})
+	}
+}
+
 func TestAutomationSaveRejectsNewVisionDriverAndAllowsExistingEdit(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Vision Driver creation boundary")
 	ctx := context.Background()

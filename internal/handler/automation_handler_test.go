@@ -822,6 +822,24 @@ func automationDraftCandidateJSONForTest(t *testing.T, candidate models.Automati
 	return string(raw)
 }
 
+func automationCandidateWithoutNodeHandler(candidate models.AutomationDraftCandidate, key string) models.AutomationDraftCandidate {
+	nodes := make([]models.AutomationDraftNode, 0, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		if node.Key != key {
+			nodes = append(nodes, node)
+		}
+	}
+	edges := make([]models.AutomationDraftEdge, 0, len(candidate.Edges))
+	for _, edge := range candidate.Edges {
+		if edge.From != key && edge.To != key {
+			edges = append(edges, edge)
+		}
+	}
+	candidate.Nodes = nodes
+	candidate.Edges = edges
+	return candidate
+}
+
 func issueCodesHandler(candidate models.AutomationDraftCandidate, drafts *service.AutomationDraftService) []string {
 	issues := drafts.ValidateCandidate(candidate)
 	codes := make([]string, 0, len(issues))
@@ -927,6 +945,35 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 	var legacyInboxRows int
 	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM github_project_inboxes WHERE project_id = ?`, project.ID).Scan(&legacyInboxRows))
 	require.Zero(t, legacyInboxRows, "visible Authorized Users must not require a hidden legacy inbox row")
+
+	var automationID string
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
+	withoutVision := automationCandidateWithoutNodeHandler(candidate, "vision_suggestions")
+	edited := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"edit"},
+		"candidate_json": {automationDraftCandidateJSONForTest(t, withoutVision)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, edited.Code, edited.Body.String())
+	require.NotEmpty(t, edited.Header().Get("HX-Redirect"))
+	definition, err := automationRepo.GetDefinition(ctx, project.ID, automationID)
+	require.NoError(t, err)
+	for _, node := range definition.Nodes {
+		require.NotEqual(t, "vision_suggestions", node.NodeKey)
+	}
+	for _, resource := range definition.Resources {
+		require.NotEqual(t, "vision_suggestions", resource.NodeKey)
+	}
+
+	withoutRequiredOutcome := automationCandidateWithoutNodeHandler(withoutVision, "completed")
+	invalid := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"edit"},
+		"candidate_json": {automationDraftCandidateJSONForTest(t, withoutRequiredOutcome)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, invalid.Code, invalid.Body.String())
+	require.Empty(t, invalid.Header().Get("HX-Redirect"))
+	require.Contains(t, invalid.Body.String(), "Required node")
+	require.Contains(t, invalid.Body.String(), "completed")
+	require.Contains(t, invalid.Body.String(), "Restore it before saving")
 }
 
 func TestAutomationBrowserRejectsForgedNewVisionDriverCandidateAndAllowsExistingEdit(t *testing.T) {

@@ -1339,23 +1339,15 @@ func automationDraftEdgesJSON(edges []models.AutomationDraftEdge) string {
 	value, _ := json.Marshal(edges)
 	return string(value)
 }
-func automationValidationMessages(issues []models.AutomationValidationIssue, palette []models.AutomationDraftNode) []string {
-	missingNodes := []string{}
-	missingEdges := 0
+func automationValidationMessages(issues []models.AutomationValidationIssue, _ []models.AutomationDraftNode) []string {
 	messages := []string{}
 	seen := map[string]bool{}
 	for _, issue := range issues {
-		switch issue.Code {
-		case "missing_node":
-			missingNodes = append(missingNodes, automationDraftNodeName(palette, issue.NodeKey))
-		case "missing_edge":
-			missingEdges++
-		default:
-			if !seen[issue.Message] { messages = append(messages, issue.Message); seen[issue.Message] = true }
+		if !seen[issue.Message] {
+			messages = append(messages, issue.Message)
+			seen[issue.Message] = true
 		}
 	}
-	if len(missingNodes) > 0 { messages = append([]string{fmt.Sprintf("%d required nodes remain: %s.", len(missingNodes), strings.Join(missingNodes, ", "))}, messages...) }
-	if missingEdges > 0 { messages = append([]string{fmt.Sprintf("%d required connections remain.", missingEdges)}, messages...) }
 	return messages
 }
 func automationDraftHasConfig(node models.AutomationDraftNode, key string) bool { _, ok := node.Config[key]; return ok }

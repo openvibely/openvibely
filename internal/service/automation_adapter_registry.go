@@ -17,6 +17,7 @@ type AutomationAdapterNode struct {
 	Name             string
 	Type             string
 	Role             string
+	Optional         bool
 	AllowedResources map[string]bool
 	X                float64
 	Y                float64
@@ -97,10 +98,10 @@ func nativeSDLCAdapter() AutomationAdapter {
 		Key: AutomationAdapterNativeSDLC, AutomationType: "native_sdlc", DefaultName: "Native SDLC",
 		Description: "Find vision suggestions, bugs, optimizations, and redundancies; wait for native approval; and create visible implementation work.",
 		Nodes: []AutomationAdapterNode{
-			{Key: "vision_suggestions", Name: "Vision Suggestions", Type: "trigger", Role: "offering_manager", AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 0},
-			{Key: "bug_finder", Name: "Bug Finder", Type: "trigger", Role: "bug_finder", AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 120},
-			{Key: "optimization_finder", Name: "Optimization Finder", Type: "trigger", Role: "optimization_finder", AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 240},
-			{Key: "redundancy_finder", Name: "Redundancy Finder", Type: "trigger", Role: "redundancy_finder", AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 360},
+			{Key: "vision_suggestions", Name: "Vision Suggestions", Type: "trigger", Role: "offering_manager", Optional: true, AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 0},
+			{Key: "bug_finder", Name: "Bug Finder", Type: "trigger", Role: "bug_finder", Optional: true, AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 120},
+			{Key: "optimization_finder", Name: "Optimization Finder", Type: "trigger", Role: "optimization_finder", Optional: true, AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 240},
+			{Key: "redundancy_finder", Name: "Redundancy Finder", Type: "trigger", Role: "redundancy_finder", Optional: true, AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 360},
 			{Key: "notification", Name: "Pending Notification", Type: "action", Role: "create_notification", AllowedResources: resourceTypes(), X: 220, Y: 180},
 			{Key: "approval", Name: "Human Approval", Type: "human_gate", Role: "native_approval", AllowedResources: resourceTypes(), X: 440, Y: 180},
 			{Key: "inbox", Name: "Approved Inbox", Type: "trigger", Role: "native_inbox", AllowedResources: resourceTypes("task", "schedule"), X: 660, Y: 270},
@@ -148,10 +149,10 @@ func githubSDLCAdapter() AutomationAdapter {
 		Key: AutomationAdapterGitHubSDLC, AutomationType: "github_sdlc", DefaultName: "GitHub SDLC",
 		Description: "Create GitHub suggestions, use assignment as approval, implement accepted issues, and open pull requests for review.",
 		Nodes: []AutomationAdapterNode{
-			{Key: "vision_suggestions", Name: "Vision Suggestions", Type: "trigger", Role: "offering_manager", AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 0},
-			{Key: "bug_finder", Name: "Bug Finder", Type: "trigger", Role: "bug_finder", AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 120},
-			{Key: "optimization_finder", Name: "Optimization Finder", Type: "trigger", Role: "optimization_finder", AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 240},
-			{Key: "redundancy_finder", Name: "Redundancy Finder", Type: "trigger", Role: "redundancy_finder", AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 360},
+			{Key: "vision_suggestions", Name: "Vision Suggestions", Type: "trigger", Role: "offering_manager", Optional: true, AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 0},
+			{Key: "bug_finder", Name: "Bug Finder", Type: "trigger", Role: "bug_finder", Optional: true, AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 120},
+			{Key: "optimization_finder", Name: "Optimization Finder", Type: "trigger", Role: "optimization_finder", Optional: true, AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 240},
+			{Key: "redundancy_finder", Name: "Redundancy Finder", Type: "trigger", Role: "redundancy_finder", Optional: true, AllowedResources: resourceTypes("task", "schedule"), X: 0, Y: 360},
 			{Key: "issue", Name: "GitHub Issue", Type: "action", Role: "create_github_issue", AllowedResources: resourceTypes(), X: 220, Y: 180},
 			{Key: "assignment", Name: "Human Assignment", Type: "human_gate", Role: "github_assignment", AllowedResources: resourceTypes(), X: 440, Y: 180},
 			{Key: "dev_inbox", Name: "Dev Inbox", Type: "trigger", Role: "github_inbox", AllowedResources: resourceTypes("task", "schedule"), X: 660, Y: 270},

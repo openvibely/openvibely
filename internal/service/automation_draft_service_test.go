@@ -14,6 +14,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestMaintainedSDLCTemplatesAllowDeletingOptionalProducerBranches(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
+		t.Run(adapterKey, func(t *testing.T) {
+			candidate, err := drafts.TemplateCandidate(adapterKey)
+			require.NoError(t, err)
+			for _, producerKey := range []string{"vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder"} {
+				candidate = automationCandidateWithoutNode(candidate, producerKey)
+			}
+
+			require.Empty(t, drafts.ValidateCandidate(candidate))
+
+			missingRequired := automationCandidateWithoutNode(candidate, "completed")
+			issues := drafts.ValidateCandidate(missingRequired)
+			require.Contains(t, issueCodes(issues), "missing_node")
+			require.Contains(t, issues[0].Message, "completed")
+
+			candidateWithMissingEdge, err := drafts.TemplateCandidate(adapterKey)
+			require.NoError(t, err)
+			requiredEdgeKey := "implementation_to_completed"
+			if adapterKey == AutomationAdapterGitHubSDLC {
+				requiredEdgeKey = "review_to_completed"
+			}
+			candidateWithMissingEdge = automationCandidateWithoutEdge(candidateWithMissingEdge, requiredEdgeKey)
+			edgeIssues := drafts.ValidateCandidate(candidateWithMissingEdge)
+			require.Contains(t, issueCodes(edgeIssues), "missing_edge")
+			require.Contains(t, edgeIssues[0].Message, requiredEdgeKey)
+			require.Contains(t, edgeIssues[0].Message, "completed")
+		})
+	}
+}
+
 func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *testing.T) {
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(nil, registry)
@@ -864,6 +896,35 @@ func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t 
 	driverIndex := automationDraftNodeIndexByKey(t, candidate, "vision_driver")
 	candidate.Nodes[driverIndex].Config["priority"] = math.NaN()
 	require.Contains(t, issueCodes(svc.ValidateCandidate(candidate)), "invalid_json")
+}
+
+func automationCandidateWithoutNode(candidate models.AutomationDraftCandidate, key string) models.AutomationDraftCandidate {
+	nodes := make([]models.AutomationDraftNode, 0, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		if node.Key != key {
+			nodes = append(nodes, node)
+		}
+	}
+	edges := make([]models.AutomationDraftEdge, 0, len(candidate.Edges))
+	for _, edge := range candidate.Edges {
+		if edge.From != key && edge.To != key {
+			edges = append(edges, edge)
+		}
+	}
+	candidate.Nodes = nodes
+	candidate.Edges = edges
+	return candidate
+}
+
+func automationCandidateWithoutEdge(candidate models.AutomationDraftCandidate, key string) models.AutomationDraftCandidate {
+	edges := make([]models.AutomationDraftEdge, 0, len(candidate.Edges))
+	for _, edge := range candidate.Edges {
+		if edge.Key != key {
+			edges = append(edges, edge)
+		}
+	}
+	candidate.Edges = edges
+	return candidate
 }
 
 func automationDraftNodeIndexByKey(t *testing.T, candidate models.AutomationDraftCandidate, key string) int {
