@@ -180,16 +180,33 @@ func (r *TaskRepo) ConfirmAutomationChainedTaskAdmission(ctx context.Context, pr
 // existing pending-to-running task transition, and creates or resolves exactly
 // one execution by dispatch ID in one BEGIN IMMEDIATE transaction.
 func (r *TaskRepo) ClaimAutomationDispatch(ctx context.Context, dispatchID, claimant string) (*models.Execution, error) {
-	return r.claimAutomationDispatch(ctx, dispatchID, claimant, false)
+	return r.claimAutomationDispatch(ctx, dispatchID, claimant, false, nil)
+}
+
+// QueuedAutomationDispatchClaim contains the execution and authoritative Task
+// admitted by a queued Automation dispatch.
+type QueuedAutomationDispatchClaim struct {
+	Execution models.Execution
+	Task      models.Task
 }
 
 // ClaimQueuedAutomationDispatch performs the pending-to-running transition only
-// after WorkerService has reserved global, project, and model capacity.
-func (r *TaskRepo) ClaimQueuedAutomationDispatch(ctx context.Context, dispatchID string) (*models.Execution, error) {
-	return r.claimAutomationDispatch(ctx, dispatchID, "", true)
+// after WorkerService has reserved global, project, and model capacity. The
+// returned Task is captured in the atomic claim transaction so execution uses
+// the exact persisted assignment that was admitted.
+func (r *TaskRepo) ClaimQueuedAutomationDispatch(ctx context.Context, dispatchID string) (*QueuedAutomationDispatchClaim, error) {
+	var task *models.Task
+	execution, err := r.claimAutomationDispatch(ctx, dispatchID, "", true, &task)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil || task.Status != models.StatusRunning {
+		return nil, errors.New("claimed automation task disappeared")
+	}
+	return &QueuedAutomationDispatchClaim{Execution: *execution, Task: *task}, nil
 }
 
-func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, claimant string, queued bool) (*models.Execution, error) {
+func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, claimant string, queued bool, claimedTask **models.Task) (*models.Execution, error) {
 	conn, err := r.db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -307,6 +324,16 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 			activityID, resource.kind, resource.id); err != nil {
 			return nil, err
 		}
+	}
+	if queued && claimedTask != nil {
+		task, err := getTaskWithExecutor(ctx, conn, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("loading claimed automation task: %w", err)
+		}
+		if task == nil {
+			return nil, errors.New("claimed automation task disappeared")
+		}
+		*claimedTask = task
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, err

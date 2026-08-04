@@ -78,6 +78,7 @@ type WorkerService struct {
 	afterCompleteRuntimeToolProvider func(context.Context, models.Task) *llmcontracts.RuntimeTools
 	beforeOrdinaryTaskClaim          func(models.Task) // deterministic pre-claim test barrier
 	afterOrdinaryTaskClaim           func(models.Task) // deterministic persisted-claim test barrier
+	beforeQueuedAutomationTaskClaim  func(models.Task) // deterministic prepared-dispatch test barrier
 	currentCatalog                   atomic.Value      // stores *agentskills.Catalog for hook skill resolution
 	admissionOpen                    func() bool
 	updateTracker                    *update.WorkTracker
@@ -326,15 +327,17 @@ func (w *WorkerService) dispatchNext() {
 				applog.Infof("[worker] pruned stale task=%s %q from queue", task.ID, task.Title)
 				continue
 			}
-			if !isPrepared {
-				// Ordinary submissions are admission hints keyed by Task ID. The
-				// persisted Task is authoritative at dispatch time so a queued root
-				// cannot run replaced prompt, Agent, or topology data under the
-				// current Automation graph. The scheduled occurrence's context boundary
-				// is runtime-only, so preserve it across the persisted task refresh.
+			if !isPrepared || prepared.ExecutionID == "" {
+				// Queued submissions are admission hints keyed by Task ID. The
+				// persisted Task is authoritative at dispatch time so queued work
+				// cannot run replaced prompt, Agent, or topology data. The scheduled
+				// occurrence's context boundary is runtime-only, so preserve it for
+				// ordinary submissions across the persisted task refresh.
 				startsNewContext := task.StartsNewContext
 				task = *dbTask
-				task.StartsNewContext = startsNewContext
+				if !isPrepared {
+					task.StartsNewContext = startsNewContext
+				}
 			}
 
 			// Dependency gating: chained tasks must wait for parent to reach terminal state.
@@ -493,18 +496,38 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	// If claim fails (task already running/completed/cancelled), skip — the
 	// task either was already promoted or shouldn't run.
 	if isPrepared && prepared.ExecutionID == "" {
-		execution, claimErr := w.taskRepo.ClaimQueuedAutomationDispatch(taskCtx, prepared.Envelope.DispatchID)
+		if w.beforeQueuedAutomationTaskClaim != nil {
+			w.beforeQueuedAutomationTaskClaim(task)
+		}
+		claim, claimErr := w.taskRepo.ClaimQueuedAutomationDispatch(taskCtx, prepared.Envelope.DispatchID)
 		if claimErr != nil {
 			applog.Infof("[worker] queued automation task=%s claim failed: %v", task.ID, claimErr)
 			logOutcome = false
 			return
 		}
-		prepared.ExecutionID = execution.ID
+		prepared.ExecutionID = claim.Execution.ID
 		claimed = true
 		completionAttempted = true
-		task.Status = models.StatusRunning
-		taskCtx = withPreparedAutomationExecution(taskCtx, execution.ID)
+		task = claim.Task
+		taskCtx = withPreparedAutomationExecution(taskCtx, claim.Execution.ID)
 		taskCtx = withTaskPreClaimed(taskCtx)
+
+		// Capacity was reserved from the queue refresh. If the Task assignment
+		// changed before the atomic claim, transfer the model reservation before
+		// lifecycle hooks or provider execution use the admitted Task.
+		claimedAgentConfigID := w.resolveAgentConfigID(taskCtx, task)
+		if claimedAgentConfigID != agentConfigID {
+			w.releaseModelSlot(agentConfigID)
+			agentConfigID = ""
+			if err := w.AcquireModelSlot(taskCtx, claimedAgentConfigID); err != nil {
+				executionErr = fmt.Errorf("acquiring claimed automation task model capacity: %w", err)
+				if updateErr := w.taskRepo.UpdateStatus(context.Background(), task.ID, models.StatusFailed); updateErr != nil {
+					applog.Infof("[worker] automation task=%s failed status update after model capacity error: %v", task.ID, updateErr)
+				}
+				return
+			}
+			agentConfigID = claimedAgentConfigID
+		}
 	}
 	if w.taskRepo != nil && !isPrepared {
 		if w.beforeOrdinaryTaskClaim != nil {
