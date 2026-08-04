@@ -1628,8 +1628,11 @@ func (s *SlackService) resolveSlackFileInfo(ctx context.Context, f slackIncoming
 	if !needsInfo {
 		return f, nil
 	}
-	client := s.slackClientForFiles()
+	client := s.slackClientForFiles(ctx)
 	if client == nil {
+		if err := ctx.Err(); err != nil {
+			return f, err
+		}
 		if optionalInfo && !forceInfo {
 			return f, nil
 		}
@@ -1946,14 +1949,14 @@ func slackTrustedFileDownloadHost(originalHost, nextHost string) bool {
 	return false
 }
 
-func (s *SlackService) slackClientForFiles() *slack.Client {
+func (s *SlackService) slackClientForFiles(ctx context.Context) *slack.Client {
 	s.mu.RLock()
 	client := s.botClient
 	s.mu.RUnlock()
 	if client != nil {
 		return client
 	}
-	botToken := strings.TrimSpace(s.resolveBotToken(context.Background()))
+	botToken := strings.TrimSpace(s.resolveBotToken(ctx))
 	if botToken == "" {
 		return nil
 	}

@@ -446,6 +446,43 @@ func TestSlackService_SocketEventPreACKDeadlineBoundsSettingsAndReceiptReads(t *
 	}
 }
 
+func TestSlackService_FileInfoTokenLookupRespectsRequestCancellation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenSource, SlackBotTokenSourceManual))
+	require.NoError(t, settingsRepo.Set(ctx, SlackSettingBotTokenOverride, "xoxb-test"))
+	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	blockingTx, err := db.Begin()
+	require.NoError(t, err)
+	_, err = blockingTx.Exec(`SELECT 1`)
+	require.NoError(t, err)
+
+	cancelledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.resolveSlackFileInfo(cancelledCtx, slackIncomingFile{
+			ID:         "F1",
+			Name:       "attachment.bin",
+			Mimetype:   "application/octet-stream",
+			FileAccess: "check_file_info",
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(250 * time.Millisecond):
+		require.NoError(t, blockingTx.Rollback())
+		<-done
+		t.Fatal("file-info bot-token lookup ignored request cancellation")
+	}
+	require.NoError(t, blockingTx.Rollback())
+}
+
 func TestSlackService_SocketEventPreACKFailureCallbackDoesNotBlock(t *testing.T) {
 	svc, _, taskRepo, _, _, _, projectID := newSlackSocketIngressTestService(t)
 	svc.preACKTimeout = 30 * time.Millisecond
