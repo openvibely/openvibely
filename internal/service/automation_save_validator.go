@@ -141,7 +141,7 @@ func (v *AutomationSaveValidator) capabilityIssues(ctx context.Context, projectI
 			return nil, errors.New("project not found")
 		}
 	}
-	if candidate.AdapterKey != AutomationAdapterGitHubSDLC && !customAutomationUsesGitHub(candidate) {
+	if !automationUsesGitHub(candidate) {
 		return nil, nil
 	}
 
@@ -202,10 +202,7 @@ func (v *AutomationSaveValidator) capabilityIssues(ctx context.Context, projectI
 	return issues, nil
 }
 
-func customAutomationUsesGitHub(candidate models.AutomationDraftCandidate) bool {
-	if candidate.AdapterKey != AutomationAdapterCustom {
-		return false
-	}
+func automationUsesGitHub(candidate models.AutomationDraftCandidate) bool {
 	for _, node := range candidate.Nodes {
 		switch node.Role {
 		case "create_github_issue", "github_assignment", "github_inbox", "open_pull_request", "pull_request_review":

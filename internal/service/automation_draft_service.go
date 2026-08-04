@@ -455,6 +455,7 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 		canonicalEdges[edge.Key] = edge
 	}
 	seenEdgeKeys := map[string]bool{}
+	seenEndpointPairs := map[string]bool{}
 	seenCanonicalEdges := map[string]bool{}
 	for _, edge := range candidate.Edges {
 		if edge.Key == "" || seenEdgeKeys[edge.Key] {
@@ -470,6 +471,11 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 			issues = append(issues, models.AutomationValidationIssue{Code: "invalid_edge", Message: "Graph edge references an invalid node."})
 			continue
 		}
+		endpointPair := edge.From + "\x00" + edge.To
+		if seenEndpointPairs[endpointPair] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: edge.From, Code: "ambiguous_handoff", Message: fmt.Sprintf("Nodes %q and %q have more than one connection. Keep exactly one connection between the same source and target.", edge.From, edge.To)})
+		}
+		seenEndpointPairs[endpointPair] = true
 		if adapter.DynamicTopology || flexibleTemplate {
 			conditionState, hasCondition := customAutomationEdgeConditionState(edge.Condition)
 			fromNode := draftNodes[edge.From]
@@ -1367,7 +1373,7 @@ func validateAutomationTaskReferenceShape(node models.AutomationDraftNode) []mod
 
 func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate models.AutomationDraftCandidate, snapshot models.AutomationCapabilitySnapshot) []models.AutomationValidationIssue {
 	issues := s.ValidateCandidate(candidate)
-	if candidate.AdapterKey == AutomationAdapterGitHubSDLC || customAutomationUsesGitHub(candidate) {
+	if automationUsesGitHub(candidate) {
 		github, configured := snapshot.Integrations["github"]
 		if !configured || !github.Configured {
 			issues = append(issues, models.AutomationValidationIssue{Code: "github_unavailable", Message: "GitHub is not ready for this project. Configure connected GitHub authentication, at least one GitHub Authorized User, and either a project GitHub repository URL or a GitHub remote in the project's local checkout before saving this Automation."})

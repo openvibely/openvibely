@@ -96,6 +96,24 @@ func seedExistingVisionDriverAutomation(t *testing.T, h automationSaveHarness) (
 	return definition, candidate
 }
 
+func TestGitHubSDLCReducedGraphWithoutGitHubRolesDoesNotRequireGitHubSetup(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Reduced GitHub graph without GitHub capabilities")
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
+	require.NoError(t, err)
+	for _, node := range append([]models.AutomationDraftNode(nil), candidate.Nodes...) {
+		if node.Key != "vision_suggestions" {
+			candidate = automationCandidateWithoutNode(candidate, node.Key)
+		}
+	}
+
+	result, err := h.compiler.Save(context.Background(), AutomationSaveRequest{
+		ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate,
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Definition.Nodes, 1)
+	require.Equal(t, "vision_suggestions", result.Definition.Nodes[0].NodeKey)
+}
+
 func TestMaintainedSDLCSaveRemovesOptionalVisionProducerAndOwnedResources(t *testing.T) {
 	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
 		t.Run(adapterKey, func(t *testing.T) {

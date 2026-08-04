@@ -3213,6 +3213,45 @@ func TestAutomationRuntimeCustomNativeMailboxUsesRoleTopologyInsteadOfMaintained
 	}
 }
 
+func TestAutomationRuntimeReducedNativeApprovalBranchesEndAtGate(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		decision   models.AlertDecisionState
+		removeKeys []string
+	}{
+		{name: "rejection without rejected outcome", decision: models.AlertDecisionRejected, removeKeys: []string{"rejected"}},
+		{name: "approval without inbox branch", decision: models.AlertDecisionApproved, removeKeys: []string{"inbox", "implementation", "completed"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newAutomationSaveHarness(t, "Reduced Native decision")
+			ctx := context.Background()
+			candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+			require.NoError(t, err)
+			for _, key := range test.removeKeys {
+				candidate = automationCandidateWithoutNode(candidate, key)
+			}
+			saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
+			require.NoError(t, err)
+
+			alertRepo := repository.NewAlertRepo(h.db)
+			alertRepo.SetAutomationRepo(h.automationRepo)
+			alertSvc := NewAlertService(alertRepo, nil)
+			producer := automationNodeByKey(t, saved.Definition, "vision_suggestions")
+			producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+				AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: producer.ID,
+			}}})
+			alert, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: test.name, IdempotencyKey: test.name})
+			require.NoError(t, err)
+			require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, alert.ID, test.decision))
+
+			stored, err := alertSvc.GetByID(ctx, h.project.ID, alert.ID)
+			require.NoError(t, err)
+			require.Equal(t, test.decision, stored.DecisionState)
+			require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND status = 'completed'`, saved.Definition.Automation.ID))
+		})
+	}
+}
+
 func TestAutomationRuntimeNativeAlertLifecycleAndLiveProjection(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()

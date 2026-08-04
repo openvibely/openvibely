@@ -37,6 +37,13 @@ func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
 			reconnected.Edges[0].Key = "user_reconnected_edge"
 			require.Empty(t, drafts.ValidateCandidate(reconnected))
 
+			duplicateHandoff := candidate
+			duplicateHandoff.Edges = append([]models.AutomationDraftEdge(nil), candidate.Edges...)
+			duplicate := duplicateHandoff.Edges[0]
+			duplicate.Key = "forged_duplicate_handoff"
+			duplicateHandoff.Edges = append(duplicateHandoff.Edges, duplicate)
+			require.Contains(t, issueCodes(drafts.ValidateCandidate(duplicateHandoff)), "ambiguous_handoff")
+
 			stranded := automationCandidateWithoutNode(candidate, "completed")
 			issues := drafts.ValidateCandidate(stranded)
 			require.NotContains(t, issueCodes(issues), "missing_node")

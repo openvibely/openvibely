@@ -207,15 +207,6 @@ func recordAlertDecisionProjection(ctx context.Context, exec SQLExecutor, projec
 			if err != nil {
 				return err
 			}
-			targetKey := "inbox"
-			if state == models.AlertDecisionRejected || state == models.AlertDecisionDismissed {
-				targetKey = "rejected"
-				transition = models.AutomationTransitionCompleted
-			}
-			targetNode, err = automationNodeIDByKey(ctx, exec, projectID, value.automationID, value.versionID, targetKey)
-			if err != nil {
-				return err
-			}
 		} else if adapterKey == "custom" {
 			if err := exec.QueryRowContext(ctx, `SELECT n.id FROM automation_work_item_positions p
 				JOIN automation_nodes n ON n.id = p.node_id AND n.project_id = p.project_id
@@ -224,27 +215,28 @@ func recordAlertDecisionProjection(ctx context.Context, exec SQLExecutor, projec
 					AND n.node_type = 'human_gate' AND n.role = 'native_approval'`, projectID, value.automationID, value.versionID, value.workItemID).Scan(&approvalNode); err != nil {
 				return err
 			}
-			branchState := "approved"
-			if state == models.AlertDecisionRejected || state == models.AlertDecisionDismissed {
-				branchState = "rejected"
-			}
-			var targetType models.AutomationNodeType
-			branchErr := exec.QueryRowContext(ctx, `SELECT target.id, target.node_type FROM automation_edges edge
-					JOIN automation_nodes target ON target.id = edge.target_node_id AND target.project_id = edge.project_id
-						AND target.automation_id = edge.automation_id AND target.version_id = edge.version_id
-					WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ?
-						AND edge.source_node_id = ? AND json_extract(edge.condition_json, '$.state') = ?`,
-				projectID, value.automationID, value.versionID, approvalNode, branchState).Scan(&targetNode, &targetType)
-			if errors.Is(branchErr, sql.ErrNoRows) {
-				targetNode = approvalNode
-				transition = models.AutomationTransitionCompleted
-			} else if branchErr != nil {
-				return branchErr
-			} else if targetType == models.AutomationNodeOutcome {
-				transition = models.AutomationTransitionCompleted
-			}
 		} else {
 			continue
+		}
+
+		branchState := "approved"
+		if state == models.AlertDecisionRejected || state == models.AlertDecisionDismissed {
+			branchState = "rejected"
+		}
+		var targetType models.AutomationNodeType
+		branchErr := exec.QueryRowContext(ctx, `SELECT target.id, target.node_type FROM automation_edges edge
+				JOIN automation_nodes target ON target.id = edge.target_node_id AND target.project_id = edge.project_id
+					AND target.automation_id = edge.automation_id AND target.version_id = edge.version_id
+				WHERE edge.project_id = ? AND edge.automation_id = ? AND edge.version_id = ?
+					AND edge.source_node_id = ? AND json_extract(edge.condition_json, '$.state') = ?`,
+			projectID, value.automationID, value.versionID, approvalNode, branchState).Scan(&targetNode, &targetType)
+		if errors.Is(branchErr, sql.ErrNoRows) {
+			targetNode = approvalNode
+			transition = models.AutomationTransitionCompleted
+		} else if branchErr != nil {
+			return branchErr
+		} else if targetType == models.AutomationNodeOutcome {
+			transition = models.AutomationTransitionCompleted
 		}
 		binding := models.AutomationBinding{AutomationID: value.automationID, VersionID: value.versionID, NodeID: approvalNode, WorkItemID: value.workItemID}
 		_, _, err = recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
