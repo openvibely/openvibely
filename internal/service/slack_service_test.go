@@ -461,6 +461,79 @@ func TestSlackService_SocketEventFirstTurnPersistenceFailureRedelivery(t *testin
 	require.Len(t, tasks, 1)
 }
 
+func TestSlackService_SocketEventAppMentionFailureAllowsMatchingMessageEventHandoff(t *testing.T) {
+	svc, _, taskRepo, execRepo, _, _, projectID := newSlackSocketIngressTestService(t)
+	ctx := context.Background()
+	require.NoError(t, svc.settingsRepo.Set(ctx, SlackSettingBotUserID, "UBOT"))
+
+	acks := 0
+	attempts := 0
+	svc.ackSocketRequestFn = func(*socketmode.Client, socketmode.Request) { acks++ }
+	svc.createExecutionFn = func(ctx context.Context, execution *models.Execution) (bool, error) {
+		attempts++
+		if attempts == 1 {
+			return false, fmt.Errorf("transient app-mention persistence failure")
+		}
+		return false, execRepo.Create(ctx, execution)
+	}
+
+	const timestamp = "1710000000.150000"
+	appMention := socketmode.Event{
+		Type:    socketmode.EventTypeEventsAPI,
+		Request: &socketmode.Request{EnvelopeID: "E-app-mention"},
+		Data: slackevents.EventsAPIEvent{
+			Type:   slackevents.CallbackEvent,
+			TeamID: "T1",
+			InnerEvent: slackevents.EventsAPIInnerEvent{Data: slackevents.AppMentionEvent{
+				User:      "U1",
+				Channel:   "C1",
+				Text:      "<@UBOT> persist this",
+				TimeStamp: timestamp,
+			}},
+		},
+	}
+	messageEvent := socketmode.Event{
+		Type:    socketmode.EventTypeEventsAPI,
+		Request: &socketmode.Request{EnvelopeID: "E-message"},
+		Data: slackevents.EventsAPIEvent{
+			Type:   slackevents.CallbackEvent,
+			TeamID: "T1",
+			InnerEvent: slackevents.EventsAPIInnerEvent{Data: slackevents.MessageEvent{
+				ChannelType: "channel",
+				User:        "U1",
+				Channel:     "C1",
+				Text:        "<@UBOT> persist this",
+				TimeStamp:   timestamp,
+			}},
+		},
+	}
+
+	svc.handleSocketEvent(ctx, nil, appMention)
+	require.Equal(t, 0, acks)
+	require.Eventually(t, func() bool {
+		tasks, err := taskRepo.ListByProject(ctx, projectID, "")
+		return err == nil && len(tasks) == 0
+	}, time.Second, 10*time.Millisecond, "failed app-mention handoff must release the shared message key after cleanup")
+
+	svc.handleSocketEvent(ctx, nil, messageEvent)
+	require.Equal(t, 1, acks)
+	require.Equal(t, 2, attempts)
+	tasks, err := taskRepo.ListByProject(ctx, projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	executions, err := execRepo.ListByTask(ctx, tasks[0].ID)
+	require.NoError(t, err)
+	require.Len(t, executions, 1)
+
+	svc.handleSocketEvent(ctx, nil, appMention)
+	svc.handleSocketEvent(ctx, nil, messageEvent)
+	require.Equal(t, 3, acks, "both duplicate envelope forms must be terminally acknowledged")
+	require.Equal(t, 2, attempts, "durable duplicates must not retry persistence")
+	tasks, err = taskRepo.ListByProject(ctx, projectID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+}
+
 func TestSlackService_SocketEventQueuedTurnPersistenceFailureRedelivery(t *testing.T) {
 	svc, _, taskRepo, execRepo, threadInputRepo, _, projectID := newSlackSocketIngressTestService(t)
 	ctx := context.Background()
