@@ -23,7 +23,7 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	implementationTaskID := "implementation-task-1"
 	alerts := []models.Alert{
 		{
-			ID: "operational-1", Title: "Build failed", Message: "Compiler exited", Type: models.AlertTaskFailed,
+			ID: "operational-1", Title: "Build failed", Message: "Compiler exited", Body: "Compiler diagnostics\nline 2", Type: models.AlertTaskFailed,
 			Severity: models.SeverityError, Source: "task-runner", DecisionState: models.AlertDecisionNotRequired,
 			ProcessingState: models.AlertProcessingNotApplicable, CreatedAt: createdAt, UpdatedAt: createdAt,
 		},
@@ -34,9 +34,14 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 			ImplementationTaskID: &implementationTaskID, Metadata: map[string]any{"attempt": float64(2)},
 			CreatedAt: createdAt, UpdatedAt: createdAt,
 		},
+		{
+			ID: "empty-body-1", Title: "No body", Message: "Summary only", Type: models.AlertCustom,
+			Severity: models.SeverityInfo, Source: "system", DecisionState: models.AlertDecisionNotRequired,
+			ProcessingState: models.AlertProcessingNotApplicable, CreatedAt: createdAt, UpdatedAt: createdAt,
+		},
 	}
 	var rendered bytes.Buffer
-	if err := AlertsContent(alerts, "project-alerts-browser", 2).Render(context.Background(), &rendered); err != nil {
+	if err := AlertsContent(alerts, "project-alerts-browser", 3).Render(context.Background(), &rendered); err != nil {
 		t.Fatalf("render Alerts content: %v", err)
 	}
 
@@ -56,23 +61,13 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied.push(text); return Promise.resolve(); }}});
 	    var operational = document.querySelector('#alert-operational-1 [data-alert-copy]');
 	    var notification = document.querySelector('#alert-notification-1 [data-alert-copy]');
+	    var emptyBody = document.querySelector('#alert-empty-body-1 [data-alert-copy]');
 	    if (!operational || !notification) fail('missing inspect copy buttons');
-	    var operationalDetails = operational.closest('details');
-	    var operationalContent = operational.parentElement;
-	    var operationalSource = operationalDetails && operationalDetails.nextElementSibling;
-	    if (!operationalDetails || !operationalContent || !operationalSource) fail('missing operational inspect geometry elements');
-	    operationalDetails.open = true;
-	    var contentRect = operationalContent.getBoundingClientRect();
-	    var copyRect = operational.getBoundingClientRect();
-	    var sourceRect = operationalSource.getBoundingClientRect();
-	    if (contentRect.height < copyRect.height) fail('empty inspect content did not reserve copy button height');
-	    if (copyRect.bottom > contentRect.bottom + 0.5) fail('copy button overflowed empty inspect content');
-	    if (copyRect.bottom > sourceRect.top + 0.5) fail('copy button overlapped source row');
+	    if (emptyBody) fail('body-less alert exposed a copy button');
 	    operational.click();
 	    await wait(0);
 	    if (operational.textContent.trim() !== 'Copied') fail('success feedback was not shown');
-	    if (!copied[0] || !copied[0].includes('OpenVibely alert\nID: operational-1') || !copied[0].includes('Message: Compiler exited')) fail('operational alert clipboard text was incomplete');
-	    if (copied[0].includes('project-alerts-browser')) fail('clipboard text leaked project identity');
+	    if (copied[0] !== 'Compiler diagnostics\nline 2') fail('operational alert copied more than its body: ' + copied[0]);
 	    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function() { return Promise.reject(new Error('denied')); }}});
 	    notification.click();
 	    await wait(0);
@@ -80,7 +75,7 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied.push(text); return Promise.resolve(); }}});
 	    notification.click();
 	    await wait(0);
-	    if (!copied[1] || !copied[1].includes('OpenVibely notification\nID: notification-1') || !copied[1].includes('Implementation task ID: implementation-task-1') || !copied[1].includes('Metadata:\n{\n  "attempt": 2\n}')) fail('notification clipboard text was incomplete');
+	    if (copied[1] !== 'Check the patch.') fail('notification copied more than its body: ' + copied[1]);
 	    report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});

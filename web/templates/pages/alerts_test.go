@@ -101,34 +101,27 @@ func TestAlertsContent_DeleteActionsDoNotDependOnHxConfirm(t *testing.T) {
 	}
 }
 
-func TestAlertsContent_InspectCopyIncludesSafeStructuredDetailsForAllAlertKinds(t *testing.T) {
-	decidedAt := time.Date(2026, time.August, 4, 10, 11, 12, 0, time.UTC)
-	claimedAt := decidedAt.Add(time.Minute)
-	claimExpiresAt := claimedAt.Add(15 * time.Minute)
-	implementationTaskID := "implementation-task-1"
-	sourceTaskID := "source-task-1"
-	executionID := "execution-1"
-	operationalTaskID := "operational-task-1"
+func TestAlertsContent_InspectCopyCopiesOnlyBodyForAllAlertKinds(t *testing.T) {
 	createdAt := time.Date(2026, time.August, 4, 9, 8, 7, 0, time.UTC)
-	updatedAt := createdAt.Add(2 * time.Hour)
 	alerts := []models.Alert{
 		{
 			ID: "operational-1", ProjectID: "hidden-project", IdempotencyKey: "hidden-idempotency-key",
-			TaskID: &operationalTaskID, ExecutionID: &executionID, Type: models.AlertTaskFailed,
-			Severity: models.SeverityError, Title: "Build failed", Message: "Compiler exited",
-			Source: "task-runner", DecisionState: models.AlertDecisionNotRequired,
-			ProcessingState: models.AlertProcessingNotApplicable, IsRead: true,
-			CreatedAt: createdAt, UpdatedAt: updatedAt,
+			Type: models.AlertTaskFailed, Severity: models.SeverityError, Title: "Build failed",
+			Message: "Compiler exited", Body: "Compiler diagnostics\nline 2", Source: "task-runner",
+			DecisionState: models.AlertDecisionNotRequired, ProcessingState: models.AlertProcessingNotApplicable,
+			CreatedAt: createdAt, UpdatedAt: createdAt,
 		},
 		{
 			ID: "notification-1", ProjectID: "hidden-project", IdempotencyKey: "hidden-idempotency-key",
-			SourceTaskID: &sourceTaskID, Type: models.AlertCustom, Severity: models.SeverityWarning,
-			Title: "Review change", Message: "Approval requested", Body: "Check the proposed patch.",
-			Source: "review-agent", Metadata: map[string]any{"attempt": float64(2), "nested": map[string]any{"safe": true}},
-			DecisionState: models.AlertDecisionApproved, DecidedAt: &decidedAt,
-			ProcessingState: models.AlertProcessingFailed, Claimant: "inbox-agent", ClaimedAt: &claimedAt,
-			ClaimExpiresAt: &claimExpiresAt, ImplementationTaskID: &implementationTaskID,
-			ProcessingError: "worker unavailable", CreatedAt: createdAt, UpdatedAt: updatedAt,
+			Type: models.AlertCustom, Severity: models.SeverityWarning, Title: "Review change",
+			Message: "Approval requested", Body: "Check the proposed patch.", Source: "review-agent",
+			Metadata: map[string]any{"attempt": float64(2)}, DecisionState: models.AlertDecisionPending,
+			ProcessingState: models.AlertProcessingUnclaimed, CreatedAt: createdAt, UpdatedAt: createdAt,
+		},
+		{
+			ID: "empty-body-1", Title: "No body", Message: "Summary only", Type: models.AlertCustom,
+			Severity: models.SeverityInfo, Source: "system", DecisionState: models.AlertDecisionNotRequired,
+			ProcessingState: models.AlertProcessingNotApplicable, CreatedAt: createdAt, UpdatedAt: createdAt,
 		},
 	}
 
@@ -141,45 +134,53 @@ func TestAlertsContent_InspectCopyIncludesSafeStructuredDetailsForAllAlertKinds(
 	for _, required := range []string{
 		`<summary class="cursor-pointer text-sm font-medium">Inspect alert</summary>`,
 		`<summary class="cursor-pointer text-sm font-medium">Inspect notification</summary>`,
-		`class="relative mt-3 min-h-6 min-w-0 max-w-full pr-8"`,
+		`class="relative mt-3 min-w-0 max-w-full min-h-6 pr-8"`,
 		`class="btn btn-xs btn-ghost btn-square absolute right-0 top-0"`,
-		`data-alert-copy`,
-		`aria-label="Copy inspected alert details"`, `aria-label="Copy inspected notification details"`,
-		`title="Copy details"`, `data-alert-copy-icon`, `data-alert-copy-success-icon`, `data-alert-copy-error-icon`,
+		`data-alert-copy`, `aria-label="Copy inspected alert body"`, `aria-label="Copy inspected notification body"`,
+		`title="Copy body"`, `data-alert-copy-icon`, `data-alert-copy-success-icon`, `data-alert-copy-error-icon`,
 		`data-alert-copy-feedback class="sr-only" aria-live="polite"`,
 		`onclick="copyAlertDetails(this)"`, `data-alert-copy-text`,
 		`navigator.clipboard.writeText(text)`, `Copied`, `Copy failed`,
-		"ID: operational-1", "Title: Build failed", "Message: Compiler exited", "Severity: error",
-		"Type: task_failed", "Source: task-runner", "Read: yes", "Task ID: operational-task-1",
-		"Execution ID: execution-1", "Created at: 2026-08-04T09:08:07Z", "Updated at: 2026-08-04T11:08:07Z",
-		"ID: notification-1", "Body:\nCheck the proposed patch.", "Decision state: approved",
-		"Processing state: failed", "Decided at: 2026-08-04T10:11:12Z", "Claimant: inbox-agent",
-		"Claimed at: 2026-08-04T10:12:12Z", "Claim expires at: 2026-08-04T10:27:12Z",
-		"Source task ID: source-task-1", "Implementation task ID: implementation-task-1",
-		"Processing error:\nworker unavailable", "Metadata:\n{\n  &#34;attempt&#34;: 2,\n  &#34;nested&#34;: {\n    &#34;safe&#34;: true\n  }\n}",
 	} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("inspect copy markup missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{"Project ID: hidden-project", "Idempotency key: hidden-idempotency-key"} {
-		if strings.Contains(html, forbidden) {
-			t.Fatalf("inspect copy leaked hidden value %q", forbidden)
-		}
-	}
+
 	operationalStart := strings.Index(html, `id="alert-operational-1"`)
 	notificationStart := strings.Index(html, `id="alert-notification-1"`)
-	if operationalStart < 0 || notificationStart <= operationalStart {
+	emptyStart := strings.Index(html, `id="alert-empty-body-1"`)
+	if operationalStart < 0 || notificationStart <= operationalStart || emptyStart <= notificationStart {
 		t.Fatal("rendered alert card boundaries missing")
 	}
 	operationalCard := html[operationalStart:notificationStart]
-	if strings.Contains(operationalCard, `class="mt-3 flex justify-end"`) {
-		t.Fatal("inspect copy button must not consume a separate layout row")
+	notificationCard := html[notificationStart:emptyStart]
+	emptyEnd := strings.Index(html[emptyStart:], `<div class="mt-2 text-xs opacity-60 break-words">`)
+	if emptyEnd < 0 {
+		t.Fatal("empty-body alert source row missing")
 	}
-	copyPayloadIndex := strings.Index(operationalCard, `data-alert-copy-text`)
-	copyButtonIndex := strings.Index(operationalCard, `class="btn btn-xs btn-ghost btn-square absolute right-0 top-0"`)
-	if copyPayloadIndex < 0 || copyButtonIndex < 0 || copyButtonIndex < copyPayloadIndex {
-		t.Fatal("inspect copy button must render after the inspected content")
+	emptyCard := html[emptyStart : emptyStart+emptyEnd]
+	for card, body := range map[string]string{
+		operationalCard:  "Compiler diagnostics\nline 2",
+		notificationCard: "Check the proposed patch.",
+	} {
+		payloadStart := strings.Index(card, `<pre class="hidden" data-alert-copy-text aria-hidden="true">`)
+		payloadEnd := strings.Index(card[payloadStart:], `</pre>`)
+		if payloadStart < 0 || payloadEnd < 0 {
+			t.Fatal("copy payload missing")
+		}
+		payload := card[payloadStart : payloadStart+payloadEnd]
+		if !strings.Contains(payload, body) {
+			t.Fatalf("copy payload missing exact body %q", body)
+		}
+		for _, forbidden := range []string{"OpenVibely", "ID:", "Title:", "Message:", "Metadata:", "hidden-project", "hidden-idempotency-key"} {
+			if strings.Contains(payload, forbidden) {
+				t.Fatalf("body-only copy payload unexpectedly contains %q", forbidden)
+			}
+		}
+	}
+	if strings.Contains(emptyCard, `data-alert-copy`) {
+		t.Fatal("alert without a body must not render a copy control")
 	}
 }
 
