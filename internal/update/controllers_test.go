@@ -1738,6 +1738,7 @@ func TestHostedLostReadinessResponseReplaysClaimAndUsesAuthoritativeLease(t *tes
 func TestHostedLostReadinessResponseRemainsClosedWhileReplayUnavailable(t *testing.T) {
 	var readyCalls atomic.Int32
 	var firstKey atomic.Value
+	readyStarted := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/ready") {
 			t.Errorf("unexpected control-plane request %s %s", r.Method, r.URL.Path)
@@ -1747,6 +1748,7 @@ func TestHostedLostReadinessResponseRemainsClosedWhileReplayUnavailable(t *testi
 		key := r.Header.Get("Idempotency-Key")
 		if readyCalls.Add(1) == 1 {
 			firstKey.Store(key)
+			close(readyStarted)
 		} else if got, _ := firstKey.Load().(string); key == "" || key != got {
 			t.Errorf("readiness idempotency key changed from %q to %q", got, key)
 		}
@@ -1776,12 +1778,17 @@ func TestHostedLostReadinessResponseRemainsClosedWhileReplayUnavailable(t *testi
 	controller := NewHostedController(api, drain, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, filepath.Join(root, "hosted.json"))
 	controller.state = state
 	controller.renewInterval = 5 * time.Millisecond
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
 		done <- controller.coordinate(ctx, HostedDirective{UpdateID: "assigned"}, state)
 	}()
+	select {
+	case <-readyStarted:
+	case <-time.After(time.Second):
+		t.Fatal("readiness claim did not start")
+	}
 	select {
 	case <-drain.Reopened():
 		t.Fatal("admission reopened while readiness acceptance remained ambiguous")
@@ -1790,9 +1797,10 @@ func TestHostedLostReadinessResponseRemainsClosedWhileReplayUnavailable(t *testi
 	if readyCalls.Load() < 2 || !drain.Owns(status.Generation) {
 		t.Fatalf("readyCalls=%d owns=%v", readyCalls.Load(), drain.Owns(status.Generation))
 	}
+	cancel()
 	select {
 	case err := <-done:
-		if !errors.Is(err, context.DeadlineExceeded) {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("coordinate error=%v", err)
 		}
 	case <-time.After(time.Second):
