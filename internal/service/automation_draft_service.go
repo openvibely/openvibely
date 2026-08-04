@@ -770,6 +770,12 @@ func automationCapabilityMentionNegated(prefix string) bool {
 			continue
 		}
 		governingText := strings.TrimSpace(prefix[index+len(negation):])
+		governingText = strings.Trim(governingText, "`'\"()[]{} ")
+		words := strings.Fields(governingText)
+		if len(words) > 1 && (words[len(words)-1] == "a" || words[len(words)-1] == "an" || words[len(words)-1] == "the") {
+			words = words[:len(words)-1]
+		}
+		governingText = strings.Join(words, " ")
 		switch governingText {
 		case "", "use", "using", "call", "calling", "invoke", "invoking", "access", "accessing", "publish with", "publishing with", "work with", "working with":
 			return true

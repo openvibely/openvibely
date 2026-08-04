@@ -106,6 +106,8 @@ func TestGitHubSDLCReducedGraphRequiresSetupOnlyForRetainedGitHubRuntimeNodes(t 
 		prompt string
 	}{
 		{key: "vision_suggestions", prompt: "Do not call github_create_issue. Review local project notes and summarize one improvement."},
+		{key: "vision_suggestions", prompt: "Do not call `github_create_issue`. Review local project notes and summarize one improvement."},
+		{key: "vision_suggestions", prompt: "Do not call the github_create_issue tool. Review local project notes and summarize one improvement."},
 		{key: "auditor", prompt: "Review local project notes only; do not use GitHub."},
 	} {
 		customized, err := h.drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)

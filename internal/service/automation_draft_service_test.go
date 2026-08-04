@@ -23,6 +23,8 @@ func TestAutomationPromptCapabilityUseIgnoresNegatedMentions(t *testing.T) {
 	}{
 		{name: "positive tool instruction", prompt: "Call github_create_issue with the completed proposal.", capability: "github_create_issue", want: true},
 		{name: "negated tool instruction", prompt: "Do not call github_create_issue. Summarize the proposal locally.", capability: "github_create_issue"},
+		{name: "negated backtick tool instruction", prompt: "Do not call `github_create_issue`. Summarize the proposal locally.", capability: "github_create_issue"},
+		{name: "negated natural tool instruction", prompt: "Do not call the github_create_issue tool. Summarize the proposal locally.", capability: "github_create_issue"},
 		{name: "positive GitHub work", prompt: "Review stale labels and unexpected GitHub assignments.", capability: "github", want: true},
 		{name: "post-capability unrelated negation", prompt: "Review unexpected GitHub assignments without modifying code.", capability: "github", want: true},
 		{name: "negated GitHub work", prompt: "Review local project notes only; do not use GitHub.", capability: "github"},
@@ -65,6 +67,8 @@ func TestGitHubSDLCCapabilityValidationTracksRetainedRuntimePrompts(t *testing.T
 		prompt string
 	}{
 		{key: "vision_suggestions", prompt: "Do not call github_create_issue. Review local project notes and summarize one improvement."},
+		{key: "vision_suggestions", prompt: "Do not call `github_create_issue`. Review local project notes and summarize one improvement."},
+		{key: "vision_suggestions", prompt: "Do not call the github_create_issue tool. Review local project notes and summarize one improvement."},
 		{key: "auditor", prompt: "Review local project notes only; do not use GitHub."},
 	} {
 		customized, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
