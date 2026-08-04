@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-02
+updated: 2026-08-04
 source: consolidation
-source_id: memory_consolidation_2026_07_29
+source_id: memory_consolidation_2026_08_04
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -92,7 +92,7 @@ Chat/thread rendering facts:
 - GitHub issue #38 tracks duplicated global task-thread scroll-state helpers in `task_detail.templ` and independently loaded `task_detail_helpers.templ`; both copies required the same scroll-intent fix, and browser load order currently determines which implementation wins.
 - GitHub issue #55 tracks duplicated task-thread terminal UI/composer reconciliation across fresh-stream, resumed-stream, and out-of-band completion paths. The bounded direction is a shared lifecycle helper that preserves intentional per-path differences, with validation for terminal output/status and composer refresh behavior.
 - GitHub issue #59 tracks the separately hand-built live-event queued task-thread row, which drifted from the canonical pending-input templ fragment by missing its attachment indicator. The bounded direction is to reuse the authoritative server-rendered pending-input fragment while retaining explicit live-event routing and task scoping.
-- GitHub issue #65 tracks the repeated task-thread post-swap hydration pipeline in the `htmx:afterSwap` branches for `task-thread-messages`, `task-thread-view`, and `task-detail-content`. Commits `5378108` and `1dbbd79` required synchronized updates across all three copies; the bounded direction is one shared hydration helper that preserves target-specific behavior, with validation for all three swap targets.
+- GitHub issue #65 tracks the repeated task-thread post-swap hydration pipeline in the `htmx:afterSwap` branches for `task-thread-messages`, `task-thread-view`, and `task-detail-content`. The bounded direction is one shared hydration helper that preserves target-specific behavior, with validation for all three swap targets.
 - GitHub issue #47 tracks three duplicated schedule repeat-interval UI controllers across Task Detail schedule create/edit controls and the Schedule page modal. The copies repeat label derivation, conditional visibility, whole-number validity, and event wiring; the two Task Detail controllers also repeat once per rendered schedule card. The bounded direction is a shared initializer with validation across create/edit and modal contexts.
 
 Responsive and shared UI contracts:
@@ -112,7 +112,7 @@ Responsive and shared UI contracts:
 - Changes-tab Actions dropdowns need an explicit high stacking context above sticky diff file headers (`z-20`) and viewport max-width containment; using DaisyUI's low default-style `z-[1]` menu layering can leave Local/GitHub merge actions obscured by the diff surface.
 - Tasks page uses server-rendered kanban board/task-card templ components. Responsive contract: one-column stacked board/cards on phones, two columns around tablet widths, three columns on desktop, no phantom fourth column, no global fixed one-third column width, independent mobile dropzone scrolling, no page-level horizontal overflow, mobile-safe wrapping, at least 44px touch targets, compact desktop card density, and the `+ Add Task` header action colocated beside the title like Models `+ Add Model`.
 - Active kanban queued/pending dropzones should render only real active pending/queued/blocked work; terminal `failed`/`cancelled` task rows must not be displayed as queued work even as a defensive fallback for stale durable state.
-- In the Completed column, Date newest/oldest sorting is completion-time sorting via nullable `tasks.completed_at`; Backlog date sorting remains creation-time sorting. UI/tests should keep backlog and completed sort semantics distinct.
+- Tasks page date sorting defaults to newest-first when no explicit preference exists: Backlog uses creation time (`created_desc`), while Completed uses nullable `tasks.completed_at` (`completed_desc`) with `updated_at` fallback for legacy null timestamps. Persisted user-selected sort cookies remain authoritative, and the shared request preference resolver applies the same effective ordering to initial renders, HTMX/SSE refreshes, mutations, and drag/drop transitions. Task Detail category edits route actual category changes through `TaskService.UpdateCategory`, so leaving Completed clears `completed_at`, re-entering Completed assigns a fresh timestamp, and newest-first ordering stays consistent with drag/drop. Focused handler and real-Chrome coverage verifies default ordering, active sort controls, live authoritative refresh, the production drag lifecycle, explicit sort persistence, and Completed to Backlog to Completed timestamp/order behavior.
 - Responsive card pages such as Models, Agents, Alerts, Channels, and Personality should keep page roots, grids, cards, badges, and inner content shrink-safe with `max-w-full`/`min-w-0` containment. Long badge values need truncation within the badge row rather than expanding the card/grid.
 - Goal edit controls belong in the task edit dialog; verified-state Git worktree actions can remain on the details surface.
 - Schedule UI surfaces should clearly distinguish disabled schedules, and dynamic task-loop wakeups should remain visually distinct from fixed schedules.

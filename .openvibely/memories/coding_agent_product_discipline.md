@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-08-02
-source: task_turn
-source_id: 36bb8adce55d398c6e715f4cfb58abff
+updated: 2026-08-03
+source: consolidation
+source_id: memory_consolidation_2026_08_03
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -16,6 +16,7 @@ User interaction preferences:
 - Prefer prompt or configuration corrections when they are sufficient; do not change runtime or product code merely because a model-facing prompt can express the intended behavior. Add code enforcement only when an authoritative invariant must also cover manual, forged, or otherwise prompt-bypassing inputs.
 - Do not describe unreleased feature contracts as legacy or preserve compatibility shims for unreleased API/UI shapes unless the user explicitly asks for migration compatibility.
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
+- Ask before rewriting or collapsing meaningful Git history, including rebuilding a long task branch as one net-tree commit to avoid rebase conflicts. Preserve a clearly named backup ref when history must be recovered or rewritten, but do not treat that backup as a substitute for user approval.
 - Treat requests explicitly limited to memory or skill maintenance as a hard scope boundary: do not add implementation, generated-file, test, rebase, or other repository changes unless the user separately requests them; clearly distinguish any pre-existing or later-instructed code work when reporting the diff.
 - Treat explicit audit exclusions as equally hard scope boundaries. In particular, when the user excludes managed memory, do not inspect, cite, reconcile, or use managed or tracked memory as audit evidence; audit only the requested repository/publication artifacts.
 - Do not delegate tasks or create child-agent work. This prohibition applies especially to memory updates; use only direct capabilities available in the current task and report a capability blocker when direct work is unavailable.

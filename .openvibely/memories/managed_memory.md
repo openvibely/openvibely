@@ -2,9 +2,9 @@
 name: managed_memory
 type: project
 created: 2026-05-09
-updated: 2026-07-17
-source: consolidation
-source_id: memory_consolidation_2026_07_17
+updated: 2026-08-03
+source: user_feedback
+source_id: e109ce8999815c5518324d5ce39b470b:5a4b1a14997c7eb1
 confidence: high
 title: Managed Memory
 ---
@@ -24,7 +24,8 @@ Durable storage boundaries:
 
 Lifecycle and retrieval facts:
 - Memory lifecycle work is owned by the built-in Memory Curator through `recall_memory`, `update_memory`, and scheduled `consolidate_memory` skills.
-- The user explicitly prefers memory updates not be delegated to another task or agent. When the active agent has authorized scoped memory mutation tools, it should perform the update directly; if direct managed-memory mutation is unavailable, report that limitation rather than creating a delegated memory-update task.
+- Ordinary implementation and audit agents must not manually edit managed memory or skill Markdown as part of task work; those files are lifecycle-agent-owned. Authorized lifecycle curator turns should make the scoped updates directly.
+- The user explicitly prefers memory updates not be delegated to another task or agent. When the active lifecycle agent has authorized scoped memory mutation tools, it should perform the update directly; if direct managed-memory mutation is unavailable, report that limitation rather than creating a delegated memory-update task.
 - Recall is a `route_task` handle-selection step with `selected_memories`, parallel to Skill Curator `selected_skills`, and receives only the compact index from `MEMORIES.md`; topic bodies are not loaded during route selection.
 - Normal tasks and task-thread follow-ups consume managed memory through route-selected handles. Interactive Chat uses a narrower recall-only lifecycle preparation path.
 - Selected-memory prompt context is handle-only for skill-style parity. Memory bodies are loaded only on demand through the authorized `memory_view` tool.

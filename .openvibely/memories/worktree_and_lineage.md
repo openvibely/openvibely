@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-07-31
+updated: 2026-08-04
 source: consolidation
-source_id: memory_consolidation_2026_07_27
+source_id: memory_consolidation_2026_08_04
 confidence: high
 title: Worktree and Lineage
 ---
@@ -33,7 +33,7 @@ Durable worktree model:
 - Cleanup policy supports after-merge, keep, and manual.
 - Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
 - Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.
-- Two task-chaining gaps are pending human review as actionable notifications. Notification `38ca36f9560012f297428201c8e74442` records that the UI persists `ChildModel` but child creation/activation does not consume it, while later `ChildAgentID` edits do not update an already blocked child and can leave stale execution configuration. Notification `0815c784f28c10a7bb6a6ab36bb058ad` records that chain handoff failures are reduced to application logs after the parent is completed, leaving no durable user-facing failure evidence and potentially leaving a pre-created child blocked indefinitely. These are pending suggestions only; no implementation task has been approved or created.
+- Known task-chaining gaps: child creation/activation does not consume persisted `ChildModel`; later `ChildAgentID` edits do not update an already blocked child; and chain handoff failures are reduced to application logs after parent completion, potentially leaving a pre-created child blocked without durable user-facing failure evidence. These remain pending suggestions rather than approved implementation work.
 
 Commit-message direction:
 - Task execution auto-commits use generated descriptive commit messages driven by the actual worktree diff. Generation happens while changes are still in the worktree for initial execution diff capture, later task-thread completion, post-execution safety capture, and merge-prep dirty-worktree commits. GitHub PR branch publication now uses API-backed synthesized branch commits rather than local `git add`/`git commit`/`git push`, but the synthesized commit message is still generated from the task worktree diff.

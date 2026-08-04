@@ -210,11 +210,6 @@ always_use:
 ## openvibely_github_implementation_inbox_workflow
 
 [OpenVibely GitHub Implementation Inbox Workflow](openvibely_github_implementation_inbox_workflow/SKILL.md) — Poll GitHub implementation mailboxes, reconcile assigned issues with OpenVibely tasks, and start approved work without duplicate submissions.
-
-## user_approval_gate_workflow
-
-[User Approval Gate Workflow](user_approval_gate_workflow/SKILL.md) — Preserve explicit plan-first and approval-before-editing gates during coding tasks.
-
 ## openvibely_docker_image_workflow
 
 [OpenVibely Docker Image Workflow](openvibely_docker_image_workflow/SKILL.md) — Safely change OpenVibely production and coding-agent images while keeping consumers, release publishing, documentation, runtime validation, and sandbox boundaries aligned.
@@ -226,3 +221,11 @@ always_use:
 ## openvibely_update_lifecycle_workflow
 
 [OpenVibely Update Lifecycle Workflow](openvibely_update_lifecycle_workflow/SKILL.md) — Implement, audit, and explain OpenVibely update staging, draining, admission, restart validation, rollback, and durable recovery.
+
+## openvibely_lifecycle_managed_artifact_boundary
+
+[OpenVibely Lifecycle-Managed Artifact Boundary](openvibely_lifecycle_managed_artifact_boundary/SKILL.md) — Keep ordinary implementation and audit turns from editing lifecycle-managed skills or memories.
+
+## openvibely_task_category_transition_workflow
+
+[OpenVibely Task Category Transition Workflow](openvibely_task_category_transition_workflow/SKILL.md) — Implement and audit OpenVibely task category changes without bypassing completion, ordering, activation, cancellation, or goal lifecycle behavior.
