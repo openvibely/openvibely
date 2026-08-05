@@ -375,10 +375,11 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 			Agents:                 agents,
 			ShowModelSelector:      true,
 			TaskID:                 task.ID,
-				IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
-				ActiveTurnID:           taskThreadActiveTurnID(executions),
-				StopEndpoint:           fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID),
-				SelectedAgentID:        derefString(task.AgentID),
+			IsRunning:              TaskThreadHasActiveComposerStopState(task, executions),
+			ActiveTurnID:           taskThreadActiveTurnID(executions),
+			StopEndpoint:           fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", task.ID),
+			SteerEndpoint:          fmt.Sprintf("/tasks/%s/thread/steer", task.ID),
+			SelectedAgentID:        derefString(task.AgentID),
 			PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: taskQueuedSteerEndpoint,
 		})
@@ -991,7 +992,7 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							var form = document.getElementById('task-thread-form');
 							if (form) {
 								var textarea = document.getElementById('task-message-input');
-								if (textarea) textarea.setAttribute('placeholder', 'Type your message... (Enter to send, Shift+Enter for new line)');
+								if (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById('task-thread-messages');

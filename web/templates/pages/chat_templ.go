@@ -507,6 +507,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 			IsRunning:              chatHasActiveTurn(chatHistory),
 			ActiveTurnID:           chatActiveTurnID(chatHistory),
 			StopEndpoint:           "/chat/stop?project_id=" + currentProjectID,
+			SteerEndpoint:          "/chat/steer?project_id=" + currentProjectID,
 			PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: chatQueuedSteerEndpoint,
 		}).Render(ctx, templ_7745c5c3_Buffer)
@@ -563,7 +564,7 @@ func ChatModelInfo(info string) templ.Component {
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(info)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 1414, Col: 9}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 1415, Col: 9}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {

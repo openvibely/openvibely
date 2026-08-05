@@ -148,15 +148,16 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			ChatMode:               models.ChatModeOrchestrate,
 			ProjectID:              currentProjectID,
 			IsRunning:              chatHasActiveTurn(chatHistory),
-				ActiveTurnID:           chatActiveTurnID(chatHistory),
-				StopEndpoint:           "/chat/stop?project_id=" + currentProjectID,
-				PendingInputs:          pendingInputs,
+			ActiveTurnID:           chatActiveTurnID(chatHistory),
+			StopEndpoint:           "/chat/stop?project_id=" + currentProjectID,
+			SteerEndpoint:          "/chat/steer?project_id=" + currentProjectID,
+			PendingInputs:          pendingInputs,
 			QueuedSteerEndpointFor: chatQueuedSteerEndpoint,
 		})
-			<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
-			@components.ChatAutoScrollScript()
-			@components.ChatStreamingResumeInitScript()
-			<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
+		<!-- Shared auto-scroll and transcript rendering/cleaning utilities -->
+		@components.ChatAutoScrollScript()
+		@components.ChatStreamingResumeInitScript()
+		<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
 				<script>
 					window.initializeChatTranscriptScroll = function() {
 						var chatRoot = document.getElementById('chat-page-root');

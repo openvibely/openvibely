@@ -908,8 +908,8 @@ func TestChatInputForm_SubmitButtonUsesRequestSubmit(t *testing.T) {
 	if !strings.Contains(content, "form.addEventListener('click', function(e)") {
 		t.Fatal("chat input script must delegate submit button clicks after OOB action swaps")
 	}
-	if !strings.Contains(content, "e.target.closest('button[type=\"submit\"]')") {
-		t.Fatal("chat input script must detect the current submit button from delegated clicks")
+	if !strings.Contains(content, `e.target.closest('[id="' + formId + '-primary-action"] button')`) {
+		t.Fatal("chat input script must detect the current primary action from delegated clicks")
 	}
 	if !strings.Contains(content, "if (typeof form.requestSubmit === 'function')") {
 		t.Fatal("chat input script must feature-detect requestSubmit")
@@ -1195,15 +1195,69 @@ func TestChatInputForm_MessageHistoryCursorGuardsPreventArrowHijack(t *testing.T
 	}
 }
 
-func TestChatInputForm_RunningChatDoesNotExposeComposerSteeringControl(t *testing.T) {
+func TestChatInputForm_SharedQueueAndSteerShortcuts(t *testing.T) {
+	configs := []ChatInputFormConfig{
+		{
+			FormID:        "chat-form",
+			InputID:       "message-input",
+			PostEndpoint:  "/chat/send?project_id=project-1",
+			SteerEndpoint: "/chat/steer?project_id=project-1",
+			TargetID:      "chat-messages",
+			IsRunning:     true,
+			ActiveTurnID:  "exec-active-chat",
+		},
+		{
+			FormID:        "task-thread-form",
+			InputID:       "task-message-input",
+			PostEndpoint:  "/tasks/task-1/thread",
+			SteerEndpoint: "/tasks/task-1/thread/steer",
+			TargetID:      "task-thread-messages",
+			TaskID:        "task-1",
+			IsRunning:     true,
+			ActiveTurnID:  "exec-active-task",
+		},
+	}
+	for _, config := range configs {
+		t.Run(config.FormID, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := ChatInputForm(config).Render(context.Background(), &buf); err != nil {
+				t.Fatalf("render ChatInputForm: %v", err)
+			}
+			content := buf.String()
+			required := []string{
+				`data-steer-endpoint="` + config.SteerEndpoint + `"`,
+				"function chatComposerUsesAppleShortcuts()",
+				"navigator.userAgentData && navigator.userAgentData.platform",
+				"/Mac|iPhone|iPad|iPod/i.test(platform)",
+				"Enter sends or queues · ⌘Enter queues · Shift+Enter adds a line · ⌘click steers",
+				"Enter sends or queues · Ctrl+Enter queues · Shift+Enter adds a line · Ctrl+click steers",
+				"if (e.isComposing || e.keyCode === 229) return;",
+				"if (e.key === 'Enter' && !e.shiftKey)",
+				"var explicitQueue = shortcutModifierPressed(e);",
+				"submitComposer(normalPostEndpoint, explicitQueue ? 'queue' : 'normal');",
+				"if (!shortcutModifierPressed(e)) return;",
+				"submitComposer(steerEndpoint, 'steer');",
+				"e.stopImmediatePropagation();",
+			}
+			for _, expected := range required {
+				if !strings.Contains(content, expected) {
+					t.Fatalf("shared shortcut script missing %q", expected)
+				}
+			}
+		})
+	}
+}
+
+func TestChatInputForm_RunningChatExposesModifierSteeringEndpoint(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{
-		FormID:       "chat-form",
-		InputID:      "message-input",
-		PostEndpoint: "/chat/send",
-		TargetID:     "chat-messages",
-		IsRunning:    true,
-		ActiveTurnID: "exec-active-chat",
+		FormID:        "chat-form",
+		InputID:       "message-input",
+		PostEndpoint:  "/chat/send",
+		TargetID:      "chat-messages",
+		IsRunning:     true,
+		ActiveTurnID:  "exec-active-chat",
+		SteerEndpoint: "/chat/steer",
 	}).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render ChatInputForm: %v", err)
@@ -1213,24 +1267,28 @@ func TestChatInputForm_RunningChatDoesNotExposeComposerSteeringControl(t *testin
 	if !strings.Contains(content, `name="expected_turn_id" value="exec-active-chat"`) {
 		t.Fatal("running chat form should keep the active turn guard for queue safety")
 	}
-	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, `data-steer-submit="true"`) || strings.Contains(content, ">Steer") {
-		t.Fatal("running chat form must not expose composer steering controls")
+	if !strings.Contains(content, `data-steer-endpoint="/chat/steer"`) {
+		t.Fatal("running chat form must expose the guarded steering endpoint for modifier-click")
 	}
-	if strings.Contains(content, "htmx.ajax('POST', steerEndpoint") {
-		t.Fatal("running chat form must not post directly to the steering endpoint")
+	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, ">Steer") {
+		t.Fatal("running chat form must not expose a separate visible composer steering control")
+	}
+	if !strings.Contains(content, "submitComposer(steerEndpoint, 'steer');") || !strings.Contains(content, "htmx.ajax('POST', endpoint") {
+		t.Fatal("running chat modifier-click must post through the steering endpoint")
 	}
 }
 
-func TestChatInputForm_RunningTaskThreadDoesNotExposeComposerSteeringControl(t *testing.T) {
+func TestChatInputForm_RunningTaskThreadExposesModifierSteeringEndpoint(t *testing.T) {
 	var buf bytes.Buffer
 	err := ChatInputForm(ChatInputFormConfig{
-		FormID:       "task-thread-form",
-		InputID:      "task-message-input",
-		PostEndpoint: "/tasks/task-1/thread",
-		TargetID:     "task-thread-messages",
-		TaskID:       "task-1",
-		IsRunning:    true,
-		ActiveTurnID: "exec-active-task",
+		FormID:        "task-thread-form",
+		InputID:       "task-message-input",
+		PostEndpoint:  "/tasks/task-1/thread",
+		TargetID:      "task-thread-messages",
+		TaskID:        "task-1",
+		IsRunning:     true,
+		ActiveTurnID:  "exec-active-task",
+		SteerEndpoint: "/tasks/task-1/thread/steer",
 	}).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render ChatInputForm: %v", err)
@@ -1240,8 +1298,11 @@ func TestChatInputForm_RunningTaskThreadDoesNotExposeComposerSteeringControl(t *
 	if !strings.Contains(content, `name="expected_turn_id" value="exec-active-task"`) {
 		t.Fatal("running task-thread form should keep the active turn guard for queue safety")
 	}
-	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, `data-steer-submit="true"`) || strings.Contains(content, ">Steer") {
-		t.Fatal("running task-thread form must not expose composer steering controls")
+	if !strings.Contains(content, `data-steer-endpoint="/tasks/task-1/thread/steer"`) {
+		t.Fatal("running task-thread form must expose the guarded steering endpoint for modifier-click")
+	}
+	if strings.Contains(content, `name="steer_endpoint"`) || strings.Contains(content, ">Steer") {
+		t.Fatal("running task-thread form must not expose a separate visible composer steering control")
 	}
 }
 

@@ -106,6 +106,7 @@ type ChatInputFormConfig struct {
 	IsRunning              bool
 	ActiveTurnID           string
 	StopEndpoint           string // non-empty turns the send button into a stop button while IsRunning
+	SteerEndpoint          string // guarded explicit steering endpoint used by the platform modifier-click shortcut
 	ProjectID              string // non-empty enables model selection persistence via localStorage
 	SelectedAgentID        string // initial model selection; defaults to auto when empty
 	PendingInputs          []models.ThreadInput
@@ -478,7 +479,7 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 							var form = document.getElementById('task-thread-form');
 							if (form) {
 								var textarea = document.getElementById('task-message-input');
-								if (textarea) textarea.setAttribute('placeholder', 'Type your message... (Enter to send, Shift+Enter for new line)');
+								if (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById(messagesId);
@@ -972,7 +973,7 @@ templ ChatStreamingResumeInitScript() {
 							var form = document.getElementById('task-thread-form');
 							if (form) {
 								var textarea = document.getElementById('task-message-input');
-								if (textarea) textarea.setAttribute('placeholder', 'Type your message... (Enter to send, Shift+Enter for new line)');
+								if (textarea && window.refreshChatComposerShortcutHint) window.refreshChatComposerShortcutHint(textarea);
 								refreshThreadComposerAction();
 							}
 							var messages = document.getElementById(messagesId);
@@ -1498,6 +1499,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-clear-func-name={ config.FormID + "ClearAttachments" }
 			data-message-history-key={ chatMessageHistoryStorageKey(config) }
 			data-attachment-state-key={ chatAttachmentStateKey(config) }
+			data-steer-endpoint={ config.SteerEndpoint }
 			if config.TaskID != "" {
 				data-scroll-intent-scope={ config.TaskID }
 			} else if config.ProjectID != "" {
@@ -1542,7 +1544,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					id={ config.InputID }
 					name="message"
 					class="w-full resize-none bg-transparent text-sm leading-relaxed focus:outline-none placeholder:opacity-40 p-0 text-left"
-					placeholder="Type your message... (Enter to send, Shift+Enter for new line)"
+					placeholder="Enter sends or queues"
+					title="Enter sends or queues"
 					rows="3"
 					enterkeyhint="send"
 					required
@@ -1814,19 +1817,73 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				var agentInput = agentSelect ? document.getElementById(agentSelect.getAttribute('data-agent-input')) : null;
 					var modeSelect = form.querySelector('[id$="-mode-select"]');
 					var modeInput = modeSelect ? document.getElementById(modeSelect.getAttribute('data-mode-input')) : null;
-							var normalPostEndpoint = form.getAttribute('hx-post') || form.getAttribute('action') || '';
-							function currentSubmitButton() {
-								return form.querySelector('button[type="submit"]');
-							}
-								function safeSubmit() {
-									var submitBtn = currentSubmitButton();
+						var normalPostEndpoint = form.getAttribute('hx-post') || form.getAttribute('action') || '';
+						var steerEndpoint = form.getAttribute('data-steer-endpoint') || '';
+						function chatComposerUsesAppleShortcuts() {
+							var platform = '';
+							if (navigator.userAgentData && navigator.userAgentData.platform) platform = navigator.userAgentData.platform;
+							else platform = navigator.platform || navigator.userAgent || '';
+							return /Mac|iPhone|iPad|iPod/i.test(platform);
+						}
+						var usesAppleShortcuts = chatComposerUsesAppleShortcuts();
+						function shortcutModifierPressed(event) {
+							return usesAppleShortcuts ? event.metaKey : event.ctrlKey;
+						}
+						function shortcutHint() {
+							return usesAppleShortcuts
+								? 'Enter sends or queues · ⌘Enter queues · Shift+Enter adds a line · ⌘click steers'
+								: 'Enter sends or queues · Ctrl+Enter queues · Shift+Enter adds a line · Ctrl+click steers';
+						}
+						window.refreshChatComposerShortcutHint = function(textarea) {
+							if (!textarea) return;
+							textarea.setAttribute('placeholder', shortcutHint());
+							textarea.setAttribute('title', shortcutHint());
+						};
+						window.refreshChatComposerShortcutHint(messageInput);
+						function currentSubmitButton() {
+							return form.querySelector('button[type="submit"]');
+						}
+						function safeSubmit() {
+							var submitBtn = currentSubmitButton();
 									if (typeof form.requestSubmit === 'function') {
 										form.requestSubmit(submitBtn || undefined);
 										return;
 									}
-								var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
-								form.dispatchEvent(submitEvent);
+							var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
+							form.dispatchEvent(submitEvent);
+						}
+						function submitComposer(endpoint, intent) {
+							if (!endpoint) return;
+							form.setAttribute('data-submit-intent', intent || 'normal');
+							if (intent === 'steer' && typeof htmx !== 'undefined') {
+								htmx.ajax('POST', endpoint, {
+									source: form,
+									target: form.getAttribute('hx-target'),
+									swap: form.getAttribute('hx-swap') || 'beforeend'
+								});
+								return;
 							}
+							form.setAttribute('hx-post', endpoint);
+							safeSubmit();
+						}
+						function activeTurnID() {
+							var targetSelector = form.getAttribute('hx-target') || '';
+							var target = targetSelector && targetSelector.charAt(0) === '#' ? document.getElementById(targetSelector.slice(1)) : null;
+							var pairs = target ? target.querySelectorAll('[data-execution-pair="true"][data-exec-status="running"], [data-execution-pair="true"][data-exec-status="queued"]') : [];
+							if (pairs.length) return pairs[pairs.length - 1].getAttribute('data-exec-id') || '';
+							var guard = form.querySelector('input[name="expected_turn_id"]');
+							return guard ? guard.value : '';
+						}
+						function setExpectedTurnID(turnID) {
+							var guard = form.querySelector('input[name="expected_turn_id"]');
+							if (!guard) {
+								guard = document.createElement('input');
+								guard.type = 'hidden';
+								guard.name = 'expected_turn_id';
+								form.appendChild(guard);
+							}
+							guard.value = turnID;
+						}
 
 				var messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';
 				var messageHistoryLimit = 50;
@@ -2048,27 +2105,42 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 						// Keyboard submission and message history navigation
 						if (messageInput) {
-							messageInput.addEventListener('keydown', function(e) {
-								if (handleMessageHistoryKeydown(e)) return;
-								if (e.key === 'Enter' && !e.shiftKey) {
-									e.preventDefault();
-									safeSubmit();
-								}
+						messageInput.addEventListener('keydown', function(e) {
+							if (handleMessageHistoryKeydown(e)) return;
+							if (e.isComposing || e.keyCode === 229) return;
+							if (e.key === 'Enter' && !e.shiftKey) {
+								e.preventDefault();
+								var explicitQueue = shortcutModifierPressed(e);
+								submitComposer(normalPostEndpoint, explicitQueue ? 'queue' : 'normal');
+							}
 							});
-							messageInput.addEventListener('input', function() {
-								if (!suppressMessageHistoryInputReset) resetMessageHistoryNavigation();
+							messageInput.addEventListener('input', function() {								if (!suppressMessageHistoryInputReset) resetMessageHistoryNavigation();
 							});
 						}
 
-					// Normalize send-button clicks to the same submit path as Enter, even after
-					// the primary action button is replaced out-of-band between Send and Stop.
-							form.addEventListener('click', function(e) {
-								var clickedSubmit = e.target && e.target.closest ? e.target.closest('button[type="submit"]') : null;
-								if (!clickedSubmit || !form.contains(clickedSubmit)) return;
-								e.preventDefault();
-								form.setAttribute('hx-post', normalPostEndpoint);
-								safeSubmit();
-							});
+					// Normalize primary-action clicks to the shared submit paths, even after
+					// the button is replaced out-of-band between Send and Stop. A platform
+					// modifier on the active Stop-state control requests guarded steering;
+					// an unavailable/stale steering request leaves the draft untouched.
+					form.addEventListener('click', function(e) {
+						var primaryAction = e.target && e.target.closest ? e.target.closest('[id="' + formId + '-primary-action"] button') : null;
+						if (!primaryAction || !form.contains(primaryAction)) return;
+						var isStopAction = primaryAction.getAttribute('aria-label') === 'Stop response';
+						if (isStopAction) {
+							if (!shortcutModifierPressed(e)) return;
+							e.preventDefault();
+							e.stopImmediatePropagation();
+							var turnID = activeTurnID();
+							if (!steerEndpoint || !turnID) return;
+							setExpectedTurnID(turnID);
+							submitComposer(steerEndpoint, 'steer');
+							return;
+						}
+						if (primaryAction.type !== 'submit') return;
+						e.preventDefault();
+						e.stopImmediatePropagation();
+						submitComposer(normalPostEndpoint, 'normal');
+					}, true);
 			// Model selector -> hidden input sync + localStorage persistence
 			var projectIdInput = form.querySelector('input[name="_project_id"]');
 			var projectId = projectIdInput ? projectIdInput.value : '';
@@ -2561,7 +2633,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					// Ignore bubbled HTMX events from nested composer controls such as queued-input actions.
 					form.addEventListener('htmx:beforeRequest', function(event) {
 						if (!event.detail || event.detail.elt !== form) return;
-						form.setAttribute('hx-post', normalPostEndpoint);
 						messageHistorySubmittedValue = messageInput ? messageInput.value : '';
 					});
 
@@ -2581,6 +2652,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							}
 						}
 						messageHistorySubmittedValue = '';
+						form.setAttribute('hx-post', normalPostEndpoint);
+						form.removeAttribute('data-submit-intent');
 					});		})();
 	</script>
 }
