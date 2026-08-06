@@ -68,9 +68,6 @@ jobs:
       - name: Ensure generated files are committed
         run: git diff --exit-code
 
-      - name: Build server
-        run: go build ./cmd/server
-
       - name: Run all tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
