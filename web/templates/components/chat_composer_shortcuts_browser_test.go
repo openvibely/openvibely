@@ -45,13 +45,13 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 			defer mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(records)
-		case "/chat/send", "/tasks/task-1/thread", "/tasks/task-1/thread/steer", "/tasks/task-1/cancel":
+		case "/chat/send", "/chat/steer", "/tasks/task-1/thread", "/tasks/task-1/thread/steer", "/tasks/task-1/cancel":
 			_ = r.ParseForm()
 			mu.Lock()
 			records = append(records, requestRecord{Path: r.URL.Path, Form: r.PostForm})
 			mu.Unlock()
 			w.Header().Set("Content-Type", "text/html")
-			if r.URL.Path == "/tasks/task-1/thread/steer" {
+			if r.URL.Path == "/chat/steer" || r.URL.Path == "/tasks/task-1/thread/steer" {
 				_, _ = w.Write([]byte(`<div class="steering-input-row" data-test-steering-row="true">steering pending</div>`))
 				return
 			}
@@ -81,6 +81,32 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   activeInput.value = 'newline'; key(activeInput, {shiftKey:true});
   await wait();
 
+  var pendingNormalXHR = null;
+  function beginPendingNormalSend(initialDraft) {
+    var chatForm = document.getElementById('chat-form');
+    pendingNormalXHR = {};
+    chatForm.setAttribute('data-submit-intent', 'normal');
+    idleInput.value = initialDraft;
+    chatForm.dispatchEvent(new CustomEvent('htmx:beforeRequest', {bubbles:true, detail:{elt:chatForm, xhr:pendingNormalXHR}}));
+  }
+  function acceptPendingNormalSend(turnID) {
+    var chatForm = document.getElementById('chat-form');
+    document.getElementById('chat-messages').innerHTML = '<div data-execution-pair="true" data-exec-status="running" data-exec-id="' + turnID + '"></div>';
+    document.getElementById('chat-form-primary-action').outerHTML = '<div id="chat-form-primary-action" data-composer-running="true"><button type="button" aria-label="Stop response">Stop</button></div>';
+    pendingNormalXHR.responseText = 'accepted';
+    chatForm.dispatchEvent(new CustomEvent('htmx:afterRequest', {bubbles:true, detail:{elt:chatForm, successful:true, xhr:pendingNormalXHR}}));
+    pendingNormalXHR = null;
+  }
+
+  beginPendingNormalSend('immediate initial keyboard');
+  idleInput.value = 'immediate keyboard steer'; key(idleInput, modifier);
+  acceptPendingNormalSend('keyboard-turn'); await wait(); await wait();
+  if (!document.querySelector('#chat-form #pending-thread-inputs [data-test-steering-row="true"]')) fail('immediate keyboard steer did not render pending');
+  document.querySelector('#chat-form #pending-thread-inputs').innerHTML = '';
+  document.getElementById('chat-messages').innerHTML = '';
+  document.getElementById('chat-form-primary-action').outerHTML = '<div id="chat-form-primary-action" data-composer-running="false"><button type="submit" aria-label="Send message">Send</button></div>';
+  await wait();
+
   idleInput.value = 'idle enter'; key(idleInput); await wait();
   idleInput.value = 'idle steer fallback'; key(idleInput, modifier); await wait();
   idleInput.value = 'idle modifier click fallback'; click(document.querySelector('#chat-form-primary-action button'), modifier); await wait();
@@ -107,17 +133,18 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 
   var response = await fetch('/records');
   var records = await response.json();
-  if (records.length !== 8) fail('request count was ' + records.length + ', want 8');
+  if (records.length !== 9) fail('request count was ' + records.length + ', want 9');
   var paths = records.map(function(record) { return record.Path; }).join(',');
-  if (paths !== '/chat/send,/chat/send,/chat/send,/tasks/task-1/thread/steer,/tasks/task-1/thread/steer,/tasks/task-1/cancel,/tasks/task-1/thread,/tasks/task-1/thread') fail('request paths were ' + paths);
-  if (records[0].Form.message[0] !== 'idle enter') fail('plain idle Enter lost or changed its draft');
-  if (records[1].Form.message[0] !== 'idle steer fallback') fail('idle steer fallback lost or changed its draft');
-  if (records[2].Form.message[0] !== 'idle modifier click fallback') fail('idle modifier-click fallback lost or changed its draft');
-  if (records[3].Form.expected_turn_id[0] !== 'active-turn') fail('keyboard steer omitted expected-turn guard');
-  if (records[4].Form.expected_turn_id[0] !== 'active-turn') fail('click steer omitted expected-turn guard');
-  if (records[4].Form.attachment_session_id[0] !== 'session-1') fail('steer omitted attachment session');
-  if (records[6].Form.message[0] !== 'transition idle enter fallback') fail('active-to-idle Enter fallback lost or changed its draft');
-  if (records[7].Form.message[0] !== 'transition idle click fallback') fail('active-to-idle click fallback lost or changed its draft');
+  if (paths !== '/chat/steer,/chat/send,/chat/send,/chat/send,/tasks/task-1/thread/steer,/tasks/task-1/thread/steer,/tasks/task-1/cancel,/tasks/task-1/thread,/tasks/task-1/thread') fail('request paths were ' + paths);
+  if (records[0].Form.message[0] !== 'immediate keyboard steer' || records[0].Form.expected_turn_id[0] !== 'keyboard-turn') fail('immediate keyboard steer was not deferred to the accepted turn');
+  if (records[1].Form.message[0] !== 'idle enter') fail('plain idle Enter lost or changed its draft');
+  if (records[2].Form.message[0] !== 'idle steer fallback') fail('idle steer fallback lost or changed its draft');
+  if (records[3].Form.message[0] !== 'idle modifier click fallback') fail('idle modifier-click fallback lost or changed its draft');
+  if (records[4].Form.expected_turn_id[0] !== 'active-turn') fail('keyboard steer omitted expected-turn guard');
+  if (records[5].Form.expected_turn_id[0] !== 'active-turn') fail('click steer omitted expected-turn guard');
+  if (records[5].Form.attachment_session_id[0] !== 'session-1') fail('steer omitted attachment session');
+  if (records[7].Form.message[0] !== 'transition idle enter fallback') fail('active-to-idle Enter fallback lost or changed its draft');
+  if (records[8].Form.message[0] !== 'transition idle click fallback') fail('active-to-idle click fallback lost or changed its draft');
   if (activeInput.value !== '') fail('successful active-to-idle fallbacks did not clear the draft');
   document.getElementById('browser-result').textContent = 'PASS';
   document.body.setAttribute('data-test-result', 'pass');
@@ -138,10 +165,11 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(records) != 8 {
-		t.Fatalf("recorded requests = %d, want 8: %+v", len(records), records)
+	if len(records) != 9 {
+		t.Fatalf("recorded requests = %d, want 9: %+v", len(records), records)
 	}
 	wantDrafts := []string{
+		"immediate keyboard steer",
 		"idle enter",
 		"idle steer fallback",
 		"idle modifier click fallback",
@@ -153,10 +181,110 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 			t.Fatalf("request %d draft = %q, want %q; records: %+v", i, got, want, records)
 		}
 	}
-	if got := strings.TrimSpace(records[6].Form.Get("message")); got != "transition idle enter fallback" {
+	if got := strings.TrimSpace(records[7].Form.Get("message")); got != "transition idle enter fallback" {
 		t.Fatalf("active-to-idle Enter fallback draft = %q; records: %+v", got, records)
 	}
-	if got := strings.TrimSpace(records[7].Form.Get("message")); got != "transition idle click fallback" {
+	if got := strings.TrimSpace(records[8].Form.Get("message")); got != "transition idle click fallback" {
 		t.Fatalf("active-to-idle click fallback draft = %q; records: %+v", got, records)
+	}
+}
+
+func TestChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+
+	type requestRecord struct {
+		Path string
+		Form url.Values
+	}
+	var mu sync.Mutex
+	var records []requestRecord
+
+	var form bytes.Buffer
+	if err := ChatInputForm(ChatInputFormConfig{
+		FormID:        "chat-form",
+		InputID:       "message-input",
+		PostEndpoint:  "/chat/send",
+		SteerEndpoint: "/chat/steer",
+		TargetID:      "chat-messages",
+	}).Render(context.Background(), &form); err != nil {
+		t.Fatalf("render composer: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmx204)
+		case "/chat/steer":
+			_ = r.ParseForm()
+			mu.Lock()
+			records = append(records, requestRecord{Path: r.URL.Path, Form: r.PostForm})
+			mu.Unlock()
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<div data-test-steering-row="true">steering pending</div>`))
+		case "/":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
+<script src="/htmx.js"></script>
+<div id="chat-messages"></div>%s
+<div id="browser-result">pending</div>
+<script>
+(async function() {
+  function fail(message) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', message); document.getElementById('browser-result').textContent = 'FAIL:' + message; throw new Error(message); }
+  function wait() { return new Promise(function(resolve) { setTimeout(resolve, 150); }); }
+  var composer = document.getElementById('chat-form');
+  var input = document.getElementById('message-input');
+  var session = composer.querySelector('input[name="attachment_session_id"]');
+  var apple = input.placeholder.includes('⌘+Enter steers');
+  var modifier = apple ? {metaKey:true} : {ctrlKey:true};
+  var pendingXHR = {};
+
+  composer.setAttribute('data-submit-intent', 'normal');
+  input.value = 'initial message';
+  composer.dispatchEvent(new CustomEvent('htmx:beforeRequest', {bubbles:true, detail:{elt:composer, xhr:pendingXHR}}));
+
+  input.value = 'immediate click steer';
+  session.value = 'session-immediate';
+  document.querySelector('#chat-form-primary-action button').dispatchEvent(new MouseEvent('click', Object.assign({bubbles:true, cancelable:true}, modifier)));
+  await wait();
+
+  document.getElementById('chat-messages').innerHTML = '<div data-execution-pair="true" data-exec-status="running" data-exec-id="click-turn"></div>';
+  document.getElementById('chat-form-primary-action').outerHTML = '<div id="chat-form-primary-action" data-composer-running="true"><button type="button" aria-label="Stop response">Stop</button></div>';
+  pendingXHR.responseText = 'accepted';
+  composer.dispatchEvent(new CustomEvent('htmx:afterRequest', {bubbles:true, detail:{elt:composer, successful:true, xhr:pendingXHR}}));
+  await wait(); await wait();
+
+  if (!document.querySelector('#chat-form #pending-thread-inputs [data-test-steering-row="true"]')) fail('deferred click steer did not render in pending inputs');
+  if (document.querySelector('#chat-messages [data-test-steering-row="true"]')) fail('deferred click steer rendered in transcript');
+  if (input.value !== '') fail('accepted deferred click steer did not clear its draft');
+  if (session.value !== '') fail('accepted deferred click steer did not clear its attachment session');
+  document.getElementById('browser-result').textContent = 'PASS';
+  document.body.setAttribute('data-test-result', 'pass');
+})();
+</script></body></html>`, form.String())
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	runHeadlessChromeFixture(t, chrome, server.URL+"/", "immediate modifier-click steer", 10000, 25*time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(records) != 1 {
+		t.Fatalf("recorded requests = %d, want 1: %+v", len(records), records)
+	}
+	if records[0].Path != "/chat/steer" {
+		t.Fatalf("request path = %q, want /chat/steer", records[0].Path)
+	}
+	if got := records[0].Form.Get("message"); got != "immediate click steer" {
+		t.Fatalf("steer message = %q, want immediate click steer", got)
+	}
+	if got := records[0].Form.Get("expected_turn_id"); got != "click-turn" {
+		t.Fatalf("expected turn = %q, want click-turn", got)
+	}
+	if got := records[0].Form.Get("attachment_session_id"); got != "session-immediate" {
+		t.Fatalf("attachment session = %q, want session-immediate", got)
 	}
 }

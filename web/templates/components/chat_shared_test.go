@@ -989,7 +989,7 @@ func TestChatInputForm_MessageHistoryNavigationScript(t *testing.T) {
 		"messageHistoryEntries[messageHistoryEntries.length - 1 - messageHistoryIndex]",
 		"setMessageInputFromHistory(messageHistoryDraft);",
 		"resetMessageHistoryNavigation();",
-		"rememberSubmittedMessage(messageHistorySubmittedValue);",
+		"rememberSubmittedMessage(submittedMessage);",
 		"if (!event.detail || event.detail.elt !== form) return;",
 	}
 	for _, r := range required {
@@ -1233,7 +1233,7 @@ func TestChatInputForm_SharedQueueAndSteerShortcuts(t *testing.T) {
 				"Enter sends or queues · Ctrl+Enter steers",
 				`data-composer-running="true"`,
 				"function composerHasActiveTurn()",
-				"new MutationObserver(clearExpectedTurnIDWhenIdle).observe(form, { childList: true, subtree: true })",
+				"new MutationObserver(handleComposerStateMutation).observe(form, { childList: true, subtree: true })",
 				"if (!composerHasActiveTurn()) {",
 				"if (guard) guard.remove();",
 				"if (e.isComposing || e.keyCode === 229) return;",

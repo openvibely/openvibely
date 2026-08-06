@@ -1852,18 +1852,28 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							var submitEvent = new Event('submit', { bubbles: true, cancelable: true });
 							form.dispatchEvent(submitEvent);
 						}
-						function submitComposer(endpoint, intent) {
+						function submitComposer(endpoint, intent, payload) {
 							if (!endpoint) return;
 							form.setAttribute('data-submit-intent', intent || 'normal');
+							form._chatNextSubmissionPayload = payload || null;
 							if (intent === 'steer' && typeof htmx !== 'undefined') {
-								htmx.ajax('POST', endpoint, {
+								var options = {
 									source: form,
 									target: '#pending-thread-inputs',
 									swap: form.getAttribute('hx-swap') || 'beforeend'
-								});
+								};
+								if (payload) {
+									options.values = {
+										message: payload.message,
+										attachment_session_id: payload.attachmentSessionID,
+										expected_turn_id: payload.expectedTurnID
+									};
+								}
+								htmx.ajax('POST', endpoint, options);
 								return;
 							}
 							form.setAttribute('hx-post', endpoint);
+							if (intent !== 'steer') normalRequestInFlight++;
 							safeSubmit();
 						}
 						function composerHasActiveTurn() {
@@ -1897,8 +1907,30 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							}
 							guard.value = turnID;
 						}
+						function deferSteerWhileSendPending() {
+							if (normalRequestInFlight < 1 || !steerEndpoint || !messageInput || !messageInput.value.trim()) return false;
+							deferredSteer = {
+								message: messageInput.value,
+								attachmentSessionID: sessionInput ? sessionInput.value : ''
+							};
+							return true;
+						}
+						function flushDeferredSteer() {
+							if (!deferredSteer || normalRequestInFlight > 0) return;
+							var turnID = activeTurnID();
+							if (!turnID) return;
+							var payload = deferredSteer;
+							deferredSteer = null;
+							payload.expectedTurnID = turnID;
+							setExpectedTurnID(turnID);
+							submitComposer(steerEndpoint, 'steer', payload);
+						}
+						function handleComposerStateMutation() {
+							clearExpectedTurnIDWhenIdle();
+							flushDeferredSteer();
+						}
 						if (typeof MutationObserver !== 'undefined') {
-							new MutationObserver(clearExpectedTurnIDWhenIdle).observe(form, { childList: true, subtree: true });
+							new MutationObserver(handleComposerStateMutation).observe(form, { childList: true, subtree: true });
 						}
 						clearExpectedTurnIDWhenIdle();
 
@@ -1907,7 +1939,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				var messageHistoryEntries = [];
 				var messageHistoryIndex = -1;
 				var messageHistoryDraft = '';
-				var messageHistorySubmittedValue = '';
+				var normalRequestInFlight = 0;
+				var deferredSteer = null;
 				var suppressMessageHistoryInputReset = false;
 
 				function loadMessageHistory() {
@@ -2134,6 +2167,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 										submitComposer(steerEndpoint, 'steer');
 										return;
 									}
+									if (deferSteerWhileSendPending()) return;
 								}
 								submitComposer(normalPostEndpoint, 'normal');
 							}
@@ -2158,6 +2192,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								e.stopImmediatePropagation();
 								setExpectedTurnID(turnID);
 								submitComposer(steerEndpoint, 'steer');
+								return;
+							}
+							if (deferSteerWhileSendPending()) {
+								e.preventDefault();
+								e.stopImmediatePropagation();
 								return;
 							}
 						}
@@ -2655,31 +2694,44 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				});
 			})();
 
-					// Clear input and attachments after successful composer submission.
-					// Ignore bubbled HTMX events from nested composer controls such as queued-input actions.
+					// Clear only the draft and attachment session accepted by this request.
+					// A user may type or attach a steering update while an earlier send is still in flight.
 					form.addEventListener('htmx:beforeRequest', function(event) {
 						if (!event.detail || event.detail.elt !== form) return;
-						messageHistorySubmittedValue = messageInput ? messageInput.value : '';
+						var payload = form._chatNextSubmissionPayload || null;
+						form._chatNextSubmissionPayload = null;
+						var request = event.detail.xhr || {};
+						request._chatSubmittedIntent = form.getAttribute('data-submit-intent') || 'normal';
+						if (request._chatSubmittedIntent === 'normal' && normalRequestInFlight < 1) normalRequestInFlight = 1;
+						request._chatSubmittedMessage = payload ? payload.message : (messageInput ? messageInput.value : '');
+						request._chatSubmittedAttachmentSession = payload ? payload.attachmentSessionID : (sessionInput ? sessionInput.value : '');
 					});
 
 					form.addEventListener('htmx:afterRequest', function(event) {
 						if (!event.detail || event.detail.elt !== form) return;
+						var request = event.detail.xhr || {};
+						var completedIntent = request._chatSubmittedIntent || 'normal';
+						var submittedMessage = request._chatSubmittedMessage || '';
+						var submittedAttachmentSession = request._chatSubmittedAttachmentSession || '';
+						var accepted = false;
 						if (event.detail.successful) {
-							var xhr = event.detail.xhr;
-							var responseText = xhr ? (xhr.responseText || '') : '';
+							var responseText = request.responseText || '';
 							// Keep user draft intact when the handler intentionally returns no content
 							// (e.g. model-setup guard toasts) so users don't lose their message.
 							if (responseText.trim() !== '') {
+								accepted = true;
 								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
-								rememberSubmittedMessage(messageHistorySubmittedValue);
+								rememberSubmittedMessage(submittedMessage);
 								resetMessageHistoryNavigation();
-								if (messageInput) messageInput.value = '';
-								if (window[clearFuncName]) window[clearFuncName]();
+								if (messageInput && messageInput.value === submittedMessage) messageInput.value = '';
+								if (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();
 							}
 						}
-						messageHistorySubmittedValue = '';
+						if (completedIntent === 'normal') normalRequestInFlight = Math.max(0, normalRequestInFlight - 1);
+						if (completedIntent === 'normal' && !accepted) deferredSteer = null;
 						form.setAttribute('hx-post', normalPostEndpoint);
 						form.removeAttribute('data-submit-intent');
+						if (accepted && deferredSteer) setTimeout(flushDeferredSteer, 0);
 					});		})();
 	</script>
 }
