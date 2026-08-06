@@ -1566,3 +1566,13 @@ func decodeRuntimeToolInput(input json.RawMessage, dst interface{}) error {
 func actionToolDefinitions(surface chatcontrol.Surface, includeThreadTools bool) []llmcontracts.RuntimeToolDefinition {
 	return chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, surface, includeThreadTools)
 }
+
+// buildFullChannelActionToolRuntime assembles the shared complete channel runtime
+// bundle. Channel services retain ownership of their handlers and context-specific
+// authorization while this helper preserves the canonical definitions and gating.
+func buildFullChannelActionToolRuntime(surface chatcontrol.Surface, handlers map[string]chatcontrol.RuntimeActionHandler) *llmcontracts.RuntimeTools {
+	return &llmcontracts.RuntimeTools{
+		Definitions: actionToolDefinitions(surface, true),
+		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, surface, handlers),
+	}
+}

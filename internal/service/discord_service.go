@@ -673,10 +673,7 @@ func (s *DiscordService) buildDiscordActionToolRuntime(projectID string, actionC
 
 func (s *DiscordService) buildDiscordActionToolRuntimeForTask(projectID, callerTaskID string, actionCtx discordActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.discordActionHandlersForTask(projectID, callerTaskID, actionCtx, collector)
-	return &llmcontracts.RuntimeTools{
-		Definitions: actionToolDefinitions(chatcontrol.SurfaceDiscord, true),
-		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord, handlers),
-	}
+	return buildFullChannelActionToolRuntime(chatcontrol.SurfaceDiscord, handlers)
 }
 
 type discordActionContext struct {

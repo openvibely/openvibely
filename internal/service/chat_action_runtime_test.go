@@ -58,7 +58,7 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 		name     string
 		surface  chatcontrol.Surface
 		handlers func() map[string]chatcontrol.RuntimeActionHandler
-		runtime  func() *llmcontracts.RuntimeTools
+		runtimes func() []*llmcontracts.RuntimeTools
 	}{
 		{
 			name:    "Slack",
@@ -66,8 +66,12 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
 				return (&SlackService{projectRepo: projectRepo}).slackActionHandlers(project.ID, slackActionContext{}, nil)
 			},
-			runtime: func() *llmcontracts.RuntimeTools {
-				return (&SlackService{projectRepo: projectRepo}).buildSlackActionToolRuntime(project.ID, slackActionContext{}, nil)
+			runtimes: func() []*llmcontracts.RuntimeTools {
+				service := &SlackService{projectRepo: projectRepo}
+				return []*llmcontracts.RuntimeTools{
+					service.buildSlackActionToolRuntime(project.ID, slackActionContext{}, nil),
+					service.buildSlackActionToolRuntime(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "123.456", UserID: "U1"}, nil),
+				}
 			},
 		},
 		{
@@ -76,8 +80,12 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
 				return (&TelegramService{projectRepo: projectRepo}).telegramActionHandlers(project.ID, 1, 1, nil)
 			},
-			runtime: func() *llmcontracts.RuntimeTools {
-				return (&TelegramService{projectRepo: projectRepo}).buildTelegramActionToolRuntime(project.ID, 1, 1, nil)
+			runtimes: func() []*llmcontracts.RuntimeTools {
+				service := &TelegramService{projectRepo: projectRepo}
+				return []*llmcontracts.RuntimeTools{
+					service.buildTelegramActionToolRuntime(project.ID, 0, 0, nil),
+					service.buildTelegramActionToolRuntime(project.ID, 1, 2, nil),
+				}
 			},
 		},
 		{
@@ -86,8 +94,12 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
 				return (&DiscordService{projectRepo: projectRepo}).discordActionHandlers(project.ID, discordActionContext{}, nil)
 			},
-			runtime: func() *llmcontracts.RuntimeTools {
-				return (&DiscordService{projectRepo: projectRepo}).buildDiscordActionToolRuntime(project.ID, discordActionContext{}, nil)
+			runtimes: func() []*llmcontracts.RuntimeTools {
+				service := &DiscordService{projectRepo: projectRepo}
+				return []*llmcontracts.RuntimeTools{
+					service.buildDiscordActionToolRuntime(project.ID, discordActionContext{}, nil),
+					service.buildDiscordActionToolRuntime(project.ID, discordActionContext{ChannelID: "C1", ThreadID: "T1", MessageID: "M1", UserID: "U1"}, nil),
+				}
 			},
 		},
 		{
@@ -96,8 +108,8 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 			handlers: func() map[string]chatcontrol.RuntimeActionHandler {
 				return (&EmailService{projectRepo: projectRepo}).emailActionHandlers(project.ID, "user@example.com")
 			},
-			runtime: func() *llmcontracts.RuntimeTools {
-				return (&EmailService{projectRepo: projectRepo}).buildEmailActionToolRuntime(project.ID, "user@example.com")
+			runtimes: func() []*llmcontracts.RuntimeTools {
+				return []*llmcontracts.RuntimeTools{(&EmailService{projectRepo: projectRepo}).buildEmailActionToolRuntime(project.ID, "user@example.com")}
 			},
 		},
 	}
@@ -105,14 +117,48 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handlers := tt.handlers()
-			runtime := tt.runtime()
-			require.NotNil(t, runtime)
 			if tt.surface == chatcontrol.SurfaceEmail {
-				for _, def := range runtime.Definitions {
-					require.Contains(t, handlers, def.Name, "advertised runtime tool must have a handler")
+				expectedDefs := make([]llmcontracts.RuntimeToolDefinition, 0, len(handlers))
+				for _, def := range actionToolDefinitions(tt.surface, true) {
+					if _, ok := handlers[def.Name]; ok {
+						expectedDefs = append(expectedDefs, def)
+					}
+				}
+				for _, runtime := range tt.runtimes() {
+					require.NotNil(t, runtime)
+					require.Equal(t, expectedDefs, runtime.Definitions)
+					definitionNames := make(map[string]struct{}, len(runtime.Definitions))
+					for _, def := range runtime.Definitions {
+						definitionNames[def.Name] = struct{}{}
+						require.Contains(t, handlers, def.Name, "advertised runtime tool must have a handler")
+					}
+					require.NotContains(t, definitionNames, "create_task")
 				}
 			} else {
 				require.NoError(t, chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, tt.surface, true, handlers))
+				expectedDefs := actionToolDefinitions(tt.surface, true)
+				for _, runtime := range tt.runtimes() {
+					require.NotNil(t, runtime)
+					require.Equal(t, expectedDefs, runtime.Definitions)
+					definitionNames := make(map[string]struct{}, len(runtime.Definitions))
+					for _, def := range runtime.Definitions {
+						definitionNames[def.Name] = struct{}{}
+					}
+					require.Contains(t, definitionNames, "view_task_thread")
+					require.Contains(t, definitionNames, "send_to_task")
+
+					currentProject, handled, blocked, err := runtime.Executor(ctx, "get_current_project", nil)
+					require.NoError(t, err)
+					require.True(t, handled)
+					require.False(t, blocked)
+					require.Equal(t, "Current project: Channel Handler Coverage (id: "+project.ID+")", currentProject)
+
+					gated, handled, blocked, err := runtime.Executor(ctx, "save_automation", nil)
+					require.NoError(t, err)
+					require.True(t, handled)
+					require.True(t, blocked)
+					require.Contains(t, gated, "not available on "+string(tt.surface)+" surface")
+				}
 			}
 
 			currentProject, err := handlers["get_current_project"](ctx, nil)
