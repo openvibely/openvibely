@@ -1350,18 +1350,19 @@ func TestHostedReadyClaimReplaysDurableIdempotencyAfterAcceptedResponseCrash(t *
 		t.Fatal(err)
 	}
 	writes := 0
+	crashCtx, cancelCrash := context.WithCancel(context.Background())
+	defer cancelCrash()
 	controller := NewHostedController(api, drain, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, statePath)
 	controller.state = state
 	controller.renewInterval = time.Millisecond
 	controller.stateWriter = func(path string, data []byte) error {
 		writes++
 		if writes >= 2 {
+			cancelCrash()
 			return errors.New("crash after ready accepted")
 		}
 		return atomicWriteState(path, data)
 	}
-	crashCtx, cancelCrash := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancelCrash()
 	if err := controller.coordinate(crashCtx, HostedDirective{UpdateID: "assigned"}, state); err == nil {
 		t.Fatal("ready handoff persistence failure was ignored")
 	}
