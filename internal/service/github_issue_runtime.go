@@ -688,8 +688,16 @@ func resolveGitHubRuntimeTask(ctx context.Context, taskRepo *repository.TaskRepo
 	if taskRepo == nil {
 		return nil, fmt.Errorf("task repository unavailable")
 	}
-	if strings.TrimSpace(taskID) != "" {
-		task, err := taskRepo.GetByID(ctx, strings.TrimSpace(taskID))
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "current" {
+		callerTaskID, _, hasExecution := AutomationExecutionFromContext(ctx)
+		if !hasExecution || strings.TrimSpace(callerTaskID) == "" {
+			return nil, fmt.Errorf("task_id current requires Automation task execution context")
+		}
+		taskID = callerTaskID
+	}
+	if taskID != "" {
+		task, err := taskRepo.GetByID(ctx, taskID)
 		if err != nil {
 			return nil, err
 		}

@@ -1948,8 +1948,12 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	implementationTask.WorktreeBranch = "task/issue-42"
 	implementationCtx := WithAutomationContext(context.Background(), implementationContext)
 	implementationCtx = withAutomationExecution(implementationCtx, implementationTask.ID, execution.ID)
-	_, err = handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":%q,"issue_number":42,"pr_title":"PR"}`, implementationTask.ID)))
+	openedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(`{"task_id":"current","issue_number":42,"pr_title":"PR"}`))
 	require.NoError(t, err)
+	require.Contains(t, openedOutput, `"created":true`)
+	reusedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(`{"task_id":"current","issue_number":42,"pr_title":"PR"}`))
+	require.NoError(t, err)
+	require.Contains(t, reusedOutput, `"reused_existing_record":true`)
 	for _, repoPath := range resolvedRepoPaths {
 		require.Empty(t, repoPath, "Automation GitHub repository resolution must never receive repo_path")
 	}
