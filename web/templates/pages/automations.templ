@@ -794,6 +794,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								</label>
 								<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
 									<li><button type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button></li>
+									if page.AutomationID != "" {
+										<li><a href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a></li>
+									}
 									if page.TemplateUpdateAvailable {
 										<li><button type="button" data-update-automation-template-open onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
 									}

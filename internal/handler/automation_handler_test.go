@@ -1009,7 +1009,9 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	outdated := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, http.StatusOK, outdated.Code, outdated.Body.String())
 	require.Contains(t, outdated.Body.String(), `data-update-automation-template-open`)
-
+	require.Contains(t, outdated.Body.String(), `data-automation-builder-cancel`)
+	require.Contains(t, outdated.Body.String(), `href="/automations/`+automationID+`?project_id=`+project.ID+`"`)
+	require.Contains(t, outdated.Body.String(), `hx-get="/automations/`+automationID+`?project_id=`+project.ID+`"`)
 	_, err = tc.db.ExecContext(ctx, `UPDATE automations SET template_revision = NULL WHERE id = ?`, automationID)
 	require.NoError(t, err)
 	withoutVision := automationCandidateWithoutNodeHandler(candidate, "vision_suggestions")
