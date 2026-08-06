@@ -335,13 +335,13 @@ func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, nod
 			}
 		}
 	}
-	if candidate.AdapterKey == AutomationAdapterCustom && node.Role == "native_inbox" {
+	if automationCandidateNodeUsesCustomTopology(candidate, node.Key) && node.Role == "native_inbox" {
 		producerScope := customAutomationProducerScope(candidate, node.Key, "native_approval", "create_notification")
 		prompt += "\n\nNative approved-notification handoff:\nOnly process approved notifications created by the connected upstream producers on this inbox's approval branch in this same Automation. Eligible producer stages for this inbox:\n- " + producerScope + "\nThe runtime returns only notifications with exact trusted Automation, graph-version, and inbox-branch provenance; model-supplied metadata and content similarity cannot establish ownership. Confirm each returned notification is still actionable for an eligible producer purpose, and skip unrelated content.\nCall list_alerts without project_id, using decision_state=approved, implementation_task_linked=false, a bounded limit, and stable pagination. Do not pass the read filter: both read and unread approved notifications are eligible. The runtime automatically uses this scheduled Task's persisted project. Never search for or reuse a project ID from prior messages, examples, memory, tool output, the project snapshot, or the user description. Before calling claim_alert, collect every eligible result from all pages by following the returned pagination offsets. Do not claim, link, or process any notification while paginating because linkage removes rows from this filtered result set and advancing an offset after mutation can skip notifications. Only after the complete paginated snapshot is collected, call get_alert for each collected notification and inspect the full body and metadata before claiming it.\nCall claim_alert for each notification you can process. Only continue when the claim succeeds. Then call create_alert_implementation_task with a focused Backlog Task title and prompt. The created task is the implementation task. Its prompt must include the notification ID, reviewed context, and acceptance criteria, and directly instruct it to implement the reviewed change, add or update tests, and run required validation; state that it is already the linked implementation task, must not create or look for another implementation task, and must not run notification intake or call get_alert. Human approval authorizes creating and starting that task, but not merge, release, deployment, destructive remediation, or credential changes. Do not say that the created task lacks authorization to implement. The operation atomically links at most one Task and is safe to retry after a crash. After create_alert_implementation_task links the Backlog Task, call execute_tasks with the exact returned implementation_task_id. Do not leave the created Task waiting in Backlog.\nOnly call complete_alert_processing after execute_tasks succeeds. If creation, linkage, or Task execution fails, call fail_alert_processing with a concise error; do not report processing complete. Call release_alert_claim only when no task was linked and immediate retry by another scan is appropriate."
 	}
 	if node.Role == "github_inbox" {
 		issueTask := customAutomationGitHubIssueTaskTarget(candidate, node.Key)
-		if candidate.AdapterKey != AutomationAdapterCustom {
+		if !automationCandidateNodeUsesCustomTopology(candidate, node.Key) {
 			issueTask = automationTargetByRole(candidate, node.Key, "implementation")
 		}
 		if issueTask != nil {
@@ -350,7 +350,7 @@ func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, nod
 			}
 		}
 	}
-	if candidate.AdapterKey == AutomationAdapterCustom && node.Role == "github_inbox" {
+	if automationCandidateNodeUsesCustomTopology(candidate, node.Key) && node.Role == "github_inbox" {
 		if issueTask := customAutomationGitHubIssueTaskTarget(candidate, node.Key); issueTask != nil {
 			issueTaskPrompt := automationCompiledGitHubIssueTaskPrompt(candidate, *issueTask)
 			category, _ := issueTask.Config["category"].(string)
@@ -406,7 +406,7 @@ func customAutomationProducerScope(candidate models.AutomationDraftCandidate, in
 }
 
 func customAutomationNotificationTarget(candidate models.AutomationDraftCandidate, taskNodeKey string) *models.AutomationDraftNode {
-	if candidate.AdapterKey != AutomationAdapterCustom {
+	if !automationCandidateNodeUsesCustomTopology(candidate, taskNodeKey) {
 		return nil
 	}
 	nodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
@@ -437,7 +437,7 @@ func automationTargetByRole(candidate models.AutomationDraftCandidate, sourceNod
 }
 
 func customAutomationTargetByRole(candidate models.AutomationDraftCandidate, sourceNodeKey, role string) *models.AutomationDraftNode {
-	if candidate.AdapterKey != AutomationAdapterCustom {
+	if !automationCandidateNodeUsesCustomTopology(candidate, sourceNodeKey) {
 		return nil
 	}
 	return automationTargetByRole(candidate, sourceNodeKey, role)

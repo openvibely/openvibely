@@ -479,6 +479,61 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	require.Equal(t, "Review using the replacement instructions.", savedTaskPrompt)
 }
 
+func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Template Custom Nodes Project").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	opened := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterNativeSDLC},
+	}).Execute()
+	require.Equal(t, http.StatusOK, opened.Code, opened.Body.String())
+	require.Contains(t, opened.Body.String(), `name="node_kind"`)
+	require.Contains(t, opened.Body.String(), `value="schedule"`)
+	require.Contains(t, opened.Body.String(), `value="task"`)
+
+	candidate := automationCandidateFromResponse(t, opened)
+	post := func(values url.Values) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, err := json.Marshal(candidate)
+		require.NoError(t, err)
+		values.Set("project_id", project.ID)
+		values.Set("builder_source", "template")
+		values.Set("candidate_json", string(raw))
+		response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(values).Execute()
+		if response.Code == http.StatusOK {
+			candidate = automationCandidateFromResponse(t, response)
+		}
+		return response
+	}
+
+	require.Equal(t, http.StatusOK, post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Extra review"}}).Code)
+	require.Equal(t, http.StatusOK, post(url.Values{"builder_action": {"create_node"}, "node_kind": {"task"}, "node_name": {"Extra follow-up"}}).Code)
+	require.Equal(t, http.StatusOK, post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {"extra_review"}, "to_key": {"extra_follow_up"}}).Code)
+
+	saved := post(url.Values{"save_changes": {"true"}})
+	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
+	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
+	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
+	countNodeResources := func(nodeKey, resourceType string) int {
+		t.Helper()
+		var count int
+		require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automation_definition_resources r
+			JOIN automation_nodes n ON n.id = r.node_id AND n.version_id = r.version_id
+			WHERE r.project_id = ? AND n.node_key = ? AND r.resource_type = ?`, project.ID, nodeKey, resourceType).Scan(&count))
+		return count
+	}
+	require.Equal(t, 1, countNodeResources("extra_review", "schedule"))
+	require.Equal(t, 1, countNodeResources("extra_review", "task"))
+	require.Equal(t, 1, countNodeResources("extra_follow_up", "task"))
+}
+
 func TestAutomationBlankBuilderIsEmptyInteractiveAndKeepsNodeActionsTransient(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Blank Builder Project").Build()

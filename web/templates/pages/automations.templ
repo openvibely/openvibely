@@ -794,29 +794,28 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							if page.Result.Candidate.AdapterKey == "custom" {
 								<p class="mt-1 text-sm text-base-content/65">Add an OpenVibely capability, then configure it and connect it to the next step.</p>
 							} else {
-								<p class="mt-1 text-sm text-base-content/65">Add a step from this maintained Automation template.</p>
+								<p class="mt-1 text-sm text-base-content/65">Add an OpenVibely capability or restore a removed template step, then connect supported handoffs.</p>
 							}
 						</div>
 					<form class="mt-5 space-y-4" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content">
 						<input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="builder_action" value="create_node"/>
 						<label class="form-control"><span class="label-text">Node purpose</span><select class="select select-bordered" name="node_kind" required>
-							if page.Result.Candidate.AdapterKey == "custom" {
-									<option value="schedule">Schedule</option>
-									<option value="task">Task</option>
-									<option value="create_notification">Create notification</option>
-									<option value="human_approval">Human approval</option>
-									<option value="native_inbox">Approved inbox</option>
-									<option value="native_implementation">Native implementation</option>
-									<option value="create_github_issue">Create GitHub issue</option>
-									<option value="human_assignment">Human assignment</option>
-									<option value="github_inbox">GitHub inbox</option>
-									<option value="open_pull_request">Open pull request</option>
-									<option value="human_review">Human review</option>
-									<option value="outcome">Outcome</option>
-							} else {
+							<option value="schedule">Schedule</option>
+							<option value="task">Task</option>
+							<option value="create_notification">Create notification</option>
+							<option value="human_approval">Human approval</option>
+							<option value="native_inbox">Approved inbox</option>
+							<option value="native_implementation">Native implementation</option>
+							<option value="create_github_issue">Create GitHub issue</option>
+							<option value="human_assignment">Human assignment</option>
+							<option value="github_inbox">GitHub inbox</option>
+							<option value="open_pull_request">Open pull request</option>
+							<option value="human_review">Human review</option>
+							<option value="outcome">Outcome</option>
+							if page.Result.Candidate.AdapterKey != "custom" {
 								for _, node := range page.NodePalette {
 									if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
-										<option value={ "runtime:" + node.Key }>{ node.Name } · { automationNodeTypeLabel(node.Type) }</option>
+										<option value={ "runtime:" + node.Key }>{ "Restore: " + node.Name + " · " + automationNodeTypeLabel(node.Type) }</option>
 									}
 								}
 							}

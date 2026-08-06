@@ -437,7 +437,9 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "invalid_node", Message: "Node type is not supported by the graph editor."})
 				continue
 			}
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Custom graph nodes can be saved only when they use supported runtime capabilities."})
+			if !flexibleTemplate {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "unsupported_topology", Message: "Custom graph nodes can be saved only when they use supported runtime capabilities."})
+			}
 			issues = append(issues, validateCustomAutomationNodeConfig(node)...)
 			continue
 		}
@@ -537,13 +539,13 @@ func (s *AutomationDraftService) ValidateCandidate(candidate models.AutomationDr
 	if adapter.DynamicTopology {
 		issues = append(issues, validateCustomAutomationTopology(candidate)...)
 	} else if flexibleTemplate {
-		issues = append(issues, validateMaintainedSDLCTopology(candidate)...)
+		issues = append(issues, validateMaintainedSDLCTopology(candidate, canonicalNodes)...)
 	}
 	sortAutomationValidationIssues(issues)
 	return issues
 }
 
-func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) []models.AutomationValidationIssue {
+func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate, canonicalNodes map[string]AutomationAdapterNode) []models.AutomationValidationIssue {
 	if len(candidate.Nodes) == 0 {
 		return []models.AutomationValidationIssue{{Code: "empty_graph", Message: "Keep at least one runnable node before saving."}}
 	}
@@ -572,6 +574,11 @@ func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) [
 		from, fromOK := nodes[edge.From]
 		to, toOK := nodes[edge.To]
 		if !fromOK || !toOK || edge.From == edge.To {
+			continue
+		}
+		_, fromCanonical := canonicalNodes[from.Key]
+		_, toCanonical := canonicalNodes[to.Key]
+		if !fromCanonical && !toCanonical {
 			continue
 		}
 		supported := false
@@ -606,7 +613,33 @@ func validateMaintainedSDLCTopology(candidate models.AutomationDraftCandidate) [
 		}
 	}
 
+	customNodes := make([]models.AutomationDraftNode, 0)
 	for _, node := range candidate.Nodes {
+		if _, canonical := canonicalNodes[node.Key]; !canonical {
+			customNodes = append(customNodes, node)
+		}
+	}
+	if len(customNodes) > 0 {
+		customEdges := make([]models.AutomationDraftEdge, 0)
+		for _, edge := range candidate.Edges {
+			_, fromCanonical := canonicalNodes[edge.From]
+			_, toCanonical := canonicalNodes[edge.To]
+			if !fromCanonical && !toCanonical {
+				customEdges = append(customEdges, edge)
+			}
+		}
+		customCandidate := candidate
+		customCandidate.AdapterKey = AutomationAdapterCustom
+		customCandidate.AutomationType = "custom"
+		customCandidate.Nodes = customNodes
+		customCandidate.Edges = customEdges
+		issues = append(issues, validateCustomAutomationTopology(customCandidate)...)
+	}
+
+	for _, node := range candidate.Nodes {
+		if _, canonical := canonicalNodes[node.Key]; !canonical {
+			continue
+		}
 		in, out := incoming[node.Key], outgoing[node.Key]
 		add := func(code, message string) {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: code, Message: message})
@@ -742,8 +775,13 @@ func customAutomationNativeImplementation(candidate models.AutomationDraftCandid
 		nodes[node.Key] = node
 	}
 	node, ok := nodes[nodeKey]
-	if !ok || node.Type != models.AutomationNodeAgentTask || node.Role != "implementation" || len(node.Config) != 0 {
+	if !ok || node.Type != models.AutomationNodeAgentTask || node.Role != "implementation" {
 		return false
+	}
+	for key := range node.Config {
+		if key != "goal" {
+			return false
+		}
 	}
 	incoming, outgoing := 0, 0
 	for _, edge := range candidate.Edges {

@@ -85,20 +85,7 @@ func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, 
 		return plan, normalized, nil
 	}
 	adapter, _ := c.validator.registry.Get(normalized.AdapterKey)
-	resourceNodes := automationPresentAdapterNodes(adapter, normalized)
-	if adapter.DynamicTopology {
-		resourceNodes = nil
-		for _, node := range normalized.Nodes {
-			allowed := map[string]bool{}
-			if customAutomationNodeMaterializesTask(normalized, node) {
-				allowed["task"] = true
-			}
-			if node.Type == models.AutomationNodeTrigger {
-				allowed["schedule"] = true
-			}
-			resourceNodes = append(resourceNodes, AutomationAdapterNode{Key: node.Key, Name: node.Name, AllowedResources: allowed})
-		}
-	}
+	resourceNodes := automationResourceNodes(adapter, normalized)
 	for _, node := range resourceNodes {
 		if node.AllowedResources["task"] {
 			plan.Effects = append(plan.Effects, models.AutomationSaveEffect{Operation: "create", ResourceType: "task", Name: node.Name})
@@ -110,18 +97,47 @@ func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, 
 	return plan, normalized, nil
 }
 
-func automationPresentAdapterNodes(adapter AutomationAdapter, candidate models.AutomationDraftCandidate) []AutomationAdapterNode {
-	present := make(map[string]bool, len(candidate.Nodes))
-	for _, node := range candidate.Nodes {
-		present[node.Key] = true
-	}
-	nodes := make([]AutomationAdapterNode, 0, len(adapter.Nodes))
+func automationResourceNodes(adapter AutomationAdapter, candidate models.AutomationDraftCandidate) []AutomationAdapterNode {
+	canonical := make(map[string]AutomationAdapterNode, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
-		if present[node.Key] {
-			nodes = append(nodes, node)
+		canonical[node.Key] = node
+	}
+	resources := make([]AutomationAdapterNode, 0, len(candidate.Nodes))
+	for _, node := range candidate.Nodes {
+		if resource, exists := canonical[node.Key]; exists {
+			resources = append(resources, resource)
+			continue
+		}
+		if !adapter.DynamicTopology && adapter.Key != AutomationAdapterNativeSDLC && adapter.Key != AutomationAdapterGitHubSDLC {
+			continue
+		}
+		resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
+		if customAutomationNodeMaterializesTask(candidate, node) {
+			resource.AllowedResources["task"] = true
+		}
+		if node.Type == models.AutomationNodeTrigger {
+			resource.AllowedResources["schedule"] = true
+		}
+		resources = append(resources, resource)
+	}
+	return resources
+}
+
+func automationNodeUsesCustomTopology(adapter AutomationAdapter, nodeKey string) bool {
+	if adapter.DynamicTopology {
+		return true
+	}
+	for _, node := range adapter.Nodes {
+		if node.Key == nodeKey {
+			return false
 		}
 	}
-	return nodes
+	return adapter.Key == AutomationAdapterNativeSDLC || adapter.Key == AutomationAdapterGitHubSDLC
+}
+
+func automationCandidateNodeUsesCustomTopology(candidate models.AutomationDraftCandidate, nodeKey string) bool {
+	adapter, ok := NewAutomationAdapterRegistry().Get(candidate.AdapterKey)
+	return ok && automationNodeUsesCustomTopology(adapter, nodeKey)
 }
 
 func customAutomationNodeMaterializesTask(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) bool {
@@ -205,20 +221,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	for _, node := range candidate.Nodes {
 		candidateNodes[node.Key] = node
 	}
-	resourceNodes := automationPresentAdapterNodes(adapter, candidate)
-	if adapter.DynamicTopology {
-		resourceNodes = make([]AutomationAdapterNode, 0, len(candidate.Nodes))
-		for _, node := range candidate.Nodes {
-			resource := AutomationAdapterNode{Key: node.Key, Name: node.Name, Type: string(node.Type), Role: node.Role, AllowedResources: map[string]bool{}}
-			if customAutomationNodeMaterializesTask(candidate, node) {
-				resource.AllowedResources["task"] = true
-			}
-			if node.Type == models.AutomationNodeTrigger {
-				resource.AllowedResources["schedule"] = true
-			}
-			resourceNodes = append(resourceNodes, resource)
-		}
-	}
+	resourceNodes := automationResourceNodes(adapter, candidate)
 
 	write := repository.AutomationSaveWrite{ProjectID: request.ProjectID, AutomationID: automationID, GraphID: repository.NewID(),
 		ExpectedCurrentGraphID: expectedGraphID, StableKey: request.StableKey, Source: request.Source,
@@ -252,7 +255,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		if existing := existingResources[node.Key+"\x00task"]; existing.ResourceID != "" {
 			taskWrite.ExistingTaskID = existing.ResourceID
 		}
-		if candidate.AdapterKey == AutomationAdapterCustom {
+		if automationNodeUsesCustomTopology(adapter, node.Key) {
 			taskWrite.ApplyTopology = true
 			taskWrite.ParentNodeKey, _ = customAutomationTaskNeighbors(candidate, node.Key)
 			if _, child := customAutomationTaskNeighbors(candidate, node.Key); child != nil {
@@ -284,7 +287,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			}
 		}
 		taskNodeKey := node.Key
-		if candidate.AdapterKey != AutomationAdapterCustom {
+		if !automationNodeUsesCustomTopology(adapter, node.Key) {
 			taskNodeKey, _ = node.Config["target_node_key"].(string)
 		}
 		schedule, err := c.scheduleFromNode("", node)
