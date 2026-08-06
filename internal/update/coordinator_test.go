@@ -1471,32 +1471,35 @@ func TestCoordinatorPreservesApplyingStateForDurableInstallerReplay(t *testing.T
 }
 
 func TestCoordinatorRestartAutonomouslyExpiresOrphanDrainAfterWaitingTransitionCrash(t *testing.T) {
+	var unix atomic.Int64
+	unix.Store(1000)
+	now := func() time.Time { return time.Unix(unix.Load(), 0).UTC() }
 	root := t.TempDir()
 	drainPath := filepath.Join(root, "drain.json")
 	coordinatorPath := filepath.Join(root, "coordinator.json")
 
-	oldDrain := NewDrainManager(nil, nil, 0, time.Now)
+	oldDrain := NewDrainManager(nil, nil, 0, now)
 	if err := oldDrain.SetPersistence(drainPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := oldDrain.BeginDrain(DrainRequest{Lease: 150 * time.Millisecond}); err != nil {
+	if _, err := oldDrain.BeginDrain(DrainRequest{Lease: time.Second}); err != nil {
 		t.Fatal(err)
 	}
-	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json")})
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: now})
 	oldCoordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", oldDrain, nil, false, "", nil)
 	if err := oldCoordinator.SetPersistence(coordinatorPath); err != nil {
 		t.Fatal(err)
 	}
 	oldCoordinator.mu.Lock()
 	oldCoordinator.state = StateAvailable
-	oldCoordinator.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: time.Now().Add(time.Hour)}}
+	oldCoordinator.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now().Add(time.Hour)}}
 	if err := oldCoordinator.persistLocked(); err != nil {
 		oldCoordinator.mu.Unlock()
 		t.Fatal(err)
 	}
 	oldCoordinator.mu.Unlock()
 
-	restartedDrain := NewDrainManager(nil, nil, 0, time.Now)
+	restartedDrain := NewDrainManager(nil, nil, 0, now)
 	if err := restartedDrain.SetPersistence(drainPath); err != nil {
 		t.Fatal(err)
 	}
@@ -1515,13 +1518,14 @@ func TestCoordinatorRestartAutonomouslyExpiresOrphanDrainAfterWaitingTransitionC
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	restartedDrain.StartExpirySupervisor(ctx)
+	unix.Add(2)
 
 	select {
 	case <-restartedDrain.Reopened():
 	case <-time.After(time.Second):
 		t.Fatal("orphan persisted drain did not expire autonomously after restart")
 	}
-	persisted := NewDrainManager(nil, nil, 0, time.Now)
+	persisted := NewDrainManager(nil, nil, 0, now)
 	if err := persisted.SetPersistence(drainPath); err != nil {
 		t.Fatal(err)
 	}
