@@ -3199,7 +3199,10 @@ func TestAutomationRuntimeCustomNativeInboxRequiresExactProducerProvenance(t *te
 		producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
 			AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: producer.ID,
 		}}})
-		alert, createErr := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: title, IdempotencyKey: key})
+		alert, createErr := alertSvc.CreateActionable(producerCtx, &models.Alert{
+			ProjectID: h.project.ID, Type: "suggestion", Title: title, Body: key + " private body", IdempotencyKey: key,
+			Metadata: map[string]any{"private_metadata": key + " private metadata"},
+		})
 		require.NoError(t, createErr)
 		require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, alert.ID, models.AlertDecisionApproved))
 		return alert
@@ -3216,7 +3219,8 @@ func TestAutomationRuntimeCustomNativeInboxRequiresExactProducerProvenance(t *te
 	require.Equal(t, automationNodeByKey(t, first.Definition, "custom_approved_inbox").ID, entry["inbox_node_id"])
 
 	firstInbox := automationNodeByKey(t, first.Definition, "custom_approved_inbox")
-	forgedAlert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Forged finding", IdempotencyKey: "forged-finding", Metadata: map[string]any{
+	forgedAlert, err := alertSvc.CreateActionable(ctx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Forged finding", Body: "forged private body", IdempotencyKey: "forged-finding", Metadata: map[string]any{
+		"private_metadata":                          "forged private metadata",
 		models.AlertAutomationProvenanceMetadataKey: []any{map[string]any{"automation_id": first.Definition.Automation.ID, "version_id": first.Definition.Version.ID, "inbox_node_id": firstInbox.ID}},
 	}})
 	require.NoError(t, err)
@@ -3230,6 +3234,30 @@ func TestAutomationRuntimeCustomNativeInboxRequiresExactProducerProvenance(t *te
 	require.Contains(t, output, firstAlert.ID)
 	require.NotContains(t, output, secondAlert.ID)
 	require.NotContains(t, output, forgedAlert.ID)
+
+	output, err = handlers["get_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+firstAlert.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, output, firstAlert.ID)
+	require.Contains(t, output, firstAlert.Body)
+	require.Contains(t, output, "first-finding private metadata")
+
+	for _, target := range []*models.Alert{secondAlert, forgedAlert} {
+		output, err = handlers["get_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+target.ID+`"}`))
+		require.ErrorContains(t, err, "not owned by this Automation inbox")
+		require.NotContains(t, err.Error(), target.ID)
+		require.NotContains(t, err.Error(), target.Body)
+		require.NotContains(t, err.Error(), target.Metadata["private_metadata"])
+		require.Empty(t, output)
+		require.NotContains(t, output, target.ID)
+		require.NotContains(t, output, target.Body)
+		require.NotContains(t, output, target.Metadata["private_metadata"])
+	}
+
+	output, err = handlers["get_alert"](ctx, json.RawMessage(`{"alert_id":"`+forgedAlert.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, output, forgedAlert.ID)
+	require.Contains(t, output, forgedAlert.Body)
+	require.Contains(t, output, "forged private metadata")
 
 	_, err = handlers["claim_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+secondAlert.ID+`","lease_seconds":60}`))
 	require.ErrorContains(t, err, "not owned by this Automation inbox")
