@@ -777,15 +777,15 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 
 func (s *DiscordService) setActiveProject(ctx context.Context, userID, projectID string) error {
 	key := strings.TrimSpace(userID)
-	s.mu.Lock()
-	s.userProjects[key] = projectID
-	s.mu.Unlock()
 	if s.discordUserProjectRepo != nil {
 		if err := s.discordUserProjectRepo.SetUserProject(ctx, key, projectID); err != nil {
 			applog.Infof("[discord] persist active project failed for user=%s: %v", key, err)
 			return fmt.Errorf("persist failed: %w", err)
 		}
 	}
+	s.mu.Lock()
+	s.userProjects[key] = projectID
+	s.mu.Unlock()
 	return nil
 }
 
