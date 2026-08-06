@@ -348,9 +348,8 @@ func (r *AutomationRepo) ListAutomationTransitions(ctx context.Context, projectI
 func (r *AutomationRepo) GetDefinitionVersion(ctx context.Context, projectID, automationID, versionID string) (*models.AutomationDefinition, error) {
 	var automation models.Automation
 	err := scanAutomation(r.db.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description,
-		automation_type, lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
-		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`,
-		projectID, automationID), &automation)
+		automation_type, lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
+		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID), &automation)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

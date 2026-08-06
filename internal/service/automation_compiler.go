@@ -32,16 +32,17 @@ type AutomationCompiler struct {
 }
 
 type AutomationSaveRequest struct {
-	ProjectID             string
-	AutomationID          string
-	StableKey             string
-	Source                string
-	CreatedVia            string
-	Candidate             models.AutomationDraftCandidate
-	ConfirmationTokenID   string
-	ConfirmationPrincipal string
-	ConfirmationThreadID  string
-	ConfirmingUserInputID string
+	ProjectID              string
+	AutomationID           string
+	StableKey              string
+	Source                 string
+	CreatedVia             string
+	Candidate              models.AutomationDraftCandidate
+	ConfirmationTokenID    string
+	ConfirmationPrincipal  string
+	ConfirmationThreadID   string
+	ConfirmingUserInputID  string
+	UpdateToLatestTemplate bool
 }
 
 type AutomationSaveResult struct {
@@ -191,6 +192,15 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	if !ok {
 		return nil, fmt.Errorf("unsupported automation adapter %q", candidate.AdapterKey)
 	}
+	templateRevision := automation.TemplateRevision
+	if request.UpdateToLatestTemplate {
+		if current == nil || adapter.TemplateRevision == 0 {
+			return nil, errors.New("only an existing maintained template Automation can update to the latest template")
+		}
+		templateRevision = &adapter.TemplateRevision
+	} else if current == nil && request.Source == "template" && adapter.TemplateRevision > 0 {
+		templateRevision = &adapter.TemplateRevision
+	}
 	candidateNodes := make(map[string]models.AutomationDraftNode, len(candidate.Nodes))
 	for _, node := range candidate.Nodes {
 		candidateNodes[node.Key] = node
@@ -212,7 +222,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 
 	write := repository.AutomationSaveWrite{ProjectID: request.ProjectID, AutomationID: automationID, GraphID: repository.NewID(),
 		ExpectedCurrentGraphID: expectedGraphID, StableKey: request.StableKey, Source: request.Source,
-		CreatedVia: request.CreatedVia, Candidate: candidate, ConfirmationTokenID: request.ConfirmationTokenID,
+		CreatedVia: request.CreatedVia, TemplateRevision: templateRevision, Candidate: candidate, ConfirmationTokenID: request.ConfirmationTokenID,
 		ConfirmationPrincipal: request.ConfirmationPrincipal, ConfirmationThreadID: request.ConfirmationThreadID,
 		ConfirmingUserInputID: request.ConfirmingUserInputID}
 	for _, resourceNode := range resourceNodes {

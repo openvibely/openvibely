@@ -849,6 +849,80 @@ func issueCodesHandler(candidate models.AutomationDraftCandidate, drafts *servic
 	return codes
 }
 
+func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Legacy maintained template update").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	candidate, err := drafts.TemplateCandidate(service.AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	saved := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"},
+		"candidate_json": {automationDraftCandidateJSONForTest(t, candidate)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
+
+	var automationID string
+	var templateRevision *int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT id, template_revision FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &templateRevision))
+	require.NotNil(t, templateRevision)
+	require.Equal(t, service.CurrentAutomationTemplateRevision(service.AutomationAdapterNativeSDLC), *templateRevision)
+
+	_, err = tc.db.ExecContext(ctx, `UPDATE automations SET template_revision = 0 WHERE id = ?`, automationID)
+	require.NoError(t, err)
+	outdated := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	require.Equal(t, http.StatusOK, outdated.Code, outdated.Body.String())
+	require.Contains(t, outdated.Body.String(), `data-update-automation-template-open`)
+
+	_, err = tc.db.ExecContext(ctx, `UPDATE automations SET template_revision = NULL WHERE id = ?`, automationID)
+	require.NoError(t, err)
+	withoutVision := automationCandidateWithoutNodeHandler(candidate, "vision_suggestions")
+	edited := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "candidate_json": {automationDraftCandidateJSONForTest(t, withoutVision)}, "save_changes": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, edited.Code, edited.Body.String())
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT template_revision FROM automations WHERE id = ?`, automationID).Scan(&templateRevision))
+	require.Nil(t, templateRevision, "ordinary edits must not claim a legacy graph matches the latest template")
+
+	opened := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	require.Equal(t, http.StatusOK, opened.Code, opened.Body.String())
+	require.Contains(t, opened.Body.String(), `data-update-automation-template-open`)
+	require.Contains(t, opened.Body.String(), "replaces your current nodes, connections, prompts, and schedules")
+
+	updated := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "update_template": {"true"},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, updated.Code, updated.Body.String())
+	require.NotEmpty(t, updated.Header().Get("HX-Redirect"))
+	require.Equal(t, 1, tableCountHandler(t, tc, "automation_versions"), "template update must replace the graph without adding history")
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT template_revision FROM automations WHERE id = ?`, automationID).Scan(&templateRevision))
+	require.NotNil(t, templateRevision)
+	require.Equal(t, service.CurrentAutomationTemplateRevision(service.AutomationAdapterNativeSDLC), *templateRevision)
+	definition, err := automationRepo.GetDefinition(ctx, project.ID, automationID)
+	require.NoError(t, err)
+	require.NotNil(t, definition)
+	require.NotNil(t, automationNodeByKeyHandler(definition.Nodes, "vision_suggestions"), "updating replaces customizations with the canonical latest template")
+
+	current := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
+	require.Equal(t, http.StatusOK, current.Code, current.Body.String())
+	require.NotContains(t, current.Body.String(), `data-update-automation-template-open`)
+}
+
+func automationNodeByKeyHandler(nodes []models.AutomationNode, key string) *models.AutomationNode {
+	for i := range nodes {
+		if nodes[i].NodeKey == key {
+			return &nodes[i]
+		}
+	}
+	return nil
+}
+
 func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("GitHub template without setup").Build()
@@ -948,7 +1022,10 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 	require.Zero(t, legacyInboxRows, "visible Authorized Users must not require a hidden legacy inbox row")
 
 	var automationID string
-	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID))
+	var templateRevision *int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT id, template_revision FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &templateRevision))
+	require.NotNil(t, templateRevision)
+	require.Equal(t, service.CurrentAutomationTemplateRevision(service.AutomationAdapterGitHubSDLC), *templateRevision)
 	withoutVision := automationCandidateWithoutNodeHandler(candidate, "vision_suggestions")
 	edited := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "builder_source": {"edit"},

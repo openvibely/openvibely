@@ -31,20 +31,33 @@ type AutomationAdapterEdge struct {
 }
 
 type AutomationAdapter struct {
-	Key             string
-	AutomationType  string
-	DefaultName     string
-	Description     string
-	DynamicTopology bool
-	Nodes           []AutomationAdapterNode
-	Edges           []AutomationAdapterEdge
+	Key              string
+	AutomationType   string
+	DefaultName      string
+	Description      string
+	TemplateRevision int
+	DynamicTopology  bool
+	Nodes            []AutomationAdapterNode
+	Edges            []AutomationAdapterEdge
 }
 
 type AutomationAdapterRegistry struct{ adapters map[string]AutomationAdapter }
 
+// CurrentAutomationTemplateRevision is bumped when a maintained template changes
+// and existing Automations should offer destructive replacement with that template.
+func CurrentAutomationTemplateRevision(adapterKey string) int {
+	switch adapterKey {
+	case AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC:
+		return 1
+	default:
+		return 0
+	}
+}
+
 func NewAutomationAdapterRegistry() *AutomationAdapterRegistry {
 	registry := &AutomationAdapterRegistry{adapters: make(map[string]AutomationAdapter)}
 	for _, adapter := range []AutomationAdapter{customAutomationAdapter(), nativeSDLCAdapter(), githubSDLCAdapter(), visionDriverAdapter()} {
+		adapter.TemplateRevision = CurrentAutomationTemplateRevision(adapter.Key)
 		registry.adapters[adapter.Key] = adapter
 	}
 	return registry

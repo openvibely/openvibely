@@ -714,6 +714,21 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
 			</dialog>
 		}
+		if page.AutomationID != "" && page.TemplateUpdateAvailable {
+			<dialog id="update-automation-template-modal" class="modal">
+				<div class="modal-box">
+					@ModalCloseButton("document.getElementById('update-automation-template-modal')", "Close template update confirmation")
+					<h3 class="pr-10 text-lg font-bold">Update to latest template</h3>
+					<p class="py-4">This replaces your current nodes, connections, prompts, and schedules with the latest { automationAdapterLabel(page.Result.Candidate.AdapterKey) } template.</p>
+					<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Your Automation name and lifecycle state are preserved. Template customizations are not merged.</div>
+					<div class="modal-action">
+						<button class="btn" type="button" onclick="document.getElementById('update-automation-template-modal').close()">Cancel</button>
+						<form method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="update_template" value="true"/><button class="btn btn-primary" type="submit">Update to latest</button></form>
+					</div>
+				</div>
+				<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
+			</dialog>
+		}
 		if page.AutomationID == "" && page.Source == "template" {
 			<div class="alert alert-info mb-4" role="status"><span>This template design is browser-local. Review or customize the graph, then select <strong>Save changes</strong> to create the Automation.</span></div>
 		}
@@ -761,6 +776,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								</label>
 								<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
 									<li><button type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button></li>
+									if page.TemplateUpdateAvailable {
+										<li><button type="button" data-update-automation-template-open onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
+									}
 									if page.AutomationID != "" {
 										<li><button class="text-error" type="button" data-delete-automation-open onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button></li>
 									}
