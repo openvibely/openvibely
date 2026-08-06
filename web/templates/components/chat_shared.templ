@@ -4358,7 +4358,6 @@ templ ChatAutoScrollScript() {
 					var codeRanges = [];
 					var transcriptToolRanges = [];
 					var segments = [];
-					var preparationFailed = false;
 					function toolBlockRanges(text) {
 						var ranges = [];
 						var pattern = /^[\t ]*\[Tool\s+\S+\s+(?:done|error)\][\t ]*(?:\r\n|\r|\n)?[\s\S]*?\[\/Tool\][\t ]*(?=\r?$)(?:\r\n|\r|\n)?/gm;
@@ -4434,29 +4433,30 @@ templ ChatAutoScrollScript() {
 						});
 						return filtered;
 					}
-					function prepareInitialCodeRanges() {
-						if (shouldYieldPreparation && window.codeRangesAsync) {
-							return window.codeRangesAsync(textBuffer, container).then(function(result) {
-								if (result !== null) rawCodeRanges = result;
-								else preparationFailed = true;
-								return true;
-							});
+						function prepareInitialCodeRanges() {
+							if (shouldYieldPreparation && window.codeRangesAsync) {
+								return window.codeRangesAsync(textBuffer, container).then(function(result) {
+									// A worker is an optimization only. Falling back to raw Markdown
+									// would expose tool protocol markers instead of rendering cards.
+									rawCodeRanges = result !== null ? result : (window.codeRanges ? window.codeRanges(textBuffer) : []);
+									return true;
+								});
+							}
+							rawCodeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
+							return true;
 						}
-						rawCodeRanges = window.codeRanges ? window.codeRanges(textBuffer) : [];
-						return true;
-					}
-					function prepareCodeRanges() {
-						if (shouldYieldPreparation && window.codeRangesAsync) {
-							return window.codeRangesAsync(textBuffer, container).then(function(result) {
-								if (result !== null) codeRanges = excludeToolBlockCodeRanges(result);
-								else preparationFailed = true;
-								return true;
-							});
+						function prepareCodeRanges() {
+							if (shouldYieldPreparation && window.codeRangesAsync) {
+								return window.codeRangesAsync(textBuffer, container).then(function(result) {
+									// Keep structured rendering intact if worker preparation is unavailable.
+									codeRanges = excludeToolBlockCodeRanges(result !== null ? result : (window.codeRanges ? window.codeRanges(textBuffer) : []));
+									return true;
+								});
+							}
+							codeRanges = excludeToolBlockCodeRanges(window.codeRanges ? window.codeRanges(textBuffer) : []);
+							return true;
 						}
-						codeRanges = excludeToolBlockCodeRanges(window.codeRanges ? window.codeRanges(textBuffer) : []);
-						return true;
-					}
-					function preparationBudgetExpired(startedAt, processed) {
+						function preparationBudgetExpired(startedAt, processed) {
 						return processed >= 64 || ((window.performance && performance.now ? performance.now() : Date.now()) - startedAt) >= 8;
 					}
 					function collectThinkingMatches() {
@@ -5145,8 +5145,8 @@ templ ChatAutoScrollScript() {
 			if (shouldYieldPreparation) {
 				return new Promise(function(resolve, reject) {
 					var preparationIndex = 0;
-					function runPreparationPhase() {
-						if (container._streamRenderVersion !== renderVersion) { resolve(false); return; }
+						function runPreparationPhase() {
+							if (container._streamRenderVersion !== renderVersion) { resolve(false); return; }
 							try {
 								if (preparationIndex < preparationPhases.length) {
 									var phaseResult = preparationPhases[preparationIndex]();
@@ -5159,22 +5159,15 @@ templ ChatAutoScrollScript() {
 									}
 									if (phaseResult !== false) preparationIndex++;
 									setTimeout(runPreparationPhase, 0);
-								return;
+									return;
+								}
+								var rendered = renderPreparedSegments();
+								if (rendered && typeof rendered.then === 'function') rendered.then(resolve, reject);
+								else resolve(rendered !== false);
+							} catch (err) {
+								reject(err);
 							}
-							if (preparationFailed) {
-								var fallback = window.renderChatMarkdownLargeFallback ? window.renderChatMarkdownLargeFallback(textBuffer) : null;
-								container.replaceChildren(fallback || document.createTextNode(textBuffer));
-								resolve(true);
-								return;
-							}
-							var rendered = renderPreparedSegments();
-							if (rendered && typeof rendered.then === 'function') rendered.then(resolve, reject);
-							else resolve(rendered !== false);
-						} catch (err) {
-							reject(err);
-						}
-					}
-					setTimeout(runPreparationPhase, 0);
+						}					setTimeout(runPreparationPhase, 0);
 				});
 				}
 				for (var preparationIndex = 0; preparationIndex < preparationPhases.length; preparationIndex++) {
