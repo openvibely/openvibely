@@ -1873,7 +1873,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								return;
 							}
 							form.setAttribute('hx-post', endpoint);
-							if (intent !== 'steer') normalRequestInFlight++;
 							safeSubmit();
 						}
 						function composerHasActiveTurn() {
@@ -2702,7 +2701,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						form._chatNextSubmissionPayload = null;
 						var request = event.detail.xhr || {};
 						request._chatSubmittedIntent = form.getAttribute('data-submit-intent') || 'normal';
-						if (request._chatSubmittedIntent === 'normal' && normalRequestInFlight < 1) normalRequestInFlight = 1;
+						if (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;
 						request._chatSubmittedMessage = payload ? payload.message : (messageInput ? messageInput.value : '');
 						request._chatSubmittedAttachmentSession = payload ? payload.attachmentSessionID : (sessionInput ? sessionInput.value : '');
 					});

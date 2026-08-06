@@ -1242,12 +1242,17 @@ func TestChatInputForm_SharedQueueAndSteerShortcuts(t *testing.T) {
 				"if (steerEndpoint && turnID) {",
 				"submitComposer(normalPostEndpoint, 'normal');",
 				"submitComposer(steerEndpoint, 'steer');",
+				"form.addEventListener('htmx:beforeRequest'",
+				"if (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;",
 				"e.stopImmediatePropagation();",
 			}
 			for _, expected := range required {
 				if !strings.Contains(content, expected) {
 					t.Fatalf("shared shortcut script missing %q", expected)
 				}
+			}
+			if strings.Contains(content, "if (intent !== 'steer') normalRequestInFlight++") {
+				t.Fatal("normal request must not be counted before native form validation succeeds")
 			}
 		})
 	}
