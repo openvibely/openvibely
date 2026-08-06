@@ -129,6 +129,43 @@ func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
 	}
 }
 
+func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     json.RawMessage
+		wantError string
+	}{
+		{name: "empty", input: nil, wantError: "create_task requires title and prompt"},
+		{name: "whitespace", input: json.RawMessage(" \n\t "), wantError: "create_task requires title and prompt"},
+		{name: "valid", input: json.RawMessage(`{"title":"Decoded task","prompt":"Create this task","category":"backlog"}`)},
+		{name: "malformed", input: json.RawMessage(`{"title":`), wantError: "invalid tool input JSON:"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _, _, _ := setupTestHandlerWithDB(t)
+			project := createProject(t, h, "Runtime input "+tt.name)
+			handler := h.chatActionHandlers(
+				streamingResponseParams{ExecID: "runtime-input-exec", ProjectID: project.ID},
+				nil,
+				models.ChatModeOrchestrate,
+				chatcontrol.SurfaceWeb,
+			)["create_task"]
+
+			out, err := handler(context.Background(), tt.input)
+			if tt.wantError != "" {
+				require.ErrorContains(t, err, tt.wantError)
+				if tt.name == "malformed" {
+					require.ErrorContains(t, err, "unexpected end of JSON input")
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Contains(t, out, "Decoded task")
+		})
+	}
+}
+
 func TestCreateTaskRuntimeToolDecodesTypedChainConfigDirectly(t *testing.T) {
 	h, _, _, _ := setupTestHandlerWithDB(t)
 	ctx := context.Background()

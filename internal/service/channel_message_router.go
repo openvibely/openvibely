@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -243,7 +244,7 @@ func (r *ChannelMessageRouter) SendDirectTarget(ctx context.Context, projectID s
 
 func ExecuteSendMessageTool(ctx context.Context, router *ChannelMessageRouter, projectID string, input json.RawMessage) (string, error) {
 	var req SendMessageRequest
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	result := router.Send(ctx, projectID, req)

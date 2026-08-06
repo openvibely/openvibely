@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 )
@@ -23,7 +24,7 @@ type automationSaveActionInput struct {
 
 func (h *Handler) executeAutomationPreviewAction(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
 	var request automationPreviewActionInput
-	if err := decodeChatActionInput(input, &request); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &request); err != nil {
 		return "", err
 	}
 	result, err := h.previewAutomationDescription(ctx, params.ProjectID, request.Description)
@@ -38,7 +39,7 @@ func (h *Handler) executeAutomationSaveAction(ctx context.Context, params stream
 		return "", errors.New("automation save is unavailable")
 	}
 	var request automationSaveActionInput
-	if err := decodeChatActionInput(input, &request); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &request); err != nil {
 		return "", err
 	}
 	var candidate models.AutomationDraftCandidate

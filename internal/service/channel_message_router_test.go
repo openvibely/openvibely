@@ -88,6 +88,36 @@ func setupChannelMessageRouterTest(t *testing.T) (context.Context, *repository.C
 	return ctx, targetRepo, settingsRepo, slackAuthRepo, telegramAuthRepo, emailAuthRepo, discordAuthRepo, project, router, slack, telegram, email, discord
 }
 
+func TestExecuteSendMessageToolNormalizesAndDecodesInput(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      json.RawMessage
+		wantError  string
+		wantOutput string
+	}{
+		{name: "empty", input: nil, wantOutput: "send_message requires target"},
+		{name: "whitespace", input: json.RawMessage(" \n\t "), wantOutput: "send_message requires target"},
+		{name: "valid", input: json.RawMessage(`{"action":"list"}`), wantOutput: `"ok":true`},
+		{name: "malformed", input: json.RawMessage(`{"action":`), wantError: "invalid tool input JSON:"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _, _, _, _, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
+			out, err := ExecuteSendMessageTool(ctx, router, project.ID, tt.input)
+			if tt.wantError != "" {
+				require.ErrorContains(t, err, tt.wantError)
+				if tt.name == "malformed" {
+					require.ErrorContains(t, err, "unexpected end of JSON input")
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Contains(t, out, tt.wantOutput)
+		})
+	}
+}
+
 func TestChannelMessageRouter_ListTargets(t *testing.T) {
 	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
 	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "t1", ProjectID: project.ID, Platform: "slack", Name: "ops", TargetID: "C123", Home: true}))

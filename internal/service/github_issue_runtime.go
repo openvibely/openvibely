@@ -100,7 +100,7 @@ func runtimeToolDefinitionSet(defs []llmcontracts.RuntimeToolDefinition) map[str
 }
 
 func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]chatcontrol.RuntimeActionHandler {
-	core := NewGitHubIssueActionCore(opts.GitHub, opts.GitHubAuthRepo, opts.ProjectID, decodeRuntimeToolInput,
+	core := NewGitHubIssueActionCore(opts.GitHub, opts.GitHubAuthRepo, opts.ProjectID, chatcontrol.DecodeRuntimeToolInput,
 		func(ctx context.Context, repoURL string) (*GitHubRepoRef, error) {
 			return resolveGitHubRepoForRuntimeToolURL(ctx, opts, repoURL)
 		})
@@ -117,7 +117,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"github_create_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req githubCreateIssueRuntimeInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			automationBound, err := applyAutomationGitHubIssueConfiguration(ctx, opts, &req)
@@ -285,7 +285,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", fmt.Errorf("task repository unavailable")
 			}
 			var req GitHubIssueActionRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			project, err := resolveGitHubRuntimeProject(ctx, opts)
@@ -343,7 +343,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", fmt.Errorf("task repository unavailable")
 			}
 			var req GitHubIssueActionRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if !req.ConfirmHistoryRewrite {
@@ -384,7 +384,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
 			}
 			var req GitHubIssueActionRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)

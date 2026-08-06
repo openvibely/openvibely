@@ -155,7 +155,7 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 				return "", fmt.Errorf("create_task: task service unavailable")
 			}
 			var req TaskCreationRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if opts.PrepareTaskCreation != nil {
@@ -198,7 +198,7 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 		},
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req channelCreateSwarmTaskInput
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
@@ -248,7 +248,7 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 		},
 		"edit_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req TaskEditRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(req.ID) == "" {
@@ -262,7 +262,7 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 		},
 		"execute_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req TaskExecutionRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" && len(req.Tags) == 0 && req.MinPriority == 0 {
@@ -279,7 +279,7 @@ func buildChannelGoalActionHandlers(opts channelGoalActionHandlerOptions) map[st
 			return nil, channelGoalToolInput{}, fmt.Errorf("task goal service unavailable")
 		}
 		var req channelGoalToolInput
-		if err := decodeRuntimeToolInput(input, &req); err != nil {
+		if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 			return nil, req, err
 		}
 		task, err := resolveChannelTaskReference(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
@@ -370,14 +370,14 @@ func buildChannelThreadActionHandlers(opts channelThreadActionHandlerOptions) ma
 	handlers := map[string]chatcontrol.RuntimeActionHandler{
 		"view_task_thread": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req ViewThreadRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return runChannelViewTaskThread(ctx, opts.TaskRepo, opts.ExecRepo, opts.ProjectID, req)
 		},
 		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req SendToTaskRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			result := runChannelSendToTaskAction(ctx, opts, req)
@@ -471,7 +471,7 @@ func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) 
 		},
 		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req SwitchProjectRequest
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return switchChannelProjectResult(ctx, opts.ProjectRepo, strings.TrimSpace(req.Project), opts.SwitchProject)
@@ -606,7 +606,7 @@ func switchChannelProjectResult(ctx context.Context, projectRepo *repository.Pro
 
 func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandlerOptions, input json.RawMessage) string {
 	var req ScheduleTaskRequest
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for schedule_task."
 	}
 	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
@@ -645,7 +645,7 @@ func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandle
 
 func runChannelDeleteSchedule(ctx context.Context, opts channelUtilityActionHandlerOptions, input json.RawMessage) string {
 	var req DeleteScheduleRequest
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for delete_schedule."
 	}
 	if strings.TrimSpace(req.ScheduleID) == "" && strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
@@ -671,7 +671,7 @@ func runChannelDeleteSchedule(ctx context.Context, opts channelUtilityActionHand
 
 func runChannelModifySchedule(ctx context.Context, opts channelUtilityActionHandlerOptions, input json.RawMessage) string {
 	var req ModifyScheduleRequest
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for modify_schedule."
 	}
 	if strings.TrimSpace(req.ScheduleID) == "" && strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
@@ -763,7 +763,7 @@ func channelSetPersonalityResult(ctx context.Context, settingsRepo *repository.S
 	var req struct {
 		Personality string `json:"personality"`
 	}
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for set_personality."
 	}
 	key := strings.TrimSpace(req.Personality)
@@ -818,7 +818,7 @@ func channelGetModelResult(ctx context.Context, repo *repository.LLMConfigRepo, 
 		ModelID string `json:"model_id"`
 		Name    string `json:"name"`
 	}
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for get_model."
 	}
 	configs, err := repo.List(ctx)
@@ -961,7 +961,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				Type     string `json:"type"`
 				TaskID   string `json:"task_id"`
 			}
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if err := requireService(); err != nil {
@@ -1008,7 +1008,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				Metadata       map[string]any `json:"metadata"`
 				IdempotencyKey string         `json:"idempotency_key"`
 			}
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if err := assertProject(req.ProjectID); err != nil {
@@ -1069,7 +1069,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				Limit                    int    `json:"limit"`
 				Offset                   int    `json:"offset"`
 			}
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if err := assertProject(req.ProjectID); err != nil {
@@ -1109,7 +1109,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				ProjectID string `json:"project_id"`
 				AlertID   string `json:"alert_id"`
 			}
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if err := assertProject(req.ProjectID); err != nil {
@@ -1133,7 +1133,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				AlertID      string `json:"alert_id"`
 				LeaseSeconds int    `json:"lease_seconds"`
 			}
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if err := assertProject(req.ProjectID); err != nil {
@@ -1165,7 +1165,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				Priority  int            `json:"priority"`
 				Tag       models.TaskTag `json:"tag"`
 			}
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if err := assertProject(req.ProjectID); err != nil {
@@ -1197,7 +1197,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				AlertID   string `json:"alert_id"`
 				TaskID    string `json:"task_id"`
 			}
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if err := assertProject(req.ProjectID); err != nil {
@@ -1224,7 +1224,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				ProjectID string `json:"project_id"`
 				AlertID   string `json:"alert_id"`
 			}
-			if err := decodeRuntimeToolInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if err := assertProject(req.ProjectID); err != nil {
@@ -1254,7 +1254,7 @@ func alertTerminalRuntimeHandler(opts AlertRuntimeOptions, state models.AlertPro
 			AlertID   string `json:"alert_id"`
 			Message   string `json:"message"`
 		}
-		if err := decodeRuntimeToolInput(input, &req); err != nil {
+		if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 			return "", err
 		}
 		if err := assertProject(req.ProjectID); err != nil {
@@ -1307,7 +1307,7 @@ func channelGetAlertResult(ctx context.Context, alertSvc *AlertService, projectI
 	var req struct {
 		AlertID string `json:"alert_id"`
 	}
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for get_alert."
 	}
 	if req.AlertID == "" {
@@ -1332,7 +1332,7 @@ func channelGetAlertResult(ctx context.Context, alertSvc *AlertService, projectI
 
 func channelCreateAlertResult(ctx context.Context, alertSvc *AlertService, projectID string, input json.RawMessage) string {
 	var req CreateAlertRequest
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for create_alert."
 	}
 	if strings.TrimSpace(req.Title) == "" {
@@ -1362,7 +1362,7 @@ func channelCreateAlertResult(ctx context.Context, alertSvc *AlertService, proje
 
 func channelDeleteAlertResult(ctx context.Context, alertSvc *AlertService, projectID string, input json.RawMessage) string {
 	var req DeleteAlertRequest
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for delete_alert."
 	}
 	if strings.TrimSpace(req.AlertID) == "" {
@@ -1379,7 +1379,7 @@ func channelDeleteAlertResult(ctx context.Context, alertSvc *AlertService, proje
 
 func channelToggleAlertResult(ctx context.Context, alertSvc *AlertService, projectID string, input json.RawMessage) string {
 	var req ToggleAlertRequest
-	if err := decodeRuntimeToolInput(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for toggle_alert."
 	}
 	if strings.TrimSpace(req.AlertID) == "" {
@@ -1547,17 +1547,6 @@ func channelGoalToolJSON(goal *models.TaskGoal) (string, error) {
 	}
 	b, err := json.Marshal(payload)
 	return string(b), err
-}
-
-func decodeRuntimeToolInput(input json.RawMessage, dst interface{}) error {
-	payload := input
-	if len(strings.TrimSpace(string(payload))) == 0 {
-		payload = json.RawMessage(`{}`)
-	}
-	if err := json.Unmarshal(payload, dst); err != nil {
-		return fmt.Errorf("invalid tool input JSON: %w", err)
-	}
-	return nil
 }
 
 // actionToolDefinitions returns tool definitions from the canonical registry

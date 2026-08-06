@@ -210,7 +210,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		},
 		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.TaskCreationRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(params.ProjectID) == "" {
@@ -250,7 +250,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		},
 		"edit_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.TaskEditRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(req.ID) == "" {
@@ -264,7 +264,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		},
 		"execute_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.TaskExecutionRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" && len(req.Tags) == 0 && req.MinPriority == 0 {
@@ -277,7 +277,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		},
 		"view_task_thread": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ViewThreadRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return h.executeViewTaskThreadRequest(ctx, params.ProjectID, req)
@@ -350,21 +350,21 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		},
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ScheduleTaskRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeChatScheduleRequests(ctx, params.ProjectID, []service.ScheduleTaskRequest{req})), nil
 		},
 		"delete_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.DeleteScheduleRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeChatDeleteScheduleRequests(ctx, params.ProjectID, []service.DeleteScheduleRequest{req})), nil
 		},
 		"modify_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ModifyScheduleRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeChatModifyScheduleRequests(ctx, params.ProjectID, []service.ModifyScheduleRequest{req})), nil
@@ -380,7 +380,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		},
 		"set_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.SetPersonalityRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeSetPersonality(ctx, req)), nil
@@ -421,14 +421,14 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"release_alert_claim":              alertHandlers["release_alert_claim"],
 		"delete_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.DeleteAlertRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeDeleteAlertRequests(ctx, params.ProjectID, []service.DeleteAlertRequest{req})), nil
 		},
 		"toggle_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ToggleAlertRequest
-			if err := decodeChatActionInput(input, &req); err != nil {
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeToggleAlertRequests(ctx, params.ProjectID, []service.ToggleAlertRequest{req})), nil
@@ -861,17 +861,6 @@ func formatCapabilities(summaries []chatcontrol.ActionSummary, selectedMemoryHan
 		sb.WriteString(fmt.Sprintf("  - %s%s: %s\n", s.Name, accessTag, s.Description))
 	}
 	return sb.String()
-}
-
-func decodeChatActionInput(input json.RawMessage, dst any) error {
-	payload := input
-	if len(strings.TrimSpace(string(payload))) == 0 {
-		payload = json.RawMessage(`{}`)
-	}
-	if err := json.Unmarshal(payload, dst); err != nil {
-		return fmt.Errorf("invalid tool input JSON: %w", err)
-	}
-	return nil
 }
 
 // buildChatActionToolRuntimeFromDefs creates a RuntimeTools from pre-computed tool
