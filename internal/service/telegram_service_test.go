@@ -4158,6 +4158,129 @@ func TestTelegramService_SendChatResponse_RichDraftFinalSendRejectionSendsLegacy
 	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
 }
 
+func TestTelegramService_SendChatResponse_RichDraftFinalSendRejectionCompleteMultiChunkLegacyFallbackClearsPlaceholder(t *testing.T) {
+	var endpoints []string
+	var markdownChunks []string
+	var plainChunks []string
+	var clearedPlaceholder string
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			require.Equal(t, "sendRichMessage", endpoint)
+			require.Equal(t, "42", params["chat_id"])
+			return nil, fmt.Errorf("Bad Request: rich_message unsupported")
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			switch msg := c.(type) {
+			case tgbotapi.MessageConfig:
+				require.Equal(t, int64(42), msg.ChatID)
+				if msg.ParseMode == "MarkdownV2" {
+					markdownChunks = append(markdownChunks, msg.Text)
+					if len(markdownChunks) == 1 {
+						return tgbotapi.Message{}, fmt.Errorf("Bad Request: can't parse entities")
+					}
+					return tgbotapi.Message{}, nil
+				}
+				plainChunks = append(plainChunks, msg.Text)
+				return tgbotapi.Message{}, nil
+			case tgbotapi.EditMessageTextConfig:
+				require.Equal(t, int64(42), msg.ChatID)
+				require.Equal(t, 99, msg.MessageID)
+				clearedPlaceholder = msg.Text
+			default:
+				t.Fatalf("unexpected Telegram config type %T", c)
+			}
+			return tgbotapi.Message{}, nil
+		},
+	}
+	done := svc.beginTelegramPreview(42, 99)
+	require.True(t, svc.withActiveTelegramPreview(42, 99, done, func(state *telegramPreviewState) bool {
+		state.richDraftID = 123
+		state.richDraftVisible = true
+		return true
+	}))
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			svc.finishTelegramPreview(42, 99)
+		}
+	})
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+	output := strings.Repeat("a", maxMessageLength+1)
+
+	svc.SendChatResponse(context.Background(), task, output, "", 99)
+
+	require.Equal(t, []string{"sendRichMessage"}, endpoints)
+	require.Len(t, markdownChunks, 2)
+	require.Len(t, plainChunks, 1)
+	require.Len(t, markdownChunks[0], maxMessageLength)
+	require.Len(t, plainChunks[0], maxMessageLength)
+	require.Equal(t, "a", markdownChunks[1])
+	require.Equal(t, "✅ Response sent.", clearedPlaceholder)
+}
+
+func TestTelegramService_SendChatResponse_RichDraftFinalSendRejectionPartialLegacyFallbackKeepsPlaceholder(t *testing.T) {
+	var endpoints []string
+	var markdownChunks []string
+	var plainChunks []string
+	placeholderCleared := false
+	svc := &TelegramService{
+		makeRequestFunc: func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error) {
+			endpoints = append(endpoints, endpoint)
+			require.Equal(t, "sendRichMessage", endpoint)
+			require.Equal(t, "42", params["chat_id"])
+			return nil, fmt.Errorf("Bad Request: rich_message unsupported")
+		},
+		sendConfigFunc: func(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+			switch msg := c.(type) {
+			case tgbotapi.MessageConfig:
+				require.Equal(t, int64(42), msg.ChatID)
+				if msg.ParseMode == "MarkdownV2" {
+					markdownChunks = append(markdownChunks, msg.Text)
+					if len(markdownChunks) == 1 {
+						return tgbotapi.Message{}, fmt.Errorf("Bad Request: can't parse entities")
+					}
+					return tgbotapi.Message{}, nil
+				}
+				plainChunks = append(plainChunks, msg.Text)
+				return tgbotapi.Message{}, fmt.Errorf("Bad Request: message rejected")
+			case tgbotapi.EditMessageTextConfig:
+				placeholderCleared = true
+				t.Fatalf("partial legacy fallback must not clear the Thinking placeholder")
+			default:
+				t.Fatalf("unexpected Telegram config type %T", c)
+			}
+			return tgbotapi.Message{}, nil
+		},
+	}
+	done := svc.beginTelegramPreview(42, 99)
+	require.True(t, svc.withActiveTelegramPreview(42, 99, done, func(state *telegramPreviewState) bool {
+		state.richDraftID = 123
+		state.richDraftVisible = true
+		return true
+	}))
+	t.Cleanup(func() {
+		select {
+		case <-done:
+		default:
+			svc.finishTelegramPreview(42, 99)
+		}
+	})
+	task := models.Task{ID: "task-1", Category: models.CategoryChat, CreatedVia: models.TaskOriginTelegram, TelegramChatID: 42}
+	output := strings.Repeat("a", maxMessageLength+1)
+
+	svc.SendChatResponse(context.Background(), task, output, "", 99)
+
+	require.Equal(t, []string{"sendRichMessage"}, endpoints)
+	require.Len(t, markdownChunks, 2)
+	require.Len(t, plainChunks, 1)
+	require.Len(t, markdownChunks[0], maxMessageLength)
+	require.Len(t, plainChunks[0], maxMessageLength)
+	require.Equal(t, "a", markdownChunks[1])
+	require.False(t, placeholderCleared)
+}
+
 func TestTelegramService_SendChatResponse_AmbiguousFinalRichEditErrorDoesNotSendOrEditFallback(t *testing.T) {
 	var endpoints []string
 	legacyEditCalled := false
