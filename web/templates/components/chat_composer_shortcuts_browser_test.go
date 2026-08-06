@@ -81,6 +81,8 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   await wait();
 
   idleInput.value = 'idle enter'; key(idleInput); await wait();
+  idleInput.value = 'idle explicit queue fallback'; key(idleInput, modifier); await wait();
+  idleInput.value = 'idle modifier click fallback'; click(document.querySelector('#chat-form-primary-action button'), modifier); await wait();
   document.getElementById('chat-form').remove();
   activeInput.value = 'explicit queue'; key(activeInput, modifier); await wait();
   activeInput.value = 'steer with attachment'; document.querySelector('#task-thread-form input[name="attachment_session_id"]').value = 'session-1';
@@ -91,11 +93,14 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 
   var response = await fetch('/records');
   var records = await response.json();
-  if (records.length !== 4) fail('request count was ' + records.length + ', want 4');
+  if (records.length !== 6) fail('request count was ' + records.length + ', want 6');
   var paths = records.map(function(record) { return record.Path; }).join(',');
-  if (paths !== '/chat/send,/tasks/task-1/thread,/tasks/task-1/thread/steer,/tasks/task-1/cancel') fail('request paths were ' + paths);
-  if (records[2].Form.expected_turn_id[0] !== 'active-turn') fail('steer omitted expected-turn guard');
-  if (records[2].Form.attachment_session_id[0] !== 'session-1') fail('steer omitted attachment session');
+  if (paths !== '/chat/send,/chat/send,/chat/send,/tasks/task-1/thread,/tasks/task-1/thread/steer,/tasks/task-1/cancel') fail('request paths were ' + paths);
+  if (records[0].Form.message[0] !== 'idle enter') fail('plain idle Enter lost or changed its draft');
+  if (records[1].Form.message[0] !== 'idle explicit queue fallback') fail('idle explicit queue fallback lost or changed its draft');
+  if (records[2].Form.message[0] !== 'idle modifier click fallback') fail('idle modifier-click fallback lost or changed its draft');
+  if (records[4].Form.expected_turn_id[0] !== 'active-turn') fail('steer omitted expected-turn guard');
+  if (records[4].Form.attachment_session_id[0] !== 'session-1') fail('steer omitted attachment session');
   if (activeInput.value !== 'preserved stop draft') fail('normal Stop cleared the draft');
   document.getElementById('browser-result').textContent = 'PASS';
   document.body.setAttribute('data-test-result', 'pass');
@@ -111,10 +116,19 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(records) != 4 {
-		t.Fatalf("recorded requests = %d, want 4: %+v", len(records), records)
+	if len(records) != 6 {
+		t.Fatalf("recorded requests = %d, want 6: %+v", len(records), records)
 	}
-	if strings.TrimSpace(records[0].Form.Get("message")) != "idle enter" || strings.TrimSpace(records[1].Form.Get("message")) != "explicit queue" || strings.TrimSpace(records[2].Form.Get("message")) != "steer with attachment" {
-		t.Fatalf("unexpected submitted drafts: %+v", records)
+	wantDrafts := []string{
+		"idle enter",
+		"idle explicit queue fallback",
+		"idle modifier click fallback",
+		"explicit queue",
+		"steer with attachment",
+	}
+	for i, want := range wantDrafts {
+		if got := strings.TrimSpace(records[i].Form.Get("message")); got != want {
+			t.Fatalf("request %d draft = %q, want %q; records: %+v", i, got, want, records)
+		}
 	}
 }
