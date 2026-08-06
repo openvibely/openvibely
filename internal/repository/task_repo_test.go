@@ -2612,6 +2612,61 @@ func TestTaskRepo_ReclaimStaleQueuedTaskRejectsOwnerAddedAfterListing(t *testing
 	}
 }
 
+func TestTaskRepo_ListTasksForDiscovery_UsesCompactProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	parent := &models.Task{
+		ProjectID: "default",
+		Title:     "Discovery parent",
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusRunning,
+		Prompt:    "parent prompt",
+	}
+	if err := repo.Create(ctx, parent); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+
+	largePrompt := strings.Repeat("p", 64*1024)
+	largeChainConfig := `{"payload":"` + strings.Repeat("c", 16*1024) + `"}`
+	largeSwarmConfig := `{"payload":"` + strings.Repeat("s", 16*1024) + `"}`
+	child := &models.Task{
+		ProjectID:    "default",
+		Title:        "Discovery compact worker",
+		Category:     models.CategoryActive,
+		Priority:     4,
+		Status:       models.StatusRunning,
+		Prompt:       largePrompt,
+		ParentTaskID: &parent.ID,
+		ChainConfig:  largeChainConfig,
+		SwarmRole:    models.SwarmRoleWorker,
+		SwarmConfig:  largeSwarmConfig,
+	}
+	if err := repo.Create(ctx, child); err != nil {
+		t.Fatalf("create child: %v", err)
+	}
+
+	tasks, total, err := repo.ListTasksForDiscovery(ctx, "default", TaskDiscoveryFilter{Query: child.Title})
+	if err != nil {
+		t.Fatalf("ListTasksForDiscovery: %v", err)
+	}
+	if total != 1 || len(tasks) != 1 {
+		t.Fatalf("expected one compact discovery result, got total=%d len=%d", total, len(tasks))
+	}
+	got := tasks[0]
+	if got.ID != child.ID || got.Title != child.Title || got.Category != child.Category || got.Status != child.Status || got.Priority != child.Priority || got.UpdatedAt.IsZero() {
+		t.Fatalf("discovery fields changed: %+v", got)
+	}
+	if got.ParentTaskID == nil || *got.ParentTaskID != parent.ID || got.SwarmRole != models.SwarmRoleWorker {
+		t.Fatalf("optional discovery fields changed: %+v", got)
+	}
+	if got.Prompt != "" || got.ChainConfig != "" || got.SwarmConfig != "" {
+		t.Fatalf("discovery materialized unreturned payloads: prompt=%d chain_config=%d swarm_config=%d", len(got.Prompt), len(got.ChainConfig), len(got.SwarmConfig))
+	}
+}
+
 func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
@@ -2657,8 +2712,8 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 		if task.Category == models.CategoryChat {
 			t.Fatalf("chat row leaked into discovery: %q", task.Title)
 		}
-		if task.ProjectID != "default" {
-			t.Fatalf("cross-project row leaked: %q", task.ProjectID)
+		if task.Title == "Deploy pipeline elsewhere" {
+			t.Fatalf("cross-project row leaked: %q", task.Title)
 		}
 	}
 
