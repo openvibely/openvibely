@@ -85,6 +85,51 @@ func TestCreateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T)
 	}
 }
 
+func TestCreateAndUpdateSchedule_NativeRedirectParity(t *testing.T) {
+	for _, tcse := range []struct {
+		name            string
+		operation       string
+		explicitProject bool
+	}{
+		{name: "create explicit project", operation: "create", explicitProject: true},
+		{name: "update explicit project", operation: "update", explicitProject: true},
+		{name: "create inferred project", operation: "create"},
+		{name: "update inferred project", operation: "update"},
+	} {
+		t.Run(tcse.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			task := tc.CreateTask(project.ID).Build()
+			runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+			form := url.Values{
+				"run_at":          {runAt},
+				"repeat_type":     {"once"},
+				"repeat_interval": {"1"},
+			}
+			projectQuery := ""
+			if tcse.explicitProject {
+				projectQuery = "?project_id=" + project.ID
+			}
+
+			var rec *httptest.ResponseRecorder
+			if tcse.operation == "create" {
+				rec = tc.HTTP().Post("/tasks/" + task.ID + "/schedule" + projectQuery).WithForm(form).Execute()
+			} else {
+				schedule := tc.CreateSchedule(task.ID).Build()
+				rec = tc.HTTP().Put("/schedules/" + schedule.ID + projectQuery).WithForm(form).Execute()
+			}
+
+			if rec.Code != http.StatusSeeOther {
+				t.Fatalf("expected 303 redirect, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			wantLocation := "/tasks/" + task.ID + "?tab=schedules&project_id=" + project.ID
+			if location := rec.Header().Get("Location"); location != wantLocation {
+				t.Fatalf("redirect location = %q, want %q", location, wantLocation)
+			}
+		})
+	}
+}
+
 func TestCreateSchedule_Success_Redirect(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
