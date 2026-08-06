@@ -784,11 +784,7 @@ func (h *Handler) CreateModel(c echo.Context) error {
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
-		agents, err := h.llmConfigRepo.List(c.Request().Context())
-		if err != nil {
-			return err
-		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
+		return h.renderRefreshedModels(c)
 	}
 	redirectURL := "/models"
 	if projectID := c.QueryParam("project_id"); projectID != "" {
@@ -932,11 +928,7 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
-		agents, err := h.llmConfigRepo.List(c.Request().Context())
-		if err != nil {
-			return err
-		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
+		return h.renderRefreshedModels(c)
 	}
 	redirectURL := "/models"
 	if projectID := c.QueryParam("project_id"); projectID != "" {
@@ -968,11 +960,7 @@ func (h *Handler) SetDefaultModel(c echo.Context) error {
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
-		agents, err := h.llmConfigRepo.List(c.Request().Context())
-		if err != nil {
-			return err
-		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
+		return h.renderRefreshedModels(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/models")
 }
@@ -1040,13 +1028,17 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
-		agents, err := h.llmConfigRepo.List(c.Request().Context())
-		if err != nil {
-			return err
-		}
-		return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
+		return h.renderRefreshedModels(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/models")
+}
+
+func (h *Handler) renderRefreshedModels(c echo.Context) error {
+	agents, err := h.llmConfigRepo.List(c.Request().Context())
+	if err != nil {
+		return err
+	}
+	return render(c, http.StatusOK, pages.ModelsContent(agents, h.buildModelWorkerStats(agents), h.desktopMode))
 }
 
 // buildModelWorkerStats returns a map of agent config ID -> running worker count.
