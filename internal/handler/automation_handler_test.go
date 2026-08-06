@@ -2013,6 +2013,8 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, workItem.ID)
+	active := models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Finishing the prior implementation run"}
+	require.NoError(t, tc.execRepo.Create(ctx, &active))
 
 	goalContext := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "goal-agent", SystemKind: models.AgentSystemKindGoal})
 	output, err := tc.handler.executeSendToTaskTool(goalContext, streamingResponseParams{
@@ -2031,9 +2033,19 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 		AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: implementation.ID, WorkItemID: workItem.ID,
 	}}, queuedContext.Bindings)
 
+	counts, _, _, err := automationRepo.LiveNodeCounts(ctx, project.ID, definition.Automation.ID, definition.Version.ID, time.Now().UTC().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 1, counts[implementation.ID].Running, "a queued Goal Agent continuation is active Automation work")
+	require.Zero(t, counts[implementation.ID].CompletedRecently)
+	portfolioCounts, err := automationRepo.PortfolioOperationalCounts(ctx, project.ID, time.Now().UTC().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 1, portfolioCounts[definition.Automation.ID].Running)
+	require.Zero(t, portfolioCounts[definition.Automation.ID].CompletedRecently)
+	require.NoError(t, tc.execRepo.Complete(ctx, active.ID, models.ExecCompleted, "", "", 0, 0))
+
 	followup := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Continue the Automation implementation task.", IsFollowup: true}
 	require.NoError(t, tc.handler.threadInputRepo.ClaimQueuedForTaskExecution(ctx, result.QueuedMessageID, followup))
-	counts, _, _, err := automationRepo.LiveNodeCounts(ctx, project.ID, definition.Automation.ID, definition.Version.ID, time.Now().UTC().Add(-time.Hour))
+	counts, _, _, err = automationRepo.LiveNodeCounts(ctx, project.ID, definition.Automation.ID, definition.Version.ID, time.Now().UTC().Add(-time.Hour))
 	require.NoError(t, err)
 	require.Equal(t, 1, counts[implementation.ID].Running)
 	require.Zero(t, counts[implementation.ID].CompletedRecently)

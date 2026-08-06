@@ -1689,6 +1689,13 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 			AND i.status IN ('claimed','dispatched','running')
 			AND NOT EXISTS (SELECT 1 FROM ranked_activities a WHERE a.invocation_id = i.id)
 		UNION
+		SELECT binding.node_id, 'running', CASE WHEN binding.work_item_id IS NOT NULL
+			THEN 'work:' || binding.work_item_id ELSE 'input:' || binding.thread_input_id END
+		FROM automation_thread_input_bindings binding
+		JOIN thread_inputs input ON input.id = binding.thread_input_id
+		WHERE binding.project_id = ? AND binding.automation_id = ? AND binding.version_id = ?
+			AND input.input_status = 'pending'
+		UNION
 		SELECT position.node_id,
 			CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
 				WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
@@ -1716,6 +1723,7 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 			SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
 		FROM identity_state GROUP BY node_id`, projectID, automationID, versionID, recentCutoff.UTC(),
+		projectID, automationID, versionID,
 		projectID, automationID, versionID,
 		projectID, automationID, versionID,
 		projectID, automationID, versionID, recentCutoff.UTC())
@@ -1768,6 +1776,12 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 		WHERE (work_item_id IS NOT NULL OR task_id IS NULL OR activity_rank = 1)
 			AND (status IN ('pending','running','waiting','failed') OR (status = 'completed' AND completed_at >= ?))
 		UNION
+		SELECT binding.automation_id, 'running', CASE WHEN binding.work_item_id IS NOT NULL
+			THEN 'work:' || binding.work_item_id ELSE 'input:' || binding.thread_input_id END
+		FROM automation_thread_input_bindings binding
+		JOIN thread_inputs input ON input.id = binding.thread_input_id
+		WHERE binding.project_id = ? AND input.input_status = 'pending'
+		UNION
 		SELECT position.automation_id,
 			CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
 				WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
@@ -1793,7 +1807,7 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 			SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
-		FROM identity_state GROUP BY automation_id`, projectID, recentCutoff.UTC(), projectID, projectID, recentCutoff.UTC())
+		FROM identity_state GROUP BY automation_id`, projectID, recentCutoff.UTC(), projectID, projectID, projectID, recentCutoff.UTC())
 	if err != nil {
 		return nil, err
 	}
