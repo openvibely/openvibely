@@ -5,6 +5,23 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
+    inputs:
+      linux_desktop_benchmark_variant:
+        description: "candidate uses the optimized path; baseline forces the prior update/install path"
+        required: false
+        default: candidate
+        type: string
+      linux_desktop_benchmark_scenario:
+        description: "standard, warm, cache-hit, cold, or partial"
+        required: false
+        default: standard
+        type: string
+      linux_desktop_benchmark_sample_id:
+        description: "unique identifier retained with benchmark timing artifacts"
+        required: false
+        default: standard
+        type: string
 
 permissions:
   contents: read
@@ -20,10 +37,20 @@ jobs:
         libwebkitgtk-6.0-dev
         libglib2.0-dev
         libsoup-3.0-dev
+      LINUX_DESKTOP_BENCHMARK_VARIANT: ${{ inputs.linux_desktop_benchmark_variant || 'candidate' }}
+      LINUX_DESKTOP_BENCHMARK_SCENARIO: ${{ inputs.linux_desktop_benchmark_scenario || 'standard' }}
+      LINUX_DESKTOP_BENCHMARK_SAMPLE_ID: ${{ inputs.linux_desktop_benchmark_sample_id || 'standard' }}
 
     steps:
+      - name: Record Linux test job start
+        shell: bash
+        run: echo "LINUX_TEST_JOB_STARTED_AT_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
+
       - name: Check out repo
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Validate Linux desktop dependency workflow
+        run: ruby .github/scripts/test_linux_desktop_dependency_workflow.rb
 
       - name: Prepare Linux desktop dependency cache
         id: linux-desktop-cache-key
@@ -32,8 +59,13 @@ jobs:
           package_hash="$(printf '%s' "$LINUX_DESKTOP_PACKAGES" | sha256sum | cut -d' ' -f1)"
           runner_image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}-${RUNNER_ARCH}"
           metadata_date="$(date -u +%Y%m%d)"
-          echo "key=linux-desktop-apt-v1-${runner_image}-${package_hash}" >> "$GITHUB_OUTPUT"
-          echo "metadata_key=linux-desktop-apt-lists-v1-${runner_image}-${package_hash}-${metadata_date}" >> "$GITHUB_OUTPUT"
+          cache_key_suffix=""
+          if [[ "$LINUX_DESKTOP_BENCHMARK_SCENARIO" == "cold" ]]; then
+            sample_hash="$(printf '%s' "$LINUX_DESKTOP_BENCHMARK_SAMPLE_ID" | sha256sum | cut -d' ' -f1)"
+            cache_key_suffix="-benchmark-cold-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${sample_hash}"
+          fi
+          echo "key=linux-desktop-apt-v1-${runner_image}-${package_hash}${cache_key_suffix}" >> "$GITHUB_OUTPUT"
+          echo "metadata_key=linux-desktop-apt-lists-v1-${runner_image}-${package_hash}-${metadata_date}${cache_key_suffix}" >> "$GITHUB_OUTPUT"
 
           mkdir -p "$HOME/.cache/openvibely-apt/archives/partial" "$HOME/.cache/openvibely-apt/lists/partial"
 
@@ -64,9 +96,20 @@ jobs:
             "$HOME/.cache/openvibely-apt/lists" \
             "$HOME/.cache/openvibely-apt/lists/partial"
 
+          if [[ "$LINUX_DESKTOP_BENCHMARK_SCENARIO" == "partial" ]]; then
+            partial_archive="$(find "$HOME/.cache/openvibely-apt/archives" -maxdepth 1 -type f -name '*.deb' -print -quit)"
+            if [[ -z "$partial_archive" ]]; then
+              echo "partial benchmark requires a restored archive cache" >&2
+              exit 1
+            fi
+            rm -f "$partial_archive"
+          fi
+
       - name: Install Linux desktop dependencies
         shell: bash
         run: |
+          timing_directory="ci-timing"
+          timing_file="$timing_directory/linux-desktop-dependency.json"
           archives_directory="$HOME/.cache/openvibely-apt/archives"
           lists_directory="$HOME/.cache/openvibely-apt/lists"
           metadata_max_age_minutes=1440
@@ -80,10 +123,64 @@ jobs:
           if [[ "$metadata_cache_restore_outcome" != "success" ]]; then
             metadata_cache_hit=false
           fi
+          metadata_validation="cache-miss"
+          if [[ "$metadata_cache_restore_outcome" != "success" ]]; then
+            metadata_validation="restore-failed"
+          fi
+          if [[ "$LINUX_DESKTOP_BENCHMARK_SCENARIO" == "partial" ]]; then
+            archive_cache_hit=false
+            metadata_validation="partial-cache"
+          fi
           metadata_fresh=false
+          apt_update_count=0
+          install_attempts=0
+          install_succeeded=false
+          started_at_ms="$(date +%s%3N)"
+          mkdir -p "$timing_directory"
           read -r -a packages <<< "$LINUX_DESKTOP_PACKAGES"
 
+          archive_stats() {
+            find "$archives_directory" -maxdepth 1 -type f -name '*.deb' -printf '%s\n' |
+              awk '{ count += 1; bytes += $1 } END { printf "%.0f %.0f\n", count, bytes }'
+          }
+          read -r archive_before_count archive_before_bytes <<< "$(archive_stats)"
+
+          write_timing() {
+            local finished_at_ms archive_after_count archive_after_bytes
+            finished_at_ms="$(date +%s%3N)"
+            read -r archive_after_count archive_after_bytes <<< "$(archive_stats)"
+            cat > "$timing_file" <<EOF
+          {
+            "schema_version": 2,
+            "benchmark_variant": "${LINUX_DESKTOP_BENCHMARK_VARIANT}",
+            "benchmark_scenario": "${LINUX_DESKTOP_BENCHMARK_SCENARIO}",
+            "benchmark_sample_id": "${LINUX_DESKTOP_BENCHMARK_SAMPLE_ID}",
+            "runner_image": "${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}-${RUNNER_ARCH}",
+            "github_run_id": "${GITHUB_RUN_ID}",
+            "dependency_setup_started_at_ms": ${started_at_ms},
+            "dependency_setup_duration_ms": $((finished_at_ms - started_at_ms)),
+            "archive_cache_restore_outcome": "${archive_cache_restore_outcome}",
+            "metadata_cache_restore_outcome": "${metadata_cache_restore_outcome}",
+            "archive_cache_hit": "${archive_cache_hit}",
+            "metadata_cache_hit": "${metadata_cache_hit}",
+            "metadata_validation": "${metadata_validation}",
+            "metadata_max_age_minutes": ${metadata_max_age_minutes},
+            "apt_update_count": ${apt_update_count},
+            "apt_install_attempts": ${install_attempts},
+            "install_succeeded": ${install_succeeded},
+            "archive_packages_before": ${archive_before_count},
+            "archive_bytes_before": ${archive_before_bytes},
+            "archive_packages_after": ${archive_after_count},
+            "archive_bytes_after": ${archive_after_bytes},
+            "archive_downloaded_packages": $((archive_after_count - archive_before_count)),
+            "archive_downloaded_bytes": $((archive_after_bytes - archive_before_bytes))
+          }
+          EOF
+          }
+          trap write_timing EXIT
+
           apt_install() {
+            install_attempts=$((install_attempts + 1))
             sudo apt-get \
               -o Dir::State::lists="$lists_directory" \
               -o Dir::Cache::archives="$archives_directory" \
@@ -96,17 +193,31 @@ jobs:
             find "$lists_directory" -maxdepth 1 -type f -name '*InRelease' -mmin "-${metadata_max_age_minutes}" -print -quit | grep -q . &&
             sudo apt-get -o Dir::State::lists="$lists_directory" -s install "${packages[@]}" >/dev/null; then
             metadata_fresh=true
+            metadata_validation="fresh-preflight"
+          elif [[ "$metadata_cache_hit" == "true" ]]; then
+            metadata_validation="stale-or-invalid"
           fi
 
-          if [[ "$archive_cache_hit" == "true" && "$metadata_fresh" == "true" ]]; then
-            if apt_install --no-download; then
-              echo "Linux desktop dependencies installed from verified caches"
-              exit 0
+          if [[ "$LINUX_DESKTOP_BENCHMARK_VARIANT" == "baseline" ]]; then
+            metadata_validation="${metadata_validation}+benchmark-baseline-updated"
+            sudo apt-get -o Dir::State::lists="$lists_directory" update
+            apt_update_count=$((apt_update_count + 1))
+            apt_install
+          elif [[ "$archive_cache_hit" == "true" && "$metadata_fresh" == "true" ]]; then
+            if ! apt_install --no-download; then
+              metadata_validation="cached-install-failed+updated"
+              sudo apt-get -o Dir::State::lists="$lists_directory" update
+              apt_update_count=$((apt_update_count + 1))
+              apt_install
             fi
+          else
+            sudo apt-get -o Dir::State::lists="$lists_directory" update
+            apt_update_count=$((apt_update_count + 1))
+            metadata_validation="${metadata_validation}+updated"
+            apt_install
           fi
-
-          sudo apt-get -o Dir::State::lists="$lists_directory" update
-          apt_install
+          install_succeeded=true
+          echo "Linux desktop dependencies installed in $(( ($(date +%s%3N) - started_at_ms) / 1000 ))s (archive cache hit: ${archive_cache_hit}, metadata cache hit: ${metadata_cache_hit}, metadata: ${metadata_validation})"
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -132,6 +243,33 @@ jobs:
         run: |
           grep -v "_templ.go" coverage.out > coverage.filtered.out
           go tool cover -func=coverage.filtered.out | tail -1
+
+      - name: Record Linux test job timing
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p ci-timing
+          finished_at_ms="$(date +%s%3N)"
+          cat > ci-timing/linux-test-job.json <<EOF
+          {
+            "schema_version": 2,
+            "benchmark_variant": "${LINUX_DESKTOP_BENCHMARK_VARIANT}",
+            "benchmark_scenario": "${LINUX_DESKTOP_BENCHMARK_SCENARIO}",
+            "benchmark_sample_id": "${LINUX_DESKTOP_BENCHMARK_SAMPLE_ID}",
+            "github_run_id": "${GITHUB_RUN_ID}",
+            "job_timing_started_at_ms": ${LINUX_TEST_JOB_STARTED_AT_MS},
+            "job_timing_duration_ms": $((finished_at_ms - LINUX_TEST_JOB_STARTED_AT_MS)),
+            "dependency_timing_file": "linux-desktop-dependency.json"
+          }
+          EOF
+
+      - name: Upload Linux desktop dependency timing
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-desktop-dependency-timing-${{ github.run_id }}-${{ github.run_attempt }}-${{ env.LINUX_DESKTOP_BENCHMARK_SAMPLE_ID }}
+          path: ci-timing
+          if-no-files-found: warn
 
   packaged-update-native:
     name: Packaged update (${{ matrix.os }})
