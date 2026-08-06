@@ -34,6 +34,7 @@ Durable worktree model:
 - Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
 - Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.
 - Known task-chaining gaps: child creation/activation does not consume persisted `ChildModel`; later `ChildAgentID` edits do not update an already blocked child; and chain handoff failures are reduced to application logs after parent completion, potentially leaving a pre-created child blocked without durable user-facing failure evidence. These remain pending suggestions rather than approved implementation work.
+- Task Changes currently supports inline comments and a `Submit Review` action, but submission routes feedback back to the agent, clears comments, and does not persist an explicit human approval or changes-requested outcome; this review-state gap is tracked by suggestion issue [GitHub #221](https://github.com/openvibely/openvibely/issues/221).
 
 Commit-message direction:
 - Task execution auto-commits use generated descriptive commit messages driven by the actual worktree diff. Generation happens while changes are still in the worktree for initial execution diff capture, later task-thread completion, post-execution safety capture, and merge-prep dirty-worktree commits. GitHub PR branch publication now uses API-backed synthesized branch commits rather than local `git add`/`git commit`/`git push`, but the synthesized commit message is still generated from the task worktree diff.

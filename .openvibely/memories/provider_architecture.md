@@ -84,6 +84,7 @@ Mixture of Models provider facts:
 
 OAuth and model-specific facts:
 - OAuth access/refresh tokens are currently stored per `agent_configs` model config rather than shared per provider account, so two Anthropic model configs can have different OAuth freshness/reauth states even when both use the same account.
+- GitHub issue #218 tracks duplicated OAuth status classification in model-card text/class helpers: the same three-state model is independently reimplemented for the card's status presentation. A bounded shared classifier should centralize the state decision while leaving text and CSS-class formatting at the presentation boundary.
 - Editing a model config should update the existing `agent_configs` row in place and preserve per-row OAuth token/reauth state unless the user explicitly changes auth/provider in a way that requires reauthorization; creating a duplicate row for an edit can split Anthropic OAuth status between “Token Expired” and “Not Connected.”
 - As of the 2026-06-29 model-edit fix, Models CRUD updates preserve per-row OAuth token/account/client state only for same-provider/settings edits. Any provider or auth-method change, including Anthropic OAuth to OpenAI OAuth or OpenAI OAuth to Anthropic OAuth, must clear OAuth access/refresh/expiry/account/client fields so reauthorization starts from a clean provider-specific state.
 - `agent_configs.oauth_account_id` is provider-dependent: OpenAI OAuth populates it from token response identity, while Anthropic OAuth does not currently provide a reliable account identifier.

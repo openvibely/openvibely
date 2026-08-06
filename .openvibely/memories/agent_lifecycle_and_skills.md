@@ -2,7 +2,7 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-08-02
+updated: 2026-08-03
 source: consolidation
 source_id: memory_consolidation_2026_07_17
 confidence: high
@@ -42,7 +42,7 @@ Skill Curator facts:
 - `observe_task_for_learning` is a Skill Curator `after_complete` hook, not execution as the task's assigned primary agent.
 - Cross-agent improvements belong in standalone skills.
 - Skill-library maintenance may create, patch, consolidate, or archive skills, but agents are user-managed configurations: do not create, edit, archive, route, reassign, or mutate agent metadata/tools/hooks/attachments as part of skill maintenance.
-- Skill Curator consolidation/archive decisions must inspect the full safe package manifest from `skill_view`, including nested files and directories beyond `SKILL.md`; package file actions must explicitly account for safe non-`SKILL.md` contents.
+- Skill Curator consolidation/archive decisions must inspect the full safe package manifest from `skill_view`, including nested files and directories beyond `SKILL.md`; package file actions must explicitly account for safe non-`SKILL.md` contents. If `skill_view` exposes only `SKILL.md` and linked files without `package_manifest`, the incomplete inventory is a hard blocker: do not archive or consolidate the skill based on inferred package contents.
 - Assigned-agent updates are reserved for behavior specific to that agent's role, purpose, private workflow, or selected agent-owned skill. Agent-owned skill mutation uses the server-scoped `agent_skill_manage` path.
 - Skill catalog maintenance must distinguish intentional global-generic/project-specific layering from true duplication; topic or name overlap alone is not sufficient reason to consolidate packages.
 
@@ -55,7 +55,7 @@ Lifecycle facts:
 - Ordinary tasks may intentionally have no assigned primary agent. Explicit assigned primary agents skip standalone skill routing and use that agent's curated/default or manual skill selection.
 - Maintenance/system agents are excluded from auto-routing via `selectable_as_primary=false`.
 - Lifecycle visibility renders structured selected-skill and selected-memory route decisions as compact prompt-safe badges/pills; text summaries remain useful for non-route hook rows.
-- Known lifecycle-evidence gaps include prompt-safe lifecycle trace events and durable applied/blocked skill-mutation audit rows being persisted by the backend but not exposed from the task-detail Lifecycle tab, which currently renders execution summary cards. Selected-memory activity is also reduced to filenames even though richer prompt-safe context is available. Issues `#161`, `#168`, `#175`, `#177`, `#201`, `#205`, and `#209` propose bounded, on-demand prompt-safe lifecycle evidence views without changing lifecycle behavior. Issues `#201` and `#209` specifically propose exposing existing durable lifecycle trace events from task execution cards, while `#205` proposes a prompt-safe task-detail read surface for persisted lifecycle skill-mutation outcomes; these suggestions were opened with `suggestion` and `feature` labels.
+- Known lifecycle-evidence gaps include prompt-safe lifecycle trace events and durable applied/blocked skill-mutation audit rows being persisted by the backend but not exposed from the task-detail Lifecycle tab, which currently renders execution summary cards. Selected-memory activity is also reduced to filenames even though richer prompt-safe context is available. Issues `#161`, `#168`, `#175`, `#177`, `#201`, `#205`, `#209`, `#219`, and `#220` propose bounded, on-demand prompt-safe lifecycle evidence views without changing lifecycle behavior. Issues `#201`, `#209`, and `#219` specifically propose exposing existing durable lifecycle trace events from task execution cards, while `#205` proposes a prompt-safe task-detail read surface for persisted lifecycle skill-mutation outcomes and `#220` proposes showing prompt-safe memory context; these suggestions were opened with `suggestion` and `feature` labels.
 - Lifecycle output contracts constrain final stored/validated results, not the agent's working notes or tool use.
 - Lifecycle hook and task-mode terminal execution status writes must use a fresh short-timeout finalization context after hook/model work returns so LLM deadlines or cancellations do not leave rows `running`.
 

@@ -2,11 +2,11 @@
 name: product_vision_and_autonomy
 type: project
 created: 2026-06-10
-updated: 2026-07-25
+updated: 2026-08-04
 source: consolidation
-source_id: memory_consolidation_2026_07_25
+source_id: memory_consolidation_2026_08_04
 confidence: high
-title: Product Vision and Reviewable Autonomy
+title: Product Vision, Reviewable Autonomy, and Naming
 ---
 
 OpenVibely's product direction centers on recursive, reviewable self-improvement: goals become tasks, agents execute work in isolated worktrees, schedules and dynamic wakeups keep progress moving, and skills/memory compound learning across runs.
@@ -16,7 +16,7 @@ Durable vision principles:
 - Autonomy should remain inspectable and review-gated through task threads, lifecycle evidence, worktree diffs, schedules, goals, selected skills, selected memories, and review/merge boundaries.
 - Humans remain responsible for product judgment, priority tradeoffs, credentials/integration setup, and final merge/release decisions.
 - Goal Agent, Loop Agent, scheduled tasks, task chaining, Skill Curator, and Memory Curator are the intended primitives for recursive self-improvement loops.
-- The strongest current self-evolution pattern is a durable goal-driven Vision Driver task, dynamic loop wakeups for adaptive continuation, scheduled audits for reliable recurrence, task chaining for reviewable decomposition, and curator agents for compounding durable knowledge.
+- Automation Graphs is the primary visible orchestration surface for maintained Native and GitHub SDLC loops. Durable goals, dynamic loop wakeups, scheduled tasks, task chaining, and curator agents remain the underlying primitives; detailed graph and approval contracts belong in `automation_graphs.md` and `alerts_and_actionable_notifications.md`.
 
 User-priority direction:
 - Explicit user-provided bug lists and specs are higher-priority work sources than autonomously discovered `VISION.md` gaps.
@@ -33,10 +33,19 @@ GitHub-backed autonomous SDLC direction:
 - GitHub issues and PRs are the preferred durable mailbox and status board for autonomous product development. Suggestion/finder roles open focused issues; humans approve implementation by assignment to the configured inbox identity; Dev Inbox creates visible implementation tasks; implementation tasks open or reuse PRs; and humans review and merge in GitHub.
 - Human approval, whether represented by GitHub assignment or a Native Alert decision, authorizes only creation or activation of configured downstream work. It never authorizes merge, release, or deployment.
 - Autonomous suggestions should prioritize small gaps that materially deepen Chat coordination, task execution, review, learning, and human control rather than minor incidental UI improvements. Active product gaps belong in their canonical feature memories or GitHub issues, not as an issue-by-issue list here.
-- The bundled `openvibely_github_autonomous_sdlc_bootstrap` remains a supported prompt-driven setup path. The maintained GitHub SDLC Automation template owns its role prompts independently so it does not require the bootstrap skill package at runtime.
+- The bundled `openvibely_github_autonomous_sdlc_bootstrap` remains a supported prompt-driven setup path but is disabled by default for lifecycle routing. The maintained GitHub SDLC Automation template owns its role prompts independently and does not require the bootstrap package at runtime.
 - The bootstrap and Automation paths create visible scheduled loops and implementation tasks, forward authorized PR feedback, and preserve human review/merge gates. Recurring discovery/inbox tasks do not carry persisted completion goals; implementation tasks do.
 - GitHub autonomous-SDLC support should use generic runtime and control-plane tools rather than hidden workflow-specific daemons. Scheduled prompts and resources must remain visible, project-scoped, and inspectable.
 - OpenVibely also supports a Native Alert alternative using project-scoped actionable notifications, explicit human approval, atomic claims, and implementation-task linkage. Detailed contracts live in `alerts_and_actionable_notifications.md` and `automation_graphs.md`.
 - Both bootstrap skills require visible task and schedule creation. Optional Automation resource registration is used only when its runtime capability is exposed; absence is reported without inventing a fallback or invalidating otherwise complete setup.
+
+Related product naming context:
+- The cloud-infrastructure AI agent formerly named `Finn` is now `Paver`.
+- The AI benchmarking product formerly called `Finnsight` needs a replacement independent of Finn; it does not need to incorporate Paver or use infrastructure/construction imagery.
+- The benchmark product compares models, agents, and broader AI systems. Its name should be concise, memorable, easy to say repeatedly, credible for developer and enterprise use, reasonably ownable, and compatible with the OpenVibely ecosystem.
+- Favor coined names, compounds, or evocative real words around measurement, trials, evaluation, intelligence, clarity, arenas, standards, navigation, or performance. Avoid generic names, awkward spellings, established-brand copies, and mechanically Paver-derived names.
+- If a Paver-linked name is reconsidered, preserve the complete string `Paver` in a genuine recognizable overlap; clipped forms and simple compounds are unacceptable. Prior candidates `Paverdict`, `Paverify`, `Pavertex`, `Paverall`, and `Paverity` are not finalists. A strong standalone benchmark name is preferred unless constraints change.
+- Domain availability is not a criterion because the enterprise company already has a domain. Check product-name collisions, ownability, and trademark risk instead, while noting that public collision checks are not legal clearance.
+- No replacement benchmark name has been selected.
 
 Current product-completeness themes from `VISION.md` expected to require recurring work include outcome-to-work decomposition, multi-agent team coordination, reviewable autonomy UX, durable learning quality, external integrations, operational clarity, and provider/model normalization.

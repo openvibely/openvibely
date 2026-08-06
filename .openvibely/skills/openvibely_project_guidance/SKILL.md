@@ -1,6 +1,6 @@
 ---
 kind: openvibely.agent_skill
-version: 4
+version: 5
 skill:
     key: openvibely_project_guidance
     name: OpenVibely Project Guidance
@@ -25,6 +25,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - For `edit_file`, expand stable surrounding context when a replacement fails instead of retrying the same snippet. Use bulk replacement only when intentionally replacing every occurrence.
 - When a user asks to intentionally fail a task to trigger OpenVibely failure alerts, output the explicit failure marker required by the current runtime/instructions; merely describing an exit code or claiming failure is insufficient. If the marker is not already in the prompt, inspect the relevant marker-extraction instructions/code and emit the exact marker, not a paraphrase.
 - When a user asks to explain something better, says "no word salad", or challenges a prior diagnosis, explain the exact current bug, fix, or evidence in plain causal terms. Re-read the current diff/context if needed; do not paste unrelated instruction templates, cite stale commits as proof of a live fix, or claim a bug is fixed without current validation evidence.
+- When a user pushes back mid-task with a short directive observation that clearly implies a design change (e.g. pointing out an existing global setting makes a proposed per-entity setting inconsistent), treat that as direction to implement, not an open question. Do not restate the tradeoff and ask "should I implement that change?" — make the change, then report what changed. Reserve an actual clarifying question for cases where the user's intent is genuinely ambiguous or the change is destructive/irreversible, not for ordinary design agreement.
 
 ## Critical Rules
 
