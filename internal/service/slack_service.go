@@ -1357,10 +1357,7 @@ func (s *SlackService) buildSlackActionToolRuntime(projectID string, actionCtx s
 
 func (s *SlackService) buildSlackActionToolRuntimeForTask(projectID, callerTaskID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.slackActionHandlersForTask(projectID, callerTaskID, actionCtx, collector)
-	return &llmcontracts.RuntimeTools{
-		Definitions: actionToolDefinitions(chatcontrol.SurfaceSlack, true),
-		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceSlack, handlers),
-	}
+	return buildFullChannelActionToolRuntime(chatcontrol.SurfaceSlack, handlers)
 }
 
 func (s *SlackService) slackActionHandlers(projectID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {

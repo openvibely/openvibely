@@ -1269,10 +1269,7 @@ func (s *TelegramService) buildTelegramActionToolRuntime(projectID string, chatI
 
 func (s *TelegramService) buildTelegramActionToolRuntimeForTask(projectID, callerTaskID string, chatID int64, userID int64, collector *channelActionSummaryCollector) *llmcontracts.RuntimeTools {
 	handlers := s.telegramActionHandlersForTask(projectID, callerTaskID, chatID, userID, collector)
-	return &llmcontracts.RuntimeTools{
-		Definitions: actionToolDefinitions(chatcontrol.SurfaceTelegram, true),
-		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceTelegram, handlers),
-	}
+	return buildFullChannelActionToolRuntime(chatcontrol.SurfaceTelegram, handlers)
 }
 
 func (s *TelegramService) telegramActionHandlers(projectID string, chatID int64, userID int64, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
