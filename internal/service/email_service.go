@@ -58,6 +58,12 @@ const (
 	emailMaxFileSize     = 20 << 20   // 20 MB per attachment
 	emailMaxTextFileSize = 100 * 1024 // 100KB for inline text-attachment context
 	emailMaxAttachments  = 10
+
+	emailMaxHeaderLineLength   = 998
+	emailPreferredHeaderLength = 78
+	emailMaxReferenceIDs       = 32
+	emailMaxReferencesLength   = 4096
+	emailMaxMessageIDLength    = emailMaxHeaderLineLength - len("In-Reply-To: ") - len("\r\n")
 )
 
 type EmailProviderPreset struct {
@@ -1252,18 +1258,110 @@ func replySubject(subject string) string {
 }
 
 func appendEmailReference(references, messageID string) string {
-	refs := strings.TrimSpace(references)
-	messageID = strings.TrimSpace(messageID)
-	if messageID == "" {
-		return refs
+	ids := emailReferenceIDs(references)
+	if messageID = normalizeEmailMessageID(messageID); messageID != "" && !containsEmailMessageID(ids, messageID) {
+		ids = append(ids, messageID)
 	}
-	if refs == "" {
-		return messageID
+	return strings.Join(boundEmailReferenceIDs(ids), " ")
+}
+
+func normalizeEmailMessageID(value string) string {
+	ids := emailReferenceIDs(value)
+	if len(ids) == 0 {
+		return ""
 	}
-	if strings.Contains(refs, messageID) {
-		return refs
+	return ids[len(ids)-1]
+}
+
+func emailReferenceIDs(value string) []string {
+	if containsEmailHeaderControl(value) {
+		return nil
 	}
-	return refs + " " + messageID
+	var ids []string
+	for {
+		start := strings.IndexByte(value, '<')
+		if start < 0 {
+			break
+		}
+		end := strings.IndexByte(value[start:], '>')
+		if end < 0 {
+			break
+		}
+		end += start
+		candidate := value[start : end+1]
+		if validEmailMessageID(candidate) && !containsEmailMessageID(ids, candidate) {
+			ids = append(ids, candidate)
+		}
+		value = value[end+1:]
+	}
+	return ids
+}
+
+func containsEmailHeaderControl(value string) bool {
+	for _, r := range value {
+		if r < 32 || r == 127 {
+			return true
+		}
+	}
+	return false
+}
+
+func validEmailMessageID(value string) bool {
+	if len(value) < 3 || len(value) > emailMaxMessageIDLength || value[0] != '<' || value[len(value)-1] != '>' || containsEmailHeaderControl(value) {
+		return false
+	}
+	for _, r := range value {
+		if r < 33 || r > 126 {
+			return false
+		}
+	}
+	address, err := netmail.ParseAddress(value)
+	return err == nil && address != nil && address.Name == "" && address.Address != ""
+}
+
+func containsEmailMessageID(ids []string, messageID string) bool {
+	for _, id := range ids {
+		if id == messageID {
+			return true
+		}
+	}
+	return false
+}
+
+func boundEmailReferenceIDs(ids []string) []string {
+	if len(ids) <= emailMaxReferenceIDs && joinedEmailReferenceLength(ids) <= emailMaxReferencesLength {
+		return ids
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	root := ids[0]
+	suffix := make([]string, 0, emailMaxReferenceIDs-1)
+	length := len(root)
+	for i := len(ids) - 1; i > 0 && len(suffix) < emailMaxReferenceIDs-1; i-- {
+		id := ids[i]
+		if length+1+len(id) > emailMaxReferencesLength {
+			continue
+		}
+		suffix = append(suffix, id)
+		length += 1 + len(id)
+	}
+	for left, right := 0, len(suffix)-1; left < right; left, right = left+1, right-1 {
+		suffix[left], suffix[right] = suffix[right], suffix[left]
+	}
+	return append([]string{root}, suffix...)
+}
+
+func joinedEmailReferenceLength(ids []string) int {
+	length := 0
+	for i, id := range ids {
+		if i > 0 {
+			length++
+		}
+		length += len(id)
+	}
+	return length
 }
 
 func defaultEmailSendMail(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, inReplyTo, references string) error {
@@ -1271,22 +1369,43 @@ func defaultEmailSendMail(ctx context.Context, cfg EmailRuntimeConfig, to, subje
 	from := mailAddress(cfg.Address)
 	toAddr := mailAddress(to)
 	headers := map[string]string{"From": from.String(), "To": toAddr.String(), "Subject": mime.QEncoding.Encode("utf-8", subject), "MIME-Version": "1.0", "Content-Type": `text/plain; charset="utf-8"`, "Content-Transfer-Encoding": "8bit"}
-	if inReplyTo != "" {
-		headers["In-Reply-To"] = inReplyTo
-	}
-	if references != "" {
-		headers["References"] = references
-	}
-	for _, key := range []string{"From", "To", "Subject", "MIME-Version", "Content-Type", "Content-Transfer-Encoding", "In-Reply-To", "References"} {
+	for _, key := range []string{"From", "To", "Subject", "MIME-Version", "Content-Type", "Content-Transfer-Encoding"} {
 		if v := headers[key]; v != "" {
 			fmt.Fprintf(&buf, "%s: %s\r\n", key, v)
 		}
+	}
+	if inReplyTo = normalizeEmailMessageID(inReplyTo); inReplyTo != "" {
+		writeFoldedEmailMessageIDHeader(&buf, "In-Reply-To", []string{inReplyTo})
+	}
+	if referenceIDs := boundEmailReferenceIDs(emailReferenceIDs(references)); len(referenceIDs) > 0 {
+		writeFoldedEmailMessageIDHeader(&buf, "References", referenceIDs)
 	}
 	buf.WriteString("\r\n")
 	buf.WriteString(body)
 	addr := fmt.Sprintf("%s:%d", cfg.SMTPHost, cfg.SMTPPort)
 	auth := smtp.PlainAuth("", cfg.Address, cfg.Password, cfg.SMTPHost)
 	return smtp.SendMail(addr, auth, cfg.Address, []string{to}, buf.Bytes())
+}
+
+func writeFoldedEmailMessageIDHeader(buf *bytes.Buffer, name string, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	lineLength := len(name) + len(": ")
+	fmt.Fprintf(buf, "%s: %s", name, ids[0])
+	lineLength += len(ids[0])
+	for _, id := range ids[1:] {
+		if lineLength+1+len(id)+len("\r\n") > emailPreferredHeaderLength {
+			buf.WriteString("\r\n ")
+			buf.WriteString(id)
+			lineLength = 1 + len(id)
+			continue
+		}
+		buf.WriteByte(' ')
+		buf.WriteString(id)
+		lineLength += 1 + len(id)
+	}
+	buf.WriteString("\r\n")
 }
 
 func mailAddress(address string) *netmail.Address {

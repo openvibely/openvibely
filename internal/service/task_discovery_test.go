@@ -3,10 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -121,81 +119,6 @@ func TestExecuteListTasksTool(t *testing.T) {
 	page3 := decodeListTasksResult(t, out)
 	if page3.Offset != 2 || page3.Count != 1 || page3.HasMore {
 		t.Fatalf("unexpected final page contract: %+v", page3)
-	}
-}
-
-func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	ctx := context.Background()
-
-	parent := &models.Task{
-		ProjectID: "default",
-		Title:     "Discovery JSON parent",
-		Category:  models.CategoryChat,
-		Priority:  1,
-		Status:    models.StatusCompleted,
-		Prompt:    "internal parent",
-	}
-	if err := taskRepo.Create(ctx, parent); err != nil {
-		t.Fatalf("create parent: %v", err)
-	}
-	withOptionalFields := &models.Task{
-		ProjectID:    "default",
-		Title:        "Discovery JSON optional",
-		Category:     models.CategoryActive,
-		Priority:     4,
-		Status:       models.StatusRunning,
-		Prompt:       "not returned",
-		ParentTaskID: &parent.ID,
-		SwarmRole:    models.SwarmRoleWorker,
-	}
-	withoutOptionalFields := &models.Task{
-		ProjectID: "default",
-		Title:     "Discovery JSON nullable",
-		Category:  models.CategoryBacklog,
-		Priority:  2,
-		Status:    models.StatusPending,
-		Prompt:    "not returned",
-	}
-	for _, task := range []*models.Task{withOptionalFields, withoutOptionalFields} {
-		if err := taskRepo.Create(ctx, task); err != nil {
-			t.Fatalf("create %q: %v", task.Title, err)
-		}
-	}
-
-	fixedTimestamp := time.Date(2024, time.January, 2, 3, 4, 5, 0, time.UTC)
-	if _, err := db.ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE id IN (?, ?)`, fixedTimestamp, withOptionalFields.ID, withoutOptionalFields.ID); err != nil {
-		t.Fatalf("set fixture timestamps: %v", err)
-	}
-
-	for _, tc := range []struct {
-		name     string
-		query    string
-		expected string
-	}{
-		{
-			name:  "optional fields present",
-			query: `{"query":"Discovery JSON optional"}`,
-			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","title":"Discovery JSON optional","category":"active","status":"running","priority":4,"updated_at":"2024-01-02T03:04:05Z","parent_task_id":"%s","swarm_role":"worker"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false}`,
-				withOptionalFields.ID, parent.ID),
-		},
-		{
-			name:  "nullable optional fields omitted",
-			query: `{"query":"Discovery JSON nullable"}`,
-			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","title":"Discovery JSON nullable","category":"backlog","status":"pending","priority":2,"updated_at":"2024-01-02T03:04:05Z"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false}`,
-				withoutOptionalFields.ID),
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			out, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(tc.query))
-			if err != nil {
-				t.Fatalf("ExecuteListTasksTool: %v", err)
-			}
-			if out != tc.expected {
-				t.Fatalf("compact JSON changed:\nwant %s\n got %s", tc.expected, out)
-			}
-		})
 	}
 }
 

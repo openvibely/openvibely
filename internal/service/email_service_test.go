@@ -1,10 +1,14 @@
 package service
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net"
+	netmail "net/mail"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"sort"
@@ -466,6 +470,173 @@ func TestEmailThreadingHelpers(t *testing.T) {
 	assert.Equal(t, "Re: Deploy question", replySubject("Re: Deploy question"))
 	assert.Equal(t, "<root@example.com> <m1@example.com> <m2@example.com>", appendEmailReference(msg.References, msg.MessageID))
 	assert.NotEqual(t, EmailSessionKey("alice@example.com", "", "", "Subject A"), EmailSessionKey("alice@example.com", "", "", "Subject B"))
+}
+
+func TestAppendEmailReferenceBoundsLongChainsAndRetainsRootAndLatest(t *testing.T) {
+	refs := testEmailReferenceChain(80)
+	latest := "<reply@example.com>"
+
+	got := appendEmailReference(refs, latest)
+	ids := strings.Fields(got)
+	require.LessOrEqual(t, len(ids), 32)
+	assert.Equal(t, "<thread-000@example.com>", ids[0])
+	assert.Equal(t, latest, ids[len(ids)-1])
+}
+
+func TestDefaultEmailSendMailFoldsBoundedReferencesForSMTPDelivery(t *testing.T) {
+	host, port, received := startTestSMTPServer(t)
+	references := appendEmailReference(testEmailReferenceChain(80), "<reply@example.com>")
+	inReplyTo := "<" + strings.Repeat("a", emailMaxMessageIDLength-len("<@example.com>")) + "@example.com>"
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", Password: "secret", SMTPHost: host, SMTPPort: port}
+
+	require.NoError(t, defaultEmailSendMail(context.Background(), cfg, "alice@example.com", "Thread", "completed", inReplyTo, references))
+	wire := <-received
+
+	headers, _, found := bytes.Cut(wire, []byte("\r\n\r\n"))
+	require.True(t, found)
+	for _, line := range bytes.Split(headers, []byte("\r\n")) {
+		assert.LessOrEqual(t, len(line)+len("\r\n"), 998, "header line exceeds RFC 5322 limit: %q", line)
+	}
+	message, err := netmail.ReadMessage(bytes.NewReader(wire))
+	require.NoError(t, err)
+	assert.Contains(t, message.Header.Get("References"), "<thread-000@example.com>")
+	assert.Contains(t, message.Header.Get("References"), "<reply@example.com>")
+	assert.Equal(t, inReplyTo, message.Header.Get("In-Reply-To"))
+	assert.True(t, bytes.Contains(headers, []byte("References: ")))
+	assert.True(t, bytes.Contains(headers, []byte("\r\n ")))
+}
+
+func TestDefaultEmailSendMailRejectsInjectedReplyHeaders(t *testing.T) {
+	host, port, received := startTestSMTPServer(t)
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", Password: "secret", SMTPHost: host, SMTPPort: port}
+
+	require.NoError(t, defaultEmailSendMail(context.Background(), cfg, "alice@example.com", "Thread", "completed", "<reply@example.com>\r\nBcc: victim@example.com", "<root@example.com>\r\nBcc: victim@example.com"))
+	wire := <-received
+	message, err := netmail.ReadMessage(bytes.NewReader(wire))
+	require.NoError(t, err)
+	assert.Empty(t, message.Header.Get("In-Reply-To"))
+	assert.Empty(t, message.Header.Get("References"))
+	assert.Empty(t, message.Header.Get("Bcc"))
+}
+
+func TestEmailService_ReplyPathsBoundReferenceChains(t *testing.T) {
+	paths := []struct {
+		name string
+		send func(*EmailService, models.Task)
+	}{
+		{name: "task completion to thread", send: func(svc *EmailService, _ models.Task) {
+			svc.SendTaskCompletionToThread(context.Background(), "alice@example.com", "<reply@example.com>", testEmailReferenceChain(80), "Question", "Task", "done", "")
+		}},
+		{name: "chat response", send: func(svc *EmailService, task models.Task) {
+			svc.SendChatResponse(context.Background(), task, "done", "")
+		}},
+		{name: "task completion notification", send: func(svc *EmailService, task models.Task) {
+			svc.SendTaskCompletionNotification(context.Background(), task, "done", "")
+		}},
+	}
+
+	for _, path := range paths {
+		t.Run(path.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			settingsRepo := repository.NewSettingsRepo(db)
+			for key, value := range map[string]string{EmailSettingAddress: "bot@example.com", EmailSettingPassword: "secret", EmailSettingIMAPHost: "imap.example.com", EmailSettingSMTPHost: "smtp.example.com", EmailSettingSendResponses: "true"} {
+				require.NoError(t, settingsRepo.Set(ctx, key, value))
+			}
+			projectRepo := repository.NewProjectRepo(db)
+			projects, err := projectRepo.List(ctx)
+			require.NoError(t, err)
+			task := models.Task{ProjectID: projects[0].ID, Title: "Email task", Prompt: "request", Category: models.CategoryActive, Status: models.StatusCompleted, CreatedVia: models.TaskOriginEmail}
+			require.NoError(t, repository.NewTaskRepo(db, nil).Create(ctx, &task))
+			contextRepo := repository.NewEmailTaskContextRepo(db)
+			require.NoError(t, contextRepo.Upsert(ctx, &models.EmailTaskContext{TaskID: task.ID, EmailFrom: "alice@example.com", EmailMessageID: "<reply@example.com>", EmailReferences: testEmailReferenceChain(80), EmailSubject: "Question"}))
+			svc := NewEmailService(settingsRepo, projectRepo, repository.NewLLMConfigRepo(db), repository.NewTaskRepo(db, nil), repository.NewExecutionRepo(db), repository.NewScheduleRepo(db), nil, nil, nil, repository.NewEmailAuthRepo(db), contextRepo)
+			var inReplyTo, references string
+			svc.sendMail = func(_ context.Context, _ EmailRuntimeConfig, _, _, _, gotInReplyTo, gotReferences string) error {
+				inReplyTo, references = gotInReplyTo, gotReferences
+				return nil
+			}
+
+			path.send(svc, task)
+			ids := strings.Fields(references)
+			require.NotEmpty(t, ids)
+			assert.LessOrEqual(t, len(ids), 32)
+			assert.Equal(t, "<thread-000@example.com>", ids[0])
+			assert.Equal(t, "<reply@example.com>", ids[len(ids)-1])
+			assert.Equal(t, "<reply@example.com>", inReplyTo)
+		})
+	}
+}
+
+func testEmailReferenceChain(count int) string {
+	ids := make([]string, count)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("<thread-%03d@example.com>", i)
+	}
+	return strings.Join(ids, " ")
+}
+
+func startTestSMTPServer(t *testing.T) (string, int, <-chan []byte) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = listener.Close() })
+	received := make(chan []byte, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		br := bufio.NewReader(conn)
+		reader := textproto.NewReader(br)
+		writer := bufio.NewWriter(conn)
+		writeResponse := func(response string) {
+			_, _ = writer.WriteString(response)
+			_ = writer.Flush()
+		}
+		writeResponse("220 test SMTP\r\n")
+		for {
+			line, err := reader.ReadLine()
+			if err != nil {
+				return
+			}
+			command := strings.ToUpper(strings.Fields(line)[0])
+			switch command {
+			case "EHLO", "HELO":
+				writeResponse("250-test SMTP\r\n250-AUTH PLAIN\r\n250 OK\r\n")
+			case "AUTH":
+				writeResponse("235 authenticated\r\n")
+			case "MAIL", "RCPT":
+				writeResponse("250 OK\r\n")
+			case "DATA":
+				writeResponse("354 End data with <CR><LF>.<CR><LF>\r\n")
+				var data bytes.Buffer
+				for {
+					line, err := br.ReadString('\n')
+					if err != nil {
+						return
+					}
+					if line == ".\r\n" {
+						break
+					}
+					if strings.HasPrefix(line, "..") {
+						line = line[1:]
+					}
+					data.WriteString(line)
+				}
+				received <- data.Bytes()
+				writeResponse("250 queued\r\n")
+			case "QUIT":
+				writeResponse("221 bye\r\n")
+				return
+			default:
+				writeResponse("250 OK\r\n")
+			}
+		}
+	}()
+	address := listener.Addr().(*net.TCPAddr)
+	return "127.0.0.1", address.Port, received
 }
 
 func TestEmailService_UsesThreadScopedSessionForActiveChatAndHistory(t *testing.T) {

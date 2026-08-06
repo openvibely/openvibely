@@ -766,21 +766,6 @@ type TaskDiscoveryFilter struct {
 	Offset int
 }
 
-// taskDiscoveryRow is the private compact projection used by list_tasks. Keep it
-// aligned with the response fields in service.taskDiscoverySummary.
-type taskDiscoveryRow struct {
-	ID           string
-	Title        string
-	Category     models.TaskCategory
-	Status       models.TaskStatus
-	Priority     int
-	UpdatedAt    time.Time
-	ParentTaskID sql.NullString
-	SwarmRole    models.SwarmRole
-}
-
-const taskDiscoverySelectColumns = `id, title, category, status, priority, updated_at, parent_task_id, swarm_role`
-
 // ListTasksForDiscovery returns a bounded, deterministic page of non-chat tasks for
 // a single project, plus the total number of matching rows for pagination. It never
 // crosses project boundaries and always excludes internal chat rows (CategoryChat).
@@ -833,7 +818,7 @@ func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, 
 	selectArgs = append(selectArgs, limit, offset)
 
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+taskDiscoverySelectColumns+`
+		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE `+where+orderClause+`
 		 LIMIT ? OFFSET ?`,
 		selectArgs...)
@@ -844,24 +829,12 @@ func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, 
 
 	var tasks []models.Task
 	for rows.Next() {
-		var row taskDiscoveryRow
-		if err := rows.Scan(&row.ID, &row.Title, &row.Category, &row.Status, &row.Priority, &row.UpdatedAt, &row.ParentTaskID, &row.SwarmRole); err != nil {
-			return nil, 0, fmt.Errorf("scanning task discovery row: %w", err)
+		var t models.Task
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			return nil, 0, fmt.Errorf("scanning task: %w", err)
 		}
-		task := models.Task{
-			ID:        row.ID,
-			Title:     row.Title,
-			Category:  row.Category,
-			Status:    row.Status,
-			Priority:  row.Priority,
-			UpdatedAt: row.UpdatedAt,
-			SwarmRole: row.SwarmRole,
-		}
-		if row.ParentTaskID.Valid {
-			parentTaskID := row.ParentTaskID.String
-			task.ParentTaskID = &parentTaskID
-		}
-		tasks = append(tasks, task)
+		tasks = append(tasks, t)
 	}
 	return tasks, total, rows.Err()
 }
