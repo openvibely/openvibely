@@ -51,6 +51,10 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 			records = append(records, requestRecord{Path: r.URL.Path, Form: r.PostForm})
 			mu.Unlock()
 			w.Header().Set("Content-Type", "text/html")
+			if r.URL.Path == "/tasks/task-1/thread/steer" {
+				_, _ = w.Write([]byte(`<div class="steering-input-row" data-test-steering-row="true">steering pending</div>`))
+				return
+			}
 			_, _ = w.Write([]byte(`<div data-accepted="true">accepted</div>`))
 		case "/":
 			w.Header().Set("Content-Type", "text/html")
@@ -77,9 +81,12 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   await wait();
 
   idleInput.value = 'idle enter'; key(idleInput); await wait();
+  document.getElementById('chat-form').remove();
   activeInput.value = 'explicit queue'; key(activeInput, modifier); await wait();
   activeInput.value = 'steer with attachment'; document.querySelector('#task-thread-form input[name="attachment_session_id"]').value = 'session-1';
   click(document.querySelector('#task-thread-form-primary-action button'), modifier); await wait();
+  if (!document.querySelector('#task-thread-form #pending-thread-inputs [data-test-steering-row="true"]')) fail('steering response was not inserted into pending inputs');
+  if (document.querySelector('#task-thread-messages [data-test-steering-row="true"]')) fail('steering response was inserted into the transcript');
   activeInput.value = 'preserved stop draft'; click(document.querySelector('#task-thread-form-primary-action button')); await wait();
 
   var response = await fetch('/records');

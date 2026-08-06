@@ -1858,7 +1858,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							if (intent === 'steer' && typeof htmx !== 'undefined') {
 								htmx.ajax('POST', endpoint, {
 									source: form,
-									target: form.getAttribute('hx-target'),
+									target: '#pending-thread-inputs',
 									swap: form.getAttribute('hx-swap') || 'beforeend'
 								});
 								return;
