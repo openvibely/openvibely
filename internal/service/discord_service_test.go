@@ -470,21 +470,53 @@ func TestDiscordFailedSwitchProjectPreservesPriorCacheAndInboundRouting(t *testi
 }
 
 func TestDiscordSetActiveProjectFailureDoesNotCreateCacheEntry(t *testing.T) {
-	svc, db, _, projectRepo, _, _, _ := newDiscordServiceForTest(t)
+	svc, db, settingsRepo, projectRepo, taskRepo, authRepo, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
-	project := &models.Project{Name: "Discord Project", IsDefault: true}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
+	defaultProject, err := projectRepo.GetByID(ctx, "default")
+	if err != nil {
+		t.Fatalf("load durable default project: %v", err)
 	}
-	svc.SetDiscordUserProjectRepo(repository.NewDiscordUserProjectRepo(db))
+	rejectedProject := &models.Project{Name: "Rejected Discord Project"}
+	if err := projectRepo.Create(ctx, rejectedProject); err != nil {
+		t.Fatalf("create rejected project: %v", err)
+	}
+	const userID = "uncached-user"
+	userProjectRepo := repository.NewDiscordUserProjectRepo(db)
+	svc.SetDiscordUserProjectRepo(userProjectRepo)
+	if err := authRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: defaultProject.ID, DiscordUserID: userID, DisplayName: "Discord User", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize default project: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatalf("set responses: %v", err)
+	}
+	agentRepo := repository.NewLLMConfigRepo(db)
+	agent := &models.LLMConfig{Name: "test", Provider: models.ProviderOpenAI, Model: "gpt-4o", APIKey: "key", IsDefault: true}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	svc.llmConfigRepo = agentRepo
+	svc.execRepo = execRepo
+	svc.scheduleRepo = scheduleRepo
+	svc.taskSvc = NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	svc.llmSvc = NewLLMService(agentRepo, execRepo, taskRepo, projectRepo, scheduleRepo, repository.NewAttachmentRepo(db))
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) { return "ack-1", nil }
 
 	failedCtx, cancel := context.WithCancel(ctx)
 	cancel()
-	if err := svc.setActiveProject(failedCtx, "uncached-user", project.ID); err == nil {
+	if err := svc.setActiveProject(failedCtx, userID, rejectedProject.ID); err == nil {
 		t.Fatal("expected persistence failure")
 	}
-	if _, ok := svc.userProjects["uncached-user"]; ok {
+	if _, ok := svc.userProjects[userID]; ok {
 		t.Fatal("failed switch created a cache entry")
+	}
+
+	var incoming ChannelChatRunRequest
+	svc.SetChannelChatRunner(func(_ context.Context, req ChannelChatRunRequest) { incoming = req })
+	svc.processIncomingMessage(discordIncomingMessage{ChannelID: "chan-1", MessageID: "msg-1", UserID: userID, Username: "Discord User", Text: "continue", Source: "discord"})
+	if incoming.ProjectID != defaultProject.ID {
+		t.Fatalf("inbound message used project %q after failed uncached switch, want durable default %q", incoming.ProjectID, defaultProject.ID)
 	}
 }
 
