@@ -1953,6 +1953,16 @@ func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
+	// Swarm parent tasks resolve their assigned agent through swarm-specific
+	// semantics (see SwarmService.resolveAssignedAgentID and child creation),
+	// not through direct Task.AgentID composer persistence. TaskThreadSend
+	// skips AgentID persistence for swarm parents by routing through
+	// HandleParentFollowup first; mirror that here so this endpoint cannot
+	// mutate parent.AgentID and unintentionally affect swarm child creation.
+	if task.SwarmRole == models.SwarmRoleParent {
+		return c.NoContent(http.StatusNoContent)
+	}
+
 	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
 		agent, selErr := h.selectAgent(c.Request().Context(), agentID, "", false)
 		if selErr != nil || agent == nil {
