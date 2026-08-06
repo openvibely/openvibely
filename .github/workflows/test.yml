@@ -25,17 +25,21 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
+      - name: Validate Linux desktop dependency workflow
+        run: ruby .github/scripts/test_linux_desktop_dependency_workflow.rb
+
       - name: Prepare Linux desktop dependency cache
         id: linux-desktop-cache-key
         shell: bash
         run: |
           package_hash="$(printf '%s' "$LINUX_DESKTOP_PACKAGES" | sha256sum | cut -d' ' -f1)"
           runner_image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}-${RUNNER_ARCH}"
+          metadata_date="$(date -u +%Y%m%d)"
           echo "key=linux-desktop-apt-v1-${runner_image}-${package_hash}" >> "$GITHUB_OUTPUT"
+          echo "metadata_key=linux-desktop-apt-lists-v1-${runner_image}-${package_hash}-${metadata_date}" >> "$GITHUB_OUTPUT"
+          echo "LINUX_TEST_JOB_STARTED_AT_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
 
-          mkdir -p "$HOME/.cache/openvibely-apt/archives/partial"
-          sudo chown -R _apt:"$(id -gn)" "$HOME/.cache/openvibely-apt/archives"
-          sudo chmod 0775 "$HOME/.cache/openvibely-apt/archives" "$HOME/.cache/openvibely-apt/archives/partial"
+          mkdir -p "$HOME/.cache/openvibely-apt/archives/partial" "$HOME/.cache/openvibely-apt/lists/partial"
 
       - name: Restore Linux desktop dependency downloads
         id: linux-desktop-cache
@@ -44,17 +48,110 @@ jobs:
           path: ~/.cache/openvibely-apt/archives/*.deb
           key: ${{ steps.linux-desktop-cache-key.outputs.key }}
 
+      - name: Restore fresh Linux APT metadata
+        id: linux-desktop-metadata-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/openvibely-apt/lists
+          key: ${{ steps.linux-desktop-cache-key.outputs.metadata_key }}
+
+      - name: Prepare cached APT state
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.cache/openvibely-apt/archives/partial" "$HOME/.cache/openvibely-apt/lists/partial"
+          sudo chown -R _apt:"$(id -gn)" "$HOME/.cache/openvibely-apt/archives" "$HOME/.cache/openvibely-apt/lists"
+          sudo chmod 0775 \
+            "$HOME/.cache/openvibely-apt/archives" \
+            "$HOME/.cache/openvibely-apt/archives/partial" \
+            "$HOME/.cache/openvibely-apt/lists" \
+            "$HOME/.cache/openvibely-apt/lists/partial"
+
       - name: Install Linux desktop dependencies
         shell: bash
         run: |
-          started_at=$SECONDS
+          timing_directory="ci-timing"
+          timing_file="$timing_directory/linux-desktop-dependency.json"
+          archives_directory="$HOME/.cache/openvibely-apt/archives"
+          lists_directory="$HOME/.cache/openvibely-apt/lists"
+          metadata_max_age_minutes=1440
+          archive_cache_hit="${{ steps.linux-desktop-cache.outputs.cache-hit }}"
+          metadata_cache_hit="${{ steps.linux-desktop-metadata-cache.outputs.cache-hit }}"
+          metadata_validation="cache-miss"
+          metadata_fresh=false
+          apt_update_count=0
+          install_attempts=0
+          install_succeeded=false
+          started_at_ms="$(date +%s%3N)"
+          mkdir -p "$timing_directory"
           read -r -a packages <<< "$LINUX_DESKTOP_PACKAGES"
-          sudo apt-get update
-          sudo apt-get \
-            -o Dir::Cache::archives="$HOME/.cache/openvibely-apt/archives" \
-            -o APT::Keep-Downloaded-Packages=true \
-            install -y "${packages[@]}"
-          echo "Linux desktop dependencies installed in $((SECONDS - started_at))s (cache hit: ${{ steps.linux-desktop-cache.outputs.cache-hit }})"
+
+          archive_stats() {
+            find "$archives_directory" -maxdepth 1 -type f -name '*.deb' -printf '%s\n' |
+              awk '{ count += 1; bytes += $1 } END { printf "%.0f %.0f\n", count, bytes }'
+          }
+          read -r archive_before_count archive_before_bytes <<< "$(archive_stats)"
+
+          write_timing() {
+            local finished_at_ms archive_after_count archive_after_bytes
+            finished_at_ms="$(date +%s%3N)"
+            read -r archive_after_count archive_after_bytes <<< "$(archive_stats)"
+            cat > "$timing_file" <<EOF
+          {
+            "schema_version": 1,
+            "dependency_setup_started_at_ms": ${started_at_ms},
+            "dependency_setup_duration_ms": $((finished_at_ms - started_at_ms)),
+            "archive_cache_hit": "${archive_cache_hit}",
+            "metadata_cache_hit": "${metadata_cache_hit}",
+            "metadata_validation": "${metadata_validation}",
+            "metadata_max_age_minutes": ${metadata_max_age_minutes},
+            "apt_update_count": ${apt_update_count},
+            "apt_install_attempts": ${install_attempts},
+            "install_succeeded": ${install_succeeded},
+            "archive_packages_before": ${archive_before_count},
+            "archive_bytes_before": ${archive_before_bytes},
+            "archive_packages_after": ${archive_after_count},
+            "archive_bytes_after": ${archive_after_bytes},
+            "archive_downloaded_packages": $((archive_after_count - archive_before_count)),
+            "archive_downloaded_bytes": $((archive_after_bytes - archive_before_bytes))
+          }
+          EOF
+          }
+          trap write_timing EXIT
+
+          apt_install() {
+            install_attempts=$((install_attempts + 1))
+            sudo apt-get \
+              -o Dir::State::lists="$lists_directory" \
+              -o Dir::Cache::archives="$archives_directory" \
+              -o APT::Keep-Downloaded-Packages=true \
+              "$@" \
+              install -y "${packages[@]}"
+          }
+
+          if [[ "$metadata_cache_hit" == "true" ]] &&
+            find "$lists_directory" -maxdepth 1 -type f -name '*InRelease' -mmin "-${metadata_max_age_minutes}" -print -quit | grep -q . &&
+            sudo apt-get -o Dir::State::lists="$lists_directory" -s install "${packages[@]}" >/dev/null; then
+            metadata_fresh=true
+            metadata_validation="fresh-preflight"
+          elif [[ "$metadata_cache_hit" == "true" ]]; then
+            metadata_validation="stale-or-invalid"
+          fi
+
+          if [[ "$archive_cache_hit" == "true" && "$metadata_fresh" == "true" ]]; then
+            if ! apt_install --no-download; then
+              metadata_validation="cached-install-failed+updated"
+              sudo apt-get -o Dir::State::lists="$lists_directory" update
+              apt_update_count=$((apt_update_count + 1))
+              apt_install
+            fi
+          else
+            sudo apt-get -o Dir::State::lists="$lists_directory" update
+            apt_update_count=$((apt_update_count + 1))
+            metadata_validation="${metadata_validation}+updated"
+            apt_install
+          fi
+          install_succeeded=true
+          echo "Linux desktop dependencies installed in $(( ($(date +%s%3N) - started_at_ms) / 1000 ))s (archive cache hit: ${archive_cache_hit}, metadata cache hit: ${metadata_cache_hit}, metadata: ${metadata_validation})"
 
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -83,6 +180,29 @@ jobs:
         run: |
           grep -v "_templ.go" coverage.out > coverage.filtered.out
           go tool cover -func=coverage.filtered.out | tail -1
+
+      - name: Record Linux test job timing
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p ci-timing
+          finished_at_ms="$(date +%s%3N)"
+          cat > ci-timing/linux-test-job.json <<EOF
+          {
+            "schema_version": 1,
+            "job_timing_started_at_ms": ${LINUX_TEST_JOB_STARTED_AT_MS},
+            "job_timing_duration_ms": $((finished_at_ms - LINUX_TEST_JOB_STARTED_AT_MS)),
+            "dependency_timing_file": "linux-desktop-dependency.json"
+          }
+          EOF
+
+      - name: Upload Linux desktop dependency timing
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-desktop-dependency-timing-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-timing
+          if-no-files-found: warn
 
   packaged-update-native:
     name: Packaged update (${{ matrix.os }})
