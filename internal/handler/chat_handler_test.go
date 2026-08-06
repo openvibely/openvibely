@@ -1582,16 +1582,6 @@ func TestHandler_BrowserPendingAttachmentMetadataFailureRemovesSession(t *testin
 			},
 		},
 		{
-			name: "steering chat",
-			send: func(t *testing.T, _ *Handler, e *echo.Echo, project *models.Project, _ *models.Task, exec *models.Execution, _ *models.LLMConfig, sessionID string) *httptest.ResponseRecorder {
-				form := url.Values{}
-				form.Set("message", "steer chat with attachment")
-				form.Set("expected_turn_id", exec.ID)
-				form.Set("attachment_session_id", sessionID)
-				return htmxPost(e, "/chat/steer?project_id="+project.ID, form)
-			},
-		},
-		{
 			name: "queued task thread",
 			send: func(t *testing.T, _ *Handler, e *echo.Echo, _ *models.Project, task *models.Task, _ *models.Execution, agent *models.LLMConfig, sessionID string) *httptest.ResponseRecorder {
 				form := url.Values{}
@@ -1899,6 +1889,50 @@ func TestHandler_ChatSteer_CreatesPendingSteeringInput(t *testing.T) {
 	require.Len(t, inputs, 1)
 	assert.Equal(t, "Actually answer about queues", inputs[0].Content)
 	assert.Equal(t, models.ThreadInputModeSteering, inputs[0].InputMode)
+}
+
+func TestHandler_ChatSteer_FailurePreservesAttachmentSessionForRetry(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Failed Chat steer attachment retry")
+	activeTask := createTask(t, h, project.ID, "Active Chat steer attachment retry", func(task *models.Task) {
+		task.Category = models.CategoryChat
+		task.Status = models.StatusRunning
+		task.AgentID = &agent.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, agent.ID, func(exec *models.Execution) {
+		exec.Status = models.ExecRunning
+		exec.PromptSent = "active turn"
+	})
+
+	const sessionID = "abababababababababababababababab"
+	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
+	attachmentPath := filepath.Join(sessionDir, "retry.txt")
+	require.NoError(t, os.MkdirAll(sessionDir, 0o755))
+	require.NoError(t, os.WriteFile(attachmentPath, []byte("retry content"), 0o600))
+	_, err := db.Exec(`CREATE TRIGGER fail_chat_steer_input BEFORE INSERT ON thread_inputs BEGIN SELECT RAISE(ABORT, 'injected steer failure'); END`)
+	require.NoError(t, err)
+
+	form := url.Values{}
+	form.Set("message", "steer with retained attachment")
+	form.Set("expected_turn_id", activeExec.ID)
+	form.Set("attachment_session_id", sessionID)
+	failed := htmxPost(e, "/chat/steer?project_id="+project.ID, form)
+	require.Equal(t, http.StatusInternalServerError, failed.Code)
+	require.FileExists(t, attachmentPath, "failed steering must retain pending attachments for retry")
+
+	_, err = db.Exec(`DROP TRIGGER fail_chat_steer_input`)
+	require.NoError(t, err)
+	retried := htmxPost(e, "/chat/steer?project_id="+project.ID, form)
+	require.Equal(t, http.StatusOK, retried.Code)
+	require.FileExists(t, attachmentPath, "successful steering keeps pending files until the steering input is consumed")
+
+	inputs, err := h.threadInputRepo.ListPendingSteering(ctx, activeExec.ID, activeExec.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, sessionID, inputs[0].AttachmentSessionID)
+	assert.Equal(t, "steer with retained attachment", inputs[0].Content)
 }
 
 func TestHandler_ClearChat_CancelsPendingChatInputs(t *testing.T) {

@@ -437,9 +437,6 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 	}
 	if err := h.threadInputRepo.CreateSteeringForActiveExecution(c.Request().Context(), input, active.ID); err != nil {
 		applog.Infof("[handler] ChatSteer error creating steering input: %v", err)
-		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), input.AttachmentSessionID); cleanupErr != nil {
-			applog.Infof("[handler] ChatSteer error cleaning unpublished attachment session %s: %v", input.AttachmentSessionID, cleanupErr)
-		}
 		if errors.Is(err, repository.ErrExpectedTurnEmpty) {
 			return echo.NewHTTPError(http.StatusBadRequest, "expected turn id is required")
 		}
