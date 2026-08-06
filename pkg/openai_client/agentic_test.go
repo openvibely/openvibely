@@ -1075,6 +1075,9 @@ func TestSendAgentic_ToolCalling(t *testing.T) {
 						if m["type"] == "function_call_output" && m["call_id"] == "call_1" {
 							found = true
 							output := m["output"].(string)
+							if !strings.HasPrefix(output, "1\thello world\n") || strings.Contains(output, "     1\t") {
+								t.Errorf("model-facing read_file output must use compact line prefix, got: %q", output)
+							}
 							if !strings.Contains(output, "hello world") {
 								t.Errorf("tool output should contain file content, got: %s", output)
 							}

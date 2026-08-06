@@ -222,7 +222,7 @@ func execReadFile(workDir string, input json.RawMessage) (string, error) {
 	var sb strings.Builder
 	startLine := params.Offset + 1
 	for i, line := range lines {
-		fmt.Fprintf(&sb, "%6d\t%s\n", startLine+i, line)
+		fmt.Fprintf(&sb, "%d\t%s\n", startLine+i, line)
 	}
 	if truncated {
 		fmt.Fprintf(&sb, "\n... (truncated, showing %d of %d lines from offset %d)", params.Limit, len(strings.Split(string(data), "\n")), params.Offset)

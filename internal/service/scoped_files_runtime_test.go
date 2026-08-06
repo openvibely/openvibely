@@ -46,6 +46,41 @@ func TestScopedFilesRuntimeRejectsEscapesAndHonorsPermissions(t *testing.T) {
 	}
 }
 
+func TestScopedFilesRuntimeReadFileUsesCompactLinePrefixes(t *testing.T) {
+	repo := t.TempDir()
+	_, rt, err := buildScopedFilesRuntimeTools(context.Background(), "p1", repo, models.AgentToolConfig{
+		ScopedFiles: []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"read"}}},
+	})
+	if err != nil {
+		t.Fatalf("build scoped runtime: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "docs", "lines.txt"), []byte("  first\nsecond\nthird\nfourth\nfifth\nsixth\nseventh\neighth\nninth\nlast\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, handled, isErr, err := rt.Executor(context.Background(), "read_file", json.RawMessage(`{"file_path":"lines.txt","limit":10}`))
+	if err != nil || isErr || !handled {
+		t.Fatalf("read failed handled=%v isErr=%v err=%v", handled, isErr, err)
+	}
+	if !strings.HasPrefix(out, "1\t  first\n") || !strings.Contains(out, "10\tlast\n") {
+		t.Fatalf("compact single/double-digit line prefixes or source indentation lost: %q", out)
+	}
+	if strings.Contains(out, "     1\t") || strings.Contains(out, "    10\t") {
+		t.Fatalf("read output retains fixed-width line-number padding: %q", out)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "docs", "wide.txt"), []byte(strings.Repeat("\n", 99999)+"  wide\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, handled, isErr, err = rt.Executor(context.Background(), "read_file", json.RawMessage(`{"file_path":"wide.txt","offset":99999,"limit":1}`))
+	if err != nil || isErr || !handled {
+		t.Fatalf("wide read failed handled=%v isErr=%v err=%v", handled, isErr, err)
+	}
+	if !strings.HasPrefix(out, "100000\t  wide\n") {
+		t.Fatalf("wide line prefix or source indentation changed: %q", out)
+	}
+}
+
 func TestScopedFilesRuntimeRejectsAbsoluteConfiguredDirectory(t *testing.T) {
 	_, _, err := buildScopedFilesRuntimeTools(context.Background(), "p1", t.TempDir(), models.AgentToolConfig{
 		ScopedFiles: []models.ScopedFilesConfig{{Directory: filepath.Join(string(filepath.Separator), "tmp"), Permissions: []string{"read"}}},

@@ -367,7 +367,7 @@ func (s *scopedFilesToolSession) readFile(input json.RawMessage) (string, error)
 	}
 	var b strings.Builder
 	for i, line := range lines {
-		fmt.Fprintf(&b, "%6d\t%s\n", params.Offset+i+1, line)
+		fmt.Fprintf(&b, "%d\t%s\n", params.Offset+i+1, line)
 	}
 	if truncated {
 		fmt.Fprintf(&b, "\n... (truncated, showing %d lines from offset %d)", params.Limit, params.Offset)
