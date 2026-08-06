@@ -23,6 +23,7 @@ type AutomationSaveWrite struct {
 	StableKey              string
 	Source                 string
 	CreatedVia             string
+	TemplateRevision       *int
 	Candidate              models.AutomationDraftCandidate
 	ConfirmationTokenID    string
 	ConfirmationPrincipal  string
@@ -128,7 +129,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 
 	var automation models.Automation
 	err = scanAutomation(conn.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
-		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
 		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`, in.ProjectID, in.AutomationID), &automation)
 	newAutomation := errors.Is(err, sql.ErrNoRows)
 	if err != nil && !newAutomation {
@@ -139,14 +140,14 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 			return nil, nil, errors.New("automation changed before Save")
 		}
 		if _, err := conn.ExecContext(ctx, `INSERT INTO automations
-			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, created_via)
-			VALUES (?, ?, ?, ?, ?, ?, 'active', ?)`, in.AutomationID, in.ProjectID, in.StableKey,
-			in.Candidate.Name, in.Candidate.Description, in.Candidate.AutomationType, in.CreatedVia); err != nil {
+			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, template_revision, created_via)
+			VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)`, in.AutomationID, in.ProjectID, in.StableKey,
+			in.Candidate.Name, in.Candidate.Description, in.Candidate.AutomationType, in.TemplateRevision, in.CreatedVia); err != nil {
 			return nil, nil, fmt.Errorf("creating Automation: %w", err)
 		}
 		automation = models.Automation{ID: in.AutomationID, ProjectID: in.ProjectID, StableKey: in.StableKey,
 			Name: in.Candidate.Name, Description: in.Candidate.Description, AutomationType: in.Candidate.AutomationType,
-			LifecycleState: models.AutomationActive, CreatedVia: in.CreatedVia}
+			LifecycleState: models.AutomationActive, TemplateRevision: in.TemplateRevision, CreatedVia: in.CreatedVia}
 	} else {
 		currentGraphID := ""
 		if automation.PublishedVersionID != nil {
@@ -402,9 +403,9 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 	}
 
 	if _, err := conn.ExecContext(ctx, `UPDATE automations SET name = ?, description = ?, automation_type = ?, lifecycle_state = ?,
-		published_version_id = ?, archived_at = CASE WHEN ? = 'archived' THEN archived_at ELSE NULL END, updated_at = CURRENT_TIMESTAMP
+		template_revision = ?, published_version_id = ?, archived_at = CASE WHEN ? = 'archived' THEN archived_at ELSE NULL END, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND project_id = ?`, in.Candidate.Name, in.Candidate.Description, in.Candidate.AutomationType,
-		automation.LifecycleState, in.GraphID, automation.LifecycleState, in.AutomationID, in.ProjectID); err != nil {
+		automation.LifecycleState, in.TemplateRevision, in.GraphID, automation.LifecycleState, in.AutomationID, in.ProjectID); err != nil {
 		return nil, nil, err
 	}
 	if in.ExpectedCurrentGraphID != "" {
@@ -422,7 +423,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 	}
 
 	if err := scanAutomation(conn.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
-		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
 		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`, in.ProjectID, in.AutomationID), &automation); err != nil {
 		return nil, nil, err
 	}

@@ -29,7 +29,7 @@ func (r *AutomationRepo) ListByProject(ctx context.Context, projectID string, li
 		limit = 100
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
-		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
 		created_via, created_at, updated_at, archived_at
 		FROM automations WHERE project_id = ? ORDER BY updated_at DESC, id LIMIT ?`, projectID, limit)
 	if err != nil {
@@ -49,7 +49,7 @@ func (r *AutomationRepo) ListByProject(ctx context.Context, projectID string, li
 
 func (r *AutomationRepo) ListSavedByProject(ctx context.Context, projectID string) ([]models.Automation, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
-		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
 		created_via, created_at, updated_at, archived_at
 		FROM automations WHERE project_id = ? AND published_version_id IS NOT NULL
 		ORDER BY updated_at DESC, id`, projectID)
@@ -71,7 +71,7 @@ func (r *AutomationRepo) ListSavedByProject(ctx context.Context, projectID strin
 func (r *AutomationRepo) GetByStableKey(ctx context.Context, projectID, stableKey string) (*models.Automation, error) {
 	var a models.Automation
 	err := scanAutomation(r.db.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
-		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
 		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND stable_key = ?`, projectID, stableKey), &a)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -85,7 +85,7 @@ func (r *AutomationRepo) GetByStableKey(ctx context.Context, projectID, stableKe
 func (r *AutomationRepo) GetDefinition(ctx context.Context, projectID, automationID string) (*models.AutomationDefinition, error) {
 	var a models.Automation
 	err := scanAutomation(r.db.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
-		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
 		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID), &a)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -421,14 +421,14 @@ type queryer interface {
 
 func scanAutomation(row automationRowScanner, a *models.Automation) error {
 	return row.Scan(&a.ID, &a.ProjectID, &a.StableKey, &a.Name, &a.Description, &a.AutomationType,
-		&a.LifecycleState, &a.HealthState, &a.HealthReason, &a.HealthEvaluatedAt, &a.PublishedVersionID,
+		&a.LifecycleState, &a.HealthState, &a.HealthReason, &a.HealthEvaluatedAt, &a.PublishedVersionID, &a.TemplateRevision,
 		&a.CreatedVia, &a.CreatedAt, &a.UpdatedAt, &a.ArchivedAt)
 }
 
 func getAutomationByStableKeyQuery(ctx context.Context, q queryer, projectID, stableKey string) (*models.Automation, error) {
 	var a models.Automation
 	err := scanAutomation(q.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
-		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id,
+		lifecycle_state, health_state, health_reason, health_evaluated_at, published_version_id, template_revision,
 		created_via, created_at, updated_at, archived_at FROM automations WHERE project_id = ? AND stable_key = ?`, projectID, stableKey), &a)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

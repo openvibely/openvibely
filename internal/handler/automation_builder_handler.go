@@ -82,7 +82,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 	if !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
-	return h.saveAutomationBuilderCandidate(c, projectID, page)
+	return h.saveAutomationBuilderCandidate(c, projectID, page, false)
 }
 
 func (h *Handler) EditAutomationBuilder(c echo.Context) error {
@@ -103,7 +103,20 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	candidate := opened.Candidate
-	if raw := strings.TrimSpace(c.FormValue("candidate_json")); raw != "" {
+	currentTemplateRevision := service.CurrentAutomationTemplateRevision(candidate.AdapterKey)
+	templateUpdateAvailable := currentTemplateRevision > 0 &&
+		(opened.Definition.Automation.TemplateRevision == nil || *opened.Definition.Automation.TemplateRevision < currentTemplateRevision)
+	updateTemplate := c.FormValue("update_template") == "true"
+	if updateTemplate {
+		if !templateUpdateAvailable {
+			return echo.NewHTTPError(http.StatusBadRequest, "this Automation already uses the latest template")
+		}
+		candidate, err = h.automationDraftSvc.TemplateCandidate(candidate.AdapterKey)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		candidate.Name = opened.Candidate.Name
+	} else if raw := strings.TrimSpace(c.FormValue("candidate_json")); raw != "" {
 		candidate, err = service.DecodeAutomationDraftCandidate([]byte(raw))
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -117,14 +130,15 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	page := models.AutomationBuilderPage{Result: *result, AutomationID: automationID, Source: opened.Definition.Version.Source}
+	page := models.AutomationBuilderPage{Result: *result, AutomationID: automationID, Source: opened.Definition.Version.Source,
+		TemplateUpdateAvailable: templateUpdateAvailable}
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"?project_id="+projectID)
 	}
-	if !automationBuilderSaveRequested(c) {
+	if !updateTemplate && !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
-	return h.saveAutomationBuilderCandidate(c, projectID, page)
+	return h.saveAutomationBuilderCandidate(c, projectID, page, updateTemplate)
 }
 
 func automationBuilderSaveRequested(c echo.Context) bool {
@@ -132,7 +146,7 @@ func automationBuilderSaveRequested(c echo.Context) bool {
 		strings.TrimSpace(c.FormValue("remove_node")) == "" && strings.TrimSpace(c.FormValue("remove_edge")) == ""
 }
 
-func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID string, page models.AutomationBuilderPage) error {
+func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID string, page models.AutomationBuilderPage, updateToLatestTemplate bool) error {
 	if h.automationCompiler == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation save unavailable")
 	}
@@ -146,6 +160,7 @@ func (h *Handler) saveAutomationBuilderCandidate(c echo.Context, projectID strin
 	}
 	saved, err := h.automationCompiler.Save(c.Request().Context(), service.AutomationSaveRequest{
 		ProjectID: projectID, AutomationID: page.AutomationID, Source: source, CreatedVia: "web", Candidate: page.Result.Candidate,
+		UpdateToLatestTemplate: updateToLatestTemplate,
 	})
 	if err != nil {
 		page.Error = "Save did not apply: " + err.Error()

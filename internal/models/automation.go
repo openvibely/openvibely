@@ -42,6 +42,7 @@ type Automation struct {
 	HealthReason       string                   `json:"health_reason"`
 	HealthEvaluatedAt  *time.Time               `json:"health_evaluated_at,omitempty"`
 	PublishedVersionID *string                  `json:"published_version_id,omitempty"`
+	TemplateRevision   *int                     `json:"template_revision,omitempty"`
 	CreatedVia         string                   `json:"created_via"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
