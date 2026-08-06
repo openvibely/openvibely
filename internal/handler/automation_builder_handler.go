@@ -69,6 +69,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		return err
 	}
 	if hasPostedCandidate {
+		h.discardStaleTemplateOnlyNodeConfig(&candidate)
 		applyAutomationDraftFormValues(c, &candidate)
 		if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -121,6 +122,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		h.discardStaleTemplateOnlyNodeConfig(&candidate)
 		applyAutomationDraftFormValues(c, &candidate)
 		if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -179,6 +181,28 @@ func (h *Handler) redirectToAutomation(c echo.Context, projectID, automationID s
 		return c.NoContent(http.StatusNoContent)
 	}
 	return c.Redirect(http.StatusSeeOther, url)
+}
+
+func (h *Handler) discardStaleTemplateOnlyNodeConfig(candidate *models.AutomationDraftCandidate) {
+	if candidate == nil || (candidate.AdapterKey != service.AutomationAdapterNativeSDLC && candidate.AdapterKey != service.AutomationAdapterGitHubSDLC) {
+		return
+	}
+	template, err := h.automationDraftSvc.TemplateCandidate(candidate.AdapterKey)
+	if err != nil {
+		return
+	}
+	canonicalNodes := make(map[string]struct{}, len(template.Nodes))
+	for _, node := range template.Nodes {
+		canonicalNodes[node.Key] = struct{}{}
+	}
+	for i := range candidate.Nodes {
+		node := &candidate.Nodes[i]
+		if _, canonical := canonicalNodes[node.Key]; canonical {
+			continue
+		}
+		delete(node.Config, "skills")
+		delete(node.Config, "source_files")
+	}
 }
 
 func applyAutomationDraftFormValues(c echo.Context, candidate *models.AutomationDraftCandidate) {

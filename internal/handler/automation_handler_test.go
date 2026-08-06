@@ -523,6 +523,17 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	require.NotContains(t, addedTask.Body.String(), `name="node_extra_follow_up_source_files"`)
 	require.Equal(t, http.StatusOK, post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {"extra_review"}, "to_key": {"extra_follow_up"}}).Code)
 
+	// An editor page that was open before template-only controls were removed
+	// has already synchronized those values into candidate_json. Preserve that
+	// browser shape rather than only sending stale standalone form fields.
+	for i := range candidate.Nodes {
+		switch candidate.Nodes[i].Key {
+		case "extra_review", "extra_follow_up":
+			candidate.Nodes[i].Config["skills"] = []string{"example:review"}
+			candidate.Nodes[i].Config["source_files"] = []string{"README.md"}
+		}
+	}
+
 	// The browser synchronizes all rendered template settings into candidate_json.
 	// These stale extra-node values model a form submission from before the controls
 	// were removed; the handler must not merge template-only settings into custom nodes.
