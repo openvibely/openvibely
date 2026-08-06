@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -27,7 +28,13 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const checkSchemaVersion = 1
+const (
+	checkSchemaVersion = 1
+	installIDOptOutEnv = "OPENVIBELY_DISABLE_INSTALL_ID"
+	// The server reports 30-day actives, so rotation must be at least that long;
+	// 90 days prevents one install from rotating mid-window and being counted twice.
+	installIDRotationWindow = 90 * 24 * time.Hour
+)
 
 type CurrentBuild struct {
 	buildinfo.Build
@@ -41,6 +48,7 @@ type CheckRequest struct {
 	Channel       string `json:"channel"`
 	OS            string `json:"os"`
 	Arch          string `json:"arch"`
+	InstallID     string `json:"install_id,omitempty"`
 }
 type CheckResponse struct {
 	SchemaVersion    int            `json:"schema_version"`
@@ -107,7 +115,22 @@ type persistedClientState struct {
 	Cached                 *VerifiedRelease `json:"cached,omitempty"`
 	Failures               int              `json:"failures,omitempty"`
 	NextAttempt            time.Time        `json:"next_attempt,omitempty"`
+	InstallID              string           `json:"install_id,omitempty"`
+	InstallIDIssuedAt      time.Time        `json:"install_id_issued_at,omitempty"`
 }
+
+func (s persistedClientState) MarshalJSON() ([]byte, error) {
+	type stateJSON persistedClientState
+	var installIDIssuedAt *time.Time
+	if !s.InstallIDIssuedAt.IsZero() {
+		installIDIssuedAt = &s.InstallIDIssuedAt
+	}
+	return json.Marshal(struct {
+		stateJSON
+		InstallIDIssuedAt *time.Time `json:"install_id_issued_at,omitempty"`
+	}{stateJSON: stateJSON(s), InstallIDIssuedAt: installIDIssuedAt})
+}
+
 type ClientConfig struct {
 	ServiceURL, Channel, StatePath string
 	HTTPClient                     *http.Client
@@ -194,7 +217,33 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 	if now.Before(state.NextAttempt) {
 		return state.Cached, false, nil
 	}
-	requestBody := CheckRequest{checkSchemaVersion, current.Version, current.Commit, current.Distribution, c.cfg.Channel, current.OS, current.Arch}
+
+	installIDPersistenceFailed := false
+	if _, optedOut := os.LookupEnv(installIDOptOutEnv); optedOut {
+		state.InstallID = ""
+		state.InstallIDIssuedAt = time.Time{}
+	} else if state.InstallID == "" || state.InstallIDIssuedAt.Before(now.Add(-installIDRotationWindow)) {
+		installID, err := generateInstallID()
+		if err != nil {
+			return state.Cached, true, err
+		}
+		state.InstallID = installID
+		state.InstallIDIssuedAt = now
+		if err := c.saveState(state); err != nil {
+			installIDPersistenceFailed = true
+		}
+	}
+
+	requestBody := CheckRequest{
+		SchemaVersion: checkSchemaVersion,
+		Version:       current.Version,
+		Commit:        current.Commit,
+		Distribution:  current.Distribution,
+		Channel:       c.cfg.Channel,
+		OS:            current.OS,
+		Arch:          current.Arch,
+		InstallID:     state.InstallID,
+	}
 	encoded, err := json.Marshal(requestBody)
 	if err != nil {
 		return nil, true, err
@@ -241,7 +290,11 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 	state.LastSuccessfulCheck, state.Failures, state.NextAttempt = now, 0, now.Add(24*time.Hour+c.cfg.Random(time.Hour))
 	if current.Distribution == buildinfo.DistributionSource {
 		state.Cached = nil
-		return nil, true, c.saveState(state)
+		saveErr := c.saveState(state)
+		if installIDPersistenceFailed {
+			saveErr = nil
+		}
+		return nil, true, saveErr
 	}
 	var verified *VerifiedRelease
 	if response.Release != nil {
@@ -254,7 +307,11 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 	} else {
 		state.Cached = nil
 	}
-	return verified, true, c.saveState(state)
+	saveErr := c.saveState(state)
+	if installIDPersistenceFailed {
+		saveErr = nil
+	}
+	return verified, true, saveErr
 }
 
 func (c *Client) verifyRelease(response CheckResponse, current CurrentBuild, highest string, now time.Time) (*VerifiedRelease, error) {
@@ -536,6 +593,14 @@ func (c *Client) Fetch(ctx context.Context, release VerifiedRelease, destination
 		return nil, errors.New("artifact SHA-256 mismatch")
 	}
 	return &VerifiedArtifact{Path: destination, Target: release.Target, Release: release.Metadata}, nil
+}
+
+func generateInstallID() (string, error) {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(id[:]), nil
 }
 
 func (c *Client) recordFailure(state *persistedClientState, now time.Time) {

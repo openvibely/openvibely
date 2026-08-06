@@ -26,6 +26,7 @@ func TestCanonicalJSONUsesRFC8785NumberSerialization(t *testing.T) {
 }
 
 func TestClientSourceCheckIsMetricOnlyAndPersistsSuccess(t *testing.T) {
+	unsetEnvForTest(t, installIDOptOutEnvForTest)
 	var request map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/updates/check" {
@@ -48,7 +49,7 @@ func TestClientSourceCheckIsMetricOnlyAndPersistsSuccess(t *testing.T) {
 	if result != nil {
 		t.Fatalf("source check exposed update state: %#v", result)
 	}
-	if len(request) != 7 || request["distribution"] != buildinfo.DistributionSource {
+	if len(request) != 8 || request["distribution"] != buildinfo.DistributionSource {
 		t.Fatalf("request=%#v", request)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "update-state.json")); err != nil {
