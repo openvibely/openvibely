@@ -212,12 +212,21 @@ func TestGoalAgentSendToTaskQueuesWhenGoalStillActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("active goal continuation rejected: out=%q err=%v", out, err)
 	}
-	pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, task.ID)
-	if err != nil {
-		t.Fatalf("list pending: %v", err)
+	var result struct {
+		QueuedMessageID string `json:"queued_message_id"`
 	}
-	if len(pending) != 1 || pending[0].Content != "Continue because goal remains unmet" || pending[0].Source != models.TaskOriginSystemAgent || pending[0].OriginAgent != models.AgentSystemKindGoal {
-		t.Fatalf("active goal continuation pending = %+v", pending)
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode send_to_task result %q: %v", out, err)
+	}
+	queued, err := tc.handler.threadInputRepo.GetByID(ctx, result.QueuedMessageID)
+	if err != nil {
+		t.Fatalf("load queued continuation: %v", err)
+	}
+	if queued == nil {
+		t.Fatalf("queued continuation %q was not persisted", result.QueuedMessageID)
+	}
+	if queued.Content != "Continue because goal remains unmet" || queued.Source != models.TaskOriginSystemAgent || queued.OriginAgent != models.AgentSystemKindGoal {
+		t.Fatalf("queued continuation details = %+v", queued)
 	}
 }
 
