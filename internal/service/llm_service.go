@@ -603,6 +603,9 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 		break
 	}
 	request.Prompt = prompt
+	if goal := automationConfigGoal(config); goal != "" {
+		request.Goal = goal
+	}
 	category, _ := config["category"].(string)
 	request.Category = category
 	priority, _ := draftInt(config["priority"])
@@ -619,6 +622,11 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 		request.Agent = ""
 	}
 	return nil
+}
+
+func automationConfigGoal(config map[string]any) string {
+	goal, _ := config["goal"].(string)
+	return strings.TrimSpace(goal)
 }
 
 type automationGitHubTaskCreationPlan struct {
@@ -778,7 +786,7 @@ func (s *LLMService) createPreparedAutomationTask(ctx context.Context, projectID
 	}
 	summary := fmt.Sprintf("\n\n---\n%s 1 task(s):\n- \"%s\" (%s) [TASK_ID:%s]", action,
 		canonical.Title, canonical.Category, canonical.ID)
-	if strings.TrimSpace(request.Goal) != "" && created {
+	if objective != "" && created {
 		summary += " [goal:set]"
 	}
 	return []models.Task{*canonical}, summary, true, nil

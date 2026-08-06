@@ -220,6 +220,9 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 				}
 			}
 		}
+		if value, exists := automationDraftFormValue(c, prefix+"goal"); exists {
+			node.Config["goal"] = value
+		}
 		if _, ok := node.Config["run_at"]; ok {
 			node.Config["enabled"] = true
 			if value, exists := automationDraftFormValue(c, prefix+"run_at"); exists {
@@ -364,10 +367,10 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		switch nodeKind {
 		case "schedule":
 			nodeType, role = models.AutomationNodeTrigger, "fixed_schedule"
-			config = map[string]any{"prompt": "Describe the scheduled work this node should perform.", "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1, "enabled": true}
+			config = map[string]any{"prompt": "Describe the scheduled work this node should perform.", "goal": "", "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1, "enabled": true}
 		case "task", "agent_task":
 			nodeType, role = models.AutomationNodeAgentTask, "task"
-			config = map[string]any{"prompt": "Describe the work this node should perform.", "category": string(models.CategoryBacklog), "priority": 2}
+			config = map[string]any{"prompt": "Describe the work this node should perform.", "goal": "", "category": string(models.CategoryBacklog), "priority": 2}
 		case "create_notification":
 			nodeType, role = models.AutomationNodeAction, "create_notification"
 			config = map[string]any{"notification_type": "approval_request", "instructions": "Summarize the proposal that needs a human decision."}
@@ -376,9 +379,10 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 			config = map[string]any{"approval_method": "native_alert"}
 		case "native_inbox":
 			nodeType, role = models.AutomationNodeTrigger, "native_inbox"
-			config = map[string]any{"prompt": service.NativeSDLCNotificationInboxPrompt, "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatHours), "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}
+			config = map[string]any{"prompt": service.NativeSDLCNotificationInboxPrompt, "goal": "", "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatHours), "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}
 		case "native_implementation":
 			nodeType, role = models.AutomationNodeAgentTask, "implementation"
+			config = map[string]any{"goal": ""}
 		case "create_github_issue":
 			nodeType, role = models.AutomationNodeAction, "create_github_issue"
 			config = map[string]any{"instructions": "Open one focused, reviewable GitHub issue.", "labels": []string{}}
@@ -387,7 +391,7 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 			config = map[string]any{"approval_method": "github_assignment"}
 		case "github_inbox":
 			nodeType, role = models.AutomationNodeTrigger, "github_inbox"
-			config = map[string]any{"prompt": "Process newly assigned GitHub issues and create or continue one issue-linked implementation task per approved issue.", "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatHours), "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}
+			config = map[string]any{"prompt": "Process newly assigned GitHub issues and create or continue one issue-linked implementation task per approved issue.", "goal": "", "category": string(models.CategoryScheduled), "priority": 2, "run_at": "09:00", "repeat_type": string(models.RepeatHours), "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}
 		case "open_pull_request":
 			nodeType, role = models.AutomationNodeAction, "open_pull_request"
 			config = map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "", "draft": false}

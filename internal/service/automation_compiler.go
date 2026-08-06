@@ -239,8 +239,16 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		if agent != nil {
 			agentID = &agent.ID
 		}
-		taskWrite := repository.AutomationSaveTask{NodeKey: node.Key, Title: automationTaskTitle(automation, node), Prompt: prompt,
-			Category: category, Priority: priority, AgentDefinitionID: agentID}
+		goal, _ := node.Config["goal"].(string)
+		taskWrite := repository.AutomationSaveTask{
+			NodeKey:           node.Key,
+			Title:             automationTaskTitle(automation, node),
+			Prompt:            prompt,
+			Goal:              strings.TrimSpace(goal),
+			Category:          category,
+			Priority:          priority,
+			AgentDefinitionID: agentID,
+		}
 		if existing := existingResources[node.Key+"\x00task"]; existing.ResourceID != "" {
 			taskWrite.ExistingTaskID = existing.ResourceID
 		}

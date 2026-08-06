@@ -182,7 +182,7 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, claimJSON, `"processing_state":"claimed"`)
 
-	createTaskInput := json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","title":"Implement approval inbox","prompt":"Implement the approved suggestion and leave merge/release to human review.","priority":3,"tag":"feature"}`)
+	createTaskInput := json.RawMessage(`{"alert_id":"` + created.Notification.ID + `","title":"Implement approval inbox","prompt":"Implement the approved suggestion and leave merge/release to human review.","goal":"Complete the approved change with focused regression coverage.","priority":3,"tag":"feature"}`)
 	taskJSON, err := handlers["create_alert_implementation_task"](ctx, createTaskInput)
 	require.NoError(t, err)
 	var linked struct {
@@ -190,6 +190,10 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal([]byte(taskJSON), &linked))
 	require.NotEmpty(t, linked.ImplementationTaskID)
+	implementationGoal, err := repository.NewTaskGoalRepo(db).GetByTaskID(ctx, linked.ImplementationTaskID)
+	require.NoError(t, err)
+	require.NotNil(t, implementationGoal)
+	require.Equal(t, "Complete the approved change with focused regression coverage.", implementationGoal.Objective)
 	secondTaskJSON, err := handlers["create_alert_implementation_task"](ctx, createTaskInput)
 	require.NoError(t, err)
 	var linkedAgain struct {

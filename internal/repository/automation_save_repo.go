@@ -38,6 +38,7 @@ type AutomationSaveTask struct {
 	ExistingTaskID    string
 	Title             string
 	Prompt            string
+	Goal              string
 	Category          models.TaskCategory
 	Priority          int
 	AgentDefinitionID *string
@@ -317,6 +318,11 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		}
 		if affected, _ := result.RowsAffected(); affected != 1 {
 			return nil, nil, fmt.Errorf("task for node %q is unavailable", write.NodeKey)
+		}
+		if strings.TrimSpace(write.Goal) != "" {
+			if err := setTaskGoalWithExecutor(ctx, conn, taskID, write.Goal, "set by Automation configuration"); err != nil {
+				return nil, nil, fmt.Errorf("saving goal for task node %q: %w", write.NodeKey, err)
+			}
 		}
 		if nodeID := nodeIDs[write.NodeKey]; nodeID != "" {
 			if _, err := conn.ExecContext(ctx, `INSERT INTO automation_definition_resources

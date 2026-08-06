@@ -1161,6 +1161,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				AlertID   string         `json:"alert_id"`
 				Title     string         `json:"title"`
 				Prompt    string         `json:"prompt"`
+				Goal      string         `json:"goal"`
 				Priority  int            `json:"priority"`
 				Tag       models.TaskTag `json:"tag"`
 			}
@@ -1179,8 +1180,11 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
 				return "", err
 			}
+			if len(strings.TrimSpace(req.Goal)) > MaxTaskGoalLength {
+				return "", ErrTaskGoalTooLong
+			}
 			task, err := opts.AlertSvc.CreateImplementationTask(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, models.AlertImplementationTaskInput{
-				Title: req.Title, Prompt: req.Prompt, Priority: req.Priority, Tag: req.Tag,
+				Title: req.Title, Prompt: req.Prompt, Goal: req.Goal, Priority: req.Priority, Tag: req.Tag,
 			})
 			if err != nil {
 				return "", err

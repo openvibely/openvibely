@@ -130,6 +130,7 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 				return nil, err
 			}
 			config["prompt"] = prompt
+			config["goal"] = ""
 			config["category"] = string(models.CategoryBacklog)
 			if adapter.Key == AutomationAdapterGitHubSDLC && node.Role == "implementation" {
 				config["category"] = string(models.CategoryActive)
@@ -151,6 +152,9 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 			} else if strings.Contains(node.Key, "inbox") {
 				config["repeat_type"] = string(models.RepeatHours)
 			}
+		}
+		if adapter.Key == AutomationAdapterNativeSDLC && node.Role == "implementation" {
+			config["goal"] = ""
 		}
 		switch node.Role {
 		case "create_notification":
@@ -1097,12 +1101,12 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	switch node.Type {
 	case models.AutomationNodeAgentTask:
 		if node.Role == "implementation" {
-			allowed = map[string]bool{}
+			allowed = map[string]bool{"goal": true}
 		} else {
-			allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true}
+			allowed = map[string]bool{"prompt": true, "goal": true, "category": true, "priority": true, "agent_ref": true}
 		}
 	case models.AutomationNodeTrigger:
-		allowed = map[string]bool{"prompt": true, "category": true, "priority": true, "agent_ref": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true, "clear_context_on_start": true}
+		allowed = map[string]bool{"prompt": true, "goal": true, "category": true, "priority": true, "agent_ref": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true, "clear_context_on_start": true}
 	case models.AutomationNodeAction:
 		switch node.Role {
 		case "create_notification":
@@ -1195,6 +1199,11 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 			}
 		}
 	}
+	if goal, present := node.Config["goal"]; present {
+		if text, ok := goal.(string); !ok || len(strings.TrimSpace(text)) > MaxTaskGoalLength {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "goal", Message: "Task goal must be text of at most 2000 characters."})
+		}
+	}
 	if node.Type == models.AutomationNodeAction {
 		issues = append(issues, validateAutomationActionConfig(node, node.Role)...)
 	}
@@ -1253,10 +1262,14 @@ func validateAutomationHumanGateConfig(node models.AutomationDraftNode, role str
 func validateAutomationNodeConfig(adapter AutomationAdapter, canonical AutomationAdapterNode, node models.AutomationDraftNode) []models.AutomationValidationIssue {
 	allowed := map[string]bool{}
 	usesTaskConfiguration := automationMaintainedNodeUsesTaskConfiguration(adapter, canonical)
+	usesGoalConfiguration := usesTaskConfiguration || adapter.Key == AutomationAdapterNativeSDLC && canonical.Role == "implementation"
 	if usesTaskConfiguration {
 		for _, key := range []string{"prompt", "category", "priority", "agent_ref", "skills", "source_files"} {
 			allowed[key] = true
 		}
+	}
+	if usesGoalConfiguration {
+		allowed["goal"] = true
 	}
 	if canonical.AllowedResources["schedule"] {
 		for _, key := range []string{"target_node_key", "run_at", "repeat_type", "repeat_interval", "enabled", "clear_context_on_start"} {
@@ -1305,6 +1318,13 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "priority", Message: "Task priority must be between 1 and 4."})
 		}
 		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
+	}
+	if usesGoalConfiguration {
+		if goal, present := node.Config["goal"]; present {
+			if text, ok := goal.(string); !ok || len(strings.TrimSpace(text)) > MaxTaskGoalLength {
+				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "goal", Message: "Task goal must be text of at most 2000 characters."})
+			}
+		}
 	}
 	if canonical.AllowedResources["schedule"] {
 		target, targetOK := node.Config["target_node_key"].(string)

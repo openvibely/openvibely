@@ -91,6 +91,7 @@ type AlertListFilter struct {
 type AlertImplementationTaskInput struct {
 	Title    string  `json:"title"`
 	Prompt   string  `json:"prompt"`
+	Goal     string  `json:"goal"`
 	Priority int     `json:"priority"`
 	Tag      TaskTag `json:"tag"`
 }

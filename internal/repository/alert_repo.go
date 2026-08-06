@@ -692,6 +692,11 @@ func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, ale
 		RETURNING id`, projectID, strings.TrimSpace(input.Title), input.Priority, input.Prompt, input.Tag, displayOrder, models.TaskOriginSystemAgent).Scan(&taskID); err != nil {
 		return nil, fmt.Errorf("creating implementation task: %w", err)
 	}
+	if goal := strings.TrimSpace(input.Goal); goal != "" {
+		if err := createTaskGoalWithExecutor(ctx, conn, taskID, &models.TaskGoal{GoalID: NewID(), Objective: goal, Status: models.TaskGoalStatusActive, Reason: "set at task creation"}); err != nil {
+			return nil, err
+		}
+	}
 	if _, err := conn.ExecContext(ctx, `UPDATE alerts SET implementation_task_id = ?, processing_state = 'implementation_task_linked',
 		claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, taskID, projectID, alertID); err != nil {
 		return nil, err

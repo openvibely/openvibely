@@ -545,7 +545,7 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string","enum":["","feature","bug"]}},"required":["alert_id","title","prompt"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","maxLength":2000},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string","enum":["","feature","bug"]}},"required":["alert_id","title","prompt"],"additionalProperties":false}`),
 	},
 	{
 		Name:         "link_alert_implementation_task",

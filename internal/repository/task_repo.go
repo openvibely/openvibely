@@ -317,6 +317,33 @@ func createTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID st
 	return nil
 }
 
+func setTaskGoalWithExecutor(ctx context.Context, exec sqlExecutor, taskID, objective, reason string) error {
+	objective = strings.TrimSpace(objective)
+	var existingObjective string
+	err := exec.QueryRowContext(ctx, `SELECT objective FROM task_goals WHERE task_id = ?`, taskID).Scan(&existingObjective)
+	if err == nil && existingObjective == objective {
+		return nil
+	}
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("loading task goal: %w", err)
+	}
+	goal := &models.TaskGoal{GoalID: NewID(), Objective: objective, Status: models.TaskGoalStatusActive, Reason: reason}
+	if err == sql.ErrNoRows {
+		return createTaskGoalWithExecutor(ctx, exec, taskID, goal)
+	}
+	updated, err := scanTaskGoal(exec.QueryRowContext(ctx, `
+		UPDATE task_goals
+		SET goal_id = ?, objective = ?, status = 'active', reason = ?, blocker_key = '', blocker_count = 0, blocker_reason = '',
+			blocker_last_seen_at = NULL, last_checked_at = NULL, achieved_at = NULL, updated_at = datetime('now')
+		WHERE task_id = ?
+		RETURNING `+taskGoalSelectColumns, goal.GoalID, goal.Objective, goal.Reason, taskID))
+	if err != nil {
+		return fmt.Errorf("updating task goal: %w", err)
+	}
+	*goal = *updated
+	return nil
+}
+
 func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *models.Task) error {
 	// Get the max display_order for this project and category, then add 1
 	var maxOrder sql.NullInt64

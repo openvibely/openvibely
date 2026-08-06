@@ -849,6 +849,46 @@ func issueCodesHandler(candidate models.AutomationDraftCandidate, drafts *servic
 	return codes
 }
 
+func TestAutomationBuilderConfiguresGoalsForOwnedAndImplementationTasks(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation task goals").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	candidate, err := drafts.TemplateCandidate(service.AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+
+	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"},
+		"candidate_json": {automationDraftCandidateJSONForTest(t, candidate)},
+	}).Execute()
+	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+	require.Contains(t, preview.Body.String(), `name="node_vision_suggestions_goal"`)
+	require.Contains(t, preview.Body.String(), `name="node_implementation_goal"`)
+
+	saved := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"template"},
+		"candidate_json": {automationDraftCandidateJSONForTest(t, candidate)}, "save_changes": {"true"},
+		"node_vision_suggestions_goal": {"Produce one reviewable product suggestion."},
+		"node_implementation_goal":     {"Implement the approved change with tests passing."},
+	}).Execute()
+	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
+
+	var taskID string
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT resource_id FROM automation_definition_resources resource
+		JOIN automation_nodes node ON node.id = resource.node_id
+		WHERE node.node_key = 'vision_suggestions' AND resource.resource_type = 'task'`).Scan(&taskID))
+	goal, err := repository.NewTaskGoalRepo(tc.db).GetByTaskID(ctx, taskID)
+	require.NoError(t, err)
+	require.NotNil(t, goal)
+	require.Equal(t, "Produce one reviewable product suggestion.", goal.Objective)
+}
+
 func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

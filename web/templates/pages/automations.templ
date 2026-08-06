@@ -962,7 +962,18 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 											</select></label>
 										}
 										<label class="form-control"><span class="label-text">Priority</span><input type="number" min="1" max="4" class="input input-bordered" name={ "node_" + node.Key + "_priority" } value={ fmt.Sprintf("%d", automationDraftIntConfig(node, "priority")) }/></label>
-									</div>						}						if automationDraftHasConfig(node, "run_at") {
+									</div>
+								}
+								if automationDraftSupportsGoal(node) {
+									<label class="form-control mt-3"><span class="label-text">Task goal (optional)</span><textarea class="textarea textarea-bordered h-20" name={ "node_" + node.Key + "_goal" } maxlength="2000">{ automationDraftStringConfig(node, "goal") }</textarea>
+										if node.Role == "implementation" {
+											<span class="label-text-alt mt-1">Each implementation task created from this node receives this completion goal.</span>
+										} else {
+											<span class="label-text-alt mt-1">The task created for this node receives this completion goal.</span>
+										}
+									</label>
+								}
+								if automationDraftHasConfig(node, "run_at") {
 							<div class="grid grid-cols-2 gap-3"><label class="form-control"><span class="label-text">Time</span><input type="time" class="input input-bordered" name={ "node_" + node.Key + "_run_at" } value={ automationDraftStringConfig(node, "run_at") }/></label><label class="form-control"><span class="label-text">Repeat</span><select class="select select-bordered" name={ "node_" + node.Key + "_repeat_type" }>
 								for _, repeat := range []string{"once","minutes","hours","daily","weekly","monthly"} {
 									<option value={ repeat } selected?={ automationDraftStringConfig(node, "repeat_type") == repeat }>{ repeat }</option>
@@ -1032,10 +1043,14 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						if (automationName) candidate.name = automationName.value;
 						(candidate.nodes || []).forEach(function(node) {
 						var prefix = 'node_' + node.key + '_';
-						var name = builder.querySelector('[name="' + prefix + 'name"]');
-						if (name) node.name = name.value;
-						if (node.config && Object.prototype.hasOwnProperty.call(node.config, 'prompt')) {
-							var prompt = builder.querySelector('[name="' + prefix + 'prompt"]');
+							var name = builder.querySelector('[name="' + prefix + 'name"]');
+							var goal = builder.querySelector('[name="' + prefix + 'goal"]');
+							if (name) node.name = name.value;
+							if (goal) {
+								node.config = node.config || {};
+								node.config.goal = goal.value;
+							}
+							if (node.config && Object.prototype.hasOwnProperty.call(node.config, 'prompt')) {							var prompt = builder.querySelector('[name="' + prefix + 'prompt"]');
 							var category = builder.querySelector('[name="' + prefix + 'category"]');
 							var priority = builder.querySelector('[name="' + prefix + 'priority"]');
 							var agentRef = builder.querySelector('[name="' + prefix + 'agent_ref"]');
@@ -1369,6 +1384,9 @@ func automationValidationMessages(issues []models.AutomationValidationIssue, _ [
 	return messages
 }
 func automationDraftHasConfig(node models.AutomationDraftNode, key string) bool { _, ok := node.Config[key]; return ok }
+func automationDraftSupportsGoal(node models.AutomationDraftNode) bool {
+	return node.Type == models.AutomationNodeTrigger || node.Type == models.AutomationNodeAgentTask
+}
 func automationDraftStringConfig(node models.AutomationDraftNode, key string) string { value, _ := node.Config[key].(string); return value }
 func automationDraftStringSliceConfig(node models.AutomationDraftNode, key string) string { values := []string{}; switch configured := node.Config[key].(type) { case []string: values = append(values, configured...); case []any: for _, value := range configured { if text, ok := value.(string); ok { values = append(values, text) } } }; return strings.Join(values, ", ") }
 func automationDraftStringSliceContains(node models.AutomationDraftNode, key, expected string) bool { switch values := node.Config[key].(type) { case []string: for _, value := range values { if value == expected { return true } }; case []any: for _, value := range values { if text, ok := value.(string); ok && text == expected { return true } } }; return false }

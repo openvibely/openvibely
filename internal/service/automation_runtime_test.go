@@ -1775,6 +1775,12 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(fixture.taskRepo, nil, workerSvc)
 	implementationNode := automationNodeByKey(t, fixture.definition, "implementation")
+	var implementationConfig map[string]any
+	require.NoError(t, json.Unmarshal([]byte(implementationNode.ConfigJSON), &implementationConfig))
+	implementationConfig["goal"] = "Complete the assigned issue with focused regression coverage."
+	updatedImplementationConfig, err := json.Marshal(implementationConfig)
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE automation_nodes SET config_json = ? WHERE id = ? RETURNING id`, string(updatedImplementationConfig), implementationNode.ID).Scan(new(string)))
 	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
 		taskRepo: fixture.taskRepo, taskSvc: taskSvc}
 	runtime := llmSvc.taskControlRuntimeTools(fixture.task)
@@ -1800,7 +1806,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	fixture.project.RepoURL = ""
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 	localRemoteOutput, handled, isErr, localRemoteErr := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
-		"title":"Local remote issue task","prompt":"use the project local remote","category":"backlog",
+		"title":"Local remote issue task","prompt":"use the project local remote","goal":"ignore this model-supplied goal","category":"backlog",
 		"source_github_issue_number":44,"source_github_repo_url":"https://github.com/attacker/fallback"
 	}`))
 	require.NoError(t, localRemoteErr)
@@ -1810,6 +1816,11 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	localRemoteTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Local remote issue task")
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryActive, localRemoteTask.Category, "GitHub assignment is approval, so the issue-specific task must be admitted immediately")
+	localRemoteGoal, err := repository.NewTaskGoalRepo(fixture.repo.DB()).GetByTaskID(ctx, localRemoteTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, localRemoteGoal)
+	require.Equal(t, "Complete the assigned issue with focused regression coverage.", localRemoteGoal.Objective,
+		"the persisted implementation-node goal must override a model-supplied goal")
 	select {
 	case submitted := <-workerSvc.Submitted():
 		require.Equal(t, localRemoteTask.ID, submitted.ID, "the approved issue-specific task must be submitted to the worker")
