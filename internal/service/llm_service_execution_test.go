@@ -4064,6 +4064,14 @@ func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *te
 	require.Empty(t, resolvedPath)
 }
 
+func TestAutomationGitHubRuntimeToolsDoNotExposeStatusCommenting(t *testing.T) {
+	defs := gitHubIssueRuntimeToolDefs(true)
+	for _, def := range defs {
+		require.NotEqual(t, "github_comment_on_issue", def.Name)
+	}
+	require.Contains(t, runtimeToolDefinitionSet(defs), "github_open_pull_request")
+}
+
 func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

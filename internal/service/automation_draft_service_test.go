@@ -351,6 +351,9 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.Contains(t, githubSDLCDevInboxPrompt, "Never call `execute_tasks` for an Active pending, queued, running, or completed task")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "Finally, call execute_tasks with that exact task ID")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not leave approved implementation work in Backlog")
+	require.Contains(t, githubSDLCDevInboxPrompt, "Do not post status comments on GitHub issues")
+	require.NotContains(t, githubSDLCDevInboxPrompt, "github_comment_on_issue")
+	require.Contains(t, githubSDLCDevInboxPrompt, "github_open_pull_request")
 	for name, prompt := range map[string]string{
 		"vision suggestions":  githubSDLCOfferingManagerPrompt,
 		"bug finder":          githubSDLCBugFinderPrompt,

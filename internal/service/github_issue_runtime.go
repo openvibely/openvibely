@@ -52,6 +52,7 @@ type githubIssueRuntimeOptions struct {
 	AutomationRepo           *repository.AutomationRepo
 	GitHub                   GitHubIssueRuntimeProvider
 	AfterPRFeedbackForwarded func(taskID string)
+	SuppressIssueComments    bool
 }
 
 type githubCreateIssueRuntimeInput struct {
@@ -66,7 +67,7 @@ func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.
 	if opts.GitHub == nil || opts.ProjectRepo == nil || strings.TrimSpace(opts.ProjectID) == "" {
 		return nil
 	}
-	defs := gitHubIssueRuntimeToolDefs()
+	defs := gitHubIssueRuntimeToolDefs(opts.SuppressIssueComments)
 	if len(defs) == 0 {
 		return nil
 	}
@@ -77,11 +78,11 @@ func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.
 	}
 }
 
-func gitHubIssueRuntimeToolDefs() []llmcontracts.RuntimeToolDefinition {
+func gitHubIssueRuntimeToolDefs(suppressIssueComments bool) []llmcontracts.RuntimeToolDefinition {
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, false)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 6)
 	for _, def := range defs {
-		if strings.HasPrefix(strings.ToLower(def.Name), "github_") {
+		if strings.HasPrefix(strings.ToLower(def.Name), "github_") && (!suppressIssueComments || def.Name != "github_comment_on_issue") {
 			filtered = append(filtered, def)
 		}
 	}

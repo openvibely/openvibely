@@ -255,6 +255,7 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 	if s == nil {
 		return nil
 	}
+	_, automationBound := AutomationContextFromContext(ctx)
 	githubTools := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
 		ProjectID:                task.ProjectID,
 		ProjectRepo:              s.projectRepo,
@@ -266,6 +267,7 @@ func (s *LLMService) taskActionRuntimeTools(ctx context.Context, task models.Tas
 		AutomationRepo:           s.automationRepo,
 		GitHub:                   s.githubIssueRuntime,
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
+		SuppressIssueComments:    automationBound,
 	})
 	return llmcontracts.CompositeRuntimeTools(s.taskSendMessageRuntimeTools(task), s.taskControlRuntimeTools(task), githubTools, s.automationBootstrapRuntimeTools(ctx, task))
 }
@@ -293,6 +295,7 @@ func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task mode
 		AutomationRepo:           s.automationRepo,
 		GitHub:                   s.githubIssueRuntime,
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
+		SuppressIssueComments:    true,
 	})
 	if runtime == nil {
 		return nil

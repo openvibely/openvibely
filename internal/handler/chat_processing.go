@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -196,12 +197,33 @@ func (h *Handler) automationGitHubRuntimeTools(ctx context.Context, task models.
 // by processStreamingResponse. The hardened Automation GitHub runtime is built
 // once here and remains first in the dispatch chain for the whole model turn.
 func (h *Handler) buildStreamingResponseActionRuntime(ctx context.Context, params streamingResponseParams, collector *chatActionSummaryCollector, defs []llmcontracts.RuntimeToolDefinition, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
+	_, automationBound := service.AutomationContextFromContext(ctx)
+	automationBound = automationBound || params.AutomationContext != nil
+	if automationBound {
+		filtered := make([]llmcontracts.RuntimeToolDefinition, 0, len(defs))
+		for _, def := range defs {
+			if def.Name != "github_comment_on_issue" {
+				filtered = append(filtered, def)
+			}
+		}
+		defs = filtered
+	}
 	var hardenedAutomationGitHubRT *llmcontracts.RuntimeTools
 	if params.IsTaskFollowup && params.Task != nil && h.llmSvc != nil {
 		hardenedAutomationGitHubRT = h.automationGitHubRuntimeTools(ctx, *params.Task, defs)
 	}
 	genericRT := h.buildChatActionToolRuntimeFromDefs(params, collector, defs, mode, surface)
-	return llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, genericRT)
+	runtime := llmcontracts.CompositeRuntimeTools(hardenedAutomationGitHubRT, llmcontracts.RuntimeToolsFromContext(ctx), params.RuntimeTools, genericRT)
+	if automationBound && runtime != nil {
+		baseExecutor := runtime.Executor
+		runtime.Executor = func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if strings.EqualFold(strings.TrimSpace(name), "github_comment_on_issue") {
+				return "", true, true, errors.New("GitHub issue status comments are disabled for Automation tasks")
+			}
+			return baseExecutor(toolCtx, name, input)
+		}
+	}
+	return runtime
 }
 
 func (h *Handler) startStreamingResponse(params streamingResponseParams) error {

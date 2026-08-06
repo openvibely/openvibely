@@ -1787,12 +1787,19 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 	}
 	require.Zero(t, createCalls, "every real task-thread entry shape must use the Automation human gate")
 
-	params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, ExecID: execution.ID, IsTaskFollowup: true, Task: &task}
+	params := streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, ExecID: execution.ID, IsTaskFollowup: true, Task: &task, AutomationContext: &models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}}}
+	assembledRuntime := tc.handler.buildStreamingResponseActionRuntime(causalCtx, params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	require.False(t, assembledRuntime.HasDefinition("github_comment_on_issue"), "Automation follow-ups must not expose issue status commenting through a generic fallback")
+	require.True(t, assembledRuntime.HasDefinition("github_open_pull_request"), "Automation follow-ups must retain PR publication and issue linking")
+	_, handled, isError, commentErr := assembledRuntime.Executor(causalCtx, "github_comment_on_issue", json.RawMessage(`{"issue_number":91,"body":"status"}`))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, commentErr, "status comments are disabled")
 	hardened := tc.handler.llmSvc.AutomationGitHubRuntimeTools(causalCtx, task, defs)
 	generic := tc.handler.buildChatActionToolRuntimeFromDefs(params, nil, defs, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
 	runtime := llmcontracts.CompositeRuntimeTools(hardened, generic)
 
-	_, handled, isError, err := runtime.Executor(causalCtx, "github_create_issue", json.RawMessage(`{"title":"Safe follow-up issue","assignees":["bot"]}`))
+	_, handled, isError, err = runtime.Executor(causalCtx, "github_create_issue", json.RawMessage(`{"title":"Safe follow-up issue","assignees":["bot"]}`))
 	require.True(t, handled)
 	require.True(t, isError)
 	require.ErrorContains(t, err, "human GitHub assignment")
