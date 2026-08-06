@@ -56,11 +56,12 @@ type githubIssueRuntimeOptions struct {
 }
 
 type githubCreateIssueRuntimeInput struct {
-	Title     string   `json:"title"`
-	Body      string   `json:"body"`
-	Labels    []string `json:"labels"`
-	Assignees []string `json:"assignees"`
-	RepoURL   string   `json:"repo_url"`
+	Title          string   `json:"title"`
+	Body           string   `json:"body"`
+	Labels         []string `json:"labels"`
+	Assignees      []string `json:"assignees"`
+	RepoURL        string   `json:"repo_url"`
+	IdempotencyKey string   `json:"idempotency_key"`
 }
 
 func buildGitHubIssueRuntimeTools(opts githubIssueRuntimeOptions) *llmcontracts.RuntimeTools {
@@ -182,7 +183,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				if !hasAutomationContext || !hasExecution {
 					return "", errors.New("complete Automation source is required for GitHub issue creation")
 				}
-				dedupFingerprint = githubIssueTitleFingerprint(req.Title)
+				dedupFingerprint = githubIssueDedupFingerprint(req.Title, req.IdempotencyKey)
 				dedupOwner = activityKey
 				dedupClaim, err = opts.AutomationRepo.AcquireGitHubIssueDedupLease(ctx, opts.ProjectID, repo.FullName, dedupFingerprint,
 					dedupOwner, repository.AutomationGitHubIssueDedupSource{Context: automationContext, TaskID: taskID, ExecutionID: executionID},
@@ -526,6 +527,11 @@ func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIss
 	if !actionAuthorized {
 		return false, errors.New("github_create_issue is not authorized by the caller's Automation graph")
 	}
+	if key := strings.Join(strings.Fields(strings.TrimSpace(req.IdempotencyKey)), " "); len(key) > 200 {
+		return false, errors.New("GitHub issue idempotency_key must be at most 200 characters")
+	} else {
+		req.IdempotencyKey = key
+	}
 	req.RepoURL = ""
 	if configured {
 		req.Labels = configuredLabels
@@ -742,6 +748,14 @@ func repairAutomationGitHubIssueProjection(opts githubIssueRuntimeOptions, repo 
 		return nil, fmt.Errorf("expected GitHub issue projection for %d source binding(s), recorded %d", len(claim.Source.Context.Bindings), recordedBindings)
 	}
 	return githubIssueFromCanonicalResource(githubIssueResourceID(repo, claim.IssueNumber)), nil
+}
+
+func githubIssueDedupFingerprint(title, idempotencyKey string) string {
+	if normalizedKey := strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(idempotencyKey))), " "); normalizedKey != "" {
+		hash := sha256.Sum256([]byte("finding:\n" + normalizedKey))
+		return fmt.Sprintf("%x", hash[:])
+	}
+	return githubIssueTitleFingerprint(title)
 }
 
 func githubIssueTitleFingerprint(title string) string {

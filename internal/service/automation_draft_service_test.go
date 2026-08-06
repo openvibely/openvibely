@@ -367,7 +367,8 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 		require.Contains(t, prompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection", name)
 		require.Contains(t, prompt, "Do not require a repository-wide issue or pull-request listing/search before publication", name)
 		require.Contains(t, prompt, "Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated", name)
-		require.Contains(t, prompt, "Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention", name)
+		require.Contains(t, prompt, "Call github_create_issue for each actionable finding with an idempotency_key built as finder-role:primary-file-or-component:stable-symbol-or-behavior", name)
+		require.Contains(t, prompt, "Reuse the exact key when the same finding is reworded or retried", name)
 		require.NotContains(t, prompt, "searching/inspecting existing visible work", name)
 	}
 

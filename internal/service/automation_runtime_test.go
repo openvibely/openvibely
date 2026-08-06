@@ -2085,6 +2085,39 @@ func replaceAutomationGitHubIssueGraph(t *testing.T, fixture automationRuntimeFi
 	return saved.Definition
 }
 
+func TestAutomationGitHubIssueCreationDeduplicatesStableFindingKeyAcrossRewordedTitles(t *testing.T) {
+	var createCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createCalls.Add(1)
+			return &GitHubIssue{Number: 96, URL: "https://github.com/example/runtime/issues/96", Title: req.Title, State: "open"}, nil
+		},
+	}
+	_, newCausalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
+
+	firstCtx := newCausalContext("stable-finding-first")
+	firstInput := json.RawMessage(`{
+		"title":"Request validation panics for empty headers",
+		"body":"body",
+		"idempotency_key":"bug:internal/http/handler.go:validate-request-headers"
+	}`)
+	first, err := createIssue(firstCtx, firstInput)
+	require.NoError(t, err)
+	require.Contains(t, first, `"Number":96`)
+
+	second, err := createIssue(newCausalContext("stable-finding-reworded"), json.RawMessage(`{
+		"title":"Empty request headers crash the validation handler",
+		"body":"rewritten body",
+		"idempotency_key":"bug:internal/http/handler.go:validate-request-headers"
+	}`))
+	require.NoError(t, err)
+	require.Contains(t, second, `"reused":true`)
+	require.Equal(t, int32(1), createCalls.Load(), "a reworded duplicate finding must reuse the locally claimed issue")
+}
+
 func TestAutomationGitHubIssueCreationRejectsCompletedClaimFromDifferentAutomation(t *testing.T) {
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{

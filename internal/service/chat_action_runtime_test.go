@@ -176,6 +176,22 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 	}
 }
 
+func TestAutomationNotificationCreationRequiresStableIdempotencyKey(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Native duplicate prevention"}
+	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, project))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, AlertSvc: alertSvc})
+	automationCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID, OriginTask: true})
+
+	_, err := handlers["create_notification"](automationCtx, json.RawMessage(`{
+		"type":"bug_suggestion",
+		"title":"Missing key creates a duplicate-prone notification"
+	}`))
+	require.ErrorContains(t, err, "stable idempotency_key")
+}
+
 func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

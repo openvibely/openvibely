@@ -43,7 +43,7 @@ const githubSDLCOfferingManagerPrompt = `Review the configured project vision/so
 
 Open GitHub suggestion issues only. Use ` + "`" + `github_create_issue` + "`" + ` with the unprefixed labels ` + "`" + `suggestion` + "`" + ` and ` + "`" + `feature` + "`" + `. Do not create implementation tasks and do not modify code.` + githubSDLCReadableIssueInstructions + `
 
-Include enough context for a human to approve, reject, or assign the issue. Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.`
+Include enough context for a human to approve, reject, or assign the issue. Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding with an idempotency_key built as finder-role:primary-file-or-component:stable-symbol-or-behavior. Reuse the exact key when the same finding is reworded or retried; never include a run ID, date, timestamp, or random value. The server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.`
 
 const githubSDLCBugFinderPrompt = `You are the Bug Finder. Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
 
@@ -51,7 +51,7 @@ Look only for likely correctness defects, edge-case failures, broken behavior, o
 
 Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `bug` + "`" + `.` + githubSDLCReadableIssueInstructions + `
 
-Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
+Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding with an idempotency_key built as finder-role:primary-file-or-component:stable-symbol-or-behavior. Reuse the exact key when the same finding is reworded or retried; never include a run ID, date, timestamp, or random value. The server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 
 Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.`
 
@@ -61,7 +61,7 @@ Look only for measurable performance, latency, throughput, memory, build, or wor
 
 Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `performance` + "`" + `.` + githubSDLCReadableIssueInstructions + `
 
-Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
+Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding with an idempotency_key built as finder-role:primary-file-or-component:stable-symbol-or-behavior. Reuse the exact key when the same finding is reworded or retried; never include a run ID, date, timestamp, or random value. The server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 
 Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.`
 
@@ -71,7 +71,7 @@ Look only for demonstrated duplicated or redundant code, configuration, or workf
 
 Open GitHub issues only using ` + "`" + `github_create_issue` + "`" + ` with the unprefixed label ` + "`" + `duplication` + "`" + `.` + githubSDLCReadableIssueInstructions + `
 
-Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding; the server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
+Do not list, search, or inspect existing GitHub issues for duplicate detection. Do not require a repository-wide issue or pull-request listing/search before publication. Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated. Call github_create_issue for each actionable finding with an idempotency_key built as finder-role:primary-file-or-component:stable-symbol-or-behavior. Reuse the exact key when the same finding is reworded or retried; never include a run ID, date, timestamp, or random value. The server performs trusted local duplicate prevention, and the server prevents duplicate Automation-created issues using trusted local state.
 
 Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.`
 

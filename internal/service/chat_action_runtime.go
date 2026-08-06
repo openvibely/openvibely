@@ -1029,6 +1029,9 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if len(req.Message) > 2000 || len(req.Body) > 20000 || len(req.IdempotencyKey) > 200 {
 				return "", fmt.Errorf("notification content exceeds the allowed size")
 			}
+			if automationContext, automationBound := AutomationContextFromContext(ctx); automationBound && automationContext.ProjectID == opts.ProjectID && strings.TrimSpace(req.IdempotencyKey) == "" {
+				return "", fmt.Errorf("Automation notifications require a stable idempotency_key")
+			}
 			severity, severityErr := channelAlertSeverity(req.Severity)
 			if severityErr != "" {
 				return "", fmt.Errorf("%s", severityErr)
