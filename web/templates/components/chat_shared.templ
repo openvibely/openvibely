@@ -1831,8 +1831,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 						function shortcutHint() {
 							return usesAppleShortcuts
-								? 'Enter sends or queues · ⌘Enter queues · Shift+Enter adds a line · ⌘click steers'
-								: 'Enter sends or queues · Ctrl+Enter queues · Shift+Enter adds a line · Ctrl+click steers';
+								? 'Enter sends or queues · ⌘Enter steers'
+								: 'Enter sends or queues · Ctrl+Enter steers';
 						}
 						window.refreshChatComposerShortcutHint = function(textarea) {
 							if (!textarea) return;
@@ -2110,8 +2110,15 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							if (e.isComposing || e.keyCode === 229) return;
 							if (e.key === 'Enter' && !e.shiftKey) {
 								e.preventDefault();
-								var explicitQueue = shortcutModifierPressed(e);
-								submitComposer(normalPostEndpoint, explicitQueue ? 'queue' : 'normal');
+								if (shortcutModifierPressed(e)) {
+									var turnID = activeTurnID();
+									if (steerEndpoint && turnID) {
+										setExpectedTurnID(turnID);
+										submitComposer(steerEndpoint, 'steer');
+										return;
+									}
+								}
+								submitComposer(normalPostEndpoint, 'normal');
 							}
 							});
 							messageInput.addEventListener('input', function() {								if (!suppressMessageHistoryInputReset) resetMessageHistoryNavigation();
