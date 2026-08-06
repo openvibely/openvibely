@@ -194,6 +194,76 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 	}
 }
 
+func TestChatComposerIOSShortcutHintAndModifierInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+
+	var form bytes.Buffer
+	if err := ChatInputForm(ChatInputFormConfig{
+		FormID:        "chat-form",
+		InputID:       "message-input",
+		PostEndpoint:  "/chat/send",
+		SteerEndpoint: "/chat/steer",
+		TargetID:      "chat-messages",
+		IsRunning:     true,
+		ActiveTurnID:  "ios-turn",
+	}).Render(context.Background(), &form); err != nil {
+		t.Fatalf("render composer: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
+<script>
+Object.defineProperty(navigator, 'userAgentData', { configurable: true, value: { platform: 'iOS' } });
+window.__iosComposerRequests = [];
+window.htmx = {
+  ajax: function(method, endpoint, options) {
+    var data = options.values || Object.fromEntries(new FormData(options.source));
+    window.__iosComposerRequests.push({ path: endpoint, message: data.message, expectedTurnID: data.expected_turn_id });
+  }
+};
+</script>
+<div id="chat-messages"><div data-execution-pair="true" data-exec-status="running" data-exec-id="ios-turn"></div></div>%s
+<div id="browser-result">pending</div>
+<script>
+(function() {
+  function fail(message) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', message); document.getElementById('browser-result').textContent = 'FAIL:' + message; throw new Error(message); }
+  function key(input, options) { input.dispatchEvent(new KeyboardEvent('keydown', Object.assign({key:'Enter', bubbles:true, cancelable:true}, options || {}))); }
+  try {
+    var form = document.getElementById('chat-form');
+    var input = document.getElementById('message-input');
+    var expectedHint = '⏎ sends or queues · ⌘+⏎ steers';
+    if (input.placeholder !== expectedHint || input.title !== expectedHint) fail('iOS did not receive Apple shortcut hint');
+    form.addEventListener('submit', function(event) {
+      event.preventDefault();
+      window.__iosComposerRequests.push({ path: form.getAttribute('hx-post'), message: new FormData(form).get('message') });
+    });
+
+    input.value = 'ctrl normal send'; key(input, {ctrlKey:true});
+    input.value = 'meta steer'; key(input, {metaKey:true});
+
+    var records = window.__iosComposerRequests;
+    if (records.length !== 2) fail('request count was ' + records.length + ', want 2');
+    if (records[0].path !== '/chat/send' || records[0].message !== 'ctrl normal send') fail('iOS Ctrl+Enter did not use the normal send path');
+    if (records[1].path !== '/chat/steer' || records[1].message !== 'meta steer' || records[1].expectedTurnID !== 'ios-turn') fail('iOS Meta+Enter did not use guarded steering');
+    document.getElementById('browser-result').textContent = 'PASS';
+    document.body.setAttribute('data-test-result', 'pass');
+  } catch (error) {
+    document.body.setAttribute('data-test-result', 'fail');
+    document.body.setAttribute('data-test-error', error.message);
+  }
+})();
+</script></body></html>`, form.String())
+	}))
+	defer server.Close()
+
+	runHeadlessChromeFixture(t, chrome, server.URL+"/", "iOS composer shortcuts", 5000, 20*time.Second)
+}
+
 func TestChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
