@@ -5108,6 +5108,76 @@ func TestHandler_TaskThreadSend_WithExplicitAgent(t *testing.T) {
 	}
 }
 
+// TestHandler_TaskThreadSend_ExplicitAgentPersistsAsTaskDefault verifies that
+// explicitly selecting a model in the task-thread composer becomes the task's
+// ongoing assigned model (Task.AgentID), so a subsequent thread render reflects
+// the newly selected model rather than reverting to the task's prior default.
+func TestHandler_TaskThreadSend_ExplicitAgentPersistsAsTaskDefault(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	defaultAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Default Agent" })
+	explicitAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Explicit Agent"
+		a.Provider = "anthropic"
+		a.Model = "claude-opus-4-20250514"
+		a.MaxTokens = 8192
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Model Persist Test")
+	task := createTask(t, h, project.ID, "Model Persist Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &defaultAgent.ID
+	})
+
+	form := url.Values{}
+	form.Set("message", "Switch to the explicit model")
+	form.Set("agent_id", explicitAgent.ID)
+	rec := postForm(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updatedTask.AgentID == nil || *updatedTask.AgentID != explicitAgent.ID {
+		t.Fatalf("expected task.AgentID=%s after explicit selection, got %v", explicitAgent.ID, updatedTask.AgentID)
+	}
+
+	// A subsequent thread render must reflect the persisted selection, not the
+	// task's original default agent.
+	threadRec := htmxGet(e, "/tasks/"+task.ID+"/thread")
+	assertCode(t, threadRec, http.StatusOK)
+	assertContains(t, threadRec, "data-task-agent=\""+explicitAgent.ID+"\"")
+}
+
+// TestHandler_TaskThreadSend_AutoSelectionDoesNotOverrideTaskDefault verifies that
+// sending a follow-up with "auto" model routing (no explicit selection change)
+// does not overwrite the task's previously assigned model.
+func TestHandler_TaskThreadSend_AutoSelectionDoesNotOverrideTaskDefault(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	assignedAgent := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Assigned Agent" })
+	project := createProject(t, h, "Auto No Override Test")
+	task := createTask(t, h, project.ID, "Auto No Override Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &assignedAgent.ID
+	})
+
+	form := url.Values{}
+	form.Set("message", "Follow up without an explicit model change")
+	form.Set("agent_id", "auto")
+	rec := postForm(e, "/tasks/"+task.ID+"/thread", form)
+	assertCode(t, rec, http.StatusOK)
+
+	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if updatedTask.AgentID == nil || *updatedTask.AgentID != assignedAgent.ID {
+		t.Fatalf("expected task.AgentID to remain %s, got %v", assignedAgent.ID, updatedTask.AgentID)
+	}
+}
+
 func TestHandler_GetTaskThread_LoadsAttachments(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

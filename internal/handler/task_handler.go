@@ -1984,6 +1984,27 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 	}
 
+	// An explicit composer model selection (a concrete model ID, or an explicit
+	// "default" choice) becomes the task's ongoing assigned model, so the composer
+	// selector continues to reflect it after this send and on future follow-ups
+	// instead of silently reverting to the task's previous default. This matches
+	// task assignment semantics where explicit Task.AgentID drives task model
+	// selection. "auto" and unset selections are one-off routing for this send
+	// only and do not change the task's assignment. Persisting here (rather than
+	// only after execution admission) also protects against races with concurrent
+	// or queued follow-ups: each queued/direct execution still carries its own
+	// explicitly resolved agent.ID independent of this assignment update.
+	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
+		newAgentID := agent.ID
+		if task.AgentID == nil || *task.AgentID != newAgentID {
+			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), taskID, newAgentID); updErr != nil {
+				applog.Infof("[handler] TaskThreadSend error persisting selected model task=%s agent=%s: %v", taskID, newAgentID, updErr)
+			} else {
+				task.AgentID = &newAgentID
+			}
+		}
+	}
+
 	activeExec, activeErr := h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
 	if activeErr != nil {
 		applog.Infof("[handler] TaskThreadSend active execution check failed task=%s: %v", taskID, activeErr)
