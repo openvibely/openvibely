@@ -125,6 +125,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	githubAppSlug := ""
 	githubPrivateKeyValue := ""
 	githubPATValue := ""
+	githubAPIEndpoint := ""
 	githubHasPrivateKey := false
 	githubHasPAT := false
 	githubModeSetting := ""
@@ -167,6 +168,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		if strings.TrimSpace(githubPATValue) != "" {
 			githubHasPAT = true
 		}
+		githubAPIEndpoint, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAPIEndpoint)
 		if strings.TrimSpace(githubModeSetting) != "" {
 			githubAuthMode = service.NormalizeGitHubAuthMode(githubModeSetting)
 		}
@@ -286,9 +288,9 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	}
 
 	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, resolvedProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
+		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, resolvedProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubAPIEndpoint, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
 	}
-	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
+	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubAPIEndpoint, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
 }
 
 // handleAppSettings renders the application settings page (personality, etc.)
@@ -479,6 +481,11 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 	appSlug := strings.TrimSpace(c.FormValue("github_app_slug"))
 	privateKey := strings.TrimSpace(c.FormValue("github_app_private_key"))
 	pat := strings.TrimSpace(c.FormValue("github_pat"))
+	apiEndpoint := strings.TrimSpace(c.FormValue("github_api_endpoint"))
+
+	if err := h.settingsRepo.Set(c.Request().Context(), service.GitHubSettingAPIEndpoint, apiEndpoint); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save GitHub API endpoint")
+	}
 
 	if strings.TrimSpace(c.FormValue("github_auth_mode")) == "" && (appID != "" || appSlug != "" || privateKey != "") {
 		authMode = service.GitHubAuthModeApp
@@ -574,6 +581,7 @@ func (h *Handler) handleGitHubRemove(c echo.Context) error {
 		{key: service.GitHubSettingPAT, value: ""},
 		{key: service.GitHubSettingPATUserLogin, value: ""},
 		{key: service.GitHubSettingAuthMode, value: ""},
+		{key: service.GitHubSettingAPIEndpoint, value: ""},
 	}); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}

@@ -652,7 +652,7 @@ func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 	var createdReq service.GitHubCreatePullRequestRequest
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
 			if publishReq.Branch != task.WorktreeBranch {
@@ -715,7 +715,7 @@ func TestGitHubReplacePullRequestBranchRuntimeToolUsesLeaseGuard(t *testing.T) {
 	var got service.GitHubReplaceBranchHeadRequest
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 		getPullRequestFn: func(_ context.Context, _ *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error) {
 			return &service.GitHubPullRequest{Number: number, HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely"}, nil
@@ -826,6 +826,56 @@ func TestGitHubPRRuntimeToolsShareTargetRejections(t *testing.T) {
 	}
 }
 
+func TestInteractiveGitHubRuntimeExplicitRepositoryUsesProjectEndpointByParsedHost(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	const enterpriseEndpoint = "https://github.example.com/api/v3"
+	project := &models.Project{
+		Name:    "Enterprise Chat runtime",
+		RepoURL: "https://github.example.com/acme/widgets.git",
+	}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	providerCalls := 0
+	h.SetGitHubService(&fakeGitHubService{
+		globalAPIEndpoint: enterpriseEndpoint,
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
+			if strings.TrimSpace(repoPath) != "" {
+				t.Fatalf("explicit repo_url unexpectedly used local path %q", repoPath)
+			}
+			parsed, err := service.ParseGitHubRepoURL(repoURL)
+			if err != nil {
+				return nil, err
+			}
+			return &parsed, nil
+		},
+		createIssueFn: func(_ context.Context, repo *service.GitHubRepoRef, req service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
+			providerCalls++
+			if repo.FullName != "acme/sibling" || repo.APIBaseURL != enterpriseEndpoint {
+				t.Fatalf("unexpected resolved repository: %+v", repo)
+			}
+			return &service.GitHubIssue{Number: 1, Title: req.Title}, nil
+		},
+	})
+	handlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+	if _, err := handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"Sibling issue","repo_url":"git@github.example.com:acme/sibling.git"}`)); err != nil {
+		t.Fatalf("same-host Enterprise repository failed: %v", err)
+	}
+	if providerCalls != 1 {
+		t.Fatalf("provider calls = %d, want 1", providerCalls)
+	}
+
+	if _, err := handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"Unsafe issue","repo_url":"https://github.com/acme/widgets.git"}`)); err == nil || !strings.Contains(err.Error(), "repository host") {
+		t.Fatalf("expected cross-host repository rejection, got %v", err)
+	}
+	if providerCalls != 1 {
+		t.Fatalf("cross-host request reached provider; calls = %d", providerCalls)
+	}
+}
+
 func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()
@@ -847,12 +897,12 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			switch repoURL {
 			case project.RepoURL:
-				return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+				return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 			case "https://github.com/example/other":
 				if strings.TrimSpace(repoPath) != "" {
 					t.Fatalf("expected explicit repo_url lookup to avoid local repo path, got %q", repoPath)
 				}
-				return &service.GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
+				return &service.GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other", HTMLURL: "https://github.com/example/other"}, nil
 			default:
 				t.Fatalf("unexpected repo URL %q", repoURL)
 				return nil, nil

@@ -17,6 +17,7 @@ func TestProjectRepo_CreateAndGetByID(t *testing.T) {
 		Name:        "Test Project",
 		Description: "A test project",
 		RepoPath:    "/path/to/repo",
+		RepoURL:     "https://github.example.com/acme/widgets",
 	}
 
 	if err := repo.Create(ctx, p); err != nil {

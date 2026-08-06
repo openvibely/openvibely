@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +16,7 @@ import (
 
 type prFeedbackCall struct {
 	repoFullName string
+	apiBaseURL   string
 	prNumber     int
 }
 
@@ -23,7 +27,7 @@ type fakePRFeedbackProvider struct {
 	calls             []prFeedbackCall
 }
 
-func (f *fakePRFeedbackProvider) GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error) {
+func (f *fakePRFeedbackProvider) GetAuthenticatedUserForRepo(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, error) {
 	if f.authenticatedUser != nil {
 		return f.authenticatedUser, nil
 	}
@@ -34,12 +38,89 @@ func (f *fakePRFeedbackProvider) ListPullRequestFeedback(ctx context.Context, re
 	call := prFeedbackCall{prNumber: prNumber}
 	if repo != nil {
 		call.repoFullName = repo.FullName
+		call.apiBaseURL = repo.APIBaseURL
 	}
 	f.calls = append(f.calls, call)
 	if f.itemsByCall != nil {
 		return f.itemsByCall[call], nil
 	}
 	return f.items, nil
+}
+
+func TestGitHubPRFeedbackForwarderResolvesPATIdentityThroughEnterpriseEndpoint(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "enterprise-token"); err != nil {
+		t.Fatalf("set PAT: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPATUserLogin, "cached-public-user"); err != nil {
+		t.Fatalf("set cached public PAT user: %v", err)
+	}
+
+	var publicRequests atomic.Int32
+	publicServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		publicRequests.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login":"wrong-public-user"}`))
+	}))
+	defer publicServer.Close()
+
+	var enterpriseUserRequests atomic.Int32
+	enterpriseServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/user" {
+			enterpriseUserRequests.Add(1)
+			if got := r.Header.Get("Authorization"); got != "Bearer enterprise-token" {
+				t.Errorf("enterprise /user authorization = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"login":"enterprise-user"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer enterpriseServer.Close()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Enterprise Identity", RepoPath: t.TempDir(), RepoURL: "https://github.example.com/acme/widgets"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Enterprise PR", Category: models.CategoryActive, Status: models.StatusPending}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 42, PRURL: "https://github.example.com/acme/widgets/pull/42", PRState: "open"}); err != nil {
+		t.Fatalf("upsert PR: %v", err)
+	}
+
+	github := NewGitHubService(settingsRepo, "", "", "", "")
+	github.apiBaseURL = publicServer.URL
+	forwarder := NewGitHubPRFeedbackForwarder(
+		github,
+		prRepo,
+		repository.NewGitHubPRFeedbackRepo(db),
+		repository.NewGitHubAuthRepo(db),
+		repository.NewThreadInputRepo(db),
+	)
+	_, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, &GitHubRepoRef{
+		Owner:      "acme",
+		Name:       "widgets",
+		FullName:   "acme/widgets",
+		HTMLURL:    "https://github.example.com/acme/widgets",
+		APIBaseURL: enterpriseServer.URL,
+	})
+	if err != nil {
+		t.Fatalf("forward feedback: %v", err)
+	}
+	if got := publicRequests.Load(); got != 0 {
+		t.Fatalf("public/default GitHub endpoint received %d request(s)", got)
+	}
+	if got := enterpriseUserRequests.Load(); got != 1 {
+		t.Fatalf("enterprise /user requests = %d, want 1", got)
+	}
 }
 
 func TestGitHubPRFeedbackForwarderQueuesAuthorizedFeedbackOnce(t *testing.T) {
@@ -264,6 +345,90 @@ func TestGitHubPRFeedbackForwarderDoesNotFetchPersistedPRFromSelectedRepository(
 	}
 	if len(pending) != 0 {
 		t.Fatalf("expected no queued feedback, got %#v", pending)
+	}
+}
+
+func TestParsePersistedGitHubPullRequestURLMatchesExplicitDefaultHTTPSPort(t *testing.T) {
+	selectedRepo, err := ParseGitHubRepoURL("https://github.example.com:443/acme/widgets")
+	if err != nil {
+		t.Fatalf("parse selected repository: %v", err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(&selectedRepo, "https://github.example.com/api/v3"); err != nil {
+		t.Fatalf("configure selected repository endpoint: %v", err)
+	}
+
+	parsed, err := parsePersistedGitHubPullRequestURL("https://github.example.com/acme/widgets/pull/42", 42, &selectedRepo)
+	if err != nil {
+		t.Fatalf("parse persisted PR URL: %v", err)
+	}
+	if parsed.FullName != "acme/widgets" || parsed.APIBaseURL != "https://github.example.com/api/v3" {
+		t.Fatalf("parsed repository = %#v", parsed)
+	}
+}
+
+func TestGitHubPRFeedbackForwarderUsesEnterpriseHostAndAPIEndpoint(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	feedbackRepo := repository.NewGitHubPRFeedbackRepo(db)
+	authRepo := repository.NewGitHubAuthRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+
+	project := &models.Project{ID: "proj-enterprise-pr-feedback", Name: "Enterprise PR Feedback", RepoPath: t.TempDir(), RepoURL: "https://github.example.com:8443/acme/widgets"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "alice", Permission: "triage", AddedBy: "test"}); err != nil {
+		t.Fatalf("authorize actor: %v", err)
+	}
+	var enterpriseTaskID string
+	for _, stored := range []struct {
+		id  string
+		url string
+	}{
+		{id: "task-enterprise-pr", url: "https://github.example.com:8443/acme/widgets/pull/42"},
+		{id: "task-foreign-pr", url: "https://attacker.example.com/acme/widgets/pull/43"},
+	} {
+		task := &models.Task{ID: stored.id, ProjectID: project.ID, Title: stored.id, Category: models.CategoryActive, Status: models.StatusPending}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %s: %v", stored.id, err)
+		}
+		if stored.id == "task-enterprise-pr" {
+			enterpriseTaskID = task.ID
+		}
+		prNumber := 42
+		if stored.id == "task-foreign-pr" {
+			prNumber = 43
+		}
+		if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: prNumber, PRURL: stored.url, PRState: "open"}); err != nil {
+			t.Fatalf("upsert PR %s: %v", stored.id, err)
+		}
+	}
+
+	provider := &fakePRFeedbackProvider{items: []GitHubPullRequestFeedback{{
+		Kind: "issue_comment", ID: "enterprise-feedback", AuthorLogin: "alice", AuthorType: "User", Body: "Enterprise feedback.",
+	}}}
+	parsedRepo, err := ParseGitHubRepoURL(project.RepoURL)
+	if err != nil {
+		t.Fatalf("parse selected repository: %v", err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(&parsedRepo, "https://github.example.com/api/v3"); err != nil {
+		t.Fatalf("configure selected repository endpoint: %v", err)
+	}
+	selectedRepo := &parsedRepo
+	forwarder := NewGitHubPRFeedbackForwarder(provider, prRepo, feedbackRepo, authRepo, threadInputRepo)
+	result, err := forwarder.ForwardAuthorizedFeedback(ctx, project.ID, selectedRepo)
+	if err != nil {
+		t.Fatalf("forward feedback: %v", err)
+	}
+	if len(result.Forwarded) != 1 || result.Forwarded[0].TaskID != enterpriseTaskID {
+		t.Fatalf("forwarded = %#v, want only Enterprise PR feedback", result.Forwarded)
+	}
+	wantCalls := []prFeedbackCall{{repoFullName: "acme/widgets", apiBaseURL: "https://github.example.com/api/v3", prNumber: 42}}
+	if len(provider.calls) != len(wantCalls) || provider.calls[0] != wantCalls[0] {
+		t.Fatalf("provider calls = %#v, want %#v", provider.calls, wantCalls)
 	}
 }
 

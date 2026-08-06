@@ -497,8 +497,15 @@ type automationCapabilityGitHubResolverStub struct {
 func (s *automationCapabilityGitHubResolverStub) ResolveRepo(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 	s.resolvedURL = repoURL
 	s.resolvedPath = repoPath
-	return &GitHubRepoRef{Owner: "openvibely", Name: "local-project", FullName: "openvibely/local-project"}, nil
+	return &GitHubRepoRef{
+		Owner:    "openvibely",
+		Name:     "local-project",
+		FullName: "openvibely/local-project",
+		HTMLURL:  "https://github.com/openvibely/local-project",
+	}, nil
 }
+
+func (s *automationCapabilityGitHubResolverStub) GlobalAPIEndpoint(context.Context) string { return "" }
 
 func TestAutomationCapabilitySnapshotAcceptsAuthorizedUserAndLocalGitHubRemote(t *testing.T) {
 	db := testutil.NewTestDB(t)

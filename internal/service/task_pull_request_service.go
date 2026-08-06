@@ -15,6 +15,7 @@ type TaskPullRequestGitHubProvider interface {
 	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error
 	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
+	GlobalAPIEndpoint(ctx context.Context) string
 }
 
 type taskPullRequestBranchReplacer interface {
@@ -101,6 +102,9 @@ func (s *TaskPullRequestService) replaceBranchHeadForTask(ctx context.Context, p
 	if err != nil {
 		return nil, fmt.Errorf("resolving repository: %w", err)
 	}
+	if err := ConfigureGitHubRepoEndpoint(repoRef, s.github.GlobalAPIEndpoint(ctx)); err != nil {
+		return nil, fmt.Errorf("configuring GitHub API endpoint: %w", err)
+	}
 	linkedPR, err := replacer.GetPullRequest(ctx, repoRef, existingPR.PRNumber)
 	if err != nil {
 		return nil, fmt.Errorf("fetching linked pull request: %w", err)
@@ -168,6 +172,9 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	repoRef, err := s.github.ResolveRepo(ctx, project.RepoURL, repoPathForResolution)
 	if err != nil {
 		return nil, fmt.Errorf("resolving repository: %w", err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(repoRef, s.github.GlobalAPIEndpoint(ctx)); err != nil {
+		return nil, fmt.Errorf("configuring GitHub API endpoint: %w", err)
 	}
 
 	createReq := s.buildCreatePullRequestRequest(ctx, project, task, opts, repoRef)

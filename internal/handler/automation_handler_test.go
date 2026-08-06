@@ -978,7 +978,7 @@ func TestAutomationGitHubTemplateSaveUsesVisibleGitHubSetupAndBrowserActionField
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			require.Equal(t, project.RepoURL, repoURL)
 			require.Empty(t, repoPath)
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 	}
 	automationRepo := repository.NewAutomationRepo(tc.db)
@@ -1612,7 +1612,7 @@ func TestAutomationTaskFollowupGitHubToolsUseHardenedRuntime(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			require.Equal(t, project.RepoURL, repoURL)
 			require.Empty(t, repoPath)
-			return &service.GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+			return &service.GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		createIssueFn: func(_ context.Context, _ *service.GitHubRepoRef, req service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
 			createCalls++
@@ -1767,7 +1767,7 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 	var issueCalls, pullRequestCalls, branchReplacementCalls int
 	github := &fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+			return &service.GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		createIssueFn: func(_ context.Context, _ *service.GitHubRepoRef, _ service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
 			issueCalls++

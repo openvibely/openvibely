@@ -87,14 +87,14 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					</div>
 					<div id="edit-project-github-fields" class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-						<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
-						<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo"/>
+							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else if projectRepoSource(project) == "github" {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-						<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
-						<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" value={ project.RepoURL } placeholder="https://github.com/owner/repo" required/>
+							<label class="label"><span class="label-text-alt opacity-60">Changing this URL re-clones the repository into managed storage.</span></label>
 					</div>
 				} else {
 					<input type="hidden" name="repo_path" value={ project.RepoPath }/>
@@ -105,8 +105,8 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 					</div>
 					<div id="edit-project-github-fields" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-						<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
-						<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage.</span></label>
+							<input type="url" id="edit-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
+							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage.</span></label>
 					</div>
 				}
 				<div class="form-control mb-3">
@@ -363,11 +363,9 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 					</div>
 					<div id="new-project-github-fields" class="form-control mb-3 hidden">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-						<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
-							<label class="label">
-								<span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span>
-							</label>					</div>
-					<div id="new-project-create-dir-wrapper" class="form-control mb-2">
+							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo"/>
+							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
+						</div>					<div id="new-project-create-dir-wrapper" class="form-control mb-2">
 						<label class="label cursor-pointer justify-start gap-3">
 							<input type="checkbox" id="new-project-create-dir" name="create_directory" value="true" class="checkbox checkbox-sm checkbox-primary"/>
 							<span class="label-text">Create directory if it doesn't exist</span>
@@ -382,11 +380,9 @@ templ NewProjectDialog(agents []models.LLMConfig, localRepoPathEnabled bool) {
 				} else {
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">GitHub URL</span></label>
-						<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo" required/>
-							<label class="label">
-								<span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span>
-							</label>					</div>
-				}
+							<input type="url" id="new-project-repo-url" name="repo_url" class="input input-bordered" placeholder="https://github.com/owner/repo" required/>
+							<label class="label"><span class="label-text-alt opacity-60">The repository is cloned into managed storage using configured GitHub auth or your local git credentials.</span></label>
+						</div>				}
 				<div class="form-control mb-3">
 					<label class="label">
 						<span class="label-text">Default Model</span>

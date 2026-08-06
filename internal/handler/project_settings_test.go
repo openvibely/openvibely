@@ -546,7 +546,7 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 			Name:        "GitHub Project",
 			Description: "github",
 			RepoPath:    "/repos/github-project",
-			RepoURL:     "https://github.com/owner/repo",
+			RepoURL:     "https://github.example.com/owner/repo",
 		}
 		if err := projectSvc.Create(ctx, project); err != nil {
 			t.Fatalf("failed to create project: %v", err)
@@ -563,7 +563,7 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 		}
 		body := rec.Body.String()
 		// Should show GitHub URL input directly (no selector needed)
-		if !strings.Contains(body, `value="https://github.com/owner/repo"`) {
+		if !strings.Contains(body, `value="https://github.example.com/owner/repo"`) {
 			t.Fatal("edit dialog should pre-fill existing GitHub URL")
 		}
 		// Should NOT have a local path option

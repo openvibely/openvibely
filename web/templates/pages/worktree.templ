@@ -54,8 +54,7 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 							{ fileStatsSummary(fileStats) }
 						</span>
 					</div>
-				}
-
+					}
 				// Action buttons
 				<div class="flex flex-wrap gap-2">
 					if task.MergeStatus == models.MergeStatusConflict {
@@ -254,9 +253,10 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 								</li>
 							} else {
 								<li>
-										<button
-											type="button"
-											hx-post={ fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID) }										hx-target="#changes-content"
+									<button
+										type="button"
+										hx-post={ fmt.Sprintf("/tasks/%s/worktree/pull-request", task.ID) }
+										hx-target="#changes-content"
 										hx-swap="innerHTML"
 										hx-indicator="#create-pr-indicator"
 									>
@@ -265,11 +265,10 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 									</button>
 								</li>
 							}
-						</ul>
+							</ul>
+						</div>
 					</div>
-				</div>
-			}
-
+				}
 			// File change summary list
 			if len(fileStats) > 0 {
 				<div class="mb-4 p-3 bg-base-200 rounded-lg min-w-0 max-w-full overflow-hidden">

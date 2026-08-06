@@ -2078,7 +2078,7 @@ func TestAutomationGitHubIssueCreationRejectsCompletedClaimFromDifferentAutomati
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
 			createCalls.Add(1)
@@ -2117,7 +2117,7 @@ func TestAutomationGitHubIssueCreationRejectsCompletedClaimAfterGraphReplacement
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
 			createCalls.Add(1)
@@ -2148,7 +2148,7 @@ func TestAutomationGitHubIssueCreationRejectsCompletedClaimAfterGraphReplacement
 func TestAutomationGitHubIssueProjectionRepairRejectsDeletedSourceGraph(t *testing.T) {
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
 			return &GitHubIssue{Number: 95, URL: "https://github.com/example/runtime/issues/95", Title: req.Title, State: "open"}, nil
@@ -2181,7 +2181,7 @@ func TestAutomationGitHubIssueCreationFailsClosedAfterAmbiguousProviderOutcome(t
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		createIssueFn: func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error) {
 			createCalls.Add(1)
@@ -2216,7 +2216,7 @@ func TestAutomationGitHubIssueCreationRecordsSuccessDespiteRequestCancellation(t
 	var cancelFirst context.CancelFunc
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
 			if createCalls.Add(1) == 1 {
@@ -2290,7 +2290,7 @@ func TestAutomationGitHubIssueCreationRepairsCompletedClaimProjection(t *testing
 			var createCalls atomic.Int32
 			provider := &fakeGitHubIssueRuntimeProvider{
 				resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-					return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+					return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 				},
 				createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
 					createCalls.Add(1)
@@ -2352,7 +2352,7 @@ func TestAutomationGitHubIssueCreationRepairsPartialMultiBindingProjection(t *te
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
 			createCalls.Add(1)
@@ -2479,7 +2479,7 @@ func TestMaintainedGitHubSDLCCategoryLabelsAreProvisionedAndVerified(t *testing.
 			var ensureCalls, createCalls atomic.Int32
 			provider := &fakeGitHubIssueRuntimeProvider{
 				resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-					return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+					return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 				},
 				ensureIssueLabelsFn: func(_ context.Context, _ *GitHubRepoRef, labels []string) error {
 					ensureCalls.Add(1)
@@ -2534,7 +2534,7 @@ func TestAutomationGitHubIssueCreationDoesNotReadExistingIssuesForDeduplication(
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		getIssueFn: func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error) {
 			lookupCalls.Add(1)
@@ -2595,7 +2595,7 @@ func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *te
 	var issueHasBugLabel, denyLabelRepair, omitRepairedLabel atomic.Bool
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
-			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
 			if createCalls.Add(1) == 1 {
@@ -2864,8 +2864,10 @@ func (f *fakeAutomationPullRequestProvider) ResolveRepo(_ context.Context, repoU
 	f.resolveCalls++
 	f.resolvedURL = repoURL
 	f.resolvedPath = repoPath
-	return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+	return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 }
+
+func (f *fakeAutomationPullRequestProvider) GlobalAPIEndpoint(context.Context) string { return "" }
 
 func (f *fakeAutomationPullRequestProvider) GetPullRequest(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
 	f.calls++

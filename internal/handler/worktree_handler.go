@@ -235,6 +235,15 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		setHTMXToast(c, "Project has no repository path configured", "failed")
 		return c.NoContent(http.StatusNoContent)
 	}
+	repoRef, err := h.githubSvc.ResolveRepo(c.Request().Context(), project.RepoURL, project.RepoPath)
+	if err != nil {
+		setHTMXToast(c, formatTaskPullRequestError(fmt.Errorf("resolving repository: %w", err)), "failed")
+		return c.NoContent(http.StatusNoContent)
+	}
+	if err := service.ConfigureGitHubRepoEndpoint(repoRef, h.githubSvc.GlobalAPIEndpoint(c.Request().Context())); err != nil {
+		setHTMXToast(c, err.Error(), "failed")
+		return c.NoContent(http.StatusNoContent)
+	}
 
 	result, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).OpenForTask(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
 		CommitMessage: h.buildPullRequestPrepCommitMessage(c.Request().Context(), task),

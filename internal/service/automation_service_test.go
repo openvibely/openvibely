@@ -19,6 +19,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type automationEnterpriseRepoResolver struct {
+	endpoint string
+}
+
+func (r automationEnterpriseRepoResolver) ResolveRepo(context.Context, string, string) (*GitHubRepoRef, error) {
+	return &GitHubRepoRef{Owner: "acme", Name: "widgets", HTMLURL: "https://github.example.com/acme/widgets"}, nil
+}
+
+func (r automationEnterpriseRepoResolver) GlobalAPIEndpoint(context.Context) string {
+	return r.endpoint
+}
+
+func TestResolveAutomationProjectGitHubRepository_AppliesGlobalEndpoint(t *testing.T) {
+	const endpoint = "https://github.example.com/api/v3"
+	project := &models.Project{RepoURL: "https://github.example.com/acme/widgets"}
+	repo, err := resolveAutomationProjectGitHubRepository(context.Background(), automationEnterpriseRepoResolver{endpoint: endpoint}, project)
+	require.NoError(t, err)
+	require.Equal(t, endpoint, repo.APIBaseURL)
+}
+
 func automationTestProject(t *testing.T, repo *repository.ProjectRepo, name string) models.Project {
 	t.Helper()
 	project := models.Project{Name: name}

@@ -137,6 +137,7 @@ type GitHubServiceProvider interface {
 	CreateIssue(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreateIssueRequest) (*service.GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) (*service.GitHubIssue, error)
 	GetAuthenticatedUser(ctx context.Context) (*service.GitHubAuthenticatedUser, error)
+	GetAuthenticatedUserForRepo(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, error)
 	ListAuthenticatedAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error)
 	ListAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error)
@@ -144,6 +145,7 @@ type GitHubServiceProvider interface {
 	ListPullRequestFeedback(ctx context.Context, repo *service.GitHubRepoRef, prNumber int) ([]service.GitHubPullRequestFeedback, error)
 	CommentOnIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
+	GlobalAPIEndpoint(ctx context.Context) string
 }
 
 type SlackServiceProvider interface {

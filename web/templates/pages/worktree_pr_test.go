@@ -10,6 +10,33 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 )
 
+func TestTaskChangesWorktreeContent_CreatePRIsDirectActionWithoutEndpointModal(t *testing.T) {
+	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
+	var buf bytes.Buffer
+	if err := TaskChangesWorktreeContent("diff --git", task, nil, nil, nil, false, false).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		`hx-post="/tasks/task-1/worktree/pull-request"`,
+		`hx-target="#changes-content"`,
+		`hx-indicator="#create-pr-indicator"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected direct Create PR action to contain %q", want)
+		}
+	}
+	for _, unwanted := range []string{
+		`id="create-pr-modal-task-1"`,
+		`name="github_api_endpoint"`,
+		`toggleTaskChangesPRModal`,
+	} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("Create PR must not introduce endpoint modal content %q", unwanted)
+		}
+	}
+}
+
 func TestTaskChangesWorktreeContent_FileStatsStayContained(t *testing.T) {
 	task := &models.Task{ID: "task-1", WorktreeBranch: "task/feature", MergeStatus: models.MergeStatusPending}
 	fileStats := []service.WorktreeFileStat{
