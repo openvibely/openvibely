@@ -1933,6 +1933,42 @@ func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), components.TaskThreadHasActiveComposerStopState(task, executions)))
 }
 
+// TaskThreadSelectModel persists a task-thread composer model selection
+// immediately, independent of sending a message. Without this, changing the
+// model dropdown only mutates client-side DOM/hidden-input state; since task
+// threads intentionally do not use the Chat page's localStorage persistence
+// (which is keyed by ProjectID), navigating away and back would otherwise
+// re-render the composer from the task's unchanged Task.AgentID and silently
+// revert the visible selection. "auto" and "" are one-off routing choices and
+// are not persisted here (matches TaskThreadSend's persistence semantics).
+func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
+	taskID := c.Param("taskId")
+	agentID := c.FormValue("agent_id")
+
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
+		agent, selErr := h.selectAgent(c.Request().Context(), agentID, "", false)
+		if selErr != nil || agent == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
+		}
+		if task.AgentID == nil || *task.AgentID != agent.ID {
+			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), taskID, agent.ID); updErr != nil {
+				applog.Infof("[handler] TaskThreadSelectModel error persisting selected model task=%s agent=%s: %v", taskID, agent.ID, updErr)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist model selection")
+			}
+		}
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}
+
 // TaskThreadSend handles sending a follow-up message in the task thread.
 // Uses shared agent selection and streaming response processing from chat_processing.go.
 func (h *Handler) TaskThreadSend(c echo.Context) error {

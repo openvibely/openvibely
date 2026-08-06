@@ -1500,6 +1500,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			data-attachment-state-key={ chatAttachmentStateKey(config) }
 			if config.TaskID != "" {
 				data-scroll-intent-scope={ config.TaskID }
+				data-model-select-endpoint={ "/tasks/" + config.TaskID + "/thread/model" }
 			} else if config.ProjectID != "" {
 				data-scroll-intent-scope={ config.ProjectID }
 			}
@@ -2098,10 +2099,20 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 					}
 				}
+				var modelSelectEndpoint = form.getAttribute('data-model-select-endpoint');
 				agentSelect.addEventListener('chat-select-change', function(e) {
 					agentInput.value = e.detail.value;
 					if (modelStorageKey) {
 						localStorage.setItem(modelStorageKey, e.detail.value);
+					}
+					// Task threads have no localStorage persistence (keyed by
+					// ProjectID, which task threads omit); persist the
+					// selection server-side immediately so navigating away
+					// and back does not silently revert to the task default.
+					if (modelSelectEndpoint) {
+						var body = new URLSearchParams();
+						body.set('agent_id', e.detail.value);
+						fetch(modelSelectEndpoint, { method: 'POST', body: body }).catch(function() {});
 					}
 				});
 			}
