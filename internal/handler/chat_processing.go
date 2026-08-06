@@ -3583,7 +3583,18 @@ func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, o
 		queued.EmailSubject = reply.EmailSubject
 		queued.EmailSessionKey = reply.EmailSessionKey
 	}
-	if automationContext, ok := service.AutomationContextFromContext(ctx); ok && automationContext.ProjectID == task.ProjectID {
+	automationContext, hasAutomationContext := service.AutomationContextFromContext(ctx)
+	if !hasAutomationContext && origin == models.TaskOriginSystemAgent && originAgent == models.AgentSystemKindGoal && h.automationGraphSvc != nil {
+		derivedContext, contextErr := h.automationGraphSvc.ContextForTask(ctx, task.ProjectID, task.ID)
+		if contextErr != nil {
+			return nil, fmt.Errorf("loading Automation context for goal continuation: %w", contextErr)
+		}
+		if len(derivedContext.Bindings) > 0 {
+			automationContext = derivedContext
+			hasAutomationContext = true
+		}
+	}
+	if hasAutomationContext && automationContext.ProjectID == task.ProjectID && len(automationContext.Bindings) > 0 {
 		if err := h.threadInputRepo.CreateQueuedWithAutomationContext(ctx, queued, automationContext, "causal"); err != nil {
 			return nil, err
 		}

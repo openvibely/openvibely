@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -1963,6 +1964,79 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 	require.Zero(t, issueCalls)
 	require.Zero(t, pullRequestCalls)
 	require.Zero(t, branchReplacementCalls)
+}
+
+func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Goal continuation Automation projection").Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := models.Task{ProjectID: project.ID, Title: "Automation implementation", Category: models.CategoryCompleted,
+		Status: models.StatusCompleted, Priority: 2, Prompt: "Implement the approved work", AgentID: &agent.ID}
+	require.NoError(t, tc.taskRepo.Create(ctx, &task))
+	_, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Finish implementation and validation", service.GoalOptions{})
+	require.NoError(t, err)
+
+	producerTask := models.Task{ProjectID: project.ID, Title: "Automation producer", Category: models.CategoryScheduled,
+		Status: models.StatusPending, Priority: 2, Prompt: "Discover approved implementation work", AgentID: &agent.ID}
+	require.NoError(t, tc.taskRepo.Create(ctx, &producerTask))
+	producerSchedule := models.Schedule{TaskID: producerTask.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, tc.scheduleRepo.Create(ctx, &producerSchedule))
+
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
+	definition, _, err := registration.Register(ctx, service.AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: service.AutomationAdapterNativeSDLC, StableKey: "native-sdlc/goal-continuation",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: producerTask.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: producerSchedule.ID},
+		},
+	})
+	require.NoError(t, err)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
+
+	var implementation models.AutomationNode
+	for _, node := range definition.Nodes {
+		if node.NodeKey == "implementation" {
+			implementation = node
+			break
+		}
+	}
+	require.NotEmpty(t, implementation.ID)
+	binding := models.AutomationBinding{AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: implementation.ID}
+	workItem, _, err := automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "goal-continuation:implementation", WorkItemKind: "implementation",
+		ActivityKey: "goal-continuation:implementation:created", ActivityType: "create_implementation_task",
+		ActivityStatus: models.AutomationActivityCompleted,
+		Resources:      []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, workItem.ID)
+
+	goalContext := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "goal-agent", SystemKind: models.AgentSystemKindGoal})
+	output, err := tc.handler.executeSendToTaskTool(goalContext, streamingResponseParams{
+		ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true,
+	}, json.RawMessage(`{"task_id":"current","message":"Continue the Automation implementation task."}`))
+	require.NoError(t, err)
+	var result struct {
+		QueuedMessageID string `json:"queued_message_id"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(output), &result))
+	require.NotEmpty(t, result.QueuedMessageID)
+
+	queuedContext, err := automationRepo.ContextForThreadInput(ctx, project.ID, result.QueuedMessageID)
+	require.NoError(t, err)
+	require.Equal(t, []models.AutomationBinding{{
+		AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: implementation.ID, WorkItemID: workItem.ID,
+	}}, queuedContext.Bindings)
+
+	followup := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Continue the Automation implementation task.", IsFollowup: true}
+	require.NoError(t, tc.handler.threadInputRepo.ClaimQueuedForTaskExecution(ctx, result.QueuedMessageID, followup))
+	counts, _, _, err := automationRepo.LiveNodeCounts(ctx, project.ID, definition.Automation.ID, definition.Version.ID, time.Now().UTC().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 1, counts[implementation.ID].Running)
+	require.Zero(t, counts[implementation.ID].CompletedRecently)
 }
 
 func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T) {
