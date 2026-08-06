@@ -132,6 +132,9 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 			config["prompt"] = prompt
 			config["goal"] = ""
 			config["category"] = string(models.CategoryBacklog)
+			config["priority"] = 2
+			config["skills"] = []string{}
+			config["source_files"] = []string{}
 			if adapter.Key == AutomationAdapterGitHubSDLC && node.Role == "implementation" {
 				config["category"] = string(models.CategoryActive)
 			}

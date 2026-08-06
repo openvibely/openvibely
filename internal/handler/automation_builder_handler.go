@@ -211,10 +211,12 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 			if value, exists := automationDraftFormValue(c, prefix+"agent_ref"); exists {
 				node.Config["agent_ref"] = strings.TrimSpace(value)
 			}
-			if candidate.AdapterKey != service.AutomationAdapterCustom {
+			if _, supportsSkills := node.Config["skills"]; supportsSkills {
 				if values, exists := automationDraftFormValues(c, prefix+"skills"); exists {
 					node.Config["skills"] = values
 				}
+			}
+			if _, supportsSourceFiles := node.Config["source_files"]; supportsSourceFiles {
 				if values, exists := automationDraftFormValues(c, prefix+"source_files"); exists {
 					node.Config["source_files"] = values
 				}

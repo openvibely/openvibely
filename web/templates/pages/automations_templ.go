@@ -3792,7 +3792,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if page.Result.Candidate.AdapterKey != "custom" {
+				if automationDraftHasConfig(node, "skills") || automationDraftHasConfig(node, "source_files") {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 318, "<label class=\"form-control\"><span class=\"label-text\">Skills</span><input type=\"hidden\" name=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err

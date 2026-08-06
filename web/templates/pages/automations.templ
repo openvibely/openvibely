@@ -933,7 +933,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 											<option value={ agent.ID } selected?={ automationDraftStringConfig(node, "agent_ref") == agent.ID }>{ agent.Name }</option>
 										}
 									</select></label>
-									if page.Result.Candidate.AdapterKey != "custom" {
+									if automationDraftHasConfig(node, "skills") || automationDraftHasConfig(node, "source_files") {
 										<label class="form-control"><span class="label-text">Skills</span><input type="hidden" name={ "node_" + node.Key + "_skills" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_skills" } multiple>
 											for _, skill := range page.Capabilities.Skills {
 												<option value={ skill.ID } selected?={ automationDraftStringSliceContains(node, "skills", skill.ID) }>{ skill.Name }</option>

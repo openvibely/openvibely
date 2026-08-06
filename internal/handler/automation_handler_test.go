@@ -513,11 +513,28 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 		return response
 	}
 
-	require.Equal(t, http.StatusOK, post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Extra review"}}).Code)
-	require.Equal(t, http.StatusOK, post(url.Values{"builder_action": {"create_node"}, "node_kind": {"task"}, "node_name": {"Extra follow-up"}}).Code)
+	addedSchedule := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Extra review"}})
+	require.Equal(t, http.StatusOK, addedSchedule.Code, addedSchedule.Body.String())
+	require.NotContains(t, addedSchedule.Body.String(), `name="node_extra_review_skills"`)
+	require.NotContains(t, addedSchedule.Body.String(), `name="node_extra_review_source_files"`)
+	addedTask := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"task"}, "node_name": {"Extra follow-up"}})
+	require.Equal(t, http.StatusOK, addedTask.Code, addedTask.Body.String())
+	require.NotContains(t, addedTask.Body.String(), `name="node_extra_follow_up_skills"`)
+	require.NotContains(t, addedTask.Body.String(), `name="node_extra_follow_up_source_files"`)
 	require.Equal(t, http.StatusOK, post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {"extra_review"}, "to_key": {"extra_follow_up"}}).Code)
 
-	saved := post(url.Values{"save_changes": {"true"}})
+	// The browser synchronizes all rendered template settings into candidate_json.
+	// These stale extra-node values model a form submission from before the controls
+	// were removed; the handler must not merge template-only settings into custom nodes.
+	saved := post(url.Values{
+		"save_changes":                         {"true"},
+		"node_vision_suggestions_skills":       {""},
+		"node_vision_suggestions_source_files": {""},
+		"node_extra_review_skills":             {"example:review"},
+		"node_extra_review_source_files":       {"README.md"},
+		"node_extra_follow_up_skills":          {"example:review"},
+		"node_extra_follow_up_source_files":    {"README.md"},
+	})
 	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
 	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
 	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
