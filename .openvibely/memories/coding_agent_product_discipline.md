@@ -2,7 +2,7 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-08-03
+updated: 2026-08-06
 source: consolidation
 source_id: memory_consolidation_2026_08_03
 confidence: high
@@ -18,6 +18,7 @@ User interaction preferences:
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
 - Ask before rewriting or collapsing meaningful Git history, including rebuilding a long task branch as one net-tree commit to avoid rebase conflicts. Preserve a clearly named backup ref when history must be recovered or rewritten, but do not treat that backup as a substitute for user approval.
 - Treat requests explicitly limited to memory or skill maintenance as a hard scope boundary: do not add implementation, generated-file, test, rebase, or other repository changes unless the user separately requests them; clearly distinguish any pre-existing or later-instructed code work when reporting the diff.
+- Treat an explicit path-limited change request as a hard diff boundary. Remove or revert unrelated in-branch work when necessary so the final net diff contains only the named path or paths, even when the original task requested broader artifacts.
 - Treat explicit audit exclusions as equally hard scope boundaries. In particular, when the user excludes managed memory, do not inspect, cite, reconcile, or use managed or tracked memory as audit evidence; audit only the requested repository/publication artifacts.
 - Do not delegate tasks or create child-agent work. This prohibition applies especially to memory updates; use only direct capabilities available in the current task and report a capability blocker when direct work is unavailable.
 - When diagnosing autonomous integration loops, do not manually forward, wake, or otherwise push one live message through as a substitute for fixing the product path. The user wants the implementation to work properly end-to-end; validation should prove the scheduled/tool/runtime behavior works without ad hoc live intervention unless the user explicitly asks for a one-off operational action.

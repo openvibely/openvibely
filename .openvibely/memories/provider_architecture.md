@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-04
-source: consolidation
-source_id: memory_consolidation_2026_08_04
+updated: 2026-08-06
+source: task
+source_id: 24aa433a878ff6d110da71336cf32ae1
 confidence: high
 title: Provider Architecture
 ---
@@ -109,3 +109,4 @@ Provider-native tools and runtime tools:
 - Anthropic `execBash` runtime-tool calls use a 10-minute default timeout only when no positive timeout is provided. Zero and negative requests normalize to 600 seconds; any positive explicit timeout, shorter or longer than 10 minutes, is preserved without a minimum or maximum cap.
 - Memory tool exposure is a request/tool-profile decision, not a global provider-adapter default. Route-phase Memory Curator recall stays sanitized/no-tools, while update/consolidation hooks may receive scoped memory file tools.
 - Anthropic has a provider-side name-combination collision when the exact wire names `skill_view`, `skills_list`, and `skill_manage` are sent together, which can surface a false “out of extra usage” error. The Anthropic adapter therefore aliases canonical internal `skills_list` to wire name `skill_list` and translates incoming calls back before filtering/execution; keep this workaround adapter-local.
+- `read_file` runtime executors in the OpenAI, Anthropic, and scoped-files paths emit `decimalLineNumber\t<unchanged source bytes>` rather than fixed-width numeric prefixes. In native agentic loops, that raw executor string is forwarded to provider tool-result payloads (OpenAI `function_call_output`, Anthropic `tool_result`, and OpenAI-compatible Chat Completions tool messages), then serialized/stored/streamed and rendered by the frontend as opaque raw text; the UI does not add line-number alignment padding. Keep this compact format so source indentation after the tab is preserved and avoid frontend-only reformatting that would diverge rendered/copied and model-facing content. Historical replay removes serialized tool blocks through `CleanChatOutput`, so persisted prior tool output is not normally reintroduced into model history.

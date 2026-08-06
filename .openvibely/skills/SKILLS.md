@@ -229,3 +229,27 @@ always_use:
 ## openvibely_task_category_transition_workflow
 
 [OpenVibely Task Category Transition Workflow](openvibely_task_category_transition_workflow/SKILL.md) — Implement and audit OpenVibely task category changes without bypassing completion, ordering, activation, cancellation, or goal lifecycle behavior.
+
+## openvibely_redundancy_finder_workflow
+
+[OpenVibely Redundancy Finder Workflow](openvibely_redundancy_finder_workflow/SKILL.md) — Perform focused, read-only OpenVibely duplication audits and publish actionable consolidation issues.
+
+## openvibely_optimization_finder_workflow
+
+[OpenVibely Optimization Finder Workflow](openvibely_optimization_finder_workflow/SKILL.md) — Perform focused, evidence-backed, read-only OpenVibely performance audits and publish actionable GitHub performance issues.
+
+## openvibely_github_suggestion_discovery
+
+[OpenVibely GitHub Suggestion Discovery](openvibely_github_suggestion_discovery/SKILL.md) — Review OpenVibely vision and source for small feature gaps, then publish reviewable GitHub suggestion issues.
+
+## openvibely_runtime_tool_input_decoding
+
+[OpenVibely Runtime Tool Input Decoding](openvibely_runtime_tool_input_decoding/SKILL.md) — Keep runtime-tool JSON input normalization and error contracts consistent across OpenVibely surfaces.
+
+## openvibely_protocol_serialization_audit
+
+[OpenVibely Protocol Serialization Audit](openvibely_protocol_serialization_audit/SKILL.md) — Audit OpenVibely protocol serialization boundaries for wire-format limits that helper tests can miss.
+
+## openvibely_query_projection_workflow
+
+[OpenVibely Query Projection Workflow](openvibely_query_projection_workflow/SKILL.md) — Optimize summary/list database reads with compact private projections without changing response contracts.
