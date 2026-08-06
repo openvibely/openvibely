@@ -257,8 +257,8 @@ func TestHandler_TaskThreadComposerAction_RendersStopAndSendStates(t *testing.T)
 		t.Fatalf("active composer action status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `id="task-thread-form-primary-action" hx-swap-oob="outerHTML"`) {
-		t.Fatalf("expected OOB primary action fragment, got %s", body)
+	if !strings.Contains(body, `id="task-thread-form-primary-action" data-composer-running="true" hx-swap-oob="outerHTML"`) {
+		t.Fatalf("expected active OOB primary action fragment, got %s", body)
 	}
 	if !strings.Contains(body, `title="Stop response"`) || !strings.Contains(body, `/tasks/`+task.ID+`/cancel?composer_stop=1`) {
 		t.Fatalf("expected active task-thread action to render stop button, got %s", body)
@@ -279,6 +279,9 @@ func TestHandler_TaskThreadComposerAction_RendersStopAndSendStates(t *testing.T)
 		t.Fatalf("terminal composer action status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	body = rec.Body.String()
+	if !strings.Contains(body, `data-composer-running="false"`) {
+		t.Fatalf("expected terminal task-thread action to clear active composer state, got %s", body)
+	}
 	if !strings.Contains(body, `title="Send message"`) || strings.Contains(body, `title="Stop response"`) {
 		t.Fatalf("expected terminal task-thread action to render send button, got %s", body)
 	}

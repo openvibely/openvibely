@@ -1458,7 +1458,7 @@ templ ChatEmptyState(message string) {
 }
 
 templ ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool) {
-	<div id={ targetID } hx-swap-oob="outerHTML">
+	<div id={ targetID } data-composer-running={ boolStr(isRunning) } hx-swap-oob="outerHTML">
 		@chatComposerActionButton(stopEndpoint, isRunning)
 	</div>
 }
@@ -1615,7 +1615,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							<rect x="6" y="6" width="12" height="12" rx="2"></rect>
 						</svg>
 					</button>
-					<div id={ config.FormID + "-primary-action" }>
+					<div id={ config.FormID + "-primary-action" } data-composer-running={ boolStr(config.IsRunning) }>
 						@chatComposerActionButton(config.StopEndpoint, config.IsRunning)
 					</div>
 				</div>
@@ -1866,7 +1866,20 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							form.setAttribute('hx-post', endpoint);
 							safeSubmit();
 						}
+						function composerHasActiveTurn() {
+							var action = document.getElementById(formId + '-primary-action');
+							return !!action && action.getAttribute('data-composer-running') === 'true';
+						}
+						function clearExpectedTurnIDWhenIdle() {
+							if (composerHasActiveTurn()) return;
+							var guard = form.querySelector('input[name="expected_turn_id"]');
+							if (guard) guard.remove();
+						}
 						function activeTurnID() {
+							if (!composerHasActiveTurn()) {
+								clearExpectedTurnIDWhenIdle();
+								return '';
+							}
 							var targetSelector = form.getAttribute('hx-target') || '';
 							var target = targetSelector && targetSelector.charAt(0) === '#' ? document.getElementById(targetSelector.slice(1)) : null;
 							var pairs = target ? target.querySelectorAll('[data-execution-pair="true"][data-exec-status="running"], [data-execution-pair="true"][data-exec-status="queued"]') : [];
@@ -1884,6 +1897,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							}
 							guard.value = turnID;
 						}
+						if (typeof MutationObserver !== 'undefined') {
+							new MutationObserver(clearExpectedTurnIDWhenIdle).observe(form, { childList: true, subtree: true });
+						}
+						clearExpectedTurnIDWhenIdle();
 
 				var messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';
 				var messageHistoryLimit = 50;
