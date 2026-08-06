@@ -1561,6 +1561,78 @@ func TestCreateModel_HTMX_ReturnsContentInsteadOfRedirect(t *testing.T) {
 	}
 }
 
+func TestModelMutations_HTMXReturnRefreshedList(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+
+	createForm := url.Values{
+		"name":                {"Mutation Created Model"},
+		"provider":            {"anthropic"},
+		"anthropic_auth_type": {"api_key"},
+		"model":               {"claude-sonnet-4-5-20250929"},
+		"temperature":         {"0"},
+		"model_max_workers":   {"2"},
+	}
+	createReq := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createReq.Header.Set("HX-Request", "true")
+	createRec := httptest.NewRecorder()
+	e.ServeHTTP(createRec, createReq)
+	assertRefreshedModelsResponse(t, createRec, "Mutation Created Model", "0 / 2 active")
+
+	configs, err := llmConfigRepo.List(context.Background())
+	if err != nil {
+		t.Fatalf("list models after create: %v", err)
+	}
+	var created *models.LLMConfig
+	for i := range configs {
+		if configs[i].Name == "Mutation Created Model" {
+			created = &configs[i]
+			break
+		}
+	}
+	if created == nil {
+		t.Fatal("created model not found")
+	}
+
+	updateForm := url.Values{
+		"name":                {"Mutation Updated Model"},
+		"provider":            {"anthropic"},
+		"anthropic_auth_type": {"api_key"},
+		"model":               {"claude-sonnet-4-5-20250929"},
+		"temperature":         {"0"},
+		"model_max_workers":   {"3"},
+	}
+	updateRec := htmxPut(e, "/models/"+created.ID, updateForm)
+	assertRefreshedModelsResponse(t, updateRec, "Mutation Updated Model", "0 / 3 active")
+
+	defaultRec := htmxPost(e, "/models/"+created.ID+"/set-default", nil)
+	assertRefreshedModelsResponse(t, defaultRec, "Mutation Updated Model", "data-model-is-default=\"true\"")
+
+	deleteRec := htmxDelete(e, "/models/"+created.ID)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete HTMX response code = %d, want %d: %s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
+	}
+	if body := deleteRec.Body.String(); !strings.Contains(body, "models-container") || strings.Contains(body, "Mutation Updated Model") {
+		t.Errorf("delete HTMX response did not contain the refreshed model list: %s", body)
+	}
+}
+
+func assertRefreshedModelsResponse(t *testing.T, rec *httptest.ResponseRecorder, expected ...string) {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("HTMX response code = %d, want %d: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "models-container") {
+		t.Fatalf("HTMX response missing models-container: %s", body)
+	}
+	for _, value := range expected {
+		if !strings.Contains(body, value) {
+			t.Errorf("HTMX response missing %q: %s", value, body)
+		}
+	}
+}
+
 func TestCreateModel_SubscriptionCLI(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
@@ -3315,6 +3387,41 @@ func TestUpdateModel_PreservesProjectIDInRedirect(t *testing.T) {
 	location := rec.Header().Get("Location")
 	if location != "/models?project_id=proj-xyz" {
 		t.Errorf("redirect Location = %q, want %q", location, "/models?project_id=proj-xyz")
+	}
+}
+
+func TestModelMutations_DefaultAndDeleteRedirectToPlainModels(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	defaultCandidate := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Default Redirect Model"
+		a.IsDefault = false
+	})
+	setDefaultRec := postForm(e, "/models/"+defaultCandidate.ID+"/set-default?project_id=preserved-by-create-update-only", nil)
+	if setDefaultRec.Code != http.StatusSeeOther {
+		t.Fatalf("set default response code = %d, want %d: %s", setDefaultRec.Code, http.StatusSeeOther, setDefaultRec.Body.String())
+	}
+	if location := setDefaultRec.Header().Get("Location"); location != "/models" {
+		t.Errorf("set default redirect = %q, want /models", location)
+	}
+
+	deleteCandidate := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Delete Redirect Model"
+		a.IsDefault = false
+	})
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/models/"+deleteCandidate.ID+"?project_id=preserved-by-create-update-only", nil)
+	deleteRec := httptest.NewRecorder()
+	e.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusSeeOther {
+		t.Fatalf("delete response code = %d, want %d: %s", deleteRec.Code, http.StatusSeeOther, deleteRec.Body.String())
+	}
+	if location := deleteRec.Header().Get("Location"); location != "/models" {
+		t.Errorf("delete redirect = %q, want /models", location)
+	}
+
+	if deleted, err := llmConfigRepo.GetByID(ctx, deleteCandidate.ID); err != nil || deleted != nil {
+		t.Fatalf("deleted model = %#v, err = %v; want nil, nil", deleted, err)
 	}
 }
 
