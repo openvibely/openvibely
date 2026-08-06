@@ -75,6 +75,9 @@ func (h *Handler) GetAutomationLive(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "automation not found")
 	}
 	deleteAvailable := true
+	currentTemplateRevision := service.CurrentAutomationTemplateRevision(graph.Version.AdapterKey)
+	graph.TemplateUpdateAvailable = currentTemplateRevision > 0 &&
+		(graph.Automation.TemplateRevision == nil || *graph.Automation.TemplateRevision < currentTemplateRevision)
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationLiveContent(*graph, projectID, deleteAvailable))
 	}

@@ -380,6 +380,9 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 							</label>
 							<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
 								<li><button type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit automation</button></li>
+								if graph.TemplateUpdateAvailable {
+									<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
+								}
 								if graph.Automation.LifecycleState == models.AutomationActive {
 									<li><button type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run now</button></li>
 									<li><button type="submit" form="automation-live-pause-form" data-automation-live-pause>Pause</button></li>
@@ -440,8 +443,23 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					}
 				</svg>
 			</div>
-		</div>
-			if deleteAvailable {
+			</div>
+			if graph.TemplateUpdateAvailable {
+				<dialog id="update-automation-template-modal" class="modal">
+					<div class="modal-box">
+						@ModalCloseButton("document.getElementById('update-automation-template-modal')", "Close template update confirmation")
+						<h3 class="pr-10 text-lg font-bold">Update to latest template</h3>
+						<p class="py-4">This replaces your current nodes, connections, prompts, and schedules with the latest { automationAdapterLabel(graph.Version.AdapterKey) } template.</p>
+						<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">Your Automation name and lifecycle state are preserved. Template customizations are not merged.</div>
+						<div class="modal-action">
+							<button class="btn" type="button" onclick="document.getElementById('update-automation-template-modal').close()">Cancel</button>
+							<form method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="update_template" value="true"/><button class="btn btn-primary" type="submit">Update to latest</button></form>
+						</div>
+					</div>
+					<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
+				</dialog>
+			}
+				if deleteAvailable {
 				<dialog id="delete-automation-modal" class="modal">
 					<div class="modal-box">
 						@ModalCloseButton("document.getElementById('delete-automation-modal')", "Close delete automation confirmation")

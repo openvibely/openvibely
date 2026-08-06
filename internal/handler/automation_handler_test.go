@@ -981,6 +981,7 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	validator := service.NewAutomationSaveValidator(registry, drafts)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), service.NewAutomationRegistrationService(automationRepo, registry))
 	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
 	candidate, err := drafts.TemplateCandidate(service.AutomationAdapterNativeSDLC)
@@ -999,6 +1000,12 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 
 	_, err = tc.db.ExecContext(ctx, `UPDATE automations SET template_revision = 0 WHERE id = ?`, automationID)
 	require.NoError(t, err)
+	liveOutdated := tc.HTTP().Get("/automations/" + automationID + "?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, liveOutdated.Code, liveOutdated.Body.String())
+	require.Contains(t, liveOutdated.Body.String(), `data-automation-live-update-template`)
+	require.Contains(t, liveOutdated.Body.String(), `id="update-automation-template-modal"`)
+	require.Contains(t, liveOutdated.Body.String(), `action="/automations/`+automationID+`/builder?project_id=`+project.ID+`"`)
+	require.Contains(t, liveOutdated.Body.String(), `name="update_template" value="true"`)
 	outdated := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, http.StatusOK, outdated.Code, outdated.Body.String())
 	require.Contains(t, outdated.Body.String(), `data-update-automation-template-open`)
@@ -1035,6 +1042,9 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	current := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, http.StatusOK, current.Code, current.Body.String())
 	require.NotContains(t, current.Body.String(), `data-update-automation-template-open`)
+	liveCurrent := tc.HTTP().Get("/automations/" + automationID + "?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, liveCurrent.Code, liveCurrent.Body.String())
+	require.NotContains(t, liveCurrent.Body.String(), `data-automation-live-update-template`)
 }
 
 func automationNodeByKeyHandler(nodes []models.AutomationNode, key string) *models.AutomationNode {

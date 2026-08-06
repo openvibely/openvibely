@@ -393,15 +393,16 @@ type AutomationExternalState struct {
 }
 
 type AutomationLiveGraph struct {
-	Automation        Automation                  `json:"automation"`
-	Version           AutomationVersion           `json:"version"`
-	Nodes             []AutomationLiveNode        `json:"nodes"`
-	Edges             []AutomationLiveEdge        `json:"edges"`
-	Resources         []AutomationResourceSummary `json:"resources"`
-	ActiveInvocations int                         `json:"active_invocations"`
-	ActiveWorkItems   int                         `json:"active_work_items"`
-	RecentCutoff      time.Time                   `json:"recent_cutoff"`
-	ExternalState     AutomationExternalState     `json:"external_state"`
+	Automation              Automation                  `json:"automation"`
+	Version                 AutomationVersion           `json:"version"`
+	Nodes                   []AutomationLiveNode        `json:"nodes"`
+	Edges                   []AutomationLiveEdge        `json:"edges"`
+	Resources               []AutomationResourceSummary `json:"resources"`
+	ActiveInvocations       int                         `json:"active_invocations"`
+	ActiveWorkItems         int                         `json:"active_work_items"`
+	RecentCutoff            time.Time                   `json:"recent_cutoff"`
+	ExternalState           AutomationExternalState     `json:"external_state"`
+	TemplateUpdateAvailable bool                        `json:"template_update_available,omitempty"`
 }
 
 type AutomationInvocationPage struct {
