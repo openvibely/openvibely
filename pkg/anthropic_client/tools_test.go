@@ -33,7 +33,7 @@ func TestExecReadFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(out, "     1\t") {
+		if strings.Contains(out, "1\tline1\n") {
 			t.Error("should not contain line 1")
 		}
 		if !strings.Contains(out, "line3") {
