@@ -904,6 +904,7 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 
 	projectID := "project-browser"
 	var automationARunNow atomic.Bool
+	var runNowInFlight atomic.Bool
 	cards := []models.AutomationCard{
 		{Automation: models.Automation{ID: "automation-a", Name: "Automation A", Description: "First", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"}},
 		{Automation: models.Automation{ID: "automation-b", Name: "Automation B", Description: "Second", LifecycleState: models.AutomationActive}, Version: models.AutomationVersion{Version: 1, AdapterKey: "native_sdlc"}},
@@ -1259,10 +1260,12 @@ window.addEventListener('DOMContentLoaded', function() {
 	    if (!liveBadges.closest('[data-automation-live-legend-row]')) fail('Live Automation status and health badges are not in the graph legend row');
 	    click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Run now');
 	    clickMenuRowRightEdge('#automation-live [data-automation-live-run-now]', 'Live Automation Run now menu row');
+	    await fetch('/automation-run-now-started');
+	    window.openVibelyAutomationLiveRefresh('GET');
 	    await waitFor(function() {
 	      var current = document.querySelector('#automation-live [data-automation-live-node="first_step"]');
 	      return current && current.querySelector('.automation-graph-node--running') && current.textContent.includes('1 running');
-	    }, 'Run now Live canvas refresh');
+	    }, 'Run now Live canvas refresh after an older polling snapshot');
 	    if (liveID() !== 'automation-a') fail('Run now navigated away from the Automation Live preview');
 	    await report('progress', 'live-run-now-refreshed');
 	    click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Delete');
@@ -1591,6 +1594,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	browserResult := make(chan string, 16)
 	olderLiveStarted := make(chan struct{})
 	releaseOlderLive := make(chan struct{})
+	runNowStarted := make(chan struct{})
+	releaseRunNow := make(chan struct{})
 	blankNodeRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1630,7 +1635,20 @@ window.addEventListener('DOMContentLoaded', function() {
 					http.Error(w, "newer Live request arrived before the older request started", http.StatusConflict)
 				}
 			default:
+				if runNowInFlight.Load() {
+					staleLive := renderLive("automation-a", "Automation A")
+					close(releaseRunNow)
+					_, _ = w.Write([]byte(staleLive))
+					return
+				}
 				_, _ = w.Write([]byte(renderLive("automation-a", "Automation A")))
+			}
+		case "/automation-run-now-started":
+			select {
+			case <-runNowStarted:
+				w.WriteHeader(http.StatusNoContent)
+			case <-time.After(5 * time.Second):
+				http.Error(w, "Run now request did not start", http.StatusGatewayTimeout)
 			}
 		case "/release-older-live-response":
 			close(releaseOlderLive)
@@ -1650,7 +1668,16 @@ window.addEventListener('DOMContentLoaded', function() {
 				http.Error(w, "Run now must use the ordered HTMX Live refresh", http.StatusBadRequest)
 				return
 			}
+			runNowInFlight.Store(true)
+			close(runNowStarted)
+			select {
+			case <-releaseRunNow:
+			case <-time.After(5 * time.Second):
+				http.Error(w, "stale Live polling response did not arrive", http.StatusGatewayTimeout)
+				return
+			}
 			automationARunNow.Store(true)
+			runNowInFlight.Store(false)
 			_, _ = w.Write([]byte(renderLive("automation-a", "Automation A")))
 		case "/automations/automation-a/pause":
 			setAutomationLifecycle("automation-a", models.AutomationPaused)
