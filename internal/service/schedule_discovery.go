@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -66,10 +67,8 @@ func ExecuteListSchedulesTool(ctx context.Context, scheduleRepo *repository.Sche
 	}
 
 	var req ListSchedulesRequest
-	if len(strings.TrimSpace(string(input))) > 0 {
-		if err := json.Unmarshal(input, &req); err != nil {
-			return "", fmt.Errorf("list_schedules: invalid input: %w", err)
-		}
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", fmt.Errorf("list_schedules: %w", err)
 	}
 
 	limit := req.Limit

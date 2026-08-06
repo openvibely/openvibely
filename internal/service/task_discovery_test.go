@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -118,5 +119,40 @@ func TestExecuteListTasksTool(t *testing.T) {
 	page3 := decodeListTasksResult(t, out)
 	if page3.Offset != 2 || page3.Count != 1 || page3.HasMore {
 		t.Fatalf("unexpected final page contract: %+v", page3)
+	}
+}
+
+func TestDiscoveryToolsUseSharedInputDecoder(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+
+	tools := map[string]func(json.RawMessage) (string, error){
+		"list_tasks": func(input json.RawMessage) (string, error) {
+			return ExecuteListTasksTool(ctx, taskRepo, "default", input)
+		},
+		"list_schedules": func(input json.RawMessage) (string, error) {
+			return ExecuteListSchedulesTool(ctx, scheduleRepo, "default", input)
+		},
+	}
+
+	for name, tool := range tools {
+		t.Run(name, func(t *testing.T) {
+			for _, input := range []json.RawMessage{nil, json.RawMessage(" \n\t ")} {
+				out, err := tool(input)
+				if err != nil {
+					t.Fatalf("blank input: %v", err)
+				}
+				if !strings.Contains(out, `"ok":true`) {
+					t.Fatalf("expected successful empty result, got %q", out)
+				}
+			}
+
+			_, err := tool(json.RawMessage(`{"broken":`))
+			if err == nil || !strings.Contains(err.Error(), name+`: invalid tool input JSON: unexpected end of JSON input`) {
+				t.Fatalf("expected %s shared decoder error, got %v", name, err)
+			}
+		})
 	}
 }

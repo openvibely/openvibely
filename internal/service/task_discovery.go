@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -81,10 +82,8 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 	}
 
 	var req ListTasksRequest
-	if len(strings.TrimSpace(string(input))) > 0 {
-		if err := json.Unmarshal(input, &req); err != nil {
-			return "", fmt.Errorf("list_tasks: invalid input: %w", err)
-		}
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", fmt.Errorf("list_tasks: %w", err)
 	}
 
 	category := strings.ToLower(strings.TrimSpace(req.Category))

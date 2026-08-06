@@ -97,7 +97,7 @@ func (h *Handler) executeCreateSwarmTaskTool(ctx context.Context, params streami
 		return "", fmt.Errorf("create_swarm_task: swarm service unavailable")
 	}
 	var req createSwarmTaskToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	projectID := strings.TrimSpace(params.ProjectID)
@@ -443,8 +443,8 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			var req struct {
 				Mode string `json:"mode"`
 			}
-			if err := json.Unmarshal(input, &req); err != nil {
-				return "", fmt.Errorf("invalid input: %w", err)
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
 			}
 			newMode := models.NormalizeChatMode(req.Mode)
 			return fmt.Sprintf("Chat mode set to %s. The mode change will take effect on the next message.", newMode), nil
@@ -529,7 +529,7 @@ func requireAutomationGitHubRepo(ctx context.Context, projectID string, project 
 
 func (h *Handler) executeGitHubCreateIssueTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
 	var req githubCreateIssueToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
@@ -545,7 +545,7 @@ func (h *Handler) executeGitHubCreateIssueTool(ctx context.Context, projectID st
 
 func (h *Handler) githubIssueActionCore(projectID string) *service.GitHubIssueActionCore {
 	return service.NewGitHubIssueActionCore(h.githubSvc, h.githubAuthRepo, projectID,
-		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
+		chatcontrol.DecodeRuntimeToolInput,
 		func(ctx context.Context, repoURL string) (*service.GitHubRepoRef, error) {
 			return h.resolveGitHubRepoForToolURL(ctx, projectID, repoURL)
 		})
@@ -588,7 +588,7 @@ func (h *Handler) executeGitHubForwardPRFeedbackToTasksTool(ctx context.Context,
 		return "", fmt.Errorf("github pr feedback forwarding dependencies unavailable")
 	}
 	var req service.GitHubIssueActionRequest
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	repo, err := h.resolveGitHubRepoForToolURL(ctx, projectID, req.RepoURL)
@@ -640,7 +640,7 @@ func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params s
 		return "", fmt.Errorf("task pull request repository unavailable")
 	}
 	var req service.GitHubIssueActionRequest
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	task, project, err := h.resolveGitHubPRTaskForTool(ctx, params, req.TaskID, req.Title)
@@ -670,7 +670,7 @@ func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context,
 		return "", fmt.Errorf("task pull request repository unavailable")
 	}
 	var req service.GitHubIssueActionRequest
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	if !req.ConfirmHistoryRewrite {
@@ -718,7 +718,7 @@ func (h *Handler) executeGetModel(ctx context.Context, input json.RawMessage) st
 		ModelID string `json:"model_id"`
 		Name    string `json:"name"`
 	}
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for get_model."
 	}
 
@@ -770,7 +770,7 @@ func (h *Handler) executeSwitchProject(ctx context.Context, currentProjectID str
 	var req struct {
 		Project string `json:"project"`
 	}
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for switch_project."
 	}
 	target := strings.TrimSpace(req.Project)
@@ -803,7 +803,7 @@ func (h *Handler) executeGetAlert(ctx context.Context, projectID string, input j
 	var req struct {
 		AlertID string `json:"alert_id"`
 	}
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for get_alert."
 	}
 	if req.AlertID == "" {
@@ -934,7 +934,7 @@ func (h *Handler) executeSetTaskGoalTool(ctx context.Context, params streamingRe
 		return "", fmt.Errorf("task goal service unavailable")
 	}
 	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
@@ -953,7 +953,7 @@ func (h *Handler) executeGetTaskGoalTool(ctx context.Context, params streamingRe
 		return "", fmt.Errorf("task goal service unavailable")
 	}
 	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
@@ -972,7 +972,7 @@ func (h *Handler) executeClearTaskGoalTool(ctx context.Context, params streaming
 		return "", fmt.Errorf("task goal service unavailable")
 	}
 	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
@@ -1003,7 +1003,7 @@ func (h *Handler) executeGoalStatusTool(ctx context.Context, params streamingRes
 		return "", fmt.Errorf("task goal service unavailable")
 	}
 	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
@@ -1041,7 +1041,7 @@ func (h *Handler) executeMarkTaskGoalAchievedTool(ctx context.Context, params st
 		return "", fmt.Errorf("task goal service unavailable")
 	}
 	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
@@ -1063,7 +1063,7 @@ func (h *Handler) executeReportTaskGoalBlockedTool(ctx context.Context, params s
 		return "", fmt.Errorf("task goal service unavailable")
 	}
 	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
@@ -1079,7 +1079,7 @@ func (h *Handler) executeReportTaskGoalBlockedTool(ctx context.Context, params s
 
 func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
 	var req taskGoalToolInput
-	if err := json.Unmarshal(input, &req); err != nil {
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
 	taskIDInput := strings.TrimSpace(req.TaskID)

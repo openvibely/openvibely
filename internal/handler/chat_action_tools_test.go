@@ -129,6 +129,37 @@ func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
 	}
 }
 
+func TestWebRuntimeToolsUseSharedInputDecoder(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Shared Web Runtime Decoder")
+	handlers := h.chatActionHandlers(
+		streamingResponseParams{ExecID: "shared-web-runtime-decoder", ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	ctx := context.Background()
+
+	for _, input := range []json.RawMessage{nil, json.RawMessage(" \n\t ")} {
+		out, err := handlers["set_chat_mode"](ctx, input)
+		require.NoError(t, err)
+		require.Contains(t, out, "Chat mode set to orchestrate")
+	}
+
+	for name, handler := range map[string]chatcontrol.RuntimeActionHandler{
+		"create_swarm_task": handlers["create_swarm_task"],
+		"github_get_issue":  handlers["github_get_issue"],
+		"send_to_task":      handlers["send_to_task"],
+		"set_chat_mode":     handlers["set_chat_mode"],
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := handler(ctx, json.RawMessage(`{"broken":`))
+			require.ErrorContains(t, err, "invalid tool input JSON:")
+			require.ErrorContains(t, err, "unexpected end of JSON input")
+		})
+	}
+}
+
 func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
 	tests := []struct {
 		name      string
