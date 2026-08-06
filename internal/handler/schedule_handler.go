@@ -105,6 +105,20 @@ func (h *Handler) renderScheduleTaskDetail(c echo.Context, taskID, taskLookupErr
 	return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(ctx, taskID), executions, schedules, agents, adefs, attachments, "schedules", reviewComments))
 }
 
+func (h *Handler) redirectToTaskSchedules(c echo.Context, taskID string) error {
+	projectID := c.QueryParam("project_id")
+	if projectID == "" && h.taskSvc != nil {
+		if task, _ := h.taskSvc.GetByID(c.Request().Context(), taskID); task != nil {
+			projectID = task.ProjectID
+		}
+	}
+	redirectURL := "/tasks/" + taskID + "?tab=schedules"
+	if projectID != "" {
+		redirectURL += "&project_id=" + projectID
+	}
+	return c.Redirect(http.StatusSeeOther, redirectURL)
+}
+
 func (h *Handler) CreateSchedule(c echo.Context) error {
 	taskID := c.Param("taskId")
 	isHTMX := isHTMX(c)
@@ -161,17 +175,7 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 		return h.renderScheduleTaskDetail(c, taskID, "CreateSchedule error fetching task", false)
 	}
 
-	projectID := c.QueryParam("project_id")
-	if projectID == "" && h.taskSvc != nil {
-		if task, _ := h.taskSvc.GetByID(c.Request().Context(), taskID); task != nil {
-			projectID = task.ProjectID
-		}
-	}
-	redirectURL := "/tasks/" + taskID + "?tab=schedules"
-	if projectID != "" {
-		redirectURL += "&project_id=" + projectID
-	}
-	return c.Redirect(http.StatusSeeOther, redirectURL)
+	return h.redirectToTaskSchedules(c, taskID)
 }
 
 func (h *Handler) UpdateSchedule(c echo.Context) error {
@@ -252,17 +256,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 		return h.renderScheduleTaskDetail(c, schedule.TaskID, "UpdateSchedule error fetching task", false)
 	}
 
-	projectID := c.QueryParam("project_id")
-	if projectID == "" && h.taskSvc != nil {
-		if task, _ := h.taskSvc.GetByID(c.Request().Context(), schedule.TaskID); task != nil {
-			projectID = task.ProjectID
-		}
-	}
-	redirectURL := "/tasks/" + schedule.TaskID + "?tab=schedules"
-	if projectID != "" {
-		redirectURL += "&project_id=" + projectID
-	}
-	return c.Redirect(http.StatusSeeOther, redirectURL)
+	return h.redirectToTaskSchedules(c, schedule.TaskID)
 }
 
 type scheduleToggleResult struct {
