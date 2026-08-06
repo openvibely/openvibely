@@ -71,9 +71,9 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   function wait() { return new Promise(function(resolve) { setTimeout(resolve, 150); }); }
   var idleInput = document.getElementById('message-input');
   var activeInput = document.getElementById('task-message-input');
-  var apple = idleInput.placeholder.includes('⌘+Enter steers');
+  var apple = idleInput.placeholder.includes('⌘+⏎ steers');
   var modifier = apple ? {metaKey:true} : {ctrlKey:true};
-  var expectedHint = apple ? 'Enter sends or queues · ⌘+Enter steers' : 'Enter sends or queues · Ctrl+Enter steers';
+  var expectedHint = apple ? '⏎ sends or queues · ⌘+⏎ steers' : 'Enter sends or queues · Ctrl+Enter steers';
   if (idleInput.placeholder !== expectedHint || activeInput.placeholder !== expectedHint) fail('shortcut copy was not concise or platform appropriate');
   if (idleInput.placeholder.includes('click') || idleInput.placeholder.includes('Shift+Enter')) fail('shortcut copy advertised extra shortcuts');
 
@@ -240,7 +240,7 @@ func TestChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
   var composer = document.getElementById('chat-form');
   var input = document.getElementById('message-input');
   var session = composer.querySelector('input[name="attachment_session_id"]');
-  var apple = input.placeholder.includes('⌘+Enter steers');
+  var apple = input.placeholder.includes('⌘+⏎ steers');
   var modifier = apple ? {metaKey:true} : {ctrlKey:true};
   var pendingXHR = {};
 
@@ -339,7 +339,7 @@ func TestChatComposerRunningActionModifierSteersInChrome(t *testing.T) {
   function key(input, options) { input.dispatchEvent(new KeyboardEvent('keydown', Object.assign({key:'Enter', bubbles:true, cancelable:true}, options || {}))); }
   function wait() { return new Promise(function(resolve) { setTimeout(resolve, 150); }); }
   var input = document.getElementById('message-input');
-  var apple = input.placeholder.includes('⌘+Enter steers');
+  var apple = input.placeholder.includes('⌘+⏎ steers');
   var modifier = apple ? {metaKey:true} : {ctrlKey:true};
   var modifierKey = apple ? 'Meta' : 'Control';
   var oldAction = document.getElementById('chat-form-primary-action');

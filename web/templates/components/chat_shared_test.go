@@ -1229,7 +1229,7 @@ func TestChatInputForm_SharedQueueAndSteerShortcuts(t *testing.T) {
 				"function chatComposerUsesAppleShortcuts()",
 				"navigator.userAgentData && navigator.userAgentData.platform",
 				"/Mac|iPhone|iPad|iPod/i.test(platform)",
-				"Enter sends or queues · ⌘+Enter steers",
+				"⏎ sends or queues · ⌘+⏎ steers",
 				"Enter sends or queues · Ctrl+Enter steers",
 				`data-composer-running="true"`,
 				"function composerHasActiveTurn()",
