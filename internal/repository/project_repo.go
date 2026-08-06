@@ -54,8 +54,8 @@ func (r *ProjectRepo) GetByID(ctx context.Context, id string) (*models.Project, 
 func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
 	return r.db.QueryRowContext(ctx,
 		`INSERT INTO projects (id, name, description, repo_path, repo_url, default_agent_config_id, max_workers)
-		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)
-		 RETURNING id, repo_path, repo_url, created_at, updated_at`,
+			 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?)
+			 RETURNING id, repo_path, repo_url, created_at, updated_at`,
 		p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers).
 		Scan(&p.ID, &p.RepoPath, &p.RepoURL, &p.CreatedAt, &p.UpdatedAt)
 }
@@ -63,7 +63,7 @@ func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {
 func (r *ProjectRepo) Update(ctx context.Context, p *models.Project) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE projects SET name = ?, description = ?, repo_path = ?, repo_url = ?, default_agent_config_id = ?, max_workers = ?, updated_at = datetime('now')
-		 WHERE id = ?`,
+			 WHERE id = ?`,
 		p.Name, p.Description, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, p.ID)
 	if err != nil {
 		return fmt.Errorf("updating project: %w", err)

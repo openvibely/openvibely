@@ -12,6 +12,7 @@ import (
 )
 
 type fakeTaskPullRequestGitHubProvider struct {
+	globalAPIEndpoint   string
 	resolveRepoFn       func(context.Context, string, string) (*GitHubRepoRef, error)
 	defaultBranchFn     func(context.Context, *GitHubRepoRef) (string, error)
 	publishBranchFn     func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) error
@@ -25,7 +26,7 @@ func (f *fakeTaskPullRequestGitHubProvider) ResolveRepo(ctx context.Context, rep
 	if f.resolveRepoFn != nil {
 		return f.resolveRepoFn(ctx, repoURL, repoPath)
 	}
-	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 }
 
 func (f *fakeTaskPullRequestGitHubProvider) DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error) {
@@ -68,6 +69,10 @@ func (f *fakeTaskPullRequestGitHubProvider) CreatePullRequest(ctx context.Contex
 		return f.createPRFn(ctx, repo, req)
 	}
 	return &GitHubPullRequest{Number: 42, URL: "https://github.com/openvibely/openvibely/pull/42", State: "open"}, nil
+}
+
+func (f *fakeTaskPullRequestGitHubProvider) GlobalAPIEndpoint(_ context.Context) string {
+	return f.globalAPIEndpoint
 }
 
 func TestTaskPullRequestServiceReplaceBranchHeadForTaskUsesLinkedPRAndTaskBranch(t *testing.T) {
@@ -521,7 +526,7 @@ func TestTaskPullRequestServiceAutomationOperationsUseProjectURLOrLocalGitRemote
 			resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 				resolveCalls++
 				resolvedURL, resolvedPath = repoURL, repoPath
-				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 			},
 		}, prRepo)
 
@@ -578,7 +583,7 @@ func TestTaskPullRequestServiceAutomationOperationsUseProjectURLOrLocalGitRemote
 			resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 				resolveCalls++
 				resolvedURL, resolvedPath = repoURL, repoPath
-				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 			},
 			getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
 				return &GitHubPullRequest{Number: number, HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely"}, nil

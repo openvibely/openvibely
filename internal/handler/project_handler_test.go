@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -9,6 +11,41 @@ import (
 )
 
 // ---- Home ----
+
+func TestCreateProject_EnterpriseRepositoryRequiresGlobalAPIEndpoint(t *testing.T) {
+	tc := NewTestContext(t)
+	tc.handler.SetGitHubService(&fakeGitHubService{
+		cloneFn: func(_ context.Context, projectID, repoURL string) (string, string, error) {
+			// Simulate the error ConfigureGitHubRepoEndpoint returns when no global
+			// endpoint is configured for a custom GitHub Enterprise host.
+			return "", "", fmt.Errorf("custom repository host requires a configured GitHub API endpoint")
+		},
+	})
+	before, err := tc.projectRepo.List(t.Context())
+	if err != nil {
+		t.Fatalf("list projects before create: %v", err)
+	}
+
+	rec := tc.HTTP().Post("/projects").WithForm(url.Values{
+		"name":        {"Enterprise project"},
+		"repo_source": {"github"},
+		"repo_url":    {"https://github.example.com/acme/widgets.git"},
+	}).Execute()
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "custom repository host requires a configured GitHub API endpoint") {
+		t.Fatalf("expected endpoint requirement, body=%s", rec.Body.String())
+	}
+	after, err := tc.projectRepo.List(t.Context())
+	if err != nil {
+		t.Fatalf("list projects after create: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("project count changed from %d to %d", len(before), len(after))
+	}
+}
 
 func TestHome_Redirect(t *testing.T) {
 	tc := NewTestContext(t)

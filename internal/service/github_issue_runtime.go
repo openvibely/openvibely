@@ -25,6 +25,7 @@ type GitHubIssueRuntimeProvider interface {
 	CreateIssue(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreateIssueRequest) (*GitHubIssue, error)
 	GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error)
 	GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error)
+	GetAuthenticatedUserForRepo(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, error)
 	ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error)
@@ -32,6 +33,7 @@ type GitHubIssueRuntimeProvider interface {
 	ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error)
 	CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error
+	GlobalAPIEndpoint(ctx context.Context) string
 }
 
 const (
@@ -323,6 +325,9 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				repoRef, err = opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
 			}
 			if err != nil {
+				return "", err
+			}
+			if err := ConfigureGitHubRepoEndpoint(repoRef, opts.GitHub.GlobalAPIEndpoint(ctx)); err != nil {
 				return "", err
 			}
 			if err := recordGitHubPullRequestOpened(ctx, opts, repoRef, task, req, result); err != nil {
@@ -645,17 +650,31 @@ func resolveGitHubRepoForRuntimeTool(ctx context.Context, opts githubIssueRuntim
 
 func resolveGitHubRepoForRuntimeToolURL(ctx context.Context, opts githubIssueRuntimeOptions, repoURL string) (*GitHubRepoRef, error) {
 	automationContext, automationBound := AutomationContextFromContext(ctx)
-	if strings.TrimSpace(repoURL) != "" && (!automationBound || automationContext.ProjectID != opts.ProjectID) {
-		return opts.GitHub.ResolveRepo(ctx, repoURL, "")
-	}
 	project, err := resolveGitHubRuntimeProject(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(repoURL) != "" && (!automationBound || automationContext.ProjectID != opts.ProjectID) {
+		repo, err := opts.GitHub.ResolveRepo(ctx, repoURL, "")
+		if err != nil {
+			return nil, err
+		}
+		if err := ConfigureGitHubRepoEndpointForProject(repo, repoURL, project.RepoURL, opts.GitHub.GlobalAPIEndpoint(ctx)); err != nil {
+			return nil, err
+		}
+		return repo, nil
+	}
 	if automationBound && automationContext.ProjectID == opts.ProjectID {
 		return resolveAutomationProjectGitHubRepository(ctx, opts.GitHub, project)
 	}
-	return opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	repo, err := opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := ConfigureGitHubRepoEndpoint(repo, opts.GitHub.GlobalAPIEndpoint(ctx)); err != nil {
+		return nil, err
+	}
+	return repo, nil
 }
 
 func resolveGitHubRuntimeTask(ctx context.Context, taskRepo *repository.TaskRepo, projectID, taskID, title string) (*models.Task, error) {

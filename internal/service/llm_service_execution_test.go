@@ -3779,6 +3779,7 @@ func TestLLMService_ExecuteTask_ScopedFilesPrepFailureCompletesExecution(t *test
 type fakeGitHubIssueRuntimeProvider struct {
 	issueMu              sync.Mutex
 	issues               map[int]GitHubIssue
+	globalAPIEndpoint    string
 	resolveRepoFn        func(context.Context, string, string) (*GitHubRepoRef, error)
 	createIssueFn        func(context.Context, *GitHubRepoRef, GitHubCreateIssueRequest) (*GitHubIssue, error)
 	ensureIssueLabelsFn  func(context.Context, *GitHubRepoRef, []string) error
@@ -3801,7 +3802,7 @@ func (f *fakeGitHubIssueRuntimeProvider) ResolveRepo(ctx context.Context, repoUR
 	if f.resolveRepoFn != nil {
 		return f.resolveRepoFn(ctx, repoURL, repoPath)
 	}
-	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+	return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error) {
@@ -3893,6 +3894,10 @@ func (f *fakeGitHubIssueRuntimeProvider) GetAuthenticatedUser(ctx context.Contex
 	return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, nil
 }
 
+func (f *fakeGitHubIssueRuntimeProvider) GetAuthenticatedUserForRepo(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, error) {
+	return f.GetAuthenticatedUser(ctx)
+}
+
 func (f *fakeGitHubIssueRuntimeProvider) ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
 	if f.listMyIssuesFn != nil {
 		return f.listMyIssuesFn(ctx, repo)
@@ -3954,6 +3959,68 @@ func (f *fakeGitHubIssueRuntimeProvider) AddLabelsToIssue(ctx context.Context, r
 	return nil
 }
 
+func (f *fakeGitHubIssueRuntimeProvider) GlobalAPIEndpoint(_ context.Context) string {
+	return f.globalAPIEndpoint
+}
+
+func TestGitHubRuntimeCurrentEnterpriseRepositoryRequiresAPIEndpoint(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{
+		Name:    "Enterprise runtime repository without endpoint",
+		RepoURL: "https://github.example.com/acme/widgets.git",
+	}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	provider := &fakeGitHubIssueRuntimeProvider{resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+		require.Equal(t, project.RepoURL, repoURL)
+		require.Empty(t, repoPath)
+		parsed, err := ParseGitHubRepoURL(repoURL)
+		require.NoError(t, err)
+		return &parsed, nil
+	}}
+	opts := githubIssueRuntimeOptions{ProjectID: project.ID, ProjectRepo: projectRepo, GitHub: provider}
+
+	repo, err := resolveGitHubRepoForRuntimeTool(ctx, opts)
+	require.Nil(t, repo)
+	require.ErrorContains(t, err, "custom repository host requires a configured GitHub API endpoint")
+}
+
+func TestGitHubRuntimeExplicitRepositoryUsesProjectEndpointByParsedHost(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	const enterpriseEndpoint = "https://github.example.com/api/v3"
+	project := &models.Project{
+		Name:    "Enterprise runtime repository",
+		RepoURL: "https://github.example.com/acme/widgets.git",
+	}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	provider := &fakeGitHubIssueRuntimeProvider{
+		globalAPIEndpoint: enterpriseEndpoint,
+		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
+			require.Empty(t, repoPath)
+			parsed, err := ParseGitHubRepoURL(repoURL)
+			require.NoError(t, err)
+			return &parsed, nil
+		},
+	}
+	opts := githubIssueRuntimeOptions{ProjectID: project.ID, ProjectRepo: projectRepo, GitHub: provider}
+
+	for _, repoURL := range []string{
+		"git@github.example.com:acme/widgets.git",
+		"https://github.example.com/acme/sibling.git",
+	} {
+		repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, repoURL)
+		require.NoError(t, err)
+		require.Equal(t, enterpriseEndpoint, repo.APIBaseURL)
+	}
+
+	repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, "https://github.com/acme/widgets.git")
+	require.Nil(t, repo)
+	require.ErrorContains(t, err, "repository host")
+}
+
 func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -3963,7 +4030,7 @@ func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *te
 	var resolvedURL, resolvedPath string
 	provider := &fakeGitHubIssueRuntimeProvider{resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 		resolvedURL, resolvedPath = repoURL, repoPath
-		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project"}, nil
+		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project", HTMLURL: "https://github.com/openvibely/project"}, nil
 	}}
 	opts := githubIssueRuntimeOptions{ProjectID: project.ID, ProjectRepo: projectRepo, GitHub: provider}
 	automationCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: project.ID,
@@ -3978,7 +4045,7 @@ func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *te
 	require.NoError(t, projectRepo.Update(ctx, project))
 	provider.resolveRepoFn = func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 		resolvedURL, resolvedPath = repoURL, repoPath
-		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project"}, nil
+		return &GitHubRepoRef{Owner: "openvibely", Name: "project", FullName: "openvibely/project", HTMLURL: "https://github.com/openvibely/project"}, nil
 	}
 	_, err = resolveGitHubRepoForRuntimeToolURL(automationCtx, opts, "https://github.com/attacker/other")
 	require.NoError(t, err)
@@ -3989,7 +4056,7 @@ func TestAutomationGitHubRuntimeToolsAlwaysResolveCurrentProjectRepository(t *te
 	require.NoError(t, projectRepo.Update(ctx, project))
 	provider.resolveRepoFn = func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 		resolvedURL, resolvedPath = repoURL, repoPath
-		return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
+		return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other", HTMLURL: "https://github.com/example/other"}, nil
 	}
 	_, err = resolveGitHubRepoForRuntimeToolURL(ctx, opts, "https://github.com/example/other")
 	require.NoError(t, err)
@@ -4020,12 +4087,12 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 			switch repoURL {
 			case project.RepoURL:
-				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+				return &GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 			case "https://github.com/example/other":
 				if strings.TrimSpace(repoPath) != "" {
 					t.Fatalf("expected explicit repo_url lookup to avoid local repo path, got %q", repoPath)
 				}
-				return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other"}, nil
+				return &GitHubRepoRef{Owner: "example", Name: "other", FullName: "example/other", HTMLURL: "https://github.com/example/other"}, nil
 			default:
 				t.Fatalf("unexpected repo URL %q", repoURL)
 				return nil, nil

@@ -31,6 +31,7 @@ type fakeGitHubService struct {
 	listPRFeedbackFn       func(ctx context.Context, repo *service.GitHubRepoRef, prNumber int) ([]service.GitHubPullRequestFeedback, error)
 	commentOnIssueFn       func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
 	addLabelsToIssueFn     func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
+	globalAPIEndpoint      string
 }
 
 func (f *fakeGitHubService) GetConnectionStatus(ctx context.Context) (service.GitHubConnectionStatus, error) {
@@ -149,6 +150,10 @@ func (f *fakeGitHubService) GetAuthenticatedUser(ctx context.Context) (*service.
 	return &service.GitHubAuthenticatedUser{Login: "openvibely", Source: service.GitHubAuthModePAT}, nil
 }
 
+func (f *fakeGitHubService) GetAuthenticatedUserForRepo(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, error) {
+	return f.GetAuthenticatedUser(ctx)
+}
+
 func (f *fakeGitHubService) ListAuthenticatedAssignedIssues(ctx context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error) {
 	if f != nil && f.listMyAssignedIssuesFn != nil {
 		return f.listMyAssignedIssuesFn(ctx, repo)
@@ -196,4 +201,11 @@ func (f *fakeGitHubService) AddLabelsToIssue(ctx context.Context, repo *service.
 		return f.addLabelsToIssueFn(ctx, repo, issueNumber, labels)
 	}
 	return fmt.Errorf("add labels to issue not configured")
+}
+
+func (f *fakeGitHubService) GlobalAPIEndpoint(_ context.Context) string {
+	if f != nil {
+		return f.globalAPIEndpoint
+	}
+	return ""
 }

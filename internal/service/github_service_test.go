@@ -2,8 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,6 +74,7 @@ func TestParseGitHubRepoURL(t *testing.T) {
 		raw       string
 		wantOwner string
 		wantRepo  string
+		wantHTML  string
 		wantErr   bool
 	}{
 		{name: "https", raw: "https://github.com/openvibely/openvibely", wantOwner: "openvibely", wantRepo: "openvibely"},
@@ -77,7 +82,10 @@ func TestParseGitHubRepoURL(t *testing.T) {
 		{name: "ssh short", raw: "git@github.com:openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely"},
 		{name: "ssh url", raw: "ssh://git@github.com/openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely"},
 		{name: "owner repo", raw: "openvibely/openvibely", wantOwner: "openvibely", wantRepo: "openvibely"},
-		{name: "invalid host", raw: "https://gitlab.com/openvibely/openvibely", wantErr: true},
+		{name: "enterprise https", raw: "https://github.example.com/openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely", wantHTML: "https://github.example.com/openvibely/openvibely"},
+		{name: "enterprise https default port", raw: "https://github.example.com:443/openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely", wantHTML: "https://github.example.com/openvibely/openvibely"},
+		{name: "enterprise https non-default port", raw: "https://github.example.com:8443/openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely", wantHTML: "https://github.example.com:8443/openvibely/openvibely"},
+		{name: "http custom port canonicalizes to https default authority", raw: "http://github.example.com:8080/openvibely/openvibely.git", wantOwner: "openvibely", wantRepo: "openvibely", wantHTML: "https://github.example.com/openvibely/openvibely"},
 		{name: "invalid shape", raw: "https://github.com/openvibely", wantErr: true},
 	}
 
@@ -96,13 +104,120 @@ func TestParseGitHubRepoURL(t *testing.T) {
 			if got.Owner != tt.wantOwner || got.Name != tt.wantRepo {
 				t.Fatalf("unexpected parse result: owner=%q repo=%q", got.Owner, got.Name)
 			}
-			if got.HTMLURL != "https://github.com/"+tt.wantOwner+"/"+tt.wantRepo {
+			wantHTML := tt.wantHTML
+			if wantHTML == "" {
+				wantHTML = "https://github.com/" + tt.wantOwner + "/" + tt.wantRepo
+			}
+			if got.HTMLURL != wantHTML {
 				t.Fatalf("unexpected HTML URL: %s", got.HTMLURL)
 			}
 			if got.CloneURL != got.HTMLURL+".git" {
 				t.Fatalf("unexpected clone URL: %s", got.CloneURL)
 			}
 		})
+	}
+}
+
+func TestConfigureGitHubRepoEndpoint_DefaultAndExplicitOverride(t *testing.T) {
+	publicRepo, err := ParseGitHubRepoURL("https://github.com/openvibely/openvibely")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(&publicRepo, ""); err != nil {
+		t.Fatalf("blank endpoint: %v", err)
+	}
+	if got := githubAPIBaseURLForRepo(&publicRepo, defaultGitHubAPIBaseURL); got != defaultGitHubAPIBaseURL {
+		t.Fatalf("blank endpoint resolved to %q", got)
+	}
+
+	if err := ConfigureGitHubRepoEndpoint(&publicRepo, "https://api.github.com/"); err != nil {
+		t.Fatalf("explicit public endpoint: %v", err)
+	}
+	if publicRepo.APIBaseURL != "" {
+		t.Fatalf("public endpoint should normalize to implicit default, got %q", publicRepo.APIBaseURL)
+	}
+
+	publicHostDefaultPort, err := ParseGitHubRepoURL("https://github.com:443/openvibely/openvibely")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(&publicHostDefaultPort, ""); err != nil {
+		t.Fatalf("github.com on the default HTTPS port: %v", err)
+	}
+
+	publicHostCustomPort, err := ParseGitHubRepoURL("https://github.com:8443/openvibely/openvibely")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(&publicHostCustomPort, ""); err == nil {
+		t.Fatal("github.com on a non-default port must not use the implicit public API endpoint")
+	}
+
+	enterpriseRepo, err := ParseGitHubRepoURL("https://github.example.com/acme/widgets")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpoint(&enterpriseRepo, "https://github.example.com/api/v3/"); err != nil {
+		t.Fatalf("enterprise endpoint: %v", err)
+	}
+	if enterpriseRepo.APIBaseURL != "https://github.example.com/api/v3" {
+		t.Fatalf("normalized endpoint = %q", enterpriseRepo.APIBaseURL)
+	}
+	for _, endpoint := range []string{
+		"http://github.example.com/api/v3",
+		"https://token@github.example.com/api/v3",
+		"https://other.example.com/api/v3",
+		"https://github.example.com/api/v3?token=secret",
+	} {
+		if err := ConfigureGitHubRepoEndpoint(&enterpriseRepo, endpoint); err == nil {
+			t.Fatalf("expected endpoint %q to be rejected", endpoint)
+		}
+	}
+}
+
+func TestConfigureGitHubRepoEndpointForProject_PreservesRepositoryPortScope(t *testing.T) {
+	target, err := ParseGitHubRepoURL("https://github.example.com:8443/acme/sibling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpointForProject(&target, target.HTMLURL, "https://github.example.com:8443/acme/widgets", "https://github.example.com:8443/api/v3"); err != nil {
+		t.Fatalf("same authority endpoint: %v", err)
+	}
+	if target.APIBaseURL != "https://github.example.com:8443/api/v3" {
+		t.Fatalf("API endpoint = %q", target.APIBaseURL)
+	}
+
+	foreignPort, err := ParseGitHubRepoURL("https://github.example.com:9443/acme/sibling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ConfigureGitHubRepoEndpointForProject(&foreignPort, foreignPort.HTMLURL, "https://github.example.com:8443/acme/widgets", "https://github.example.com:8443/api/v3"); err == nil {
+		t.Fatal("expected a different repository port to be rejected")
+	}
+}
+
+func TestGitHubDefaultBranch_UsesRepositoryEndpointOverride(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if r.Header.Get("Authorization") != "Bearer enterprise-pat" {
+			t.Fatalf("unexpected authorization header %q", r.Header.Get("Authorization"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"default_branch": "main"})
+	}))
+	defer server.Close()
+
+	svc := newPATGitHubService(t, "https://api.github.com")
+	if err := svc.settingsRepo.Set(context.Background(), GitHubSettingPAT, "enterprise-pat"); err != nil {
+		t.Fatal(err)
+	}
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets", APIBaseURL: server.URL + "/api/v3"}
+	branch, err := svc.DefaultBranch(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	if branch != "main" || gotPath != "/api/v3/repos/acme/widgets" {
+		t.Fatalf("branch=%q path=%q", branch, gotPath)
 	}
 }
 
@@ -123,6 +238,17 @@ func TestNormalizeGitHubAuthMode(t *testing.T) {
 		if got := NormalizeGitHubAuthMode(tt.in); got != tt.want {
 			t.Fatalf("NormalizeGitHubAuthMode(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestGitHubTokenEnvForURL_ScopesCredentialToExplicitHost(t *testing.T) {
+	env := gitHubTokenEnvForURL("enterprise-token", "https://github.example.com/acme/widgets.git")
+	joined := strings.Join(env, "\n")
+	if !strings.Contains(joined, "GIT_CONFIG_KEY_0=http.https://github.example.com/.extraheader") {
+		t.Fatalf("credential scope missing Enterprise host: %s", joined)
+	}
+	if strings.Contains(joined, "http.https://github.com/.extraheader") {
+		t.Fatalf("Enterprise token must not be scoped to public GitHub: %s", joined)
 	}
 }
 
@@ -368,6 +494,37 @@ func TestCloneProjectRepo_PATConfiguredUsesTokenClone(t *testing.T) {
 	}
 	if !envContainsPrefix(gotEnv, "GIT_CONFIG_VALUE_0=AUTHORIZATION: Basic ") {
 		t.Fatalf("expected token auth header env, got %v", gotEnv)
+	}
+}
+
+func TestCloneProjectRepoWithEndpoint_ScopesPATToEnterpriseHost(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "enterprise-pat"); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewGitHubService(settingsRepo, "", "", "", t.TempDir())
+	var gotEnv []string
+	var gotArgs []string
+	svc.runGit = func(_ context.Context, _ string, env []string, args ...string) ([]byte, error) {
+		gotEnv = append([]string(nil), env...)
+		gotArgs = append([]string(nil), args...)
+		return nil, nil
+	}
+	_, normalizedURL, err := svc.CloneProjectRepoWithEndpoint(ctx, "enterprise-project", "https://github.example.com:8443/acme/widgets", "https://github.example.com:8443/api/v3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalizedURL != "https://github.example.com:8443/acme/widgets" || len(gotArgs) < 2 || gotArgs[1] != "https://github.example.com:8443/acme/widgets.git" {
+		t.Fatalf("url=%q args=%v", normalizedURL, gotArgs)
+	}
+	joined := strings.Join(gotEnv, "\n")
+	if !strings.Contains(joined, "GIT_CONFIG_KEY_0=http.https://github.example.com:8443/.extraheader") || strings.Contains(joined, "http.https://github.example.com/.extraheader") || strings.Contains(joined, "http.https://github.com/.extraheader") {
+		t.Fatalf("unexpected credential scope: %s", joined)
 	}
 }
 
@@ -955,6 +1112,168 @@ func TestListAuthenticatedAssignedIssuesUsesConfiguredTokenUser(t *testing.T) {
 	}
 }
 
+func TestGetAuthenticatedUserForEnterpriseRepoBypassesGlobalPATLoginCache(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "enterprise-pat"); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPATUserLogin, "public-user"); err != nil {
+		t.Fatal(err)
+	}
+
+	var userRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userRequests++
+		if r.URL.Path != "/api/v3/user" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer enterprise-pat" {
+			t.Fatalf("unexpected auth header %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"login":"enterprise-user"}`))
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets", APIBaseURL: server.URL + "/api/v3"}
+	user, err := svc.GetAuthenticatedUserForRepo(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Login != "enterprise-user" || user.Source != GitHubAuthModePAT {
+		t.Fatalf("unexpected authenticated user: %#v", user)
+	}
+	if userRequests != 1 {
+		t.Fatalf("expected one Enterprise /user request, got %d", userRequests)
+	}
+	cachedLogin, err := settingsRepo.Get(ctx, GitHubSettingPATUserLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cachedLogin != "public-user" {
+		t.Fatalf("global PAT login cache changed to %q", cachedLogin)
+	}
+	publicUser, err := svc.GetAuthenticatedUser(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if publicUser.Login != "public-user" || publicUser.Source != GitHubAuthModePAT {
+		t.Fatalf("unexpected cached public user: %#v", publicUser)
+	}
+	if userRequests != 1 {
+		t.Fatalf("public cached lookup contacted Enterprise; request count = %d", userRequests)
+	}
+}
+
+func TestGetAuthenticatedUserForEnterpriseRepoBypassesGlobalGitHubAppLoginCache(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
+	for key, value := range map[string]string{
+		GitHubSettingAuthMode:       GitHubAuthModeApp,
+		githubSettingInstallationID: "123",
+		githubSettingAccountLogin:   "public-installation",
+		githubSettingAccountType:    "Organization",
+	} {
+		if err := settingsRepo.Set(ctx, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var metadataRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		metadataRequests++
+		if r.URL.Path != "/api/v3/app/installations/123" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") || len(strings.TrimPrefix(got, "Bearer ")) < 20 {
+			t.Fatalf("expected app JWT bearer auth, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"account":{"login":"enterprise-installation","type":"Organization"}}`))
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "1", "test-app", string(privateKeyPEM), "")
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets", APIBaseURL: server.URL + "/api/v3"}
+	user, err := svc.GetAuthenticatedUserForRepo(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Login != "enterprise-installation" || user.Source != GitHubAuthModeApp {
+		t.Fatalf("unexpected authenticated user: %#v", user)
+	}
+	if metadataRequests != 1 {
+		t.Fatalf("expected one Enterprise installation metadata request, got %d", metadataRequests)
+	}
+	cachedLogin, err := settingsRepo.Get(ctx, githubSettingAccountLogin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cachedLogin != "public-installation" {
+		t.Fatalf("global app login cache changed to %q", cachedLogin)
+	}
+	publicUser, err := svc.GetAuthenticatedUser(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if publicUser.Login != "public-installation" || publicUser.Source != GitHubAuthModeApp {
+		t.Fatalf("unexpected cached public app user: %#v", publicUser)
+	}
+	if metadataRequests != 1 {
+		t.Fatalf("public cached lookup contacted Enterprise; request count = %d", metadataRequests)
+	}
+}
+
+func TestListAuthenticatedAssignedIssuesUsesEnterpriseRepoEndpoint(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "enterprise-pat"); err != nil {
+		t.Fatal(err)
+	}
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.Header.Get("Authorization") != "Bearer enterprise-pat" {
+			t.Fatalf("unexpected auth header %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v3/user":
+			_, _ = w.Write([]byte(`{"login":"enterprise-user"}`))
+		case "/api/v3/repos/acme/widgets/issues":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets", APIBaseURL: server.URL + "/api/v3"}
+	user, _, err := svc.ListAuthenticatedAssignedIssues(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Login != "enterprise-user" || len(paths) != 2 {
+		t.Fatalf("user=%#v paths=%v", user, paths)
+	}
+}
+
 func TestListAuthenticatedAssignedIssuesRejectsGitHubAppInstallationAccount(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
@@ -989,6 +1308,47 @@ func TestListAuthenticatedAssignedIssuesRejectsGitHubAppInstallationAccount(t *t
 	}
 	if sawIssueList {
 		t.Fatalf("expected no GitHub issue-list request for GitHub App installation account")
+	}
+}
+
+func TestGitHubClientRejectsRedirectWithoutReplayingAuthorization(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_redirect_secret"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	var targetCalls int
+	var targetAuthorization string
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetCalls++
+		targetAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"number":7,"title":"redirected"}`)
+	}))
+	defer target.Close()
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer ghp_redirect_secret" {
+			t.Fatalf("expected source request authorization, got %q", got)
+		}
+		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer source.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = source.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+
+	if _, err := svc.GetIssue(ctx, repo, 7); err == nil || !strings.Contains(err.Error(), "redirect") {
+		t.Fatalf("expected redirect rejection, got %v", err)
+	}
+	if targetCalls != 0 {
+		t.Fatalf("redirect target received %d request(s), authorization %q", targetCalls, targetAuthorization)
 	}
 }
 

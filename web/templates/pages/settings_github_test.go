@@ -39,6 +39,7 @@ func TestSettingsContent_RendersGitHubStatusVariants(t *testing.T) {
 				"",
 				"private-key-value",
 				"pat-value",
+				"",
 				false,
 				false,
 				service.SlackConnectionStatus{},

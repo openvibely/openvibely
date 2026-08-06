@@ -46,6 +46,66 @@ func TestCreateTaskPullRequest_RequiresWorktreeBranch(t *testing.T) {
 	}
 }
 
+func TestCreateTaskPullRequest_UsesGlobalEnterpriseEndpointAndIgnoresRequestOverride(t *testing.T) {
+	const enterpriseEndpoint = "https://github.example.com/api/v3"
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
+
+	// Seed the global GitHub API endpoint setting.
+	settingsRepo := repository.NewSettingsRepo(db)
+	if err := settingsRepo.Set(context.Background(), service.GitHubSettingAPIEndpoint, enterpriseEndpoint); err != nil {
+		t.Fatal(err)
+	}
+
+	var publishedEndpoint string
+	h.SetGitHubService(&fakeGitHubService{
+		globalAPIEndpoint: enterpriseEndpoint,
+		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
+			return &service.GitHubRepoRef{Owner: "acme", Name: "widgets", FullName: "acme/widgets", CloneURL: "https://github.example.com/acme/widgets.git", HTMLURL: "https://github.example.com/acme/widgets"}, nil
+		},
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, _ service.GitHubPublishBranchRequest) error {
+			publishedEndpoint = repo.APIBaseURL
+			return nil
+		},
+		findPRFn: func(context.Context, *service.GitHubRepoRef, string) (*service.GitHubPullRequest, error) {
+			return nil, nil
+		},
+		createPRFn: func(context.Context, *service.GitHubRepoRef, service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 81, URL: "https://github.example.com/acme/widgets/pull/81", State: "open"}, nil
+		},
+	})
+	project := &models.Project{Name: "Enterprise PR", RepoPath: "/tmp/repo"}
+	if err := h.projectSvc.Create(context.Background(), project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Enterprise PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/enterprise", MergeTargetBranch: "main"}
+	if err := h.taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatal(err)
+	}
+
+	// A request-time override must be ignored; the global setting must win.
+	form := url.Values{"github_api_endpoint": {"https://evil.example/api/v3"}}
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/worktree/pull-request", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s trigger=%s", rec.Code, rec.Body.String(), rec.Header().Get("HX-Trigger"))
+	}
+	if publishedEndpoint != enterpriseEndpoint {
+		t.Fatalf("published endpoint = %q, want global endpoint %q", publishedEndpoint, enterpriseEndpoint)
+	}
+	// Global setting must remain unchanged after PR creation.
+	storedEndpoint, err := settingsRepo.Get(context.Background(), service.GitHubSettingAPIEndpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedEndpoint != enterpriseEndpoint {
+		t.Fatalf("global endpoint after PR creation = %q, want %q", storedEndpoint, enterpriseEndpoint)
+	}
+}
+
 func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetTaskPullRequestRepo(repository.NewTaskPullRequestRepo(db))
@@ -179,7 +239,7 @@ func TestCreateTaskPullRequest_ReusesExistingTaskPR(t *testing.T) {
 	var publishedReq service.GitHubPublishBranchRequest
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 		publishBranchFn: func(_ context.Context, _ *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
 			publishCalls++
@@ -264,7 +324,7 @@ func TestCreateTaskPullRequest_PublishBranchFailureShowsToast(t *testing.T) {
 
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
 			return fmt.Errorf("authentication failed: bad credentials")
@@ -304,7 +364,7 @@ func TestCreateTaskPullRequest_CreatePRAlreadyExistsRecoversByFindingPR(t *testi
 	findCalls := 0
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
 			return nil
@@ -361,7 +421,7 @@ func TestCreateTaskPullRequest_CreatePRFailureShowsToast(t *testing.T) {
 
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
-			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, nil
+			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
 		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
 			return nil

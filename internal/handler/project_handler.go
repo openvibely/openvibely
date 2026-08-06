@@ -362,6 +362,7 @@ func (h *Handler) CreateProject(c echo.Context) error {
 			return h.projectErrorResponse(c, http.StatusBadRequest, "GitHub integration is not configured")
 		}
 
+		var clonedPath, normalizedURL string
 		clonedPath, normalizedURL, err := h.githubSvc.CloneProjectRepo(c.Request().Context(), p.ID, p.RepoURL)
 		if err != nil {
 			_ = h.projectSvc.Delete(c.Request().Context(), p.ID)
@@ -473,6 +474,7 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	} else {
 		p.RepoPath = localRepoPath
 		p.RepoURL = ""
+
 	}
 	if agentID := c.FormValue("default_agent_config_id"); agentID != "" {
 		p.DefaultAgentConfigID = &agentID

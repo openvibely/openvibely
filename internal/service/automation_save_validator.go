@@ -17,6 +17,7 @@ type automationGitHubConnectionProvider interface {
 
 type automationGitHubRepositoryResolver interface {
 	ResolveRepo(context.Context, string, string) (*GitHubRepoRef, error)
+	GlobalAPIEndpoint(context.Context) string
 }
 
 func resolveAutomationProjectGitHubRepository(ctx context.Context, provider any, project *models.Project) (*GitHubRepoRef, error) {
@@ -29,11 +30,21 @@ func resolveAutomationProjectGitHubRepository(ctx context.Context, provider any,
 		repoPath = strings.TrimSpace(project.RepoPath)
 	}
 	if resolver, ok := provider.(automationGitHubRepositoryResolver); ok {
-		return resolver.ResolveRepo(ctx, repoURL, repoPath)
+		repo, err := resolver.ResolveRepo(ctx, repoURL, repoPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := ConfigureGitHubRepoEndpoint(repo, resolver.GlobalAPIEndpoint(ctx)); err != nil {
+			return nil, err
+		}
+		return repo, nil
 	}
 	if repoURL != "" {
 		repo, err := ParseGitHubRepoURL(repoURL)
 		if err != nil {
+			return nil, err
+		}
+		if err := ConfigureGitHubRepoEndpoint(&repo, ""); err != nil {
 			return nil, err
 		}
 		return &repo, nil
