@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -15,15 +16,7 @@ func (h *Handler) ListEmailAuthorizedSenders(c echo.Context) error {
 	if h.emailAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Email auth not configured")
 	}
-	projectID := c.QueryParam("project_id")
-	if projectID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
-	}
-	senders, err := h.emailAuthRepo.ListByProject(c.Request().Context(), projectID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized senders")
-	}
-	return render(c, http.StatusOK, components.EmailAuthorizedSendersList(senders, projectID))
+	return h.emailAuthorizedUserCRUD().listUsers(c, c.QueryParam("project_id"))
 }
 
 // AddEmailAuthorizedSender adds a new authorized email sender.
@@ -31,32 +24,25 @@ func (h *Handler) AddEmailAuthorizedSender(c echo.Context) error {
 	if h.emailAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Email auth not configured")
 	}
+
 	projectID := c.FormValue("project_id")
-	if projectID == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")
-	}
-	emailAddress := repository.NormalizeEmailAddress(c.FormValue("authorized_email_address"))
-	displayName := strings.TrimSpace(c.FormValue("display_name"))
-	if emailAddress == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "Email address is required")
-	}
-	if displayName == "" {
-		displayName = emailAddress
-	}
-	sender := &models.EmailAuthorizedSender{
-		ProjectID:    projectID,
-		EmailAddress: emailAddress,
-		DisplayName:  displayName,
-		AddedBy:      "web",
-	}
-	if err := h.emailAuthRepo.Create(c.Request().Context(), sender); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to add authorized sender: "+err.Error())
-	}
-	senders, err := h.emailAuthRepo.ListByProject(c.Request().Context(), projectID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized senders")
-	}
-	return render(c, http.StatusOK, components.EmailAuthorizedSendersList(senders, projectID))
+	return h.emailAuthorizedUserCRUD().createUser(c, projectID, func(ctx context.Context) error {
+		emailAddress := repository.NormalizeEmailAddress(c.FormValue("authorized_email_address"))
+		displayName := strings.TrimSpace(c.FormValue("display_name"))
+		if emailAddress == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "Email address is required")
+		}
+		if displayName == "" {
+			displayName = emailAddress
+		}
+		sender := &models.EmailAuthorizedSender{
+			ProjectID:    projectID,
+			EmailAddress: emailAddress,
+			DisplayName:  displayName,
+			AddedBy:      "web",
+		}
+		return h.emailAuthRepo.Create(ctx, sender)
+	})
 }
 
 // RemoveEmailAuthorizedSender removes an authorized email sender.
@@ -64,24 +50,24 @@ func (h *Handler) RemoveEmailAuthorizedSender(c echo.Context) error {
 	if h.emailAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Email auth not configured")
 	}
-	id := c.Param("id")
-	projectID := c.QueryParam("project_id")
-	sender, err := h.emailAuthRepo.GetByID(c.Request().Context(), id)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to find sender")
+	return h.emailAuthorizedUserCRUD().deleteUser(
+		c,
+		c.Param("id"),
+		c.QueryParam("project_id"),
+		func(ctx context.Context, id string) (string, bool, error) {
+			sender, err := h.emailAuthRepo.GetByID(ctx, id)
+			if err != nil || sender == nil {
+				return "", sender != nil, err
+			}
+			return sender.ProjectID, true, nil
+		},
+		h.emailAuthRepo.Delete,
+	)
+}
+
+func (h *Handler) emailAuthorizedUserCRUD() authorizedUserCRUD[models.EmailAuthorizedSender] {
+	return authorizedUserCRUD[models.EmailAuthorizedSender]{
+		list:   h.emailAuthRepo.ListByProject,
+		render: components.EmailAuthorizedSendersList,
 	}
-	if sender == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "Sender not found")
-	}
-	if projectID == "" {
-		projectID = sender.ProjectID
-	}
-	if err := h.emailAuthRepo.Delete(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to remove sender: "+err.Error())
-	}
-	senders, err := h.emailAuthRepo.ListByProject(c.Request().Context(), projectID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load authorized senders")
-	}
-	return render(c, http.StatusOK, components.EmailAuthorizedSendersList(senders, projectID))
 }
