@@ -1469,7 +1469,7 @@ func (h *Handler) CancelTask(c echo.Context) error {
 			return err
 		}
 		if composerStop {
-			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false))
+			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false, ""))
 		}
 		agents, _ := h.llmConfigRepo.List(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
@@ -1930,7 +1930,59 @@ func (h *Handler) TaskThreadComposerAction(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), components.TaskThreadHasActiveComposerStopState(task, executions)))
+	activeTurnID := ""
+	for _, exec := range executions {
+		if exec.Status == models.ExecRunning {
+			activeTurnID = exec.ID
+		}
+	}
+	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), components.TaskThreadHasActiveComposerStopState(task, executions), activeTurnID))
+}
+
+// TaskThreadSelectModel persists a task-thread composer model selection
+// immediately, independent of sending a message. Without this, changing the
+// model dropdown only mutates client-side DOM/hidden-input state; since task
+// threads intentionally do not use the Chat page's localStorage persistence
+// (which is keyed by ProjectID), navigating away and back would otherwise
+// re-render the composer from the task's unchanged Task.AgentID and silently
+// revert the visible selection. "auto" and "" are one-off routing choices and
+// are not persisted here (matches TaskThreadSend's persistence semantics).
+func (h *Handler) TaskThreadSelectModel(c echo.Context) error {
+	taskID := c.Param("taskId")
+	agentID := c.FormValue("agent_id")
+
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
+	// Swarm parent tasks resolve their assigned agent through swarm-specific
+	// semantics (see SwarmService.resolveAssignedAgentID and child creation),
+	// not through direct Task.AgentID composer persistence. TaskThreadSend
+	// skips AgentID persistence for swarm parents by routing through
+	// HandleParentFollowup first; mirror that here so this endpoint cannot
+	// mutate parent.AgentID and unintentionally affect swarm child creation.
+	if task.SwarmRole == models.SwarmRoleParent {
+		return c.NoContent(http.StatusNoContent)
+	}
+
+	if agentID != "" && agentID != "auto" && h.taskRepo != nil {
+		agent, selErr := h.selectAgent(c.Request().Context(), agentID, "", false)
+		if selErr != nil || agent == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid model selection")
+		}
+		if task.AgentID == nil || *task.AgentID != agent.ID {
+			if updErr := h.taskRepo.UpdateAgentID(c.Request().Context(), taskID, agent.ID); updErr != nil {
+				applog.Infof("[handler] TaskThreadSelectModel error persisting selected model task=%s agent=%s: %v", taskID, agent.ID, updErr)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist model selection")
+			}
+		}
+	}
+
+	return c.NoContent(http.StatusNoContent)
 }
 
 // TaskThreadSend handles sending a follow-up message in the task thread.
@@ -1964,7 +2016,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 		return render(c, http.StatusOK, templ.Join(
 			components.TaskThreadQueuedFollowupResponse(message, nil),
-			components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false),
+			components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false, ""),
 		))
 	}
 
@@ -2147,7 +2199,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 
 	return render(c, http.StatusOK, templ.Join(
 		components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments),
-		components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), true),
+		components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), true, exec.ID),
 	))
 }
 

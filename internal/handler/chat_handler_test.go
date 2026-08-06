@@ -311,7 +311,7 @@ func TestHandler_ChatSend(t *testing.T) {
 	if !strings.Contains(body, "chat-bubble-user-msg") && !strings.Contains(body, "chat-bubble-assistant-msg") {
 		t.Error("expected chat bubbles in response")
 	}
-	if !strings.Contains(body, `id="chat-form-primary-action" data-composer-running="true" hx-swap-oob="outerHTML"`) {
+	if !strings.Contains(body, `id="chat-form-primary-action" data-composer-running="true" data-active-turn-id="`) || strings.Contains(body, `data-active-turn-id=""`) {
 		t.Error("expected composer primary action OOB replacement in response")
 	}
 	if strings.Contains(body, `id="chat-form-action-cluster" hx-swap-oob="outerHTML"`) {
@@ -1508,7 +1508,7 @@ func TestHandler_ChatStop_CancelsActiveChatTurn(t *testing.T) {
 
 	rec := htmxPost(e, "/chat/stop?project_id="+project.ID, url.Values{})
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, `id="chat-form-primary-action" data-composer-running="false" hx-swap-oob="outerHTML"`)
+	assertContains(t, rec, `id="chat-form-primary-action" data-composer-running="false" data-active-turn-id="" hx-swap-oob="outerHTML"`)
 	assertNotContains(t, rec, `id="chat-form-action-cluster" hx-swap-oob="outerHTML"`)
 	assertContains(t, rec, `title="Send message"`)
 	assertNotContains(t, rec, `title="Stop response"`)
@@ -3510,7 +3510,7 @@ func TestHandler_TaskThreadSend_QueuesWhenAtCapacity(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code, "task follow-up should be accepted and queued")
-	assertContains(t, rec, `id="task-thread-form-primary-action" data-composer-running="true" hx-swap-oob="outerHTML"`)
+	assertContains(t, rec, `id="task-thread-form-primary-action" data-composer-running="true" data-active-turn-id="`)
 	assertNotContains(t, rec, `id="task-thread-form-action-cluster" hx-swap-oob="outerHTML"`)
 	assertContains(t, rec, `hx-post="/tasks/`+task.ID+`/cancel?composer_stop=1"`)
 	assertContains(t, rec, `title="Stop response"`)
@@ -3672,7 +3672,7 @@ func TestHandler_TaskThreadSend_CancelQueuedCapacityWait(t *testing.T) {
 	cancelRec := httptest.NewRecorder()
 	e.ServeHTTP(cancelRec, cancelReq)
 	require.Equal(t, http.StatusOK, cancelRec.Code, cancelRec.Body.String())
-	assertContains(t, cancelRec, `id="task-thread-form-primary-action" data-composer-running="false" hx-swap-oob="outerHTML"`)
+	assertContains(t, cancelRec, `id="task-thread-form-primary-action" data-composer-running="false" data-active-turn-id="" hx-swap-oob="outerHTML"`)
 	assertNotContains(t, cancelRec, `id="task-thread-form-action-cluster" hx-swap-oob="outerHTML"`)
 	assertContains(t, cancelRec, `title="Send message"`)
 	assertNotContains(t, cancelRec, `title="Stop response"`)

@@ -362,7 +362,7 @@ func TestChatReconnectDiscoversMissedActiveExecutionAndAttachesStream(t *testing
 	running := models.Execution{ID: "chat-missed-active", Status: models.ExecRunning, PromptSent: "missed start", Output: "partial"}
 	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-missed-active", nil, nil, false, false, 30))
 	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-missed-active", nil, nil, false, false, 30))
-	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-missed-active", true))
+	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-missed-active", true, "missed-active-turn"))
 	stopActionJSON, err := json.Marshal(stopAction)
 	if err != nil {
 		t.Fatalf("marshal missed-active Chat composer action: %v", err)
@@ -430,8 +430,8 @@ func runChatExecutionStreamOnlyTerminalComposerCase(t *testing.T, terminalStatus
 	initialHTML := renderReconnectComponent(t, ChatContent(nil, nil, "project-stream-only", nil, nil, false, false, 30))
 	runningHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{running}, "project-stream-only", nil, nil, false, false, 30))
 	terminalHTML := renderReconnectComponent(t, ChatContent(nil, []models.Execution{terminal}, "project-stream-only", nil, nil, false, false, 30))
-	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", true))
-	sendAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", false))
+	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", true, "stream-only-turn"))
+	sendAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id=project-stream-only", false, ""))
 	stopActionJSON, err := json.Marshal(stopAction)
 	if err != nil {
 		t.Fatalf("marshal stream-only Stop action: %v", err)
@@ -516,7 +516,7 @@ func TestTaskThreadQueuedPromotionRefreshesComposerActionToStop(t *testing.T) {
 	promoted := models.Execution{ID: "thread-promoted", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "queued next", IsFollowup: true}
 	initialHTML := renderReconnectComponent(t, components.TaskThreadView(task, []models.Execution{completed}, nil, nil, nil, nil, false, 30))
 	promotedFragment := renderReconnectComponent(t, components.TaskThreadFollowupResponse(promoted.PromptSent, promoted.ID, nil))
-	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", "/tasks/thread-promotion/cancel?composer_stop=1", true))
+	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", "/tasks/thread-promotion/cancel?composer_stop=1", true, "thread-promotion-turn"))
 	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML})
 	promotedJSON, err := json.Marshal(promotedFragment)
 	if err != nil {

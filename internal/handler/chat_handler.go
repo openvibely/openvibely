@@ -340,7 +340,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	return render(c, http.StatusOK, templ.Join(
 		userMsg,
 		agentMsg,
-		components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, true),
+		components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, true, exec.ID),
 	))
 }
 
@@ -357,7 +357,7 @@ func (h *Handler) ChatStop(c echo.Context) error {
 	}
 	if activeChatExec == nil {
 		if isHTMX(c) {
-			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false))
+			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false, ""))
 		}
 		return c.NoContent(http.StatusNoContent)
 	}
@@ -375,7 +375,7 @@ func (h *Handler) ChatStop(c echo.Context) error {
 	}
 	h.cancelRunningExecutionsAndPublish(c.Request().Context(), activeChatExec.TaskID, "ChatStop")
 	if isHTMX(c) {
-		return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false))
+		return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false, ""))
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -391,7 +391,11 @@ func (h *Handler) ChatComposerAction(c echo.Context) error {
 		applog.Infof("[handler] ChatComposerAction error checking active chat turn: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
 	}
-	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, activeChatExec != nil))
+	activeTurnID := ""
+	if activeChatExec != nil {
+		activeTurnID = activeChatExec.ID
+	}
+	return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, activeChatExec != nil, activeTurnID))
 }
 
 func (h *Handler) ChatSteer(c echo.Context) error {

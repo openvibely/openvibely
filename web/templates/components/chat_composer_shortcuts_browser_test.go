@@ -293,3 +293,93 @@ func TestChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
 		t.Fatalf("attachment session = %q, want session-immediate", got)
 	}
 }
+
+func TestChatComposerRunningActionModifierSteersInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+
+	type requestRecord struct {
+		Path string
+		Form url.Values
+	}
+	var mu sync.Mutex
+	var records []requestRecord
+
+	var form bytes.Buffer
+	if err := ChatInputForm(ChatInputFormConfig{
+		FormID:        "chat-form",
+		InputID:       "message-input",
+		PostEndpoint:  "/chat/send",
+		SteerEndpoint: "/chat/steer",
+		TargetID:      "chat-messages",
+	}).Render(context.Background(), &form); err != nil {
+		t.Fatalf("render composer: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmx204)
+		case "/chat/steer", "/chat/stop":
+			_ = r.ParseForm()
+			mu.Lock()
+			records = append(records, requestRecord{Path: r.URL.Path, Form: r.PostForm})
+			mu.Unlock()
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<div data-test-steering-row="true">steering pending</div>`))
+		case "/":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
+<script src="/htmx.js"></script>
+<div id="chat-messages"></div>%s
+<div id="browser-result">pending</div>
+<script>
+(async function() {
+  function fail(message) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', message); document.getElementById('browser-result').textContent = 'FAIL:' + message; throw new Error(message); }
+  function key(input, options) { input.dispatchEvent(new KeyboardEvent('keydown', Object.assign({key:'Enter', bubbles:true, cancelable:true}, options || {}))); }
+  function wait() { return new Promise(function(resolve) { setTimeout(resolve, 150); }); }
+  var input = document.getElementById('message-input');
+  var apple = input.placeholder.includes('⌘+Enter steers');
+  var modifier = apple ? {metaKey:true} : {ctrlKey:true};
+  var modifierKey = apple ? 'Meta' : 'Control';
+  var oldAction = document.getElementById('chat-form-primary-action');
+  oldAction.outerHTML = '<div id="chat-form-primary-action" data-composer-running="true" data-active-turn-id="new-turn"><button type="button" aria-label="Stop response" hx-post="/chat/stop" hx-swap="none"><svg data-composer-stop-icon="true"></svg><svg data-composer-steer-icon="true" class="hidden"></svg></button></div>';
+  var action = document.querySelector('#chat-form-primary-action button');
+  htmx.process(action.parentElement);
+
+  document.dispatchEvent(new KeyboardEvent('keydown', Object.assign({key:modifierKey, bubbles:true}, modifier)));
+  if (!action.querySelector('[data-composer-stop-icon]').classList.contains('hidden')) fail('holding modifier did not hide Stop icon');
+  if (action.querySelector('[data-composer-steer-icon]').classList.contains('hidden')) fail('holding modifier did not show Send icon');
+
+  input.value = 'keyboard after send'; key(input, modifier); await wait();
+  input.value = 'click after send'; action.dispatchEvent(new MouseEvent('click', Object.assign({bubbles:true, cancelable:true}, modifier))); await wait();
+  document.getElementById('browser-result').textContent = 'PASS';
+  document.body.setAttribute('data-test-result', 'pass');
+})().catch(function(error) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', error.message); });
+</script></body></html>`, form.String())
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	runHeadlessChromeFixture(t, chrome, server.URL+"/", "running action modifier steer", 5000, 20*time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(records) != 2 {
+		t.Fatalf("recorded requests = %d, want 2: %+v", len(records), records)
+	}
+	wantMessages := []string{"keyboard after send", "click after send"}
+	for i := range records {
+		if records[i].Path != "/chat/steer" {
+			t.Fatalf("request %d path = %q, want /chat/steer: %+v", i, records[i].Path, records)
+		}
+		if got := records[i].Form.Get("message"); got != wantMessages[i] {
+			t.Fatalf("request %d message = %q, want %q", i, got, wantMessages[i])
+		}
+		if got := records[i].Form.Get("expected_turn_id"); got != "new-turn" {
+			t.Fatalf("request %d expected turn = %q, want new-turn", i, got)
+		}
+	}
+}
