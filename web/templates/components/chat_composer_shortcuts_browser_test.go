@@ -71,9 +71,9 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   function wait() { return new Promise(function(resolve) { setTimeout(resolve, 150); }); }
   var idleInput = document.getElementById('message-input');
   var activeInput = document.getElementById('task-message-input');
-  var apple = idleInput.placeholder.includes('⌘Enter steers');
+  var apple = idleInput.placeholder.includes('⌘+Enter steers');
   var modifier = apple ? {metaKey:true} : {ctrlKey:true};
-  var expectedHint = apple ? 'Enter sends or queues · ⌘Enter steers' : 'Enter sends or queues · Ctrl+Enter steers';
+  var expectedHint = apple ? 'Enter sends or queues · ⌘+Enter steers' : 'Enter sends or queues · Ctrl+Enter steers';
   if (idleInput.placeholder !== expectedHint || activeInput.placeholder !== expectedHint) fail('shortcut copy was not concise or platform appropriate');
   if (idleInput.placeholder.includes('click') || idleInput.placeholder.includes('Shift+Enter')) fail('shortcut copy advertised extra shortcuts');
 
@@ -85,9 +85,13 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
   idleInput.value = 'idle steer fallback'; key(idleInput, modifier); await wait();
   idleInput.value = 'idle modifier click fallback'; click(document.querySelector('#chat-form-primary-action button'), modifier); await wait();
   document.getElementById('chat-form').remove();
+  var activeActionHTML = document.getElementById('task-thread-form-primary-action').outerHTML;
+  document.getElementById('task-thread-form-primary-action').outerHTML = '<div id="task-thread-form-primary-action" data-composer-running="false"><button type="submit" aria-label="Send message">Send</button></div>';
   activeInput.value = 'keyboard steer'; key(activeInput, modifier); await wait();
   activeInput.value = 'steer with attachment'; document.querySelector('#task-thread-form input[name="attachment_session_id"]').value = 'session-1';
   click(document.querySelector('#task-thread-form-primary-action button'), modifier); await wait();
+  document.getElementById('task-thread-form-primary-action').outerHTML = activeActionHTML;
+  htmx.process(document.getElementById('task-thread-form-primary-action'));
   if (!document.querySelector('#task-thread-form #pending-thread-inputs [data-test-steering-row="true"]')) fail('steering response was not inserted into pending inputs');
   if (document.querySelector('#task-thread-messages [data-test-steering-row="true"]')) fail('steering response was inserted into the transcript');
   activeInput.value = 'preserved stop draft'; click(document.querySelector('#task-thread-form-primary-action button')); await wait();
@@ -124,6 +128,11 @@ func TestChatComposerShortcutsInChrome(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		t.Logf("composer shortcut requests: %+v", records)
+	})
 
 	runHeadlessChromeFixture(t, chrome, server.URL+"/", "composer shortcuts", 10000, 25*time.Second)
 

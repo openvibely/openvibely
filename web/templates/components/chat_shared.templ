@@ -1831,7 +1831,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 						function shortcutHint() {
 							return usesAppleShortcuts
-								? 'Enter sends or queues · ⌘Enter steers'
+								? 'Enter sends or queues · ⌘+Enter steers'
 								: 'Enter sends or queues · Ctrl+Enter steers';
 						}
 						window.refreshChatComposerShortcutHint = function(textarea) {
@@ -1876,14 +1876,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							if (guard) guard.remove();
 						}
 						function activeTurnID() {
-							if (!composerHasActiveTurn()) {
-								clearExpectedTurnIDWhenIdle();
-								return '';
-							}
 							var targetSelector = form.getAttribute('hx-target') || '';
 							var target = targetSelector && targetSelector.charAt(0) === '#' ? document.getElementById(targetSelector.slice(1)) : null;
 							var pairs = target ? target.querySelectorAll('[data-execution-pair="true"][data-exec-status="running"], [data-execution-pair="true"][data-exec-status="queued"]') : [];
 							if (pairs.length) return pairs[pairs.length - 1].getAttribute('data-exec-id') || '';
+							if (!composerHasActiveTurn()) {
+								clearExpectedTurnIDWhenIdle();
+								return '';
+							}
 							var guard = form.querySelector('input[name="expected_turn_id"]');
 							return guard ? guard.value : '';
 						}
@@ -2144,22 +2144,24 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 					// Normalize primary-action clicks to the shared submit paths, even after
 					// the button is replaced out-of-band between Send and Stop. A platform
-					// modifier on the active Stop-state control requests guarded steering;
+					// modifier on the primary control requests guarded steering whenever the
+					// transcript already has an active turn, even if the action swap still shows Send;
 					// an unavailable/stale steering request leaves the draft untouched.
 					form.addEventListener('click', function(e) {
 						var primaryAction = e.target && e.target.closest ? e.target.closest('[id="' + formId + '-primary-action"] button') : null;
 						if (!primaryAction || !form.contains(primaryAction)) return;
 						var isStopAction = primaryAction.getAttribute('aria-label') === 'Stop response';
-						if (isStopAction) {
-							if (!shortcutModifierPressed(e)) return;
-							e.preventDefault();
-							e.stopImmediatePropagation();
+						if (shortcutModifierPressed(e)) {
 							var turnID = activeTurnID();
-							if (!steerEndpoint || !turnID) return;
-							setExpectedTurnID(turnID);
-							submitComposer(steerEndpoint, 'steer');
-							return;
+							if (steerEndpoint && turnID) {
+								e.preventDefault();
+								e.stopImmediatePropagation();
+								setExpectedTurnID(turnID);
+								submitComposer(steerEndpoint, 'steer');
+								return;
+							}
 						}
+						if (isStopAction) return;
 						if (primaryAction.type !== 'submit') return;
 						e.preventDefault();
 						e.stopImmediatePropagation();

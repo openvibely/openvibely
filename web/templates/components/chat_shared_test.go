@@ -1229,20 +1229,21 @@ func TestChatInputForm_SharedQueueAndSteerShortcuts(t *testing.T) {
 				"function chatComposerUsesAppleShortcuts()",
 				"navigator.userAgentData && navigator.userAgentData.platform",
 				"/Mac|iPhone|iPad|iPod/i.test(platform)",
-				"Enter sends or queues · ⌘Enter steers",
+				"Enter sends or queues · ⌘+Enter steers",
 				"Enter sends or queues · Ctrl+Enter steers",
 				`data-composer-running="true"`,
 				"function composerHasActiveTurn()",
 				"new MutationObserver(clearExpectedTurnIDWhenIdle).observe(form, { childList: true, subtree: true })",
 				"if (!composerHasActiveTurn()) {",
 				"if (guard) guard.remove();",
-				"if (e.isComposing || e.keyCode === 229) return;", "if (e.key === 'Enter' && !e.shiftKey)",
+				"if (e.isComposing || e.keyCode === 229) return;",
+				"if (e.key === 'Enter' && !e.shiftKey)",
 				"if (shortcutModifierPressed(e)) {",
 				"if (steerEndpoint && turnID) {",
 				"submitComposer(normalPostEndpoint, 'normal');",
-				"if (!shortcutModifierPressed(e)) return;",
 				"submitComposer(steerEndpoint, 'steer');",
-				"e.stopImmediatePropagation();"}
+				"e.stopImmediatePropagation();",
+			}
 			for _, expected := range required {
 				if !strings.Contains(content, expected) {
 					t.Fatalf("shared shortcut script missing %q", expected)
