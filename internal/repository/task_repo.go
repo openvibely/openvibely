@@ -1596,6 +1596,25 @@ func (r *TaskRepo) ListByTags(ctx context.Context, tags []models.TaskTag, projec
 	return tasks, rows.Err()
 }
 
+// UpdateAgentID persists the task's assigned model config ID. Passing an empty
+// agentID clears the assignment (falls back to project/global default resolution).
+// This is used to persist an explicit task-thread composer model selection so it
+// remains the task's ongoing assigned model for future sends, per Task.AgentID
+// task-assignment semantics.
+func (r *TaskRepo) UpdateAgentID(ctx context.Context, id, agentID string) error {
+	var value *string
+	if agentID != "" {
+		value = &agentID
+	}
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE tasks SET agent_id = ?, updated_at = datetime('now') WHERE id = ?`,
+		value, id)
+	if err != nil {
+		return fmt.Errorf("updating task agent id: %w", err)
+	}
+	return nil
+}
+
 // UpdateWorktreeInfo sets the worktree path and branch for a task.
 func (r *TaskRepo) UpdateWorktreeInfo(ctx context.Context, id, worktreePath, branch string) error {
 	_, err := r.db.ExecContext(ctx,
