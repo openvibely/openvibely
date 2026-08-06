@@ -1812,7 +1812,7 @@ func (s *TelegramService) sendMessage(ctx context.Context, chatID int64, text st
 }
 
 func (s *TelegramService) sendLegacyMessage(ctx context.Context, chatID int64, text string) bool {
-	delivered := false
+	delivered := true
 	for _, msg := range splitMessage(text, maxMessageLength) {
 		msgConfig := tgbotapi.NewMessage(chatID, escapeTelegramMarkdownV2(msg))
 		msgConfig.ParseMode = "MarkdownV2"
@@ -1821,10 +1821,9 @@ func (s *TelegramService) sendLegacyMessage(ctx context.Context, chatID int64, t
 			plainConfig := tgbotapi.NewMessage(chatID, msg)
 			if _, err := s.sendConfig(plainConfig); err != nil {
 				applog.Infof("[telegram] error sending message: %v", err)
-				continue
+				delivered = false
 			}
 		}
-		delivered = true
 	}
 	return delivered
 }
