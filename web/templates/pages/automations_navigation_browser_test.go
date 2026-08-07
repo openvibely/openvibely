@@ -508,16 +508,51 @@ func TestAutomationLiveMatchesEditVisualScale(t *testing.T) {
 	}
 }
 
-func TestAutomationCanvasExplainsInteractiveYAMLSynchronization(t *testing.T) {
-	page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Typography", AutomationType: "custom", AdapterKey: "custom"}}, YAML: "schema_version: 1\nname: Typography\n"}
+func TestAutomationBlankBuilderUsesEditableBreadcrumbAndFullHeightEditor(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Blank Automation", AutomationType: "custom", AdapterKey: "custom"}
+	page := models.AutomationBuilderPage{Source: "blank", Result: models.AutomationDraftResult{Candidate: candidate}, YAML: "schema_version: 1\nname: Blank Automation\n"}
+	var out bytes.Buffer
+	if err := AutomationBuilderContent(page, "project-blank-editor").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render blank Automation builder: %v", err)
+	}
+	body := out.String()
+	for _, want := range []string{
+		`data-automation-builder-header`,
+		`data-automation-editable-breadcrumb`,
+		`data-automation-name`,
+		`data-automation-builder-save`,
+		`class="rounded-box border border-base-300 bg-base-100 mb-0 p-4 flex flex-1 min-h-[20rem] flex-col"`,
+		`class="automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30 flex-1 min-h-[20rem]"`,
+		`data-automation-connect-status`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("blank builder must use the saved-editor layout with %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`data-automation-builder-name`,
+		`<h3 class="font-semibold">Canvas</h3>`,
+		`Drag nodes to arrange them and empty space to pan.`,
+		`Connect steps:`,
+		`data-automation-builder-card-actions`,
+		`data-automation-builder-actions`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("blank builder must not retain blank-only canvas chrome %q", forbidden)
+		}
+	}
+}
+
+func TestAutomationCanvasOmitsLegacyYAMLSettingsControls(t *testing.T) {
+	page := models.AutomationBuilderPage{AutomationID: "automation-copy", Result: models.AutomationDraftResult{Candidate: models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Typography", AutomationType: "custom", AdapterKey: "custom"}}, YAML: "schema_version: 1\nname: Typography\n"}
 	var out bytes.Buffer
 	if err := AutomationBuilderContent(page, "project-yaml-copy").Render(context.Background(), &out); err != nil {
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	for _, text := range []string{"Drag nodes to arrange them", "Connect steps:", "data-automation-connect-status"} {
-		if !strings.Contains(body, text) {
-			t.Errorf("interactive YAML authoring page must render %q", text)
+	for _, want := range []string{"data-automation-connect-status"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("interactive YAML authoring page must render %q", want)
 		}
 	}
 	for _, forbidden := range []string{"Automation YAML", "YAML controls node and connection configuration", `data-automation-yaml-preview`, "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
@@ -763,6 +798,15 @@ window.addEventListener('DOMContentLoaded', function() {
       if (yaml.textContent.includes(legacy)) fail('obsolete YAML editor chrome remains: ' + legacy);
     });
     if (document.querySelector('[data-automation-yaml-preview]')) fail('obsolete YAML preview button remains');
+    var editableBreadcrumb = document.querySelector('[data-automation-editable-breadcrumb]');
+    if (!editableBreadcrumb || !editableBreadcrumb.querySelector('[data-automation-name]')) fail('blank builder must edit its name in the breadcrumb');
+    if (document.querySelector('[data-automation-builder-name]')) fail('blank builder must not render a second name editor below the canvas');
+    var canvasRoot = document.querySelector('[data-automation-draft-canvas]');
+    if (!canvasRoot) fail('missing canvas root');
+    if (Array.from(canvasRoot.querySelectorAll('h3')).some(function(element) { return element.textContent.trim() === 'Canvas'; })) fail('blank-only Canvas heading remains');
+    ['Drag nodes to arrange them and empty space to pan.', 'Connect steps:'].forEach(function(legacy) {
+      if (Array.from(canvasRoot.querySelectorAll('*')).some(function(element) { return element.children.length === 0 && element.textContent.includes(legacy); })) fail('blank-only canvas chrome remains: ' + legacy);
+    });
     if (!isVisible(graph) || isVisible(yaml)) fail('initial Graph view must show only the canvas');
     ['Node and connection settings', 'Transition settings', 'Task prompt', 'Task goal (optional)', 'Human result'].forEach(function(legacy) {
       if (Array.from(document.querySelectorAll('label, summary, h3, h4')).some(function(element) { return element.textContent.trim() === legacy; })) fail('legacy settings control remains: ' + legacy);

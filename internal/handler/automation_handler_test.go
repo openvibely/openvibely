@@ -586,10 +586,10 @@ func TestAutomationBlankBuilderIsVisuallyEditableWithYAMLOnlySettings(t *testing
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, opened.Code)
-	for _, marker := range []string{`data-automation-yaml-builder`, `data-automation-yaml-editor`, `data-automation-view-yaml`, `data-automation-graph-panel`, `name="automation_yaml"`, `data-automation-draft-canvas`, `data-automation-add-node-open`, `data-automation-node-dialog`, `data-automation-add-first-node`, `data-automation-fit`, `Drag from a node's right handle to another node's left handle`} {
+	for _, marker := range []string{`data-automation-yaml-builder`, `data-automation-yaml-editor`, `data-automation-view-yaml`, `data-automation-graph-panel`, `name="automation_yaml"`, `data-automation-draft-canvas`, `data-automation-add-node-open`, `data-automation-node-dialog`, `data-automation-add-first-node`, `data-automation-fit`, `data-automation-builder-header`, `data-automation-editable-breadcrumb`, `class="rounded-box border border-base-300 bg-base-100 mb-0 p-4 flex flex-1 min-h-[20rem] flex-col"`, `class="automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30 flex-1 min-h-[20rem]"`} {
 		require.Contains(t, opened.Body.String(), marker)
 	}
-	for _, marker := range []string{`name="candidate_json"`, "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
+	for _, marker := range []string{`name="candidate_json"`, `data-automation-builder-name`, `<h3 class="font-semibold">Canvas</h3>`, "Drag nodes to arrange them and empty space to pan.", "Connect steps:", "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
 		require.NotContains(t, opened.Body.String(), marker)
 	}
 	require.NotContains(t, opened.Body.String(), `data-automation-yaml-preview`)
