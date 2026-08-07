@@ -498,13 +498,30 @@ func TestTaskControlRuntimeOmitsImplementationTaskToolsForLoopAuditor(t *testing
 
 	runtime := (&LLMService{}).taskControlRuntimeTools(loopAuditor)
 	require.NotNil(t, runtime)
-	require.False(t, runtime.HasDefinition("create_task"))
-	require.False(t, runtime.HasDefinition("create_swarm_task"))
-	require.False(t, runtime.HasDefinition("execute_tasks"))
-	require.False(t, runtime.HasDefinition("create_alert_implementation_task"))
-	require.False(t, runtime.HasDefinition("link_alert_implementation_task"))
-	require.True(t, runtime.HasDefinition("list_tasks"))
-	require.True(t, runtime.HasDefinition("create_notification"))
+	for _, tool := range []string{
+		"create_task",
+		"create_swarm_task",
+		"execute_tasks",
+		"set_task_goal",
+		"clear_task_goal",
+		"pause_task_goal",
+		"resume_task_goal",
+		"schedule_task",
+		"delete_schedule",
+		"modify_schedule",
+		"create_alert",
+		"claim_alert",
+		"create_alert_implementation_task",
+		"link_alert_implementation_task",
+		"complete_alert_processing",
+		"fail_alert_processing",
+		"release_alert_claim",
+	} {
+		require.Falsef(t, runtime.HasDefinition(tool), "Loop Auditor must not expose %s", tool)
+	}
+	for _, tool := range []string{"list_tasks", "get_task_goal", "list_schedules", "list_alerts", "get_alert", "create_notification", "list_capabilities"} {
+		require.Truef(t, runtime.HasDefinition(tool), "Loop Auditor must expose %s", tool)
+	}
 }
 
 func TestTaskControlRuntimeExposesExecuteTasksAndStartsExactBacklogTask(t *testing.T) {
