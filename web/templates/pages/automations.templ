@@ -806,7 +806,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						<div data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6">
 							<div class="flex min-h-0 flex-1 overflow-hidden" data-automation-yaml-editor-shell>
 										<div class="group relative w-10 shrink-0 overflow-hidden border-r border-base-300" data-automation-yaml-gutter>
-											<pre class="m-0 h-full w-full select-none overflow-hidden whitespace-nowrap px-2 text-left text-xs text-base-content/45" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(page.YAML) }</pre>										<div class="pointer-events-none absolute inset-y-0 right-0 z-10 w-4" aria-label="YAML section controls" data-automation-yaml-fold-controls></div>
+											<pre class="m-0 h-full w-full select-none overflow-hidden whitespace-nowrap px-2 py-0 text-right text-xs text-base-content/45" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(page.YAML) }</pre>										<div class="pointer-events-none absolute inset-y-0 right-0 z-10 w-4" aria-label="YAML section controls" data-automation-yaml-fold-controls></div>
 									</div>
 									<div class="relative min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport>
 										<pre class="absolute left-0 right-0 top-0 m-0 min-h-full whitespace-pre-wrap break-words px-3 font-mono text-sm leading-6" aria-hidden="true" data-automation-yaml-highlight></pre>
@@ -1025,7 +1025,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						if (!indent) return '';
 						var dots = [];
 							for (var column = 0; column < indent; column++) {
-									dots.push('<span class="pointer-events-none absolute inset-y-0 z-10 text-base-content/25" style="left:calc(' + column + 'ch + 0.5ch)" data-automation-yaml-indent-dot aria-hidden="true">·</span>');							}						return '<span class="relative inline-block align-top" style="width:' + indent + 'ch" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden="true">' + dots.join('') + '</span>';
+									dots.push('<span class="pointer-events-none absolute inset-y-0 z-10 text-base-content/25" style="left:' + (column + 1) + 'ch;transform:translateX(-50%)" data-automation-yaml-indent-dot aria-hidden="true">·</span>');							}						return '<span class="relative inline-block align-top" style="width:' + indent + 'ch" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden="true">' + dots.join('') + '</span>';
 					}
 					function yamlContinuousIndentationRails(lines, visibleLines) {
 						var rails = [], maxIndent = 0;
