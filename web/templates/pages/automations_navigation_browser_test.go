@@ -655,10 +655,18 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s YAML editor must wrap its source across the available panel width: missing %q", source, want)
 			}
 		}
-		for _, want := range []string{`data-automation-yaml-line-numbers`, `w-20`, `pl-3 pr-8 text-left`} {
+		for _, want := range []string{`data-automation-yaml-line-numbers`, `w-20`, `px-2`, `pr-8`, `text-left`, `whitespace-nowrap`} {
 			if !strings.Contains(body, want) {
-				t.Errorf("%s YAML line numbers must be left-aligned in a gutter wide enough to avoid section controls: missing %q", source, want)
+				t.Errorf("%s YAML line numbers must use the diff viewer's left-aligned padded, non-wrapping gutter layout: missing %q", source, want)
 			}
+		}
+		for _, want := range []string{`data-automation-yaml-indent-guides`, `data-automation-yaml-indent-dot`, `data-automation-yaml-indent-rail`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s YAML indentation must use visual-only guides over source spaces: missing %q", source, want)
+			}
+		}
+		if strings.Contains(body, `marker = column % 2 === 0 ? '│' : '·'`) {
+			t.Errorf("%s YAML indentation must not substitute guide characters into the source overlay flow", source)
 		}
 	}
 }
@@ -842,9 +850,13 @@ window.addEventListener('DOMContentLoaded', function() {
     var foldControls = document.querySelector('[data-automation-yaml-fold-controls]');
     var fold = document.querySelector('[data-automation-yaml-fold]');
     if (!gutter || !lineNumbers || lineNumbers.querySelectorAll('[data-automation-yaml-line-number]').length < 3) fail('YAML editor did not render a line-number gutter');
+    if (window.getComputedStyle(lineNumbers).whiteSpace !== 'nowrap') fail('YAML gutter line numbers must not wrap into the section-control lane');
     if (editor.getAttribute('wrap') !== 'soft') fail('YAML editor must wrap long YAML values within its panel');
     if (!highlight || !highlight.querySelector('[data-automation-yaml-key]')) fail('YAML editor did not syntax-highlight YAML keys');
-    if (!highlight.querySelector('[data-automation-yaml-indent-guide]')) fail('YAML editor did not render indentation guides');
+    var indentGuides = highlight.querySelector('[data-automation-yaml-indent-guides]');
+    if (!indentGuides || !indentGuides.querySelector('[data-automation-yaml-indent-dot]') || !indentGuides.querySelector('[data-automation-yaml-indent-rail]')) fail('YAML editor did not render visual-only dot and rail indentation guides');
+    if (indentGuides.textContent.includes('│')) fail('YAML indentation rails must not be source-flow characters');
+    if (window.getComputedStyle(indentGuides.querySelector('[data-automation-yaml-indent-dot]')).position !== 'absolute' || window.getComputedStyle(indentGuides.querySelector('[data-automation-yaml-indent-rail]')).position !== 'absolute') fail('YAML indentation guides must be positioned over source indentation, not laid out as editable text');
     if (highlight.querySelector('[data-automation-yaml-key]').classList.contains('text-warning')) fail('YAML editor keys still use the warning color');
     if (!foldControls || !fold || fold.parentElement !== foldControls || foldControls.parentElement !== gutter || !fold.dataset.yamlIndent) fail('YAML editor did not render a gutter section-fold control');
     var gutterBounds = gutter.getBoundingClientRect(), foldBounds = fold.getBoundingClientRect();
@@ -934,7 +946,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px;overflow:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}[data-automation-yaml-line-numbers]{width:3rem;margin:0;font:16px/24px monospace}</style></head><body>%s%s</body></html>`, builder.String(), runner)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px;overflow:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.whitespace-nowrap{white-space:nowrap}[data-automation-yaml-line-numbers]{width:3rem;margin:0;font:16px/24px monospace}</style></head><body>%s%s</body></html>`, builder.String(), runner)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
