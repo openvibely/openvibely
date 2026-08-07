@@ -1041,7 +1041,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							else if (/^\s*(?:true|false|null|~|-?\d+(?:\.\d+)?)\s*(?:#.*)?$/i.test(value)) valueClass = 'text-secondary';
 							rendered = yamlIndentationGuides(indentation.length) + escapeYAMLHTML(match[1]) + '<span class="text-primary" data-automation-yaml-key>' + escapeYAMLHTML(match[2]) + '</span>' + escapeYAMLHTML(match[3]) + '<span class="' + valueClass + '">' + escapeYAMLHTML(value) + '</span>';
 						}
-						if (lineNumber === yamlDiagnosticLine) rendered = '<span class="decoration-error underline decoration-wavy" style="text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: hsl(var(--er)); text-decoration-thickness: 1px" data-automation-yaml-error-line>' + rendered + '</span>';
+						if (lineNumber === yamlDiagnosticLine) rendered = '<span class="decoration-error underline decoration-wavy" style="text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: oklch(var(--er)); text-decoration-thickness: 1px" data-automation-yaml-error-line>' + rendered + '</span>';
 						return rendered;
 					}
 					function layoutYAMLLines() {

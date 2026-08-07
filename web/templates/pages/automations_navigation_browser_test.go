@@ -934,7 +934,13 @@ window.addEventListener('DOMContentLoaded', function() {
     var errorLine = document.querySelector('[data-automation-yaml-error-line]');
     if (!diagnostic || diagnostic.classList.contains('hidden') || !diagnostic.textContent.includes('line 1')) fail('malformed YAML did not show an inline line-aware diagnostic');
     if (!errorLine || !errorLine.classList.contains('decoration-wavy')) fail('malformed YAML did not underline the invalid source line');
-
+    var errorDecorationColor = window.getComputedStyle(errorLine).textDecorationColor;
+    if (!errorDecorationColor || errorDecorationColor === 'transparent' || errorDecorationColor === 'rgba(0, 0, 0, 0)') fail('malformed YAML error underline is transparent');
+    var errorColorReference = document.createElement('span');
+    errorColorReference.style.color = 'oklch(var(--er))';
+    document.body.appendChild(errorColorReference);
+    if (errorDecorationColor !== window.getComputedStyle(errorColorReference).color) fail('malformed YAML error underline does not use the theme error color: ' + errorDecorationColor);
+    errorColorReference.remove();
     await report('pass', '');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
@@ -946,7 +952,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px;overflow:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.whitespace-nowrap{white-space:nowrap}[data-automation-yaml-line-numbers]{width:3rem;margin:0;font:16px/24px monospace}</style></head><body>%s%s</body></html>`, builder.String(), runner)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px;overflow:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.whitespace-nowrap{white-space:nowrap}[data-automation-yaml-line-numbers]{width:3rem;margin:0;font:16px/24px monospace}</style></head><body>%s%s</body></html>`, builder.String(), runner)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
