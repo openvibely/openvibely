@@ -256,6 +256,117 @@ definitions:
           $ref: '#/definitions/models.UsageRatePoint'
         type: array
     type: object
+  models.CollisionReport:
+    properties:
+      analyses:
+        items:
+          $ref: '#/definitions/models.ImpactAnalysis'
+        type: array
+      conflicts:
+        items:
+          $ref: '#/definitions/models.ConflictPrediction'
+        type: array
+      generated_at:
+        type: string
+      project_id:
+        type: string
+      recommendation:
+        $ref: '#/definitions/models.ExecutionOrderRecommendation'
+    type: object
+  models.ConflictHistory:
+    properties:
+      actual_files:
+        description: JSON array
+        type: string
+      conflict_type:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      impact_score:
+        type: number
+      prediction_id:
+        type: string
+      project_id:
+        type: string
+      resolution:
+        type: string
+      task_a_id:
+        type: string
+      task_b_id:
+        type: string
+      was_predicted:
+        type: boolean
+    type: object
+  models.ConflictPrediction:
+    properties:
+      conflict_type:
+        $ref: '#/definitions/models.ConflictType'
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      overlapping_resources:
+        description: JSON array
+        type: string
+      project_id:
+        type: string
+      resolution_strategy:
+        type: string
+      resolved_at:
+        type: string
+      severity:
+        $ref: '#/definitions/models.ConflictSeverity'
+      status:
+        $ref: '#/definitions/models.ConflictStatus'
+      task_a_id:
+        type: string
+      task_b_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  models.ConflictSeverity:
+    enum:
+    - low
+    - medium
+    - high
+    - critical
+    type: string
+    x-enum-varnames:
+    - SeverityLow
+    - SeverityMedium
+    - SeverityHigh
+    - SeverityCritical
+  models.ConflictStatus:
+    enum:
+    - detected
+    - acknowledged
+    - resolved
+    - false_positive
+    type: string
+    x-enum-varnames:
+    - ConflictDetected
+    - ConflictAcknowledged
+    - ConflictResolved
+    - ConflictFalsePositive
+  models.ConflictType:
+    enum:
+    - file
+    - api
+    - schema
+    - component
+    - semantic
+    type: string
+    x-enum-varnames:
+    - ConflictTypeFile
+    - ConflictTypeAPI
+    - ConflictTypeSchema
+    - ConflictTypeComponent
+    - ConflictTypeSemantic
   models.DailyUsagePoint:
     properties:
       cached_input_tokens:
@@ -276,6 +387,60 @@ definitions:
         type: string
       total_tokens:
         type: integer
+    type: object
+  models.ExecutionOrderRecommendation:
+    properties:
+      batch_groups:
+        description: JSON array of arrays
+        type: string
+      conflict_count:
+        type: integer
+      created_at:
+        type: string
+      expires_at:
+        type: string
+      id:
+        type: string
+      project_id:
+        type: string
+      reasoning:
+        type: string
+      status:
+        $ref: '#/definitions/models.RecommendationStatus'
+      task_ids:
+        description: JSON array of task IDs in order
+        type: string
+    type: object
+  models.ImpactAnalysis:
+    properties:
+      analysis_model:
+        type: string
+      apis_impacted:
+        description: JSON array
+        type: string
+      components_impacted:
+        description: JSON array
+        type: string
+      confidence:
+        type: number
+      created_at:
+        type: string
+      files_impacted:
+        description: JSON array
+        type: string
+      id:
+        type: string
+      impact_summary:
+        type: string
+      project_id:
+        type: string
+      schemas_impacted:
+        description: JSON array
+        type: string
+      task_id:
+        type: string
+      updated_at:
+        type: string
     type: object
   models.MergeStatus:
     enum:
@@ -314,6 +479,18 @@ definitions:
       total_tokens:
         type: integer
     type: object
+  models.RecommendationStatus:
+    enum:
+    - pending
+    - accepted
+    - rejected
+    - expired
+    type: string
+    x-enum-varnames:
+    - RecommendationPending
+    - RecommendationAccepted
+    - RecommendationRejected
+    - RecommendationExpired
   models.RepeatType:
     enum:
     - once
@@ -1896,6 +2073,311 @@ paths:
       summary: Get the status and result of a chat message
       tags:
       - chat
+  /api/collisions/analyze/{taskId}:
+    post:
+      description: Performs AI-powered semantic analysis of what files, APIs, schemas,
+        and components a task will likely modify
+      parameters:
+      - description: Task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ImpactAnalysis'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Analyze task impact
+      tags:
+      - collisions
+  /api/collisions/conflicts/{id}/status:
+    patch:
+      consumes:
+      - application/json
+      description: Updates the status of a conflict prediction (acknowledge, resolve,
+        mark as false positive)
+      parameters:
+      - description: Conflict Prediction ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Status update
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Update conflict status
+      tags:
+      - collisions
+  /api/collisions/conflicts/{taskId}:
+    get:
+      description: Returns all active conflicts involving a specific task
+      parameters:
+      - description: Task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.ConflictPrediction'
+            type: array
+      summary: Get conflicts for a task
+      tags:
+      - collisions
+  /api/collisions/detect:
+    post:
+      description: Compares impact analyses across pending/running tasks to predict
+        conflicts
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.ConflictPrediction'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Detect conflicts between tasks
+      tags:
+      - collisions
+  /api/collisions/history:
+    get:
+      description: Returns historical conflict data for a project (for learning)
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get conflict history
+      tags:
+      - collisions
+    post:
+      consumes:
+      - application/json
+      description: Records a conflict that actually occurred for learning and prediction
+        improvement
+      parameters:
+      - description: Conflict history record
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/models.ConflictHistory'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.ConflictHistory'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Record an actual conflict
+      tags:
+      - collisions
+  /api/collisions/impact/{taskId}:
+    get:
+      description: Returns the latest impact analysis for a task
+      parameters:
+      - description: Task ID
+        in: path
+        name: taskId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ImpactAnalysis'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get task impact analysis
+      tags:
+      - collisions
+  /api/collisions/recommend:
+    post:
+      description: Generates an optimal task execution order recommendation based
+        on detected conflicts
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ExecutionOrderRecommendation'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Recommend task execution order
+      tags:
+      - collisions
+  /api/collisions/recommendation:
+    get:
+      description: Returns the latest pending recommendation for a project
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.ExecutionOrderRecommendation'
+      summary: Get latest execution order recommendation
+      tags:
+      - collisions
+  /api/collisions/recommendation/{id}/accept:
+    post:
+      description: Marks a recommendation as accepted
+      parameters:
+      - description: Recommendation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Accept execution order recommendation
+      tags:
+      - collisions
+  /api/collisions/recommendation/{id}/reject:
+    post:
+      description: Marks a recommendation as rejected
+      parameters:
+      - description: Recommendation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Reject execution order recommendation
+      tags:
+      - collisions
+  /api/collisions/report:
+    get:
+      description: Returns a full collision report for a project including analyses,
+        conflicts, and recommendations
+      parameters:
+      - description: Project ID
+        in: query
+        name: project_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.CollisionReport'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Get collision report
+      tags:
+      - collisions
   /api/lifecycle-executions/{id}/events:
     get:
       description: Returns prompt-safe trace events for one lifecycle hook invocation.

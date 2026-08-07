@@ -56,7 +56,7 @@ func setupSuggestionsTestHandler(t *testing.T) (*Handler, *echo.Echo, *repositor
 	insightsSvc.SetLLMService(llmSvc)
 	backlogSvc := service.NewBacklogService(backlogRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, insightsSvc, nil, backlogSvc, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, nil, nil, nil, nil)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, insightsSvc, nil, backlogSvc, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, nil, nil, nil, nil)
 
 	e := echo.New()
 	h.RegisterRoutes(e)

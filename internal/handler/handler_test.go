@@ -75,7 +75,7 @@ func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLM
 	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
 	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
 	h.SetGitHubAuthRepo(githubAuthRepo)
 	h.SetSlackAuthRepo(slackAuthRepo)
 	h.SetEmailAuthRepo(emailAuthRepo)
@@ -280,7 +280,7 @@ func setupTestHandlerWithInsights(t *testing.T) (*Handler, *echo.Echo) {
 	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 	insightsSvc.SetLLMService(llmSvc)
 
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, insightsSvc, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, nil, nil, nil)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, insightsSvc, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, nil, nil, nil)
 	e := echo.New()
 	h.RegisterRoutes(e)
 	return h, e

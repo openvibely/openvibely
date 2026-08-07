@@ -42,7 +42,7 @@ func setupArchitectTestHandler(t *testing.T) (*Handler, *echo.Echo, *repository.
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
 	architectSvc := service.NewArchitectService(architectRepo, taskRepo, projectRepo, llmConfigRepo)
 
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, architectSvc, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, nil, nil, nil, nil)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, architectSvc, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, nil, nil, nil, nil)
 
 	e := echo.New()
 	h.RegisterRoutes(e)

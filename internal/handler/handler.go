@@ -29,6 +29,7 @@ type Handler struct {
 	alertSvc                   *service.AlertService
 	upcomingSvc                *service.UpcomingService
 	workflowSvc                *service.WorkflowService
+	collisionSvc               *service.CollisionService
 	insightsSvc                *service.InsightsService
 	architectSvc               *service.ArchitectService
 	backlogSvc                 *service.BacklogService
@@ -184,6 +185,7 @@ func New(
 	alertSvc *service.AlertService,
 	upcomingSvc *service.UpcomingService,
 	workflowSvc *service.WorkflowService,
+	collisionSvc *service.CollisionService,
 	insightsSvc *service.InsightsService,
 	architectSvc *service.ArchitectService,
 	backlogSvc *service.BacklogService,
@@ -264,6 +266,7 @@ func New(
 		alertSvc:             alertSvc,
 		upcomingSvc:          upcomingSvc,
 		workflowSvc:          workflowSvc,
+		collisionSvc:         collisionSvc,
 		insightsSvc:          insightsSvc,
 		architectSvc:         architectSvc,
 		backlogSvc:           backlogSvc,
@@ -902,6 +905,20 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Vote Records
 	e.GET("/api/workflows/votes/:stepExecId", h.GetVoteRecords)
+
+	// Semantic Collision Detection
+	e.POST("/api/collisions/analyze/:taskId", h.AnalyzeTaskImpact)
+	e.GET("/api/collisions/impact/:taskId", h.GetTaskImpact)
+	e.POST("/api/collisions/detect", h.DetectConflicts)
+	e.GET("/api/collisions/conflicts/:taskId", h.GetTaskConflicts)
+	e.PATCH("/api/collisions/conflicts/:id/status", h.UpdateConflictStatus)
+	e.GET("/api/collisions/report", h.GetCollisionReport)
+	e.POST("/api/collisions/recommend", h.RecommendExecutionOrder)
+	e.GET("/api/collisions/recommendation", h.GetLatestRecommendation)
+	e.POST("/api/collisions/recommendation/:id/accept", h.AcceptRecommendation)
+	e.POST("/api/collisions/recommendation/:id/reject", h.RejectRecommendation)
+	e.GET("/api/collisions/history", h.GetConflictHistory)
+	e.POST("/api/collisions/history", h.RecordConflict)
 
 	// Unified Suggestions (combined Insights + Backlog)
 	e.GET("/suggestions", h.UnifiedSuggestions)

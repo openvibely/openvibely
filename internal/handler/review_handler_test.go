@@ -51,7 +51,7 @@ func setupReviewHandler(t *testing.T) (*Handler, *echo.Echo, *repository.ReviewC
 		projectSvc,
 		taskSvc,
 		llmSvc,
-		workerSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		workerSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, nil, attachmentRepo, nil, projectRepo, settingsRepo, broadcaster, nil,
 	)
 	h.SetReviewCommentRepo(reviewCommentRepo)

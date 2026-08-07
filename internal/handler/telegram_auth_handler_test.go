@@ -26,7 +26,7 @@ func setupTelegramAuthHandler(t *testing.T) (*Handler, *echo.Echo, *repository.T
 
 	h := New(
 		projectSvc,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		llmConfigRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 	)
 	h.SetTelegramAuthRepo(telegramAuthRepo)

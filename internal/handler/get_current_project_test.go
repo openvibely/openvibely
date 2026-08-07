@@ -33,7 +33,7 @@ func setupProjectTestHandler(t *testing.T) (*Handler, *service.ProjectService) {
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, nil, nil, nil, nil)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, nil, nil, nil, nil)
 
 	return h, projectSvc
 }

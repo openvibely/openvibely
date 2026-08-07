@@ -18,7 +18,7 @@ import (
 // TestHandleTelegramTest_NotRunning tests the error feedback HTML
 func TestHandleTelegramTest_NotRunning(t *testing.T) {
 	e := echo.New()
-	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	// telegramService is nil by default (not running)
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/test", nil)
@@ -335,7 +335,7 @@ func TestHandleTelegramRemoveNonHTMXRedirectsToChannelsAndClearsSettings(t *test
 
 func TestHandleTelegramRemoveMissingSettingsRepoReturnsError(t *testing.T) {
 	e := echo.New()
-	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/remove", nil)
 	rec := httptest.NewRecorder()

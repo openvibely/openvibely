@@ -34,7 +34,7 @@ func NewArchitectService(
 	}
 }
 
-// SetLLMService breaks the circular dependency between architect and LLM services.
+// SetLLMService breaks circular dependency (same pattern as CollisionService)
 func (s *ArchitectService) SetLLMService(llmSvc *LLMService) {
 	s.llmSvc = llmSvc
 }

@@ -1382,6 +1382,460 @@
                 }
             }
         },
+        "/api/collisions/analyze/{taskId}": {
+            "post": {
+                "description": "Performs AI-powered semantic analysis of what files, APIs, schemas, and components a task will likely modify",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Analyze task impact",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ImpactAnalysis"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/collisions/conflicts/{id}/status": {
+            "patch": {
+                "description": "Updates the status of a conflict prediction (acknowledge, resolve, mark as false positive)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Update conflict status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Conflict Prediction ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Status update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/collisions/conflicts/{taskId}": {
+            "get": {
+                "description": "Returns all active conflicts involving a specific task",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Get conflicts for a task",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.ConflictPrediction"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/collisions/detect": {
+            "post": {
+                "description": "Compares impact analyses across pending/running tasks to predict conflicts",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Detect conflicts between tasks",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.ConflictPrediction"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/collisions/history": {
+            "get": {
+                "description": "Returns historical conflict data for a project (for learning)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Get conflict history",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Records a conflict that actually occurred for learning and prediction improvement",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Record an actual conflict",
+                "parameters": [
+                    {
+                        "description": "Conflict history record",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/models.ConflictHistory"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/models.ConflictHistory"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/collisions/impact/{taskId}": {
+            "get": {
+                "description": "Returns the latest impact analysis for a task",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Get task impact analysis",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "taskId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ImpactAnalysis"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/collisions/recommend": {
+            "post": {
+                "description": "Generates an optimal task execution order recommendation based on detected conflicts",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Recommend task execution order",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ExecutionOrderRecommendation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/collisions/recommendation": {
+            "get": {
+                "description": "Returns the latest pending recommendation for a project",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Get latest execution order recommendation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.ExecutionOrderRecommendation"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/collisions/recommendation/{id}/accept": {
+            "post": {
+                "description": "Marks a recommendation as accepted",
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Accept execution order recommendation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Recommendation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/collisions/recommendation/{id}/reject": {
+            "post": {
+                "description": "Marks a recommendation as rejected",
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Reject execution order recommendation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Recommendation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/collisions/report": {
+            "get": {
+                "description": "Returns a full collision report for a project including analyses, conflicts, and recommendations",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "collisions"
+                ],
+                "summary": "Get collision report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.CollisionReport"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/lifecycle-executions/{id}/events": {
             "get": {
                 "description": "Returns prompt-safe trace events for one lifecycle hook invocation.",
@@ -2447,6 +2901,163 @@
                 }
             }
         },
+        "models.CollisionReport": {
+            "type": "object",
+            "properties": {
+                "analyses": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ImpactAnalysis"
+                    }
+                },
+                "conflicts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.ConflictPrediction"
+                    }
+                },
+                "generated_at": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "recommendation": {
+                    "$ref": "#/definitions/models.ExecutionOrderRecommendation"
+                }
+            }
+        },
+        "models.ConflictHistory": {
+            "type": "object",
+            "properties": {
+                "actual_files": {
+                    "description": "JSON array",
+                    "type": "string"
+                },
+                "conflict_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "impact_score": {
+                    "type": "number"
+                },
+                "prediction_id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "resolution": {
+                    "type": "string"
+                },
+                "task_a_id": {
+                    "type": "string"
+                },
+                "task_b_id": {
+                    "type": "string"
+                },
+                "was_predicted": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "models.ConflictPrediction": {
+            "type": "object",
+            "properties": {
+                "conflict_type": {
+                    "$ref": "#/definitions/models.ConflictType"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "overlapping_resources": {
+                    "description": "JSON array",
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "resolution_strategy": {
+                    "type": "string"
+                },
+                "resolved_at": {
+                    "type": "string"
+                },
+                "severity": {
+                    "$ref": "#/definitions/models.ConflictSeverity"
+                },
+                "status": {
+                    "$ref": "#/definitions/models.ConflictStatus"
+                },
+                "task_a_id": {
+                    "type": "string"
+                },
+                "task_b_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.ConflictSeverity": {
+            "type": "string",
+            "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+            ],
+            "x-enum-varnames": [
+                "SeverityLow",
+                "SeverityMedium",
+                "SeverityHigh",
+                "SeverityCritical"
+            ]
+        },
+        "models.ConflictStatus": {
+            "type": "string",
+            "enum": [
+                "detected",
+                "acknowledged",
+                "resolved",
+                "false_positive"
+            ],
+            "x-enum-varnames": [
+                "ConflictDetected",
+                "ConflictAcknowledged",
+                "ConflictResolved",
+                "ConflictFalsePositive"
+            ]
+        },
+        "models.ConflictType": {
+            "type": "string",
+            "enum": [
+                "file",
+                "api",
+                "schema",
+                "component",
+                "semantic"
+            ],
+            "x-enum-varnames": [
+                "ConflictTypeFile",
+                "ConflictTypeAPI",
+                "ConflictTypeSchema",
+                "ConflictTypeComponent",
+                "ConflictTypeSemantic"
+            ]
+        },
         "models.DailyUsagePoint": {
             "type": "object",
             "properties": {
@@ -2476,6 +3087,85 @@
                 },
                 "total_tokens": {
                     "type": "integer"
+                }
+            }
+        },
+        "models.ExecutionOrderRecommendation": {
+            "type": "object",
+            "properties": {
+                "batch_groups": {
+                    "description": "JSON array of arrays",
+                    "type": "string"
+                },
+                "conflict_count": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "reasoning": {
+                    "type": "string"
+                },
+                "status": {
+                    "$ref": "#/definitions/models.RecommendationStatus"
+                },
+                "task_ids": {
+                    "description": "JSON array of task IDs in order",
+                    "type": "string"
+                }
+            }
+        },
+        "models.ImpactAnalysis": {
+            "type": "object",
+            "properties": {
+                "analysis_model": {
+                    "type": "string"
+                },
+                "apis_impacted": {
+                    "description": "JSON array",
+                    "type": "string"
+                },
+                "components_impacted": {
+                    "description": "JSON array",
+                    "type": "string"
+                },
+                "confidence": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "files_impacted": {
+                    "description": "JSON array",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "impact_summary": {
+                    "type": "string"
+                },
+                "project_id": {
+                    "type": "string"
+                },
+                "schemas_impacted": {
+                    "description": "JSON array",
+                    "type": "string"
+                },
+                "task_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -2530,6 +3220,21 @@
                     "type": "integer"
                 }
             }
+        },
+        "models.RecommendationStatus": {
+            "type": "string",
+            "enum": [
+                "pending",
+                "accepted",
+                "rejected",
+                "expired"
+            ],
+            "x-enum-varnames": [
+                "RecommendationPending",
+                "RecommendationAccepted",
+                "RecommendationRejected",
+                "RecommendationExpired"
+            ]
         },
         "models.RepeatType": {
             "type": "string",

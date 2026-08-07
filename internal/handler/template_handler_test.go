@@ -44,7 +44,7 @@ func setupTemplateTestHandler(t *testing.T) (*Handler, *echo.Echo, *repository.T
 
 	h := New(
 		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc,
-		nil, nil, nil, nil, nil, nil, templateSvc, nil,
+		nil, nil, nil, nil, nil, nil, nil, templateSvc, nil,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, nil, nil, nil, nil,
 	)
 
@@ -438,20 +438,31 @@ func TestHandler_SaveTaskAsTemplate(t *testing.T) {
 		t.Errorf("expected status 200, got %d", rec.Code)
 	}
 
-	// Verify template was created
+	// Verify template was created. The list projection intentionally omits
+	// DefaultPrompt, so fetch the full record via GetByID to verify it.
 	templates, _ := templateRepo.ListByProject(ctx, project.ID)
+	var createdID string
 	found := false
 	for _, tmpl := range templates {
 		if tmpl.Name == "My Template" {
 			found = true
-			if tmpl.DefaultPrompt != "Do something important" {
-				t.Errorf("expected prompt from task, got %q", tmpl.DefaultPrompt)
-			}
+			createdID = tmpl.ID
 			break
 		}
 	}
 	if !found {
 		t.Error("template should be created from task")
+	}
+
+	full, err := templateRepo.GetByID(ctx, createdID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if full == nil {
+		t.Fatal("expected created template to be found by GetByID")
+	}
+	if full.DefaultPrompt != "Do something important" {
+		t.Errorf("expected prompt from task, got %q", full.DefaultPrompt)
 	}
 }
 

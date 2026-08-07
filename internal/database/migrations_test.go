@@ -12,74 +12,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func TestMigration143DropsPredictiveCollisionTables(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "drop-predictive-collisions-143.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		t.Fatal(err)
-	}
-	if err := goose.UpTo(db, ".", 142); err != nil {
-		t.Fatal(err)
-	}
-
-	tables := []string{
-		"impact_analyses",
-		"conflict_predictions",
-		"conflict_history",
-		"execution_order_recommendations",
-	}
-	for _, table := range tables {
-		var count int
-		if err := db.QueryRow(
-			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
-			table,
-		).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count != 1 {
-			t.Fatalf("table %s does not exist before migration 143", table)
-		}
-	}
-
-	if err := goose.UpTo(db, ".", 143); err != nil {
-		t.Fatal(err)
-	}
-	for _, table := range tables {
-		var count int
-		if err := db.QueryRow(
-			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
-			table,
-		).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count != 0 {
-			t.Fatalf("table %s still exists after migration 143", table)
-		}
-	}
-
-	if err := goose.DownTo(db, ".", 142); err != nil {
-		t.Fatal(err)
-	}
-	for _, table := range tables {
-		var count int
-		if err := db.QueryRow(
-			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
-			table,
-		).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count != 1 {
-			t.Fatalf("table %s was not recreated by migration 143 rollback", table)
-		}
-	}
-}
-
 func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "task-deletion-indexes-130.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -839,8 +771,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 143 {
-		t.Fatalf("max goose version = %d, want 143", maxVersion)
+	if maxVersion != 142 {
+		t.Fatalf("max goose version = %d, want 142", maxVersion)
 	}
 }
 
@@ -991,8 +923,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 143 {
-		t.Fatalf("max goose version = %d, want 143", maxVersion)
+	if maxVersion != 142 {
+		t.Fatalf("max goose version = %d, want 142", maxVersion)
 	}
 }
 
@@ -1478,8 +1410,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 143 {
-		t.Fatalf("max goose version = %d, want 143", maxVersion)
+	if maxVersion != 142 {
+		t.Fatalf("max goose version = %d, want 142", maxVersion)
 	}
 }
 
@@ -1830,8 +1762,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 143 {
-		t.Fatalf("max goose version = %d, want 143", maxVersion)
+	if maxVersion != 142 {
+		t.Fatalf("max goose version = %d, want 142", maxVersion)
 	}
 }
 

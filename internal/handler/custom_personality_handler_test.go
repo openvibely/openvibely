@@ -30,7 +30,7 @@ func setupCustomPersonalityHandler(t *testing.T) (*Handler, *echo.Echo, *reposit
 
 	h := New(
 		projectSvc,
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
 		llmConfigRepo, nil, nil, nil, nil, nil, nil, projectRepo, settingsRepo, nil, nil,
 	)
 	h.SetCustomPersonalityRepo(customPersonalityRepo)

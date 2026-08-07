@@ -82,7 +82,7 @@ func setupPatternTestHandler(t *testing.T) (*Handler, *echo.Echo, *models.Projec
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
 	patternSvc := service.NewPatternService(patternRepo, taskRepo)
 
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, nil, nil, nil, nil, patternSvc, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, nil, nil, nil, nil)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, nil, nil, nil, nil, nil, patternSvc, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, nil, nil, nil, nil)
 
 	e := echo.New()
 	h.RegisterRoutes(e)

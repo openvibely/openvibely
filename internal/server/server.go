@@ -647,6 +647,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	workflowSvc := service.NewWorkflowService(workflowRepo, llmConfigRepo, taskRepo, llmSvc)
 	workflowSvc.SetUpdateWorkTracker(updateTracker)
 	workflowSvc.SetAlertService(alertSvc)
+	collisionRepo := repository.NewCollisionRepo(db)
+	collisionSvc := service.NewCollisionService(collisionRepo, taskRepo, projectRepo, llmConfigRepo)
+	collisionSvc.SetLLMService(llmSvc)
 	insightsRepo := repository.NewInsightsRepo(db)
 	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 	insightsSvc.SetLLMService(llmSvc)
@@ -1077,7 +1080,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	})
 
 	h := handler.New(
-		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, workflowSvc, insightsSvc, architectSvc, backlogSvc, autonomousTriggerSvc, trendSvc, templateSvc, patternSvc,
+		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, workflowSvc, collisionSvc, insightsSvc, architectSvc, backlogSvc, autonomousTriggerSvc, trendSvc, templateSvc, patternSvc,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, broadcaster, telegramSvc,
 	)
 	h.SetChatBroadcaster(chatBroadcaster)
