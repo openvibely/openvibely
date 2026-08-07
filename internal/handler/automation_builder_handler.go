@@ -12,6 +12,27 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
+type automationYAMLParseResult struct {
+	Valid   bool   `json:"valid"`
+	Message string `json:"message,omitempty"`
+}
+
+// ParseAutomationYAML verifies YAML syntax for the browser editor without
+// normalizing, previewing, or persisting an Automation.
+func (h *Handler) ParseAutomationYAML(c echo.Context) error {
+	if _, err := h.getCurrentProjectID(c); err != nil {
+		return err
+	}
+	rawYAML, submitted := automationDraftFormValue(c, "automation_yaml")
+	if !submitted {
+		return c.JSON(http.StatusOK, automationYAMLParseResult{Message: "YAML is required."})
+	}
+	if _, err := service.DecodeAutomationDraftYAML([]byte(rawYAML)); err != nil {
+		return c.JSON(http.StatusOK, automationYAMLParseResult{Message: "Malformed YAML: " + err.Error()})
+	}
+	return c.JSON(http.StatusOK, automationYAMLParseResult{Valid: true})
+}
+
 func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 	if h.automationDraftSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation builder unavailable")

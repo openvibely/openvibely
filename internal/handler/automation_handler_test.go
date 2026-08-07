@@ -647,6 +647,42 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 }
 
+func TestAutomationYAMLParseReportsMalformedDocumentsWithoutSideEffects(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("YAML parse-only project").Build()
+
+	invalid := tc.HTTP().Post("/automations/yaml/parse?project_id=" + project.ID).WithForm(url.Values{
+		"automation_yaml": {"schema_version: ["},
+	}).Execute()
+	require.Equal(t, http.StatusOK, invalid.Code, invalid.Body.String())
+	var invalidResult struct {
+		Valid   bool   `json:"valid"`
+		Message string `json:"message"`
+	}
+	require.NoError(t, json.Unmarshal(invalid.Body.Bytes(), &invalidResult))
+	require.False(t, invalidResult.Valid)
+	require.Contains(t, invalidResult.Message, "Malformed YAML:")
+	require.Contains(t, invalidResult.Message, "line 1")
+
+	validYAML, err := service.EncodeAutomationDraftYAML(models.AutomationDraftCandidate{
+		SchemaVersion: 1, Name: "Syntax only", AutomationType: "custom", AdapterKey: "custom",
+	})
+	require.NoError(t, err)
+	valid := tc.HTTP().Post("/automations/yaml/parse?project_id=" + project.ID).WithForm(url.Values{
+		"automation_yaml": {validYAML},
+	}).Execute()
+	require.Equal(t, http.StatusOK, valid.Code, valid.Body.String())
+	var validResult struct {
+		Valid bool `json:"valid"`
+	}
+	require.NoError(t, json.Unmarshal(valid.Body.Bytes(), &validResult))
+	require.True(t, validResult.Valid)
+
+	for _, table := range []string{"automations", "automation_versions"} {
+		require.Zero(t, tableCountHandler(t, tc, table), "parse-only validation must not change %s", table)
+	}
+}
+
 func TestAutomationBuilderVisualActionsDecodeAndReserializeYAML(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Visual YAML Builder Project").Build()

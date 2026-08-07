@@ -241,6 +241,7 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
 		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`,
 		`data-automation-yaml-editor`, `name="automation_yaml"`, `schema_version: 1`,
+		`data-automation-yaml-editor-shell`, `data-automation-yaml-line-numbers`, `data-automation-yaml-diagnostic`,
 		`data-automation-graph-panel`, `data-automation-draft-canvas`, `min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6`,
 	} {
 		if !strings.Contains(body, want) {
@@ -645,8 +646,8 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col`) {
 			t.Errorf("%s YAML panel must grow to fill the builder card while remaining hidden in Graph mode", source)
 		}
-		if !strings.Contains(body, `class="block min-h-0 w-full flex-1 resize-none`) {
-			t.Errorf("%s YAML editor must grow to fill its panel without a separate resize height", source)
+		if !strings.Contains(body, `data-automation-yaml-editor-shell`) || !strings.Contains(body, `class="block min-h-0 flex-1 resize-none`) || !strings.Contains(body, `data-automation-yaml-line-numbers`) {
+			t.Errorf("%s YAML editor must fill its panel beside a synchronized line-number gutter", source)
 		}
 	}
 }
@@ -813,6 +814,8 @@ window.addEventListener('DOMContentLoaded', function() {
     });
     click('[data-automation-view-yaml]', 'YAML view button');
     if (!isVisible(yaml) || isVisible(graph)) fail('YAML switch did not make the editable YAML view visible');
+    var lineNumbers = document.querySelector('[data-automation-yaml-line-numbers]');
+    if (!lineNumbers || !lineNumbers.textContent.includes('1\n2\n3')) fail('YAML editor did not render a line-number gutter');
     click('[data-automation-view-graph]', 'Graph view button');
     if (!isVisible(graph) || isVisible(yaml)) fail('Graph switch did not restore the canvas');
 
@@ -850,6 +853,13 @@ window.addEventListener('DOMContentLoaded', function() {
     if (editor.value.includes('from: "first"\n    to: "third"')) fail('canvas delete did not remove the edge from YAML');
     submittedYAML(editor);
 
+    click('[data-automation-view-yaml]', 'YAML view button after canvas edits');
+    editor.value = 'schema_version: [';
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
+    var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
+    if (!diagnostic || diagnostic.classList.contains('hidden') || !diagnostic.textContent.includes('line 1')) fail('malformed YAML did not show an inline line-aware diagnostic');
+
     await report('pass', '');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
@@ -864,6 +874,17 @@ window.addEventListener('DOMContentLoaded', function() {
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
+		case "/automations/yaml/parse":
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if strings.Contains(r.FormValue("automation_yaml"), "[") {
+				_, _ = w.Write([]byte(`{"valid":false,"message":"Malformed YAML: yaml: line 1: did not find expected node content"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"valid":true}`))
 		default:
 			http.NotFound(w, r)
 		}

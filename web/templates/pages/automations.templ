@@ -804,7 +804,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						</form>
 					}
 						<div data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6">
-							<textarea class="block min-h-0 w-full flex-1 resize-none border-0 bg-transparent p-0 font-mono text-sm leading-6 outline-none" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor spellcheck="false" aria-label="Automation definition">{ page.YAML }</textarea>
+							<div class="flex min-h-0 flex-1 overflow-hidden" data-automation-yaml-editor-shell>
+								<pre class="m-0 w-12 shrink-0 select-none overflow-hidden border-r border-base-300 pr-3 text-right text-base-content/45" aria-hidden="true" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(page.YAML) }</pre>
+								<textarea class="block min-h-0 flex-1 resize-none border-0 bg-transparent pl-3 font-mono text-sm leading-6 outline-none" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor data-automation-yaml-parse-url={ fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID) } spellcheck="false" aria-label="Automation definition">{ page.YAML }</textarea>
+							</div>
+							<p class="mt-3 hidden rounded-box border border-error/30 bg-error/10 px-3 py-2 font-sans text-sm text-error" role="alert" data-automation-yaml-diagnostic></p>
 						</div>
 						<dialog id="automation-node-dialog" class="modal" data-automation-node-dialog>
 							<div class="modal-box relative max-w-md">
@@ -987,17 +991,50 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						return lines.join('\n') + '\n';
 					}
 					var yamlEditor = builder.querySelector('[data-automation-yaml-editor]');
+					var yamlLineNumbers = builder.querySelector('[data-automation-yaml-line-numbers]');
+					var yamlDiagnostic = builder.querySelector('[data-automation-yaml-diagnostic]');
+					var yamlParseTimer = 0;
+					var yamlParseRequest = 0;
+					function updateYAMLLineNumbers() {
+						if (!yamlEditor || !yamlLineNumbers) return;
+						var count = yamlEditor.value.split('\n').length;
+						yamlLineNumbers.textContent = Array.from({length: count}, function(_, index) { return String(index + 1); }).join('\n');
+						yamlLineNumbers.scrollTop = yamlEditor.scrollTop;
+					}
+					function showYAMLDiagnostic(message) {
+						if (!yamlDiagnostic) return;
+						yamlDiagnostic.textContent = message || '';
+						yamlDiagnostic.classList.toggle('hidden', !message);
+					}
+					function validateYAMLWhileTyping() {
+						if (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;
+						var request = ++yamlParseRequest;
+						window.clearTimeout(yamlParseTimer);
+						yamlParseTimer = window.setTimeout(function() {
+							fetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: yamlEditor.value})})
+								.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })
+								.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })
+								.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });
+						}, 300);
+					}
+					if (yamlEditor) {
+						yamlEditor.addEventListener('scroll', updateYAMLLineNumbers);
+						yamlEditor.addEventListener('input', function() { updateYAMLLineNumbers(); validateYAMLWhileTyping(); });
+						updateYAMLLineNumbers();
+					}
 					function syncCandidate(writeYAML) {
 						var automationName = builder.querySelector('[data-automation-name]');
 						if (automationName) candidate.name = automationName.value;
 						builder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });
 						if (writeYAML !== false) {
 							var serializedYAML = visualCandidateYAML();
-							if (yamlEditor) yamlEditor.value = serializedYAML;
+							if (yamlEditor) {
+								yamlEditor.value = serializedYAML;
+								updateYAMLLineNumbers();
+							}
 							builder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = serializedYAML; });
 						}
-					}
-					function applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }
+					}					function applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }
 				function graphPoint(event) {
 					var point = svg.createSVGPoint();
 					point.x = event.clientX;
@@ -1288,6 +1325,14 @@ func automationBuilderPostURL(page models.AutomationBuilderPage, currentProjectI
 }
 
 func automationDraftCandidateJSON(candidate models.AutomationDraftCandidate) string { value, _ := json.Marshal(candidate); return string(value) }
+func automationYAMLLineNumbers(value string) string {
+	count := strings.Count(value, "\n") + 1
+	lines := make([]string, count)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("%d", i+1)
+	}
+	return strings.Join(lines, "\n")
+}
 func automationDraftEdgesJSON(edges []models.AutomationDraftEdge) string {
 	if edges == nil {
 		return "[]"
