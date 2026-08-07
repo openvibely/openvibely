@@ -870,6 +870,7 @@ type TaskDeletionManifest struct {
 	TaskAttachmentPaths      []string
 	ExecutionAttachmentPaths []string
 	PendingUploadSessionIDs  []string
+	SwarmChildTaskIDs        []string
 }
 
 func (r *TaskRepo) DeleteWithCleanupManifest(ctx context.Context, id string, beforeDelete func(TaskDeletionManifest) error) (TaskDeletionManifest, bool, error) {
@@ -922,6 +923,18 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 			*destination = append(*destination, value)
 		}
 		return rows.Err()
+	}
+	if err = readPaths(`
+		SELECT id
+		FROM tasks
+		WHERE parent_task_id = ?
+		  AND swarm_role IN ('planner','worker','reviewer','merger','integrator')
+		  AND EXISTS (
+			SELECT 1 FROM tasks parent
+			WHERE parent.id = ? AND parent.swarm_role = 'swarm_parent'
+		  )
+		ORDER BY swarm_sequence, created_at, id`, &manifest.SwarmChildTaskIDs, id, id); err != nil {
+		return manifest, false, fmt.Errorf("listing swarm children for task deletion: %w", err)
 	}
 	if err = readPaths(`
 		SELECT ta.file_path
@@ -997,6 +1010,24 @@ func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID,
 	if beforeDelete != nil {
 		if err = beforeDelete(manifest); err != nil {
 			return manifest, false, err
+		}
+	}
+	if len(manifest.SwarmChildTaskIDs) > 0 {
+		if _, err = tx.ExecContext(ctx, `
+			UPDATE tasks
+			SET category = 'completed',
+				status = CASE
+					WHEN status IN ('pending','queued','running','blocked') THEN 'cancelled'
+					ELSE status
+				END,
+				swarm_status = CASE
+					WHEN status IN ('pending','queued','running','blocked') THEN 'cancelled'
+					ELSE swarm_status
+				END,
+				updated_at = datetime('now')
+			WHERE parent_task_id = ?
+			  AND swarm_role IN ('planner','worker','reviewer','merger','integrator')`, id); err != nil {
+			return manifest, false, fmt.Errorf("terminalizing swarm children for task deletion: %w", err)
 		}
 	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE `+where, args...)

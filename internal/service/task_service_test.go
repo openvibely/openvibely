@@ -1135,6 +1135,47 @@ func TestTaskService_Update_DuplicateTitle(t *testing.T) {
 	}
 }
 
+func TestTaskService_Delete_TerminalizesRetainedSwarmChildren(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, nil, workerSvc)
+	ctx := context.Background()
+
+	parent := &models.Task{ProjectID: "default", Title: "Deleted swarm", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p", SwarmRole: models.SwarmRoleParent, SwarmStatus: "current"}
+	require.NoError(t, taskRepo.Create(ctx, parent))
+	worker := &models.Task{ProjectID: "default", Title: "Deleted swarm · Worker", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running"}
+	reviewer := &models.Task{ProjectID: "default", Title: "Deleted swarm · Reviewer", Category: models.CategoryActive, Status: models.StatusBlocked, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleReviewer, SwarmStatus: "pending"}
+	integrator := &models.Task{ProjectID: "default", Title: "Deleted swarm · Integrator", Category: models.CategoryActive, Status: models.StatusBlocked, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleLegacyIntegrator, SwarmStatus: "pending"}
+	require.NoError(t, taskRepo.Create(ctx, worker))
+	require.NoError(t, taskRepo.Create(ctx, reviewer))
+	require.NoError(t, taskRepo.Create(ctx, integrator))
+
+	cancelled := make(map[string]bool)
+	for _, child := range []*models.Task{worker, reviewer, integrator} {
+		childID := child.ID
+		workerSvc.cancelMu.Lock()
+		workerSvc.cancelFuncs[childID] = func() { cancelled[childID] = true }
+		workerSvc.cancelMu.Unlock()
+	}
+
+	require.NoError(t, svc.Delete(ctx, parent.ID))
+
+	deletedParent, err := taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Nil(t, deletedParent)
+	for _, child := range []*models.Task{worker, reviewer, integrator} {
+		got, err := taskRepo.GetByID(ctx, child.ID)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Nil(t, got.ParentTaskID)
+		assert.Equal(t, models.CategoryCompleted, got.Category)
+		assert.Equal(t, models.StatusCancelled, got.Status)
+		assert.Equal(t, "cancelled", got.SwarmStatus)
+		assert.True(t, cancelled[child.ID], "expected CancelRunningTask invoked for child %s", child.SwarmRole)
+	}
+}
+
 func TestTaskService_Delete_PreservesAttachmentsWhenDurableDeleteFails(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
