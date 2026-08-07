@@ -83,6 +83,8 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		if !yamlSubmitted {
 			h.discardStaleTemplateOnlyNodeConfig(&candidate)
 			applyAutomationDraftFormValues(c, &candidate)
+		}
+		if !yamlSubmitted || automationBuilderVisualActionRequested(c) {
 			if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
 				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 			}
@@ -142,6 +144,8 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		if !yamlSubmitted {
 			h.discardStaleTemplateOnlyNodeConfig(&candidate)
 			applyAutomationDraftFormValues(c, &candidate)
+		}
+		if !yamlSubmitted || automationBuilderVisualActionRequested(c) {
 			if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
 				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 			}
@@ -167,6 +171,12 @@ func decodeAutomationBuilderCandidate(c echo.Context) (models.AutomationDraftCan
 		return service.DecodeAutomationDraftYAML([]byte(raw))
 	}
 	return service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
+}
+
+func automationBuilderVisualActionRequested(c echo.Context) bool {
+	return strings.TrimSpace(c.FormValue("builder_action")) != "" ||
+		strings.TrimSpace(c.FormValue("remove_node")) != "" ||
+		strings.TrimSpace(c.FormValue("remove_edge")) != ""
 }
 
 func automationBuilderSaveRequested(c echo.Context) bool {

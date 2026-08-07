@@ -232,19 +232,18 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 		t.Fatalf("render Automation Edit YAML: %v", err)
 	}
 	body := out.String()
-	for _, want := range []string{
-		`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-yaml-save`,
+	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
 		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`,
 		`data-automation-yaml-editor`, `data-automation-yaml-preview`, `name="automation_yaml"`, `schema_version: 1`,
-		`data-automation-graph-panel`,
+		`data-automation-graph-panel`, `data-automation-draft-canvas`, `data-automation-node-tool`,
 	} {
 		if !strings.Contains(body, want) {
-			t.Errorf("expected YAML Edit view to contain %q", want)
+			t.Errorf("expected synchronized Automation Edit view to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`name="automation_name"`, `data-automation-draft-canvas`, `data-automation-node-tool`, `Node and connection settings`, `data-automation-builder-actions`} {
+	for _, forbidden := range []string{`name="candidate_json"`, "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
 		if strings.Contains(body, forbidden) {
-			t.Errorf("YAML Edit view must omit retired editor control %q", forbidden)
+			t.Errorf("interactive graph must omit YAML-only settings control %q", forbidden)
 		}
 	}
 	if !strings.Contains(body, `>A YAML-authored Automation description.</p>`) {
@@ -270,16 +269,21 @@ func TestAutomationBuilderGraphAndYAMLViewsAreNonDivergent(t *testing.T) {
 	if graph < 0 || yaml < 0 || editor < 0 || !(yaml < graph) {
 		t.Fatalf("expected YAML editor and read-only graph panels, got yaml=%d graph=%d editor=%d", yaml, graph, editor)
 	}
-	if !strings.Contains(body, `data-automation-readonly-node="review"`) {
+	if !strings.Contains(body, `data-node-key="review"`) {
 		t.Error("graph view must render the same candidate represented by the YAML editor")
 	}
-	for _, forbidden := range []string{`data-automation-add-node-open`, `data-automation-node-tool`, `data-automation-disconnect-edge`, `Node and connection settings`, `data-automation-draft-canvas`} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("YAML authoring surface must omit %q", forbidden)
+	for _, want := range []string{`data-automation-add-node-open`, `data-automation-node-tool`, `data-automation-draft-canvas`, `visualCandidateYAML`, `data-automation-yaml-submission`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("synchronized authoring surface must contain %q", want)
 		}
 	}
-	if !strings.Contains(body, `graphButton && graphButton.addEventListener`) || !strings.Contains(body, `yamlButton && yamlButton.addEventListener`) {
-		t.Error("Graph/YAML switch must remain interactive")
+	if strings.Contains(body, `name="candidate_json"`) {
+		t.Error("visual editor must not submit a legacy candidate_json document")
+	}
+	for _, want := range []string{`graphButton && graphButton.addEventListener`, `yamlButton && yamlButton.addEventListener`, `graphPanel.hidden = yamlSelected`, `yamlPanel.hidden = !yamlSelected`, `form.requestSubmit()`, `yamlEditor.value !== visualCandidateYAML()`, `input.value = yamlEditor.value`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Graph/YAML synchronization must contain %q", want)
+		}
 	}
 
 	page.AutomationID = ""
@@ -498,20 +502,22 @@ func TestAutomationLiveMatchesEditVisualScale(t *testing.T) {
 	}
 }
 
-func TestAutomationCanvasOmitsExplanatoryCopy(t *testing.T) {
+func TestAutomationCanvasExplainsInteractiveYAMLSynchronization(t *testing.T) {
 	page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Typography", AutomationType: "custom", AdapterKey: "custom"}}, YAML: "schema_version: 1\nname: Typography\n"}
 	var out bytes.Buffer
 	if err := AutomationBuilderContent(page, "project-yaml-copy").Render(context.Background(), &out); err != nil {
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	for _, text := range []string{"Node and connection settings", "Drag nodes to arrange them", "Connect steps:", "data-automation-connect-status"} {
-		if strings.Contains(body, text) {
-			t.Errorf("YAML authoring page must not render retired canvas copy or controls %q", text)
+	for _, text := range []string{"Drag nodes to arrange them", "Connect steps:", "data-automation-connect-status", "YAML controls node and connection configuration"} {
+		if !strings.Contains(body, text) {
+			t.Errorf("interactive YAML authoring page must render %q", text)
 		}
 	}
-	if !strings.Contains(body, "YAML is the complete Automation definition") {
-		t.Error("YAML editor must explain its canonical authoring role")
+	for _, forbidden := range []string{"Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("interactive YAML authoring page must omit YAML-only settings control %q", forbidden)
+		}
 	}
 }
 
@@ -566,7 +572,7 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 	}
 }
 
-func TestAutomationBuilderUsesReadOnlyGraphAndYAMLEditor(t *testing.T) {
+func TestAutomationBuilderUsesInteractiveGraphAndYAMLEditor(t *testing.T) {
 	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Builder YAML", AutomationType: "custom", AdapterKey: "custom"}
 	page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, YAML: "schema_version: 1\nname: Builder YAML\n"}
 	var out bytes.Buffer
@@ -574,14 +580,9 @@ func TestAutomationBuilderUsesReadOnlyGraphAndYAMLEditor(t *testing.T) {
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	for _, want := range []string{`aria-label="Read-only automation graph"`, `data-automation-graph-panel`, `data-automation-yaml-panel`, `data-automation-yaml-editor`} {
+	for _, want := range []string{`aria-label="Automation graph builder"`, `data-automation-graph-panel`, `data-automation-yaml-panel`, `data-automation-yaml-editor`, `data-automation-zoom-in`, `data-automation-fit`, `data-automation-reset`, `data-automation-node-tool`} {
 		if !strings.Contains(body, want) {
-			t.Errorf("expected YAML builder to contain %q", want)
-		}
-	}
-	for _, forbidden := range []string{`data-automation-zoom-in`, `data-automation-fit`, `data-automation-reset`, `data-automation-node-tool`} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("read-only graph must omit %q", forbidden)
+			t.Errorf("expected interactive YAML builder to contain %q", want)
 		}
 	}
 }
@@ -595,13 +596,10 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 			t.Fatalf("render %s YAML builder: %v", source, err)
 		}
 		body := out.String()
-		for _, want := range []string{`data-automation-yaml-builder`, `data-automation-yaml-form`, `min-h-[28rem]`, `data-automation-yaml-editor`} {
+		for _, want := range []string{`data-automation-yaml-builder`, `data-automation-yaml-form`, `data-automation-yaml-editor`, `data-automation-draft-canvas`, `data-automation-graph-panel`} {
 			if !strings.Contains(body, want) {
-				t.Errorf("%s YAML builder missing %q", source, want)
+				t.Errorf("%s synchronized YAML builder missing %q", source, want)
 			}
-		}
-		if strings.Contains(body, `data-automation-draft-canvas`) {
-			t.Errorf("%s YAML builder must not render editable canvas", source)
 		}
 	}
 }
@@ -614,8 +612,8 @@ func TestAutomationBuilderSerializesGitHubImplementationCategoryToYAML(t *testin
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	if strings.Contains(body, `name="node_implementation_category"`) || strings.Contains(body, `<select`) {
-		t.Error("YAML authoring must not render per-node category controls")
+	if strings.Contains(body, `name="node_implementation_category"`) {
+		t.Error("GitHub implementation category remains runtime-controlled")
 	}
 	if !strings.Contains(body, `data-automation-yaml-editor`) {
 		t.Error("GitHub YAML template must use the canonical YAML editor")
@@ -630,27 +628,27 @@ func TestAutomationBuilderReadOnlyGraphUsesScheduleWording(t *testing.T) {
 		t.Fatalf("render Automation builder: %v", err)
 	}
 	body := out.String()
-	if !strings.Contains(body, `<span>Schedule</span>`) {
-		t.Error("read-only graph must label fixed schedules as Schedule")
-	}
-	for _, forbidden := range []string{`data-port-kind=`, `aria-label="Input for`, `aria-label="Output from`} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("read-only graph must omit editable port %q", forbidden)
+	for _, want := range []string{`<span>Schedule</span>`, `data-port-kind=`, `aria-label="Input for`, `aria-label="Output from`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("interactive graph must render %q", want)
 		}
 	}
 }
 
-func TestAutomationBuilderOmitsDeleteControls(t *testing.T) {
-	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "No delete controls", AutomationType: "custom", AdapterKey: "custom"}
+func TestAutomationBuilderRendersDeleteControls(t *testing.T) {
+	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Delete controls", AutomationType: "custom", AdapterKey: "custom", Nodes: []models.AutomationDraftNode{
+		{Key: "first", Name: "First", Type: models.AutomationNodeAgentTask, Role: "task", Position: &models.AutomationDraftPoint{}},
+		{Key: "second", Name: "Second", Type: models.AutomationNodeOutcome, Role: "completed", Position: &models.AutomationDraftPoint{X: 220}},
+	}, Edges: []models.AutomationDraftEdge{{Key: "first_second", From: "first", To: "second", FromPort: "right", ToPort: "left"}}}
 	page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, YAML: "schema_version: 1\nname: No delete controls\n"}
 	var out bytes.Buffer
 	if err := AutomationBuilderContent(page, "project-no-delete-controls").Render(context.Background(), &out); err != nil {
 		t.Fatalf("render Automation builder: %v", err)
 	}
 	body := out.String()
-	for _, forbidden := range []string{`class="automation-node-delete"`, `class="automation-edge-delete"`, `data-automation-node-delete`, `data-automation-edge-delete`, `remove_node`, `remove_edge`} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("YAML builder must not render legacy delete control %q", forbidden)
+	for _, want := range []string{`automation-node-delete`, `automation-edge-delete`, `data-delete-node`, `data-delete-edge`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("interactive builder must render delete control %q", want)
 		}
 	}
 }
@@ -663,15 +661,13 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 		t.Fatalf("render browser YAML fixture: %v", err)
 	}
 	body := builder.String()
-	for _, want := range []string{`data-automation-view-graph`, `data-automation-view-yaml`, `data-automation-yaml-editor`, `graph.hidden = yamlSelected`, `yaml.hidden = !yamlSelected`} {
+	for _, want := range []string{`data-automation-view-graph`, `data-automation-view-yaml`, `data-automation-yaml-editor`, `graphPanel.hidden = yamlSelected`, `yamlPanel.hidden = !yamlSelected`, `visualCandidateYAML`, `data-automation-add-node-open`, `data-automation-draft-canvas`, `data-candidate-json`} {
 		if !strings.Contains(body, want) {
-			t.Errorf("YAML UI fixture missing %q", want)
+			t.Errorf("synchronized YAML UI fixture missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{`data-automation-add-node-open`, `data-automation-draft-canvas`, `data-candidate-json`} {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("YAML UI fixture must omit %q", forbidden)
-		}
+	if strings.Contains(body, `name="candidate_json"`) {
+		t.Error("synchronized YAML UI must not submit candidate_json")
 	}
 	graph := models.AutomationLiveGraph{Automation: models.Automation{ID: "automation-browser", Name: "Browser YAML", LifecycleState: models.AutomationActive}, YAML: "schema_version: 1\nname: Browser YAML\n"}
 	var live bytes.Buffer
