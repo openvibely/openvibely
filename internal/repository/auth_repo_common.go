@@ -71,3 +71,13 @@ func deleteUserProject(ctx context.Context, db *sql.DB, table, keyCol, keyVal, e
 	}
 	return nil
 }
+
+// deleteByTaskID removes a task-context row keyed by task_id from table.
+// errLabel is used only in the wrapped error message on failure.
+func deleteByTaskID(ctx context.Context, db *sql.DB, table, taskID, errLabel string) error {
+	_, err := db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE task_id = ?`, table), taskID)
+	if err != nil {
+		return fmt.Errorf("delete %s: %w", errLabel, err)
+	}
+	return nil
+}
