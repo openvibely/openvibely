@@ -308,7 +308,14 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					return "", err
 				}
 				if requiresStructuredBody {
-					if err := validateGitHubSDLCReviewPRBody(req.PRBody, req.IssueNumber); err != nil {
+					trustedIssueNumber, err := automationGitHubSDLCSourceIssueNumber(ctx, opts, task)
+					if err != nil {
+						return "", err
+					}
+					if req.IssueNumber != trustedIssueNumber {
+						return "", fmt.Errorf("GitHub SDLC pull request issue_number must match the task's source issue #%d", trustedIssueNumber)
+					}
+					if err := validateGitHubSDLCReviewPRBody(req.PRBody, trustedIssueNumber); err != nil {
 						return "", err
 					}
 				}
@@ -603,6 +610,21 @@ func automationPullRequestRequiresStructuredBody(ctx context.Context, opts githu
 		}
 	}
 	return false, nil
+}
+
+func automationGitHubSDLCSourceIssueNumber(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task) (int, error) {
+	if opts.AutomationRepo == nil || task == nil {
+		return 0, errors.New("Automation GitHub source issue provenance is unavailable")
+	}
+	resourceID, err := opts.AutomationRepo.GitHubIssueResourceForTask(ctx, opts.ProjectID, task.ID)
+	if err != nil {
+		return 0, fmt.Errorf("loading Automation GitHub source issue provenance: %w", err)
+	}
+	issue := githubIssueFromCanonicalResource(resourceID)
+	if issue.Number <= 0 {
+		return 0, errors.New("Automation GitHub implementation task has no trusted source issue")
+	}
+	return issue.Number, nil
 }
 
 func validateGitHubSDLCReviewPRBody(body string, issueNumber int) error {

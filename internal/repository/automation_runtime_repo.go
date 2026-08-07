@@ -2614,6 +2614,37 @@ func (r *AutomationRepo) ContextForTask(ctx context.Context, projectID, taskID s
 	return contextForTaskWithExecutor(ctx, r.db, projectID, taskID)
 }
 
+// GitHubIssueResourceForTask returns the canonical GitHub issue resource recorded
+// when an Automation GitHub inbox created the implementation task. More than one
+// source issue is ambiguous and therefore rejected.
+func (r *AutomationRepo) GitHubIssueResourceForTask(ctx context.Context, projectID, taskID string) (string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT issue_resource.resource_id
+		FROM automation_activities activity
+		JOIN automation_activity_resources task_resource ON task_resource.activity_id = activity.id
+			AND task_resource.resource_type = 'task' AND task_resource.resource_id = ?
+		JOIN automation_activity_resources issue_resource ON issue_resource.activity_id = activity.id
+			AND issue_resource.resource_type = 'github_issue'
+		WHERE activity.project_id = ? AND activity.activity_type = 'create_task'
+		ORDER BY issue_resource.resource_id`, taskID, projectID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var resourceID string
+	for rows.Next() {
+		var candidate string
+		if err := rows.Scan(&candidate); err != nil {
+			return "", err
+		}
+		if resourceID != "" && resourceID != candidate {
+			return "", errors.New("Automation task has conflicting GitHub source issues")
+		}
+		resourceID = candidate
+	}
+	return resourceID, rows.Err()
+}
+
 func contextForTaskWithExecutor(ctx context.Context, exec SQLExecutor, projectID, taskID string) (models.AutomationContext, error) {
 	rows, err := exec.QueryContext(ctx, `WITH RECURSIVE task_lineage(id, parent_task_id, depth) AS (
 		SELECT id, parent_task_id, 0 FROM tasks WHERE id = ? AND project_id = ?

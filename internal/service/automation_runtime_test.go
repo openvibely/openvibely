@@ -1951,6 +1951,10 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	missingBodyOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(`{"task_id":"current","issue_number":42,"pr_title":"PR"}`))
 	require.Empty(t, missingBodyOutput)
 	require.ErrorContains(t, err, "require pr_body with a factual summary and validation")
+	mismatchedIssueBody := "## Summary\n- Implements the wrong issue.\n\n## Validation\n- go test ./internal/service\n\nCloses #43"
+	mismatchedIssueOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":"current","issue_number":43,"pr_title":"PR","pr_body":%q}`, mismatchedIssueBody)))
+	require.Empty(t, mismatchedIssueOutput)
+	require.ErrorContains(t, err, "must match the task's source issue #42")
 	prBody := "## Summary\n- Implements the accepted issue.\n\n## Validation\n- go test ./internal/service\n\nCloses #42"
 	openedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
 	require.NoError(t, err)
