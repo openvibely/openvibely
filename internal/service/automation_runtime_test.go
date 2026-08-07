@@ -1948,10 +1948,14 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	implementationTask.WorktreeBranch = "task/issue-42"
 	implementationCtx := WithAutomationContext(context.Background(), implementationContext)
 	implementationCtx = withAutomationExecution(implementationCtx, implementationTask.ID, execution.ID)
-	openedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(`{"task_id":"current","issue_number":42,"pr_title":"PR"}`))
+	missingBodyOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(`{"task_id":"current","issue_number":42,"pr_title":"PR"}`))
+	require.Empty(t, missingBodyOutput)
+	require.ErrorContains(t, err, "require pr_body with a factual summary and validation")
+	prBody := "## Summary\n- Implements the accepted issue.\n\n## Validation\n- go test ./internal/service\n\nCloses #42"
+	openedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
 	require.NoError(t, err)
 	require.Contains(t, openedOutput, `"created":true`)
-	reusedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(`{"task_id":"current","issue_number":42,"pr_title":"PR"}`))
+	reusedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
 	require.NoError(t, err)
 	require.Contains(t, reusedOutput, `"reused_existing_record":true`)
 	for _, repoPath := range resolvedRepoPaths {

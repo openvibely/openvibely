@@ -302,6 +302,17 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
+			if automationBound {
+				requiresStructuredBody, err := automationPullRequestRequiresStructuredBody(ctx, opts)
+				if err != nil {
+					return "", err
+				}
+				if requiresStructuredBody {
+					if err := validateGitHubSDLCReviewPRBody(req.PRBody, req.IssueNumber); err != nil {
+						return "", err
+					}
+				}
+			}
 			var issueNumber *int
 			if req.IssueNumber > 0 {
 				issueNumber = &req.IssueNumber
@@ -569,6 +580,47 @@ func maintainedGitHubSDLCFinderLabels(ctx context.Context, opts githubIssueRunti
 		}
 	}
 	return nil, errors.New("Automation GitHub finder binding node was not found")
+}
+
+func automationPullRequestRequiresStructuredBody(ctx context.Context, opts githubIssueRuntimeOptions) (bool, error) {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound || automationContext.ProjectID != opts.ProjectID {
+		return false, nil
+	}
+	if opts.AutomationRepo == nil {
+		return false, errors.New("Automation repository unavailable for pull request body validation")
+	}
+	for _, binding := range automationContext.Bindings {
+		definition, err := opts.AutomationRepo.GetDefinition(ctx, opts.ProjectID, binding.AutomationID)
+		if err != nil {
+			return false, err
+		}
+		if definition == nil || definition.Version.ID != binding.VersionID {
+			return false, errors.New("current Automation definition is unavailable for pull request body validation")
+		}
+		if definition.Version.AdapterKey == AutomationAdapterGitHubSDLC {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func validateGitHubSDLCReviewPRBody(body string, issueNumber int) error {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return errors.New("GitHub SDLC pull requests require pr_body with a factual summary and validation")
+	}
+	lowerBody := strings.ToLower(body)
+	if !strings.Contains(lowerBody, "## summary") || !strings.Contains(lowerBody, "## validation") {
+		return errors.New("GitHub SDLC pr_body must include ## Summary and ## Validation sections")
+	}
+	if issueNumber <= 0 {
+		return errors.New("GitHub SDLC pull requests require the source issue number")
+	}
+	if !strings.Contains(lowerBody, fmt.Sprintf("closes #%d", issueNumber)) {
+		return fmt.Errorf("GitHub SDLC pr_body must include Closes #%d", issueNumber)
+	}
+	return nil
 }
 
 func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task, req *GitHubIssueActionRequest) (bool, error) {

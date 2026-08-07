@@ -232,7 +232,7 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskRequiresLinkedPR(t *testi
 	}
 }
 
-func TestTaskPullRequestServiceBuildCreatePullRequestRequestUsesConciseDefaultBody(t *testing.T) {
+func TestTaskPullRequestServiceBuildCreatePullRequestRequestUsesGenericFallbackWithoutInternalMetadata(t *testing.T) {
 	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{}, nil)
 	issueNumber := 262
 
