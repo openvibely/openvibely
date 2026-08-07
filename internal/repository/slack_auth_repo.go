@@ -68,13 +68,7 @@ func (r *SlackAuthRepo) HasAnyAuthorizedUsers(ctx context.Context, projectID str
 
 // HasAnyAuthorizedUsersAnywhere checks whether any project has Slack authorized users configured.
 func (r *SlackAuthRepo) HasAnyAuthorizedUsersAnywhere(ctx context.Context) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM slack_authorized_users`).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("count slack auth users anywhere: %w", err)
-	}
-	return count > 0, nil
+	return countAny(ctx, r.db, "slack_authorized_users", "slack auth users anywhere")
 }
 
 // IsAuthorizedAnywhere checks whether a Slack user is authorized in any project.
@@ -104,16 +98,7 @@ func (r *SlackAuthRepo) Create(ctx context.Context, u *models.SlackAuthorizedUse
 
 // Delete removes an authorized Slack user by ID.
 func (r *SlackAuthRepo) Delete(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx,
-		`DELETE FROM slack_authorized_users WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete slack auth user: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("slack auth user not found")
-	}
-	return nil
+	return deleteByID(ctx, r.db, "slack_authorized_users", "slack auth user", id)
 }
 
 // GetByID returns a single authorized Slack user by ID.
