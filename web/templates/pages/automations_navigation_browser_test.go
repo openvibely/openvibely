@@ -649,6 +649,11 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 		if !strings.Contains(body, `data-automation-yaml-editor-shell`) || !strings.Contains(body, `data-automation-yaml-editor-viewport`) || !strings.Contains(body, `data-automation-yaml-highlight`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `data-automation-yaml-line-numbers`) {
 			t.Errorf("%s YAML editor must fill its panel with a highlighted, foldable line-number gutter", source)
 		}
+		for _, want := range []string{`data-automation-yaml-highlight-line`, `whitespace-pre-wrap break-words`, `wrap="soft"`, `data-automation-yaml-line-number`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s YAML editor must wrap its source across the available panel width: missing %q", source, want)
+			}
+		}
 	}
 }
 
@@ -818,12 +823,27 @@ window.addEventListener('DOMContentLoaded', function() {
     var highlight = document.querySelector('[data-automation-yaml-highlight]');
     var foldControls = document.querySelector('[data-automation-yaml-fold-controls]');
     var fold = document.querySelector('[data-automation-yaml-fold]');
-    if (!lineNumbers || !lineNumbers.textContent.includes('1\n2\n3')) fail('YAML editor did not render a line-number gutter');
+    if (!lineNumbers || lineNumbers.querySelectorAll('[data-automation-yaml-line-number]').length < 3) fail('YAML editor did not render a line-number gutter');
+    if (editor.getAttribute('wrap') !== 'soft') fail('YAML editor must wrap long YAML values within its panel');
     if (!highlight || !highlight.querySelector('[data-automation-yaml-key]')) fail('YAML editor did not syntax-highlight YAML keys');
     if (!highlight.querySelector('[data-automation-yaml-indent-guide]')) fail('YAML editor did not render indentation guides');
     if (highlight.querySelector('[data-automation-yaml-key]').classList.contains('text-warning')) fail('YAML editor keys still use the warning color');
     if (!foldControls || !fold || fold.parentElement !== foldControls || !fold.dataset.yamlIndent) fail('YAML editor did not render an in-code section-fold control');
     if (!fold.classList.contains('text-lg')) fail('YAML editor section-fold control is too small');
+    var originalYAML = editor.value;
+    editor.value = 'section:\n  message: "' + 'long YAML value '.repeat(40) + '"\n';
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    var wrappedSource = highlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="2"]');
+    var wrappedNumber = lineNumbers.querySelector('[data-automation-yaml-line-number][data-yaml-line="2"]');
+    var wrappedSourceHeight = wrappedSource && wrappedSource.getBoundingClientRect().height;
+    var wrappedNumberHeight = wrappedNumber && wrappedNumber.getBoundingClientRect().height;
+    if (!wrappedSource || !wrappedNumber || wrappedSourceHeight <= 24 || Math.abs(wrappedSourceHeight - wrappedNumberHeight) > 1) fail('wrapped YAML source did not retain aligned line numbers: source=' + wrappedSourceHeight + ', number=' + wrappedNumberHeight);
+    editor.value = originalYAML;
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+    fold = document.querySelector('[data-automation-yaml-fold]');
+    if (!fold) fail('YAML editor did not restore section-fold controls after wrapping source');
     var caretColor = window.getComputedStyle(editor).caretColor;
     if (!caretColor || caretColor === 'transparent' || caretColor === 'rgba(0, 0, 0, 0)') fail('YAML editor caret is not visible');
     fold.click();
@@ -886,7 +906,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body>%s%s</body></html>`, builder.String(), runner)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px}[data-automation-yaml-highlight],[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}[data-automation-yaml-line-numbers]{width:3rem;margin:0;font:16px/24px monospace}</style></head><body>%s%s</body></html>`, builder.String(), runner)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
