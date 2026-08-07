@@ -354,6 +354,9 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not post status comments on GitHub issues")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "github_comment_on_issue")
 	require.Contains(t, githubSDLCDevInboxPrompt, "github_open_pull_request")
+	require.Contains(t, githubSDLCImplementationPrompt, "Supply pr_body with a concise factual Markdown summary of the changes and validation")
+	require.Contains(t, githubSDLCImplementationPrompt, "Closes #<source issue number>")
+	require.Contains(t, githubSDLCImplementationPrompt, "Do not include task IDs, product or automation boilerplate, or process narration")
 	for name, prompt := range map[string]string{
 		"vision suggestions":  githubSDLCOfferingManagerPrompt,
 		"bug finder":          githubSDLCBugFinderPrompt,

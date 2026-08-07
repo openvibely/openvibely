@@ -37,7 +37,7 @@ When implementation work is complete in a task branch, use ` + "`" + `github_ope
 
 const githubSDLCImplementationPrompt = `Implement the assigned GitHub issue in the current project.
 
-Read the issue and relevant project context, make the focused code or documentation changes needed to satisfy its acceptance criteria, and run the relevant build and tests. Keep the work tied to the source issue and use github_open_pull_request to open or reuse the reviewable pull request when implementation is complete. Do not approve or merge the pull request, release, or deploy on a human's behalf.`
+Read the issue and relevant project context, make the focused code or documentation changes needed to satisfy its acceptance criteria, and run the relevant build and tests. Keep the work tied to the source issue and use github_open_pull_request to open or reuse the reviewable pull request when implementation is complete. Supply pr_body with a concise factual Markdown summary of the changes and validation, followed by Closes #<source issue number>. Do not include task IDs, product or automation boilerplate, or process narration. Do not approve or merge the pull request, release, or deploy on a human's behalf.`
 
 const githubSDLCOfferingManagerPrompt = `Review the configured project vision/source files and identify small, reviewable feature gaps.
 

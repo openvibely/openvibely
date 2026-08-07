@@ -232,6 +232,28 @@ func TestTaskPullRequestServiceReplaceBranchHeadForTaskRequiresLinkedPR(t *testi
 	}
 }
 
+func TestTaskPullRequestServiceBuildCreatePullRequestRequestUsesConciseDefaultBody(t *testing.T) {
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{}, nil)
+	issueNumber := 262
+
+	request := svc.buildCreatePullRequestRequest(context.Background(), &models.Project{RepoPath: t.TempDir()}, &models.Task{
+		ID:                "4465e3079fae6b5c4a3ce4ba81d623ee",
+		Title:             "Narrow template dashboard/list SQL projection (#262)",
+		WorktreeBranch:    "task/narrow-template-sql",
+		MergeTargetBranch: "main",
+	}, OpenTaskPullRequestOptions{IssueNumber: &issueNumber}, &GitHubRepoRef{})
+
+	want := "## Summary\n- Narrow template dashboard/list SQL projection\n\nCloses #262"
+	if request.Body != want {
+		t.Fatalf("default PR body = %q, want %q", request.Body, want)
+	}
+	for _, forbidden := range []string{"Task ID:", "Task title:", "OpenVibely", "Automated pull request"} {
+		if strings.Contains(request.Body, forbidden) {
+			t.Fatalf("default PR body contains %q: %q", forbidden, request.Body)
+		}
+	}
+}
+
 func TestTaskPullRequestServiceOpenForTaskCreatesAndPersistsPR(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
