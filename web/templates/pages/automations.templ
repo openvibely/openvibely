@@ -1116,6 +1116,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
 						yamlEditor.addEventListener('input', function() { yamlFoldedLines.clear(); updateYAMLLineNumbers(); validateYAMLWhileTyping(); });
 						updateYAMLLineNumbers();
+						validateYAMLWhileTyping();
 					}
 					if (yamlFoldControls) yamlFoldControls.addEventListener('click', function(event) {
 						var toggle = event.target.closest('[data-automation-yaml-fold]');
@@ -1411,6 +1412,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							graphButton.setAttribute('aria-pressed', String(!yamlSelected));
 							yamlButton.setAttribute('aria-pressed', String(yamlSelected));
 							queueYAMLLineLayout();
+							if (yamlSelected) validateYAMLWhileTyping();
 						}
 					graphButton && graphButton.addEventListener('click', function() {
 						var form = document.getElementById('automation-design-form');

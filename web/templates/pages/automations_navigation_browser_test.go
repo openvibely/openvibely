@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -723,7 +724,8 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 	page := models.AutomationBuilderPage{
 		Source: "blank",
 		Result: models.AutomationDraftResult{Candidate: candidate},
-		YAML: `schema_version: 1
+		YAML: `# preloaded parser failure
+schema_version: 1
 name: "Browser YAML"
 description: ""
 automation_type: "custom"
@@ -814,10 +816,20 @@ window.addEventListener('DOMContentLoaded', function() {
       if (Array.from(canvasRoot.querySelectorAll('*')).some(function(element) { return element.children.length === 0 && element.textContent.includes(legacy); })) fail('blank-only canvas chrome remains: ' + legacy);
     });
     if (!isVisible(graph) || isVisible(yaml)) fail('initial Graph view must show only the canvas');
+    await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
+    var initialDiagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
+    if (!initialDiagnostic || initialDiagnostic.classList.contains('hidden') || !initialDiagnostic.textContent.includes('line 1')) fail('preloaded YAML was not validated during editor initialization');
     ['Node and connection settings', 'Transition settings', 'Task prompt', 'Task goal (optional)', 'Human result'].forEach(function(legacy) {
       if (Array.from(document.querySelectorAll('label, summary, h3, h4')).some(function(element) { return element.textContent.trim() === legacy; })) fail('legacy settings control remains: ' + legacy);
     });
     click('[data-automation-view-yaml]', 'YAML view button');
+    await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
+    var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
+    if (!diagnostic || !diagnostic.textContent.includes('line 2')) fail('preloaded YAML was not validated when the YAML panel became visible');
+    editor.value = editor.value.replace('# preloaded parser failure\n', '');
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
+    if (!diagnostic.classList.contains('hidden')) fail('valid YAML did not clear the preloaded diagnostic');
     if (!isVisible(yaml) || isVisible(graph)) fail('YAML switch did not make the editable YAML view visible');
     var lineNumbers = document.querySelector('[data-automation-yaml-line-numbers]');
     var highlight = document.querySelector('[data-automation-yaml-highlight]');
@@ -902,6 +914,7 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	browserResult := make(chan string, 1)
+	var yamlParseRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/":
@@ -916,6 +929,10 @@ window.addEventListener('DOMContentLoaded', function() {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
+			if strings.Contains(r.FormValue("automation_yaml"), "preloaded parser failure") {
+				_, _ = w.Write([]byte(fmt.Sprintf(`{"valid":false,"message":"Malformed YAML: yaml: line %d: did not find expected node content"}`, yamlParseRequests.Add(1))))
+				return
+			}
 			if strings.Contains(r.FormValue("automation_yaml"), "[") {
 				_, _ = w.Write([]byte(`{"valid":false,"message":"Malformed YAML: yaml: line 1: did not find expected node content"}`))
 				return
