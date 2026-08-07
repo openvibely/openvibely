@@ -2729,14 +2729,14 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 214, "</pre><div class=\"pointer-events-none absolute inset-y-0 right-0 z-10 w-6\" aria-label=\"YAML section controls\" data-automation-yaml-fold-controls></div></div><div class=\"relative min-w-0 flex-1 overflow-hidden\" data-automation-yaml-editor-viewport><pre class=\"absolute left-0 right-0 top-0 m-0 min-h-full whitespace-pre-wrap break-words pl-9 font-mono text-sm leading-6\" aria-hidden=\"true\" data-automation-yaml-highlight></pre><textarea class=\"absolute inset-0 block h-full w-full resize-none overflow-y-auto overflow-x-hidden border-0 bg-transparent whitespace-pre-wrap break-words pl-9 font-mono text-sm leading-6 text-transparent outline-none caret-base-content\" style=\"caret-color: hsl(var(--bc));\" form=\"automation-design-form\" name=\"automation_yaml\" data-automation-yaml-editor data-automation-yaml-parse-url=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 214, "</pre><div class=\"pointer-events-none absolute inset-y-0 right-0 z-10 w-6\" aria-label=\"YAML section controls\" data-automation-yaml-fold-controls></div></div><div class=\"relative min-w-0 flex-1 overflow-hidden\" data-automation-yaml-editor-viewport><pre class=\"absolute left-0 right-0 top-0 m-0 min-h-full whitespace-pre-wrap break-words pl-9 font-mono text-sm leading-6\" aria-hidden=\"true\" data-automation-yaml-highlight></pre><textarea class=\"absolute inset-0 block h-full w-full resize-none overflow-y-auto overflow-x-hidden border-0 bg-transparent whitespace-pre-wrap break-words pl-9 font-mono text-sm leading-6 text-transparent outline-none caret-base-content\" style=\"caret-color: oklch(var(--bc));\" form=\"automation-design-form\" name=\"automation_yaml\" data-automation-yaml-editor data-automation-yaml-parse-url=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var149 string
 		templ_7745c5c3_Var149, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 814, Col: 469}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 814, Col: 471}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var149)
 		if templ_7745c5c3_Err != nil {
@@ -2749,7 +2749,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var150 string
 		templ_7745c5c3_Var150, templ_7745c5c3_Err = templ.JoinStringErrs(page.YAML)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 814, Col: 605}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 814, Col: 607}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var150))
 		if templ_7745c5c3_Err != nil {

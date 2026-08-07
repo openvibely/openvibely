@@ -862,8 +862,10 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     fold = document.querySelector('[data-automation-yaml-fold]');
     if (!fold) fail('YAML editor did not restore section-fold controls after wrapping source');
+    editor.focus();
+    if (document.activeElement !== editor) fail('YAML editor did not accept keyboard focus');
     var caretColor = window.getComputedStyle(editor).caretColor;
-    if (!caretColor || caretColor === 'transparent' || caretColor === 'rgba(0, 0, 0, 0)') fail('YAML editor caret is not visible');
+    if (!caretColor || caretColor === 'auto' || caretColor === 'transparent' || caretColor === 'rgba(0, 0, 0, 0)') fail('YAML editor caret is not visible');
     fold.click();
     if (!editor.hidden || !highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('YAML section fold did not collapse the source view');
     fold = document.querySelector('[data-automation-yaml-fold]');
@@ -927,7 +929,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px;overflow:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}[data-automation-yaml-line-numbers]{width:3rem;margin:0;font:16px/24px monospace}</style></head><body>%s%s</body></html>`, builder.String(), runner)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px;overflow:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}[data-automation-yaml-line-numbers]{width:3rem;margin:0;font:16px/24px monospace}</style></head><body>%s%s</body></html>`, builder.String(), runner)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
