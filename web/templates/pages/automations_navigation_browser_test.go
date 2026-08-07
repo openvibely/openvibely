@@ -314,6 +314,9 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			LifecycleState: models.AutomationActive,
 			HealthState:    models.AutomationHealthHealthy,
 		},
+		Nodes: []models.AutomationLiveNode{{
+			AutomationNode: models.AutomationNode{ID: "node-live-actions", NodeKey: "review", Name: "Review", NodeType: models.AutomationNodeAgentTask, Role: "task", ConfigJSON: `{"prompt":"Review the queue.","priority":2}`},
+		}},
 	}
 
 	var out bytes.Buffer
@@ -332,6 +335,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		`class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions`,
 		`data-automation-view-switcher`,
 		`data-automation-view-graph`,
+		`data-automation-view-cards`,
 		`data-automation-view-yaml`,
 		`data-automation-live-badges`,
 		`data-automation-live-status`,
@@ -341,8 +345,15 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation canvas actions to contain %q", want)
 		}
 	}
+	for _, want := range []string{`data-automation-live-cards-panel`, `data-automation-live-node-cards`, `data-automation-live-edge-cards`, `data-automation-live-node-card="review"`, `>Prompt</dt>`, `>Review the queue.</dd>`, `selectAutomationLiveView('cards')`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected Live Automation Cards view to contain %q", want)
+		}
+	}
+	if !(strings.Index(body, `data-automation-graph-panel`) < strings.Index(body, `data-automation-live-cards-panel`) && strings.Index(body, `data-automation-live-cards-panel`) < strings.Index(body, `data-automation-yaml-panel`)) {
+		t.Error("expected Live Automation panels in Graph, Cards, YAML order")
+	}
 	for _, forbidden := range []string{
-		`class="dropdown dropdown-end"`, `data-automation-live-edit`, `data-automation-live-run-now`, `data-automation-live-pause`, `data-automation-live-delete`,
 		`Node states`, `A node’s border and label show the highest-priority work state currently present.`,
 		`data-automation-live-legend-row`, `aria-label="Graph status legend"`, `Failed`, `Waiting human`, `Recently Completed`,
 	} {
@@ -364,7 +375,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation breadcrumb header to contain %q", want)
 		}
 	}
-	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, `data-automation-live-menu`)) {
+	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-cards`) && strings.Index(cardHeader, `data-automation-view-cards`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, `data-automation-live-menu`)) {
 		t.Error("expected Live breadcrumb actions in Edit, Run, then kebab order")
 	}
 	liveSwitcherStart := strings.Index(cardHeader, `data-automation-view-switcher`)
@@ -376,7 +387,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		t.Fatal("expected Live Automation canvas view switcher end")
 	}
 	liveSwitcher := cardHeader[liveSwitcherStart : liveSwitcherStart+liveSwitcherEndOffset]
-	for _, want := range []string{`>Graph</button>`, `>YAML</button>`, `btn-active`, `aria-pressed="true"`, `aria-pressed="false"`} {
+	for _, want := range []string{`>Graph</button>`, `>Cards</button>`, `>YAML</button>`, `btn-active`, `aria-pressed="true"`, `aria-pressed="false"`} {
 		if !strings.Contains(liveSwitcher, want) {
 			t.Errorf("expected Live Automation view switcher to contain %q", want)
 		}

@@ -209,9 +209,12 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.NotContains(t, detail.Body.String(), ">Archive<")
 	require.NotContains(t, detail.Body.String(), "/archive?")
 	require.Contains(t, detail.Body.String(), `data-automation-view-yaml`)
+	require.Contains(t, detail.Body.String(), `data-automation-view-cards`)
 	require.Contains(t, detail.Body.String(), `data-automation-yaml-panel`)
+	require.Contains(t, detail.Body.String(), `data-automation-live-cards-panel`)
+	require.Contains(t, detail.Body.String(), `data-automation-live-node-cards`)
 	require.NotContains(t, detail.Body.String(), `name="automation_yaml"`)
-	require.NotContains(t, detail.Body.String(), task.Prompt)
+	require.Contains(t, detail.Body.String(), task.Prompt)
 
 	livePartial := tc.HTMX().Get(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, project.ID)).Execute()
 	require.Equal(t, 200, livePartial.Code)
