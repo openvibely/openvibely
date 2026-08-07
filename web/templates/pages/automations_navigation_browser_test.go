@@ -346,8 +346,6 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 		`data-automation-builder-actions`,
 		`class="dropdown dropdown-end shrink-0"`,
 		`aria-label="More actions for Edit card actions"`,
-		`data-automation-builder-menu-save`,
-		`data-automation-builder-menu-cancel`,
 		`data-automation-builder-pause`,
 		`>Disable</button>`,
 		`data-delete-automation-open`,
@@ -362,11 +360,11 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 			t.Errorf("Edit Automation canvas must not retain %q", forbidden)
 		}
 	}
-	if got := strings.Count(body, `>Save</button>`); got != 2 {
-		t.Errorf("expected saved Edit page to expose Save as a primary and menu action, got %d actions", got)
+	if got := strings.Count(body, `>Save</button>`); got != 1 {
+		t.Errorf("expected saved Edit page to expose Save once in the breadcrumb controls, got %d actions", got)
 	}
-	if got := strings.Count(body, `>Cancel</a>`); got != 2 {
-		t.Errorf("expected saved Edit page to expose Cancel as a primary and menu action, got %d actions", got)
+	if got := strings.Count(body, `>Cancel</a>`); got != 1 {
+		t.Errorf("expected saved Edit page to expose Cancel once in the breadcrumb controls, got %d actions", got)
 	}
 	if got := strings.Count(body, `data-automation-builder-actions`); got != 1 {
 		t.Errorf("expected one Edit Automation kebab, got %d", got)
@@ -403,13 +401,13 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 		t.Fatal("expected Edit Automation kebab menu")
 	}
 	menu := header[menuStart : menuStart+menuEndOffset]
-	for _, want := range []string{`data-automation-builder-menu-save`, `data-automation-builder-menu-cancel`} {
-		if !strings.Contains(menu, want) {
-			t.Errorf("expected Edit Automation kebab to contain %q", want)
+	for _, forbidden := range []string{`data-automation-builder-menu-save`, `data-automation-builder-menu-cancel`} {
+		if strings.Contains(menu, forbidden) {
+			t.Errorf("Edit Automation kebab must not retain %q", forbidden)
 		}
 	}
 	if !strings.Contains(header, `>Save</button>`) || !strings.Contains(header, `>Cancel</a>`) {
-		t.Error("saved Edit page must expose Save and Cancel in the breadcrumb kebab")
+		t.Error("saved Edit page must expose Save and Cancel before the breadcrumb kebab")
 	}
 
 	page.LifecycleState = models.AutomationPaused
@@ -531,8 +529,6 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		`data-automation-live-menu`,
 		`class="dropdown dropdown-end shrink-0"`,
 		`aria-label="More actions for Card actions"`,
-		`data-automation-live-menu-edit`,
-		`data-automation-live-menu-run-now="automation-live-actions"`,
 		`data-automation-live-pause`,
 		`data-automation-live-delete`,
 	} {
@@ -566,14 +562,14 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		t.Fatal("expected Live Automation breadcrumb kebab menu")
 	}
 	menu := breadcrumbHeader[menuStart : menuStart+menuEndOffset]
-	for _, want := range []string{"Edit", "Run", "Disable", "Delete"} {
+	for _, want := range []string{"Disable", "Delete"} {
 		if !strings.Contains(menu, ">"+want+"</button>") {
 			t.Errorf("expected Live Automation kebab to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`data-automation-live-edit`, `data-automation-live-run-now`} {
+	for _, forbidden := range []string{`data-automation-live-menu-edit`, `data-automation-live-menu-run-now`, `>Edit</button>`, `>Run</button>`} {
 		if strings.Contains(menu, forbidden) {
-			t.Errorf("Live Automation kebab must use dedicated menu selectors instead of %q", forbidden)
+			t.Errorf("Live Automation kebab must not retain %q", forbidden)
 		}
 	}
 	if got := strings.Count(body, `data-automation-live-header-actions`); got != 1 {
