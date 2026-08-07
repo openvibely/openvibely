@@ -6,7 +6,7 @@ Use `/automations` to author project-scoped workflows in YAML and view their cur
 
 Open `/automations`, select `+ New Automation`, and choose Template, Describe, or Custom. Each option opens browser-local YAML. Templates load the maintained Native SDLC or GitHub SDLC YAML without creating an Automation, Task, schedule, graph row, or runtime resource. Describe creates a supported candidate, then renders it as YAML. Refreshing or navigating away discards unsaved YAML.
 
-The YAML document is the complete editable Automation definition, and Graph mode is an interactive editor for that same browser-local document. Adding, deleting, connecting, moving, or configuring nodes updates YAML immediately; YAML is still the only document submitted for Preview and Save. After manually editing YAML, select Graph or Preview to parse it and rebuild the interactive canvas. Saved Edit uses the same behavior. Existing Automations are read from their current stored graph and serialized to YAML when opened; this does not rewrite the record, prompts, configuration, or runtime resources.
+The YAML document is the complete editable Automation definition. Graph mode is a read-only visualization of the parsed document; it cannot be used to add, delete, connect, move, or configure nodes. Edit YAML, including deleting a node and its incident edges, then select Save. Saved Edit uses the same behavior. Existing Automations are read from their current stored graph and serialized to YAML when opened; this does not rewrite the record, prompts, configuration, or runtime resources.
 
 ## YAML Schema
 
@@ -56,7 +56,7 @@ edges:
 
 Top-level metadata is `schema_version`, `name`, `description`, `automation_type`, `adapter_key`, `nodes`, `edges`, and optional `assumptions` and `warnings`. A node has `key`, `name`, `type`, `role`, `config`, and optional `position`. An edge has `key`, `from`, `to`, optional ports and label, and optional `condition`.
 
-Node types, roles, and configuration fields are constrained by the selected adapter. Task and schedule configuration supports prompts, optional goals, categories, priority, agent references, skills and source files where the selected node supports them, and recurrence settings. Maintained Native and GitHub SDLC templates are stored as canonical YAML and decoded through this same boundary when selected. Retained template nodes preserve their specialized runtime behavior; custom nodes use the existing Custom Automation capability rules. `position` is optional: omitted positions receive a deterministic preview layout during normalization. Moving a node in Graph mode writes its position to YAML, while manually omitted positions remain eligible for deterministic layout after Preview or Save.
+Node types, roles, and configuration fields are constrained by the selected adapter. Task and schedule configuration supports prompts, optional goals, categories, priority, agent references, skills and source files where the selected node supports them, and recurrence settings. Maintained Native and GitHub SDLC templates are stored as canonical YAML and decoded through this same boundary when selected. Retained template nodes preserve their specialized runtime behavior; custom nodes use the existing Custom Automation capability rules. `position` is optional: omitted positions receive a deterministic preview layout during normalization, so Graph mode renders every valid node and edge without making the layout a separate authoring source.
 
 ## Validation and Save
 

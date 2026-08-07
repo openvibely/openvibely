@@ -332,45 +332,6 @@ func TestAutomationBrowserSaveRejectsExplicitInvalidSemanticConfiguration(t *tes
 	}
 }
 
-func TestAutomationBuilderVisualActionsDecodeAutomationYAML(t *testing.T) {
-	tc := NewTestContext(t)
-	project := tc.CreateProject().WithName("Visual YAML Builder Project").Build()
-	automationRepo := repository.NewAutomationRepo(tc.db)
-	registry := service.NewAutomationAdapterRegistry()
-	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	validator := service.NewAutomationSaveValidator(registry, drafts)
-	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
-	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
-
-	candidate, err := drafts.BlankCandidate("")
-	require.NoError(t, err)
-	yaml, err := service.EncodeAutomationDraftYAML(candidate)
-	require.NoError(t, err)
-
-	response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {yaml},
-		"builder_action": {"create_node"}, "node_kind": {"task"}, "node_name": {"Review queue"},
-	}).Execute()
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	updated := automationCandidateFromResponse(t, response)
-	require.Len(t, updated.Nodes, 1)
-	require.Equal(t, "review_queue", updated.Nodes[0].Key)
-	require.Equal(t, "Review queue", updated.Nodes[0].Name)
-	require.Zero(t, tableCountHandler(t, tc, "automations"))
-	require.Zero(t, tableCountHandler(t, tc, "automation_versions"))
-
-	updatedYAML, err := service.EncodeAutomationDraftYAML(updated)
-	require.NoError(t, err)
-	saved := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {updatedYAML}, "save_changes": {"true"},
-	}).Execute()
-	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
-	require.NotEmpty(t, saved.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "tasks"))
-}
-
 func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Browser Local Builder Project").Build()
@@ -399,7 +360,7 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 		"node_kind": {"agent_task"}, "node_name": {"Review support queue"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, added.Code, added.Body.String())
-	require.Contains(t, added.Body.String(), `data-node-key="review_support_queue"`)
+	require.Contains(t, added.Body.String(), `data-automation-readonly-node="review_support_queue"`)
 	require.Zero(t, tableCountHandler(t, tc, "automations"), "adding a node must remain browser-local")
 	require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "adding a node must not create an editable draft")
 
@@ -606,7 +567,7 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	require.Equal(t, 1, countNodeResources("extra_follow_up", "task"))
 }
 
-func TestAutomationBlankBuilderIsInteractiveAndSynchronizesYAML(t *testing.T) {
+func TestAutomationBlankBuilderIsYAMLOnlyAndKeepsChangesBrowserLocal(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Blank Builder Project").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
@@ -622,10 +583,13 @@ func TestAutomationBlankBuilderIsInteractiveAndSynchronizesYAML(t *testing.T) {
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, opened.Code)
-	for _, marker := range []string{`data-automation-yaml-editor`, `data-automation-view-yaml`, `data-automation-graph-panel`, `name="automation_yaml"`, `data-automation-draft-canvas`, `data-automation-node-tool`, `data-automation-add-node-open`, `data-automation-node-dialog`, `data-automation-fit`, `data-automation-reset`, `Node and connection settings`, `visualCandidateYAML`} {
+	for _, marker := range []string{`data-automation-yaml-builder`, `data-automation-yaml-editor`, `data-automation-view-yaml`, `data-automation-graph-panel`, `name="automation_yaml"`} {
 		require.Contains(t, opened.Body.String(), marker)
 	}
-	require.NotContains(t, opened.Body.String(), `name="candidate_json"`)
+	for _, marker := range []string{`data-automation-node-tool`, `data-automation-add-node-open`, `data-automation-add-first-node`, `data-automation-node-dialog`, `data-automation-fit`, `data-automation-reset`, `name="candidate_json"`, "Drag from a node's right handle to another node's left handle", "Node and connection settings", "Delete node", "Transition settings"} {
+		require.NotContains(t, opened.Body.String(), marker)
+	}
+	require.NotContains(t, opened.Body.String(), `data-automation-disconnect-edge`, "the midpoint edge control is the only visible connection delete action on the canvas")
 	require.Contains(t, opened.Body.String(), `data-automation-yaml-preview`)
 	require.Contains(t, opened.Body.String(), `name="save_changes" value="true"`)
 	require.NotContains(t, opened.Body.String(), "Review and apply")
@@ -668,8 +632,10 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	require.NoError(t, err)
 	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {yaml}}).Execute()
 	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
-	require.Contains(t, preview.Body.String(), `automation-draft-node`)
-	require.Contains(t, preview.Body.String(), `data-automation-add-node-open`)
+	require.Contains(t, preview.Body.String(), `data-automation-readonly-node="schedule"`)
+	require.Contains(t, preview.Body.String(), `data-automation-readonly-node="task"`)
+	require.Contains(t, preview.Body.String(), `data-automation-readonly-edge="schedule_task"`)
+	require.NotContains(t, preview.Body.String(), `data-automation-add-node-open`)
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 }
 
@@ -807,7 +773,7 @@ func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(
 	}).Execute()
 	require.Equal(t, 200, saved.Code, saved.Body.String())
 	require.Empty(t, saved.Header().Get("HX-Redirect"), "invalid designs must remain in the editor")
-	require.Contains(t, saved.Body.String(), "setup items before this design can run")
+	require.Contains(t, saved.Body.String(), "YAML validation failed")
 	require.Zero(t, tableCountHandler(t, tc, "tasks"), "invalid Save must not create partial task resources")
 	require.Zero(t, tableCountHandler(t, tc, "schedules"), "invalid Save must not create partial schedule resources")
 }
