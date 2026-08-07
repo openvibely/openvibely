@@ -646,8 +646,8 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col`) {
 			t.Errorf("%s YAML panel must grow to fill the builder card while remaining hidden in Graph mode", source)
 		}
-		if !strings.Contains(body, `data-automation-yaml-editor-shell`) || !strings.Contains(body, `class="block min-h-0 flex-1 resize-none`) || !strings.Contains(body, `data-automation-yaml-line-numbers`) {
-			t.Errorf("%s YAML editor must fill its panel beside a synchronized line-number gutter", source)
+		if !strings.Contains(body, `data-automation-yaml-editor-shell`) || !strings.Contains(body, `data-automation-yaml-editor-viewport`) || !strings.Contains(body, `data-automation-yaml-highlight`) || !strings.Contains(body, `data-automation-yaml-fold-gutter`) || !strings.Contains(body, `data-automation-yaml-line-numbers`) {
+			t.Errorf("%s YAML editor must fill its panel with a highlighted, foldable line-number gutter", source)
 		}
 	}
 }
@@ -815,7 +815,15 @@ window.addEventListener('DOMContentLoaded', function() {
     click('[data-automation-view-yaml]', 'YAML view button');
     if (!isVisible(yaml) || isVisible(graph)) fail('YAML switch did not make the editable YAML view visible');
     var lineNumbers = document.querySelector('[data-automation-yaml-line-numbers]');
+    var highlight = document.querySelector('[data-automation-yaml-highlight]');
+    var fold = document.querySelector('[data-automation-yaml-fold]');
     if (!lineNumbers || !lineNumbers.textContent.includes('1\n2\n3')) fail('YAML editor did not render a line-number gutter');
+    if (!highlight || !highlight.querySelector('[data-automation-yaml-key]')) fail('YAML editor did not syntax-highlight YAML keys');
+    if (!fold) fail('YAML editor did not render a section-fold control');
+    fold.click();
+    if (!editor.hidden || !highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('YAML section fold did not collapse the source view');
+    document.querySelector('[data-automation-yaml-editor-viewport]').click();
+    if (editor.hidden) fail('clicking a folded YAML view did not restore editing');
     click('[data-automation-view-graph]', 'Graph view button');
     if (!isVisible(graph) || isVisible(yaml)) fail('Graph switch did not restore the canvas');
 
@@ -858,7 +866,9 @@ window.addEventListener('DOMContentLoaded', function() {
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
     var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
+    var errorLine = document.querySelector('[data-automation-yaml-error-line]');
     if (!diagnostic || diagnostic.classList.contains('hidden') || !diagnostic.textContent.includes('line 1')) fail('malformed YAML did not show an inline line-aware diagnostic');
+    if (!errorLine || !errorLine.classList.contains('decoration-wavy')) fail('malformed YAML did not underline the invalid source line');
 
     await report('pass', '');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
