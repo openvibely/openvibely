@@ -240,14 +240,14 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	body := out.String()
 	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
 		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`,
-		`data-automation-yaml-editor`, `data-automation-yaml-preview`, `name="automation_yaml"`, `schema_version: 1`,
-		`data-automation-graph-panel`, `data-automation-draft-canvas`, `data-automation-node-tool`,
+		`data-automation-yaml-editor`, `name="automation_yaml"`, `schema_version: 1`,
+		`data-automation-graph-panel`, `data-automation-draft-canvas`, `min-h-[20rem] overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected synchronized Automation Edit view to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`name="candidate_json"`, "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
+	for _, forbidden := range []string{`name="candidate_json"`, `data-automation-yaml-preview`, "Automation YAML", "YAML controls node and connection configuration", "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("interactive graph must omit YAML-only settings control %q", forbidden)
 		}
@@ -515,12 +515,12 @@ func TestAutomationCanvasExplainsInteractiveYAMLSynchronization(t *testing.T) {
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	for _, text := range []string{"Drag nodes to arrange them", "Connect steps:", "data-automation-connect-status", "YAML controls node and connection configuration"} {
+	for _, text := range []string{"Drag nodes to arrange them", "Connect steps:", "data-automation-connect-status"} {
 		if !strings.Contains(body, text) {
 			t.Errorf("interactive YAML authoring page must render %q", text)
 		}
 	}
-	for _, forbidden := range []string{"Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
+	for _, forbidden := range []string{"Automation YAML", "YAML controls node and connection configuration", `data-automation-yaml-preview`, "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("interactive YAML authoring page must omit YAML-only settings control %q", forbidden)
 		}
@@ -750,6 +750,10 @@ window.addEventListener('DOMContentLoaded', function() {
     var yaml = document.querySelector('[data-automation-yaml-panel]');
     if (!editor || !graph || !yaml) fail('builder did not render both graph and YAML views');
     if (editor.readOnly) fail('Edit YAML editor is unexpectedly read-only');
+    ['Automation YAML', 'YAML controls node and connection configuration', 'Preview YAML'].forEach(function(legacy) {
+      if (yaml.textContent.includes(legacy)) fail('obsolete YAML editor chrome remains: ' + legacy);
+    });
+    if (document.querySelector('[data-automation-yaml-preview]')) fail('obsolete YAML preview button remains');
     ['Node and connection settings', 'Transition settings', 'Task prompt', 'Task goal (optional)', 'Human result'].forEach(function(legacy) {
       if (Array.from(document.querySelectorAll('label, summary, h3, h4')).some(function(element) { return element.textContent.trim() === legacy; })) fail('legacy settings control remains: ' + legacy);
     });

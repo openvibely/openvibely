@@ -571,9 +571,12 @@ func TestAutomationBlankBuilderIsVisuallyEditableWithYAMLOnlySettings(t *testing
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Blank Builder Project").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
-	drafts := service.NewAutomationDraftService(automationRepo, service.NewAutomationAdapterRegistry())
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
 	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
 	require.Equal(t, http.StatusOK, portfolio.Code)
@@ -589,7 +592,9 @@ func TestAutomationBlankBuilderIsVisuallyEditableWithYAMLOnlySettings(t *testing
 	for _, marker := range []string{`name="candidate_json"`, "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
 		require.NotContains(t, opened.Body.String(), marker)
 	}
-	require.Contains(t, opened.Body.String(), `data-automation-yaml-preview`)
+	require.NotContains(t, opened.Body.String(), `data-automation-yaml-preview`)
+	require.NotContains(t, opened.Body.String(), "Automation YAML")
+	require.NotContains(t, opened.Body.String(), "YAML controls node and connection configuration")
 	require.Contains(t, opened.Body.String(), `name="save_changes" value="true"`)
 	require.NotContains(t, opened.Body.String(), "Review and apply")
 	require.NotContains(t, opened.Body.String(), "Apply changes")
@@ -612,8 +617,9 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
 	planner := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, nil, nil, nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, nil)
 
 	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"blank"},
@@ -647,8 +653,10 @@ func TestAutomationBuilderVisualActionsDecodeAndReserializeYAML(t *testing.T) {
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
 
 	candidate, err := drafts.BlankCandidate("")
 	require.NoError(t, err)
@@ -673,6 +681,151 @@ func TestAutomationBuilderVisualActionsDecodeAndReserializeYAML(t *testing.T) {
 	require.NotContains(t, response.Body.String(), "Human result")
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 	require.Zero(t, tableCountHandler(t, tc, "automation_versions"))
+}
+
+func TestAutomationBuilderPreviewUsesCompilerValidation(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Compiler Preview Project").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	validator.SetAgentRepository(repository.NewAgentRepo(tc.db))
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, nil)
+
+	t.Run("GitHub capability", func(t *testing.T) {
+		candidate, err := drafts.TemplateCandidate(service.AutomationAdapterGitHubSDLC)
+		require.NoError(t, err)
+		yaml, err := service.EncodeAutomationDraftYAML(candidate)
+		require.NoError(t, err)
+
+		response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+			"project_id": {project.ID}, "builder_source": {"template"}, "automation_yaml": {yaml},
+		}).Execute()
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		require.Contains(t, response.Body.String(), "Configure the selected GitHub authentication mode")
+		require.Contains(t, response.Body.String(), "GitHub Authorized User")
+		require.Zero(t, tableCountHandler(t, tc, "automations"))
+	})
+
+	t.Run("agent selection", func(t *testing.T) {
+		candidate, err := drafts.BlankCandidate("")
+		require.NoError(t, err)
+		candidate.Name = "Missing agent"
+		candidate.Nodes = []models.AutomationDraftNode{{
+			Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task",
+			Config: map[string]any{"prompt": "Review one request.", "category": "backlog", "priority": 2, "agent_ref": "missing-agent"},
+		}}
+		yaml, err := service.EncodeAutomationDraftYAML(candidate)
+		require.NoError(t, err)
+
+		response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+			"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {yaml},
+		}).Execute()
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		require.Contains(t, response.Body.String(), "Agent selection is unavailable in this project.")
+		require.Zero(t, tableCountHandler(t, tc, "automations"))
+	})
+}
+
+func TestAutomationBuilderRejectsUnsafeAndUnsupportedYAMLWithoutSideEffects(t *testing.T) {
+	newBuilder := func(t *testing.T) (*TestContext, *models.Project, *repository.AutomationRepo, *service.AutomationDraftService) {
+		t.Helper()
+		tc := NewTestContext(t)
+		project := tc.CreateProject().WithName("YAML configuration validation project").Build()
+		automationRepo := repository.NewAutomationRepo(tc.db)
+		registry := service.NewAutomationAdapterRegistry()
+		drafts := service.NewAutomationDraftService(automationRepo, registry)
+		validator := service.NewAutomationSaveValidator(registry, drafts)
+		compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+		tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+		tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, nil)
+		return tc, project, automationRepo, drafts
+	}
+	validCandidate := func(t *testing.T, drafts *service.AutomationDraftService) models.AutomationDraftCandidate {
+		t.Helper()
+		candidate, err := drafts.BlankCandidate("")
+		require.NoError(t, err)
+		candidate.Name = "Validated YAML Automation"
+		candidate.Nodes = []models.AutomationDraftNode{{
+			Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task",
+			Config: map[string]any{"prompt": "Review one request.", "category": "backlog", "priority": 2},
+		}}
+		return candidate
+	}
+	invalidCases := []struct {
+		name    string
+		mutate  func(models.AutomationDraftCandidate)
+		message string
+	}{
+		{name: "unsupported configuration", mutate: func(candidate models.AutomationDraftCandidate) {
+			candidate.Nodes[0].Config["unsupported_field"] = "nope"
+		}, message: "unsupported_field"},
+		{name: "unsafe configuration", mutate: func(candidate models.AutomationDraftCandidate) {
+			candidate.Nodes[0].Config["prompt"] = "Review https://example.invalid/unsafe"
+		}, message: "contains an unsupported value"},
+	}
+
+	for _, testCase := range invalidCases {
+		t.Run("new "+testCase.name, func(t *testing.T) {
+			tc, project, _, drafts := newBuilder(t)
+			candidate := validCandidate(t, drafts)
+			testCase.mutate(candidate)
+			yaml, err := service.EncodeAutomationDraftYAML(candidate)
+			require.NoError(t, err)
+
+			response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+				"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {yaml}, "save_changes": {"true"},
+			}).Execute()
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			require.Empty(t, response.Header().Get("HX-Redirect"))
+			require.Contains(t, response.Body.String(), testCase.message)
+			require.Zero(t, tableCountHandler(t, tc, "automations"))
+			require.Zero(t, tableCountHandler(t, tc, "automation_versions"))
+			require.Zero(t, tableCountHandler(t, tc, "tasks"))
+			require.Zero(t, tableCountHandler(t, tc, "schedules"))
+		})
+	}
+
+	for _, testCase := range invalidCases {
+		t.Run("saved edit "+testCase.name, func(t *testing.T) {
+			tc, project, automationRepo, drafts := newBuilder(t)
+			candidate := validCandidate(t, drafts)
+			yaml, err := service.EncodeAutomationDraftYAML(candidate)
+			require.NoError(t, err)
+			created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+				"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {yaml}, "save_changes": {"true"},
+			}).Execute()
+			require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
+			var automationID, versionID string
+			require.NoError(t, tc.db.QueryRow(`SELECT id, published_version_id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &versionID))
+			before, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
+			require.NoError(t, err)
+			baselineTasks := tableCountHandler(t, tc, "tasks")
+			baselineSchedules := tableCountHandler(t, tc, "schedules")
+
+			invalid := validCandidate(t, drafts)
+			testCase.mutate(invalid)
+			invalidYAML, err := service.EncodeAutomationDraftYAML(invalid)
+			require.NoError(t, err)
+			response := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+				"project_id": {project.ID}, "automation_yaml": {invalidYAML}, "save_changes": {"true"},
+			}).Execute()
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			require.Empty(t, response.Header().Get("HX-Redirect"))
+			require.Contains(t, response.Body.String(), testCase.message)
+			var currentVersionID string
+			require.NoError(t, tc.db.QueryRow(`SELECT published_version_id FROM automations WHERE id = ?`, automationID).Scan(&currentVersionID))
+			require.Equal(t, versionID, currentVersionID)
+			after, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
+			require.NoError(t, err)
+			require.Equal(t, before, after)
+			require.Equal(t, baselineTasks, tableCountHandler(t, tc, "tasks"))
+			require.Equal(t, baselineSchedules, tableCountHandler(t, tc, "schedules"))
+		})
+	}
 }
 
 func TestAutomationBuilderRejectsEmptyYAMLWithoutSideEffects(t *testing.T) {

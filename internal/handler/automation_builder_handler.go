@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -90,7 +91,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 			}
 		}
 	}
-	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, candidate, nil)
+	result, err := h.previewAutomationBuilderCandidate(ctx, projectID, candidate, nil)
 	if err != nil {
 		return err
 	}
@@ -151,7 +152,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 			}
 		}
 	}
-	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, candidate, opened.Definition)
+	result, err := h.previewAutomationBuilderCandidate(ctx, projectID, candidate, opened.Definition)
 	if err != nil {
 		return err
 	}
@@ -164,6 +165,23 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		return h.renderAutomationBuilder(c, page)
 	}
 	return h.saveAutomationBuilderCandidate(c, projectID, page, updateTemplate)
+}
+
+func (h *Handler) previewAutomationBuilderCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate, definition *models.AutomationDefinition) (*models.AutomationDraftResult, error) {
+	if h.automationCompiler == nil {
+		return nil, echo.NewHTTPError(http.StatusServiceUnavailable, "automation preview unavailable")
+	}
+	plan, normalized, err := h.automationCompiler.PreviewSave(ctx, projectID, candidate)
+	if err != nil {
+		return nil, err
+	}
+	result, err := h.automationDraftSvc.PreviewCandidate(ctx, projectID, normalized, definition)
+	if err != nil {
+		return nil, err
+	}
+	result.Candidate = normalized
+	result.ValidationErrors = plan.Validation
+	return result, nil
 }
 
 func decodeAutomationBuilderCandidate(c echo.Context) (models.AutomationDraftCandidate, error) {

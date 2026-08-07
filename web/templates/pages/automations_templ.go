@@ -2749,20 +2749,20 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 216, "<div data-automation-yaml-panel hidden class=\"mb-3\"><label class=\"form-control\"><span class=\"label-text mb-2 font-semibold\">Automation YAML</span><textarea class=\"textarea textarea-bordered min-h-[28rem] w-full font-mono text-sm leading-6\" form=\"automation-design-form\" name=\"automation_yaml\" data-automation-yaml-editor spellcheck=\"false\" aria-label=\"Automation YAML\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 216, "<div data-automation-yaml-panel hidden class=\"min-h-[20rem] overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6\"><textarea class=\"block min-h-[calc(20rem-2rem)] w-full resize-y border-0 bg-transparent p-0 font-mono text-sm leading-6 outline-none\" form=\"automation-design-form\" name=\"automation_yaml\" data-automation-yaml-editor spellcheck=\"false\" aria-label=\"Automation definition\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var150 string
 		templ_7745c5c3_Var150, templ_7745c5c3_Err = templ.JoinStringErrs(page.YAML)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 816, Col: 334}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 816, Col: 287}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var150))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 217, "</textarea><span class=\"label-text-alt mt-2\">YAML controls node and connection configuration. Canvas changes update this document; edit it, then select Graph to preview the validated graph.</span></label><div class=\"mt-3 flex justify-end\"><button class=\"btn btn-ghost btn-sm\" type=\"submit\" form=\"automation-design-form\" data-automation-yaml-preview>Preview YAML</button></div></div><dialog id=\"automation-node-dialog\" class=\"modal\" data-automation-node-dialog><div class=\"modal-box relative max-w-md\"><div class=\"absolute right-4 top-4\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 217, "</textarea></div><dialog id=\"automation-node-dialog\" class=\"modal\" data-automation-node-dialog><div class=\"modal-box relative max-w-md\"><div class=\"absolute right-4 top-4\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2775,7 +2775,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			return templ_7745c5c3_Err
 		}
 		if page.Result.Candidate.AdapterKey == "custom" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 219, "<p class=\"mt-1 text-sm text-base-content/65\">Add an OpenVibely capability, then connect it to the next step. Edit its configuration in YAML.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 219, "<p class=\"mt-1 text-sm text-base-content/65\">Add an OpenVibely capability, then connect it to the next step.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

@@ -6,7 +6,7 @@ Use `/automations` to author project-scoped workflows in YAML and view their cur
 
 Open `/automations`, select `+ New Automation`, and choose Template, Describe, or Custom. Each option opens browser-local YAML. Templates load the maintained Native SDLC or GitHub SDLC YAML without creating an Automation, Task, schedule, graph row, or runtime resource. Describe creates a supported candidate, then renders it as YAML. Refreshing or navigating away discards unsaved YAML.
 
-The YAML document is the complete editable Automation definition. Graph mode remains interactive for topology and layout: add or delete nodes, connect or reconnect nodes, and move nodes. Those canvas changes update YAML immediately. Node and connection configuration, including prompts, schedules, agents, tools, skills, labels, and conditions, is edited only in YAML; there are no node or connector settings cards. After manually editing YAML, select Graph or Preview to parse it and rebuild the interactive canvas. Saved Edit uses the same behavior. Existing Automations are read from their current stored graph and serialized to YAML when opened; this does not rewrite the record, prompts, configuration, or runtime resources.
+The YAML document is the complete editable Automation definition. Graph mode remains interactive for topology and layout: add or delete nodes, connect or reconnect nodes, and move nodes. Those canvas changes update YAML immediately. Node and connection configuration, including prompts, schedules, agents, tools, skills, labels, and conditions, is edited only in YAML; there are no node or connector settings cards. After manually editing YAML, select Graph to parse it and rebuild the interactive canvas. Saved Edit uses the same behavior. Existing Automations are read from their current stored graph and serialized to YAML when opened; this does not rewrite the record, prompts, configuration, or runtime resources.
 
 ## YAML Schema
 
@@ -60,13 +60,13 @@ Node types, roles, and configuration fields are constrained by the selected adap
 
 ## Validation and Save
 
-YAML is decoded, normalized, validated, and compiled through the same path used by Preview and Save. Select Preview to parse the current browser-local document and return to Graph mode without persisting or creating resources; Save performs that same validation before the atomic compiler transaction. It fails closed on malformed YAML, duplicate keys, aliases, unknown document fields, unsupported values, unsupported configuration, invalid references, invalid ports, duplicate keys, dangling endpoints, cycles, invalid topology, unavailable project capabilities, and all existing safety checks. Parse and validation errors are shown in the editor. They create no resources and leave the current saved graph and resources untouched.
+YAML is decoded, normalized, and validated through the compiler's non-persisting preview path before Graph renders the submitted browser-local document, and Save uses that same validation before its atomic compiler transaction. There is no separate Preview button. Switching from YAML to Graph parses the document and rebuilds the interactive canvas without persisting or creating resources. Validation includes project capabilities and agent selection as well as malformed YAML, duplicate keys, aliases, unknown document fields, unsupported values, unsupported configuration, invalid references, invalid ports, duplicate keys, dangling endpoints, cycles, invalid topology, and all existing safety checks. Parse and validation errors are shown in the editor. They create no resources and leave the current saved graph and resources untouched.
 
 Save atomically creates or replaces the one current graph and its owned Task/Schedule bindings. The saved graph remains a point-in-time prompt/configuration snapshot. Reopening, template registration, and YAML serialization never silently upgrade prompts or recreate runtime resources. Editing a compatible Automation retains its stable Automation identity and the existing ownership/provenance rules for pending Native and GitHub work.
 
 ## Preview and Live
 
-On a saved Automation, Graph shows the current rendered graph state. YAML shows the same current saved definition in a read-only view. Neither Preview nor selecting either view creates resources. Edit opens a browser-local YAML copy; the existing saved graph continues to run until an atomic Save succeeds.
+On a saved Automation, Graph shows the current rendered graph state. YAML shows the same current saved definition in a read-only view. Switching either view creates no resources. Edit opens a browser-local YAML copy; the existing saved graph continues to run until an atomic Save succeeds.
 
 ## Human Review Boundaries
 
