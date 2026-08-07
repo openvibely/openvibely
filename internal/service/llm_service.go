@@ -429,15 +429,11 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		"list_capabilities":                true,
 	}
 	if strings.HasPrefix(task.CreatedVia, "automation:") && strings.HasSuffix(task.CreatedVia, ":auditor") {
-		allowed = map[string]bool{
-			"list_tasks":          true,
-			"get_task_goal":       true,
-			"list_schedules":      true,
-			"create_notification": true,
-			"list_alerts":         true,
-			"get_alert":           true,
-			"list_capabilities":   true,
-		}
+		delete(allowed, "create_task")
+		delete(allowed, "create_swarm_task")
+		delete(allowed, "execute_tasks")
+		delete(allowed, "create_alert_implementation_task")
+		delete(allowed, "link_alert_implementation_task")
 	}
 	for _, def := range defs {
 		name := strings.ToLower(strings.TrimSpace(def.Name))

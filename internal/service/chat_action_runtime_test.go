@@ -502,25 +502,33 @@ func TestTaskControlRuntimeOmitsImplementationTaskToolsForLoopAuditor(t *testing
 		"create_task",
 		"create_swarm_task",
 		"execute_tasks",
+		"create_alert_implementation_task",
+		"link_alert_implementation_task",
+	} {
+		require.Falsef(t, runtime.HasDefinition(tool), "Loop Auditor must not expose %s", tool)
+	}
+	for _, tool := range []string{
+		"list_tasks",
 		"set_task_goal",
 		"clear_task_goal",
+		"get_task_goal",
 		"pause_task_goal",
 		"resume_task_goal",
+		"list_schedules",
 		"schedule_task",
 		"delete_schedule",
 		"modify_schedule",
 		"create_alert",
+		"create_notification",
+		"list_alerts",
+		"get_alert",
 		"claim_alert",
-		"create_alert_implementation_task",
-		"link_alert_implementation_task",
 		"complete_alert_processing",
 		"fail_alert_processing",
 		"release_alert_claim",
+		"list_capabilities",
 	} {
-		require.Falsef(t, runtime.HasDefinition(tool), "Loop Auditor must not expose %s", tool)
-	}
-	for _, tool := range []string{"list_tasks", "get_task_goal", "list_schedules", "list_alerts", "get_alert", "create_notification", "list_capabilities"} {
-		require.Truef(t, runtime.HasDefinition(tool), "Loop Auditor must expose %s", tool)
+		require.Truef(t, runtime.HasDefinition(tool), "Loop Auditor must retain %s", tool)
 	}
 }
 
