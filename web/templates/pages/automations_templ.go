@@ -5256,14 +5256,14 @@ func automationEditableBreadcrumb(currentProjectID string, automationName string
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 448, "\" hx-target=\"#main-content\" hx-push-url=\"true\" onclick=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;\">Automations</a> <span class=\"flex-shrink-0 text-2xl text-base-content/30\">/</span> <input class=\"input input-bordered h-10 min-w-0 flex-1 text-xl font-bold sm:max-w-xl sm:text-2xl\" form=\"automation-design-form\" name=\"automation_name\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 448, "\" hx-target=\"#main-content\" hx-push-url=\"true\" onclick=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;\">Automations</a> <span class=\"flex-shrink-0 text-2xl text-base-content/30\">/</span> <input class=\"input input-bordered h-8 min-w-0 flex-1 text-xl font-bold sm:max-w-xl sm:text-2xl\" form=\"automation-design-form\" name=\"automation_name\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var279 string
 		templ_7745c5c3_Var279, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1555, Col: 175}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1555, Col: 174}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var279)
 		if templ_7745c5c3_Err != nil {
