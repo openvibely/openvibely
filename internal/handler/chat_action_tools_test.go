@@ -129,6 +129,46 @@ func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
 	}
 }
 
+// TestViewTaskThreadResolvesCurrentTaskID reproduces the incident where an
+// audit-only task-thread follow-up turn called view_task_thread with an
+// explicit task_id of "current" (or omitted task_id/title entirely) and got
+// "task current not found" instead of resolving to the persisted task
+// backing the follow-up, matching resolveTaskIDForTool's handling for the
+// goal and send_to_task runtime tools.
+func TestViewTaskThreadResolvesCurrentTaskID(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "View Task Thread Current")
+	task := &models.Task{ProjectID: project.ID, Title: "Audit target task", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "do the work", Priority: 2}
+	if err := h.taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	params := streamingResponseParams{TaskID: task.ID, ProjectID: project.ID, IsTaskFollowup: true}
+	handlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+	t.Run("explicit current task_id", func(t *testing.T) {
+		out, err := handlers["view_task_thread"](context.Background(), []byte(`{"task_id":"current"}`))
+		if err != nil {
+			t.Fatalf("view_task_thread with explicit current task_id failed: out=%q err=%v", out, err)
+		}
+	})
+
+	t.Run("omitted task_id and title", func(t *testing.T) {
+		out, err := handlers["view_task_thread"](context.Background(), []byte(`{}`))
+		if err != nil {
+			t.Fatalf("view_task_thread with omitted task_id/title failed: out=%q err=%v", out, err)
+		}
+	})
+
+	t.Run("current outside a task-thread follow-up is rejected", func(t *testing.T) {
+		nonFollowupHandlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+		out, err := nonFollowupHandlers["view_task_thread"](context.Background(), []byte(`{"task_id":"current"}`))
+		if err == nil || !strings.Contains(err.Error(), "only valid in a persisted task thread") {
+			t.Fatalf("expected current task_id outside a follow-up to be rejected, out=%q err=%v", out, err)
+		}
+	})
+}
+
 func TestWebRuntimeToolsUseSharedInputDecoder(t *testing.T) {
 	h, _, _, _ := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "Shared Web Runtime Decoder")

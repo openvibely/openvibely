@@ -2691,12 +2691,18 @@ func (h *Handler) executeChatTaskExecutionRequests(ctx context.Context, execID, 
 }
 
 // executeViewTaskThreadRequest resolves a typed runtime-tool task reference and
-// returns its execution history.
-func (h *Handler) executeViewTaskThreadRequest(ctx context.Context, projectID string, req service.ViewThreadRequest) (string, error) {
+// returns its execution history. A task_id of "current" resolves to the
+// persisted task backing this task-thread follow-up, matching the resolution
+// used by the goal and send_to_task runtime tools.
+func (h *Handler) executeViewTaskThreadRequest(ctx context.Context, params streamingResponseParams, req service.ViewThreadRequest) (string, error) {
 	if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" {
 		return "", fmt.Errorf("view_task_thread requires task_id or title")
 	}
-	task, err := h.resolveTaskReference(ctx, projectID, req.TaskID, req.Title)
+	taskID, err := h.resolveTaskIDForTool(ctx, params, req.TaskID, req.Title)
+	if err != nil {
+		return "", err
+	}
+	task, err := h.resolveTaskReference(ctx, params.ProjectID, taskID, "")
 	if err != nil {
 		return "", err
 	}

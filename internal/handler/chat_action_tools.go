@@ -280,7 +280,10 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			return h.executeViewTaskThreadRequest(ctx, params.ProjectID, req)
+			if strings.TrimSpace(req.TaskID) == "" && strings.TrimSpace(req.Title) == "" && params.IsTaskFollowup && params.TaskID != "" {
+				req.TaskID = "current"
+			}
+			return h.executeViewTaskThreadRequest(ctx, params, req)
 		},
 		"send_to_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSendToTaskTool(ctx, params, input)
