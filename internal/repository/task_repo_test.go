@@ -433,6 +433,54 @@ func TestTaskRepo_Delete(t *testing.T) {
 	}
 }
 
+func TestTaskRepo_DeleteWithCleanupManifest_TerminalizesRetainedSwarmChildren(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	parent := &models.Task{ProjectID: "default", Title: "Swarm", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p", SwarmRole: models.SwarmRoleParent, SwarmStatus: "current"}
+	if err := repo.Create(ctx, parent); err != nil {
+		t.Fatalf("Create parent: %v", err)
+	}
+	planner := &models.Task{ProjectID: "default", Title: "Swarm · Planner", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRolePlanner, SwarmStatus: "planned"}
+	worker := &models.Task{ProjectID: "default", Title: "Swarm · Worker", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleWorker, SwarmStatus: "running"}
+	reviewer := &models.Task{ProjectID: "default", Title: "Swarm · Reviewer", Category: models.CategoryActive, Status: models.StatusBlocked, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleReviewer, SwarmStatus: "pending"}
+	merger := &models.Task{ProjectID: "default", Title: "Swarm · Merger", Category: models.CategoryActive, Status: models.StatusBlocked, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleMerger, SwarmStatus: "pending"}
+	integrator := &models.Task{ProjectID: "default", Title: "Swarm · Integrator", Category: models.CategoryActive, Status: models.StatusBlocked, Prompt: "p", ParentTaskID: &parent.ID, SwarmRole: models.SwarmRoleLegacyIntegrator, SwarmStatus: "pending"}
+	for _, child := range []*models.Task{planner, worker, reviewer, merger, integrator} {
+		if err := repo.Create(ctx, child); err != nil {
+			t.Fatalf("Create child %s: %v", child.SwarmRole, err)
+		}
+	}
+
+	_, deleted, err := repo.DeleteWithCleanupManifest(ctx, parent.ID, nil)
+	if err != nil {
+		t.Fatalf("DeleteWithCleanupManifest: %v", err)
+	}
+	if !deleted {
+		t.Fatal("expected swarm parent deletion")
+	}
+
+	for _, child := range []*models.Task{planner, worker, reviewer, merger, integrator} {
+		got, err := repo.GetByID(ctx, child.ID)
+		if err != nil || got == nil {
+			t.Fatalf("retained child %s: task=%v err=%v", child.SwarmRole, got, err)
+		}
+		if got.ParentTaskID != nil {
+			t.Errorf("child %s parent = %v, want nil after parent deletion", child.SwarmRole, *got.ParentTaskID)
+		}
+		if child == planner {
+			if got.Status != models.StatusCompleted || got.SwarmStatus != "planned" || got.Category != models.CategoryCompleted {
+				t.Errorf("completed planner changed during parent deletion: category=%s status=%s swarm_status=%s", got.Category, got.Status, got.SwarmStatus)
+			}
+			continue
+		}
+		if got.Status != models.StatusCancelled || got.SwarmStatus != "cancelled" || got.Category != models.CategoryCompleted {
+			t.Errorf("unfinished child %s not terminalized: category=%s status=%s swarm_status=%s", child.SwarmRole, got.Category, got.Status, got.SwarmStatus)
+		}
+	}
+}
+
 func TestTaskRepo_GetByID_NotFound(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)

@@ -377,6 +377,9 @@ func (s *TaskService) deleteTask(ctx context.Context, id, projectID string, cate
 		}
 		if s.workerSvc != nil {
 			s.workerSvc.CancelRunningTask(id)
+			for _, childID := range manifest.SwarmChildTaskIDs {
+				s.workerSvc.CancelRunningTask(childID)
+			}
 		}
 		return nil
 	}
