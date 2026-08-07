@@ -464,7 +464,7 @@ func TestAutomationLiveActionsUseCardKebab(t *testing.T) {
 	if strings.Index(legend, `aria-label="Graph status legend"`) > strings.Index(legend, `data-automation-live-badges`) {
 		t.Error("expected lifecycle and health badges after the graph status legend")
 	}
-	for _, label := range []string{"Edit automation", "Run now", "Pause", "Delete"} {
+	for _, label := range []string{"Edit automation", "Run now", "Disable", "Delete"} {
 		if !strings.Contains(cardHeader, ">"+label+"</button>") {
 			t.Errorf("expected Live Automation kebab to contain %q", label)
 		}
@@ -503,7 +503,7 @@ func TestAutomationLiveRunNowIsActiveOnly(t *testing.T) {
 	if strings.Contains(pausedBody, `/run-now`) || strings.Contains(pausedBody, `>Run now</button>`) {
 		t.Error("paused Automation Live must not offer Run now")
 	}
-	for _, want := range []string{`data-automation-live-actions`, `data-automation-live-resume`, `>Resume</button>`} {
+	for _, want := range []string{`data-automation-live-actions`, `data-automation-live-resume`, `>Enable</button>`} {
 		if !strings.Contains(pausedBody, want) {
 			t.Errorf("expected paused Automation Live kebab to contain %q", want)
 		}

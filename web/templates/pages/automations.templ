@@ -103,8 +103,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 													data-automation-card-pause={ card.Automation.ID }
 													data-automation-lifecycle-form={ fmt.Sprintf("pause-automation-card-form-%s", card.Automation.ID) }
 													onclick="submitAutomationLifecycleFallback(this)"
-												>Pause</button>
-											</li>
+													>Disable</button>											</li>
 										}
 										if card.Automation.LifecycleState == models.AutomationPaused {
 											<li>
@@ -118,8 +117,7 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 													data-automation-card-resume={ card.Automation.ID }
 													data-automation-lifecycle-form={ fmt.Sprintf("resume-automation-card-form-%s", card.Automation.ID) }
 													onclick="submitAutomationLifecycleFallback(this)"
-												>Resume</button>
-											</li>
+													>Enable</button>											</li>
 										}
 										<li>
 											<button
@@ -385,11 +383,9 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 								}
 								if graph.Automation.LifecycleState == models.AutomationActive {
 									<li><button type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run now</button></li>
-									<li><button type="submit" form="automation-live-pause-form" data-automation-live-pause>Pause</button></li>
-								}
+										<li><button type="submit" form="automation-live-pause-form" data-automation-live-pause>Disable</button></li>								}
 								if graph.Automation.LifecycleState == models.AutomationPaused {
-									<li><button type="submit" form="automation-live-resume-form" data-automation-live-resume>Resume</button></li>
-								}
+										<li><button type="submit" form="automation-live-resume-form" data-automation-live-resume>Enable</button></li>								}
 								if deleteAvailable {
 									<li><button class="text-error" type="button" data-automation-live-delete onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button></li>
 								}

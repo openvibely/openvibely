@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAutomationPortfolioCardKebabPausesAndResumesInPlace(t *testing.T) {
+func TestAutomationPortfolioCardKebabEnablesAndDisablesInPlace(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Automation card lifecycle").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
@@ -47,7 +47,8 @@ func TestAutomationPortfolioCardKebabPausesAndResumesInPlace(t *testing.T) {
 	portfolio := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
 	require.Equal(t, http.StatusOK, portfolio.Code)
 	require.Contains(t, portfolio.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/pause?project_id=%s"`, definition.Automation.ID, project.ID))
-	require.Contains(t, portfolio.Body.String(), ">Pause</button>")
+	require.Contains(t, portfolio.Body.String(), ">Disable</button>")
+	require.NotContains(t, portfolio.Body.String(), ">Pause</button>")
 	require.NotContains(t, portfolio.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/resume?project_id=%s"`, definition.Automation.ID, project.ID))
 
 	paused := tc.HTMX().Post(fmt.Sprintf("/automations/%s/pause?project_id=%s", definition.Automation.ID, project.ID)).WithForm(url.Values{
@@ -56,7 +57,8 @@ func TestAutomationPortfolioCardKebabPausesAndResumesInPlace(t *testing.T) {
 	require.Equal(t, http.StatusOK, paused.Code, paused.Body.String())
 	require.Contains(t, paused.Body.String(), `id="automations-container"`)
 	require.Contains(t, paused.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/resume?project_id=%s"`, definition.Automation.ID, project.ID))
-	require.Contains(t, paused.Body.String(), ">Resume</button>")
+	require.Contains(t, paused.Body.String(), ">Enable</button>")
+	require.NotContains(t, paused.Body.String(), ">Resume</button>")
 	require.NotContains(t, paused.Body.String(), fmt.Sprintf(`hx-post="/automations/%s/pause?project_id=%s"`, definition.Automation.ID, project.ID))
 	storedSchedule, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
 	require.NoError(t, err)
