@@ -683,8 +683,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				<div class="mb-6 min-w-0" data-automation-builder-header>
 					<div class="flex flex-wrap items-start justify-between gap-3">
 						<div class="min-w-0 flex-1">@automationEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)</div>
-						@automationBuilderMoreActions(page)
-					</div>
+							@automationBuilderMoreActions(page, currentProjectID)					</div>
 					if strings.TrimSpace(page.Result.Candidate.Description) != "" {
 						<p class="mt-1 text-sm opacity-60">{ page.Result.Candidate.Description }</p>
 					}
@@ -1507,10 +1506,14 @@ templ automationLiveMoreActions(graph models.AutomationLiveGraph, deleteAvailabl
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 			</svg>
 		</label>
-		<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
-			if graph.TemplateUpdateAvailable {
-				<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
-			}
+			<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
+				<li><button type="submit" form="automation-live-edit-form" data-automation-live-menu-edit>Edit automation</button></li>
+				if graph.Automation.LifecycleState == models.AutomationActive {
+					<li><button type="submit" form="automation-live-run-now-form" data-automation-live-menu-run-now={ graph.Automation.ID }>Run now</button></li>
+				}
+				if graph.TemplateUpdateAvailable {
+					<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
+				}
 			if graph.Automation.LifecycleState == models.AutomationActive {
 				<li><button type="submit" form="automation-live-pause-form" data-automation-live-pause>Disable</button></li>
 			}
@@ -1524,17 +1527,19 @@ templ automationLiveMoreActions(graph models.AutomationLiveGraph, deleteAvailabl
 	</div>
 }
 
-templ automationBuilderMoreActions(page models.AutomationBuilderPage) {
+templ automationBuilderMoreActions(page models.AutomationBuilderPage, currentProjectID string) {
 	<div class="dropdown dropdown-end shrink-0" data-automation-builder-actions>
 		<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + page.Result.Candidate.Name } onclick="handleDropdownToggle(event)">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 			</svg>
 		</label>
-		<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
-			if page.LifecycleState == models.AutomationActive {
-				<li><button type="submit" form="automation-builder-pause-form" data-automation-builder-pause>Disable</button></li>
-			}
+			<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
+				<li><button type="submit" form="automation-design-form" data-automation-builder-menu-save>Save changes</button></li>
+				<li><a href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-menu-cancel>Cancel</a></li>
+				if page.LifecycleState == models.AutomationActive {
+					<li><button type="submit" form="automation-builder-pause-form" data-automation-builder-pause>Disable</button></li>
+				}
 			if page.LifecycleState == models.AutomationPaused {
 				<li><button type="submit" form="automation-builder-resume-form" data-automation-builder-resume>Enable</button></li>
 			}
