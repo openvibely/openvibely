@@ -26,7 +26,7 @@ type UpcomingTaskRow struct {
 	Category     string
 	Priority     int
 	Status       string
-	Prompt       string
+	Prompt       string // Bounded to upcomingTaskPromptPreviewLen chars; only used for a truncated UI preview.
 	AgentID      *string
 	Tag          string
 	DisplayOrder int
@@ -44,17 +44,25 @@ type UpcomingTaskRow struct {
 	LastRun          *time.Time
 }
 
+// upcomingTaskPromptPreviewLen bounds the prompt text selected by Pulse
+// dashboard list queries. web/templates/pages/upcoming.templ only ever
+// renders a 200-char truncated preview (truncatePrompt(bt.Task.Prompt, 200)),
+// so selecting/scanning the full prompt column for every row wastes time and
+// memory. SUBSTR(t.prompt, 1, N) always returns at most N characters, so
+// truncatePrompt on this preview matches truncating the full prompt.
+const upcomingTaskPromptPreviewLen = 200
+
 // ListRunningTasks returns tasks currently being executed for a project
 func (r *UpcomingRepo) ListRunningTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt,
+		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, SUBSTR(t.prompt, 1, ?),
 			t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
 			ac.name as agent_name,
 			NULL, NULL, NULL, NULL, NULL, NULL, NULL
 		 FROM tasks t
 		 LEFT JOIN agent_configs ac ON ac.id = t.agent_id
 		 WHERE t.project_id = ? AND t.status = 'running' AND t.category != 'chat'
-		 ORDER BY t.updated_at DESC`, projectID)
+		 ORDER BY t.updated_at DESC`, upcomingTaskPromptPreviewLen, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing running tasks: %w", err)
 	}
@@ -65,14 +73,14 @@ func (r *UpcomingRepo) ListRunningTasks(ctx context.Context, projectID string) (
 // ListPendingActiveTasks returns active tasks with pending status (queued for execution)
 func (r *UpcomingRepo) ListPendingActiveTasks(ctx context.Context, projectID string) ([]models.UpcomingTask, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt,
+		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, SUBSTR(t.prompt, 1, ?),
 			t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
 			ac.name as agent_name,
 			NULL, NULL, NULL, NULL, NULL, NULL, NULL
 		 FROM tasks t
 		 LEFT JOIN agent_configs ac ON ac.id = t.agent_id
 		 WHERE t.project_id = ? AND t.category = 'active' AND t.status = 'pending'
-		 ORDER BY t.priority DESC, t.display_order ASC`, projectID)
+		 ORDER BY t.priority DESC, t.display_order ASC`, upcomingTaskPromptPreviewLen, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("listing pending active tasks: %w", err)
 	}
@@ -83,7 +91,7 @@ func (r *UpcomingRepo) ListPendingActiveTasks(ctx context.Context, projectID str
 // ListUpcomingScheduledTasks returns scheduled tasks with a future next_run
 func (r *UpcomingRepo) ListUpcomingScheduledTasks(ctx context.Context, projectID string, until time.Time) ([]models.UpcomingTask, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt,
+		`SELECT t.id, t.project_id, t.title, t.category, t.priority, t.status, SUBSTR(t.prompt, 1, ?),
 			t.agent_id, t.tag, t.display_order, t.created_at, t.updated_at,
 			ac.name as agent_name,
 			s.id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.next_run, s.last_run
@@ -91,7 +99,7 @@ func (r *UpcomingRepo) ListUpcomingScheduledTasks(ctx context.Context, projectID
 		 JOIN schedules s ON s.task_id = t.id
 		 LEFT JOIN agent_configs ac ON ac.id = t.agent_id
 		 WHERE t.project_id = ? AND s.enabled = 1 AND s.next_run IS NOT NULL AND s.next_run <= ?
-		 ORDER BY s.next_run ASC`, projectID, until)
+		 ORDER BY s.next_run ASC`, upcomingTaskPromptPreviewLen, projectID, until)
 	if err != nil {
 		return nil, fmt.Errorf("listing upcoming scheduled tasks: %w", err)
 	}
