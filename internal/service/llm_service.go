@@ -432,6 +432,8 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		delete(allowed, "create_task")
 		delete(allowed, "create_swarm_task")
 		delete(allowed, "execute_tasks")
+		delete(allowed, "create_alert_implementation_task")
+		delete(allowed, "link_alert_implementation_task")
 	}
 	for _, def := range defs {
 		name := strings.ToLower(strings.TrimSpace(def.Name))

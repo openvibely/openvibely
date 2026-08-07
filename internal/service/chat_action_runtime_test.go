@@ -501,6 +501,8 @@ func TestTaskControlRuntimeOmitsImplementationTaskToolsForLoopAuditor(t *testing
 	require.False(t, runtime.HasDefinition("create_task"))
 	require.False(t, runtime.HasDefinition("create_swarm_task"))
 	require.False(t, runtime.HasDefinition("execute_tasks"))
+	require.False(t, runtime.HasDefinition("create_alert_implementation_task"))
+	require.False(t, runtime.HasDefinition("link_alert_implementation_task"))
 	require.True(t, runtime.HasDefinition("list_tasks"))
 	require.True(t, runtime.HasDefinition("create_notification"))
 }
