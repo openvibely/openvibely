@@ -1153,6 +1153,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					var yamlEditor = builder.querySelector('[data-automation-yaml-editor]');
 					var yamlLineNumbers = builder.querySelector('[data-automation-yaml-line-numbers]');
 					var yamlFoldControls = builder.querySelector('[data-automation-yaml-fold-controls]');
+					var yamlGutter = builder.querySelector('[data-automation-yaml-gutter]');
 					var yamlViewport = builder.querySelector('[data-automation-yaml-editor-viewport]');
 					var yamlHighlight = builder.querySelector('[data-automation-yaml-highlight]');
 					var yamlDiagnostic = builder.querySelector('[data-automation-yaml-diagnostic]');
@@ -1161,6 +1162,34 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					var yamlParseTimer = 0;
 					var yamlParseRequest = 0;
 					var yamlLineLayoutFrame = 0;
+					function yamlActiveScrollTop() { return yamlEditor && yamlEditor.hidden && yamlViewport ? yamlViewport.scrollTop : (yamlEditor ? yamlEditor.scrollTop : 0); }
+					function restoreYAMLScrollTop(value) {
+						if (!yamlEditor) return;
+						if (yamlEditor.hidden && yamlViewport) yamlViewport.scrollTop = value;
+						else {
+							yamlEditor.scrollTop = value;
+							if (yamlViewport) yamlViewport.scrollTop = 0;
+							syncYAMLHighlightScroll();
+						}
+					}
+					function scrollYAMLFromWheel(event) {
+						if (!yamlEditor || !event.deltaY) return;
+						var scroller = yamlEditor.hidden && yamlViewport ? yamlViewport : yamlEditor;
+						if (!scroller) return;
+						var delta = event.deltaY;
+						if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;
+						if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= scroller.clientHeight;
+						var previousTop = scroller.scrollTop;
+						scroller.scrollTop += delta;
+						if (scroller.scrollTop !== previousTop) {
+							if (scroller === yamlEditor) syncYAMLHighlightScroll();
+							else {
+								if (yamlLineNumbers) yamlLineNumbers.scrollTop = scroller.scrollTop;
+								if (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-scroller.scrollTop) + 'px)';
+							}
+							event.preventDefault();
+						}
+					}
 					function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 					function yamlLineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }
 					function yamlFoldRanges(lines) {
@@ -1248,7 +1277,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							visibleLines.push(index);
 							lineNumbers.push('<span class="block min-h-6" data-automation-yaml-line-number data-yaml-line="' + (index + 1) + '">' + (index + 1) + '</span>');								if (canFold) {
 									var visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';
-									controls.push('<button class="pointer-events-auto absolute right-0 inline-flex h-6 w-4 items-center justify-center rounded text-lg font-bold leading-none text-base-content/70 transition-opacity hover:bg-base-300/70 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary' + visibilityClass + '" style="top:0" type="button" data-automation-yaml-fold data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '" aria-label="' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '">' + (isFolded ? '▸' : '▾') + '</button>');
+									controls.push('<button class="pointer-events-auto absolute right-0 inline-flex h-6 w-4 items-center justify-center rounded bg-transparent text-lg font-bold leading-none text-base-content/70 transition-opacity hover:bg-transparent hover:text-base-content focus-visible:bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary' + visibilityClass + '" style="top:0" type="button" data-automation-yaml-fold data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '" aria-label="' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '">' + (isFolded ? '▸' : '▾') + '</button>');
 								}
 								var rendered = highlightYAMLLine(lines[index], index + 1), indentationGuide = yamlIndentationGuides(indent), hangingIndent = indent ? ' style="padding-left:' + indent + 'ch"' : '';
 								if (isFolded) rendered += '<span class="ml-2 text-base-content/45" data-automation-yaml-fold-summary>…</span>';
@@ -1316,9 +1345,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						var toggle = event.target.closest('[data-automation-yaml-fold]');
 						if (!toggle) return;
 						var line = Number(toggle.dataset.yamlLine) - 1;
+						var scrollTop = yamlActiveScrollTop();
 						if (yamlFoldedLines.has(line)) yamlFoldedLines.delete(line); else yamlFoldedLines.add(line);
 						if (yamlEditor) yamlEditor.blur();
 						updateYAMLLineNumbers();
+						restoreYAMLScrollTop(scrollTop);
 					});
 						if (yamlViewport) yamlViewport.addEventListener('scroll', function() {
 							if (!yamlEditor || !yamlEditor.hidden) return;
@@ -1326,14 +1357,10 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							if (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlViewport.scrollTop) + 'px)';
 						});
 						if (yamlViewport) yamlViewport.addEventListener('wheel', function(event) {
-							if (!yamlEditor || !yamlEditor.hidden || !event.deltaY) return;
-							var delta = event.deltaY;
-							if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;
-							if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= yamlViewport.clientHeight;
-							var previousTop = yamlViewport.scrollTop;
-							yamlViewport.scrollTop += delta;
-							if (yamlViewport.scrollTop !== previousTop) event.preventDefault();
+							if (!yamlEditor || !yamlEditor.hidden) return;
+							scrollYAMLFromWheel(event);
 						}, {passive: false});
+						if (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});
 						window.addEventListener('resize', queueYAMLLineLayout);					function syncCandidate(writeYAML) {
 						var automationName = builder.querySelector('[data-automation-name]');
 						if (automationName) candidate.name = automationName.value;
