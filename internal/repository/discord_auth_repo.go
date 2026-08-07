@@ -69,13 +69,7 @@ func (r *DiscordAuthRepo) HasAnyAuthorizedUsers(ctx context.Context, projectID s
 
 // HasAnyAuthorizedUsersAnywhere checks whether any project has Discord authorized users configured.
 func (r *DiscordAuthRepo) HasAnyAuthorizedUsersAnywhere(ctx context.Context) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM discord_authorized_users`).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("count discord auth users anywhere: %w", err)
-	}
-	return count > 0, nil
+	return countAny(ctx, r.db, "discord_authorized_users", "discord auth users anywhere")
 }
 
 // IsAuthorizedAnywhere checks whether a Discord user is authorized in any project.
@@ -115,16 +109,7 @@ func (r *DiscordAuthRepo) DeleteByProject(ctx context.Context, projectID string)
 
 // Delete removes an authorized Discord user by ID.
 func (r *DiscordAuthRepo) Delete(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx,
-		`DELETE FROM discord_authorized_users WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete discord auth user: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("discord auth user not found")
-	}
-	return nil
+	return deleteByID(ctx, r.db, "discord_authorized_users", "discord auth user", id)
 }
 
 // GetByID returns a single authorized Discord user by ID.

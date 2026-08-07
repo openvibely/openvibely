@@ -66,12 +66,7 @@ func (r *TelegramAuthRepo) BackfillUserID(ctx context.Context, projectID string,
 // HasAnyAuthorizedUsers checks whether any system-level Telegram authorized users are configured.
 // projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *TelegramAuthRepo) HasAnyAuthorizedUsers(ctx context.Context, projectID string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM telegram_authorized_users`).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("count telegram auth users: %w", err)
-	}
-	return count > 0, nil
+	return countAny(ctx, r.db, "telegram_authorized_users", "telegram auth users")
 }
 
 // IsAuthorizedAnywhere checks whether a Telegram user is authorized in any project.
@@ -122,16 +117,7 @@ func (r *TelegramAuthRepo) Create(ctx context.Context, u *models.TelegramAuthori
 
 // Delete removes an authorized Telegram user by ID.
 func (r *TelegramAuthRepo) Delete(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx,
-		`DELETE FROM telegram_authorized_users WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete telegram auth user: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("telegram auth user not found")
-	}
-	return nil
+	return deleteByID(ctx, r.db, "telegram_authorized_users", "telegram auth user", id)
 }
 
 // GetByID returns a single authorized user by ID.

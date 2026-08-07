@@ -82,12 +82,7 @@ func (r *EmailAuthRepo) HasAnyAuthorizedUsers(ctx context.Context, projectID str
 
 // HasAnyAuthorizedUsersAnywhere checks whether any project has email authorized senders configured.
 func (r *EmailAuthRepo) HasAnyAuthorizedUsersAnywhere(ctx context.Context) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM email_authorized_senders`).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("count email authorized senders anywhere: %w", err)
-	}
-	return count > 0, nil
+	return countAny(ctx, r.db, "email_authorized_senders", "email authorized senders anywhere")
 }
 
 // IsAuthorizedAnywhere checks whether an email address is authorized in any project.
@@ -130,15 +125,7 @@ func (r *EmailAuthRepo) Create(ctx context.Context, s *models.EmailAuthorizedSen
 
 // Delete removes an authorized email sender by ID.
 func (r *EmailAuthRepo) Delete(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM email_authorized_senders WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete email authorized sender: %w", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("email authorized sender not found")
-	}
-	return nil
+	return deleteByID(ctx, r.db, "email_authorized_senders", "email authorized sender", id)
 }
 
 // GetByID returns a single authorized email sender by ID.
