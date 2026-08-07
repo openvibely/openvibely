@@ -258,11 +258,19 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 	for _, want := range []string{
 		`class="mb-6 min-w-0"`,
 		`data-automation-breadcrumb`,
+		`data-automation-editable-breadcrumb`,
+		`name="automation_name"`,
+		`value="Edit header spacing"`,
 		`class="mt-1 text-sm opacity-60"`,
 		`>A standard editable Automation description.</p>`,
 	} {
 		if !strings.Contains(header, want) {
 			t.Errorf("expected standard Edit Automation header to contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{`>Edit automation</h2>`, `data-automation-builder-name`} {
+		if strings.Contains(header, forbidden) {
+			t.Errorf("Edit Automation header must omit %q", forbidden)
 		}
 	}
 	if strings.Contains(header, `class="flex min-w-0 flex-shrink-0 items-center gap-2 mb-6"`) {
@@ -314,11 +322,14 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 	warnings := strings.Index(body, `>Warnings</h3>`)
 	settings := strings.Index(body, `>Node and connection settings</summary>`)
 	if canvasStart < 0 || canvasEndOffset < 0 || name < 0 || assumptions < 0 || warnings < 0 || settings < 0 {
-		t.Fatal("expected Edit canvas, name, assumptions, warnings, and node settings")
+		t.Fatal("expected Edit name, canvas, assumptions, warnings, and node settings")
 	}
 	canvasEnd := canvasStart + canvasEndOffset
-	if !(canvasEnd < name && name < assumptions && assumptions < warnings && warnings < settings) {
-		t.Errorf("expected Edit order canvas → name → assumptions → warnings → settings, got canvas=%d name=%d assumptions=%d warnings=%d settings=%d", canvasEnd, name, assumptions, warnings, settings)
+	if !(name < canvasStart && canvasEnd < assumptions && assumptions < warnings && warnings < settings) {
+		t.Errorf("expected Edit order name breadcrumb → canvas → assumptions → warnings → settings, got name=%d canvas=%d canvasEnd=%d assumptions=%d warnings=%d settings=%d", name, canvasStart, canvasEnd, assumptions, warnings, settings)
+	}
+	if strings.Contains(body[canvasEnd:settings], `data-automation-builder-name`) {
+		t.Error("saved Edit page must not retain the standalone Automation name field below the canvas")
 	}
 	canvas := body[canvasStart:canvasEnd]
 	for _, want := range []string{
@@ -1326,9 +1337,13 @@ window.addEventListener('DOMContentLoaded', function() {
     if (liveDeleteModal.open) fail('Live Automation delete modal close button did not close the dialog');
 
 	    click('#automation-live [data-automation-live-edit]', 'Edit automation button');    await waitFor(function() { return !!document.getElementById('automation-builder'); }, 'builder after Edit automation');
-    if (document.getElementById('automation-live')) fail('live Automation root remained mounted behind the editor');
-	    click('#automation-builder [data-automation-builder-actions] label', 'Edit Automation kebab before Delete');
-	    clickMenuRowRightEdge('#automation-builder [data-delete-automation-open]', 'Edit Automation Delete menu row');    var editDeleteModal = document.querySelector('#automation-builder #delete-automation-modal');
+	    if (document.getElementById('automation-live')) fail('live Automation root remained mounted behind the editor');
+	    var editBreadcrumb = document.querySelector('#automation-builder [data-automation-editable-breadcrumb]');
+	    var editName = editBreadcrumb && editBreadcrumb.querySelector('[data-automation-name]');
+	    if (!editName || editName.value !== 'Blank Automation') fail('Edit Automation breadcrumb does not contain the editable Automation name');
+	    if (editBreadcrumb.textContent.includes('Edit automation')) fail('Edit Automation breadcrumb retains the removed Edit automation label');
+	    if (document.querySelector('#automation-builder [data-automation-builder-name]')) fail('Edit Automation retains the standalone name field below the canvas');
+	    click('#automation-builder [data-automation-builder-actions] label', 'Edit Automation kebab before Delete');	    clickMenuRowRightEdge('#automation-builder [data-delete-automation-open]', 'Edit Automation Delete menu row');    var editDeleteModal = document.querySelector('#automation-builder #delete-automation-modal');
     if (!editDeleteModal || !editDeleteModal.open) fail('Edit Automation Delete did not open its confirmation dialog');
     click('#automation-builder #delete-automation-modal button[aria-label="Close delete automation confirmation"]', 'Edit Automation delete modal close button');
     if (editDeleteModal.open) fail('Edit Automation delete modal close button did not close the dialog');
