@@ -241,7 +241,7 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
 		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`,
 		`data-automation-yaml-editor`, `name="automation_yaml"`, `schema_version: 1`,
-		`data-automation-graph-panel`, `data-automation-draft-canvas`, `min-h-[20rem] overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6`,
+		`data-automation-graph-panel`, `data-automation-draft-canvas`, `min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected synchronized Automation Edit view to contain %q", want)
@@ -607,8 +607,8 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s synchronized YAML builder missing %q", source, want)
 			}
 		}
-		if !strings.Contains(body, `data-automation-yaml-panel hidden class="flex min-h-[20rem] flex-1 flex-col`) {
-			t.Errorf("%s YAML panel must grow to fill the builder card", source)
+		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col`) {
+			t.Errorf("%s YAML panel must grow to fill the builder card while remaining hidden in Graph mode", source)
 		}
 		if !strings.Contains(body, `class="block min-h-0 w-full flex-1 resize-none`) {
 			t.Errorf("%s YAML editor must grow to fill its panel without a separate resize height", source)
@@ -723,6 +723,9 @@ edges:
 window.addEventListener('DOMContentLoaded', function() {
   function fail(message) { throw new Error(message); }
   function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method: 'POST'}); }
+  function isVisible(element) {
+    return !element.hidden && window.getComputedStyle(element).display !== 'none' && element.getClientRects().length > 0;
+  }
   function click(selector, label) { var element = document.querySelector(selector); if (!element) fail('missing ' + label); element.click(); }
   function pointEvent(type, target, pointerId) {
     var rect = target.getBoundingClientRect();
@@ -760,13 +763,14 @@ window.addEventListener('DOMContentLoaded', function() {
       if (yaml.textContent.includes(legacy)) fail('obsolete YAML editor chrome remains: ' + legacy);
     });
     if (document.querySelector('[data-automation-yaml-preview]')) fail('obsolete YAML preview button remains');
+    if (!isVisible(graph) || isVisible(yaml)) fail('initial Graph view must show only the canvas');
     ['Node and connection settings', 'Transition settings', 'Task prompt', 'Task goal (optional)', 'Human result'].forEach(function(legacy) {
       if (Array.from(document.querySelectorAll('label, summary, h3, h4')).some(function(element) { return element.textContent.trim() === legacy; })) fail('legacy settings control remains: ' + legacy);
     });
     click('[data-automation-view-yaml]', 'YAML view button');
-    if (yaml.hidden || !graph.hidden) fail('YAML switch did not make the editable YAML view visible');
+    if (!isVisible(yaml) || isVisible(graph)) fail('YAML switch did not make the editable YAML view visible');
     click('[data-automation-view-graph]', 'Graph view button');
-    if (graph.hidden || !yaml.hidden) fail('Graph switch did not restore the canvas');
+    if (!isVisible(graph) || isVisible(yaml)) fail('Graph switch did not restore the canvas');
 
     var first = document.querySelector('[data-node-key="first"]');
     if (!first) fail('missing first node');
@@ -812,7 +816,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:20px}.hidden{display:none!important}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body>%s%s</body></html>`, builder.String(), runner)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body>%s%s</body></html>`, builder.String(), runner)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)

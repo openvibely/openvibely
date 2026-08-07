@@ -812,7 +812,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							<input type="hidden" name="project_id" value={ currentProjectID }/>
 						</form>
 					}
-						<div data-automation-yaml-panel hidden class="flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6">
+						<div data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6">
 							<textarea class="block min-h-0 w-full flex-1 resize-none border-0 bg-transparent p-0 font-mono text-sm leading-6 outline-none" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor spellcheck="false" aria-label="Automation definition">{ page.YAML }</textarea>
 						</div>
 						<dialog id="automation-node-dialog" class="modal" data-automation-node-dialog>
@@ -1269,7 +1269,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					function selectAutomationBuilderView(yamlSelected) {
 						if (!graphPanel || !yamlPanel) return;
 						graphPanel.hidden = yamlSelected;
+						graphPanel.style.display = yamlSelected ? 'none' : '';
 						yamlPanel.hidden = !yamlSelected;
+						yamlPanel.style.display = yamlSelected ? 'flex' : 'none';
 						graphButton.classList.toggle('btn-active', !yamlSelected);
 						yamlButton.classList.toggle('btn-active', yamlSelected);
 						graphButton.setAttribute('aria-pressed', String(!yamlSelected));

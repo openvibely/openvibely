@@ -9,7 +9,7 @@
 - [Chat and Task-Thread Behavior](chat_thread_system.md) - Modes, queueing, steering, actions, swarms, follow-ups, goals, cancellation, scheduling, recovery, and known scheduling/swarm bugs (#88, #270, #281; #278 fixed via PR #282).
 - [Realtime and Frontend Patterns](realtime_and_frontend_patterns.md) - SSE, streaming, rendering safety, scrolling/windowing, responsive UI, and shared tokens.
 - [Worktree and Lineage](worktree_and_lineage.md) - Isolated worktrees, diffs, merge/recovery, cleanup, commits, chained-task lineage, and known review-comment/GitHub-PR sync/UI gaps (#221, #271, #284, #286).
-- [Integrations and Channels](integrations_and_channels.md) - GitHub, webhooks, Slack, Telegram, Discord, Email, outbound messaging, migration renumbering after main conflicts, migration count (144), and the fixed webhook priority-scale bug (#287, PR #290).
+- [Integrations and Channels](integrations_and_channels.md) - GitHub, webhooks, Slack, Telegram, Discord, Email, outbound messaging, migration renumbering after main conflicts, migration count (144), the fixed webhook priority-scale bug (#287, PR #290), and authorization-handler consolidation opportunity (2026-08-07 Redundancy Finder audit).
 - [Usage Analytics](usage_analytics.md) - Local model/skill usage, token normalization, Analytics UI/API, account snapshots, and privacy.
 - [Testing Coverage and Performance](testing_coverage_and_performance.md) - Coverage priorities, validation conventions, performance seams, environment caveats, and **ExecutionStreamHub mutex lock contention optimization (Aug 2026)**.
 - [Product Vision and Reviewable Autonomy](product_vision_and_autonomy.md) - Product direction, review boundaries, user priorities, recursive improvement, and naming constraints.
