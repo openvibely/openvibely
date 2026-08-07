@@ -357,6 +357,9 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.Contains(t, githubSDLCImplementationPrompt, "Supply pr_body with a concise factual Markdown summary of the changes and validation")
 	require.Contains(t, githubSDLCImplementationPrompt, "Closes #<source issue number>")
 	require.Contains(t, githubSDLCImplementationPrompt, "Do not include task IDs, product or automation boilerplate, or process narration")
+	require.Contains(t, githubSDLCLoopAuditorPrompt, "Inspect and report findings only")
+	require.Contains(t, githubSDLCLoopAuditorPrompt, "Do not create, execute, modify, or link implementation tasks")
+	require.Contains(t, githubSDLCLoopAuditorPrompt, "The Dev Inbox alone creates implementation tasks")
 	for name, prompt := range map[string]string{
 		"vision suggestions":  githubSDLCOfferingManagerPrompt,
 		"bug finder":          githubSDLCBugFinderPrompt,

@@ -428,6 +428,11 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		"release_alert_claim":              true,
 		"list_capabilities":                true,
 	}
+	if strings.HasPrefix(task.CreatedVia, "automation:") && strings.HasSuffix(task.CreatedVia, ":auditor") {
+		delete(allowed, "create_task")
+		delete(allowed, "create_swarm_task")
+		delete(allowed, "execute_tasks")
+	}
 	for _, def := range defs {
 		name := strings.ToLower(strings.TrimSpace(def.Name))
 		if !allowed[name] {

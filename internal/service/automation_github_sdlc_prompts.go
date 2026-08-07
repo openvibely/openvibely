@@ -75,7 +75,9 @@ Do not list, search, or inspect existing GitHub issues for duplicate detection. 
 
 Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.`
 
-const githubSDLCLoopAuditorPrompt = `Reviews stale labels, blocked work, duplicate tasks, missing issue/task/PR links, and unexpected GitHub assignments.`
+const githubSDLCLoopAuditorPrompt = `Review GitHub SDLC loop state for stale labels, blocked work, duplicate tasks, missing issue/task/PR links, and unexpected assignments.
+
+Inspect and report findings only. Do not create, execute, modify, or link implementation tasks, and do not open pull requests. The Dev Inbox alone creates implementation tasks after a GitHub issue is assigned to an authorized inbox identity. Use a human-review notification or report the finding when follow-up is needed.`
 
 func githubSDLCRolePrompt(role string) (string, error) {
 	switch strings.TrimSpace(role) {

@@ -489,6 +489,22 @@ func TestRunChannelChatFirstTurnBuildsRuntimeAfterPersistingCallerTask(t *testin
 	require.NotNil(t, runReq.RuntimeTools)
 }
 
+func TestTaskControlRuntimeOmitsImplementationTaskToolsForLoopAuditor(t *testing.T) {
+	loopAuditor := models.Task{
+		ProjectID:  "project",
+		Category:   models.CategoryScheduled,
+		CreatedVia: "automation:github-sdlc:auditor",
+	}
+
+	runtime := (&LLMService{}).taskControlRuntimeTools(loopAuditor)
+	require.NotNil(t, runtime)
+	require.False(t, runtime.HasDefinition("create_task"))
+	require.False(t, runtime.HasDefinition("create_swarm_task"))
+	require.False(t, runtime.HasDefinition("execute_tasks"))
+	require.True(t, runtime.HasDefinition("list_tasks"))
+	require.True(t, runtime.HasDefinition("create_notification"))
+}
+
 func TestTaskControlRuntimeExposesExecuteTasksAndStartsExactBacklogTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
