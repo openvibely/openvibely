@@ -96,7 +96,7 @@ func (h *Handler) HandleWebhookInbound(c echo.Context) error {
 		ProjectID:  endpoint.ProjectID,
 		Title:      title,
 		Category:   models.CategoryActive,
-		Priority:   endpoint.DefaultPriority,
+		Priority:   webhookTaskPriority(endpoint.DefaultPriority),
 		Status:     models.StatusPending,
 		Prompt:     prompt,
 		CreatedVia: models.TaskOriginWebhook,
@@ -150,6 +150,19 @@ func (h *Handler) HandleWebhookInbound(c echo.Context) error {
 
 // verifyWebhookAuth checks the webhook secret using constant-time comparison.
 // Supports X-Webhook-Secret header (direct comparison) and X-Hub-Signature-256 (HMAC).
+// webhookTaskPriority maps a stored webhook default priority onto the canonical
+// task priority scale (1=Low, 2=Normal, 3=High, 4=Urgent). Legacy endpoints
+// persisted before the priority scale was corrected may still store 0, which
+// on the canonical scale is treated as no badge and sorts last; remap that
+// legacy value to Normal (2) instead of silently producing a badge-less,
+// bottom-sorted task.
+func webhookTaskPriority(defaultPriority int) int {
+	if defaultPriority < 1 || defaultPriority > 4 {
+		return 2
+	}
+	return defaultPriority
+}
+
 func verifyWebhookAuth(req *http.Request, secret string, body []byte) bool {
 	// Check direct secret header first
 	headerSecret := req.Header.Get("X-Webhook-Secret")
@@ -297,7 +310,7 @@ func (h *Handler) HandleWebhookCreate(c echo.Context) error {
 		SystemInstructions: strings.TrimSpace(c.FormValue("system_instructions")),
 		TitleTemplate:      strings.TrimSpace(c.FormValue("title_template")),
 		PromptTemplate:     strings.TrimSpace(c.FormValue("prompt_template")),
-		DefaultPriority:    parseIntClamped(c.FormValue("default_priority"), 0, 4),
+		DefaultPriority:    parseIntClamped(c.FormValue("default_priority"), 1, 4),
 	}
 
 	if err := h.webhookRepo.Create(c.Request().Context(), w); err != nil {
@@ -338,7 +351,7 @@ func (h *Handler) HandleWebhookUpdate(c echo.Context) error {
 	w.SystemInstructions = strings.TrimSpace(c.FormValue("system_instructions"))
 	w.TitleTemplate = strings.TrimSpace(c.FormValue("title_template"))
 	w.PromptTemplate = strings.TrimSpace(c.FormValue("prompt_template"))
-	w.DefaultPriority = parseIntClamped(c.FormValue("default_priority"), 0, 4)
+	w.DefaultPriority = parseIntClamped(c.FormValue("default_priority"), 1, 4)
 
 	if err := h.webhookRepo.Update(c.Request().Context(), w); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update webhook")
@@ -416,7 +429,7 @@ func (h *Handler) HandleWebhookTest(c echo.Context) error {
 		ProjectID:  endpoint.ProjectID,
 		Title:      title,
 		Category:   models.CategoryActive,
-		Priority:   endpoint.DefaultPriority,
+		Priority:   webhookTaskPriority(endpoint.DefaultPriority),
 		Status:     models.StatusPending,
 		Prompt:     prompt,
 		CreatedVia: models.TaskOriginWebhook,

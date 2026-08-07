@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 // webhookTestContext sets up a test context with webhook repo wired in.
@@ -382,6 +384,198 @@ func TestWebhookCRUD_CreateViaForm(t *testing.T) {
 	}
 	if assigned[0].AgentDefinitionID != agent1.ID || assigned[1].AgentDefinitionID != agent2.ID {
 		t.Fatalf("unexpected agent assignment order: %#v", assigned)
+	}
+}
+
+// TestWebhookCRUD_DefaultPriorityMatchesCanonicalScale proves the webhook
+// Default Priority dropdown options persist on the canonical task priority
+// scale (1=Low, 2=Normal, 3=High, 4=Urgent) for both create and update.
+func TestWebhookCRUD_DefaultPriorityMatchesCanonicalScale(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Priority Scale").Build()
+
+	for _, want := range []int{1, 2, 3, 4} {
+		form := url.Values{
+			"project_id":       {project.ID},
+			"name":             {"Priority Hook"},
+			"default_priority": {strconv.Itoa(want)},
+		}
+		req := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		rec := httptest.NewRecorder()
+		wtc.echo.ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create priority=%d: expected 201, got %d; body=%s", want, rec.Code, rec.Body.String())
+		}
+
+		webhooks, _ := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
+		var created *models.WebhookEndpoint
+		for i := range webhooks {
+			if webhooks[i].DefaultPriority == want {
+				created = &webhooks[i]
+			}
+		}
+		if created == nil {
+			t.Fatalf("expected a created webhook with DefaultPriority=%d, got %#v", want, webhooks)
+		}
+
+		// Now update it to a different value on the canonical scale and confirm
+		// the persisted value matches exactly (no inversion/remapping).
+		other := want%4 + 1
+		updateForm := url.Values{
+			"name":             {"Priority Hook Updated"},
+			"default_priority": {strconv.Itoa(other)},
+		}
+		updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+created.ID, strings.NewReader(updateForm.Encode()))
+		updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		updateRec := httptest.NewRecorder()
+		wtc.echo.ServeHTTP(updateRec, updateReq)
+		if updateRec.Code != http.StatusOK {
+			t.Fatalf("update priority=%d: expected 200, got %d; body=%s", other, updateRec.Code, updateRec.Body.String())
+		}
+
+		updated, err := wtc.webhookRepo.GetByID(context.Background(), created.ID)
+		if err != nil || updated == nil {
+			t.Fatalf("GetByID after update: %v", err)
+		}
+		if updated.DefaultPriority != other {
+			t.Errorf("updated DefaultPriority = %d, want %d", updated.DefaultPriority, other)
+		}
+	}
+}
+
+// TestWebhookCRUD_BlankDefaultPriorityDoesNotProduceLegacyZero proves blank/omitted
+// default_priority form submissions never resolve to the legacy no-badge value 0.
+func TestWebhookCRUD_BlankDefaultPriorityDoesNotProduceLegacyZero(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Priority Blank").Build()
+
+	// Create with default_priority omitted entirely.
+	createForm := url.Values{
+		"project_id": {project.ID},
+		"name":       {"Blank Priority Hook"},
+	}
+	req := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(createForm.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	webhooks, _ := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
+	if len(webhooks) != 1 {
+		t.Fatalf("expected 1 webhook, got %d", len(webhooks))
+	}
+	if webhooks[0].DefaultPriority == 0 {
+		t.Fatalf("blank default_priority resolved to legacy no-badge 0")
+	}
+	if webhooks[0].DefaultPriority != 1 {
+		t.Errorf("blank default_priority = %d, want the sane default (1, Low)", webhooks[0].DefaultPriority)
+	}
+
+	// Update with default_priority sent as an explicit blank string.
+	updateForm := url.Values{
+		"name":             {"Blank Priority Hook"},
+		"default_priority": {""},
+	}
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+webhooks[0].ID, strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updateRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update: expected 200, got %d; body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	updated, err := wtc.webhookRepo.GetByID(context.Background(), webhooks[0].ID)
+	if err != nil || updated == nil {
+		t.Fatalf("GetByID after update: %v", err)
+	}
+	if updated.DefaultPriority == 0 {
+		t.Fatalf("blank default_priority on update resolved to legacy no-badge 0")
+	}
+}
+
+// TestWebhookInbound_UrgentDefaultPriorityProducesCanonicalUrgentTask proves a
+// webhook configured with the canonical "Urgent" (4) default priority creates
+// a task that renders the Urgent badge and sorts above lower-priority tasks.
+func TestWebhookInbound_UrgentDefaultPriorityProducesCanonicalUrgentTask(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Urgent Priority").Build()
+
+	w := &models.WebhookEndpoint{
+		ProjectID:       project.ID,
+		Name:            "UrgentHook",
+		Enabled:         true,
+		DefaultPriority: 4, // Urgent on the canonical scale.
+	}
+	if err := wtc.webhookRepo.Create(context.Background(), w); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	payload := `{"event_type":"incident.triggered","summary":"Everything is down"}`
+	rec := wtc.jsonRequest("POST", "/webhooks/inbound/"+w.PathToken, payload,
+		map[string]string{"X-Webhook-Secret": w.Secret})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].Priority != 4 {
+		t.Fatalf("task priority = %d, want 4 (canonical Urgent)", tasks[0].Priority)
+	}
+	if components.PriorityLabel(tasks[0].Priority) != "Urgent" {
+		t.Fatalf("PriorityLabel(%d) = %q, want Urgent", tasks[0].Priority, components.PriorityLabel(tasks[0].Priority))
+	}
+}
+
+// TestWebhookInbound_LegacyZeroDefaultPriorityDoesNotProduceNoBadgeTask proves
+// an existing webhook endpoint with a stored legacy DefaultPriority=0 does not
+// silently produce a badge-less, bottom-sorted task.
+func TestWebhookInbound_LegacyZeroDefaultPriorityDoesNotProduceNoBadgeTask(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Legacy Zero Priority").Build()
+
+	w := &models.WebhookEndpoint{
+		ProjectID:       project.ID,
+		Name:            "LegacyZeroHook",
+		Enabled:         true,
+		DefaultPriority: 0, // legacy stored value from before the scale fix.
+	}
+	if err := wtc.webhookRepo.Create(context.Background(), w); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// Force the legacy value past repository-level validation, if any, by
+	// writing it directly so this test exercises a genuinely stored 0.
+	if _, err := wtc.db.Exec(`UPDATE webhook_endpoints SET default_priority = 0 WHERE id = ?`, w.ID); err != nil {
+		t.Fatalf("force legacy default_priority=0: %v", err)
+	}
+
+	payload := `{"event_type":"incident.triggered","summary":"Legacy priority event"}`
+	rec := wtc.jsonRequest("POST", "/webhooks/inbound/"+w.PathToken, payload,
+		map[string]string{"X-Webhook-Secret": w.Secret})
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].Priority == 0 {
+		t.Fatalf("legacy stored DefaultPriority=0 produced a badge-less, bottom-sorted task")
+	}
+	if components.PriorityLabel(tasks[0].Priority) == "" {
+		t.Fatalf("legacy stored DefaultPriority=0 produced a task with no priority badge")
 	}
 }
 
