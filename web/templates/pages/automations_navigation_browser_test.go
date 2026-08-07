@@ -363,8 +363,28 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 	if got := strings.Count(body, `data-automation-builder-actions`); got != 1 {
 		t.Errorf("expected one Edit Automation kebab, got %d", got)
 	}
-	if !strings.Contains(canvas, `data-automation-builder-card-actions`) || !(strings.Index(canvas, `data-automation-add-node-open`) < strings.Index(canvas, `data-automation-builder-save`) && strings.Index(canvas, `data-automation-builder-save`) < strings.Index(canvas, `data-automation-builder-cancel`)) {
-		t.Error("expected Edit Automation canvas actions in Add node, Save changes, then Cancel order")
+	if !strings.Contains(canvas, `data-automation-view-switcher`) || !strings.Contains(canvas, `data-automation-view-graph`) || !strings.Contains(canvas, `data-automation-view-yaml`) {
+		t.Error("expected Edit Automation canvas to include the Graph/YAML view switcher")
+	}
+	if !(strings.Index(canvas, `data-automation-view-graph`) < strings.Index(canvas, `data-automation-view-yaml`) && strings.Index(canvas, `data-automation-view-yaml`) < strings.Index(canvas, `data-automation-add-node-open`) && strings.Index(canvas, `data-automation-add-node-open`) < strings.Index(canvas, `data-automation-builder-save`) && strings.Index(canvas, `data-automation-builder-save`) < strings.Index(canvas, `data-automation-builder-cancel`)) {
+		t.Error("expected Edit Automation canvas actions in Graph, YAML, Add node, Save changes, then Cancel order")
+	}
+	switcherStart := strings.Index(canvas, `data-automation-view-switcher`)
+	if switcherStart < 0 {
+		t.Fatal("expected Edit Automation canvas view switcher")
+	}
+	switcherEndOffset := strings.Index(canvas[switcherStart:], `</div>`)
+	if switcherEndOffset < 0 {
+		t.Fatal("expected Edit Automation canvas view switcher end")
+	}
+	switcher := canvas[switcherStart : switcherStart+switcherEndOffset]
+	for _, want := range []string{`>Graph</button>`, `>YAML</button>`, `btn-active`, `aria-pressed="true"`, `aria-pressed="false"`} {
+		if !strings.Contains(switcher, want) {
+			t.Errorf("expected Edit Automation view switcher to contain %q", want)
+		}
+	}
+	if strings.Contains(switcher, `onclick=`) || strings.Contains(switcher, `hx-`) || strings.Contains(switcher, `form=`) {
+		t.Error("Edit Automation view switcher must remain an inert placeholder")
 	}
 	menuStart := strings.Index(header, `data-automation-builder-actions`)
 	menuEndOffset := strings.Index(header[menuStart:], `</ul>`)
@@ -416,6 +436,9 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 		if !strings.Contains(customCanvasMarkup, want) {
 			t.Errorf("new Custom canvas must match Edit actions and contain %q", want)
 		}
+	}
+	if strings.Contains(customCanvasMarkup, `data-automation-view-switcher`) {
+		t.Error("new Custom canvas must not expose the saved Automation Graph/YAML placeholder")
 	}
 	if strings.Contains(customBody, `data-delete-automation-open`) {
 		t.Error("unsaved Custom builder must not expose Delete")
@@ -471,6 +494,9 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 	for _, want := range []string{
 		`data-automation-live-actions`,
 		`class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions`,
+		`data-automation-view-switcher`,
+		`data-automation-view-graph`,
+		`data-automation-view-yaml`,
 		`class="flex shrink-0 flex-wrap items-center gap-2" data-automation-live-actions`,
 		`data-automation-live-edit`,
 		`data-automation-live-run-now="automation-live-actions"`,
@@ -502,8 +528,25 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation breadcrumb header to contain %q", want)
 		}
 	}
-	if !(strings.Index(cardHeader, `data-automation-live-edit`) < strings.Index(cardHeader, `data-automation-live-run-now`)) {
-		t.Error("expected Live Edit and Run now buttons in primary-action order")
+	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(cardHeader, `data-automation-view-yaml`) < strings.Index(cardHeader, `data-automation-live-edit`) && strings.Index(cardHeader, `data-automation-live-edit`) < strings.Index(cardHeader, `data-automation-live-run-now`)) {
+		t.Error("expected Live canvas actions in Graph, YAML, Edit, then Run now order")
+	}
+	liveSwitcherStart := strings.Index(cardHeader, `data-automation-view-switcher`)
+	if liveSwitcherStart < 0 {
+		t.Fatal("expected Live Automation canvas view switcher")
+	}
+	liveSwitcherEndOffset := strings.Index(cardHeader[liveSwitcherStart:], `</div>`)
+	if liveSwitcherEndOffset < 0 {
+		t.Fatal("expected Live Automation canvas view switcher end")
+	}
+	liveSwitcher := cardHeader[liveSwitcherStart : liveSwitcherStart+liveSwitcherEndOffset]
+	for _, want := range []string{`>Graph</button>`, `>YAML</button>`, `btn-active`, `aria-pressed="true"`, `aria-pressed="false"`} {
+		if !strings.Contains(liveSwitcher, want) {
+			t.Errorf("expected Live Automation view switcher to contain %q", want)
+		}
+	}
+	if strings.Contains(liveSwitcher, `onclick=`) || strings.Contains(liveSwitcher, `hx-`) || strings.Contains(liveSwitcher, `form=`) {
+		t.Error("Live Automation view switcher must remain an inert placeholder")
 	}
 	menuStart := strings.Index(breadcrumbHeader, `class="dropdown dropdown-end shrink-0"`)
 	menuEndOffset := strings.Index(breadcrumbHeader[menuStart:], `</ul>`)

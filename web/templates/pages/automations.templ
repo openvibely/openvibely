@@ -335,6 +335,13 @@ templ AutomationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 	@automationLiveContent(graph, currentProjectID, deleteAvailable)
 }
 
+templ automationCanvasViewSwitcher() {
+	<div class="join" role="group" aria-label="Automation canvas view" data-automation-view-switcher>
+		<button class="btn btn-sm join-item btn-active" type="button" aria-pressed="true" data-automation-view-graph>Graph</button>
+		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-yaml>YAML</button>
+	</div>
+}
+
 templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
 		<div id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
 			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }
@@ -370,14 +377,16 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 			</div>
 		}
 				<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas>
-					<div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions>
-						<div class="flex shrink-0 flex-wrap items-center gap-2" data-automation-live-actions>
-							<button class="btn btn-outline btn-sm" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit automation</button>
-							if graph.Automation.LifecycleState == models.AutomationActive {
-								<button class="btn btn-primary btn-sm" type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run now</button>
-							}
-						</div>
-						<div class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-badges>
+						<div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions>
+							<div class="flex shrink-0 flex-wrap items-center gap-2">
+								@automationCanvasViewSwitcher()
+								<div class="flex shrink-0 flex-wrap items-center gap-2" data-automation-live-actions>
+									<button class="btn btn-outline btn-sm" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit automation</button>
+									if graph.Automation.LifecycleState == models.AutomationActive {
+										<button class="btn btn-primary btn-sm" type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run now</button>
+									}
+								</div>
+							</div>						<div class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-badges>
 							<span class="badge badge-primary badge-outline" data-automation-live-status>{ string(graph.Automation.LifecycleState) }</span>
 							<span class="badge badge-ghost" data-automation-live-health>{ string(graph.Automation.HealthState) }</span>
 						</div>
@@ -756,6 +765,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			}
 					<section class={ "mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4", templ.KV("flex h-[calc(100dvh-12rem)] min-h-[20rem] flex-col", page.AutomationID != "") } data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 						<div class="flex flex-wrap items-start justify-between gap-3">
+							if page.AutomationID != "" {
+								@automationCanvasViewSwitcher()
+							}
 							if page.AutomationID == "" {
 								<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">{ automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect steps:</span> Drag from a node's right handle to another node's left handle. Select a line, then use its × control to delete it or drag an endpoint to reconnect it.</p></div>
 							}
