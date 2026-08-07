@@ -1113,6 +1113,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								yamlEditor.hidden = false;
 								yamlHighlight.classList.add('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');
 								if (yamlViewport) {
+									yamlViewport.scrollTop = 0;
 									yamlViewport.classList.replace('overflow-auto', 'overflow-hidden');
 									yamlViewport.tabIndex = -1;
 									yamlViewport.removeAttribute('aria-label');

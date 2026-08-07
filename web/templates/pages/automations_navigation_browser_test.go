@@ -644,7 +644,8 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s synchronized YAML builder missing %q", source, want)
 			}
 		}
-			if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6"`) {			t.Errorf("%s YAML panel must grow to fill the builder card while remaining hidden in Graph mode", source)
+		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6"`) {
+			t.Errorf("%s YAML panel must grow to fill the builder card while remaining hidden in Graph mode", source)
 		}
 		if !strings.Contains(body, `data-automation-yaml-editor-shell`) || !strings.Contains(body, `data-automation-yaml-editor-viewport`) || !strings.Contains(body, `data-automation-yaml-highlight`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `data-automation-yaml-line-numbers`) {
 			t.Errorf("%s YAML editor must fill its panel with a highlighted, foldable line-number gutter", source)
@@ -654,7 +655,8 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s YAML editor must wrap its source across the available panel width: missing %q", source, want)
 			}
 		}
-			if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden`) || !strings.Contains(body, `class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport`) || !strings.Contains(body, `class="group relative w-10 min-w-0 shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: 2.5rem; min-width: 2.5rem; flex: 0 0 2.5rem;"`) || !strings.Contains(body, `class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-0 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;"`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `w-4`) || !strings.Contains(body, `h-6 w-4`) || !strings.Contains(body, `text-lg`) || !strings.Contains(body, `whitespace-pre-wrap break-words px-3`) || !strings.Contains(body, `data-yaml-indent="' + indent + '"' + hangingIndent`) || !strings.Contains(body, `left:calc(' + column + 'ch + 0.65ch)`) {			t.Errorf("%s YAML gutter must use the split diff viewer's compact w-10 line-number column with overlay fold controls and indentation-preserving wrapping", source)
+		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden`) || !strings.Contains(body, `class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport`) || !strings.Contains(body, `class="group relative w-10 min-w-0 shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: 2.5rem; min-width: 2.5rem; flex: 0 0 2.5rem;"`) || !strings.Contains(body, `class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-0 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;"`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `w-4`) || !strings.Contains(body, `h-6 w-4`) || !strings.Contains(body, `text-lg`) || !strings.Contains(body, `whitespace-pre-wrap break-words px-3`) || !strings.Contains(body, `data-yaml-indent="' + indent + '"' + hangingIndent`) || !strings.Contains(body, `left:calc(' + column + 'ch + 0.65ch)`) {
+			t.Errorf("%s YAML gutter must use the split diff viewer's compact w-10 line-number column with overlay fold controls and indentation-preserving wrapping", source)
 		}
 		for _, want := range []string{`data-automation-yaml-indent-guides`, `data-automation-yaml-indent-dot`, `data-automation-yaml-indent-rail`} {
 			if !strings.Contains(body, want) {
@@ -918,9 +920,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (foldedViewport.scrollTop <= 0 || !editor.hidden || !foldedContent || foldedContent.getBoundingClientRect().top >= foldedContentTop - 1) fail('wheel scrolling a collapsed YAML view must move its visible content while retaining its folded state');
     foldedViewport.click();
     if (!editor.hidden) fail('clicking collapsed YAML content must not unfold it');
-    fold.click();
-    if (editor.hidden) fail('expanding the final collapsed section must restore editing');
-    editor.value = originalYAML;
+	    fold.click();
+	    if (foldedViewport.scrollTop !== 0) fail('expanding a folded section must reset the viewport scroll offset to zero');
+	    if (editor.hidden) fail('expanding the final collapsed section must restore editing');    editor.value = originalYAML;
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     click('[data-automation-view-graph]', 'Graph view button');
