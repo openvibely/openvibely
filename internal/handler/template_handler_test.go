@@ -44,7 +44,7 @@ func setupTemplateTestHandler(t *testing.T) (*Handler, *echo.Echo, *repository.T
 
 	h := New(
 		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc,
-		nil, nil, nil, nil, nil, nil, nil, templateSvc, nil,
+		nil, nil, nil, nil, nil, nil, templateSvc, nil,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, nil, nil, nil, nil,
 	)
 

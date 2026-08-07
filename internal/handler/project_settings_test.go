@@ -56,7 +56,6 @@ func TestProjectSettings_EndToEnd(t *testing.T) {
 		nil, // alertSvc
 		nil, // upcomingSvc
 		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
 		nil, // architectSvc
 		nil, // backlogSvc
@@ -318,7 +317,6 @@ func TestNewProjectDialog(t *testing.T) {
 		nil, // alertSvc
 		nil, // upcomingSvc
 		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
 		nil, // architectSvc
 		nil, // backlogSvc
@@ -454,7 +452,6 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 		nil, // alertSvc
 		nil, // upcomingSvc
 		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
 		nil, // architectSvc
 		nil, // backlogSvc
@@ -595,7 +592,6 @@ func TestUpdateProject_SwitchLocalToGitHub_LocalDisabled(t *testing.T) {
 		nil, // alertSvc
 		nil, // upcomingSvc
 		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
 		nil, // architectSvc
 		nil, // backlogSvc
@@ -721,7 +717,6 @@ func TestProjectCreate_WithDefaultSettings(t *testing.T) {
 		nil, // alertSvc
 		nil, // upcomingSvc
 		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
 		nil, // architectSvc
 		nil, // backlogSvc
@@ -968,7 +963,6 @@ func TestProjectCreate_WithSettings(t *testing.T) {
 		nil, // alertSvc
 		nil, // upcomingSvc
 		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
 		nil, // architectSvc
 		nil, // backlogSvc
@@ -1083,7 +1077,6 @@ func TestDeleteProject(t *testing.T) {
 		nil, // alertSvc
 		nil, // upcomingSvc
 		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
 		nil, // architectSvc
 		nil, // backlogSvc
@@ -1321,7 +1314,6 @@ func TestGlobalPersonality(t *testing.T) {
 		nil, // alertSvc
 		nil, // upcomingSvc
 		nil, // workflowSvc
-		nil, // collisionSvc
 		nil, // insightsSvc
 		nil, // architectSvc
 		nil, // backlogSvc
