@@ -468,29 +468,27 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 	}
 	cardHeader := body[cardStart:viewportStart]
 	breadcrumbHeader := body[:cardStart]
-	legendMarker := strings.Index(cardHeader, `data-automation-live-legend-row`)
-	if legendMarker < 0 {
-		t.Fatal("expected Live Automation legend row")
-	}
-	legendStart := strings.LastIndex(cardHeader[:legendMarker], `<div`)
-	if legendStart < 0 {
-		t.Fatal("expected Live Automation legend row opening element")
-	}
-	legend := cardHeader[legendStart:]
 	for _, want := range []string{
 		`data-automation-live-actions`,
-		`class="mb-3 flex flex-wrap items-start justify-between gap-3" data-automation-live-card-heading`,
-		`class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-actions`,
+		`class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions`,
+		`class="flex shrink-0 flex-wrap items-center gap-2" data-automation-live-actions`,
 		`data-automation-live-edit`,
 		`data-automation-live-run-now="automation-live-actions"`,
+		`data-automation-live-badges`,
+		`data-automation-live-status`,
+		`data-automation-live-health`,
 	} {
 		if !strings.Contains(cardHeader, want) {
-			t.Errorf("expected Live Automation canvas header to contain %q", want)
+			t.Errorf("expected Live Automation canvas actions to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`class="dropdown dropdown-end"`, `data-automation-live-pause`, `data-automation-live-delete`} {
+	for _, forbidden := range []string{
+		`class="dropdown dropdown-end"`, `data-automation-live-pause`, `data-automation-live-delete`,
+		`Node states`, `A node’s border and label show the highest-priority work state currently present.`,
+		`data-automation-live-legend-row`, `aria-label="Graph status legend"`, `Failed`, `Waiting human`, `Recently Completed`,
+	} {
 		if strings.Contains(cardHeader, forbidden) {
-			t.Errorf("Live Automation canvas header must not retain %q", forbidden)
+			t.Errorf("Live Automation canvas must not retain %q", forbidden)
 		}
 	}
 	for _, want := range []string{
@@ -503,20 +501,6 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		if !strings.Contains(breadcrumbHeader, want) {
 			t.Errorf("expected Live Automation breadcrumb header to contain %q", want)
 		}
-	}
-	for _, want := range []string{
-		`class="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2" data-automation-live-legend-row`,
-		`aria-label="Graph status legend"`,
-		`class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-badges`,
-		`data-automation-live-status`,
-		`data-automation-live-health`,
-	} {
-		if !strings.Contains(legend, want) {
-			t.Errorf("expected legend row to contain %q", want)
-		}
-	}
-	if strings.Index(legend, `aria-label="Graph status legend"`) > strings.Index(legend, `data-automation-live-badges`) {
-		t.Error("expected lifecycle and health badges after the graph status legend")
 	}
 	if !(strings.Index(cardHeader, `data-automation-live-edit`) < strings.Index(cardHeader, `data-automation-live-run-now`)) {
 		t.Error("expected Live Edit and Run now buttons in primary-action order")
@@ -648,7 +632,7 @@ func TestAutomationLiveMatchesEditVisualScale(t *testing.T) {
 	}
 }
 
-func TestAutomationLiveCardTypographyMatchesEdit(t *testing.T) {
+func TestAutomationCanvasOmitsExplanatoryCopy(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{ID: "automation-live-type", Name: "Typography", LifecycleState: models.AutomationActive},
 	}
@@ -657,12 +641,6 @@ func TestAutomationLiveCardTypographyMatchesEdit(t *testing.T) {
 		t.Fatalf("render Automation Live: %v", err)
 	}
 	liveBody := liveOut.String()
-	liveHeadingMarker := strings.Index(liveBody, `data-automation-live-card-heading`)
-	liveLegendMarker := strings.Index(liveBody, `data-automation-live-legend-row`)
-	if liveHeadingMarker < 0 || liveLegendMarker <= liveHeadingMarker {
-		t.Fatal("expected Live card heading before legend")
-	}
-	liveHeading := liveBody[liveHeadingMarker:liveLegendMarker]
 
 	page := models.AutomationBuilderPage{
 		AutomationID: "automation-live-type",
@@ -677,34 +655,20 @@ func TestAutomationLiveCardTypographyMatchesEdit(t *testing.T) {
 	}
 	editBody := editOut.String()
 
-	paragraphClass := func(body, text string) string {
-		t.Helper()
-		textAt := strings.Index(body, text)
-		if textAt < 0 {
-			t.Fatalf("expected helper description %q", text)
+	for _, text := range []string{
+		"Node states",
+		"A node’s border and label show the highest-priority work state currently present.",
+		"Graph status legend",
+		`<h3 class="font-semibold">Canvas</h3>`,
+		"Drag nodes to arrange them and empty space to pan.",
+		"Connect steps:",
+	} {
+		if strings.Contains(liveBody, text) || strings.Contains(editBody, text) {
+			t.Errorf("Automation canvas pages must not render explanatory copy %q", text)
 		}
-		paragraphAt := strings.LastIndex(body[:textAt], `<p class="`)
-		if paragraphAt < 0 {
-			t.Fatalf("expected classed helper paragraph before %q", text)
-		}
-		classStart := paragraphAt + len(`<p class="`)
-		classEnd := strings.Index(body[classStart:textAt], `"`)
-		if classEnd < 0 {
-			t.Fatalf("expected helper paragraph class before %q", text)
-		}
-		return body[classStart : classStart+classEnd]
 	}
-
-	if !strings.Contains(liveHeading, `<h3 class="font-semibold">Node states</h3>`) {
-		t.Error("expected Live card heading to match Edit heading typography")
-	}
-	liveDescriptionClass := paragraphClass(liveHeading, `A node’s border and label show the highest-priority work state currently present.`)
-	editDescriptionClass := paragraphClass(editBody, `Drag nodes to arrange them and empty space to pan.`)
-	if editDescriptionClass != `mt-1 text-xs text-base-content/60` {
-		t.Fatalf("unexpected Edit helper typography source of truth: %q", editDescriptionClass)
-	}
-	if liveDescriptionClass != editDescriptionClass {
-		t.Errorf("Live and Edit helper descriptions must use identical typography: Live=%q Edit=%q", liveDescriptionClass, editDescriptionClass)
+	if !strings.Contains(editBody, `class="sr-only" data-automation-connect-status aria-live="polite"`) {
+		t.Error("expected Edit canvas to retain an assistive connection-status region")
 	}
 }
 
@@ -913,7 +877,6 @@ func TestAutomationBuilderRendersDirectionalPortsAndScheduleWording(t *testing.T
 		`aria-label="Input for Daily review"`,
 		`aria-label="Output from Daily review"`,
 		`<span>Schedule</span>`,
-		`Drag from a node's right handle to another node's left handle`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected directional Automation builder to contain %q", want)
@@ -1332,11 +1295,10 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var liveHeader = document.querySelector('#automation-live [data-automation-live-header]');
 	    var liveActions = liveCard && liveCard.querySelector('[data-automation-live-actions]');
 	    var liveMenu = liveHeader && liveHeader.querySelector('[data-automation-live-menu]');
-	    var liveLegendRow = liveCard && liveCard.querySelector('[data-automation-live-legend-row]');
-	    var liveLegend = liveLegendRow && liveLegendRow.querySelector('[aria-label="Graph status legend"]');
-	    var liveBadges = liveLegendRow && liveLegendRow.querySelector('[data-automation-live-badges]');
-	    if (!liveActions || !liveMenu || !liveLegend || !liveBadges || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation page is missing its breadcrumb kebab, canvas actions, legend, status, or health');
-	    if (!liveMenu.closest('[data-automation-live-header]')) fail('Live Automation kebab is not in the breadcrumb header row');	    if (!liveBadges.closest('[data-automation-live-legend-row]')) fail('Live Automation status and health badges are not in the graph legend row');
+	    var liveBadges = liveCard && liveCard.querySelector('[data-automation-live-badges]');
+	    if (!liveActions || !liveMenu || !liveBadges || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation page is missing its breadcrumb kebab, canvas actions, status, or health');
+	    if (!liveMenu.closest('[data-automation-live-header]')) fail('Live Automation kebab is not in the breadcrumb header row');
+	    if (liveCard.querySelector('[data-automation-live-legend-row]') || liveCard.querySelector('[aria-label="Graph status legend"]')) fail('Live Automation retains the removed graph status legend');
 	    click('#automation-live [data-automation-live-run-now]', 'Live Automation Run now button');
 	    await fetch('/automation-run-now-started');
 	    window.openVibelyAutomationLiveRefresh('GET');
