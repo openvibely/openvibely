@@ -7,6 +7,11 @@ import (
 )
 
 // SlackUserProjectRepo persists active project selection per Slack team/user.
+//
+// Unlike the single-key Discord/Telegram/Email user-project repos, Slack
+// selection is keyed by a composite (slack_team_id, slack_user_id), so it
+// keeps its own upsert/get/delete SQL rather than delegating to the shared
+// single-key helpers in auth_repo_common.go.
 type SlackUserProjectRepo struct {
 	db *sql.DB
 }
