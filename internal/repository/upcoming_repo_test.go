@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,6 +115,181 @@ func TestUpcomingRepo_ListPendingActiveTasks(t *testing.T) {
 	}
 	if results[0].AgentName != "Test Agent" {
 		t.Fatalf("expected agent name 'Test Agent', got %q", results[0].AgentName)
+	}
+}
+
+func TestUpcomingRepo_ListRunningTasks_PromptPreviewBounded(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+
+	project := createTestProject(t, projectRepo)
+
+	shortPrompt := "short prompt"
+	longPrompt := strings.Repeat("x", 500)
+
+	shortTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Short Prompt Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusRunning,
+		Prompt:    shortPrompt,
+	}
+	if err := taskRepo.Create(context.Background(), shortTask); err != nil {
+		t.Fatalf("creating short prompt task: %v", err)
+	}
+
+	longTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Long Prompt Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusRunning,
+		Prompt:    longPrompt,
+	}
+	if err := taskRepo.Create(context.Background(), longTask); err != nil {
+		t.Fatalf("creating long prompt task: %v", err)
+	}
+
+	emptyTask := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Empty Prompt Task",
+		Category:  models.CategoryActive,
+		Status:    models.StatusRunning,
+		Prompt:    "",
+	}
+	if err := taskRepo.Create(context.Background(), emptyTask); err != nil {
+		t.Fatalf("creating empty prompt task: %v", err)
+	}
+
+	results, err := upcomingRepo.ListRunningTasks(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 running tasks, got %d", len(results))
+	}
+
+	byTitle := make(map[string]string)
+	for _, r := range results {
+		byTitle[r.Task.Title] = r.Task.Prompt
+	}
+
+	// Task with prompt shorter than the 200-char preview bound displays in full.
+	if got := byTitle["Short Prompt Task"]; got != shortPrompt {
+		t.Fatalf("expected full short prompt %q, got %q", shortPrompt, got)
+	}
+
+	// Task with prompt longer than the bound displays the same truncated text
+	// that truncatePrompt(prompt, 200) would have produced against the full
+	// original prompt.
+	wantLong := longPrompt[:200]
+	if got := byTitle["Long Prompt Task"]; got != wantLong {
+		t.Fatalf("expected bounded prompt preview of length %d, got %q (len %d)", len(wantLong), got, len(got))
+	}
+
+	// Task with empty prompt renders the "no prompt" UI branch (empty string).
+	if got := byTitle["Empty Prompt Task"]; got != "" {
+		t.Fatalf("expected empty prompt to remain empty, got %q", got)
+	}
+}
+
+func TestUpcomingRepo_ListPendingActiveTasks_PromptPreviewBounded(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+
+	project := createTestProject(t, projectRepo)
+	longPrompt := strings.Repeat("y", 300)
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Pending Long Prompt",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    longPrompt,
+	}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		t.Fatalf("creating task: %v", err)
+	}
+
+	results, err := upcomingRepo.ListPendingActiveTasks(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 pending active task, got %d", len(results))
+	}
+	if got, want := results[0].Task.Prompt, longPrompt[:200]; got != want {
+		t.Fatalf("expected bounded prompt preview %q, got %q", want, got)
+	}
+}
+
+func TestUpcomingRepo_ListUpcomingScheduledTasks_PromptPreviewAndScheduleFields(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	scheduleRepo := NewScheduleRepo(db)
+
+	project := createTestProject(t, projectRepo)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	longPrompt := strings.Repeat("z", 400)
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Scheduled Long Prompt",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusPending,
+		Prompt:    longPrompt,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("creating task: %v", err)
+	}
+
+	nextRun := now.Add(1 * time.Hour)
+	sched := &models.Schedule{
+		TaskID:         task.ID,
+		RunAt:          now,
+		RepeatType:     models.RepeatDaily,
+		RepeatInterval: 1,
+		Enabled:        true,
+		NextRun:        &nextRun,
+	}
+	if err := scheduleRepo.Create(ctx, sched); err != nil {
+		t.Fatalf("creating schedule: %v", err)
+	}
+
+	results, err := upcomingRepo.ListUpcomingScheduledTasks(ctx, project.ID, now.Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 scheduled task, got %d", len(results))
+	}
+
+	// Bounded prompt projection.
+	if got, want := results[0].Task.Prompt, longPrompt[:200]; got != want {
+		t.Fatalf("expected bounded prompt preview %q, got %q", want, got)
+	}
+
+	// Schedule fields still join correctly alongside the bounded prompt projection.
+	if results[0].Schedule == nil {
+		t.Fatalf("expected schedule to be populated")
+	}
+	if results[0].Schedule.RepeatType != models.RepeatDaily {
+		t.Fatalf("expected repeat type daily, got %q", results[0].Schedule.RepeatType)
+	}
+	if results[0].Schedule.RepeatInterval != 1 {
+		t.Fatalf("expected repeat interval 1, got %d", results[0].Schedule.RepeatInterval)
+	}
+	if !results[0].Schedule.Enabled {
+		t.Fatalf("expected schedule enabled")
+	}
+	if results[0].NextRun == nil || !results[0].NextRun.Equal(nextRun) {
+		t.Fatalf("expected next run %v, got %v", nextRun, results[0].NextRun)
 	}
 }
 
