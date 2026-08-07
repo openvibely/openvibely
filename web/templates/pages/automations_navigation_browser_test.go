@@ -790,6 +790,12 @@ edges:
 	if err := AutomationBuilderContent(page, "project-browser").Render(context.Background(), &builder); err != nil {
 		t.Fatalf("render browser Automation builder: %v", err)
 	}
+	cardsPage := page
+	cardsPage.InitialView = "cards"
+	var cardsBuilder bytes.Buffer
+	if err := AutomationBuilderContent(cardsPage, "project-browser").Render(context.Background(), &cardsBuilder); err != nil {
+		t.Fatalf("render browser Cards preview builder: %v", err)
+	}
 
 	runner := `<script>
 window.addEventListener('DOMContentLoaded', function() {
@@ -829,6 +835,13 @@ window.addEventListener('DOMContentLoaded', function() {
     var editor = document.querySelector('[data-automation-yaml-editor]');
     var graph = document.querySelector('[data-automation-graph-panel]');
     var yaml = document.querySelector('[data-automation-yaml-panel]');
+    var requestedInitialView = document.querySelector('[data-automation-initial-view]');
+    if (requestedInitialView && requestedInitialView.value === 'cards') {
+      var returnedCards = document.querySelector('[data-automation-cards-panel]');
+      if (!returnedCards || !isVisible(returnedCards) || isVisible(graph) || isVisible(yaml)) fail('YAML preview replacement did not restore the requested Cards view');
+      await report('pass', '');
+      return;
+    }
     if (!editor || !graph || !yaml) fail('builder did not render both graph and YAML views');
     if (editor.readOnly) fail('Edit YAML editor is unexpectedly read-only');
     ['Automation YAML', 'YAML controls node and connection configuration', 'Preview YAML'].forEach(function(legacy) {
@@ -999,7 +1012,10 @@ window.addEventListener('DOMContentLoaded', function() {
     document.body.appendChild(errorColorReference);
     if (errorDecorationColor !== window.getComputedStyle(errorColorReference).color) fail('malformed YAML error underline does not use the theme error color: ' + errorDecorationColor);
     errorColorReference.remove();
-    await report('pass', '');
+    editor.value = originalYAML + '# open Cards after canonical YAML preview\n';
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    cardsButton.click();
+    return;
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
@@ -1008,8 +1024,20 @@ window.addEventListener('DOMContentLoaded', function() {
 	var yamlParseRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/":
+		case "/", "/automations/builder":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if r.Method == http.MethodPost {
+				if err := r.ParseForm(); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				if r.FormValue("initial_view") != "cards" {
+					http.Error(w, "Cards preview must request the Cards initial view", http.StatusBadRequest)
+					return
+				}
+				_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.p-4{padding:16px}.px-0{padding-left:0;padding-right:0}.py-4{padding-top:16px;padding-bottom:16px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:40px;position:relative}[data-automation-yaml-fold-controls]{position:absolute;top:0;right:0;bottom:0;width:16px}[data-automation-yaml-fold]{position:absolute;right:0;width:16px;height:24px}[data-automation-yaml-panel]{height:260px;display:flex;flex-direction:column;overflow:hidden}[data-automation-yaml-editor-shell]{display:flex;flex:1 1 0%%;min-height:0;overflow:hidden}[data-automation-yaml-editor-viewport]{position:relative;min-height:0;flex:1 1 0%%;overflow:hidden}[data-automation-yaml-editor-viewport].overflow-auto{overflow:auto}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.left-0{left:0}.inset-y-0{top:0;bottom:0}.whitespace-nowrap{white-space:nowrap}.text-left{text-align:left}.text-right{text-align:right}.px-2{padding-left:8px;padding-right:8px}.py-0{padding-top:0;padding-bottom:0}.pb-0{padding-bottom:0}.pl-2{padding-left:8px}.pr-0{padding-right:0}.pt-0{padding-top:0}.p-0{padding:0}.w-full{width:100%%}.text-xs{font-size:12px;line-height:16px}.font-mono{font-family:monospace}.border-collapse{border-collapse:collapse}.diff-table td{padding-top:1px;padding-bottom:1px;vertical-align:top;line-height:1.5}.diff-line-num{min-width:40px;user-select:none}[data-automation-yaml-line-numbers]{width:100%%;margin:0;font:12px/24px monospace}</style></head><body><div style="position:absolute;visibility:hidden;left:20px;right:20px"><table class="diff-table w-full text-xs font-mono border-collapse"><colgroup><col style="width:40px"/><col style="width:50%%"/><col style="width:40px"/><col style="width:50%%"/></colgroup><tbody><tr><td class="diff-line-num text-right px-2 py-0" data-split-diff-gutter-reference>1</td><td>source</td><td class="diff-line-num text-right px-2 py-0">1</td><td>source</td></tr></tbody></table></div>%s%s</body></html>`, cardsBuilder.String(), runner)
+				return
+			}
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.p-4{padding:16px}.px-0{padding-left:0;padding-right:0}.py-4{padding-top:16px;padding-bottom:16px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:40px;position:relative}[data-automation-yaml-fold-controls]{position:absolute;top:0;right:0;bottom:0;width:16px}[data-automation-yaml-fold]{position:absolute;right:0;width:16px;height:24px}[data-automation-yaml-panel]{height:260px;display:flex;flex-direction:column;overflow:hidden}[data-automation-yaml-editor-shell]{display:flex;flex:1 1 0%%;min-height:0;overflow:hidden}[data-automation-yaml-editor-viewport]{position:relative;min-height:0;flex:1 1 0%%;overflow:hidden}[data-automation-yaml-editor-viewport].overflow-auto{overflow:auto}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.left-0{left:0}.inset-y-0{top:0;bottom:0}.whitespace-nowrap{white-space:nowrap}.text-left{text-align:left}.text-right{text-align:right}.px-2{padding-left:8px;padding-right:8px}.py-0{padding-top:0;padding-bottom:0}.pb-0{padding-bottom:0}.pl-2{padding-left:8px}.pr-0{padding-right:0}.pt-0{padding-top:0}.p-0{padding:0}.w-full{width:100%%}.text-xs{font-size:12px;line-height:16px}.font-mono{font-family:monospace}.border-collapse{border-collapse:collapse}.diff-table td{padding-top:1px;padding-bottom:1px;vertical-align:top;line-height:1.5}.diff-line-num{min-width:40px;user-select:none}[data-automation-yaml-line-numbers]{width:100%%;margin:0;font:12px/24px monospace}</style></head><body><div style="position:absolute;visibility:hidden;left:20px;right:20px"><table class="diff-table w-full text-xs font-mono border-collapse"><colgroup><col style="width:40px"/><col style="width:50%%"/><col style="width:40px"/><col style="width:50%%"/></colgroup><tbody><tr><td class="diff-line-num text-right px-2 py-0" data-split-diff-gutter-reference>1</td><td>source</td><td class="diff-line-num text-right px-2 py-0">1</td><td>source</td></tr></tbody></table></div>%s%s</body></html>`, builder.String(), runner)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")

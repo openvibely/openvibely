@@ -135,6 +135,7 @@ type AutomationBuilderPage struct {
 	LifecycleState          AutomationLifecycleState     `json:"lifecycle_state,omitempty"`
 	YAML                    string                       `json:"-"`
 	YAMLProvided            bool                         `json:"-"`
+	InitialView             string                       `json:"-"`
 	Error                   string                       `json:"error,omitempty"`
 }
 

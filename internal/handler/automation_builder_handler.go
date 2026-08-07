@@ -116,7 +116,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	page := models.AutomationBuilderPage{Result: *result, Source: source}
+	page := models.AutomationBuilderPage{Result: *result, Source: source, InitialView: automationBuilderInitialView(c)}
 	if !automationBuilderSaveRequested(c) {
 		return h.renderAutomationBuilder(c, page)
 	}
@@ -178,7 +178,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		return err
 	}
 	page := models.AutomationBuilderPage{Result: *result, AutomationID: automationID, Source: opened.Definition.Version.Source,
-		TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState}
+		TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState, InitialView: automationBuilderInitialView(c)}
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"?project_id="+projectID)
 	}
@@ -210,6 +210,13 @@ func decodeAutomationBuilderCandidate(c echo.Context) (models.AutomationDraftCan
 		return service.DecodeAutomationDraftYAML([]byte(raw))
 	}
 	return service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
+}
+
+func automationBuilderInitialView(c echo.Context) string {
+	if strings.TrimSpace(c.FormValue("initial_view")) == "cards" {
+		return "cards"
+	}
+	return ""
 }
 
 func automationBuilderVisualActionRequested(c echo.Context) bool {

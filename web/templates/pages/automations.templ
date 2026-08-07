@@ -1090,9 +1090,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			}
 			<form id="automation-design-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="hidden" data-automation-yaml-form>
 				<input type="hidden" name="project_id" value={ currentProjectID }/>
-				<input type="hidden" name="builder_source" value={ page.Source }/>
-			</form>
-			<input type="hidden" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
+					<input type="hidden" name="builder_source" value={ page.Source }/>
+					<input type="hidden" name="initial_view" value={ page.InitialView } data-automation-initial-view/>
+				</form>			<input type="hidden" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/>
 			<script>
 			(function() {
 				var root = document.querySelector('[data-automation-draft-canvas]');
@@ -1624,7 +1624,12 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						}
 						function previewYAMLThenSelect(view) {
 							var form = document.getElementById('automation-design-form');
-							if (yamlEditor && form && yamlEditor.value !== visualCandidateYAML()) { form.requestSubmit(); return; }
+							if (yamlEditor && form && yamlEditor.value !== visualCandidateYAML()) {
+								var initialView = form.querySelector('[data-automation-initial-view]');
+								if (initialView) initialView.value = view === 'cards' ? 'cards' : '';
+								form.requestSubmit();
+								return;
+							}
 							selectAutomationBuilderView(view);
 						}
 						graphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });
@@ -1636,8 +1641,10 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								cardsForm.requestSubmit();
 							});
 						});
-						renderEdges(); syncCandidate(false);				})();
-		</script>
+							renderEdges(); syncCandidate(false);
+							var initialView = builder.querySelector('[data-automation-initial-view]');
+							if (initialView && initialView.value === 'cards') selectAutomationBuilderView('cards');
+					})();		</script>
 	</div>
 }
 

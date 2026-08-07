@@ -655,6 +655,35 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 }
 
+func TestAutomationBuilderPreviewRestoresCardsView(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Cards preview project").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, nil)
+
+	candidate, err := drafts.BlankCandidate("")
+	require.NoError(t, err)
+	candidate.Name = "Cards preview"
+	candidate.Nodes = []models.AutomationDraftNode{{
+		Key: "review", Name: "Review", Type: models.AutomationNodeAgentTask, Role: "task",
+		Config: map[string]any{"prompt": "Review the request.", "category": "backlog", "priority": 2},
+	}}
+	yaml, err := service.EncodeAutomationDraftYAML(candidate)
+	require.NoError(t, err)
+
+	response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {yaml}, "initial_view": {"cards"},
+	}).Execute()
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `name="initial_view" value="cards" data-automation-initial-view`)
+	require.Contains(t, response.Body.String(), `if (initialView && initialView.value === 'cards') selectAutomationBuilderView('cards');`)
+}
+
 func TestAutomationYAMLParseReportsMalformedDocumentsWithoutSideEffects(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("YAML parse-only project").Build()
