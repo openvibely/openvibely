@@ -29,3 +29,45 @@ func countAny(ctx context.Context, db *sql.DB, table, errLabel string) (bool, er
 	}
 	return count > 0, nil
 }
+
+// upsertUserProject persists a single-key channel user's active project
+// selection, refreshing updated_at on conflict. errLabel is used only in the
+// wrapped error message on failure.
+func upsertUserProject(ctx context.Context, db *sql.DB, table, keyCol, keyVal, projectID, errLabel string) error {
+	query := fmt.Sprintf(
+		`INSERT INTO %s (%s, project_id, updated_at)
+		 VALUES (?, ?, datetime('now'))
+		 ON CONFLICT(%s) DO UPDATE
+		 SET project_id = excluded.project_id, updated_at = datetime('now')`,
+		table, keyCol, keyCol)
+	if _, err := db.ExecContext(ctx, query, keyVal, projectID); err != nil {
+		return fmt.Errorf("set %s: %w", errLabel, err)
+	}
+	return nil
+}
+
+// getUserProject returns the active project ID for a single-key channel
+// user, or "" if not set. errLabel is used only in the wrapped error message
+// on query failure.
+func getUserProject(ctx context.Context, db *sql.DB, table, keyCol, keyVal, errLabel string) (string, error) {
+	query := fmt.Sprintf(`SELECT project_id FROM %s WHERE %s = ?`, table, keyCol)
+	var projectID string
+	err := db.QueryRowContext(ctx, query, keyVal).Scan(&projectID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("get %s: %w", errLabel, err)
+	}
+	return projectID, nil
+}
+
+// deleteUserProject removes a single-key channel user's active project
+// selection. errLabel is used only in the wrapped error message on failure.
+func deleteUserProject(ctx context.Context, db *sql.DB, table, keyCol, keyVal, errLabel string) error {
+	query := fmt.Sprintf(`DELETE FROM %s WHERE %s = ?`, table, keyCol)
+	if _, err := db.ExecContext(ctx, query, keyVal); err != nil {
+		return fmt.Errorf("delete %s: %w", errLabel, err)
+	}
+	return nil
+}
