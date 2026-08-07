@@ -25,7 +25,8 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		source = strings.TrimSpace(c.FormValue("source"))
 	}
 	var candidate models.AutomationDraftCandidate
-	hasPostedCandidate := strings.TrimSpace(c.FormValue("automation_yaml")) != "" || strings.TrimSpace(c.FormValue("candidate_json")) != ""
+	rawYAML, yamlSubmitted := automationDraftFormValue(c, "automation_yaml")
+	hasPostedCandidate := yamlSubmitted || strings.TrimSpace(c.FormValue("candidate_json")) != ""
 	if hasPostedCandidate {
 		candidate, err = decodeAutomationBuilderCandidate(c)
 	} else {
@@ -45,13 +46,13 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		}
 	}
 	if err != nil {
-		if rawYAML := strings.TrimSpace(c.FormValue("automation_yaml")); rawYAML != "" {
+		if yamlSubmitted {
 			fallback, fallbackErr := h.automationDraftSvc.BlankCandidate("")
 			if fallbackErr != nil {
 				return fallbackErr
 			}
 			return h.renderAutomationBuilder(c, models.AutomationBuilderPage{
-				Result: models.AutomationDraftResult{Candidate: fallback}, Source: source, YAML: rawYAML,
+				Result: models.AutomationDraftResult{Candidate: fallback}, Source: source, YAML: rawYAML, YAMLProvided: true,
 				Error: "YAML did not parse: " + err.Error(),
 			})
 		}
@@ -79,7 +80,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		return err
 	}
 	if hasPostedCandidate {
-		if strings.TrimSpace(c.FormValue("automation_yaml")) == "" {
+		if !yamlSubmitted {
 			h.discardStaleTemplateOnlyNodeConfig(&candidate)
 			applyAutomationDraftFormValues(c, &candidate)
 			if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
@@ -129,16 +130,16 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		candidate.Name = opened.Candidate.Name
-	} else if strings.TrimSpace(c.FormValue("automation_yaml")) != "" || strings.TrimSpace(c.FormValue("candidate_json")) != "" {
+	} else if rawYAML, yamlSubmitted := automationDraftFormValue(c, "automation_yaml"); yamlSubmitted || strings.TrimSpace(c.FormValue("candidate_json")) != "" {
 		candidate, err = decodeAutomationBuilderCandidate(c)
 		if err != nil {
 			return h.renderAutomationBuilder(c, models.AutomationBuilderPage{
 				Result: *opened, AutomationID: automationID, Source: opened.Definition.Version.Source,
 				TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState,
-				YAML: strings.TrimSpace(c.FormValue("automation_yaml")), Error: "YAML did not parse: " + err.Error(),
+				YAML: rawYAML, YAMLProvided: true, Error: "YAML did not parse: " + err.Error(),
 			})
 		}
-		if strings.TrimSpace(c.FormValue("automation_yaml")) == "" {
+		if !yamlSubmitted {
 			h.discardStaleTemplateOnlyNodeConfig(&candidate)
 			applyAutomationDraftFormValues(c, &candidate)
 			if err := h.applyAutomationBuilderAction(c, &candidate); err != nil {
@@ -162,7 +163,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 }
 
 func decodeAutomationBuilderCandidate(c echo.Context) (models.AutomationDraftCandidate, error) {
-	if raw := strings.TrimSpace(c.FormValue("automation_yaml")); raw != "" {
+	if raw, yamlSubmitted := automationDraftFormValue(c, "automation_yaml"); yamlSubmitted {
 		return service.DecodeAutomationDraftYAML([]byte(raw))
 	}
 	return service.DecodeAutomationDraftCandidate([]byte(strings.TrimSpace(c.FormValue("candidate_json"))))
@@ -700,7 +701,7 @@ func (h *Handler) changeAutomationLifecycle(c echo.Context, action string) error
 
 func (h *Handler) renderAutomationBuilder(c echo.Context, page models.AutomationBuilderPage) error {
 	projectID, _ := h.getCurrentProjectID(c)
-	if page.YAML == "" {
+	if !page.YAMLProvided && page.YAML == "" {
 		encodedYAML, err := service.EncodeAutomationDraftYAML(page.Result.Candidate)
 		if err != nil {
 			return err

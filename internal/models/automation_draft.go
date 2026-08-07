@@ -134,6 +134,7 @@ type AutomationBuilderPage struct {
 	TemplateUpdateAvailable bool                         `json:"template_update_available,omitempty"`
 	LifecycleState          AutomationLifecycleState     `json:"lifecycle_state,omitempty"`
 	YAML                    string                       `json:"-"`
+	YAMLProvided            bool                         `json:"-"`
 	Error                   string                       `json:"error,omitempty"`
 }
 

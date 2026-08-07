@@ -639,6 +639,69 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 }
 
+func TestAutomationBuilderRejectsEmptyYAMLWithoutSideEffects(t *testing.T) {
+	newBuilder := func(t *testing.T) (*TestContext, *models.Project, *repository.AutomationRepo, *service.AutomationDraftService) {
+		t.Helper()
+		tc := NewTestContext(t)
+		project := tc.CreateProject().WithName("Empty YAML Builder Project").Build()
+		automationRepo := repository.NewAutomationRepo(tc.db)
+		registry := service.NewAutomationAdapterRegistry()
+		drafts := service.NewAutomationDraftService(automationRepo, registry)
+		validator := service.NewAutomationSaveValidator(registry, drafts)
+		compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+		tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+		tc.handler.SetAutomationBuilderServices(drafts, nil, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+		return tc, project, automationRepo, drafts
+	}
+
+	t.Run("new template", func(t *testing.T) {
+		tc, project, _, _ := newBuilder(t)
+		response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+			"project_id": {project.ID}, "builder_source": {"template"}, "template_key": {service.AutomationAdapterNativeSDLC},
+			"automation_yaml": {""}, "save_changes": {"true"},
+		}).Execute()
+
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		require.Empty(t, response.Header().Get("HX-Redirect"))
+		require.Contains(t, response.Body.String(), "YAML did not parse")
+		require.Regexp(t, `(?s)<textarea[^>]*name="automation_yaml"[^>]*>\s*</textarea>`, response.Body.String())
+		require.Zero(t, tableCountHandler(t, tc, "automations"))
+		require.Zero(t, tableCountHandler(t, tc, "tasks"))
+		require.Zero(t, tableCountHandler(t, tc, "schedules"))
+	})
+
+	t.Run("saved edit", func(t *testing.T) {
+		tc, project, automationRepo, drafts := newBuilder(t)
+		candidate, err := drafts.TemplateCandidate(service.AutomationAdapterNativeSDLC)
+		require.NoError(t, err)
+		yaml, err := service.EncodeAutomationDraftYAML(candidate)
+		require.NoError(t, err)
+		created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+			"project_id": {project.ID}, "builder_source": {"template"}, "automation_yaml": {yaml}, "save_changes": {"true"},
+		}).Execute()
+		require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
+		var automationID, versionID string
+		require.NoError(t, tc.db.QueryRow(`SELECT id, published_version_id FROM automations WHERE project_id = ?`, project.ID).Scan(&automationID, &versionID))
+		before, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
+		require.NoError(t, err)
+
+		response := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{
+			"project_id": {project.ID}, "automation_yaml": {""}, "save_changes": {"true"},
+		}).Execute()
+
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		require.Empty(t, response.Header().Get("HX-Redirect"))
+		require.Contains(t, response.Body.String(), "YAML did not parse")
+		require.Regexp(t, `(?s)<textarea[^>]*name="automation_yaml"[^>]*>\s*</textarea>`, response.Body.String())
+		var currentVersionID string
+		require.NoError(t, tc.db.QueryRow(`SELECT published_version_id FROM automations WHERE id = ?`, automationID).Scan(&currentVersionID))
+		require.Equal(t, versionID, currentVersionID)
+		after, err := automationRepo.GetDefinition(context.Background(), project.ID, automationID)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+	})
+}
+
 func TestAutomationBuilderRejectsMalformedYAMLWithoutSideEffects(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Malformed YAML Project").Build()
