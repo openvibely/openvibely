@@ -843,14 +843,16 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!foldControls || !fold || fold.parentElement !== foldControls || !fold.dataset.yamlIndent) fail('YAML editor did not render an in-code section-fold control');
     if (!fold.classList.contains('text-lg')) fail('YAML editor section-fold control is too small');
     var originalYAML = editor.value;
-    editor.value = 'section:\n  message: "' + 'long YAML value '.repeat(40) + '"\n';
+    editor.value = 'section:\n  message: "' + 'long YAML value '.repeat(40) + '"\nnext: "still visible"\n';
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     var wrappedSource = highlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="2"]');
     var wrappedNumber = lineNumbers.querySelector('[data-automation-yaml-line-number][data-yaml-line="2"]');
+    var continuedSource = highlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="3"]');
     var wrappedSourceHeight = wrappedSource && wrappedSource.getBoundingClientRect().height;
     var wrappedNumberHeight = wrappedNumber && wrappedNumber.getBoundingClientRect().height;
     if (!wrappedSource || !wrappedNumber || wrappedSourceHeight <= 24 || Math.abs(wrappedSourceHeight - wrappedNumberHeight) > 1) fail('wrapped YAML source did not retain aligned line numbers: source=' + wrappedSourceHeight + ', number=' + wrappedNumberHeight);
+    if (!continuedSource || window.getComputedStyle(highlight).overflow !== 'visible' || highlight.clientHeight < continuedSource.offsetTop + continuedSource.offsetHeight) fail('wrapped YAML source was clipped before its following logical line');
     editor.value = originalYAML;
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
@@ -919,7 +921,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px}[data-automation-yaml-highlight],[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}[data-automation-yaml-line-numbers]{width:3rem;margin:0;font:16px/24px monospace}</style></head><body>%s%s</body></html>`, builder.String(), runner)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px;overflow:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:2.25rem;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}[data-automation-yaml-line-numbers]{width:3rem;margin:0;font:16px/24px monospace}</style></head><body>%s%s</body></html>`, builder.String(), runner)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
