@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	netmail "net/mail"
 	"strings"
 
@@ -35,24 +34,12 @@ func NormalizeEmailAddress(email string) string {
 // ListByProject returns all system-level authorized email senders.
 // projectID is accepted for UI compatibility but does not scope inbound authorization.
 func (r *EmailAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.EmailAuthorizedSender, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, project_id, email_address, display_name, added_at, added_by
-		 FROM email_authorized_senders
-		 ORDER BY added_at ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("list email authorized senders: %w", err)
-	}
-	defer rows.Close()
-
-	var senders []models.EmailAuthorizedSender
-	for rows.Next() {
-		var s models.EmailAuthorizedSender
-		if err := rows.Scan(&s.ID, &s.ProjectID, &s.EmailAddress, &s.DisplayName, &s.AddedAt, &s.AddedBy); err != nil {
-			return nil, fmt.Errorf("scan email authorized sender: %w", err)
-		}
-		senders = append(senders, s)
-	}
-	return senders, rows.Err()
+	return listAuthorizedUsers(ctx, r.db, "email_authorized_senders", "email_address", "email authorized senders", "email authorized sender",
+		func(rows *sql.Rows) (models.EmailAuthorizedSender, error) {
+			var s models.EmailAuthorizedSender
+			err := rows.Scan(&s.ID, &s.ProjectID, &s.EmailAddress, &s.DisplayName, &s.AddedAt, &s.AddedBy)
+			return s, err
+		})
 }
 
 // IsAuthorized checks whether an email address is authorized at the system channel level.
@@ -63,15 +50,8 @@ func (r *EmailAuthRepo) IsAuthorized(ctx context.Context, projectID, emailAddres
 
 // IsAuthorizedForProject checks the legacy project-scoped row ownership for diagnostics/tests.
 func (r *EmailAuthRepo) IsAuthorizedForProject(ctx context.Context, projectID, emailAddress string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM email_authorized_senders
-		 WHERE project_id = ? AND lower(email_address) = lower(?)`,
-		projectID, NormalizeEmailAddress(emailAddress)).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("check email project authorization: %w", err)
-	}
-	return count > 0, nil
+	return countWhere(ctx, r.db, "email_authorized_senders", "check email project authorization",
+		`project_id = ? AND lower(email_address) = lower(?)`, projectID, NormalizeEmailAddress(emailAddress))
 }
 
 // HasAnyAuthorizedUsers checks whether any system-level email authorized senders are configured.
@@ -87,14 +67,8 @@ func (r *EmailAuthRepo) HasAnyAuthorizedUsersAnywhere(ctx context.Context) (bool
 
 // IsAuthorizedAnywhere checks whether an email address is authorized in any project.
 func (r *EmailAuthRepo) IsAuthorizedAnywhere(ctx context.Context, emailAddress string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM email_authorized_senders WHERE lower(email_address) = lower(?)`,
-		NormalizeEmailAddress(emailAddress)).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("check email authorization anywhere: %w", err)
-	}
-	return count > 0, nil
+	return countWhere(ctx, r.db, "email_authorized_senders", "check email authorization anywhere",
+		`lower(email_address) = lower(?)`, NormalizeEmailAddress(emailAddress))
 }
 
 // Create adds a system-level authorized email sender.
@@ -130,16 +104,10 @@ func (r *EmailAuthRepo) Delete(ctx context.Context, id string) error {
 
 // GetByID returns a single authorized email sender by ID.
 func (r *EmailAuthRepo) GetByID(ctx context.Context, id string) (*models.EmailAuthorizedSender, error) {
-	var s models.EmailAuthorizedSender
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, project_id, email_address, display_name, added_at, added_by
-		 FROM email_authorized_senders WHERE id = ?`, id).
-		Scan(&s.ID, &s.ProjectID, &s.EmailAddress, &s.DisplayName, &s.AddedAt, &s.AddedBy)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get email authorized sender: %w", err)
-	}
-	return &s, nil
+	return getAuthorizedUserByID(ctx, r.db, "email_authorized_senders", "email_address", "get email authorized sender", id,
+		func(row *sql.Row) (models.EmailAuthorizedSender, error) {
+			var s models.EmailAuthorizedSender
+			err := row.Scan(&s.ID, &s.ProjectID, &s.EmailAddress, &s.DisplayName, &s.AddedAt, &s.AddedBy)
+			return s, err
+		})
 }
