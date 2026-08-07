@@ -354,7 +354,13 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						<p class="mt-1 text-sm opacity-60">{ graph.Automation.Description }</p>
 					}
 				</div>
-				@automationLiveMoreActions(graph, deleteAvailable)
+				<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-header-actions>
+					<button class="btn btn-outline btn-sm" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit automation</button>
+					if graph.Automation.LifecycleState == models.AutomationActive {
+						<button class="btn btn-primary btn-sm" type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run now</button>
+					}
+					@automationLiveMoreActions(graph, deleteAvailable)
+				</div>
 			</div>
 		if graph.ExternalState.TrackedResources > 0 {
 			<div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-box border border-base-300 bg-base-100 px-4 py-3" data-automation-external-state>
@@ -378,15 +384,8 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 		}
 				<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas>
 						<div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions>
-							<div class="flex shrink-0 flex-wrap items-center gap-2">
-								@automationCanvasViewSwitcher()
-								<div class="flex shrink-0 flex-wrap items-center gap-2" data-automation-live-actions>
-									<button class="btn btn-outline btn-sm" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit automation</button>
-									if graph.Automation.LifecycleState == models.AutomationActive {
-										<button class="btn btn-primary btn-sm" type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run now</button>
-									}
-								</div>
-							</div>						<div class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-badges>
+							@automationCanvasViewSwitcher()
+							<div class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-badges>
 							<span class="badge badge-primary badge-outline" data-automation-live-status>{ string(graph.Automation.LifecycleState) }</span>
 							<span class="badge badge-ghost" data-automation-live-health>{ string(graph.Automation.HealthState) }</span>
 						</div>
@@ -679,18 +678,23 @@ templ AutomationBuilder(projects []models.Project, currentProjectID string, page
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
 	<div id="automation-builder" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-draft>
 		@layout.PageTitle(page.Result.Candidate.Name)
-			if page.AutomationID != "" {
-				<div class="mb-6 min-w-0" data-automation-builder-header>
-					<div class="flex flex-wrap items-start justify-between gap-3">
-						<div class="min-w-0 flex-1">@automationEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)</div>
-							@automationBuilderMoreActions(page, currentProjectID)					</div>
-					if strings.TrimSpace(page.Result.Candidate.Description) != "" {
-						<p class="mt-1 text-sm opacity-60">{ page.Result.Candidate.Description }</p>
-					}
+		if page.AutomationID != "" {
+			<div class="mb-6 min-w-0" data-automation-builder-header>
+				<div class="flex flex-wrap items-start justify-between gap-3">
+					<div class="min-w-0 flex-1">@automationEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)</div>
+					<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
+						<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button>
+						<a class="btn btn-ghost btn-sm" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a>
+						@automationBuilderMoreActions(page, currentProjectID)
+					</div>
 				</div>
-			} else {			@automationBreadcrumb(currentProjectID, "", "", "New Automation", true)
-		}
-		if page.AutomationID == "" && page.Source != "blank" {
+				if strings.TrimSpace(page.Result.Candidate.Description) != "" {
+					<p class="mt-1 text-sm opacity-60">{ page.Result.Candidate.Description }</p>
+				}
+			</div>
+		} else {
+			@automationBreadcrumb(currentProjectID, "", "", "New Automation", true)
+		}		if page.AutomationID == "" && page.Source != "blank" {
 			<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
 				<div class="min-w-0 flex-1">
 					<label class="form-control max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
@@ -770,25 +774,21 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							if page.AutomationID == "" {
 								<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">{ automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect steps:</span> Drag from a node's right handle to another node's left handle. Select a line, then use its × control to delete it or drag an endpoint to reconnect it.</p></div>
 							}
-							<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-node-tool data-automation-builder-card-actions>						<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
-						if page.AutomationID != "" {
-							<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button>
-							<a class="btn btn-ghost btn-sm" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a>
-						}
-							if page.AutomationID == "" && page.Source == "blank" {
-								<div class="dropdown dropdown-end" data-automation-builder-actions>
-									<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + page.Result.Candidate.Name } onclick="handleDropdownToggle(event)">
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-										</svg>
-									</label>
-									<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
-										<li><button type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button></li>
-									</ul>
-								</div>
+							<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-node-tool data-automation-builder-card-actions>
+								<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
+								if page.AutomationID == "" && page.Source == "blank" {
+									<div class="dropdown dropdown-end" data-automation-builder-actions>
+										<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + page.Result.Candidate.Name } onclick="handleDropdownToggle(event)">
+											<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+											</svg>
+										</label>
+										<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
+											<li><button type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button></li>
+										</ul>
+									</div>
 								}
-							</div>
-						</div>
+							</div>						</div>
 						if page.AutomationID != "" {
 							<span class="sr-only" data-automation-connect-status aria-live="polite"></span>
 						}

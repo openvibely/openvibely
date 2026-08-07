@@ -198,7 +198,8 @@ func TestAutomationLiveHeaderUsesStandardSpacingAndDescriptionStyle(t *testing.T
 	header := body[headerStart:cardStart]
 	for _, want := range []string{
 		`class="mb-6 flex flex-wrap items-start justify-between gap-3"`,
-		`data-automation-breadcrumb`,
+		`data-automation-live-header-actions`,
+		`data-automation-live-edit`,
 		`data-automation-live-menu`,
 		`class="mt-1 text-sm opacity-60"`,
 		`>A standard Automation description.</p>`,
@@ -261,6 +262,9 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 		`class="flex flex-wrap items-start justify-between gap-3"`,
 		`data-automation-breadcrumb`,
 		`data-automation-editable-breadcrumb`,
+		`data-automation-builder-header-actions`,
+		`data-automation-builder-save`,
+		`data-automation-builder-cancel`,
 		`data-automation-builder-actions`,
 		`name="automation_name"`,
 		`value="Edit header spacing"`,
@@ -351,7 +355,7 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 			t.Errorf("expected Edit Automation breadcrumb header to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`data-automation-builder-actions`, `data-automation-builder-pause`, `data-delete-automation-open`} {
+	for _, forbidden := range []string{`data-automation-builder-actions`, `data-automation-builder-save`, `data-automation-builder-cancel`, `data-automation-builder-pause`, `data-delete-automation-open`} {
 		if strings.Contains(canvas, forbidden) {
 			t.Errorf("Edit Automation canvas must not retain %q", forbidden)
 		}
@@ -368,8 +372,11 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 	if !strings.Contains(canvas, `data-automation-view-switcher`) || !strings.Contains(canvas, `data-automation-view-graph`) || !strings.Contains(canvas, `data-automation-view-yaml`) {
 		t.Error("expected Edit Automation canvas to include the Graph/YAML view switcher")
 	}
-	if !(strings.Index(canvas, `data-automation-view-graph`) < strings.Index(canvas, `data-automation-view-yaml`) && strings.Index(canvas, `data-automation-view-yaml`) < strings.Index(canvas, `data-automation-add-node-open`) && strings.Index(canvas, `data-automation-add-node-open`) < strings.Index(canvas, `data-automation-builder-save`) && strings.Index(canvas, `data-automation-builder-save`) < strings.Index(canvas, `data-automation-builder-cancel`)) {
-		t.Error("expected Edit Automation canvas actions in Graph, YAML, Add node, Save changes, then Cancel order")
+	if !(strings.Index(canvas, `data-automation-view-graph`) < strings.Index(canvas, `data-automation-view-yaml`) && strings.Index(canvas, `data-automation-view-yaml`) < strings.Index(canvas, `data-automation-add-node-open`)) {
+		t.Error("expected Edit Automation canvas actions in Graph, YAML, then Add node order")
+	}
+	if !(strings.Index(header, `data-automation-editable-breadcrumb`) < strings.Index(header, `data-automation-builder-save`) && strings.Index(header, `data-automation-builder-save`) < strings.Index(header, `data-automation-builder-cancel`) && strings.Index(header, `data-automation-builder-cancel`) < strings.Index(header, `data-automation-builder-actions`)) {
+		t.Error("expected Edit Automation breadcrumb actions in name, Save changes, Cancel, then kebab order")
 	}
 	switcherStart := strings.Index(canvas, `data-automation-view-switcher`)
 	if switcherStart < 0 {
@@ -494,14 +501,10 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 	cardHeader := body[cardStart:viewportStart]
 	breadcrumbHeader := body[:cardStart]
 	for _, want := range []string{
-		`data-automation-live-actions`,
 		`class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions`,
 		`data-automation-view-switcher`,
 		`data-automation-view-graph`,
 		`data-automation-view-yaml`,
-		`class="flex shrink-0 flex-wrap items-center gap-2" data-automation-live-actions`,
-		`data-automation-live-edit`,
-		`data-automation-live-run-now="automation-live-actions"`,
 		`data-automation-live-badges`,
 		`data-automation-live-status`,
 		`data-automation-live-health`,
@@ -511,7 +514,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		}
 	}
 	for _, forbidden := range []string{
-		`class="dropdown dropdown-end"`, `data-automation-live-pause`, `data-automation-live-delete`,
+		`class="dropdown dropdown-end"`, `data-automation-live-edit`, `data-automation-live-run-now`, `data-automation-live-pause`, `data-automation-live-delete`,
 		`Node states`, `A node’s border and label show the highest-priority work state currently present.`,
 		`data-automation-live-legend-row`, `aria-label="Graph status legend"`, `Failed`, `Waiting human`, `Recently Completed`,
 	} {
@@ -520,6 +523,9 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		}
 	}
 	for _, want := range []string{
+		`data-automation-live-header-actions`,
+		`data-automation-live-edit`,
+		`data-automation-live-run-now="automation-live-actions"`,
 		`data-automation-live-menu`,
 		`class="dropdown dropdown-end shrink-0"`,
 		`aria-label="More actions for Card actions"`,
@@ -532,8 +538,8 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation breadcrumb header to contain %q", want)
 		}
 	}
-	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(cardHeader, `data-automation-view-yaml`) < strings.Index(cardHeader, `data-automation-live-edit`) && strings.Index(cardHeader, `data-automation-live-edit`) < strings.Index(cardHeader, `data-automation-live-run-now`)) {
-		t.Error("expected Live canvas actions in Graph, YAML, Edit, then Run now order")
+	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, `data-automation-live-menu`)) {
+		t.Error("expected Live breadcrumb actions in Edit, Run now, then kebab order")
 	}
 	liveSwitcherStart := strings.Index(cardHeader, `data-automation-view-switcher`)
 	if liveSwitcherStart < 0 {
@@ -568,8 +574,8 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("Live Automation kebab must use dedicated menu selectors instead of %q", forbidden)
 		}
 	}
-	if got := strings.Count(body, `data-automation-live-actions`); got != 1 {
-		t.Errorf("expected one Live Automation action group, got %d", got)
+	if got := strings.Count(body, `data-automation-live-header-actions`); got != 1 {
+		t.Errorf("expected one Live Automation breadcrumb action group, got %d", got)
 	}
 }
 
@@ -602,7 +608,7 @@ func TestAutomationLiveRunNowIsActiveOnly(t *testing.T) {
 	if strings.Contains(pausedBody, `/run-now`) || strings.Contains(pausedBody, `>Run now</button>`) {
 		t.Error("paused Automation Live must not offer Run now")
 	}
-	for _, want := range []string{`data-automation-live-actions`, `data-automation-live-resume`, `>Enable</button>`} {
+	for _, want := range []string{`data-automation-live-header-actions`, `data-automation-live-resume`, `>Enable</button>`} {
 		if !strings.Contains(pausedBody, want) {
 			t.Errorf("expected paused Automation Live kebab to contain %q", want)
 		}
@@ -1340,11 +1346,11 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	    var liveCard = document.querySelector('#automation-live [data-automation-readonly-canvas]');
 	    var liveHeader = document.querySelector('#automation-live [data-automation-live-header]');
-	    var liveActions = liveCard && liveCard.querySelector('[data-automation-live-actions]');
+	    var liveActions = liveHeader && liveHeader.querySelector('[data-automation-live-header-actions]');
 	    var liveMenu = liveHeader && liveHeader.querySelector('[data-automation-live-menu]');
 	    var liveBadges = liveCard && liveCard.querySelector('[data-automation-live-badges]');
-	    if (!liveActions || !liveMenu || !liveBadges || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation page is missing its breadcrumb kebab, canvas actions, status, or health');
-	    if (!liveMenu.closest('[data-automation-live-header]')) fail('Live Automation kebab is not in the breadcrumb header row');
+	    if (!liveActions || !liveMenu || !liveBadges || !liveActions.querySelector('[data-automation-live-edit]') || !liveActions.querySelector('[data-automation-live-run-now]') || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation page is missing its breadcrumb actions, kebab, canvas status, or health');
+	    if (!liveActions.closest('[data-automation-live-header]') || !liveMenu.closest('[data-automation-live-header]')) fail('Live Automation actions and kebab are not in the breadcrumb header row');
 	    if (liveCard.querySelector('[data-automation-live-legend-row]') || liveCard.querySelector('[aria-label="Graph status legend"]')) fail('Live Automation retains the removed graph status legend');
 	    click('#automation-live [data-automation-live-run-now]', 'Live Automation Run now button');
 	    await fetch('/automation-run-now-started');
