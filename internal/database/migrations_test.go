@@ -62,6 +62,22 @@ func TestMigration143DropsPredictiveCollisionTables(t *testing.T) {
 			t.Fatalf("table %s still exists after migration 143", table)
 		}
 	}
+
+	if err := goose.DownTo(db, ".", 142); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range tables {
+		var count int
+		if err := db.QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`,
+			table,
+		).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("table %s was not recreated by migration 143 rollback", table)
+		}
+	}
 }
 
 func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {

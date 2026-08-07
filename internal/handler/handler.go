@@ -903,7 +903,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	// Vote Records
 	e.GET("/api/workflows/votes/:stepExecId", h.GetVoteRecords)
 
-	// Semantic Collision Detection
 	// Unified Suggestions (combined Insights + Backlog)
 	e.GET("/suggestions", h.UnifiedSuggestions)
 	e.POST("/suggestions/analyze", h.RunCombinedAnalysis)
