@@ -607,6 +607,12 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s synchronized YAML builder missing %q", source, want)
 			}
 		}
+		if !strings.Contains(body, `data-automation-yaml-panel hidden class="flex min-h-[20rem] flex-1 flex-col`) {
+			t.Errorf("%s YAML panel must grow to fill the builder card", source)
+		}
+		if !strings.Contains(body, `class="block min-h-0 w-full flex-1 resize-none`) {
+			t.Errorf("%s YAML editor must grow to fill its panel without a separate resize height", source)
+		}
 	}
 }
 

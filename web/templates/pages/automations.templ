@@ -812,8 +812,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							<input type="hidden" name="project_id" value={ currentProjectID }/>
 						</form>
 					}
-						<div data-automation-yaml-panel hidden class="min-h-[20rem] overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6">
-							<textarea class="block min-h-[calc(20rem-2rem)] w-full resize-y border-0 bg-transparent p-0 font-mono text-sm leading-6 outline-none" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor spellcheck="false" aria-label="Automation definition">{ page.YAML }</textarea>
+						<div data-automation-yaml-panel hidden class="flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6">
+							<textarea class="block min-h-0 w-full flex-1 resize-none border-0 bg-transparent p-0 font-mono text-sm leading-6 outline-none" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor spellcheck="false" aria-label="Automation definition">{ page.YAML }</textarea>
 						</div>
 						<dialog id="automation-node-dialog" class="modal" data-automation-node-dialog>
 							<div class="modal-box relative max-w-md">

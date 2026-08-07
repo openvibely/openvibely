@@ -2749,14 +2749,14 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 216, "<div data-automation-yaml-panel hidden class=\"min-h-[20rem] overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6\"><textarea class=\"block min-h-[calc(20rem-2rem)] w-full resize-y border-0 bg-transparent p-0 font-mono text-sm leading-6 outline-none\" form=\"automation-design-form\" name=\"automation_yaml\" data-automation-yaml-editor spellcheck=\"false\" aria-label=\"Automation definition\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 216, "<div data-automation-yaml-panel hidden class=\"flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6\"><textarea class=\"block min-h-0 w-full flex-1 resize-none border-0 bg-transparent p-0 font-mono text-sm leading-6 outline-none\" form=\"automation-design-form\" name=\"automation_yaml\" data-automation-yaml-editor spellcheck=\"false\" aria-label=\"Automation definition\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var150 string
 		templ_7745c5c3_Var150, templ_7745c5c3_Err = templ.JoinStringErrs(page.YAML)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 816, Col: 287}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 816, Col: 280}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var150))
 		if templ_7745c5c3_Err != nil {
