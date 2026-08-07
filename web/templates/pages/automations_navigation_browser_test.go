@@ -912,9 +912,9 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var foldBounds = fold.getBoundingClientRect();
 	    if (foldBounds.left < gutterBounds.left - 1 || foldBounds.right > gutterBounds.right + 1) fail('YAML section-fold control is not contained in the line-number gutter');
 	    if (firstLineNumberTextBounds.right > foldBounds.left - 4) fail('YAML line number text must not collide with the fold-control lane: text=' + firstLineNumberTextBounds.right + ', fold=' + foldBounds.left);    if (!fold.classList.contains('opacity-0') || !fold.classList.contains('group-hover:opacity-100')) fail('expanded YAML section-fold control must appear only while hovering the gutter');
-if (!fold.classList.contains('h-6') || !fold.classList.contains('w-4') || !fold.classList.contains('text-lg')) fail('YAML editor section-fold control must fit the split diff viewer gutter');
-	    if (!fold.classList.contains('bg-transparent') || !fold.classList.contains('hover:bg-transparent') || fold.className.includes('hover:bg-base')) fail('YAML section-fold control must remain a transparent ghost control on hover: ' + fold.className);
-	    var originalYAML = editor.value;    editor.value = 'section:\n  message: "' + 'long YAML value '.repeat(40) + '"\nnext: "still visible"\n';
+if (!fold.classList.contains('h-6') || !fold.classList.contains('w-4') || !fold.classList.contains('p-0') || !fold.querySelector('svg')) fail('YAML editor section-fold control must render a centered chevron in the split diff viewer gutter');
+		    if (Math.abs((foldBounds.left + foldBounds.width / 2) - (foldControlsBounds.left + foldControlsBounds.width / 2)) > 1) fail('YAML section-fold chevron lane must be centered between the line numbers and gutter edge');
+		    if (!fold.classList.contains('bg-transparent') || !fold.classList.contains('hover:bg-transparent') || fold.className.includes('hover:bg-base') || fold.className.includes('hover:text-base-content ')) fail('YAML section-fold control must remain a transparent stable-color ghost control on hover: ' + fold.className);	    var originalYAML = editor.value;    editor.value = 'section:\n  message: "' + 'long YAML value '.repeat(40) + '"\nnext: "still visible"\n';
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     var wrappedSource = highlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="2"]');
