@@ -676,9 +676,10 @@ templ AutomationBuilder(projects []models.Project, currentProjectID string, page
 
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
 	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-draft>
+		<div class={ templ.KV("flex h-full min-h-0 shrink-0 flex-col", page.AutomationID != "") } data-automation-builder-edit-pane>
 		@layout.PageTitle(page.Result.Candidate.Name)
 		if page.AutomationID != "" {
-			<div class="mb-6 min-w-0 shrink-0" data-automation-builder-header>
+			<div class="mb-2 min-w-0 shrink-0" data-automation-builder-header>
 				<div class="flex flex-wrap items-start justify-between gap-3">
 					<div class="min-w-0 flex-1">@automationEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)</div>
 						<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
@@ -902,7 +903,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					}
 				</div>
 			</section>
-				if page.AutomationID == "" && page.Source == "blank" {
+		</div>
+			if page.AutomationID == "" && page.Source == "blank" {
 					<div class="mb-4 min-w-0" data-automation-builder-name>
 						<label class="form-control max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
 						<p class="mt-2 text-sm text-base-content/65">Saving validates and applies this Automation immediately.</p>

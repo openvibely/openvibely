@@ -258,7 +258,7 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 	}
 	header := body[headerStart:headerEnd]
 	for _, want := range []string{
-		`class="mb-6 min-w-0 shrink-0"`,
+		`class="mb-2 min-w-0 shrink-0"`,
 		`class="flex flex-wrap items-start justify-between gap-3"`,
 		`data-automation-breadcrumb`,
 		`data-automation-editable-breadcrumb`,
@@ -841,7 +841,8 @@ func TestAutomationCustomBuilderCanvasMatchesEditLayout(t *testing.T) {
 	edit := render("edit", "automation-edit")
 	for _, want := range []string{
 		`id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto"`,
-		`class="mb-6 min-w-0 shrink-0" data-automation-builder-header`,
+		`class="flex h-full min-h-0 shrink-0 flex-col" data-automation-builder-edit-pane`,
+		`class="mb-2 min-w-0 shrink-0" data-automation-builder-header`,
 		`class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4 flex flex-1 min-h-[20rem] flex-col"`,
 		`flex-1 min-h-[20rem]`,
 		`h-full`,
@@ -1063,6 +1064,9 @@ func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 
 	renderBlankBuilder := func(nodeCount int, automationID string) string {
 		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Blank Automation", AutomationType: "custom", AdapterKey: "custom"}
+		if automationID != "" {
+			candidate.Description = "Theme and navigation fixture"
+		}
 		if nodeCount > 0 {
 			candidate.Nodes = []models.AutomationDraftNode{
 				{Key: "first_step", Name: "First step", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Describe the work this node should perform.", "category": "scheduled", "priority": 2}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
@@ -1191,6 +1195,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var canvasRect = document.querySelector('[data-automation-canvas]').getBoundingClientRect();
 	    var liveRootRect = document.getElementById('automation-live').getBoundingClientRect();
 	    var liveCanvasShellRect = liveCanvasShell.getBoundingClientRect();
+	    var liveCardRect = document.querySelector('#automation-live [data-automation-readonly-canvas]').getBoundingClientRect();
+	    var liveHeaderRect = document.querySelector('#automation-live [data-automation-live-header]').getBoundingClientRect();
 	    if (liveCanvasShellRect.height < 319) fail('short-desktop Live canvas collapsed below its 20rem usability floor: ' + liveCanvasShellRect.height.toFixed(1) + 'px');
 	    if (liveCanvasShellRect.bottom > liveRootRect.bottom + 4 && getComputedStyle(document.getElementById('automation-live')).overflowY !== 'auto') fail('constrained one-node Live canvas overflows without a scroll fallback');
 	    var liveViewBox = document.querySelector('#automation-live [data-automation-canvas]').getAttribute('viewBox').split(/\s+/).map(Number);
@@ -1394,9 +1400,16 @@ window.addEventListener('DOMContentLoaded', function() {
 		    var editParityCanvasRect = editedCanvas.querySelector('[data-automation-canvas]').getBoundingClientRect();
 		    var editParityShellRect = editParityShell.getBoundingClientRect();
 		    var editSVG = editedCanvas.querySelector('[data-automation-canvas]');
-		    if (editParityShellRect.height < 319) fail('short-desktop Edit canvas collapsed below its 20rem usability floor: ' + editParityShellRect.height.toFixed(1) + 'px');
-		    if (editSVG.getAttribute('viewBox') !== liveViewBox.join(' ')) fail('Live and Edit must use the same initial tight graph bounds: Live=' + liveViewBox.join(' ') + ' Edit=' + editSVG.getAttribute('viewBox'));
-		    click('#automation-builder [data-automation-fit]', 'Edit Fit control for visual parity');
+	    if (editParityShellRect.height < 319) fail('short-desktop Edit canvas collapsed below its 20rem usability floor: ' + editParityShellRect.height.toFixed(1) + 'px');
+	    if (Math.abs(editParityShellRect.height - liveCanvasShellRect.height) > 1) {
+	      var editPaneRect = document.querySelector('#automation-builder [data-automation-builder-edit-pane]').getBoundingClientRect();
+	      var editSectionRect = editedCanvas.getBoundingClientRect();
+	      fail('Edit graph canvas height must match Preview: Edit=' + editParityShellRect.height.toFixed(1) + 'px Preview=' + liveCanvasShellRect.height.toFixed(1) + 'px EditPane=' + editPaneRect.height.toFixed(1) + 'px EditSection=' + editSectionRect.height.toFixed(1) + 'px PreviewCard=' + liveCardRect.height.toFixed(1) + 'px PreviewHeader=' + liveHeaderRect.height.toFixed(1) + 'px');
+	    }
+	    var editSettingsRect = document.querySelector('#automation-builder summary').getBoundingClientRect();
+	    var editRootRect = document.getElementById('automation-builder').getBoundingClientRect();
+	    if (editSettingsRect.top < editRootRect.bottom - 1) fail('Edit node and connection settings must remain below the initial graph pane');
+	    if (editSVG.getAttribute('viewBox') !== liveViewBox.join(' ')) fail('Live and Edit must use the same initial tight graph bounds: Live=' + liveViewBox.join(' ') + ' Edit=' + editSVG.getAttribute('viewBox'));		    click('#automation-builder [data-automation-fit]', 'Edit Fit control for visual parity');
 		    if (editSVG.getAttribute('viewBox') !== liveViewBox.join(' ')) fail('Live and Edit Fit must use the same tight graph bounds: Live=' + liveViewBox.join(' ') + ' Edit=' + editSVG.getAttribute('viewBox'));
 		    if (editParityNodeRect.width <= 0 || editParityNodeRect.height <= 0 || editParityCanvasRect.width <= 0 || editParityCanvasRect.height <= 0) fail('Edit canvas did not render a visible graph after expanding to page height');		    var editPanStart = editSVG.getAttribute('viewBox').split(/\s+/).map(Number);
 		    var editPanRect = editSVG.getBoundingClientRect();
@@ -1669,6 +1682,9 @@ window.addEventListener('DOMContentLoaded', function() {
 		.flex { display: flex; }
 		.flex-col { flex-direction: column; }
 		.flex-1 { flex: 1 1 0%; }
+		.shrink-0 { flex-shrink: 0; }
+		.mb-6 { margin-bottom: 1.5rem; }
+		.mb-2 { margin-bottom: .5rem; }
 		.min-h-0 { min-height: 0; }
 		[class~="min-h-[20rem]"] { min-height: 20rem; }
 		[class~="md:min-h-0"] { min-height: 0; }
