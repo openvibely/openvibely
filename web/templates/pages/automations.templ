@@ -1104,11 +1104,19 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								yamlHighlight.classList.add('min-h-full');
 								yamlHighlight.style.transform = '';
 								yamlFoldControls.style.transform = '';
-								if (yamlViewport) yamlViewport.classList.replace('overflow-hidden', 'overflow-auto');
+								if (yamlViewport) {
+									yamlViewport.classList.replace('overflow-hidden', 'overflow-auto');
+									yamlViewport.tabIndex = 0;
+									yamlViewport.setAttribute('aria-label', 'Collapsed YAML source');
+								}
 							} else {
 								yamlEditor.hidden = false;
 								yamlHighlight.classList.add('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');
-								if (yamlViewport) yamlViewport.classList.replace('overflow-auto', 'overflow-hidden');
+								if (yamlViewport) {
+									yamlViewport.classList.replace('overflow-auto', 'overflow-hidden');
+									yamlViewport.tabIndex = -1;
+									yamlViewport.removeAttribute('aria-label');
+								}
 								syncYAMLHighlightScroll();
 							}
 							queueYAMLLineLayout();
@@ -1157,6 +1165,15 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							if (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlViewport.scrollTop;
 							if (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlViewport.scrollTop) + 'px)';
 						});
+						if (yamlViewport) yamlViewport.addEventListener('wheel', function(event) {
+							if (!yamlEditor || !yamlEditor.hidden || !event.deltaY) return;
+							var delta = event.deltaY;
+							if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;
+							if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= yamlViewport.clientHeight;
+							var previousTop = yamlViewport.scrollTop;
+							yamlViewport.scrollTop += delta;
+							if (yamlViewport.scrollTop !== previousTop) event.preventDefault();
+						}, {passive: false});
 						window.addEventListener('resize', queueYAMLLineLayout);					function syncCandidate(writeYAML) {
 						var automationName = builder.querySelector('[data-automation-name]');
 						if (automationName) candidate.name = automationName.value;

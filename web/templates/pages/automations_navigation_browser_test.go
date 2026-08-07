@@ -913,10 +913,9 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!foldedViewport || window.getComputedStyle(foldedViewport).overflowY !== 'auto' || foldedViewport.scrollHeight <= foldedViewport.clientHeight) fail('collapsed YAML view must remain scrollable when visible lines exceed the viewport');
     var foldedContent = highlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="3"]');
     var foldedContentTop = foldedContent && foldedContent.getBoundingClientRect().top;
-    foldedViewport.scrollTop = 48;
-    foldedViewport.dispatchEvent(new Event('scroll', {bubbles: true}));
+    foldedViewport.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true, deltaY: 48}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
-    if (foldedViewport.scrollTop <= 0 || !editor.hidden || !foldedContent || foldedContent.getBoundingClientRect().top >= foldedContentTop - 1) fail('scrolling a collapsed YAML view must move its visible content while retaining its folded state');
+    if (foldedViewport.scrollTop <= 0 || !editor.hidden || !foldedContent || foldedContent.getBoundingClientRect().top >= foldedContentTop - 1) fail('wheel scrolling a collapsed YAML view must move its visible content while retaining its folded state');
     foldedViewport.click();
     if (!editor.hidden) fail('clicking collapsed YAML content must not unfold it');
     fold.click();
