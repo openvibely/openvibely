@@ -54,9 +54,5 @@ func (r *EmailTaskContextRepo) GetByTaskID(ctx context.Context, taskID string) (
 }
 
 func (r *EmailTaskContextRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM email_task_context WHERE task_id = ?`, taskID)
-	if err != nil {
-		return fmt.Errorf("delete email task context: %w", err)
-	}
-	return nil
+	return deleteByTaskID(ctx, r.db, "email_task_context", taskID, "email task context")
 }

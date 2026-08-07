@@ -67,9 +67,5 @@ func (r *SlackTaskContextRepo) GetByTaskID(ctx context.Context, taskID string) (
 }
 
 func (r *SlackTaskContextRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM slack_task_context WHERE task_id = ?`, taskID)
-	if err != nil {
-		return fmt.Errorf("delete slack task context: %w", err)
-	}
-	return nil
+	return deleteByTaskID(ctx, r.db, "slack_task_context", taskID, "slack task context")
 }
