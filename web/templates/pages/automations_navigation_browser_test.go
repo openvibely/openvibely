@@ -655,8 +655,8 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s YAML editor must wrap its source across the available panel width: missing %q", source, want)
 			}
 		}
-		if !strings.Contains(body, `class="group relative w-10 shrink-0 overflow-hidden border-r border-base-300"`) || !strings.Contains(body, `class="m-0 h-full w-full select-none overflow-hidden whitespace-nowrap px-2 text-right text-base-content/45"`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `w-8`) || !strings.Contains(body, `h-8 w-8`) || !strings.Contains(body, `text-2xl`) || !strings.Contains(body, `whitespace-pre-wrap break-words px-3`) {
-			t.Errorf("%s YAML gutter and source padding must match the 40px split diff number cell with px-3 source content, while retaining larger fold controls", source)
+		if !strings.Contains(body, `class="group relative w-20 shrink-0 overflow-hidden border-r border-base-300"`) || !strings.Contains(body, `class="m-0 h-full w-12 select-none overflow-hidden whitespace-nowrap px-2 text-left text-base-content/45"`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `w-8`) || !strings.Contains(body, `h-8 w-8`) || !strings.Contains(body, `text-2xl`) || !strings.Contains(body, `whitespace-pre-wrap break-words px-3`) || !strings.Contains(body, `data-yaml-indent="' + indent + '"' + hangingIndent`) {
+			t.Errorf("%s YAML gutter must reserve the split diff viewer's w-12 left-aligned number lane and an adjacent larger fold-control lane, with indentation-preserving wrapping", source)
 		}
 		for _, want := range []string{`data-automation-yaml-indent-guides`, `data-automation-yaml-indent-dot`, `data-automation-yaml-indent-rail`} {
 			if !strings.Contains(body, want) {
@@ -860,12 +860,15 @@ window.addEventListener('DOMContentLoaded', function() {
     if (indentGuides.textContent.includes('│')) fail('YAML indentation rails must not be source-flow characters');
     if (window.getComputedStyle(indentGuides.querySelector('[data-automation-yaml-indent-dot]')).position !== 'absolute' || window.getComputedStyle(indentRails[0]).position !== 'absolute') fail('YAML indentation guides must be positioned over source indentation, not laid out as editable text');
     if (!Array.from(indentRails).some(function(rail) { return rail.getBoundingClientRect().height > 24 && window.getComputedStyle(rail).backgroundColor !== 'rgba(0, 0, 0, 0)'; })) fail('YAML indentation rails must continuously span nested YAML rows with a visible color');
-    if (!gutter.classList.contains('w-10') || !lineNumbers.classList.contains('w-full') || !foldControls.classList.contains('w-8')) fail('YAML gutter must use the split diff viewer\'s 40px number column and fold-control overlay');
+    if (!gutter.classList.contains('w-20') || !lineNumbers.classList.contains('w-12') || !lineNumbers.classList.contains('text-left') || !foldControls.classList.contains('w-8')) fail('YAML gutter must reserve the split diff viewer\'s left-aligned w-12 number lane and a separate fold-control lane');
+    var gutterBounds = gutter.getBoundingClientRect(), numberBounds = lineNumbers.getBoundingClientRect(), foldControlsBounds = foldControls.getBoundingClientRect();
+    if (numberBounds.left < gutterBounds.left - 1 || numberBounds.right > foldControlsBounds.left + 1 || foldControlsBounds.right > gutterBounds.right + 1) fail('YAML number and fold-control lanes overlap instead of remaining separate');
+    if (window.getComputedStyle(lineNumbers).textAlign !== 'left') fail('YAML line numbers must be left aligned like the split diff viewer');
     var editorPadding = window.getComputedStyle(editor).paddingLeft, highlightPadding = window.getComputedStyle(highlight).paddingLeft;
     if (editorPadding !== '12px' || highlightPadding !== '12px') fail('YAML source must use the split diff viewer\'s px-3 content inset: editor=' + editorPadding + ', highlight=' + highlightPadding);
     if (highlight.querySelector('[data-automation-yaml-key]').classList.contains('text-warning')) fail('YAML editor keys still use the warning color');
     if (!foldControls || !fold || fold.parentElement !== foldControls || foldControls.parentElement !== gutter || !fold.dataset.yamlIndent) fail('YAML editor did not render a gutter section-fold control');
-    var gutterBounds = gutter.getBoundingClientRect(), foldBounds = fold.getBoundingClientRect();
+    var foldBounds = fold.getBoundingClientRect();
     if (foldBounds.left < gutterBounds.left - 1 || foldBounds.right > gutterBounds.right + 1) fail('YAML section-fold control is not contained in the line-number gutter');
     if (!fold.classList.contains('opacity-0') || !fold.classList.contains('group-hover:opacity-100')) fail('expanded YAML section-fold control must appear only while hovering the gutter');
     if (!fold.classList.contains('h-8') || !fold.classList.contains('w-8') || !fold.classList.contains('text-2xl')) fail('YAML editor section-fold control must use the larger Swagger-style chevron');
@@ -879,6 +882,7 @@ window.addEventListener('DOMContentLoaded', function() {
     var wrappedSourceHeight = wrappedSource && wrappedSource.getBoundingClientRect().height;
     var wrappedNumberHeight = wrappedNumber && wrappedNumber.getBoundingClientRect().height;
     if (!wrappedSource || !wrappedNumber || wrappedSourceHeight <= 24 || Math.abs(wrappedSourceHeight - wrappedNumberHeight) > 1) fail('wrapped YAML source did not retain aligned line numbers: source=' + wrappedSourceHeight + ', number=' + wrappedNumberHeight);
+    if (wrappedSource.dataset.yamlIndent !== '2' || window.getComputedStyle(wrappedSource).paddingLeft === '0px' || window.getComputedStyle(wrappedSource).textIndent === '0px') fail('wrapped YAML values must retain their parent indentation as a hanging indent');
     if (!continuedSource || window.getComputedStyle(highlight).overflow !== 'visible' || highlight.clientHeight < continuedSource.offsetTop + continuedSource.offsetHeight) fail('wrapped YAML source was clipped before its following logical line');
     editor.value = originalYAML;
     editor.dispatchEvent(new Event('input', {bubbles: true}));
@@ -958,7 +962,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:40px;position:relative}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px;overflow:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.whitespace-nowrap{white-space:nowrap}[data-automation-yaml-line-numbers]{width:40px;margin:0;font:16px/24px monospace}</style></head><body>%s%s</body></html>`, builder.String(), runner)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}.flex{display:flex}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:80px;position:relative}[data-automation-yaml-fold-controls]{position:absolute;top:0;right:0;bottom:0;width:32px}[data-automation-yaml-fold]{position:absolute;right:0;width:32px;height:32px}[data-automation-yaml-editor-viewport]{position:relative;width:320px;height:260px;overflow:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.whitespace-nowrap{white-space:nowrap}[data-automation-yaml-line-numbers]{width:48px;margin:0;font:16px/24px monospace;text-align:left}</style></head><body>%s%s</body></html>`, builder.String(), runner)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)

@@ -805,8 +805,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					}
 						<div data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6">
 							<div class="flex min-h-0 flex-1 overflow-hidden" data-automation-yaml-editor-shell>
-									<div class="group relative w-10 shrink-0 overflow-hidden border-r border-base-300" data-automation-yaml-gutter>
-										<pre class="m-0 h-full w-full select-none overflow-hidden whitespace-nowrap px-2 text-right text-base-content/45" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(page.YAML) }</pre>
+									<div class="group relative w-20 shrink-0 overflow-hidden border-r border-base-300" data-automation-yaml-gutter>
+										<pre class="m-0 h-full w-12 select-none overflow-hidden whitespace-nowrap px-2 text-left text-base-content/45" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(page.YAML) }</pre>
 										<div class="pointer-events-none absolute inset-y-0 right-0 z-10 w-8" aria-label="YAML section controls" data-automation-yaml-fold-controls></div>
 									</div>
 									<div class="relative min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport>
@@ -1097,10 +1097,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 									var visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';
 									controls.push('<button class="pointer-events-auto absolute right-0 inline-flex h-8 w-8 items-center justify-center rounded text-2xl font-bold leading-none text-base-content/70 transition-opacity hover:bg-base-300/70 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary' + visibilityClass + '" style="top:0" type="button" data-automation-yaml-fold data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '" aria-label="' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '">' + (isFolded ? '▸' : '▾') + '</button>');
 								}
-								var rendered = highlightYAMLLine(lines[index], index + 1);
-								if (isFolded) rendered += '<span class="ml-2 text-base-content/45" data-automation-yaml-fold-summary>…</span>';
-								highlighted.push('<span class="block min-h-6 break-words" data-automation-yaml-highlight-line data-yaml-line="' + (index + 1) + '">' + rendered + '</span>');
-								if (isFolded) index = foldEnd + 1; else index++;
+									var rendered = highlightYAMLLine(lines[index], index + 1), hangingIndent = indent ? ' style="padding-left:' + indent + 'ch;text-indent:-' + indent + 'ch"' : '';
+									if (isFolded) rendered += '<span class="ml-2 text-base-content/45" data-automation-yaml-fold-summary>…</span>';
+									highlighted.push('<span class="block min-h-6 break-words" data-automation-yaml-highlight-line data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '"' + hangingIndent + '>' + rendered + '</span>');								if (isFolded) index = foldEnd + 1; else index++;
 							}
 							yamlHighlight.innerHTML = yamlContinuousIndentationRails(lines, visibleLines) + highlighted.join('');
 							yamlLineNumbers.innerHTML = lineNumbers.join('');
