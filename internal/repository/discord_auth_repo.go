@@ -22,24 +22,12 @@ func NewDiscordAuthRepo(db *sql.DB) *DiscordAuthRepo {
 // ListByProject returns all system-level authorized Discord users.
 // projectID is accepted for UI compatibility but does not scope inbound authorization.
 func (r *DiscordAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.DiscordAuthorizedUser, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, project_id, discord_user_id, display_name, added_at, added_by
-		 FROM discord_authorized_users
-		 ORDER BY added_at ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("list discord auth users: %w", err)
-	}
-	defer rows.Close()
-
-	var users []models.DiscordAuthorizedUser
-	for rows.Next() {
-		var u models.DiscordAuthorizedUser
-		if err := rows.Scan(&u.ID, &u.ProjectID, &u.DiscordUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy); err != nil {
-			return nil, fmt.Errorf("scan discord auth user: %w", err)
-		}
-		users = append(users, u)
-	}
-	return users, rows.Err()
+	return listAuthorizedUsers(ctx, r.db, "discord_authorized_users", "discord_user_id", "discord auth users", "discord auth user",
+		func(rows *sql.Rows) (models.DiscordAuthorizedUser, error) {
+			var u models.DiscordAuthorizedUser
+			err := rows.Scan(&u.ID, &u.ProjectID, &u.DiscordUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy)
+			return u, err
+		})
 }
 
 // IsAuthorized checks whether a Discord user is authorized at the system channel level.
@@ -50,15 +38,8 @@ func (r *DiscordAuthRepo) IsAuthorized(ctx context.Context, projectID, discordUs
 
 // IsAuthorizedForProject checks the legacy project-scoped row ownership used only for outbound DM compatibility.
 func (r *DiscordAuthRepo) IsAuthorizedForProject(ctx context.Context, projectID, discordUserID string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM discord_authorized_users
-		 WHERE project_id = ? AND discord_user_id = ?`,
-		projectID, strings.TrimSpace(discordUserID)).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("check discord project auth: %w", err)
-	}
-	return count > 0, nil
+	return countWhere(ctx, r.db, "discord_authorized_users", "check discord project auth",
+		`project_id = ? AND discord_user_id = ?`, projectID, strings.TrimSpace(discordUserID))
 }
 
 // HasAnyAuthorizedUsers checks whether any system-level Discord authorized users are configured.
@@ -74,14 +55,8 @@ func (r *DiscordAuthRepo) HasAnyAuthorizedUsersAnywhere(ctx context.Context) (bo
 
 // IsAuthorizedAnywhere checks whether a Discord user is authorized in any project.
 func (r *DiscordAuthRepo) IsAuthorizedAnywhere(ctx context.Context, discordUserID string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM discord_authorized_users WHERE discord_user_id = ?`,
-		strings.TrimSpace(discordUserID)).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("check discord auth anywhere: %w", err)
-	}
-	return count > 0, nil
+	return countWhere(ctx, r.db, "discord_authorized_users", "check discord auth anywhere",
+		`discord_user_id = ?`, strings.TrimSpace(discordUserID))
 }
 
 // Create adds a system-level authorized Discord user.
@@ -114,16 +89,10 @@ func (r *DiscordAuthRepo) Delete(ctx context.Context, id string) error {
 
 // GetByID returns a single authorized Discord user by ID.
 func (r *DiscordAuthRepo) GetByID(ctx context.Context, id string) (*models.DiscordAuthorizedUser, error) {
-	var u models.DiscordAuthorizedUser
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, project_id, discord_user_id, display_name, added_at, added_by
-		 FROM discord_authorized_users WHERE id = ?`, id).
-		Scan(&u.ID, &u.ProjectID, &u.DiscordUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get discord auth user: %w", err)
-	}
-	return &u, nil
+	return getAuthorizedUserByID(ctx, r.db, "discord_authorized_users", "discord_user_id", "get discord auth user", id,
+		func(row *sql.Row) (models.DiscordAuthorizedUser, error) {
+			var u models.DiscordAuthorizedUser
+			err := row.Scan(&u.ID, &u.ProjectID, &u.DiscordUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy)
+			return u, err
+		})
 }

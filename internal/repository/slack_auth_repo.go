@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -21,24 +20,12 @@ func NewSlackAuthRepo(db *sql.DB) *SlackAuthRepo {
 // ListByProject returns all system-level authorized Slack users.
 // projectID is accepted for UI compatibility but does not scope inbound authorization.
 func (r *SlackAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.SlackAuthorizedUser, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, project_id, slack_user_id, display_name, added_at, added_by
-		 FROM slack_authorized_users
-		 ORDER BY added_at ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("list slack auth users: %w", err)
-	}
-	defer rows.Close()
-
-	var users []models.SlackAuthorizedUser
-	for rows.Next() {
-		var u models.SlackAuthorizedUser
-		if err := rows.Scan(&u.ID, &u.ProjectID, &u.SlackUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy); err != nil {
-			return nil, fmt.Errorf("scan slack auth user: %w", err)
-		}
-		users = append(users, u)
-	}
-	return users, rows.Err()
+	return listAuthorizedUsers(ctx, r.db, "slack_authorized_users", "slack_user_id", "slack auth users", "slack auth user",
+		func(rows *sql.Rows) (models.SlackAuthorizedUser, error) {
+			var u models.SlackAuthorizedUser
+			err := rows.Scan(&u.ID, &u.ProjectID, &u.SlackUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy)
+			return u, err
+		})
 }
 
 // IsAuthorized checks whether a Slack user is authorized at the system channel level.
@@ -49,15 +36,8 @@ func (r *SlackAuthRepo) IsAuthorized(ctx context.Context, projectID, slackUserID
 
 // IsAuthorizedForProject checks the legacy project-scoped row ownership used only for outbound DM compatibility.
 func (r *SlackAuthRepo) IsAuthorizedForProject(ctx context.Context, projectID, slackUserID string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM slack_authorized_users
-		 WHERE project_id = ? AND slack_user_id = ?`,
-		projectID, slackUserID).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("check slack project auth: %w", err)
-	}
-	return count > 0, nil
+	return countWhere(ctx, r.db, "slack_authorized_users", "check slack project auth",
+		`project_id = ? AND slack_user_id = ?`, projectID, slackUserID)
 }
 
 // HasAnyAuthorizedUsers checks whether any system-level Slack authorized users are configured.
@@ -73,14 +53,8 @@ func (r *SlackAuthRepo) HasAnyAuthorizedUsersAnywhere(ctx context.Context) (bool
 
 // IsAuthorizedAnywhere checks whether a Slack user is authorized in any project.
 func (r *SlackAuthRepo) IsAuthorizedAnywhere(ctx context.Context, slackUserID string) (bool, error) {
-	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM slack_authorized_users WHERE slack_user_id = ?`,
-		slackUserID).Scan(&count)
-	if err != nil {
-		return false, fmt.Errorf("check slack auth anywhere: %w", err)
-	}
-	return count > 0, nil
+	return countWhere(ctx, r.db, "slack_authorized_users", "check slack auth anywhere",
+		`slack_user_id = ?`, slackUserID)
 }
 
 // Create adds a system-level authorized Slack user.
@@ -103,16 +77,10 @@ func (r *SlackAuthRepo) Delete(ctx context.Context, id string) error {
 
 // GetByID returns a single authorized Slack user by ID.
 func (r *SlackAuthRepo) GetByID(ctx context.Context, id string) (*models.SlackAuthorizedUser, error) {
-	var u models.SlackAuthorizedUser
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, project_id, slack_user_id, display_name, added_at, added_by
-		 FROM slack_authorized_users WHERE id = ?`, id).
-		Scan(&u.ID, &u.ProjectID, &u.SlackUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get slack auth user: %w", err)
-	}
-	return &u, nil
+	return getAuthorizedUserByID(ctx, r.db, "slack_authorized_users", "slack_user_id", "get slack auth user", id,
+		func(row *sql.Row) (models.SlackAuthorizedUser, error) {
+			var u models.SlackAuthorizedUser
+			err := row.Scan(&u.ID, &u.ProjectID, &u.SlackUserID, &u.DisplayName, &u.AddedAt, &u.AddedBy)
+			return u, err
+		})
 }
