@@ -2716,14 +2716,14 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 213, "<div data-automation-yaml-panel hidden style=\"display: none\" class=\"flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6\"><div class=\"flex min-h-0 flex-1 overflow-hidden\" data-automation-yaml-editor-shell><div class=\"group relative w-10 min-w-0 shrink-0 overflow-hidden border-r border-base-300\" style=\"box-sizing: border-box; width: 2.5rem; min-width: 2.5rem; flex: 0 0 2.5rem;\" data-automation-yaml-gutter><pre class=\"m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap p-0 text-left text-xs text-base-content/45\" style=\"box-sizing: border-box; text-align: left !important;\" aria-label=\"YAML line numbers\" data-automation-yaml-line-numbers>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 213, "<div data-automation-yaml-panel hidden style=\"display: none\" class=\"flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6\"><div class=\"flex min-h-0 flex-1 overflow-hidden\" data-automation-yaml-editor-shell><div class=\"group relative w-10 min-w-0 shrink-0 overflow-hidden border-r border-base-300\" style=\"box-sizing: border-box; width: 2.5rem; min-width: 2.5rem; flex: 0 0 2.5rem;\" data-automation-yaml-gutter><pre class=\"m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-0 pt-0 text-left text-xs text-base-content/45\" style=\"box-sizing: border-box; text-align: left !important;\" aria-label=\"YAML line numbers\" data-automation-yaml-line-numbers>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var148 string
 		templ_7745c5c3_Var148, templ_7745c5c3_Err = templ.JoinStringErrs(automationYAMLLineNumbers(page.YAML))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 808, Col: 302}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 808, Col: 318}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var148))
 		if templ_7745c5c3_Err != nil {
