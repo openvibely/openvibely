@@ -3,6 +3,12 @@ package pages
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -654,28 +660,191 @@ func TestAutomationBuilderRendersDeleteControls(t *testing.T) {
 }
 
 func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
-	candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Browser YAML", AutomationType: "custom", AdapterKey: "custom"}
-	page := models.AutomationBuilderPage{Result: models.AutomationDraftResult{Candidate: candidate}, YAML: "schema_version: 1\nname: Browser YAML\n"}
+	chrome := chatNavigationChromePath(t)
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion:  1,
+		Name:           "Browser YAML",
+		AutomationType: "custom",
+		AdapterKey:     "custom",
+		Nodes: []models.AutomationDraftNode{
+			{Key: "first", Name: "First", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "YAML-only configuration"}, Position: &models.AutomationDraftPoint{X: 0, Y: 0}},
+			{Key: "second", Name: "Second", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 240, Y: 0}},
+			{Key: "third", Name: "Third", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}, Position: &models.AutomationDraftPoint{X: 480, Y: 0}},
+		},
+		Edges: []models.AutomationDraftEdge{{Key: "first_second", From: "first", To: "second", FromPort: "right", ToPort: "left"}},
+	}
+	page := models.AutomationBuilderPage{
+		Source: "blank",
+		Result: models.AutomationDraftResult{Candidate: candidate},
+		YAML: `schema_version: 1
+name: "Browser YAML"
+description: ""
+automation_type: "custom"
+adapter_key: "custom"
+nodes:
+  - key: "first"
+    name: "First"
+    type: "agent_task"
+    role: "task"
+    config: {"prompt":"YAML-only configuration"}
+    position: {"x":0,"y":0}
+  - key: "second"
+    name: "Second"
+    type: "agent_task"
+    role: "task"
+    config: {}
+    position: {"x":240,"y":0}
+  - key: "third"
+    name: "Third"
+    type: "outcome"
+    role: "completed"
+    config: {}
+    position: {"x":480,"y":0}
+edges:
+  - key: "first_second"
+    from: "first"
+    to: "second"
+    from_port: "right"
+    to_port: "left"
+`,
+	}
 	var builder bytes.Buffer
 	if err := AutomationBuilderContent(page, "project-browser").Render(context.Background(), &builder); err != nil {
-		t.Fatalf("render browser YAML fixture: %v", err)
+		t.Fatalf("render browser Automation builder: %v", err)
 	}
-	body := builder.String()
-	for _, want := range []string{`data-automation-view-graph`, `data-automation-view-yaml`, `data-automation-yaml-editor`, `graphPanel.hidden = yamlSelected`, `yamlPanel.hidden = !yamlSelected`, `visualCandidateYAML`, `data-automation-add-node-open`, `data-automation-draft-canvas`, `data-candidate-json`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("synchronized YAML UI fixture missing %q", want)
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function fail(message) { throw new Error(message); }
+  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method: 'POST'}); }
+  function click(selector, label) { var element = document.querySelector(selector); if (!element) fail('missing ' + label); element.click(); }
+  function pointEvent(type, target, pointerId) {
+    var rect = target.getBoundingClientRect();
+    return new PointerEvent(type, {bubbles: true, cancelable: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, pointerId: pointerId, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2});
+  }
+  function submittedYAML(editor) {
+    var values = Array.from(document.querySelectorAll('[data-automation-yaml-submission]')).map(function(input) { return input.value; });
+    if (!values.length || values.some(function(value) { return value !== editor.value; })) fail('canvas mutation did not synchronize the YAML submitted by its forms');
+  }
+  function contains(editor, text, label) { if (!editor.value.includes(text)) fail(label + ': ' + editor.value); }
+  function edge(from, to) { return Array.from(document.querySelectorAll('.automation-draft-edge')).find(function(group) { return group.dataset.from === from && group.dataset.to === to; }); }
+  function port(node, side) { return document.querySelector('[data-connect-port="' + node + '"][data-port-side="' + side + '"]'); }
+  function connect(from, to, pointerId) {
+    var source = port(from, 'right'), target = port(to, 'left');
+    if (!source || !target) fail('missing ports for ' + from + ' to ' + to);
+    source.dispatchEvent(pointEvent('pointerdown', source, pointerId));
+    target.dispatchEvent(pointEvent('pointerup', target, pointerId));
+  }
+  function reconnect(group, endpoint, targetNode, pointerId) {
+    var controls = document.querySelector('[data-edge-controls][data-edge-key="' + group.dataset.edgeKey + '"]');
+    var handle = controls && controls.querySelector('[data-reconnect-edge][data-edge-endpoint="' + endpoint + '"]');
+    var target = port(targetNode, endpoint === 'from' ? 'right' : 'left');
+    if (!handle || !target) fail('missing reconnect controls');
+    handle.dispatchEvent(pointEvent('pointerdown', handle, pointerId));
+    target.dispatchEvent(pointEvent('pointerup', target, pointerId));
+  }
+  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message || 'window error')); });
+  (async function() {
+    var editor = document.querySelector('[data-automation-yaml-editor]');
+    var graph = document.querySelector('[data-automation-graph-panel]');
+    var yaml = document.querySelector('[data-automation-yaml-panel]');
+    if (!editor || !graph || !yaml) fail('builder did not render both graph and YAML views');
+    if (editor.readOnly) fail('Edit YAML editor is unexpectedly read-only');
+    ['Node and connection settings', 'Transition settings', 'Task prompt', 'Task goal (optional)', 'Human result'].forEach(function(legacy) {
+      if (Array.from(document.querySelectorAll('label, summary, h3, h4')).some(function(element) { return element.textContent.trim() === legacy; })) fail('legacy settings control remains: ' + legacy);
+    });
+    click('[data-automation-view-yaml]', 'YAML view button');
+    if (yaml.hidden || !graph.hidden) fail('YAML switch did not make the editable YAML view visible');
+    click('[data-automation-view-graph]', 'Graph view button');
+    if (graph.hidden || !yaml.hidden) fail('Graph switch did not restore the canvas');
+
+    var first = document.querySelector('[data-node-key="first"]');
+    if (!first) fail('missing first node');
+    var originalTransform = first.getAttribute('transform');
+    first.dispatchEvent(pointEvent('pointerdown', first, 1));
+    var move = pointEvent('pointermove', first, 1);
+    Object.defineProperties(move, {clientX: {value: move.clientX + 40}, clientY: {value: move.clientY + 30}});
+    first.dispatchEvent(move);
+    first.dispatchEvent(pointEvent('pointerup', first, 1));
+    if (first.getAttribute('transform') === originalTransform) fail('dragging a canvas node did not move it');
+    if (editor.value.includes('position: {"x":0,"y":0}')) fail('node drag did not update YAML position: ' + editor.value);
+    contains(editor, 'YAML-only configuration', 'node drag discarded YAML-only configuration');
+    submittedYAML(editor);
+
+    connect('second', 'third', 2);
+    if (!edge('second', 'third')) fail('canvas connect did not render the new edge');
+    contains(editor, 'from: "second"\n    to: "third"', 'canvas connect did not update YAML');
+    submittedYAML(editor);
+
+    var firstSecond = edge('first', 'second');
+    if (!firstSecond) fail('missing original edge for reconnection');
+    reconnect(firstSecond, 'to', 'third', 3);
+    if (edge('first', 'second') || !edge('first', 'third')) fail('canvas reconnect did not replace the rendered edge');
+    contains(editor, 'from: "first"\n    to: "third"', 'canvas reconnect did not update YAML');
+    submittedYAML(editor);
+
+    var firstThird = edge('first', 'third');
+    var firstThirdControls = firstThird && document.querySelector('[data-edge-controls][data-edge-key="' + firstThird.dataset.edgeKey + '"]');
+    var firstThirdDelete = firstThirdControls && firstThirdControls.querySelector('[data-delete-edge]');
+    if (!firstThirdDelete) fail('missing delete control for reconnected edge');
+    firstThirdDelete.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, button: 0}));
+    if (edge('first', 'third')) fail('canvas delete did not remove the reconnected edge');
+    if (editor.value.includes('from: "first"\n    to: "third"')) fail('canvas delete did not remove the edge from YAML');
+    submittedYAML(editor);
+
+    await report('pass', '');
+  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+
+	browserResult := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:20px}.hidden{display:none!important}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body>%s%s</body></html>`, builder.String(), runner)
+		case "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
 		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "automation-yaml-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(body, `name="candidate_json"`) {
-		t.Error("synchronized YAML UI must not submit candidate_json")
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new",
+		"--no-sandbox",
+		"--disable-gpu",
+		"--disable-software-rasterizer",
+		"--disable-dev-shm-usage",
+		"--disable-background-networking",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--window-size=1200,700",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-yaml-browser-profile"),
+		server.URL,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
 	}
-	graph := models.AutomationLiveGraph{Automation: models.Automation{ID: "automation-browser", Name: "Browser YAML", LifecycleState: models.AutomationActive}, YAML: "schema_version: 1\nname: Browser YAML\n"}
-	var live bytes.Buffer
-	if err := AutomationLiveContent(graph, "project-browser", true).Render(context.Background(), &live); err != nil {
-		t.Fatalf("render live YAML fixture: %v", err)
-	}
-	liveBody := live.String()
-	if !strings.Contains(liveBody, `data-automation-yaml-panel`) || strings.Contains(liveBody, `name="automation_yaml"`) {
-		t.Error("Live YAML view must be present and read-only")
+	defer stopBrowserProcess(cmd)
+
+	select {
+	case outcome := <-browserResult:
+		if outcome != "pass:" {
+			stderr, _ := os.ReadFile(stderrPath)
+			t.Fatalf("Automation YAML browser regression failed: %s\n%s", outcome, strings.TrimSpace(string(stderr)))
+		}
+	case <-time.After(20 * time.Second):
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("timed out waiting for Automation YAML browser regression\n%s", strings.TrimSpace(string(stderr)))
 	}
 }
