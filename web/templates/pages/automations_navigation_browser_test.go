@@ -240,10 +240,10 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	}
 	body := out.String()
 	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
-		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`, `data-automation-view-cards`,
+		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`, `data-automation-view-details`,
 		`data-automation-yaml-editor`, `name="automation_yaml"`, `schema_version: 1`,
 		`data-automation-yaml-editor-shell`, `data-automation-yaml-line-numbers`, `data-automation-yaml-diagnostic`,
-		`data-automation-graph-panel`, `data-automation-cards-panel`, `data-automation-cards-form`, `data-automation-node-cards`, `data-automation-edge-cards`,
+		`data-automation-graph-panel`, `data-automation-details-panel`, `data-automation-details-form`, `data-automation-node-details`, `data-automation-edge-details`,
 		`min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6`,
 	} {
 		if !strings.Contains(body, want) {
@@ -256,7 +256,7 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 		}
 	}
 	if !strings.Contains(body, `name="candidate_json"`) {
-		t.Error("Cards view must preserve the prior card-form candidate submission")
+		t.Error("Details view must preserve the prior card-form candidate submission")
 	}
 	if !strings.Contains(body, `>A YAML-authored Automation description.</p>`) {
 		t.Error("Edit header must retain its description")
@@ -284,14 +284,14 @@ func TestAutomationBuilderGraphAndYAMLViewsAreNonDivergent(t *testing.T) {
 	if !strings.Contains(body, `data-node-key="review"`) {
 		t.Error("graph view must render the same candidate represented by the YAML editor")
 	}
-	for _, want := range []string{`data-automation-add-node-open`, `data-automation-node-tool`, `data-automation-draft-canvas`, `visualCandidateYAML`, `data-automation-yaml-submission`, `data-automation-cards-panel`, `data-automation-cards-form`, `data-automation-view-cards`} {
+	for _, want := range []string{`data-automation-add-node-open`, `data-automation-node-tool`, `data-automation-draft-canvas`, `visualCandidateYAML`, `data-automation-yaml-submission`, `data-automation-details-panel`, `data-automation-details-form`, `data-automation-view-details`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("synchronized authoring surface must contain %q", want)
 		}
 	}
-	for _, want := range []string{`graphButton && graphButton.addEventListener`, `yamlButton && yamlButton.addEventListener`, `cardsButton && cardsButton.addEventListener`, `cardsPanel.hidden = !cardsSelected`, `form.requestSubmit()`, `yamlEditor.value !== visualCandidateYAML()`, `input.value = yamlEditor.value`} {
+	for _, want := range []string{`graphButton && graphButton.addEventListener`, `yamlButton && yamlButton.addEventListener`, `detailsButton && detailsButton.addEventListener`, `detailsPanel.hidden = !detailsSelected`, `form.requestSubmit()`, `yamlEditor.value !== visualCandidateYAML()`, `input.value = yamlEditor.value`} {
 		if !strings.Contains(body, want) {
-			t.Errorf("Graph/YAML/Cards synchronization must contain %q", want)
+			t.Errorf("Graph/YAML/Details synchronization must contain %q", want)
 		}
 	}
 
@@ -335,7 +335,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		`class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions`,
 		`data-automation-view-switcher`,
 		`data-automation-view-graph`,
-		`data-automation-view-cards`,
+		`data-automation-view-details`,
 		`data-automation-view-yaml`,
 		`data-automation-live-badges`,
 		`data-automation-live-status`,
@@ -345,13 +345,13 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation canvas actions to contain %q", want)
 		}
 	}
-	for _, want := range []string{`data-automation-live-cards-panel`, `data-automation-live-node-cards`, `data-automation-live-edge-cards`, `data-automation-live-node-card="review"`, `>Prompt</dt>`, `>Review the queue.</dd>`, `selectAutomationLiveView('cards')`} {
+	for _, want := range []string{`data-automation-live-details-panel`, `data-automation-live-node-details`, `data-automation-live-edge-details`, `data-automation-live-node-detail="review"`, `>Prompt</dt>`, `>Review the queue.</dd>`, `selectAutomationLiveView('details')`} {
 		if !strings.Contains(body, want) {
-			t.Errorf("expected Live Automation Cards view to contain %q", want)
+			t.Errorf("expected Live Automation Details view to contain %q", want)
 		}
 	}
-	if !(strings.Index(body, `data-automation-graph-panel`) < strings.Index(body, `data-automation-live-cards-panel`) && strings.Index(body, `data-automation-live-cards-panel`) < strings.Index(body, `data-automation-yaml-panel`)) {
-		t.Error("expected Live Automation panels in Graph, Cards, YAML order")
+	if !(strings.Index(body, `data-automation-graph-panel`) < strings.Index(body, `data-automation-live-details-panel`) && strings.Index(body, `data-automation-live-details-panel`) < strings.Index(body, `data-automation-yaml-panel`)) {
+		t.Error("expected Live Automation panels in Graph, Details, YAML order")
 	}
 	for _, forbidden := range []string{
 		`Node states`, `A node’s border and label show the highest-priority work state currently present.`,
@@ -375,7 +375,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation breadcrumb header to contain %q", want)
 		}
 	}
-	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-cards`) && strings.Index(cardHeader, `data-automation-view-cards`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, `data-automation-live-menu`)) {
+	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-details`) && strings.Index(cardHeader, `data-automation-view-details`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, `data-automation-live-menu`)) {
 		t.Error("expected Live breadcrumb actions in Edit, Run, then kebab order")
 	}
 	liveSwitcherStart := strings.Index(cardHeader, `data-automation-view-switcher`)
@@ -387,7 +387,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		t.Fatal("expected Live Automation canvas view switcher end")
 	}
 	liveSwitcher := cardHeader[liveSwitcherStart : liveSwitcherStart+liveSwitcherEndOffset]
-	for _, want := range []string{`>Graph</button>`, `>Cards</button>`, `>YAML</button>`, `btn-active`, `aria-pressed="true"`, `aria-pressed="false"`} {
+	for _, want := range []string{`>Graph</button>`, `>Details</button>`, `>YAML</button>`, `btn-active`, `aria-pressed="true"`, `aria-pressed="false"`} {
 		if !strings.Contains(liveSwitcher, want) {
 			t.Errorf("expected Live Automation view switcher to contain %q", want)
 		}
@@ -557,14 +557,14 @@ func TestAutomationBlankBuilderUsesEditableBreadcrumbAndFullHeightEditor(t *test
 	}
 }
 
-func TestAutomationCanvasIncludesCardsConfigurationView(t *testing.T) {
+func TestAutomationCanvasIncludesDetailsConfigurationView(t *testing.T) {
 	page := models.AutomationBuilderPage{AutomationID: "automation-copy", Result: models.AutomationDraftResult{Candidate: models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Typography", AutomationType: "custom", AdapterKey: "custom"}}, YAML: "schema_version: 1\nname: Typography\n"}
 	var out bytes.Buffer
 	if err := AutomationBuilderContent(page, "project-yaml-copy").Render(context.Background(), &out); err != nil {
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	for _, want := range []string{"data-automation-connect-status", "data-automation-cards-panel", "data-automation-cards-form", "data-automation-node-cards", "data-automation-edge-cards"} {
+	for _, want := range []string{"data-automation-connect-status", "data-automation-details-panel", "data-automation-details-form", "data-automation-node-details", "data-automation-edge-details"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("interactive authoring page must render %q", want)
 		}
@@ -670,8 +670,8 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden`) || !strings.Contains(body, `class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport`) || !strings.Contains(body, `class="group relative w-10 min-w-0 shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: 2.5rem; min-width: 2.5rem; flex: 0 0 2.5rem;"`) || !strings.Contains(body, `class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-0 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;"`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `w-4`) || !strings.Contains(body, `h-6 w-4`) || !strings.Contains(body, `text-lg`) || !strings.Contains(body, `whitespace-pre-wrap break-words px-3`) || !strings.Contains(body, `data-yaml-indent="' + indent + '"' + hangingIndent`) || !strings.Contains(body, `left:calc(' + column + 'ch + 0.65ch)`) {
 			t.Errorf("%s YAML gutter must use the split diff viewer's compact w-10 line-number column with overlay fold controls and indentation-preserving wrapping", source)
 		}
-		if !strings.Contains(body, `cardsButton && cardsButton.addEventListener('click', function() { previewYAMLThenSelect('cards'); });`) {
-			t.Errorf("%s Cards selector must canonicalize pending YAML before showing card fields", source)
+		if !strings.Contains(body, `detailsButton && detailsButton.addEventListener('click', function() { previewYAMLThenSelect('details'); });`) {
+			t.Errorf("%s Details selector must canonicalize pending YAML before showing card fields", source)
 		}
 		for _, want := range []string{`data-automation-yaml-indent-guides`, `data-automation-yaml-indent-dot`, `data-automation-yaml-indent-rail`} {
 			if !strings.Contains(body, want) {
@@ -790,11 +790,11 @@ edges:
 	if err := AutomationBuilderContent(page, "project-browser").Render(context.Background(), &builder); err != nil {
 		t.Fatalf("render browser Automation builder: %v", err)
 	}
-	cardsPage := page
-	cardsPage.InitialView = "cards"
-	var cardsBuilder bytes.Buffer
-	if err := AutomationBuilderContent(cardsPage, "project-browser").Render(context.Background(), &cardsBuilder); err != nil {
-		t.Fatalf("render browser Cards preview builder: %v", err)
+	detailsPage := page
+	detailsPage.InitialView = "details"
+	var detailsBuilder bytes.Buffer
+	if err := AutomationBuilderContent(detailsPage, "project-browser").Render(context.Background(), &detailsBuilder); err != nil {
+		t.Fatalf("render browser Details preview builder: %v", err)
 	}
 
 	runner := `<script>
@@ -836,9 +836,9 @@ window.addEventListener('DOMContentLoaded', function() {
     var graph = document.querySelector('[data-automation-graph-panel]');
     var yaml = document.querySelector('[data-automation-yaml-panel]');
     var requestedInitialView = document.querySelector('[data-automation-initial-view]');
-    if (requestedInitialView && requestedInitialView.value === 'cards') {
-      var returnedCards = document.querySelector('[data-automation-cards-panel]');
-      if (!returnedCards || !isVisible(returnedCards) || isVisible(graph) || isVisible(yaml)) fail('YAML preview replacement did not restore the requested Cards view');
+    if (requestedInitialView && requestedInitialView.value === 'details') {
+      var returnedDetails = document.querySelector('[data-automation-details-panel]');
+      if (!returnedDetails || !isVisible(returnedDetails) || isVisible(graph) || isVisible(yaml)) fail('YAML preview replacement did not restore the requested Details view');
       await report('pass', '');
       return;
     }
@@ -861,12 +861,12 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
     var initialDiagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
     if (!initialDiagnostic || initialDiagnostic.classList.contains('hidden') || !initialDiagnostic.textContent.includes('line 1')) fail('preloaded YAML was not validated during editor initialization');
-    var cards = document.querySelector('[data-automation-cards-panel]');
-    var cardsButton = document.querySelector('[data-automation-view-cards]');
-    if (!cards || !cardsButton) fail('Cards view switcher or panel is missing');
-    if (!cards.querySelector('[data-automation-cards-form]')) fail('Cards view is missing its form');
-    if (!cards.querySelector('[data-automation-node-card]')) fail('Cards view is missing node cards');
-    if (!cards.querySelector('[data-automation-edge-card]')) fail('Cards view is missing transition cards');
+    var details = document.querySelector('[data-automation-details-panel]');
+    var detailsButton = document.querySelector('[data-automation-view-details]');
+    if (!details || !detailsButton) fail('Details view switcher or panel is missing');
+    if (!details.querySelector('[data-automation-details-form]')) fail('Details view is missing its form');
+    if (!details.querySelector('[data-automation-node-detail]')) fail('Details view is missing node details');
+    if (!details.querySelector('[data-automation-edge-detail]')) fail('Details view is missing transition details');
     click('[data-automation-view-yaml]', 'YAML view button');
     await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
     var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
@@ -875,11 +875,11 @@ window.addEventListener('DOMContentLoaded', function() {
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
     if (!diagnostic.classList.contains('hidden')) fail('valid YAML did not clear the preloaded diagnostic');
-    cardsButton.click();
-    if (!isVisible(cards) || isVisible(graph) || isVisible(yaml)) fail('Cards switch did not make only the card editor visible');
-    if (!cards.querySelector('textarea[name="node_first_prompt"]') || !cards.querySelector('textarea[name="node_first_goal"]')) fail('Cards view omitted prior task configuration controls');
-    click('[data-automation-view-yaml]', 'YAML view button after Cards');
-    if (!isVisible(yaml) || isVisible(graph) || isVisible(cards)) fail('YAML switch did not restore the editable YAML view');
+    detailsButton.click();
+    if (!isVisible(details) || isVisible(graph) || isVisible(yaml)) fail('Details switch did not make only the details editor visible');
+    if (!details.querySelector('textarea[name="node_first_prompt"]') || !details.querySelector('textarea[name="node_first_goal"]')) fail('Details view omitted prior task configuration controls');
+    click('[data-automation-view-yaml]', 'YAML view button after Details');
+    if (!isVisible(yaml) || isVisible(graph) || isVisible(details)) fail('YAML switch did not restore the editable YAML view');
 	    var gutter = document.querySelector('[data-automation-yaml-gutter]');
 	    var editorShell = document.querySelector('[data-automation-yaml-editor-shell]');
 	    var lineNumbers = document.querySelector('[data-automation-yaml-line-numbers]');    var highlight = document.querySelector('[data-automation-yaml-highlight]');
@@ -1012,9 +1012,9 @@ window.addEventListener('DOMContentLoaded', function() {
     document.body.appendChild(errorColorReference);
     if (errorDecorationColor !== window.getComputedStyle(errorColorReference).color) fail('malformed YAML error underline does not use the theme error color: ' + errorDecorationColor);
     errorColorReference.remove();
-    editor.value = originalYAML + '# open Cards after canonical YAML preview\n';
+    editor.value = originalYAML + '# open Details after canonical YAML preview\n';
     editor.dispatchEvent(new Event('input', {bubbles: true}));
-    cardsButton.click();
+    detailsButton.click();
     return;
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
@@ -1031,11 +1031,11 @@ window.addEventListener('DOMContentLoaded', function() {
 					http.Error(w, err.Error(), http.StatusBadRequest)
 					return
 				}
-				if r.FormValue("initial_view") != "cards" {
-					http.Error(w, "Cards preview must request the Cards initial view", http.StatusBadRequest)
+				if r.FormValue("initial_view") != "details" {
+					http.Error(w, "Details preview must request the Details initial view", http.StatusBadRequest)
 					return
 				}
-				_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.p-4{padding:16px}.px-0{padding-left:0;padding-right:0}.py-4{padding-top:16px;padding-bottom:16px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:40px;position:relative}[data-automation-yaml-fold-controls]{position:absolute;top:0;right:0;bottom:0;width:16px}[data-automation-yaml-fold]{position:absolute;right:0;width:16px;height:24px}[data-automation-yaml-panel]{height:260px;display:flex;flex-direction:column;overflow:hidden}[data-automation-yaml-editor-shell]{display:flex;flex:1 1 0%%;min-height:0;overflow:hidden}[data-automation-yaml-editor-viewport]{position:relative;min-height:0;flex:1 1 0%%;overflow:hidden}[data-automation-yaml-editor-viewport].overflow-auto{overflow:auto}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.left-0{left:0}.inset-y-0{top:0;bottom:0}.whitespace-nowrap{white-space:nowrap}.text-left{text-align:left}.text-right{text-align:right}.px-2{padding-left:8px;padding-right:8px}.py-0{padding-top:0;padding-bottom:0}.pb-0{padding-bottom:0}.pl-2{padding-left:8px}.pr-0{padding-right:0}.pt-0{padding-top:0}.p-0{padding:0}.w-full{width:100%%}.text-xs{font-size:12px;line-height:16px}.font-mono{font-family:monospace}.border-collapse{border-collapse:collapse}.diff-table td{padding-top:1px;padding-bottom:1px;vertical-align:top;line-height:1.5}.diff-line-num{min-width:40px;user-select:none}[data-automation-yaml-line-numbers]{width:100%%;margin:0;font:12px/24px monospace}</style></head><body><div style="position:absolute;visibility:hidden;left:20px;right:20px"><table class="diff-table w-full text-xs font-mono border-collapse"><colgroup><col style="width:40px"/><col style="width:50%%"/><col style="width:40px"/><col style="width:50%%"/></colgroup><tbody><tr><td class="diff-line-num text-right px-2 py-0" data-split-diff-gutter-reference>1</td><td>source</td><td class="diff-line-num text-right px-2 py-0">1</td><td>source</td></tr></tbody></table></div>%s%s</body></html>`, cardsBuilder.String(), runner)
+				_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.p-4{padding:16px}.px-0{padding-left:0;padding-right:0}.py-4{padding-top:16px;padding-bottom:16px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:40px;position:relative}[data-automation-yaml-fold-controls]{position:absolute;top:0;right:0;bottom:0;width:16px}[data-automation-yaml-fold]{position:absolute;right:0;width:16px;height:24px}[data-automation-yaml-panel]{height:260px;display:flex;flex-direction:column;overflow:hidden}[data-automation-yaml-editor-shell]{display:flex;flex:1 1 0%%;min-height:0;overflow:hidden}[data-automation-yaml-editor-viewport]{position:relative;min-height:0;flex:1 1 0%%;overflow:hidden}[data-automation-yaml-editor-viewport].overflow-auto{overflow:auto}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.left-0{left:0}.inset-y-0{top:0;bottom:0}.whitespace-nowrap{white-space:nowrap}.text-left{text-align:left}.text-right{text-align:right}.px-2{padding-left:8px;padding-right:8px}.py-0{padding-top:0;padding-bottom:0}.pb-0{padding-bottom:0}.pl-2{padding-left:8px}.pr-0{padding-right:0}.pt-0{padding-top:0}.p-0{padding:0}.w-full{width:100%%}.text-xs{font-size:12px;line-height:16px}.font-mono{font-family:monospace}.border-collapse{border-collapse:collapse}.diff-table td{padding-top:1px;padding-bottom:1px;vertical-align:top;line-height:1.5}.diff-line-num{min-width:40px;user-select:none}[data-automation-yaml-line-numbers]{width:100%%;margin:0;font:12px/24px monospace}</style></head><body><div style="position:absolute;visibility:hidden;left:20px;right:20px"><table class="diff-table w-full text-xs font-mono border-collapse"><colgroup><col style="width:40px"/><col style="width:50%%"/><col style="width:40px"/><col style="width:50%%"/></colgroup><tbody><tr><td class="diff-line-num text-right px-2 py-0" data-split-diff-gutter-reference>1</td><td>source</td><td class="diff-line-num text-right px-2 py-0">1</td><td>source</td></tr></tbody></table></div>%s%s</body></html>`, detailsBuilder.String(), runner)
 				return
 			}
 			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.p-4{padding:16px}.px-0{padding-left:0;padding-right:0}.py-4{padding-top:16px;padding-bottom:16px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:40px;position:relative}[data-automation-yaml-fold-controls]{position:absolute;top:0;right:0;bottom:0;width:16px}[data-automation-yaml-fold]{position:absolute;right:0;width:16px;height:24px}[data-automation-yaml-panel]{height:260px;display:flex;flex-direction:column;overflow:hidden}[data-automation-yaml-editor-shell]{display:flex;flex:1 1 0%%;min-height:0;overflow:hidden}[data-automation-yaml-editor-viewport]{position:relative;min-height:0;flex:1 1 0%%;overflow:hidden}[data-automation-yaml-editor-viewport].overflow-auto{overflow:auto}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.left-0{left:0}.inset-y-0{top:0;bottom:0}.whitespace-nowrap{white-space:nowrap}.text-left{text-align:left}.text-right{text-align:right}.px-2{padding-left:8px;padding-right:8px}.py-0{padding-top:0;padding-bottom:0}.pb-0{padding-bottom:0}.pl-2{padding-left:8px}.pr-0{padding-right:0}.pt-0{padding-top:0}.p-0{padding:0}.w-full{width:100%%}.text-xs{font-size:12px;line-height:16px}.font-mono{font-family:monospace}.border-collapse{border-collapse:collapse}.diff-table td{padding-top:1px;padding-bottom:1px;vertical-align:top;line-height:1.5}.diff-line-num{min-width:40px;user-select:none}[data-automation-yaml-line-numbers]{width:100%%;margin:0;font:12px/24px monospace}</style></head><body><div style="position:absolute;visibility:hidden;left:20px;right:20px"><table class="diff-table w-full text-xs font-mono border-collapse"><colgroup><col style="width:40px"/><col style="width:50%%"/><col style="width:40px"/><col style="width:50%%"/></colgroup><tbody><tr><td class="diff-line-num text-right px-2 py-0" data-split-diff-gutter-reference>1</td><td>source</td><td class="diff-line-num text-right px-2 py-0">1</td><td>source</td></tr></tbody></table></div>%s%s</body></html>`, builder.String(), runner)

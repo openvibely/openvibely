@@ -339,7 +339,7 @@ templ AutomationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 templ automationCanvasViewSwitcher() {
 	<div class="join" role="group" aria-label="Automation canvas view" data-automation-view-switcher>
 		<button class="btn btn-sm join-item btn-active" type="button" aria-pressed="true" data-automation-view-graph>Graph</button>
-		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-cards>Cards</button>
+		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-details>Details</button>
 		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-yaml>YAML</button>
 	</div>
 }
@@ -347,7 +347,7 @@ templ automationCanvasViewSwitcher() {
 templ automationBuilderViewSwitcher() {
 	<div class="join" role="group" aria-label="Automation builder view" data-automation-view-switcher>
 		<button class="btn btn-sm join-item btn-active" type="button" aria-pressed="true" data-automation-view-graph>Graph</button>
-		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-cards>Cards</button>
+		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-details>Details</button>
 		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-yaml>YAML</button>
 	</div>
 }
@@ -430,7 +430,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					}
 					</svg>
 					</div>
-					@automationLiveCardsPanel(graph)
+					@automationLiveDetailsPanel(graph)
 					<div class="min-h-[20rem] overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6" data-automation-yaml-panel hidden aria-label="Saved automation YAML"><pre class="whitespace-pre-wrap break-words">{ graph.YAML }</pre></div>				</div>			if graph.TemplateUpdateAvailable {
 				<dialog id="update-automation-template-modal" class="modal">
 					<div class="modal-box">
@@ -541,25 +541,25 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 				}, 20000);
 					var canvasRoot = document.querySelector('[data-automation-readonly-canvas]');
 					var graphPanel = canvasRoot && canvasRoot.querySelector('[data-automation-graph-panel]');
-					var cardsPanel = canvasRoot && canvasRoot.querySelector('[data-automation-live-cards-panel]');
+					var detailsPanel = canvasRoot && canvasRoot.querySelector('[data-automation-live-details-panel]');
 					var yamlPanel = canvasRoot && canvasRoot.querySelector('[data-automation-yaml-panel]');
 					var graphViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-graph]');
-					var cardsViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-cards]');
+					var detailsViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-details]');
 					var yamlViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-yaml]');
 					function selectAutomationLiveView(view) {
-						if (!graphPanel || !cardsPanel || !yamlPanel) return;
+						if (!graphPanel || !detailsPanel || !yamlPanel) return;
 						graphPanel.hidden = view !== 'graph';
-						cardsPanel.hidden = view !== 'cards';
+						detailsPanel.hidden = view !== 'details';
 						yamlPanel.hidden = view !== 'yaml';
 						graphViewButton.classList.toggle('btn-active', view === 'graph');
-						cardsViewButton.classList.toggle('btn-active', view === 'cards');
+						detailsViewButton.classList.toggle('btn-active', view === 'details');
 						yamlViewButton.classList.toggle('btn-active', view === 'yaml');
 						graphViewButton.setAttribute('aria-pressed', String(view === 'graph'));
-						cardsViewButton.setAttribute('aria-pressed', String(view === 'cards'));
+						detailsViewButton.setAttribute('aria-pressed', String(view === 'details'));
 						yamlViewButton.setAttribute('aria-pressed', String(view === 'yaml'));
 					}
 					graphViewButton && graphViewButton.addEventListener('click', function() { selectAutomationLiveView('graph'); });
-					cardsViewButton && cardsViewButton.addEventListener('click', function() { selectAutomationLiveView('cards'); });
+					detailsViewButton && detailsViewButton.addEventListener('click', function() { selectAutomationLiveView('details'); });
 					yamlViewButton && yamlViewButton.addEventListener('click', function() { selectAutomationLiveView('yaml'); });
 					var svg = canvasRoot && canvasRoot.querySelector('[data-automation-canvas]');				if (canvasRoot && svg) {
 					var original = svg.getAttribute('viewBox').split(/\s+/).map(Number);
@@ -724,11 +724,11 @@ func automationLiveEdgeCondition(raw string) string {
 	return string(encoded)
 }
 
-templ automationLiveCardsPanel(graph models.AutomationLiveGraph) {
-	<div data-automation-live-cards-panel hidden class="min-h-[20rem] w-full flex-1 overflow-y-auto rounded-box border border-base-300 bg-base-200/20 p-4" aria-label="Saved automation cards">
-		<div class="grid grid-cols-1 gap-4 xl:grid-cols-2" data-automation-live-node-cards>
+templ automationLiveDetailsPanel(graph models.AutomationLiveGraph) {
+	<div data-automation-live-details-panel hidden class="min-h-[20rem] w-full flex-1 overflow-y-auto rounded-box border border-base-300 bg-base-200/20 p-4" aria-label="Saved automation details">
+		<div class="grid grid-cols-1 gap-4 xl:grid-cols-2" data-automation-live-node-details>
 			for _, node := range graph.Nodes {
-				<section class="rounded-box border border-base-300 bg-base-100 p-4" data-automation-live-node-card={ node.NodeKey }>
+				<section class="rounded-box border border-base-300 bg-base-100 p-4" data-automation-live-node-detail={ node.NodeKey }>
 					<div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.NodeKey } · { node.Role }</p></div><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.NodeType) }</span></div>
 					<dl class="grid grid-cols-1 gap-3 text-sm">
 						for _, field := range automationLiveCardFields(node.ConfigJSON) {
@@ -738,10 +738,10 @@ templ automationLiveCardsPanel(graph models.AutomationLiveGraph) {
 				</section>
 			}
 		</div>
-		<div class="mt-4 rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2" data-automation-live-edge-cards>
+		<div class="mt-4 rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2" data-automation-live-edge-details>
 			for _, edge := range graph.Edges {
 				if source, target, ok := automationLiveEdgeNodes(graph.Nodes, edge.AutomationEdge); ok {
-					<div class="rounded-box bg-base-200/40 p-3" data-automation-live-edge-card={ edge.EdgeKey }><div class="text-sm font-medium">{ source.Name } → { target.Name }</div>
+					<div class="rounded-box bg-base-200/40 p-3" data-automation-live-edge-detail={ edge.EdgeKey }><div class="text-sm font-medium">{ source.Name } → { target.Name }</div>
 						if edge.Label != "" {
 							<p class="mt-2 text-sm">{ edge.Label }</p>
 						}
@@ -755,16 +755,16 @@ templ automationLiveCardsPanel(graph models.AutomationLiveGraph) {
 	</div>
 }
 
-templ automationBuilderCardsPanel(page models.AutomationBuilderPage, currentProjectID string) {
-	<div data-automation-cards-panel hidden style="display: none" class="min-h-[20rem] flex-1 overflow-y-auto rounded-box border border-base-300 bg-base-200/20 p-4">
-		<form id="automation-cards-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="space-y-4" data-automation-cards-form>
+templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentProjectID string) {
+	<div data-automation-details-panel hidden style="display: none" class="min-h-[20rem] flex-1 overflow-y-auto rounded-box border border-base-300 bg-base-200/20 p-4">
+		<form id="automation-details-form" method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content" class="space-y-4" data-automation-details-form>
 			<input type="hidden" name="project_id" value={ currentProjectID }/>
 			<input type="hidden" name="builder_source" value={ page.Source }/>
 			<input type="hidden" name="save_changes" value="true"/>
 			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) }/>
-			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2" data-automation-node-cards>
+			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2" data-automation-node-details>
 				for _, node := range page.Result.Candidate.Nodes {
-					<section class="rounded-box border border-base-300 bg-base-100 p-4" data-automation-node-card={ node.Key }>
+					<section class="rounded-box border border-base-300 bg-base-100 p-4" data-automation-node-detail={ node.Key }>
 						<div class="mb-3 flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold">{ node.Name }</h3><p class="text-xs text-base-content/55">{ node.Key } · { node.Role }</p></div><div class="flex items-center gap-2"><span class="badge badge-ghost badge-sm">{ automationNodeTypeLabel(node.Type) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_node" value={ node.Key }>Delete node</button></div></div>
 						<label class="form-control"><span class="label-text">Display name</span><input class="input input-bordered" name={ "node_" + node.Key + "_name" } value={ node.Name } maxlength="200"/></label>
 						if automationDraftHasConfig(node, "prompt") {
@@ -825,9 +825,9 @@ templ automationBuilderCardsPanel(page models.AutomationBuilderPage, currentProj
 							}					</section>
 				}
 			</div>
-			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2" data-automation-edge-cards>
+			<div class="rounded-box border border-base-300 bg-base-100 p-4"><h3 class="font-semibold">Transitions</h3><div class="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2" data-automation-edge-details>
 				for _, edge := range page.Result.Candidate.Edges {
-					<div class="rounded-box bg-base-200/40 p-3" data-automation-edge-card={ edge.Key }><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Delete connection</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label>
+					<div class="rounded-box bg-base-200/40 p-3" data-automation-edge-detail={ edge.Key }><div class="mb-2 flex items-center justify-between gap-2"><span class="text-xs font-medium">{ automationDraftNodeName(page.Result.Candidate.Nodes, edge.From) } → { automationDraftNodeName(page.Result.Candidate.Nodes, edge.To) }</span><button class="btn btn-ghost btn-xs text-error" type="submit" name="remove_edge" value={ edge.Key }>Delete connection</button></div><label class="form-control"><span class="label-text">Label</span><input class="input input-bordered" name={ "edge_" + edge.Key + "_label" } value={ edge.Label } maxlength="100"/></label>
 						if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "native_approval" {
 							<label class="form-control mt-2"><span class="label-text">Human result</span><select class="select select-bordered" name={ "edge_" + edge.Key + "_state" }><option value="">Choose result</option><option value="approved" selected?={ automationDraftEdgeConditionState(edge) == "approved" }>Approved</option><option value="rejected" selected?={ automationDraftEdgeConditionState(edge) == "rejected" }>Rejected</option></select></label>
 						} else if automationDraftNodeRole(page.Result.Candidate.Nodes, edge.From) == "github_assignment" {
@@ -836,7 +836,7 @@ templ automationBuilderCardsPanel(page models.AutomationBuilderPage, currentProj
 					</div>
 				}
 			</div></div>
-			<div class="flex justify-end"><button class="btn btn-primary" type="submit" data-automation-cards-save>Save changes</button></div>
+			<div class="flex justify-end"><button class="btn btn-primary" type="submit" data-automation-details-save>Save changes</button></div>
 		</form>
 	</div>
 }
@@ -970,7 +970,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 									</div>							</div>
 							<p class="mt-3 hidden rounded-box border border-error/30 bg-error/10 px-3 py-2 font-sans text-sm text-error" role="alert" data-automation-yaml-diagnostic></p>
 							</div>
-							@automationBuilderCardsPanel(page, currentProjectID)
+							@automationBuilderDetailsPanel(page, currentProjectID)
 							<dialog id="automation-node-dialog" class="modal" data-automation-node-dialog>							<div class="modal-box relative max-w-md">
 								<div class="absolute right-4 top-4">@ModalCloseButton("document.getElementById('automation-node-dialog')", "Close add node dialog")</div>
 								<div class="pr-10"><h3 class="text-lg font-semibold">Add node</h3>
@@ -1599,26 +1599,26 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						var viewRoot = builder.querySelector('[data-automation-view-root]');
 						var graphPanel = viewRoot && viewRoot.querySelector('[data-automation-graph-panel]');
 						var yamlPanel = viewRoot && viewRoot.querySelector('[data-automation-yaml-panel]');
-						var cardsPanel = viewRoot && viewRoot.querySelector('[data-automation-cards-panel]');
+						var detailsPanel = viewRoot && viewRoot.querySelector('[data-automation-details-panel]');
 						var graphButton = viewRoot && viewRoot.querySelector('[data-automation-view-graph]');
 						var yamlButton = viewRoot && viewRoot.querySelector('[data-automation-view-yaml]');
-						var cardsButton = viewRoot && viewRoot.querySelector('[data-automation-view-cards]');
-						var cardsForm = builder.querySelector('[data-automation-cards-form]');
+						var detailsButton = viewRoot && viewRoot.querySelector('[data-automation-view-details]');
+						var detailsForm = builder.querySelector('[data-automation-details-form]');
 						function selectAutomationBuilderView(view) {
-							if (!graphPanel || !yamlPanel || !cardsPanel) return;
-							var yamlSelected = view === 'yaml', cardsSelected = view === 'cards';
-							graphPanel.hidden = yamlSelected || cardsSelected;
-							graphPanel.style.display = yamlSelected || cardsSelected ? 'none' : '';
+							if (!graphPanel || !yamlPanel || !detailsPanel) return;
+							var yamlSelected = view === 'yaml', detailsSelected = view === 'details';
+							graphPanel.hidden = yamlSelected || detailsSelected;
+							graphPanel.style.display = yamlSelected || detailsSelected ? 'none' : '';
 							yamlPanel.hidden = !yamlSelected;
 							yamlPanel.style.display = yamlSelected ? 'flex' : 'none';
-							cardsPanel.hidden = !cardsSelected;
-							cardsPanel.style.display = cardsSelected ? 'block' : 'none';
-							graphButton.classList.toggle('btn-active', !yamlSelected && !cardsSelected);
+							detailsPanel.hidden = !detailsSelected;
+							detailsPanel.style.display = detailsSelected ? 'block' : 'none';
+							graphButton.classList.toggle('btn-active', !yamlSelected && !detailsSelected);
 							yamlButton.classList.toggle('btn-active', yamlSelected);
-							cardsButton.classList.toggle('btn-active', cardsSelected);
-							graphButton.setAttribute('aria-pressed', String(!yamlSelected && !cardsSelected));
+							detailsButton.classList.toggle('btn-active', detailsSelected);
+							graphButton.setAttribute('aria-pressed', String(!yamlSelected && !detailsSelected));
 							yamlButton.setAttribute('aria-pressed', String(yamlSelected));
-							cardsButton.setAttribute('aria-pressed', String(cardsSelected));
+							detailsButton.setAttribute('aria-pressed', String(detailsSelected));
 							queueYAMLLineLayout();
 							if (yamlSelected) validateYAMLWhileTyping();
 						}
@@ -1626,7 +1626,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							var form = document.getElementById('automation-design-form');
 							if (yamlEditor && form && yamlEditor.value !== visualCandidateYAML()) {
 								var initialView = form.querySelector('[data-automation-initial-view]');
-								if (initialView) initialView.value = view === 'cards' ? 'cards' : '';
+								if (initialView) initialView.value = view === 'details' ? 'details' : '';
 								form.requestSubmit();
 								return;
 							}
@@ -1634,16 +1634,16 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						}
 						graphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });
 						yamlButton && yamlButton.addEventListener('click', function() { selectAutomationBuilderView('yaml'); });
-							cardsButton && cardsButton.addEventListener('click', function() { previewYAMLThenSelect('cards'); });						builder.querySelectorAll('[data-automation-builder-save]').forEach(function(button) {
+							detailsButton && detailsButton.addEventListener('click', function() { previewYAMLThenSelect('details'); });						builder.querySelectorAll('[data-automation-builder-save]').forEach(function(button) {
 							button.addEventListener('click', function(event) {
-								if (!cardsPanel || cardsPanel.hidden || !cardsForm) return;
+								if (!detailsPanel || detailsPanel.hidden || !detailsForm) return;
 								event.preventDefault();
-								cardsForm.requestSubmit();
+								detailsForm.requestSubmit();
 							});
 						});
 							renderEdges(); syncCandidate(false);
 							var initialView = builder.querySelector('[data-automation-initial-view]');
-							if (initialView && initialView.value === 'cards') selectAutomationBuilderView('cards');
+							if (initialView && initialView.value === 'details') selectAutomationBuilderView('details');
 					})();		</script>
 	</div>
 }

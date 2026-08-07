@@ -213,8 +213,8 @@ func decodeAutomationBuilderCandidate(c echo.Context) (models.AutomationDraftCan
 }
 
 func automationBuilderInitialView(c echo.Context) string {
-	if strings.TrimSpace(c.FormValue("initial_view")) == "cards" {
-		return "cards"
+	if strings.TrimSpace(c.FormValue("initial_view")) == "details" {
+		return "details"
 	}
 	return ""
 }
