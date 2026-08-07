@@ -292,8 +292,9 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 		}},
 	}
 	page := models.AutomationBuilderPage{
-		AutomationID: "automation-edit-actions",
-		Source:       "edit",
+		AutomationID:   "automation-edit-actions",
+		Source:         "edit",
+		LifecycleState: models.AutomationActive,
 		Result: models.AutomationDraftResult{
 			Candidate:   candidate,
 			Assumptions: []string{"Review uses the selected Agent."},
@@ -325,8 +326,9 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 		`class="dropdown dropdown-end"`,
 		`aria-label="More actions for Edit card actions"`,
 		`data-automation-builder-save`,
-		`type="submit" form="automation-design-form"`,
-		`>Save changes</button>`,
+		`data-automation-builder-cancel`,
+		`data-automation-builder-pause`,
+		`>Disable</button>`,
 		`data-delete-automation-open`,
 		`>Delete</button>`,
 	} {
@@ -335,18 +337,43 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 		}
 	}
 	if got := strings.Count(body, `>Save changes</button>`); got != 1 {
-		t.Errorf("expected saved Edit page to expose Save changes only in its kebab, got %d actions", got)
+		t.Errorf("expected saved Edit page to expose Save changes once, got %d actions", got)
+	}
+	if got := strings.Count(body, `>Cancel</a>`); got != 1 {
+		t.Errorf("expected saved Edit page to expose Cancel once, got %d actions", got)
 	}
 	if got := strings.Count(body, `data-automation-builder-actions`); got != 1 {
 		t.Errorf("expected one Edit Automation kebab, got %d", got)
 	}
-	if !strings.Contains(canvas, `data-automation-builder-card-actions`) || strings.Index(canvas, `data-automation-builder-actions`) < strings.Index(canvas, `data-automation-add-node-open`) {
-		t.Error("expected Edit Automation kebab at the far right of the canvas heading action group")
+	if !strings.Contains(canvas, `data-automation-builder-card-actions`) || !(strings.Index(canvas, `data-automation-add-node-open`) < strings.Index(canvas, `data-automation-builder-save`) && strings.Index(canvas, `data-automation-builder-save`) < strings.Index(canvas, `data-automation-builder-cancel`) && strings.Index(canvas, `data-automation-builder-cancel`) < strings.Index(canvas, `data-automation-builder-actions`)) {
+		t.Error("expected Edit Automation actions in Add node, Save changes, Cancel, then kebab order")
+	}
+	menuStart := strings.Index(canvas, `data-automation-builder-actions`)
+	menuEndOffset := strings.Index(canvas[menuStart:], `</ul>`)
+	if menuStart < 0 || menuEndOffset < 0 {
+		t.Fatal("expected Edit Automation kebab menu")
+	}
+	menu := canvas[menuStart : menuStart+menuEndOffset]
+	for _, forbidden := range []string{`data-automation-builder-save`, `data-automation-builder-cancel`} {
+		if strings.Contains(menu, forbidden) {
+			t.Errorf("Edit Automation kebab must not retain %q", forbidden)
+		}
 	}
 	if strings.Contains(body[:canvasStart], `>Save changes</button>`) || strings.Contains(body[:canvasStart], `data-delete-automation-open`) {
 		t.Error("saved Edit page must not retain standalone Save/Delete controls above the canvas")
 	}
 
+	page.LifecycleState = models.AutomationPaused
+	out.Reset()
+	if err := AutomationBuilderContent(page, "project-edit-actions").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render paused Automation Edit actions: %v", err)
+	}
+	pausedBody := out.String()
+	if !strings.Contains(pausedBody, `data-automation-builder-resume`) || !strings.Contains(pausedBody, `>Enable</button>`) || strings.Contains(pausedBody, `data-automation-builder-pause`) {
+		t.Error("paused Edit Automation must offer Enable, not Disable, in its kebab")
+	}
+
+	page.LifecycleState = models.AutomationActive
 	page.AutomationID = ""
 	page.Source = "blank"
 	out.Reset()
@@ -401,7 +428,7 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 	}
 }
 
-func TestAutomationLiveActionsUseCardKebab(t *testing.T) {
+func TestAutomationLiveActionsUsePrimaryButtonsAndCardKebab(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{
 			ID:             "automation-live-actions",
@@ -437,8 +464,8 @@ func TestAutomationLiveActionsUseCardKebab(t *testing.T) {
 		`data-automation-live-health`,
 		`>healthy</span>`,
 		`data-automation-live-actions`,
-		`class="mb-3 flex items-start justify-between gap-3" data-automation-live-card-heading`,
-		`class="shrink-0" data-automation-live-actions`,
+		`class="mb-3 flex flex-wrap items-start justify-between gap-3" data-automation-live-card-heading`,
+		`class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-actions`,
 		`class="dropdown dropdown-end"`,
 		`aria-label="More actions for Card actions"`,
 		`data-automation-live-edit`,
@@ -464,13 +491,27 @@ func TestAutomationLiveActionsUseCardKebab(t *testing.T) {
 	if strings.Index(legend, `aria-label="Graph status legend"`) > strings.Index(legend, `data-automation-live-badges`) {
 		t.Error("expected lifecycle and health badges after the graph status legend")
 	}
-	for _, label := range []string{"Edit automation", "Run now", "Disable", "Delete"} {
-		if !strings.Contains(cardHeader, ">"+label+"</button>") {
-			t.Errorf("expected Live Automation kebab to contain %q", label)
+	if !(strings.Index(cardHeader, `data-automation-live-edit`) < strings.Index(cardHeader, `data-automation-live-run-now`) && strings.Index(cardHeader, `data-automation-live-run-now`) < strings.Index(cardHeader, `class="dropdown dropdown-end"`)) {
+		t.Error("expected Live Edit and Run now buttons before the kebab")
+	}
+	menuStart := strings.Index(cardHeader, `class="dropdown dropdown-end"`)
+	menuEndOffset := strings.Index(cardHeader[menuStart:], `</ul>`)
+	if menuStart < 0 || menuEndOffset < 0 {
+		t.Fatal("expected Live Automation kebab menu")
+	}
+	menu := cardHeader[menuStart : menuStart+menuEndOffset]
+	for _, want := range []string{"Disable", "Delete"} {
+		if !strings.Contains(menu, ">"+want+"</button>") {
+			t.Errorf("expected Live Automation kebab to contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{`data-automation-live-edit`, `data-automation-live-run-now`} {
+		if strings.Contains(menu, forbidden) {
+			t.Errorf("Live Automation kebab must not retain %q", forbidden)
 		}
 	}
 	if got := strings.Count(body, `data-automation-live-actions`); got != 1 {
-		t.Errorf("expected one Live Automation kebab, got %d", got)
+		t.Errorf("expected one Live Automation action group, got %d", got)
 	}
 }
 
@@ -677,15 +718,17 @@ func TestAutomationLiveCanvasFillsAvailableHeight(t *testing.T) {
 
 	for _, want := range []string{
 		`id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto"`,
-		`class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-col" data-automation-readonly-canvas`,
-		`class="automation-canvas-shell relative h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem] w-full flex-none overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
+		`class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas`,
+		`class="automation-canvas-shell relative min-h-[20rem] w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected Automation Live viewport-filling layout to contain %q", want)
 		}
 	}
-	if strings.Contains(body, `min-h-[34rem]`) {
-		t.Error("Automation Live canvas must not force the card below the desktop page viewport")
+	for _, forbidden := range []string{`max-h-[42rem]`, `flex-none`, `h-[calc(100dvh-26rem)]`} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("Automation Live canvas must not retain capped viewport sizing %q", forbidden)
+		}
 	}
 }
 
@@ -746,13 +789,21 @@ func TestAutomationCustomBuilderCanvasMatchesEditLayout(t *testing.T) {
 	}
 
 	custom := render("blank", "")
-	edit := render("edit", "automation-edit")
 	for _, want := range []string{`h-[calc(100dvh-26rem)]`, `min-h-[20rem]`, `max-h-[42rem]`, `h-full`} {
 		if !strings.Contains(custom, want) {
-			t.Errorf("new Custom builder must use Edit viewport sizing %q", want)
+			t.Errorf("new Custom builder must retain its existing viewport sizing %q", want)
 		}
+	}
+
+	edit := render("edit", "automation-edit")
+	for _, want := range []string{`flex h-[calc(100dvh-12rem)] min-h-[20rem] flex-col`, `flex-1 min-h-[20rem]`, `h-full`} {
 		if !strings.Contains(edit, want) {
-			t.Errorf("saved Edit builder must use shared viewport sizing %q", want)
+			t.Errorf("saved Edit builder must fill the available page height with %q", want)
+		}
+	}
+	for _, forbidden := range []string{`h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem]`} {
+		if strings.Contains(edit, forbidden) {
+			t.Errorf("saved Edit builder must not retain capped viewport sizing %q", forbidden)
 		}
 	}
 	for _, forbidden := range []string{`h-[calc(100dvh-22rem)]`, `min-h-[28rem]`, `min-h-[calc(100dvh-15rem)]`, `min-h-[42rem]`} {
@@ -1258,8 +1309,7 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!liveActions || !liveLegend || !liveBadges || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation card is missing its legend, status, health, or kebab menu');
 	    if (!liveActions.closest('[data-automation-live-card-heading]')) fail('Live Automation kebab is not in the card heading row');
 	    if (!liveBadges.closest('[data-automation-live-legend-row]')) fail('Live Automation status and health badges are not in the graph legend row');
-	    click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Run now');
-	    clickMenuRowRightEdge('#automation-live [data-automation-live-run-now]', 'Live Automation Run now menu row');
+	    click('#automation-live [data-automation-live-run-now]', 'Live Automation Run now button');
 	    await fetch('/automation-run-now-started');
 	    window.openVibelyAutomationLiveRefresh('GET');
 	    await waitFor(function() {
@@ -1275,9 +1325,7 @@ window.addEventListener('DOMContentLoaded', function() {
     click('#automation-live #delete-automation-modal button[aria-label="Close delete automation confirmation"]', 'Live Automation delete modal close button');
     if (liveDeleteModal.open) fail('Live Automation delete modal close button did not close the dialog');
 
-    click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Edit');
-    clickMenuRowRightEdge('#automation-live [data-automation-live-edit]', 'Edit automation menu row');
-    await waitFor(function() { return !!document.getElementById('automation-builder'); }, 'builder after Edit automation');
+	    click('#automation-live [data-automation-live-edit]', 'Edit automation button');    await waitFor(function() { return !!document.getElementById('automation-builder'); }, 'builder after Edit automation');
     if (document.getElementById('automation-live')) fail('live Automation root remained mounted behind the editor');
 	    click('#automation-builder [data-automation-builder-actions] label', 'Edit Automation kebab before Delete');
 	    clickMenuRowRightEdge('#automation-builder [data-delete-automation-open]', 'Edit Automation Delete menu row');    var editDeleteModal = document.querySelector('#automation-builder #delete-automation-modal');
@@ -1290,16 +1338,15 @@ window.addEventListener('DOMContentLoaded', function() {
 	    editParityShell.style.height = '0px';
 	    var editParityNode = editedCanvas.querySelector('[data-node-key="first_step"] .automation-graph-node');
 	    if (!editParityNode) fail('Edit automation is missing the matching visual-parity node');
-	    var editParityNodeRect = editParityNode.getBoundingClientRect();
-	    var editParityCanvasRect = editedCanvas.querySelector('[data-automation-canvas]').getBoundingClientRect();
-	    var editParityShellRect = editParityShell.getBoundingClientRect();
-	    if (editParityShellRect.height < 319) fail('short-desktop Edit canvas collapsed below its 20rem usability floor: ' + editParityShellRect.height.toFixed(1) + 'px');
-	    if (Math.abs(editParityNodeRect.width - liveParityNodeWidth) > 1 || Math.abs(editParityNodeRect.height - liveParityNodeHeight) > 1) fail('Live and Edit render matching nodes at different sizes: Live=' + liveParityNodeWidth.toFixed(1) + 'x' + liveParityNodeHeight.toFixed(1) + ' in ' + canvasRect.width.toFixed(1) + 'x' + canvasRect.height.toFixed(1) + ' shell ' + liveCanvasShellRect.width.toFixed(1) + 'x' + liveCanvasShellRect.height.toFixed(1) + ' Edit=' + editParityNodeRect.width.toFixed(1) + 'x' + editParityNodeRect.height.toFixed(1) + ' in ' + editParityCanvasRect.width.toFixed(1) + 'x' + editParityCanvasRect.height.toFixed(1) + ' shell ' + editParityShellRect.width.toFixed(1) + 'x' + editParityShellRect.height.toFixed(1));
-	    click('#automation-builder [data-automation-fit]', 'Edit Fit control for visual parity');
-	    var editFitNodeRect = editParityNode.getBoundingClientRect();
-		    if (Math.abs(editFitNodeRect.width - liveFitNodeWidth) > 1 || Math.abs(editFitNodeRect.height - liveFitNodeHeight) > 1) fail('Live and Edit Fit render matching nodes at different sizes: Live=' + liveFitNodeWidth.toFixed(1) + 'x' + liveFitNodeHeight.toFixed(1) + ' Edit=' + editFitNodeRect.width.toFixed(1) + 'x' + editFitNodeRect.height.toFixed(1));
+		    var editParityNodeRect = editParityNode.getBoundingClientRect();
+		    var editParityCanvasRect = editedCanvas.querySelector('[data-automation-canvas]').getBoundingClientRect();
+		    var editParityShellRect = editParityShell.getBoundingClientRect();
 		    var editSVG = editedCanvas.querySelector('[data-automation-canvas]');
-		    var editPanStart = editSVG.getAttribute('viewBox').split(/\s+/).map(Number);
+		    if (editParityShellRect.height < 319) fail('short-desktop Edit canvas collapsed below its 20rem usability floor: ' + editParityShellRect.height.toFixed(1) + 'px');
+		    if (editSVG.getAttribute('viewBox') !== liveViewBox.join(' ')) fail('Live and Edit must use the same initial tight graph bounds: Live=' + liveViewBox.join(' ') + ' Edit=' + editSVG.getAttribute('viewBox'));
+		    click('#automation-builder [data-automation-fit]', 'Edit Fit control for visual parity');
+		    if (editSVG.getAttribute('viewBox') !== liveViewBox.join(' ')) fail('Live and Edit Fit must use the same tight graph bounds: Live=' + liveViewBox.join(' ') + ' Edit=' + editSVG.getAttribute('viewBox'));
+		    if (editParityNodeRect.width <= 0 || editParityNodeRect.height <= 0 || editParityCanvasRect.width <= 0 || editParityCanvasRect.height <= 0) fail('Edit canvas did not render a visible graph after expanding to page height');		    var editPanStart = editSVG.getAttribute('viewBox').split(/\s+/).map(Number);
 		    var editPanRect = editSVG.getBoundingClientRect();
 		    editSVG.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, pointerId:42, clientX:editPanRect.left+30, clientY:editPanRect.top+30}));
 		    editSVG.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, button:0, pointerId:42, clientX:editPanRect.left+150, clientY:editPanRect.top+90}));
@@ -1553,9 +1600,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var afterNodeDelete = JSON.parse(candidateInput.value);
 		    if (afterNodeDelete.nodes.some(function(node) { return node.key === 'result'; })) fail('node delete control did not remove the node');
 		    if (afterNodeDelete.edges.some(function(edge) { return edge.from === 'result' || edge.to === 'result'; })) fail('node deletion left connected edges behind');
-		    click('#automation-builder [data-automation-builder-actions] label', 'Edit Automation kebab before Save');
-		    clickMenuRowRightEdge('#automation-builder [data-automation-builder-save]', 'Edit Automation Save changes menu row');
-		    if (connectionSubmissions !== 1 || !saveSubmission) fail('Edit kebab Save changes action did not submit the design form exactly once');
+		    click('#automation-builder [data-automation-builder-save]', 'Edit Automation Save changes button');
+		    if (connectionSubmissions !== 1 || !saveSubmission) fail('Edit Save changes button did not submit the design form exactly once');
 		    if (saveSubmission.get('save_changes') !== 'true') fail('Edit kebab Save changes action omitted immediate-apply intent');
 		    var savedCandidate = JSON.parse(String(saveSubmission.get('candidate_json') || '{}'));
 		    if (savedCandidate.name !== 'Browser Named Automation' || savedCandidate.nodes.some(function(node) { return node.key === 'result'; })) fail('visible Save changes action did not submit the latest graph state');
@@ -1580,8 +1626,9 @@ window.addEventListener('DOMContentLoaded', function() {
 		.overflow-y-auto { overflow-y: auto !important; }
 		#automation-builder, #automation-live { box-sizing: border-box; height: 900px; }
 		#automation-live .automation-canvas-shell,
-		#automation-builder:has([data-automation-builder-actions]) .automation-canvas-shell { box-sizing: border-box; flex: none; height: calc(100vh - 26rem); min-height: 20rem; max-height: 42rem; }
+		#automation-builder [data-automation-draft-canvas].flex .automation-canvas-shell { box-sizing: border-box; }
 		[class~="h-[calc(100dvh-26rem)]"] { height: calc(100vh - 26rem); }
+		[class~="h-[calc(100dvh-12rem)]"] { height: calc(100vh - 12rem); }
 		[class~="h-[calc(100dvh-15rem)]"] { height: calc(100vh - 15rem); }
 		[class~="min-h-[calc(100dvh-15rem)]"] { min-height: calc(100vh - 15rem); }
 		[class~="min-h-[42rem]"] { min-height: 42rem; }

@@ -132,6 +132,7 @@ type AutomationBuilderPage struct {
 	EdgePalette             []AutomationDraftEdge        `json:"edge_palette,omitempty"`
 	Capabilities            AutomationCapabilitySnapshot `json:"capabilities"`
 	TemplateUpdateAvailable bool                         `json:"template_update_available,omitempty"`
+	LifecycleState          AutomationLifecycleState     `json:"lifecycle_state,omitempty"`
 	Error                   string                       `json:"error,omitempty"`
 }
 

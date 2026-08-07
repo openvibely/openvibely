@@ -133,7 +133,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		return err
 	}
 	page := models.AutomationBuilderPage{Result: *result, AutomationID: automationID, Source: opened.Definition.Version.Source,
-		TemplateUpdateAvailable: templateUpdateAvailable}
+		TemplateUpdateAvailable: templateUpdateAvailable, LifecycleState: opened.Definition.Automation.LifecycleState}
 	if isHTMX(c) {
 		c.Response().Header().Set("HX-Push-Url", "/automations/"+automationID+"?project_id="+projectID)
 	}

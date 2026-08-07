@@ -366,34 +366,37 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 				</form>
 			</div>
 		}
-			<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-col" data-automation-readonly-canvas>
-				<div class="mb-3 flex items-start justify-between gap-3" data-automation-live-card-heading>
-					<div class="min-w-0 pr-2"><h3 class="font-semibold">Node states</h3><p class="mt-1 text-xs text-base-content/60">A node’s border and label show the highest-priority work state currently present.</p></div>
-					<div class="shrink-0" data-automation-live-actions>
-						<div class="dropdown dropdown-end">
-							<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + graph.Automation.Name } onclick="handleDropdownToggle(event)">
-								<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-								</svg>
-							</label>
-							<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
-								<li><button type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit automation</button></li>
-								if graph.TemplateUpdateAvailable {
-									<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
-								}
-								if graph.Automation.LifecycleState == models.AutomationActive {
-									<li><button type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run now</button></li>
-										<li><button type="submit" form="automation-live-pause-form" data-automation-live-pause>Disable</button></li>								}
-								if graph.Automation.LifecycleState == models.AutomationPaused {
-										<li><button type="submit" form="automation-live-resume-form" data-automation-live-resume>Enable</button></li>								}
-								if deleteAvailable {
-									<li><button class="text-error" type="button" data-automation-live-delete onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button></li>
-								}
-							</ul>
+				<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas>
+					<div class="mb-3 flex flex-wrap items-start justify-between gap-3" data-automation-live-card-heading>
+						<div class="min-w-0 pr-2"><h3 class="font-semibold">Node states</h3><p class="mt-1 text-xs text-base-content/60">A node’s border and label show the highest-priority work state currently present.</p></div>
+						<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-actions>
+							<button class="btn btn-outline btn-sm" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit automation</button>
+							if graph.Automation.LifecycleState == models.AutomationActive {
+								<button class="btn btn-primary btn-sm" type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run now</button>
+							}
+							<div class="dropdown dropdown-end">
+								<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + graph.Automation.Name } onclick="handleDropdownToggle(event)">
+									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+									</svg>
+								</label>
+								<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
+									if graph.TemplateUpdateAvailable {
+										<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
+									}
+									if graph.Automation.LifecycleState == models.AutomationActive {
+										<li><button type="submit" form="automation-live-pause-form" data-automation-live-pause>Disable</button></li>
+									}
+									if graph.Automation.LifecycleState == models.AutomationPaused {
+										<li><button type="submit" form="automation-live-resume-form" data-automation-live-resume>Enable</button></li>
+									}
+									if deleteAvailable {
+										<li><button class="text-error" type="button" data-automation-live-delete onclick="document.getElementById('delete-automation-modal').showModal()">Delete</button></li>
+									}
+								</ul>
+							</div>
 						</div>
-					</div>
-				</div>
-				<form id="automation-live-edit-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" onsubmit="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelySubmitNavigate(this); return false;">
+					</div>				<form id="automation-live-edit-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID)) } hx-post={ fmt.Sprintf("/automations/%s/builder?project_id=%s", graph.Automation.ID, currentProjectID) } hx-target="#main-content" onsubmit="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelySubmitNavigate(this); return false;">
 					<input type="hidden" name="project_id" value={ currentProjectID }/>
 				</form>
 				if graph.Automation.LifecycleState == models.AutomationActive {
@@ -414,8 +417,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						<span class="badge badge-ghost" data-automation-live-health>{ string(graph.Automation.HealthState) }</span>
 					</div>
 				</div>
-				<div class="automation-canvas-shell relative h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem] w-full flex-none overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Live automation graph">
-					<div class="absolute right-3 top-3 z-10 flex gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" data-automation-live-viewport-controls>
+					<div class="automation-canvas-shell relative min-h-[20rem] w-full flex-1 overflow-hidden rounded-box border border-base-300 bg-base-200/20" role="region" aria-label="Live automation graph">					<div class="absolute right-3 top-3 z-10 flex gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" data-automation-live-viewport-controls>
 						<button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-xs" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
 						<button class="btn btn-ghost btn-xs" type="button" data-automation-fit>Fit</button>
@@ -776,11 +778,14 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</ul>
 				</details>
 			}
-			<section class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4" data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
-				<div class="flex flex-wrap items-start justify-between gap-3">
+				<section class={ "mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4", templ.KV("flex h-[calc(100dvh-12rem)] min-h-[20rem] flex-col", page.AutomationID != "") } data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>				<div class="flex flex-wrap items-start justify-between gap-3">
 					<div><div class="flex flex-wrap items-center gap-2"><h3 class="font-semibold">Canvas</h3><span class="badge badge-outline badge-sm">{ automationAdapterLabel(page.Result.Candidate.AdapterKey) }</span></div><p class="mt-1 text-xs text-base-content/60">Drag nodes to arrange them and empty space to pan. Pinch or use the controls to zoom; ordinary scrolling moves the page.</p><p class="mt-2 text-sm font-medium" data-automation-connect-status aria-live="polite"><span class="text-primary">Connect steps:</span> Drag from a node's right handle to another node's left handle. Select a line, then use its × control to delete it or drag an endpoint to reconnect it.</p></div>
 					<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-node-tool data-automation-builder-card-actions>
 						<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
+						if page.AutomationID != "" {
+							<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button>
+							<a class="btn btn-ghost btn-sm" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a>
+						}
 						if page.AutomationID != "" || page.Source == "blank" {
 							<div class="dropdown dropdown-end" data-automation-builder-actions>
 								<label tabindex="0" class="btn btn-ghost btn-sm" title="More actions" aria-label={ "More actions for " + page.Result.Candidate.Name } onclick="handleDropdownToggle(event)">
@@ -789,9 +794,14 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 									</svg>
 								</label>
 								<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
-									<li><button type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button></li>
-									if page.AutomationID != "" {
-										<li><a href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a></li>
+									if page.AutomationID == "" && page.Source == "blank" {
+										<li><button type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button></li>
+									}
+									if page.AutomationID != "" && page.LifecycleState == models.AutomationActive {
+										<li><button type="submit" form="automation-builder-pause-form" data-automation-builder-pause>Disable</button></li>
+									}
+									if page.AutomationID != "" && page.LifecycleState == models.AutomationPaused {
+										<li><button type="submit" form="automation-builder-resume-form" data-automation-builder-resume>Enable</button></li>
 									}
 									if page.TemplateUpdateAvailable {
 										<li><button type="button" data-update-automation-template-open onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
@@ -804,8 +814,17 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						}
 					</div>
 				</div>
-				<dialog id="automation-node-dialog" class="modal" data-automation-node-dialog>
-					<div class="modal-box relative max-w-md">
+					if page.AutomationID != "" && page.LifecycleState == models.AutomationActive {
+						<form id="automation-builder-pause-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/pause?project_id=%s", page.AutomationID, currentProjectID)) }>
+							<input type="hidden" name="project_id" value={ currentProjectID }/>
+						</form>
+					}
+					if page.AutomationID != "" && page.LifecycleState == models.AutomationPaused {
+						<form id="automation-builder-resume-form" class="hidden" method="post" action={ templ.SafeURL(fmt.Sprintf("/automations/%s/resume?project_id=%s", page.AutomationID, currentProjectID)) }>
+							<input type="hidden" name="project_id" value={ currentProjectID }/>
+						</form>
+					}
+					<dialog id="automation-node-dialog" class="modal" data-automation-node-dialog>					<div class="modal-box relative max-w-md">
 						<div class="absolute right-4 top-4">@ModalCloseButton("document.getElementById('automation-node-dialog')", "Close add node dialog")</div>
 						<div class="pr-10"><h3 class="text-lg font-semibold">Add node</h3>
 							if page.Result.Candidate.AdapterKey == "custom" {
@@ -854,8 +873,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</div>
 					<form method="dialog" class="modal-backdrop"><button aria-label="Close add node dialog">close</button></form>
 				</dialog>
-				<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem]", page.AutomationID != "" || page.Source == "blank"), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID == "" && page.Source != "blank") } role="region" aria-label="Automation graph builder">
-					<div class="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" aria-label="Canvas controls" data-automation-builder-viewport-controls>
+					<div class={ "automation-canvas-shell relative mt-3 w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("flex-1 min-h-[20rem]", page.AutomationID != ""), templ.KV("h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem]", page.AutomationID == "" && page.Source == "blank"), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID == "" && page.Source != "blank") } role="region" aria-label="Automation graph builder">					<div class="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" aria-label="Canvas controls" data-automation-builder-viewport-controls>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button>
