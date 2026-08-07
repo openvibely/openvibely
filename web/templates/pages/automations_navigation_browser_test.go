@@ -655,9 +655,9 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s YAML editor must wrap its source across the available panel width: missing %q", source, want)
 			}
 		}
-		for _, want := range []string{`data-automation-yaml-line-numbers`, `pl-3 pr-6 text-left`} {
+		for _, want := range []string{`data-automation-yaml-line-numbers`, `w-20`, `pl-3 pr-8 text-left`} {
 			if !strings.Contains(body, want) {
-				t.Errorf("%s YAML line numbers must be left-aligned with space reserved for section controls: missing %q", source, want)
+				t.Errorf("%s YAML line numbers must be left-aligned in a gutter wide enough to avoid section controls: missing %q", source, want)
 			}
 		}
 	}
