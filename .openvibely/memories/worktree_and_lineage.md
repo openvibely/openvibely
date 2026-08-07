@@ -2,7 +2,7 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-08-04
+updated: 2026-08-07
 source: consolidation
 source_id: memory_consolidation_2026_08_04
 confidence: high
@@ -33,9 +33,12 @@ Durable worktree model:
 - Cleanup policy supports after-merge, keep, and manual.
 - Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
 - Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.
-- Known task-chaining gaps: child creation/activation does not consume persisted `ChildModel`; later `ChildAgentID` edits do not update an already blocked child; and chain handoff failures are reduced to application logs after parent completion, potentially leaving a pre-created child blocked without durable user-facing failure evidence. These remain pending suggestions rather than approved implementation work.
+- Known task-chaining gaps, tracked in [GitHub #276](https://github.com/openvibely/openvibely/issues/276) (filed 2026-08-07): child creation/activation does not consume persisted `ChildModel`; later `ChildAgentID` edits do not update an already blocked child; and chain handoff failures are reduced to application logs after parent completion, potentially leaving a pre-created child blocked without durable user-facing failure evidence. These remain pending suggestions rather than approved implementation work.
 - Task Changes currently supports inline comments and a `Submit Review` action, but submission routes feedback back to the agent, clears comments, and does not persist an explicit human approval or changes-requested outcome; this review-state gap is tracked by suggestion issue [GitHub #221](https://github.com/openvibely/openvibely/issues/221).
 - Known task-detail lineage gap tracked in [GitHub #255](https://github.com/openvibely/openvibely/issues/255): ordinary chained tasks persist their parent relationship and inherited git lineage, but Task Details provides no navigable parent/child context outside swarm-specific panels. This limits review and coordination across a normal task chain.
+- Known review-comment scoping gap tracked in [GitHub #271](https://github.com/openvibely/openvibely/issues/271): the inline review comment update/delete endpoints (`PATCH/DELETE /reviews/:id`) do not verify the comment belongs to the requesting task/project, allowing cross-task mutation via ID reuse/enumeration. Authentication is single-user/global-cookie by design (no multi-tenant model), so this is a scoping/authorization-boundary gap rather than a multi-tenant security bug.
+- Known review-comment one-way-sync gap tracked in [GitHub #284](https://github.com/openvibely/openvibely/issues/284) (filed 2026-08-07): `SubmitReview` in `review_handler.go` only queues inline task review comments as a chat follow-up message; it never posts them back to a linked GitHub PR (e.g. via `CommentOnIssue`/pull-request comment APIs) even when `task_pull_requests` shows an open PR for that task. The inverse direction (GitHub PR feedback -> task thread) already exists via `github_forward_pr_feedback_to_tasks`; this is the missing task-review-UI -> GitHub PR direction.
+- Known diff-viewer "Cancel Review" gap tracked in [GitHub #286](https://github.com/openvibely/openvibely/issues/286) (filed 2026-08-07): the inline code-review UI's "Cancel Review" JS function is dead code (unwired) and would additionally use the wrong HTTP method if invoked, leaving no working discard path for an in-progress review.
 
 Commit-message direction:
 - Task execution auto-commits use generated descriptive commit messages driven by the actual worktree diff. Generation happens while changes are still in the worktree for initial execution diff capture, later task-thread completion, post-execution safety capture, and merge-prep dirty-worktree commits. GitHub PR branch publication now uses API-backed synthesized branch commits rather than local `git add`/`git commit`/`git push`, but the synthesized commit message is still generated from the task worktree diff.
@@ -58,7 +61,7 @@ Follow-up lineage direction:
 Merge and metadata direction:
 - Manual merge conflicts from `/tasks/:id/worktree/merge` are handled results, not ordinary request failures.
 - Changes-tab rebase conflicts are handled by aborting the rebase and surfacing guidance; because no rebase remains in progress after abort, the task should not be left in `MergeStatusConflict` solely from that aborted rebase.
-- Current known fast-forward defect: `fastForwardTaskWorktreeToTarget` unconditionally runs `git rebase <target>` before advancing the target, even when the target is already an ancestor of the task branch. For a task branch containing a merge commit, this can replay old commits, produce a false conflict, abort back to an otherwise mergeable branch, and persist `MergeStatusConflict`. The fast-forward path should short-circuit the rebase when ancestry already permits `--ff-only`.
+- Current known fast-forward defect, tracked in [GitHub #275](https://github.com/openvibely/openvibely/issues/275) (filed 2026-08-07): `fastForwardTaskWorktreeToTarget` unconditionally runs `git rebase <target>` before advancing the target, even when the target is already an ancestor of the task branch. For a task branch containing a merge commit, this can replay old commits, produce a false conflict, abort back to an otherwise mergeable branch, and persist `MergeStatusConflict`. The fast-forward path should short-circuit the rebase when ancestry already permits `--ff-only`.
 - Local merges do not use a blanket dirty-target guard; dirty-but-non-overlapping target checkout changes are allowed.
 - Git overwrite/refusal cases without unmerged files surface as merge failures rather than conflict-resolution states.
 - Changes-tab and local merge handlers revalidate stale `merge_status` and recover conventional worktree metadata before hiding or rejecting merge actions.

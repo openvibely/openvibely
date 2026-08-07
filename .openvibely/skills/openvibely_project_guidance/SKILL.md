@@ -1,6 +1,6 @@
 ---
 kind: openvibely.agent_skill
-version: 5
+version: 7
 skill:
     key: openvibely_project_guidance
     name: OpenVibely Project Guidance
@@ -70,6 +70,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - When a user requests a task or application mutation, use only an authorized runtime tool or direct local API actually exposed for the turn. Model-emitted bracket text is ordinary prose and must never be used as a mutation fallback; do not claim success without a successful tool/API result. Use `category=backlog` when the task must remain non-running.
 - If tasks run in isolated worktrees, include explicit worktree orientation in the model prompt while keeping runtime workdir enforcement as the source of truth.
 - When implementing, debugging, or explaining custom Automation graph tasks, treat `Task` as one generic public node capability. Derive behavior from the exact topology: an ordinary Task is materialized when the Automation is saved, while `GitHub inbox -> Task -> Open pull request` configures issue-specific tasks that are created later by the inbox and must not create one shared task during Save. Keep legacy published `role=implementation` graphs runnable and normalize that role to `task` when edited/saved. Runtime task-template lookup must require the exact persisted inbox/Task/PR topology; never classify an arbitrary connected Task or ordinary Task-to-Task chain as issue-specific work.
+- Any web/API/channel runtime tool handler that accepts `task_id` must resolve a `"current"` sentinel (and any omitted `task_id`/`title` during a task-thread follow-up) through `Handler.resolveTaskIDForTool` (`internal/handler/chat_action_tools.go`), not by passing the raw string into `resolveTaskReference`/`GetByID`. `resolveTaskIDForTool` is the single place that maps `"current"` to `params.TaskID` when `params.IsTaskFollowup`, and rejects it otherwise. A handler that skips this and calls `resolveTaskReference` directly (as `view_task_thread` once did) fails with a literal `task current not found` when the model sends `task_id=current`. When adding or auditing a new task-id-accepting web-surface tool, verify it routes through `resolveTaskIDForTool` and add a regression covering explicit `"current"`, omitted `task_id`/`title` during a follow-up, and rejection outside a follow-up context.
 
 ## Project Overview Requests
 
@@ -91,7 +92,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - For cross-layer production changes, cover the touched wiring/call-site layer as well as lower-level service behavior.
 - For consistent UI/API/provider/mode bugs, reproduce the exact reported path and verify the final provider-bound request or tool payload when relevant.
 - For task-thread UI follow-up behavior, lifecycle DB rows, intermediate context objects, direct helper tests, and adjacent tool/API paths are not enough by themselves.
-- Use `testutil.NewTestDB(t)` for DB-backed tests in the main Go app.
+- Use `testutil.NewTestDB(t)` for DB-backed tests in the main Go app. It accepts `testing.TB`, so the same helper works for benchmarks (`testing.B`) when writing before/after performance benchmarks, not only regular `*testing.T` tests.
 - Never use `t.Parallel()` with shared database connections.
 - Production baseline should not assume a default model config. In tests, use `testutil.NewTestDB(t)` or create one explicitly.
 - Run `templ generate` after modifying `.templ` files.
