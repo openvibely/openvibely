@@ -670,6 +670,9 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden`) || !strings.Contains(body, `class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport`) || !strings.Contains(body, `class="group relative w-10 min-w-0 shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: 2.5rem; min-width: 2.5rem; flex: 0 0 2.5rem;"`) || !strings.Contains(body, `class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-0 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;"`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `w-4`) || !strings.Contains(body, `h-6 w-4`) || !strings.Contains(body, `text-lg`) || !strings.Contains(body, `whitespace-pre-wrap break-words px-3`) || !strings.Contains(body, `data-yaml-indent="' + indent + '"' + hangingIndent`) || !strings.Contains(body, `left:calc(' + column + 'ch + 0.65ch)`) {
 			t.Errorf("%s YAML gutter must use the split diff viewer's compact w-10 line-number column with overlay fold controls and indentation-preserving wrapping", source)
 		}
+		if !strings.Contains(body, `cardsButton && cardsButton.addEventListener('click', function() { previewYAMLThenSelect('cards'); });`) {
+			t.Errorf("%s Cards selector must canonicalize pending YAML before showing card fields", source)
+		}
 		for _, want := range []string{`data-automation-yaml-indent-guides`, `data-automation-yaml-indent-dot`, `data-automation-yaml-indent-rail`} {
 			if !strings.Contains(body, want) {
 				t.Errorf("%s YAML indentation must use visual-only guides over source spaces: missing %q", source, want)
@@ -851,9 +854,6 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!cards.querySelector('[data-automation-cards-form]')) fail('Cards view is missing its form');
     if (!cards.querySelector('[data-automation-node-card]')) fail('Cards view is missing node cards');
     if (!cards.querySelector('[data-automation-edge-card]')) fail('Cards view is missing transition cards');
-    cardsButton.click();
-    if (!isVisible(cards) || isVisible(graph) || isVisible(yaml)) fail('Cards switch did not make only the card editor visible');
-    if (!cards.querySelector('textarea[name="node_first_prompt"]') || !cards.querySelector('textarea[name="node_first_goal"]')) fail('Cards view omitted prior task configuration controls');
     click('[data-automation-view-yaml]', 'YAML view button');
     await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
     var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
@@ -862,7 +862,11 @@ window.addEventListener('DOMContentLoaded', function() {
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
     if (!diagnostic.classList.contains('hidden')) fail('valid YAML did not clear the preloaded diagnostic');
-    if (!isVisible(yaml) || isVisible(graph)) fail('YAML switch did not make the editable YAML view visible');
+    cardsButton.click();
+    if (!isVisible(cards) || isVisible(graph) || isVisible(yaml)) fail('Cards switch did not make only the card editor visible');
+    if (!cards.querySelector('textarea[name="node_first_prompt"]') || !cards.querySelector('textarea[name="node_first_goal"]')) fail('Cards view omitted prior task configuration controls');
+    click('[data-automation-view-yaml]', 'YAML view button after Cards');
+    if (!isVisible(yaml) || isVisible(graph) || isVisible(cards)) fail('YAML switch did not restore the editable YAML view');
 	    var gutter = document.querySelector('[data-automation-yaml-gutter]');
 	    var editorShell = document.querySelector('[data-automation-yaml-editor-shell]');
 	    var lineNumbers = document.querySelector('[data-automation-yaml-line-numbers]');    var highlight = document.querySelector('[data-automation-yaml-highlight]');

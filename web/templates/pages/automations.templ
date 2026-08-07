@@ -1629,8 +1629,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						}
 						graphButton && graphButton.addEventListener('click', function() { previewYAMLThenSelect('graph'); });
 						yamlButton && yamlButton.addEventListener('click', function() { selectAutomationBuilderView('yaml'); });
-						cardsButton && cardsButton.addEventListener('click', function() { selectAutomationBuilderView('cards'); });
-						builder.querySelectorAll('[data-automation-builder-save]').forEach(function(button) {
+							cardsButton && cardsButton.addEventListener('click', function() { previewYAMLThenSelect('cards'); });						builder.querySelectorAll('[data-automation-builder-save]').forEach(function(button) {
 							button.addEventListener('click', function(event) {
 								if (!cardsPanel || cardsPanel.hidden || !cardsForm) return;
 								event.preventDefault();
