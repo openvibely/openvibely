@@ -355,10 +355,9 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					}
 				</div>
 				<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-header-actions>
-					<button class="btn btn-outline btn-sm" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit automation</button>
-					if graph.Automation.LifecycleState == models.AutomationActive {
-						<button class="btn btn-primary btn-sm" type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run now</button>
-					}
+						<button class="btn btn-outline btn-sm" type="submit" form="automation-live-edit-form" data-automation-live-edit>Edit</button>
+						if graph.Automation.LifecycleState == models.AutomationActive {
+							<button class="btn btn-primary btn-sm" type="submit" form="automation-live-run-now-form" data-automation-live-run-now={ graph.Automation.ID }>Run</button>					}
 					@automationLiveMoreActions(graph, deleteAvailable)
 				</div>
 			</div>
@@ -684,7 +683,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					<div class="min-w-0 flex-1">@automationEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)</div>
 						<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
 							<a class="btn btn-ghost btn-sm" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a>
-							<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button>
+							<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" data-automation-builder-save>Save</button>
 							@automationBuilderMoreActions(page, currentProjectID)
 						</div>				</div>
 				if strings.TrimSpace(page.Result.Candidate.Description) != "" {
@@ -1506,9 +1505,9 @@ templ automationLiveMoreActions(graph models.AutomationLiveGraph, deleteAvailabl
 			</svg>
 		</label>
 			<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
-				<li><button type="submit" form="automation-live-edit-form" data-automation-live-menu-edit>Edit automation</button></li>
+				<li><button type="submit" form="automation-live-edit-form" data-automation-live-menu-edit>Edit</button></li>
 				if graph.Automation.LifecycleState == models.AutomationActive {
-					<li><button type="submit" form="automation-live-run-now-form" data-automation-live-menu-run-now={ graph.Automation.ID }>Run now</button></li>
+					<li><button type="submit" form="automation-live-run-now-form" data-automation-live-menu-run-now={ graph.Automation.ID }>Run</button></li>
 				}
 				if graph.TemplateUpdateAvailable {
 					<li><button type="button" data-automation-live-update-template onclick="document.getElementById('update-automation-template-modal').showModal()">Update to latest template</button></li>
@@ -1534,7 +1533,7 @@ templ automationBuilderMoreActions(page models.AutomationBuilderPage, currentPro
 			</svg>
 		</label>
 			<ul tabindex="0" class="dropdown-content z-[100] menu w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow">
-				<li><button type="submit" form="automation-design-form" data-automation-builder-menu-save>Save changes</button></li>
+				<li><button type="submit" form="automation-design-form" data-automation-builder-menu-save>Save</button></li>
 				<li><a href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-menu-cancel>Cancel</a></li>
 				if page.LifecycleState == models.AutomationActive {
 					<li><button type="submit" form="automation-builder-pause-form" data-automation-builder-pause>Disable</button></li>

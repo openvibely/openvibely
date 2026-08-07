@@ -361,8 +361,8 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 			t.Errorf("Edit Automation canvas must not retain %q", forbidden)
 		}
 	}
-	if got := strings.Count(body, `>Save changes</button>`); got != 2 {
-		t.Errorf("expected saved Edit page to expose Save changes as a primary and menu action, got %d actions", got)
+	if got := strings.Count(body, `>Save</button>`); got != 2 {
+		t.Errorf("expected saved Edit page to expose Save as a primary and menu action, got %d actions", got)
 	}
 	if got := strings.Count(body, `>Cancel</a>`); got != 2 {
 		t.Errorf("expected saved Edit page to expose Cancel as a primary and menu action, got %d actions", got)
@@ -377,7 +377,7 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 		t.Error("expected Edit Automation canvas actions in Graph, YAML, then Add node order")
 	}
 	if !(strings.Index(header, `data-automation-editable-breadcrumb`) < strings.Index(header, `data-automation-builder-cancel`) && strings.Index(header, `data-automation-builder-cancel`) < strings.Index(header, `data-automation-builder-save`) && strings.Index(header, `data-automation-builder-save`) < strings.Index(header, `data-automation-builder-actions`)) {
-		t.Error("expected Edit Automation breadcrumb actions in name, Cancel, Save changes, then kebab order")
+		t.Error("expected Edit Automation breadcrumb actions in name, Cancel, Save, then kebab order")
 	}
 	switcherStart := strings.Index(canvas, `data-automation-view-switcher`)
 	if switcherStart < 0 {
@@ -407,8 +407,8 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 			t.Errorf("expected Edit Automation kebab to contain %q", want)
 		}
 	}
-	if !strings.Contains(header, `>Save changes</button>`) || !strings.Contains(header, `>Cancel</a>`) {
-		t.Error("saved Edit page must expose Save changes and Cancel in the breadcrumb kebab")
+	if !strings.Contains(header, `>Save</button>`) || !strings.Contains(header, `>Cancel</a>`) {
+		t.Error("saved Edit page must expose Save and Cancel in the breadcrumb kebab")
 	}
 
 	page.LifecycleState = models.AutomationPaused
@@ -540,7 +540,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		}
 	}
 	if !(strings.Index(cardHeader, `data-automation-view-graph`) < strings.Index(cardHeader, `data-automation-view-yaml`) && strings.Index(breadcrumbHeader, `data-automation-live-edit`) < strings.Index(breadcrumbHeader, `data-automation-live-run-now`) && strings.Index(breadcrumbHeader, `data-automation-live-run-now`) < strings.Index(breadcrumbHeader, `data-automation-live-menu`)) {
-		t.Error("expected Live breadcrumb actions in Edit, Run now, then kebab order")
+		t.Error("expected Live breadcrumb actions in Edit, Run, then kebab order")
 	}
 	liveSwitcherStart := strings.Index(cardHeader, `data-automation-view-switcher`)
 	if liveSwitcherStart < 0 {
@@ -565,7 +565,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 		t.Fatal("expected Live Automation breadcrumb kebab menu")
 	}
 	menu := breadcrumbHeader[menuStart : menuStart+menuEndOffset]
-	for _, want := range []string{"Edit automation", "Run now", "Disable", "Delete"} {
+	for _, want := range []string{"Edit", "Run", "Disable", "Delete"} {
 		if !strings.Contains(menu, ">"+want+"</button>") {
 			t.Errorf("expected Live Automation kebab to contain %q", want)
 		}
@@ -593,7 +593,7 @@ func TestAutomationLiveRunNowIsActiveOnly(t *testing.T) {
 	for _, want := range []string{
 		`action="/automations/automation-live-run/run-now?project_id=project-live-run"`,
 		`data-automation-live-run-now="automation-live-run"`,
-		`>Run now</button>`,
+		`>Run</button>`,
 	} {
 		if !strings.Contains(activeBody, want) {
 			t.Errorf("expected active Automation Live actions to contain %q", want)
@@ -606,8 +606,8 @@ func TestAutomationLiveRunNowIsActiveOnly(t *testing.T) {
 		t.Fatalf("render paused Automation Live: %v", err)
 	}
 	pausedBody := paused.String()
-	if strings.Contains(pausedBody, `/run-now`) || strings.Contains(pausedBody, `>Run now</button>`) {
-		t.Error("paused Automation Live must not offer Run now")
+	if strings.Contains(pausedBody, `/run-now`) || strings.Contains(pausedBody, `>Run</button>`) {
+		t.Error("paused Automation Live must not offer Run")
 	}
 	for _, want := range []string{`data-automation-live-header-actions`, `data-automation-live-resume`, `>Enable</button>`} {
 		if !strings.Contains(pausedBody, want) {
