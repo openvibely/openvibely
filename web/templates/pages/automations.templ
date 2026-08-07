@@ -1546,7 +1546,7 @@ templ automationBuilderMoreActions(page models.AutomationBuilderPage, currentPro
 	templ automationEditableBreadcrumb(currentProjectID string, automationName string) {
 		<nav class="flex min-w-0 flex-shrink-0 flex-wrap items-start gap-2" aria-label="Breadcrumb" data-automation-breadcrumb data-automation-editable-breadcrumb>		<a class="flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80" href={ templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)) } hx-get={ fmt.Sprintf("/automations?project_id=%s", currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;">Automations</a>
 		<span class="flex-shrink-0 text-2xl text-base-content/30">/</span>
-		<input class="input input-bordered h-8 min-w-0 flex-1 text-xl font-bold sm:max-w-xl sm:text-2xl" form="automation-design-form" name="automation_name" value={ automationName } maxlength="200" required data-automation-name aria-label="Automation name"/>
+		<input class="input input-bordered h-8 min-w-0 flex-1 px-0 text-xl font-bold sm:max-w-xl sm:text-2xl" form="automation-design-form" name="automation_name" value={ automationName } maxlength="200" required data-automation-name aria-label="Automation name"/>
 	</nav>
 }
 
