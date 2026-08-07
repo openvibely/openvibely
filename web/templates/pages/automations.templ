@@ -1153,12 +1153,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						if (yamlEditor) yamlEditor.blur();
 						updateYAMLLineNumbers();
 					});
-					if (yamlViewport) yamlViewport.addEventListener('click', function(event) {
-						if (!yamlEditor || !yamlEditor.hidden || event.target.closest('[data-automation-yaml-fold]')) return;
-						yamlFoldedLines.clear();
-						updateYAMLLineNumbers();
-						yamlEditor.focus();
-					});
 						if (yamlViewport) yamlViewport.addEventListener('scroll', function() {
 							if (!yamlEditor || !yamlEditor.hidden) return;
 							if (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlViewport.scrollTop;
