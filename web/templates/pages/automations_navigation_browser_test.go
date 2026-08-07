@@ -268,7 +268,7 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 		`data-automation-builder-cancel`,
 		`data-automation-builder-actions`,
 		`name="automation_name"`,
-		`class="input input-bordered h-8 min-w-0 flex-1 px-0 text-xl font-bold sm:max-w-xl sm:text-2xl"`,
+		`class="input input-bordered -ml-3 h-8 min-w-0 flex-1 px-3 text-xl font-bold sm:max-w-xl sm:text-2xl"`,
 		`value="Edit header spacing"`,
 		`class="mt-1 text-sm opacity-60"`,
 		`>A standard editable Automation description.</p>`,
