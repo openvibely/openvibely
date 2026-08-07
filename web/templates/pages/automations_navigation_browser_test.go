@@ -258,7 +258,7 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 	}
 	header := body[headerStart:headerEnd]
 	for _, want := range []string{
-		`class="mb-2 min-w-0 shrink-0"`,
+		`class="mb-6 min-w-0 shrink-0"`,
 		`class="flex flex-wrap items-start justify-between gap-3"`,
 		`data-automation-breadcrumb`,
 		`data-automation-editable-breadcrumb`,
@@ -842,9 +842,10 @@ func TestAutomationCustomBuilderCanvasMatchesEditLayout(t *testing.T) {
 	for _, want := range []string{
 		`id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto"`,
 		`class="flex h-full min-h-0 shrink-0 flex-col" data-automation-builder-edit-pane`,
-		`class="mb-2 min-w-0 shrink-0" data-automation-builder-header`,
-		`class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4 flex flex-1 min-h-[20rem] flex-col"`,
-		`flex-1 min-h-[20rem]`,
+		`class="mb-6 min-w-0 shrink-0" data-automation-builder-header`,
+		`class="rounded-box border border-base-300 bg-base-100 mb-0 p-4 flex flex-1 min-h-[20rem] flex-col"`,
+		`class="flex flex-wrap justify-between gap-3 mb-3 items-center"`,
+		`class="automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30 flex-1 min-h-[20rem]"`,
 		`h-full`,
 	} {
 		if !strings.Contains(edit, want) {
@@ -1401,10 +1402,11 @@ window.addEventListener('DOMContentLoaded', function() {
 		    var editParityShellRect = editParityShell.getBoundingClientRect();
 		    var editSVG = editedCanvas.querySelector('[data-automation-canvas]');
 	    if (editParityShellRect.height < 319) fail('short-desktop Edit canvas collapsed below its 20rem usability floor: ' + editParityShellRect.height.toFixed(1) + 'px');
-	    if (Math.abs(editParityShellRect.height - liveCanvasShellRect.height) > 1) {
+	    if (Math.abs(editParityShellRect.height - liveCanvasShellRect.height) > 1 || Math.abs(editParityShellRect.top - liveCanvasShellRect.top) > 1) {
 	      var editPaneRect = document.querySelector('#automation-builder [data-automation-builder-edit-pane]').getBoundingClientRect();
 	      var editSectionRect = editedCanvas.getBoundingClientRect();
-	      fail('Edit graph canvas height must match Preview: Edit=' + editParityShellRect.height.toFixed(1) + 'px Preview=' + liveCanvasShellRect.height.toFixed(1) + 'px EditPane=' + editPaneRect.height.toFixed(1) + 'px EditSection=' + editSectionRect.height.toFixed(1) + 'px PreviewCard=' + liveCardRect.height.toFixed(1) + 'px PreviewHeader=' + liveHeaderRect.height.toFixed(1) + 'px');
+	      var editHeaderRect = document.querySelector('#automation-builder [data-automation-builder-header]').getBoundingClientRect();
+	      fail('Edit graph canvas bounds must match Preview: EditTop=' + editParityShellRect.top.toFixed(1) + 'px PreviewTop=' + liveCanvasShellRect.top.toFixed(1) + 'px EditHeight=' + editParityShellRect.height.toFixed(1) + 'px PreviewHeight=' + liveCanvasShellRect.height.toFixed(1) + 'px EditPane=' + editPaneRect.top.toFixed(1) + '/' + editPaneRect.height.toFixed(1) + 'px EditHeader=' + editHeaderRect.top.toFixed(1) + '/' + editHeaderRect.height.toFixed(1) + 'px EditSection=' + editSectionRect.top.toFixed(1) + '/' + editSectionRect.height.toFixed(1) + 'px PreviewCard=' + liveCardRect.top.toFixed(1) + '/' + liveCardRect.height.toFixed(1) + 'px PreviewHeader=' + liveHeaderRect.top.toFixed(1) + '/' + liveHeaderRect.height.toFixed(1) + 'px');
 	    }
 	    var editSettingsRect = document.querySelector('#automation-builder summary').getBoundingClientRect();
 	    var editRootRect = document.getElementById('automation-builder').getBoundingClientRect();
@@ -1674,6 +1676,11 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 	style := `<style>
 		:root { --bc: 0.746477 0.0216 264.436; --b2: 0.253267 0.015896 252.417; --p: 0.6569 0.196 275.75; --er: 0.7176 0.221 22.18; --wa: 0.8471 0.199 83.87; --in: 0.7206 0.191 231.6; --su: 0.648 0.15 160; }
+		p, h1, h2 { margin: 0; }
+		.mt-1 { margin-top: .25rem; }
+		.text-2xl { font-size: 1.5rem; line-height: 2rem; }
+		.text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+		.input { box-sizing: border-box; }
 		.hidden { display: none !important; }
 		.menu { box-sizing: border-box; display: flex; width: 12rem; flex-direction: column; padding: .5rem; }
 		.menu li { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); }
@@ -1689,6 +1696,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		[class~="min-h-[20rem]"] { min-height: 20rem; }
 		[class~="md:min-h-0"] { min-height: 0; }
 		.h-full { height: 100%; }
+		.h-8 { height: 2rem; }
 		.block { display: block; }
 		.overflow-y-hidden { overflow-y: hidden !important; }
 		.overflow-y-auto { overflow-y: auto !important; }
@@ -1704,7 +1712,8 @@ window.addEventListener('DOMContentLoaded', function() {
 		[class~="min-h-[28rem]"] { min-height: 28rem; }
 		[class~="max-h-[42rem]"] { max-height: 42rem; }
 		.automation-canvas-shell > [data-automation-canvas].h-full { height: 100%; }
-		.dropdown-content { position: relative; }
+		.dropdown { position: relative; }
+		.dropdown-content { position: absolute; top: 100%; right: 0; z-index: 100; }
 		</style>`
 	browserResult := make(chan string, 16)
 	olderLiveStarted := make(chan struct{})
