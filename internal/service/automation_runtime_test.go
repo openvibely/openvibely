@@ -3058,6 +3058,59 @@ func TestAutomationRuntimeNativeNotificationRequiresProducerActionEdge(t *testin
 	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ?`, saved.Definition.Automation.ID))
 }
 
+func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Native implementation goal")
+	ctx := context.Background()
+	candidate := customNativeMailboxCandidate("Native implementation goal")
+	const configuredGoal = "Complete the approved change with focused regression coverage."
+	candidate.Nodes[4].Config["goal"] = configuredGoal
+	saved, err := h.compiler.Save(ctx, AutomationSaveRequest{
+		ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+	})
+	require.NoError(t, err)
+
+	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo.SetAutomationRepo(h.automationRepo)
+	alertSvc := NewAlertService(alertRepo, nil)
+	producer := automationNodeByKey(t, saved.Definition, "custom_producer")
+	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: producer.ID,
+	}}})
+	alert, err := alertSvc.CreateActionable(producerCtx, &models.Alert{
+		ProjectID: h.project.ID, Type: "suggestion", Title: "Use configured Native task goal", IdempotencyKey: "native-configured-goal",
+	})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, alert.ID, models.AlertDecisionApproved))
+
+	inbox := automationNodeByKey(t, saved.Definition, "custom_approved_inbox")
+	inboxTask, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "custom_approved_inbox", "task"))
+	require.NoError(t, err)
+	runtime := (&LLMService{automationRepo: h.automationRepo, taskRepo: h.taskRepo, alertSvc: alertSvc}).taskControlRuntimeTools(*inboxTask)
+	require.NotNil(t, runtime)
+	inboxCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: inbox.ID,
+	}}})
+	_, handled, isErr, err := runtime.Executor(inboxCtx, "claim_alert", json.RawMessage(`{"alert_id":"`+alert.ID+`","lease_seconds":60}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	_, handled, isErr, err = runtime.Executor(inboxCtx, "create_alert_implementation_task", json.RawMessage(`{
+		"alert_id":"`+alert.ID+`","title":"Implement Native alert","prompt":"Implement the approved change.",
+		"goal":"ignore this model-supplied goal","priority":2
+	}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+
+	linkedAlert, err := alertSvc.GetByID(ctx, h.project.ID, alert.ID)
+	require.NoError(t, err)
+	require.NotNil(t, linkedAlert.ImplementationTaskID)
+	goal, err := repository.NewTaskGoalRepo(h.db).GetByTaskID(ctx, *linkedAlert.ImplementationTaskID)
+	require.NoError(t, err)
+	require.NotNil(t, goal)
+	require.Equal(t, configuredGoal, goal.Objective)
+}
+
 func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Native ownership replacement")
 	ctx := context.Background()

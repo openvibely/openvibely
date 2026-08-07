@@ -491,6 +491,9 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		CustomPersonalityRepo: nil,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		PrepareImplementationTask: func(ctx context.Context, input *models.AlertImplementationTaskInput) error {
+			return s.prepareAutomationAlertImplementationTask(ctx, task.ProjectID, input)
+		},
 	}))
 	if task.Category == models.CategoryScheduled {
 		if listAlerts := handlers["list_alerts"]; listAlerts != nil {
@@ -630,6 +633,49 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 		}
 		request.AgentDefinitionID = agent.ID
 		request.Agent = ""
+	}
+	return nil
+}
+
+func (s *LLMService) prepareAutomationAlertImplementationTask(ctx context.Context, projectID string, input *models.AlertImplementationTaskInput) error {
+	if s == nil || s.automationRepo == nil || input == nil {
+		return nil
+	}
+	automationContext, ok := AutomationContextFromContext(ctx)
+	if !ok || automationContext.ProjectID != projectID {
+		return nil
+	}
+	configuredGoal := ""
+	for _, binding := range automationContext.Bindings {
+		implementation, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, binding.VersionID, binding.NodeID, "implementation", true)
+		if err != nil {
+			return err
+		}
+		if implementation == nil {
+			continue
+		}
+		inbox, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, binding.VersionID, implementation.ID, "native_inbox", false)
+		if err != nil {
+			return err
+		}
+		if inbox == nil || inbox.ID != binding.NodeID {
+			continue
+		}
+		var config map[string]any
+		if err := json.Unmarshal([]byte(implementation.ConfigJSON), &config); err != nil {
+			return fmt.Errorf("decoding Native implementation task configuration: %w", err)
+		}
+		goal := automationConfigGoal(config)
+		if goal == "" {
+			continue
+		}
+		if configuredGoal != "" && configuredGoal != goal {
+			return errors.New("Automation bindings have conflicting Native implementation task goals")
+		}
+		configuredGoal = goal
+	}
+	if configuredGoal != "" {
+		input.Goal = configuredGoal
 	}
 	return nil
 }

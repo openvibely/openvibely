@@ -127,25 +127,27 @@ type channelProjectActionHandlerOptions struct {
 }
 
 type AlertRuntimeOptions struct {
-	ProjectID    string
-	CallerTaskID string
-	Source       string
-	AlertSvc     *AlertService
-	TaskRepo     *repository.TaskRepo
+	ProjectID                 string
+	CallerTaskID              string
+	Source                    string
+	AlertSvc                  *AlertService
+	TaskRepo                  *repository.TaskRepo
+	PrepareImplementationTask func(context.Context, *models.AlertImplementationTaskInput) error
 }
 
 type channelUtilityActionHandlerOptions struct {
-	ProjectID             string
-	CallerTaskID          string
-	TaskRepo              *repository.TaskRepo
-	ScheduleRepo          *repository.ScheduleRepo
-	LLMConfigRepo         *repository.LLMConfigRepo
-	AgentRepo             *repository.AgentRepo
-	SettingsRepo          *repository.SettingsRepo
-	CustomPersonalityRepo *repository.CustomPersonalityRepo
-	ProjectRepo           *repository.ProjectRepo
-	AlertSvc              *AlertService
-	UnavailableAgentsText string
+	ProjectID                 string
+	CallerTaskID              string
+	TaskRepo                  *repository.TaskRepo
+	ScheduleRepo              *repository.ScheduleRepo
+	LLMConfigRepo             *repository.LLMConfigRepo
+	AgentRepo                 *repository.AgentRepo
+	SettingsRepo              *repository.SettingsRepo
+	CustomPersonalityRepo     *repository.CustomPersonalityRepo
+	ProjectRepo               *repository.ProjectRepo
+	AlertSvc                  *AlertService
+	PrepareImplementationTask func(context.Context, *models.AlertImplementationTaskInput) error
+	UnavailableAgentsText     string
 }
 
 func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
@@ -538,6 +540,7 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 	}
 	mergeChannelRuntimeActionHandlers(handlers, BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{
 		ProjectID: opts.ProjectID, CallerTaskID: opts.CallerTaskID, Source: "agent", AlertSvc: opts.AlertSvc, TaskRepo: opts.TaskRepo,
+		PrepareImplementationTask: opts.PrepareImplementationTask,
 	}))
 	return handlers
 }
@@ -1186,12 +1189,18 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
 				return "", err
 			}
-			if len(strings.TrimSpace(req.Goal)) > MaxTaskGoalLength {
+			implementation := models.AlertImplementationTaskInput{
+				Title: req.Title, Prompt: req.Prompt, Goal: req.Goal, Priority: req.Priority, Tag: req.Tag,
+			}
+			if opts.PrepareImplementationTask != nil {
+				if err := opts.PrepareImplementationTask(ctx, &implementation); err != nil {
+					return "", err
+				}
+			}
+			if len(strings.TrimSpace(implementation.Goal)) > MaxTaskGoalLength {
 				return "", ErrTaskGoalTooLong
 			}
-			task, err := opts.AlertSvc.CreateImplementationTask(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, models.AlertImplementationTaskInput{
-				Title: req.Title, Prompt: req.Prompt, Goal: req.Goal, Priority: req.Priority, Tag: req.Tag,
-			})
+			task, err := opts.AlertSvc.CreateImplementationTask(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, implementation)
 			if err != nil {
 				return "", err
 			}
