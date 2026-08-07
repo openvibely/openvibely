@@ -197,8 +197,9 @@ func TestAutomationLiveHeaderUsesStandardSpacingAndDescriptionStyle(t *testing.T
 	}
 	header := body[headerStart:cardStart]
 	for _, want := range []string{
-		`class="mb-6 min-w-0"`,
+		`class="mb-6 flex flex-wrap items-start justify-between gap-3"`,
 		`data-automation-breadcrumb`,
+		`data-automation-live-menu`,
 		`class="mt-1 text-sm opacity-60"`,
 		`>A standard Automation description.</p>`,
 	} {
@@ -206,7 +207,7 @@ func TestAutomationLiveHeaderUsesStandardSpacingAndDescriptionStyle(t *testing.T
 			t.Errorf("expected standard Live header to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`class="mb-6 flex`, `class="mb-5 min-w-0"`, `text-base-content/65`} {
+	for _, forbidden := range []string{`class="mb-5 min-w-0"`, `text-base-content/65`} {
 		if strings.Contains(header, forbidden) {
 			t.Errorf("expected standard Live header to omit legacy styling %q", forbidden)
 		}
@@ -221,8 +222,8 @@ func TestAutomationLiveHeaderUsesStandardSpacingAndDescriptionStyle(t *testing.T
 	if emptyHeaderEnd < 0 {
 		t.Fatal("expected Automation card after empty-description header")
 	}
-	if strings.Contains(out.String()[:emptyHeaderEnd], `<p`) {
-		t.Error("empty Automation description must not reserve a blank header line")
+	if strings.Contains(out.String(), `>A standard Automation description.</p>`) {
+		t.Error("empty Automation description must not render a description line")
 	}
 }
 
@@ -257,8 +258,10 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 	header := body[headerStart:headerEnd]
 	for _, want := range []string{
 		`class="mb-6 min-w-0"`,
+		`class="flex flex-wrap items-start justify-between gap-3"`,
 		`data-automation-breadcrumb`,
 		`data-automation-editable-breadcrumb`,
+		`data-automation-builder-actions`,
 		`name="automation_name"`,
 		`value="Edit header spacing"`,
 		`class="mt-1 text-sm opacity-60"`,
@@ -286,8 +289,8 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 	if emptyHeaderEnd < 0 {
 		t.Fatal("expected Edit Automation content after empty-description header")
 	}
-	if strings.Contains(out.String()[:emptyHeaderEnd], `<p`) {
-		t.Error("empty Edit Automation description must not reserve a blank header line")
+	if strings.Contains(out.String(), `>A standard editable Automation description.</p>`) {
+		t.Error("empty Edit Automation description must not render a description line")
 	}
 }
 
@@ -325,6 +328,7 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 		t.Fatal("expected Edit name, canvas, assumptions, warnings, and node settings")
 	}
 	canvasEnd := canvasStart + canvasEndOffset
+	header := body[:canvasStart]
 	if !(name < canvasStart && canvasEnd < assumptions && assumptions < warnings && warnings < settings) {
 		t.Errorf("expected Edit order name breadcrumb → canvas → assumptions → warnings → settings, got name=%d canvas=%d canvasEnd=%d assumptions=%d warnings=%d settings=%d", name, canvasStart, canvasEnd, assumptions, warnings, settings)
 	}
@@ -334,17 +338,20 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 	canvas := body[canvasStart:canvasEnd]
 	for _, want := range []string{
 		`data-automation-builder-actions`,
-		`class="dropdown dropdown-end"`,
+		`class="dropdown dropdown-end shrink-0"`,
 		`aria-label="More actions for Edit card actions"`,
-		`data-automation-builder-save`,
-		`data-automation-builder-cancel`,
 		`data-automation-builder-pause`,
 		`>Disable</button>`,
 		`data-delete-automation-open`,
 		`>Delete</button>`,
 	} {
-		if !strings.Contains(canvas, want) {
-			t.Errorf("expected Edit canvas card to contain %q", want)
+		if !strings.Contains(header, want) {
+			t.Errorf("expected Edit Automation breadcrumb header to contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{`data-automation-builder-actions`, `data-automation-builder-pause`, `data-delete-automation-open`} {
+		if strings.Contains(canvas, forbidden) {
+			t.Errorf("Edit Automation canvas must not retain %q", forbidden)
 		}
 	}
 	if got := strings.Count(body, `>Save changes</button>`); got != 1 {
@@ -356,22 +363,22 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 	if got := strings.Count(body, `data-automation-builder-actions`); got != 1 {
 		t.Errorf("expected one Edit Automation kebab, got %d", got)
 	}
-	if !strings.Contains(canvas, `data-automation-builder-card-actions`) || !(strings.Index(canvas, `data-automation-add-node-open`) < strings.Index(canvas, `data-automation-builder-save`) && strings.Index(canvas, `data-automation-builder-save`) < strings.Index(canvas, `data-automation-builder-cancel`) && strings.Index(canvas, `data-automation-builder-cancel`) < strings.Index(canvas, `data-automation-builder-actions`)) {
-		t.Error("expected Edit Automation actions in Add node, Save changes, Cancel, then kebab order")
+	if !strings.Contains(canvas, `data-automation-builder-card-actions`) || !(strings.Index(canvas, `data-automation-add-node-open`) < strings.Index(canvas, `data-automation-builder-save`) && strings.Index(canvas, `data-automation-builder-save`) < strings.Index(canvas, `data-automation-builder-cancel`)) {
+		t.Error("expected Edit Automation canvas actions in Add node, Save changes, then Cancel order")
 	}
-	menuStart := strings.Index(canvas, `data-automation-builder-actions`)
-	menuEndOffset := strings.Index(canvas[menuStart:], `</ul>`)
+	menuStart := strings.Index(header, `data-automation-builder-actions`)
+	menuEndOffset := strings.Index(header[menuStart:], `</ul>`)
 	if menuStart < 0 || menuEndOffset < 0 {
 		t.Fatal("expected Edit Automation kebab menu")
 	}
-	menu := canvas[menuStart : menuStart+menuEndOffset]
+	menu := header[menuStart : menuStart+menuEndOffset]
 	for _, forbidden := range []string{`data-automation-builder-save`, `data-automation-builder-cancel`} {
 		if strings.Contains(menu, forbidden) {
 			t.Errorf("Edit Automation kebab must not retain %q", forbidden)
 		}
 	}
-	if strings.Contains(body[:canvasStart], `>Save changes</button>`) || strings.Contains(body[:canvasStart], `data-delete-automation-open`) {
-		t.Error("saved Edit page must not retain standalone Save/Delete controls above the canvas")
+	if strings.Contains(header, `>Save changes</button>`) || strings.Contains(header, `>Cancel</a>`) {
+		t.Error("saved Edit page must retain only its kebab in the breadcrumb header")
 	}
 
 	page.LifecycleState = models.AutomationPaused
@@ -439,7 +446,7 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 	}
 }
 
-func TestAutomationLiveActionsUsePrimaryButtonsAndCardKebab(t *testing.T) {
+func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{
 			ID:             "automation-live-actions",
@@ -460,6 +467,7 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndCardKebab(t *testing.T) {
 		t.Fatal("expected Live Automation graph card before its viewport")
 	}
 	cardHeader := body[cardStart:viewportStart]
+	breadcrumbHeader := body[:cardStart]
 	legendMarker := strings.Index(cardHeader, `data-automation-live-legend-row`)
 	if legendMarker < 0 {
 		t.Fatal("expected Live Automation legend row")
@@ -470,22 +478,30 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndCardKebab(t *testing.T) {
 	}
 	legend := cardHeader[legendStart:]
 	for _, want := range []string{
-		`data-automation-live-status`,
-		`>active</span>`,
-		`data-automation-live-health`,
-		`>healthy</span>`,
 		`data-automation-live-actions`,
 		`class="mb-3 flex flex-wrap items-start justify-between gap-3" data-automation-live-card-heading`,
 		`class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-actions`,
-		`class="dropdown dropdown-end"`,
-		`aria-label="More actions for Card actions"`,
 		`data-automation-live-edit`,
 		`data-automation-live-run-now="automation-live-actions"`,
+	} {
+		if !strings.Contains(cardHeader, want) {
+			t.Errorf("expected Live Automation canvas header to contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{`class="dropdown dropdown-end"`, `data-automation-live-pause`, `data-automation-live-delete`} {
+		if strings.Contains(cardHeader, forbidden) {
+			t.Errorf("Live Automation canvas header must not retain %q", forbidden)
+		}
+	}
+	for _, want := range []string{
+		`data-automation-live-menu`,
+		`class="dropdown dropdown-end shrink-0"`,
+		`aria-label="More actions for Card actions"`,
 		`data-automation-live-pause`,
 		`data-automation-live-delete`,
 	} {
-		if !strings.Contains(cardHeader, want) {
-			t.Errorf("expected Live Automation card header to contain %q", want)
+		if !strings.Contains(breadcrumbHeader, want) {
+			t.Errorf("expected Live Automation breadcrumb header to contain %q", want)
 		}
 	}
 	for _, want := range []string{
@@ -502,15 +518,15 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndCardKebab(t *testing.T) {
 	if strings.Index(legend, `aria-label="Graph status legend"`) > strings.Index(legend, `data-automation-live-badges`) {
 		t.Error("expected lifecycle and health badges after the graph status legend")
 	}
-	if !(strings.Index(cardHeader, `data-automation-live-edit`) < strings.Index(cardHeader, `data-automation-live-run-now`) && strings.Index(cardHeader, `data-automation-live-run-now`) < strings.Index(cardHeader, `class="dropdown dropdown-end"`)) {
-		t.Error("expected Live Edit and Run now buttons before the kebab")
+	if !(strings.Index(cardHeader, `data-automation-live-edit`) < strings.Index(cardHeader, `data-automation-live-run-now`)) {
+		t.Error("expected Live Edit and Run now buttons in primary-action order")
 	}
-	menuStart := strings.Index(cardHeader, `class="dropdown dropdown-end"`)
-	menuEndOffset := strings.Index(cardHeader[menuStart:], `</ul>`)
+	menuStart := strings.Index(breadcrumbHeader, `class="dropdown dropdown-end shrink-0"`)
+	menuEndOffset := strings.Index(breadcrumbHeader[menuStart:], `</ul>`)
 	if menuStart < 0 || menuEndOffset < 0 {
-		t.Fatal("expected Live Automation kebab menu")
+		t.Fatal("expected Live Automation breadcrumb kebab menu")
 	}
-	menu := cardHeader[menuStart : menuStart+menuEndOffset]
+	menu := breadcrumbHeader[menuStart : menuStart+menuEndOffset]
 	for _, want := range []string{"Disable", "Delete"} {
 		if !strings.Contains(menu, ">"+want+"</button>") {
 			t.Errorf("expected Live Automation kebab to contain %q", want)
@@ -1312,14 +1328,15 @@ window.addEventListener('DOMContentLoaded', function() {
     await waitFor(function() { return liveID() === 'automation-a'; }, 'Automation A after in-page back');
     await report('progress', 'automation-a-ready-before-edit');
 
-    var liveCard = document.querySelector('#automation-live [data-automation-readonly-canvas]');
-    var liveActions = liveCard && liveCard.querySelector('[data-automation-live-actions]');
-    var liveLegendRow = liveCard && liveCard.querySelector('[data-automation-live-legend-row]');
-    var liveLegend = liveLegendRow && liveLegendRow.querySelector('[aria-label="Graph status legend"]');
-    var liveBadges = liveLegendRow && liveLegendRow.querySelector('[data-automation-live-badges]');
-    if (!liveActions || !liveLegend || !liveBadges || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation card is missing its legend, status, health, or kebab menu');
-	    if (!liveActions.closest('[data-automation-live-card-heading]')) fail('Live Automation kebab is not in the card heading row');
-	    if (!liveBadges.closest('[data-automation-live-legend-row]')) fail('Live Automation status and health badges are not in the graph legend row');
+	    var liveCard = document.querySelector('#automation-live [data-automation-readonly-canvas]');
+	    var liveHeader = document.querySelector('#automation-live [data-automation-live-header]');
+	    var liveActions = liveCard && liveCard.querySelector('[data-automation-live-actions]');
+	    var liveMenu = liveHeader && liveHeader.querySelector('[data-automation-live-menu]');
+	    var liveLegendRow = liveCard && liveCard.querySelector('[data-automation-live-legend-row]');
+	    var liveLegend = liveLegendRow && liveLegendRow.querySelector('[aria-label="Graph status legend"]');
+	    var liveBadges = liveLegendRow && liveLegendRow.querySelector('[data-automation-live-badges]');
+	    if (!liveActions || !liveMenu || !liveLegend || !liveBadges || !liveCard.querySelector('[data-automation-live-status]') || !liveCard.querySelector('[data-automation-live-health]')) fail('Live Automation page is missing its breadcrumb kebab, canvas actions, legend, status, or health');
+	    if (!liveMenu.closest('[data-automation-live-header]')) fail('Live Automation kebab is not in the breadcrumb header row');	    if (!liveBadges.closest('[data-automation-live-legend-row]')) fail('Live Automation status and health badges are not in the graph legend row');
 	    click('#automation-live [data-automation-live-run-now]', 'Live Automation Run now button');
 	    await fetch('/automation-run-now-started');
 	    window.openVibelyAutomationLiveRefresh('GET');
@@ -1329,7 +1346,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	    }, 'Run now Live canvas refresh after an older polling snapshot');
 	    if (liveID() !== 'automation-a') fail('Run now navigated away from the Automation Live preview');
 	    await report('progress', 'live-run-now-refreshed');
-	    click('#automation-live [data-automation-live-actions] label', 'Live Automation kebab before Delete');
+	    click('#automation-live [data-automation-live-header] label', 'Live Automation kebab before Delete');
 	    clickMenuRowRightEdge('#automation-live [data-automation-live-delete]', 'Live Automation Delete menu row');
     var liveDeleteModal = document.querySelector('#automation-live #delete-automation-modal');
     if (!liveDeleteModal || !liveDeleteModal.open) fail('Live Automation Delete did not open its confirmation dialog');
@@ -1500,7 +1517,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		    await waitFor(portfolioReady, 'portfolio before published Automation selection');
 	    click('[data-automation-url^="/automations/automation-visual?"]', 'published visual Automation card');
 	    await waitFor(function() { return liveID() === 'automation-visual'; }, 'published visual Automation');
-	    click('#automation-live [data-automation-live-actions] label', 'Published visual Automation kebab');
+	    click('#automation-live [data-automation-live-header] label', 'Published visual Automation kebab');
 	    click('#automation-live [data-automation-live-edit]', 'Edit published visual Automation');
 		    await waitFor(function() { return !!document.querySelector('[data-automation-draft-canvas]'); }, 'visual builder opened from published Automation');
 		    var malformedCandidateInput = document.querySelector('#automation-builder [data-automation-draft-form] [data-candidate-json]');

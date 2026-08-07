@@ -11,7 +11,7 @@
 - [Worktree and Lineage](worktree_and_lineage.md) - Isolated worktrees, diffs, merge/recovery, cleanup, commits, chained-task lineage, and known review-comment/GitHub-PR sync/UI gaps (#221, #271, #284, #286).
 - [Integrations and Channels](integrations_and_channels.md) - GitHub, webhooks, Slack, Telegram, Discord, Email, outbound messaging, migration renumbering after main conflicts, migration count (144), and the fixed webhook priority-scale bug (#287, PR #290).
 - [Usage Analytics](usage_analytics.md) - Local model/skill usage, token normalization, Analytics UI/API, account snapshots, and privacy.
-- [Testing Coverage and Performance](testing_coverage_and_performance.md) - Coverage priorities, validation conventions, performance seams, and environment caveats.
+- [Testing Coverage and Performance](testing_coverage_and_performance.md) - Coverage priorities, validation conventions, performance seams, environment caveats, and **ExecutionStreamHub mutex lock contention optimization (Aug 2026)**.
 - [Product Vision and Reviewable Autonomy](product_vision_and_autonomy.md) - Product direction, review boundaries, user priorities, recursive improvement, and naming constraints.
 - [Alerts and Actionable Notifications](alerts_and_actionable_notifications.md) - Project-scoped alerts, approval workflow, claims/task linkage, tools, and UI.
 - [Automation Graphs](automation_graphs.md) - Project-scoped builder, current-graph saves, custom topologies, safety, runtime projection, and UI.
