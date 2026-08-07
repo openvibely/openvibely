@@ -240,19 +240,23 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	}
 	body := out.String()
 	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
-		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`,
+		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`, `data-automation-view-cards`,
 		`data-automation-yaml-editor`, `name="automation_yaml"`, `schema_version: 1`,
 		`data-automation-yaml-editor-shell`, `data-automation-yaml-line-numbers`, `data-automation-yaml-diagnostic`,
-		`data-automation-graph-panel`, `data-automation-draft-canvas`, `min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6`,
+		`data-automation-graph-panel`, `data-automation-cards-panel`, `data-automation-cards-form`, `data-automation-node-cards`, `data-automation-edge-cards`,
+		`min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected synchronized Automation Edit view to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`name="candidate_json"`, `data-automation-yaml-preview`, "Automation YAML", "YAML controls node and connection configuration", "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
+	for _, forbidden := range []string{`data-automation-yaml-preview`, "Automation YAML", "YAML controls node and connection configuration"} {
 		if strings.Contains(body, forbidden) {
-			t.Errorf("interactive graph must omit YAML-only settings control %q", forbidden)
+			t.Errorf("interactive graph must omit obsolete YAML authoring chrome %q", forbidden)
 		}
+	}
+	if !strings.Contains(body, `name="candidate_json"`) {
+		t.Error("Cards view must preserve the prior card-form candidate submission")
 	}
 	if !strings.Contains(body, `>A YAML-authored Automation description.</p>`) {
 		t.Error("Edit header must retain its description")
@@ -280,17 +284,14 @@ func TestAutomationBuilderGraphAndYAMLViewsAreNonDivergent(t *testing.T) {
 	if !strings.Contains(body, `data-node-key="review"`) {
 		t.Error("graph view must render the same candidate represented by the YAML editor")
 	}
-	for _, want := range []string{`data-automation-add-node-open`, `data-automation-node-tool`, `data-automation-draft-canvas`, `visualCandidateYAML`, `data-automation-yaml-submission`} {
+	for _, want := range []string{`data-automation-add-node-open`, `data-automation-node-tool`, `data-automation-draft-canvas`, `visualCandidateYAML`, `data-automation-yaml-submission`, `data-automation-cards-panel`, `data-automation-cards-form`, `data-automation-view-cards`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("synchronized authoring surface must contain %q", want)
 		}
 	}
-	if strings.Contains(body, `name="candidate_json"`) {
-		t.Error("visual editor must not submit a legacy candidate_json document")
-	}
-	for _, want := range []string{`graphButton && graphButton.addEventListener`, `yamlButton && yamlButton.addEventListener`, `graphPanel.hidden = yamlSelected`, `yamlPanel.hidden = !yamlSelected`, `form.requestSubmit()`, `yamlEditor.value !== visualCandidateYAML()`, `input.value = yamlEditor.value`} {
+	for _, want := range []string{`graphButton && graphButton.addEventListener`, `yamlButton && yamlButton.addEventListener`, `cardsButton && cardsButton.addEventListener`, `cardsPanel.hidden = !cardsSelected`, `form.requestSubmit()`, `yamlEditor.value !== visualCandidateYAML()`, `input.value = yamlEditor.value`} {
 		if !strings.Contains(body, want) {
-			t.Errorf("Graph/YAML synchronization must contain %q", want)
+			t.Errorf("Graph/YAML/Cards synchronization must contain %q", want)
 		}
 	}
 
@@ -545,21 +546,21 @@ func TestAutomationBlankBuilderUsesEditableBreadcrumbAndFullHeightEditor(t *test
 	}
 }
 
-func TestAutomationCanvasOmitsLegacyYAMLSettingsControls(t *testing.T) {
+func TestAutomationCanvasIncludesCardsConfigurationView(t *testing.T) {
 	page := models.AutomationBuilderPage{AutomationID: "automation-copy", Result: models.AutomationDraftResult{Candidate: models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Typography", AutomationType: "custom", AdapterKey: "custom"}}, YAML: "schema_version: 1\nname: Typography\n"}
 	var out bytes.Buffer
 	if err := AutomationBuilderContent(page, "project-yaml-copy").Render(context.Background(), &out); err != nil {
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	for _, want := range []string{"data-automation-connect-status"} {
+	for _, want := range []string{"data-automation-connect-status", "data-automation-cards-panel", "data-automation-cards-form", "data-automation-node-cards", "data-automation-edge-cards"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("interactive YAML authoring page must render %q", want)
+			t.Errorf("interactive authoring page must render %q", want)
 		}
 	}
-	for _, forbidden := range []string{"Automation YAML", "YAML controls node and connection configuration", `data-automation-yaml-preview`, "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
+	for _, forbidden := range []string{"Automation YAML", "YAML controls node and connection configuration", `data-automation-yaml-preview`} {
 		if strings.Contains(body, forbidden) {
-			t.Errorf("interactive YAML authoring page must omit YAML-only settings control %q", forbidden)
+			t.Errorf("interactive authoring page must omit obsolete YAML chrome %q", forbidden)
 		}
 	}
 }
@@ -833,9 +834,15 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
     var initialDiagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
     if (!initialDiagnostic || initialDiagnostic.classList.contains('hidden') || !initialDiagnostic.textContent.includes('line 1')) fail('preloaded YAML was not validated during editor initialization');
-    ['Node and connection settings', 'Transition settings', 'Task prompt', 'Task goal (optional)', 'Human result'].forEach(function(legacy) {
-      if (Array.from(document.querySelectorAll('label, summary, h3, h4')).some(function(element) { return element.textContent.trim() === legacy; })) fail('legacy settings control remains: ' + legacy);
-    });
+    var cards = document.querySelector('[data-automation-cards-panel]');
+    var cardsButton = document.querySelector('[data-automation-view-cards]');
+    if (!cards || !cardsButton) fail('Cards view switcher or panel is missing');
+    if (!cards.querySelector('[data-automation-cards-form]')) fail('Cards view is missing its form');
+    if (!cards.querySelector('[data-automation-node-card]')) fail('Cards view is missing node cards');
+    if (!cards.querySelector('[data-automation-edge-card]')) fail('Cards view is missing transition cards');
+    cardsButton.click();
+    if (!isVisible(cards) || isVisible(graph) || isVisible(yaml)) fail('Cards switch did not make only the card editor visible');
+    if (!cards.querySelector('textarea[name="node_first_prompt"]') || !cards.querySelector('textarea[name="node_first_goal"]')) fail('Cards view omitted prior task configuration controls');
     click('[data-automation-view-yaml]', 'YAML view button');
     await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
     var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');

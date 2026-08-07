@@ -567,7 +567,7 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	require.Equal(t, 1, countNodeResources("extra_follow_up", "task"))
 }
 
-func TestAutomationBlankBuilderIsVisuallyEditableWithYAMLOnlySettings(t *testing.T) {
+func TestAutomationBlankBuilderOffersGraphYAMLAndCardsViews(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Blank Builder Project").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
@@ -586,10 +586,10 @@ func TestAutomationBlankBuilderIsVisuallyEditableWithYAMLOnlySettings(t *testing
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, opened.Code)
-	for _, marker := range []string{`data-automation-yaml-builder`, `data-automation-yaml-editor`, `data-automation-view-yaml`, `data-automation-graph-panel`, `name="automation_yaml"`, `data-automation-draft-canvas`, `data-automation-add-node-open`, `data-automation-node-dialog`, `data-automation-add-first-node`, `data-automation-fit`, `data-automation-builder-header`, `data-automation-editable-breadcrumb`, `class="rounded-box border border-base-300 bg-base-100 mb-0 p-4 flex flex-1 min-h-[20rem] flex-col"`, `class="automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30 flex-1 min-h-[20rem]"`} {
+	for _, marker := range []string{`data-automation-yaml-builder`, `data-automation-yaml-editor`, `data-automation-view-yaml`, `data-automation-view-cards`, `data-automation-graph-panel`, `data-automation-cards-panel`, `data-automation-cards-form`, `data-automation-node-cards`, `data-automation-edge-cards`, `name="automation_yaml"`, `name="candidate_json"`, `data-automation-draft-canvas`, `data-automation-add-node-open`, `data-automation-node-dialog`, `data-automation-add-first-node`, `data-automation-fit`, `data-automation-builder-header`, `data-automation-editable-breadcrumb`, `class="rounded-box border border-base-300 bg-base-100 mb-0 p-4 flex flex-1 min-h-[20rem] flex-col"`, `class="automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30 flex-1 min-h-[20rem]"`} {
 		require.Contains(t, opened.Body.String(), marker)
 	}
-	for _, marker := range []string{`name="candidate_json"`, `data-automation-builder-name`, `<h3 class="font-semibold">Canvas</h3>`, "Drag nodes to arrange them and empty space to pan.", "Connect steps:", "Node and connection settings", "Transition settings", "Task prompt", "Task goal (optional)", "Human result"} {
+	for _, marker := range []string{`data-automation-builder-name`, `<h3 class="font-semibold">Canvas</h3>`, "Drag nodes to arrange them and empty space to pan.", "Connect steps:"} {
 		require.NotContains(t, opened.Body.String(), marker)
 	}
 	require.NotContains(t, opened.Body.String(), `data-automation-yaml-preview`)
@@ -641,8 +641,13 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	require.Contains(t, preview.Body.String(), `data-node-key="task"`)
 	require.Contains(t, preview.Body.String(), `data-edge-key="schedule_task"`)
 	require.Contains(t, preview.Body.String(), `data-automation-add-node-open`)
-	require.NotContains(t, preview.Body.String(), "Node and connection settings")
-	require.NotContains(t, preview.Body.String(), "Task prompt")
+	require.Contains(t, preview.Body.String(), `data-automation-cards-panel`)
+	require.Contains(t, preview.Body.String(), `data-automation-cards-form`)
+	require.Contains(t, preview.Body.String(), `data-automation-node-card="schedule"`)
+	require.Contains(t, preview.Body.String(), `data-automation-node-card="task"`)
+	require.Contains(t, preview.Body.String(), `data-automation-edge-card="schedule_task"`)
+	require.Contains(t, preview.Body.String(), "Task prompt")
+	require.Contains(t, preview.Body.String(), "Task goal (optional)")
 	require.NotContains(t, preview.Body.String(), "Human result")
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 }
@@ -712,8 +717,10 @@ func TestAutomationBuilderVisualActionsDecodeAndReserializeYAML(t *testing.T) {
 	require.Len(t, updated.Nodes, 1)
 	require.Equal(t, "review_queue", updated.Nodes[0].Key)
 	require.Equal(t, "Review queue", updated.Nodes[0].Name)
-	require.NotContains(t, response.Body.String(), "Node and connection settings")
-	require.NotContains(t, response.Body.String(), "Task prompt")
+	require.Contains(t, response.Body.String(), `data-automation-cards-panel`)
+	require.Contains(t, response.Body.String(), `data-automation-node-card="review_queue"`)
+	require.Contains(t, response.Body.String(), "Task prompt")
+	require.Contains(t, response.Body.String(), "Task goal (optional)")
 	require.NotContains(t, response.Body.String(), "Human result")
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 	require.Zero(t, tableCountHandler(t, tc, "automation_versions"))
