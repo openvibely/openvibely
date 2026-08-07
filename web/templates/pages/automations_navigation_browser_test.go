@@ -262,6 +262,7 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 		`class="flex flex-wrap items-start justify-between gap-3"`,
 		`data-automation-breadcrumb`,
 		`data-automation-editable-breadcrumb`,
+		`flex-wrap items-start gap-2`,
 		`data-automation-builder-header-actions`,
 		`data-automation-builder-save`,
 		`data-automation-builder-cancel`,
