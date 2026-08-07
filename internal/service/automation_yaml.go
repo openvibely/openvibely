@@ -49,7 +49,7 @@ func DecodeAutomationDraftYAML(raw []byte) (models.AutomationDraftCandidate, err
 	if err != nil {
 		return models.AutomationDraftCandidate{}, err
 	}
-	return candidate, nil
+	return normalizeAutomationDraftYAMLNumbers(candidate), nil
 }
 
 // EncodeAutomationDraftYAML produces the stable, editable YAML representation
@@ -116,9 +116,28 @@ func automationYAMLCandidateFromCandidate(candidate models.AutomationDraftCandid
 	return document
 }
 
+func normalizeAutomationDraftYAMLNumbers(candidate models.AutomationDraftCandidate) models.AutomationDraftCandidate {
+	for i := range candidate.Nodes {
+		candidate.Nodes[i].Config, _ = normalizeAutomationYAMLValue(candidate.Nodes[i].Config).(map[string]any)
+		if candidate.Nodes[i].Config == nil {
+			candidate.Nodes[i].Config = map[string]any{}
+		}
+	}
+	for i := range candidate.Edges {
+		candidate.Edges[i].Condition, _ = normalizeAutomationYAMLValue(candidate.Edges[i].Condition).(map[string]any)
+		if candidate.Edges[i].Condition == nil {
+			candidate.Edges[i].Condition = map[string]any{}
+		}
+	}
+	return candidate
+}
+
 func normalizeAutomationYAMLValue(value any) any {
 	switch typed := value.(type) {
 	case json.Number:
+		if integer, err := strconv.Atoi(string(typed)); err == nil {
+			return integer
+		}
 		if integer, err := typed.Int64(); err == nil {
 			return integer
 		}

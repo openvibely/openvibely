@@ -1110,6 +1110,69 @@ func issueCodes(issues []models.AutomationValidationIssue) []string {
 	return codes
 }
 
+func TestMaintainedSDLCTemplatesDecodeCanonicalYAML(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	for _, adapterKey := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
+		t.Run(adapterKey, func(t *testing.T) {
+			document, ok := maintainedAutomationTemplateYAML(adapterKey)
+			require.True(t, ok)
+			expected, err := DecodeAutomationDraftYAML([]byte(document))
+			require.NoError(t, err)
+			actual, err := drafts.TemplateCandidate(adapterKey)
+			require.NoError(t, err)
+			require.Equal(t, expected, actual)
+			require.Empty(t, drafts.ValidateCandidate(actual))
+		})
+	}
+}
+
+func TestAutomationDraftYAMLPositionlessCustomNodesReceiveDeterministicLayout(t *testing.T) {
+	raw := `schema_version: 1
+name: Positionless custom graph
+description: ''
+automation_type: custom
+adapter_key: custom
+nodes:
+  - key: task
+    name: Follow up
+    type: agent_task
+    role: task
+    config:
+      prompt: Follow up on the request.
+      category: backlog
+      priority: 2
+  - key: complete
+    name: Complete
+    type: outcome
+    role: completed
+    config: {}
+edges:
+  - key: task_complete
+    from: task
+    to: complete
+    from_port: right
+    to_port: left
+`
+	candidate, err := DecodeAutomationDraftYAML([]byte(raw))
+	require.NoError(t, err)
+
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	preview, err := drafts.PreviewCandidate(context.Background(), "", candidate, nil)
+	require.NoError(t, err)
+	require.Empty(t, preview.ValidationErrors)
+	for _, node := range preview.Candidate.Nodes {
+		require.NotNil(t, node.Position, node.Key)
+	}
+	for _, edge := range preview.Candidate.Edges {
+		require.NotNil(t, automationDraftNodeByKey(t, preview.Candidate, edge.From).Position, edge.Key)
+		require.NotNil(t, automationDraftNodeByKey(t, preview.Candidate, edge.To).Position, edge.Key)
+	}
+
+	repeated, err := drafts.PreviewCandidate(context.Background(), "", candidate, nil)
+	require.NoError(t, err)
+	require.Equal(t, preview.Candidate, repeated.Candidate)
+}
+
 func TestAutomationDraftYAMLRoundTripAndStrictDecoding(t *testing.T) {
 	repo := repository.NewAutomationRepo(testutil.NewTestDB(t))
 	drafts := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
@@ -1128,6 +1191,7 @@ func TestAutomationDraftYAMLRoundTripAndStrictDecoding(t *testing.T) {
 		require.Equal(t, candidate.AdapterKey, decoded.AdapterKey)
 		require.Len(t, decoded.Nodes, len(candidate.Nodes))
 		require.Len(t, decoded.Edges, len(candidate.Edges))
+		require.IsType(t, int(0), automationDraftNodeByKey(t, decoded, "vision_suggestions").Config["priority"])
 	}
 
 	for _, document := range []string{

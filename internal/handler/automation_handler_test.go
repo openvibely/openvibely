@@ -624,8 +624,8 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	candidate := automationCandidateFromResponse(t, created)
 	candidate.Name = "YAML custom topology"
 	candidate.Nodes = []models.AutomationDraftNode{
-		{Key: "schedule", Name: "Weekday review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Review work.", "goal": "", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{}},
-		{Key: "task", Name: "Follow up", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Follow up.", "goal": "", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 260}},
+		{Key: "schedule", Name: "Weekday review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Review work.", "goal": "", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+		{Key: "task", Name: "Follow up", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Follow up.", "goal": "", "category": "backlog", "priority": 2}},
 	}
 	candidate.Edges = []models.AutomationDraftEdge{{Key: "schedule_task", From: "schedule", To: "task", FromPort: "right", ToPort: "left", Condition: map[string]any{}}}
 	yaml, err := service.EncodeAutomationDraftYAML(candidate)
@@ -634,6 +634,7 @@ func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
 	require.Contains(t, preview.Body.String(), `data-automation-readonly-node="schedule"`)
 	require.Contains(t, preview.Body.String(), `data-automation-readonly-node="task"`)
+	require.Contains(t, preview.Body.String(), `data-automation-readonly-edge="schedule_task"`)
 	require.NotContains(t, preview.Body.String(), `data-automation-add-node-open`)
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 }

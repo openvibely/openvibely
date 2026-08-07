@@ -56,7 +56,7 @@ edges:
 
 Top-level metadata is `schema_version`, `name`, `description`, `automation_type`, `adapter_key`, `nodes`, `edges`, and optional `assumptions` and `warnings`. A node has `key`, `name`, `type`, `role`, `config`, and optional `position`. An edge has `key`, `from`, `to`, optional ports and label, and optional `condition`.
 
-Node types, roles, and configuration fields are constrained by the selected adapter. Task and schedule configuration supports prompts, optional goals, categories, priority, agent references, skills and source files where the selected node supports them, and recurrence settings. Maintained Native and GitHub SDLC template YAML includes its maintained prompts, roles, schedules, inboxes, gates, and action configuration. Retained template nodes preserve their specialized runtime behavior; custom nodes use the existing Custom Automation capability rules.
+Node types, roles, and configuration fields are constrained by the selected adapter. Task and schedule configuration supports prompts, optional goals, categories, priority, agent references, skills and source files where the selected node supports them, and recurrence settings. Maintained Native and GitHub SDLC templates are stored as canonical YAML and decoded through this same boundary when selected. Retained template nodes preserve their specialized runtime behavior; custom nodes use the existing Custom Automation capability rules. `position` is optional: omitted positions receive a deterministic preview layout during normalization, so Graph mode renders every valid node and edge without making the layout a separate authoring source.
 
 ## Validation and Save
 

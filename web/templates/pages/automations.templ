@@ -739,7 +739,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						<defs><marker id="automation-builder-readonly-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow"></path></marker></defs>
 						for _, edge := range page.Result.Candidate.Edges {
 							if source, target, ok := automationDraftEdgeNodes(page.Result.Candidate.Nodes, edge); ok {
-								<line x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-graph-edge" stroke-width="2" marker-end="url(#automation-builder-readonly-arrow)"></line>
+								<line data-automation-readonly-edge={ edge.Key } x1={ fmt.Sprintf("%.0f", source.Position.X+automationGraphNodeWidth) } y1={ fmt.Sprintf("%.0f", source.Position.Y+automationGraphNodeHeight/2) } x2={ fmt.Sprintf("%.0f", target.Position.X) } y2={ fmt.Sprintf("%.0f", target.Position.Y+automationGraphNodeHeight/2) } class="automation-graph-edge" stroke-width="2" marker-end="url(#automation-builder-readonly-arrow)"></line>
 							}
 						}
 						for _, node := range page.Result.Candidate.Nodes {

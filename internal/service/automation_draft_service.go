@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,24 @@ const (
 	maxAutomationDraftNodes      = 50
 	maxAutomationDraftEdges      = 100
 )
+
+var (
+	//go:embed automation_templates/native_sdlc.yaml
+	nativeSDLCTemplateYAML string
+	//go:embed automation_templates/github_sdlc.yaml
+	githubSDLCTemplateYAML string
+)
+
+func maintainedAutomationTemplateYAML(adapterKey string) (string, bool) {
+	switch strings.TrimSpace(adapterKey) {
+	case AutomationAdapterNativeSDLC:
+		return nativeSDLCTemplateYAML, true
+	case AutomationAdapterGitHubSDLC:
+		return githubSDLCTemplateYAML, true
+	default:
+		return "", false
+	}
+}
 
 type AutomationDraftService struct {
 	repo         *repository.AutomationRepo
@@ -86,7 +105,18 @@ func (s *AutomationDraftService) CreationTemplateCandidate(adapterKey string) (m
 }
 
 func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
-	adapter, ok := s.registry.Get(strings.TrimSpace(adapterKey))
+	adapterKey = strings.TrimSpace(adapterKey)
+	if document, maintained := maintainedAutomationTemplateYAML(adapterKey); maintained {
+		candidate, err := DecodeAutomationDraftYAML([]byte(document))
+		if err != nil {
+			return models.AutomationDraftCandidate{}, fmt.Errorf("decode maintained automation template %q: %w", adapterKey, err)
+		}
+		if candidate.AdapterKey != adapterKey {
+			return models.AutomationDraftCandidate{}, fmt.Errorf("maintained automation template %q has adapter %q", adapterKey, candidate.AdapterKey)
+		}
+		return candidate, nil
+	}
+	adapter, ok := s.registry.Get(adapterKey)
 	if !ok {
 		return models.AutomationDraftCandidate{}, fmt.Errorf("unsupported automation template %q", adapterKey)
 	}
@@ -225,6 +255,9 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 	for _, node := range adapter.Nodes {
 		adapterNodes[node.Key] = node
 	}
+	missingPositions := make([]int, 0, len(candidate.Nodes))
+	hasPosition := false
+	var minY, maxX float64
 	for i := range candidate.Nodes {
 		node := &candidate.Nodes[i]
 		node.Key = strings.TrimSpace(node.Key)
@@ -245,9 +278,33 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 				}
 			}
 		}
-		if canonical, exists := adapterNodes[node.Key]; exists {
-			if node.Position == nil {
-				node.Position = &models.AutomationDraftPoint{X: canonical.X, Y: canonical.Y}
+		if canonical, exists := adapterNodes[node.Key]; exists && node.Position == nil {
+			node.Position = &models.AutomationDraftPoint{X: canonical.X, Y: canonical.Y}
+		}
+		if node.Position == nil {
+			missingPositions = append(missingPositions, i)
+			continue
+		}
+		if !hasPosition || node.Position.X > maxX {
+			maxX = node.Position.X
+		}
+		if !hasPosition || node.Position.Y < minY {
+			minY = node.Position.Y
+		}
+		hasPosition = true
+	}
+	if len(missingPositions) > 0 {
+		sort.SliceStable(missingPositions, func(i, j int) bool {
+			return candidate.Nodes[missingPositions[i]].Key < candidate.Nodes[missingPositions[j]].Key
+		})
+		baseX, baseY := 0.0, 0.0
+		if hasPosition {
+			baseX, baseY = maxX+220, minY
+		}
+		for order, index := range missingPositions {
+			candidate.Nodes[index].Position = &models.AutomationDraftPoint{
+				X: baseX + float64(order%3)*220,
+				Y: baseY + float64(order/3)*140,
 			}
 		}
 	}
