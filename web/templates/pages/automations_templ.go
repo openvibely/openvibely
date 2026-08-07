@@ -5185,14 +5185,14 @@ func automationEditableBreadcrumb(currentProjectID string, automationName string
 			templ_7745c5c3_Var273 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 442, "<nav class=\"flex min-w-0 flex-shrink-0 flex-wrap items-start gap-2\" aria-label=\"Breadcrumb\" data-automation-breadcrumb data-automation-editable-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 442, "<nav class=\"flex min-w-0 flex-shrink-0 flex-wrap items-start\" aria-label=\"Breadcrumb\" data-automation-breadcrumb data-automation-editable-breadcrumb><a class=\"flex-shrink-0 text-2xl text-base-content/50 transition-colors hover:text-base-content/80\" href=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var274 templ.SafeURL
 		templ_7745c5c3_Var274, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL(fmt.Sprintf("/automations?project_id=%s", currentProjectID)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1547, Col: 336}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1548, Col: 179}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var274))
 		if templ_7745c5c3_Err != nil {
@@ -5205,20 +5205,20 @@ func automationEditableBreadcrumb(currentProjectID string, automationName string
 		var templ_7745c5c3_Var275 string
 		templ_7745c5c3_Var275, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/automations?project_id=%s", currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1547, Col: 407}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1548, Col: 250}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var275)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 444, "\" hx-target=\"#main-content\" hx-push-url=\"true\" onclick=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;\">Automations</a> <span class=\"flex-shrink-0 text-2xl text-base-content/30\">/</span> <input class=\"input input-bordered -ml-3 h-8 min-w-0 flex-1 px-3 text-xl font-bold sm:max-w-xl sm:text-2xl\" form=\"automation-design-form\" name=\"automation_name\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 444, "\" hx-target=\"#main-content\" hx-push-url=\"true\" onclick=\"event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;\">Automations</a> <span class=\"ml-2 flex-shrink-0 text-2xl text-base-content/30\">/</span> <input class=\"input input-bordered h-8 min-w-0 flex-1 px-2 text-xl font-bold sm:max-w-xl sm:text-2xl\" form=\"automation-design-form\" name=\"automation_name\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var276 string
 		templ_7745c5c3_Var276, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationName)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1549, Col: 185}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 1550, Col: 179}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var276)
 		if templ_7745c5c3_Err != nil {
