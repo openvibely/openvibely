@@ -1691,7 +1691,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
-	fixture.project.RepoURL = "https://github.com/example/runtime.git"
+	fixture.project.RepoURL = "https://github.example.com/example/runtime.git"
 	fixture.project.RepoPath = t.TempDir()
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 	require.NoError(t, fixture.repo.DB().QueryRow(`UPDATE tasks SET worktree_branch = 'task/runtime' WHERE id = ? RETURNING id`, fixture.task.ID).Scan(new(string)))
@@ -1709,22 +1709,23 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	var resolvedRepoURLs []string
 	var resolvedRepoPaths []string
 	provider := &fakeGitHubIssueRuntimeProvider{
+		globalAPIEndpoint: "https://github.example.com/api/v3",
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
 			resolvedRepoMu.Lock()
 			defer resolvedRepoMu.Unlock()
 			resolvedRepoURLs = append(resolvedRepoURLs, repoURL)
 			resolvedRepoPaths = append(resolvedRepoPaths, repoPath)
-			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.example.com/example/runtime"}, nil
 		},
 		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
 			createCalls.Add(1)
-			return &GitHubIssue{Number: 42, URL: "https://github.com/example/runtime/issues/42", Title: req.Title, State: "open"}, nil
+			return &GitHubIssue{Number: 42, URL: "https://github.example.com/example/runtime/issues/42", Title: req.Title, State: "open"}, nil
 		},
 		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
 			return &GitHubAuthenticatedUser{Login: "dev"}, []GitHubIssue{{Number: 42, Title: "Exact issue", State: "open"}, {Number: 43, Title: "Second owned issue", State: "open"}, {Number: 44, Title: "Local remote issue", State: "open"}, {Number: 45, Title: "Unrelated assigned issue", State: "open"}}, nil
 		},
 		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
-			return &GitHubPullRequest{Number: 7, URL: "https://github.com/example/runtime/pull/7", State: "open"}, nil
+			return &GitHubPullRequest{Number: 7, URL: "https://github.example.com/example/runtime/pull/7", State: "open"}, nil
 		},
 	}
 	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
@@ -1955,10 +1956,17 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	mismatchedIssueOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":"current","issue_number":43,"pr_title":"PR","pr_body":%q}`, mismatchedIssueBody)))
 	require.Empty(t, mismatchedIssueOutput)
 	require.ErrorContains(t, err, "must match the task's source issue #42")
+	forgedIssueURLBody := "## Summary\n- Implements the accepted issue.\n\n## Validation\n- go test ./internal/service\n\nCloses #42"
+	forgedIssueURLOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":"current","issue_number":42,"issue_url":"https://github.com/attacker/other/issues/42","pr_title":"PR","pr_body":%q}`, forgedIssueURLBody)))
+	require.Empty(t, forgedIssueURLOutput)
+	require.ErrorContains(t, err, "issue_url must match the task's source issue")
 	prBody := "## Summary\n- Implements the accepted issue.\n\n## Validation\n- go test ./internal/service\n\nCloses #42"
 	openedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
 	require.NoError(t, err)
 	require.Contains(t, openedOutput, `"created":true`)
+	var recordedIssueURL string
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT issue_url FROM task_pull_requests WHERE task_id = ?`, implementationTask.ID).Scan(&recordedIssueURL))
+	require.Equal(t, "https://github.example.com/example/runtime/issues/42", recordedIssueURL)
 	reusedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
 	require.NoError(t, err)
 	require.Contains(t, reusedOutput, `"reused_existing_record":true`)

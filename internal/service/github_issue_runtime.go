@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -308,14 +309,18 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					return "", err
 				}
 				if requiresStructuredBody {
-					trustedIssueNumber, err := automationGitHubSDLCSourceIssueNumber(ctx, opts, task)
+					trustedIssue, err := automationGitHubSDLCSourceIssue(ctx, opts, project, task)
 					if err != nil {
 						return "", err
 					}
-					if req.IssueNumber != trustedIssueNumber {
-						return "", fmt.Errorf("GitHub SDLC pull request issue_number must match the task's source issue #%d", trustedIssueNumber)
+					if req.IssueNumber != trustedIssue.Number {
+						return "", fmt.Errorf("GitHub SDLC pull request issue_number must match the task's source issue #%d", trustedIssue.Number)
 					}
-					if err := validateGitHubSDLCReviewPRBody(req.PRBody, trustedIssueNumber); err != nil {
+					if suppliedIssueURL := strings.TrimSpace(req.IssueURL); suppliedIssueURL != "" && suppliedIssueURL != trustedIssue.URL {
+						return "", fmt.Errorf("GitHub SDLC pull request issue_url must match the task's source issue %s", trustedIssue.URL)
+					}
+					req.IssueURL = trustedIssue.URL
+					if err := validateGitHubSDLCReviewPRBody(req.PRBody, trustedIssue.Number); err != nil {
 						return "", err
 					}
 				}
@@ -612,19 +617,32 @@ func automationPullRequestRequiresStructuredBody(ctx context.Context, opts githu
 	return false, nil
 }
 
-func automationGitHubSDLCSourceIssueNumber(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task) (int, error) {
+func automationGitHubSDLCSourceIssue(ctx context.Context, opts githubIssueRuntimeOptions, project *models.Project, task *models.Task) (*GitHubIssue, error) {
 	if opts.AutomationRepo == nil || task == nil {
-		return 0, errors.New("Automation GitHub source issue provenance is unavailable")
+		return nil, errors.New("Automation GitHub source issue provenance is unavailable")
 	}
 	resourceID, err := opts.AutomationRepo.GitHubIssueResourceForTask(ctx, opts.ProjectID, task.ID)
 	if err != nil {
-		return 0, fmt.Errorf("loading Automation GitHub source issue provenance: %w", err)
+		return nil, fmt.Errorf("loading Automation GitHub source issue provenance: %w", err)
 	}
+	parts := strings.Split(resourceID, ":")
 	issue := githubIssueFromCanonicalResource(resourceID)
-	if issue.Number <= 0 {
-		return 0, errors.New("Automation GitHub implementation task has no trusted source issue")
+	if len(parts) != 4 || strings.TrimSpace(parts[1]) == "" || issue.Number <= 0 {
+		return nil, errors.New("Automation GitHub implementation task has no trusted source issue")
 	}
-	return issue.Number, nil
+	repo, err := resolveAutomationProjectGitHubRepository(ctx, opts.GitHub, project)
+	if err != nil {
+		return nil, fmt.Errorf("resolving Automation GitHub source issue repository: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(parts[1]), strings.TrimSpace(repo.FullName)) {
+		return nil, errors.New("Automation GitHub source issue repository does not match the selected project repository")
+	}
+	repoURL, err := url.Parse(repo.HTMLURL)
+	if err != nil || repoURL.Scheme != "https" || repoURL.Host == "" {
+		return nil, errors.New("Automation GitHub source issue repository has no valid web URL")
+	}
+	issue.URL = fmt.Sprintf("https://%s/%s/issues/%d", repoURL.Host, parts[1], issue.Number)
+	return issue, nil
 }
 
 func validateGitHubSDLCReviewPRBody(body string, issueNumber int) error {
