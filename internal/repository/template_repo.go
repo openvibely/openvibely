@@ -88,12 +88,19 @@ func (r *TemplateRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+// templateCardColumns is the bounded projection used by list/dashboard/search
+// surfaces. These callers only render name, description, category, priority,
+// favorite state, and usage count; the full default_prompt text (which can be
+// large) is deliberately excluded and is only materialized by GetByID for
+// CreateFromTemplate/edit flows.
+const templateCardColumns = `id, project_id, name, description, suggested_agent_id,
+	category, priority, tag, tags_json, category_filter,
+	is_built_in, is_favorite, usage_count, created_by, created_at, updated_at`
+
 // ListByProject returns templates for a project (includes global built-in templates)
 func (r *TemplateRepo) ListByProject(ctx context.Context, projectID string) ([]models.TaskTemplate, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, name, description, default_prompt, suggested_agent_id,
-			category, priority, tag, tags_json, category_filter,
-			is_built_in, is_favorite, usage_count, created_by, created_at, updated_at
+		SELECT `+templateCardColumns+`
 		FROM task_templates
 		WHERE project_id = ? OR project_id IS NULL
 		ORDER BY is_favorite DESC, usage_count DESC, name ASC`,
@@ -104,7 +111,7 @@ func (r *TemplateRepo) ListByProject(ctx context.Context, projectID string) ([]m
 	}
 	defer rows.Close()
 
-	return r.scanTemplates(rows)
+	return r.scanTemplateCards(rows)
 }
 
 // ListByCategory returns templates filtered by category
@@ -117,9 +124,7 @@ func (r *TemplateRepo) ListByCategory(ctx context.Context, projectID string, cat
 	}
 
 	rows, err = r.db.QueryContext(ctx, `
-		SELECT id, project_id, name, description, default_prompt, suggested_agent_id,
-			category, priority, tag, tags_json, category_filter,
-			is_built_in, is_favorite, usage_count, created_by, created_at, updated_at
+		SELECT `+templateCardColumns+`
 		FROM task_templates
 		WHERE (project_id = ? OR project_id IS NULL) AND category_filter = ?
 		ORDER BY is_favorite DESC, usage_count DESC, name ASC`,
@@ -130,16 +135,16 @@ func (r *TemplateRepo) ListByCategory(ctx context.Context, projectID string, cat
 	}
 	defer rows.Close()
 
-	return r.scanTemplates(rows)
+	return r.scanTemplateCards(rows)
 }
 
-// Search searches templates by name or description
+// Search searches templates by name or description. The default_prompt
+// column is still used to filter matching rows in SQL, but its text is not
+// selected or scanned into the returned cards.
 func (r *TemplateRepo) Search(ctx context.Context, projectID, query string) ([]models.TaskTemplate, error) {
 	searchPattern := "%" + query + "%"
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, name, description, default_prompt, suggested_agent_id,
-			category, priority, tag, tags_json, category_filter,
-			is_built_in, is_favorite, usage_count, created_by, created_at, updated_at
+		SELECT `+templateCardColumns+`
 		FROM task_templates
 		WHERE (project_id = ? OR project_id IS NULL)
 			AND (name LIKE ? OR description LIKE ? OR default_prompt LIKE ?)
@@ -151,15 +156,13 @@ func (r *TemplateRepo) Search(ctx context.Context, projectID, query string) ([]m
 	}
 	defer rows.Close()
 
-	return r.scanTemplates(rows)
+	return r.scanTemplateCards(rows)
 }
 
 // ListFavorites returns favorited templates
 func (r *TemplateRepo) ListFavorites(ctx context.Context, projectID string) ([]models.TaskTemplate, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, name, description, default_prompt, suggested_agent_id,
-			category, priority, tag, tags_json, category_filter,
-			is_built_in, is_favorite, usage_count, created_by, created_at, updated_at
+		SELECT `+templateCardColumns+`
 		FROM task_templates
 		WHERE (project_id = ? OR project_id IS NULL) AND is_favorite = 1
 		ORDER BY usage_count DESC, name ASC`,
@@ -170,15 +173,13 @@ func (r *TemplateRepo) ListFavorites(ctx context.Context, projectID string) ([]m
 	}
 	defer rows.Close()
 
-	return r.scanTemplates(rows)
+	return r.scanTemplateCards(rows)
 }
 
 // ListRecentlyUsed returns most recently used templates
 func (r *TemplateRepo) ListRecentlyUsed(ctx context.Context, projectID string, limit int) ([]models.TaskTemplate, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, name, description, default_prompt, suggested_agent_id,
-			category, priority, tag, tags_json, category_filter,
-			is_built_in, is_favorite, usage_count, created_by, created_at, updated_at
+		SELECT `+templateCardColumns+`
 		FROM task_templates
 		WHERE (project_id = ? OR project_id IS NULL) AND usage_count > 0
 		ORDER BY updated_at DESC
@@ -190,7 +191,7 @@ func (r *TemplateRepo) ListRecentlyUsed(ctx context.Context, projectID string, l
 	}
 	defer rows.Close()
 
-	return r.scanTemplates(rows)
+	return r.scanTemplateCards(rows)
 }
 
 // ToggleFavorite toggles the favorite status
@@ -214,8 +215,10 @@ func (r *TemplateRepo) IncrementUsage(ctx context.Context, id string) error {
 	return err
 }
 
-// scanTemplates is a helper to scan template rows
-func (r *TemplateRepo) scanTemplates(rows *sql.Rows) ([]models.TaskTemplate, error) {
+// scanTemplateCards scans the bounded templateCardColumns projection.
+// DefaultPrompt is intentionally left empty; callers rendering cards never
+// use it, and full-record access must go through GetByID.
+func (r *TemplateRepo) scanTemplateCards(rows *sql.Rows) ([]models.TaskTemplate, error) {
 	var templates []models.TaskTemplate
 	for rows.Next() {
 		var t models.TaskTemplate
@@ -223,11 +226,11 @@ func (r *TemplateRepo) scanTemplates(rows *sql.Rows) ([]models.TaskTemplate, err
 		var isBuiltIn, isFavorite int
 
 		if err := rows.Scan(
-			&t.ID, &projectID, &t.Name, &t.Description, &t.DefaultPrompt, &agentID,
+			&t.ID, &projectID, &t.Name, &t.Description, &agentID,
 			&t.Category, &t.Priority, &t.Tag, &t.TagsJSON, &t.CategoryFilter,
 			&isBuiltIn, &isFavorite, &t.UsageCount, &t.CreatedBy, &t.CreatedAt, &t.UpdatedAt,
 		); err != nil {
-			return nil, fmt.Errorf("scanning template: %w", err)
+			return nil, fmt.Errorf("scanning template card: %w", err)
 		}
 
 		if projectID.Valid {
