@@ -682,12 +682,11 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			<div class="mb-6 min-w-0" data-automation-builder-header>
 				<div class="flex flex-wrap items-start justify-between gap-3">
 					<div class="min-w-0 flex-1">@automationEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)</div>
-					<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
-						<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button>
-						<a class="btn btn-ghost btn-sm" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a>
-						@automationBuilderMoreActions(page, currentProjectID)
-					</div>
-				</div>
+						<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
+							<a class="btn btn-ghost btn-sm" href={ templ.URL(fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID)) } hx-get={ fmt.Sprintf("/automations/%s?project_id=%s", page.AutomationID, currentProjectID) } hx-target="#main-content" hx-push-url="true" onclick="event.preventDefault(); event.stopImmediatePropagation(); window.openVibelyNavigate(this.getAttribute('href')); return false;" data-automation-builder-cancel>Cancel</a>
+							<button class="btn btn-primary btn-sm" type="submit" form="automation-design-form" data-automation-builder-save>Save changes</button>
+							@automationBuilderMoreActions(page, currentProjectID)
+						</div>				</div>
 				if strings.TrimSpace(page.Result.Candidate.Description) != "" {
 					<p class="mt-1 text-sm opacity-60">{ page.Result.Candidate.Description }</p>
 				}

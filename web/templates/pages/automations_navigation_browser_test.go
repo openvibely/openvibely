@@ -375,8 +375,8 @@ func TestAutomationBuilderEditActionsAndMetadataFollowCanvas(t *testing.T) {
 	if !(strings.Index(canvas, `data-automation-view-graph`) < strings.Index(canvas, `data-automation-view-yaml`) && strings.Index(canvas, `data-automation-view-yaml`) < strings.Index(canvas, `data-automation-add-node-open`)) {
 		t.Error("expected Edit Automation canvas actions in Graph, YAML, then Add node order")
 	}
-	if !(strings.Index(header, `data-automation-editable-breadcrumb`) < strings.Index(header, `data-automation-builder-save`) && strings.Index(header, `data-automation-builder-save`) < strings.Index(header, `data-automation-builder-cancel`) && strings.Index(header, `data-automation-builder-cancel`) < strings.Index(header, `data-automation-builder-actions`)) {
-		t.Error("expected Edit Automation breadcrumb actions in name, Save changes, Cancel, then kebab order")
+	if !(strings.Index(header, `data-automation-editable-breadcrumb`) < strings.Index(header, `data-automation-builder-cancel`) && strings.Index(header, `data-automation-builder-cancel`) < strings.Index(header, `data-automation-builder-save`) && strings.Index(header, `data-automation-builder-save`) < strings.Index(header, `data-automation-builder-actions`)) {
+		t.Error("expected Edit Automation breadcrumb actions in name, Cancel, Save changes, then kebab order")
 	}
 	switcherStart := strings.Index(canvas, `data-automation-view-switcher`)
 	if switcherStart < 0 {
