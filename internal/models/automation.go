@@ -403,6 +403,7 @@ type AutomationLiveGraph struct {
 	RecentCutoff            time.Time                   `json:"recent_cutoff"`
 	ExternalState           AutomationExternalState     `json:"external_state"`
 	TemplateUpdateAvailable bool                        `json:"template_update_available,omitempty"`
+	YAML                    string                      `json:"-"`
 }
 
 type AutomationInvocationPage struct {

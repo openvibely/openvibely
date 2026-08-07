@@ -11,6 +11,12 @@ title: Automation Graphs
 
 Automation Graphs is a project-scoped, reviewable orchestration surface built on existing OpenVibely tasks, schedules, workers, queues, Alerts, GitHub services, repositories, and current-graph provenance. It does not introduce a parallel graph executor, queue, worker, or arbitrary-code runtime.
 
+Canonical authoring format (2026-08-07):
+- Automation YAML is the sole editable web definition. Template, Describe, Custom, and saved Edit flows serialize to deterministic YAML; Graph mode is a read-only rendering of the YAML-decoded candidate.
+- YAML uses schema version 1 and the existing candidate model (`name`, `description`, `automation_type`, `adapter_key`, nodes/configuration/positions, edges/ports/conditions, assumptions, warnings). Strict parsing rejects malformed or multi-document YAML, aliases/anchors, duplicate keys, non-string mapping keys, unsupported fields, and unsupported scalar tags before the existing normalize/validation/compiler path rejects invalid graph topology, configuration, capabilities, provenance, lifecycle, and authorization.
+- Existing saved graph-backed Automations are compatible through serialization on read. They are not migrated or silently rewritten, and opening/previewing YAML does not recreate resources or replace point-in-time prompts/configuration.
+- Preview/Live YAML is read-only; Edit YAML is browser-local until Save. Save and Preview share the existing validation/compiler path and atomic resource transaction.
+
 Architecture and safety boundaries:
 - Supported web creation paths are Template, Describe, and Custom. Custom is the runnable blank builder. New maintained templates are Native SDLC and GitHub SDLC; the internal Vision Driver adapter remains only for already-saved graph reconstruction.
 - Each Automation has exactly one current saved graph. There is no retained Automation version history, superseded graph, web-facing draft, staged publication, or failed-publication recovery model. Internal graph revision IDs exist only to isolate stale or currently running execution state; they are not durable Automation or mailbox identities.

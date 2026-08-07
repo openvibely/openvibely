@@ -1,79 +1,76 @@
 # Automation Graphs User Guide
 
-Use `/automations` to build project-scoped workflows from supported OpenVibely capabilities and watch their current state in one visual graph.
-
-## What Automation Graphs Are For
-
-Automation Graphs connect schedules, Tasks and Agents, Native approvals, supported GitHub actions, and outcomes through explicit handoffs. They reuse the same Tasks, Scheduler, Alerts, GitHub integrations, workers, and queues used elsewhere in OpenVibely.
-
-Use Automation Graphs when work needs multiple supported steps and visible handoffs. Use [Schedule](./schedule-user-guide.md) when one Task simply needs to run once or repeat.
-
-Existing Tasks, schedules, Alerts, and GitHub objects never become Automations automatically.
+Use `/automations` to author project-scoped workflows in YAML and view their current state as a graph. Automation Graphs reuse the existing Tasks, Scheduler, Alerts, GitHub integrations, workers, queues, validation, lifecycle, and approval boundaries. They do not run arbitrary code or introduce another executor.
 
 ## Create an Automation
 
-Open `/automations`, select `+ New Automation`, and choose how to start:
+Open `/automations`, select `+ New Automation`, and choose Template, Describe, or Custom. Each option opens browser-local YAML. Templates load the maintained Native SDLC or GitHub SDLC YAML without creating an Automation, Task, schedule, graph row, or runtime resource. Describe creates a supported candidate, then renders it as YAML. Refreshing or navigating away discards unsaved YAML.
 
-| Starting Point | Use It For |
-|---|---|
-| Template | Open a modal, choose a maintained Native or GitHub SDLC graph, and review the selected template's description before loading it. |
-| Describe | Open a modal, describe the result you want, and review a generated browser-local graph. |
-| Custom | Open the custom builder on an empty canvas. |
+The YAML document is the complete editable Automation definition. Graph mode is a read-only visualization of the parsed document; it cannot be used to add, delete, connect, move, or configure nodes. Edit YAML, including deleting a node and its incident edges, then select Save. Saved Edit uses the same behavior. Existing Automations are read from their current stored graph and serialized to YAML when opened; this does not rewrite the record, prompts, configuration, or runtime resources.
 
-Templates provide supported starting points. Selecting `Use template` loads the maintained graph into the browser-local builder without creating an Automation, Task, or schedule. Review or customize it, then select `Save changes`; Template, Custom, and Describe use the same builder and atomic Save rules. The GitHub SDLC template owns complete Offering Manager, finder, Dev Inbox, and Loop Auditor prompts plus their cadences; it works without the bootstrap skill and adds saved graph identity, lifecycle controls, and Live visualization over the Tasks and Schedules it creates on Save.
+## YAML Schema
 
-## Build the Graph
+The canonical document has these fields:
 
-Select `Add node` to add a supported step:
+```yaml
+schema_version: 1
+name: Daily review
+description: Review one focused area each day.
+automation_type: custom
+adapter_key: custom
+nodes:
+  - key: review
+    name: Review requests
+    type: trigger
+    role: fixed_schedule
+    config:
+      prompt: Review one request.
+      goal: ""
+      category: scheduled
+      priority: 2
+      run_at: "09:00"
+      repeat_type: daily
+      repeat_interval: 1
+      enabled: true
+      clear_context_on_start: true
+    position: {x: 0, y: 0}
+  - key: follow_up
+    name: Follow up
+    type: agent_task
+    role: task
+    config:
+      prompt: Follow up on the review.
+      goal: ""
+      category: backlog
+      priority: 2
+    position: {x: 260, y: 0}
+edges:
+  - key: review_to_follow_up
+    from: review
+    to: follow_up
+    from_port: right
+    to_port: left
+    label: ""
+    condition: {}
+```
 
-- `Schedule` defines recurring or one-time work and creates its own Task and schedule when saved.
-- `Task` defines project work, optionally performed by a selected Agent.
-- `Create notification`, `Human approval`, `Approved inbox`, and Native `Implementation` model the Native Alert mailbox. Approved inbox is itself the scheduled Task; Native Implementation represents the real runtime-created implementation Task and is not a placeholder Task created on Save.
-- `Create GitHub issue`, `Human assignment`, `GitHub inbox`, `Open pull request`, and `Human review` model supported GitHub handoffs.
-- `Outcome` marks a supported terminal result.
+Top-level metadata is `schema_version`, `name`, `description`, `automation_type`, `adapter_key`, `nodes`, `edges`, and optional `assumptions` and `warnings`. A node has `key`, `name`, `type`, `role`, `config`, and optional `position`. An edge has `key`, `from`, `to`, optional ports and label, and optional `condition`.
 
-Configure each node, then connect its right output to the next node's left input. The builder supports selecting, moving, deleting, and reconnecting nodes and edges, plus pan, zoom, Fit, and Reset controls. Drag empty canvas space to pan smoothly; dragging a node moves that node instead. New Custom and saved Edit pages use the same canvas-card layout and viewport sizing: `Add node` and the top-right kebab share the canvas heading, `Save changes` is in that menu, and the Automation name appears below the canvas. Delete is available only for a saved Automation. The builder remains vertically scrollable on constrained screens. Schedule nodes do not have individual enable or disable controls: every current schedule runs while its Automation is Active, Pause disables all of its schedules, and Resume re-enables them.
+Node types, roles, and configuration fields are constrained by the selected adapter. Task and schedule configuration supports prompts, optional goals, categories, priority, agent references, skills and source files where the selected node supports them, and recurrence settings. Maintained Native and GitHub SDLC template YAML includes its maintained prompts, roles, schedules, inboxes, gates, and action configuration. Retained template nodes preserve their specialized runtime behavior; custom nodes use the existing Custom Automation capability rules.
 
-Mailbox graphs must use one complete family. Native uses `Create notification → Human approval → Approved inbox → Implementation → Outcome`. GitHub uses `Create GitHub issue → Human assignment → GitHub inbox → Task → Open pull request → Human review → Outcome`. GitHub inbox is itself a substantive scheduled Task and owns its schedule; do not add a separate Schedule before it. Native and GitHub approval, inbox, implementation, and review stages cannot be mixed in one custom graph.
+## Validation and Save
 
-Save rejects unsupported or ambiguous handoffs, invalid connector directions, unsafe cycles, missing configuration, and project references that are unavailable or belong to another project. The builder does not expose the hidden Workflow subsystem or arbitrary executable nodes.
+YAML is decoded, normalized, validated, and compiled through the same path used by Preview and Save. Select Preview to parse the current browser-local document and return to Graph mode without persisting or creating resources; Save performs that same validation before the atomic compiler transaction. It fails closed on malformed YAML, duplicate keys, aliases, unknown document fields, unsupported values, unsupported configuration, invalid references, invalid ports, duplicate keys, dangling endpoints, cycles, invalid topology, unavailable project capabilities, and all existing safety checks. Parse and validation errors are shown in the editor. They create no resources and leave the current saved graph and resources untouched.
 
-## Save Changes
+Save atomically creates or replaces the one current graph and its owned Task/Schedule bindings. The saved graph remains a point-in-time prompt/configuration snapshot. Reopening, template registration, and YAML serialization never silently upgrade prompts or recreate runtime resources. Editing a compatible Automation retains its stable Automation identity and the existing ownership/provenance rules for pending Native and GitHub work.
 
-New and edited web graphs exist only in browser memory until you select `Save changes`. Refreshing or navigating away discards unsaved changes.
+## Preview and Live
 
-Save validates the complete graph and immediately creates or replaces the Automation's one current saved graph and required resources. A replacement keeps the same Automation identity, removes runtime projection tied to the replaced graph, and does not retain selectable or restorable graph versions.
-
-There is no persisted editable Automation draft, separate Publish step, Definition page, Automation history page, or failed-Save recovery item. Save writes the graph, Tasks, and schedules in one database transaction. If anything fails, the whole Save is rolled back: a first Save creates nothing, and an edited Automation keeps running its previous graph.
-
-## Use the Live Graph
-
-Open a saved Automation from `/automations` to see its full-width `Live` graph. Current waiting, running, blocked, failed, and completed state appears on the graph itself. Drag either empty canvas space or a node to pan the Live graph smoothly; a short click on a linked Schedule or Task node still opens its Task. Saved Live and Edit canvases use the same responsive viewport height, node geometry, typography, coordinates, padded graph bounds, and tight Fit behavior, so matching graphs retain the same visual node scale before and after selecting `Fit`, including one-node and small graphs. Their canvas height is capped at `42rem` and retains a `20rem` usability floor at every viewport width; short pages scroll vertically instead of collapsing or clipping the graph.
-
-Schedule and Task nodes link to their exact project Task when one is bound. Task details opened from the Live graph show `Automations / <Automation name> / <Task title>` in the breadcrumb, with links back to the Automations portfolio and that exact Automation preview. Other node types remain visual. Editing starts a new browser-local copy of the current graph; the saved graph continues to run until a replacement Save succeeds.
-
-## Run Now, Pause, Resume, or Delete
-
-The Live graph card keeps lifecycle status and health visible in its header. Open the top-right kebab menu for Edit automation, Run now, Pause or Resume, and Delete. Run now appears only while the Automation is active.
-
-- Run now immediately queues every eligible schedule-owned entry Task through the normal Automation worker. The Live canvas refreshes in place and marks each newly claimed entry node as running before worker activity arrives; later activity and work-item state remain authoritative. Completed GitHub issue discovery waits at the Dev Inbox until implementation handoff instead of leaving the completed inbox poll displayed as running. Run now uses each Task's saved prompt and Agent configuration without changing the schedule's next run or recurrence. Entries that are already queued, running, or reserved are skipped.
-- Pause prevents new scheduled admissions while preserving the current saved graph.
-- Resume re-enables eligible paused work.
-- Delete removes the Automation and exclusively owned schedules when no Automation-owned work prevents safe deletion. Domain Tasks are preserved.
-
-Saving edits preserves the current lifecycle state. Editing a paused Automation does not activate it.
+On a saved Automation, Graph shows the current rendered graph state. YAML shows the same current saved definition in a read-only view. Neither Preview nor selecting either view creates resources. Edit opens a browser-local YAML copy; the existing saved graph continues to run until an atomic Save succeeds.
 
 ## Human Review Boundaries
 
-Native approval must be completed by a person in Alerts. GitHub assignment, pull request review, and merge remain human-controlled in GitHub. An Automation can observe these decisions and continue through a configured handoff, but it cannot grant itself approval or merge, release, or deployment authority.
-
-GitHub nodes require the selected project to have a usable repository, provider authentication, and an enabled authorized-user inbox where the selected topology needs them.
-
-## Create an Automation from Chat
-
-Chat can prepare the same supported graph contract. It first displays a plan and waits for explicit Save confirmation. Before that confirmation, no Automation, URL, graph identity, Task, or schedule is created.
-
-After confirmation, Chat validates and saves the Automation through the same resource and safety boundaries as the web builder.
+Native approval is completed by a person in Alerts. GitHub assignment, pull-request review, merge, release, and deployment remain human-controlled. A YAML document cannot grant itself approval or bypass graph validation, provenance, lifecycle, authorization, resource ownership, or approval boundaries.
 
 ## Related Guides
 

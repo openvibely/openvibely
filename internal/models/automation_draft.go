@@ -133,6 +133,7 @@ type AutomationBuilderPage struct {
 	Capabilities            AutomationCapabilitySnapshot `json:"capabilities"`
 	TemplateUpdateAvailable bool                         `json:"template_update_available,omitempty"`
 	LifecycleState          AutomationLifecycleState     `json:"lifecycle_state,omitempty"`
+	YAML                    string                       `json:"-"`
 	Error                   string                       `json:"error,omitempty"`
 }
 

@@ -1109,3 +1109,36 @@ func issueCodes(issues []models.AutomationValidationIssue) []string {
 	}
 	return codes
 }
+
+func TestAutomationDraftYAMLRoundTripAndStrictDecoding(t *testing.T) {
+	repo := repository.NewAutomationRepo(testutil.NewTestDB(t))
+	drafts := NewAutomationDraftService(repo, NewAutomationAdapterRegistry())
+	for _, adapter := range []string{AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC} {
+		candidate, err := drafts.TemplateCandidate(adapter)
+		require.NoError(t, err)
+		first, err := EncodeAutomationDraftYAML(candidate)
+		require.NoError(t, err)
+		second, err := EncodeAutomationDraftYAML(candidate)
+		require.NoError(t, err)
+		require.Equal(t, first, second)
+
+		decoded, err := DecodeAutomationDraftYAML([]byte(first))
+		require.NoError(t, err)
+		require.Equal(t, candidate.Name, decoded.Name)
+		require.Equal(t, candidate.AdapterKey, decoded.AdapterKey)
+		require.Len(t, decoded.Nodes, len(candidate.Nodes))
+		require.Len(t, decoded.Edges, len(candidate.Edges))
+	}
+
+	for _, document := range []string{
+		"name: duplicate\nname: duplicate\n",
+		"schema_version: 1\nunknown: value\n",
+		"schema_version: 1\nname: x\ndescription: ''\nautomation_type: custom\nadapter_key: custom\nnodes: &nodes []\nedges: *nodes\n",
+	} {
+		_, err := DecodeAutomationDraftYAML([]byte(document))
+		require.Error(t, err)
+	}
+	invalidTopology, err := DecodeAutomationDraftYAML([]byte("schema_version: 1\nname: x\ndescription: ''\nautomation_type: custom\nadapter_key: custom\nnodes: []\nedges:\n  - key: dangling\n    from: missing\n    to: missing\n"))
+	require.NoError(t, err)
+	require.NotEmpty(t, drafts.ValidateCandidate(invalidTopology))
+}

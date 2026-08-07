@@ -208,6 +208,9 @@ func TestAutomationPagesRenderRegisteredDefinitionsAndEnforceProject(t *testing.
 	require.Contains(t, detail.Body.String(), "owned trigger schedules will be deleted")
 	require.NotContains(t, detail.Body.String(), ">Archive<")
 	require.NotContains(t, detail.Body.String(), "/archive?")
+	require.Contains(t, detail.Body.String(), `data-automation-view-yaml`)
+	require.Contains(t, detail.Body.String(), `data-automation-yaml-panel`)
+	require.NotContains(t, detail.Body.String(), `name="automation_yaml"`)
 	require.NotContains(t, detail.Body.String(), task.Prompt)
 
 	livePartial := tc.HTMX().Get(fmt.Sprintf("/automations/%s?project_id=%s", definition.Automation.ID, project.ID)).Execute()
@@ -357,7 +360,7 @@ func TestAutomationWebBuilderKeepsUnsavedChangesBrowserLocal(t *testing.T) {
 		"node_kind": {"agent_task"}, "node_name": {"Review support queue"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, added.Code, added.Body.String())
-	require.Contains(t, added.Body.String(), `data-node-key="review_support_queue"`)
+	require.Contains(t, added.Body.String(), `data-automation-readonly-node="review_support_queue"`)
 	require.Zero(t, tableCountHandler(t, tc, "automations"), "adding a node must remain browser-local")
 	require.Zero(t, tableCountHandler(t, tc, "automation_versions"), "adding a node must not create an editable draft")
 
@@ -497,9 +500,8 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 		"project_id": {project.ID}, "source": {"template"}, "template_key": {service.AutomationAdapterNativeSDLC},
 	}).Execute()
 	require.Equal(t, http.StatusOK, opened.Code, opened.Body.String())
-	require.Contains(t, opened.Body.String(), `name="node_kind"`)
-	require.Contains(t, opened.Body.String(), `value="schedule"`)
-	require.Contains(t, opened.Body.String(), `value="task"`)
+	require.Contains(t, opened.Body.String(), `name="automation_yaml"`)
+	require.Contains(t, opened.Body.String(), `data-automation-yaml-editor`)
 
 	candidate := automationCandidateFromResponse(t, opened)
 	post := func(values url.Values) *httptest.ResponseRecorder {
@@ -565,7 +567,7 @@ func TestAutomationTemplateBuilderAddsAndSavesCustomNodes(t *testing.T) {
 	require.Equal(t, 1, countNodeResources("extra_follow_up", "task"))
 }
 
-func TestAutomationBlankBuilderIsEmptyInteractiveAndKeepsNodeActionsTransient(t *testing.T) {
+func TestAutomationBlankBuilderIsYAMLOnlyAndKeepsChangesBrowserLocal(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Blank Builder Project").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
@@ -581,10 +583,14 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndKeepsNodeActionsTransient(t 
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
 	require.Equal(t, http.StatusOK, opened.Code)
-	for _, marker := range []string{`data-automation-draft-canvas`, `data-automation-node-tool`, `data-automation-add-node-open`, `data-automation-add-first-node`, `data-automation-node-dialog`, `data-automation-fit`, `data-automation-reset`, `name="candidate_json"`, "Drag from a node's right handle to another node's left handle", "Save changes"} {
+	for _, marker := range []string{`data-automation-yaml-builder`, `data-automation-yaml-editor`, `data-automation-view-yaml`, `data-automation-graph-panel`, `name="automation_yaml"`} {
 		require.Contains(t, opened.Body.String(), marker)
 	}
+	for _, marker := range []string{`data-automation-node-tool`, `data-automation-add-node-open`, `data-automation-add-first-node`, `data-automation-node-dialog`, `data-automation-fit`, `data-automation-reset`, `name="candidate_json"`, "Drag from a node's right handle to another node's left handle", "Node and connection settings", "Delete node", "Transition settings"} {
+		require.NotContains(t, opened.Body.String(), marker)
+	}
 	require.NotContains(t, opened.Body.String(), `data-automation-disconnect-edge`, "the midpoint edge control is the only visible connection delete action on the canvas")
+	require.Contains(t, opened.Body.String(), `data-automation-yaml-preview`)
 	require.Contains(t, opened.Body.String(), `name="save_changes" value="true"`)
 	require.NotContains(t, opened.Body.String(), "Review and apply")
 	require.NotContains(t, opened.Body.String(), "Apply changes")
@@ -594,62 +600,16 @@ func TestAutomationBlankBuilderIsEmptyInteractiveAndKeepsNodeActionsTransient(t 
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 
 	candidate := automationCandidateFromResponse(t, opened)
-	post := func(values url.Values) *httptest.ResponseRecorder {
-		t.Helper()
-		raw, err := json.Marshal(candidate)
-		require.NoError(t, err)
-		values.Set("project_id", project.ID)
-		values.Set("builder_source", "blank")
-		values.Set("candidate_json", string(raw))
-		response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(values).Execute()
-		if response.Code == http.StatusOK {
-			candidate = automationCandidateFromResponse(t, response)
-		}
-		return response
-	}
-
-	added := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Schedule"}})
-	require.Equal(t, http.StatusOK, added.Code)
-	require.Contains(t, added.Body.String(), `data-port-kind="input"`)
-	require.Contains(t, added.Body.String(), `data-port-kind="output"`)
-	require.NotContains(t, added.Body.String(), `>IN</text>`)
-	require.NotContains(t, added.Body.String(), `>OUT</text>`)
-	require.NotContains(t, added.Body.String(), `automation-port-label`)
-	require.Contains(t, added.Body.String(), `<span>Schedule</span>`)
-	require.NotContains(t, added.Body.String(), `<span>Trigger</span>`)
-	require.Contains(t, added.Body.String(), `name="node_schedule_prompt"`)
-	require.Contains(t, added.Body.String(), `Scheduled task`)
-	require.NotContains(t, added.Body.String(), `name="node_schedule_category"`)
-	require.Len(t, candidate.Nodes, 1)
-	added = post(url.Values{"builder_action": {"create_node"}, "node_kind": {"agent_task"}, "node_name": {"Task"}})
-	require.Equal(t, http.StatusOK, added.Code)
-	require.Contains(t, added.Body.String(), `data-connect-port="schedule"`)
-	require.Contains(t, added.Body.String(), `data-connect-port="task"`)
-	require.NotContains(t, added.Body.String(), `<option value="scheduled"`)
-	require.NotContains(t, added.Body.String(), `>Skills</span>`)
-	require.Equal(t, 4, strings.Count(added.Body.String(), `class="automation-connect-handle automation-connect-handle--`))
-
-	invalid := post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {"schedule"}, "to_key": {"schedule"}})
-	require.Equal(t, http.StatusBadRequest, invalid.Code)
-	require.Empty(t, candidate.Edges)
-	connected := post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {"schedule"}, "to_key": {"task"}})
-	require.Equal(t, http.StatusOK, connected.Code)
-	require.Len(t, candidate.Edges, 1)
-	require.Contains(t, connected.Body.String(), `data-delete-edge`)
-	require.Contains(t, connected.Body.String(), `data-reconnect-edge`)
-
-	removed := post(url.Values{"save_changes": {"true"}, "remove_edge": {candidate.Edges[0].Key}})
-	require.Equal(t, http.StatusOK, removed.Code)
-	require.Empty(t, removed.Header().Get("HX-Redirect"))
+	require.Empty(t, candidate.Nodes)
 	require.Empty(t, candidate.Edges)
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 	require.Zero(t, tableCountHandler(t, tc, "tasks"))
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 }
 
-func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
+func TestAutomationBlankBuilderUsesYAMLForCustomTopology(t *testing.T) {
 	tc := NewTestContext(t)
-	project := tc.CreateProject().WithName("Publishable Custom Project").Build()
+	project := tc.CreateProject().WithName("YAML Custom Project").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
@@ -660,176 +620,43 @@ func TestAutomationBlankBuildsCustomRunnableTaskAndSchedule(t *testing.T) {
 	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "source": {"blank"},
 	}).Execute()
-	require.Equal(t, 200, created.Code)
-	require.Contains(t, created.Body.String(), `name="node_kind"`)
-	require.Contains(t, created.Body.String(), "Node purpose")
-	require.Contains(t, created.Body.String(), `value="schedule"`)
-	require.Contains(t, created.Body.String(), `value="task"`)
-	require.Contains(t, created.Body.String(), `>Task</option>`)
-	require.NotContains(t, created.Body.String(), `value="agent_task"`)
-	require.Contains(t, created.Body.String(), `value="create_notification"`)
-	require.Contains(t, created.Body.String(), `value="human_approval"`)
-	require.Contains(t, created.Body.String(), `value="native_inbox"`)
-	require.Contains(t, created.Body.String(), `value="native_implementation"`)
-	require.Contains(t, created.Body.String(), `value="create_github_issue"`)
-	require.Contains(t, created.Body.String(), `value="human_assignment"`)
-	require.Contains(t, created.Body.String(), `value="github_inbox"`)
-	require.NotContains(t, created.Body.String(), `value="implementation"`)
-	require.NotContains(t, created.Body.String(), "Implementation task")
-	require.Contains(t, created.Body.String(), `value="open_pull_request"`)
-	require.Contains(t, created.Body.String(), `value="human_review"`)
-	require.Contains(t, created.Body.String(), `value="outcome"`)
-	require.Contains(t, created.Body.String(), "Custom")
-	require.NotContains(t, created.Body.String(), "Runtime behavior")
-	require.NotContains(t, created.Body.String(), "Design-only type")
-	require.NotContains(t, created.Body.String(), `name="runtime_node_key"`)
-	require.NotContains(t, created.Body.String(), "Vision Schedule")
-	require.NotContains(t, created.Body.String(), "Suggested nodes")
-
+	require.Equal(t, http.StatusOK, created.Code)
 	candidate := automationCandidateFromResponse(t, created)
-	require.Equal(t, service.AutomationAdapterCustom, candidate.AdapterKey)
-	post := func(values url.Values) string {
-		t.Helper()
-		raw, marshalErr := json.Marshal(candidate)
-		require.NoError(t, marshalErr)
-		values.Set("project_id", project.ID)
-		values.Set("builder_source", "blank")
-		values.Set("candidate_json", string(raw))
-		response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(values).Execute()
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		candidate = automationCandidateFromResponse(t, response)
-		return response.Body.String()
+	candidate.Name = "YAML custom topology"
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "schedule", Name: "Weekday review", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Review work.", "goal": "", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}, Position: &models.AutomationDraftPoint{}},
+		{Key: "task", Name: "Follow up", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Follow up.", "goal": "", "category": "backlog", "priority": 2}, Position: &models.AutomationDraftPoint{X: 260}},
 	}
-
-	scheduleHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Weekday review"}})
-	require.Contains(t, scheduleHTML, "This is the work performed by the scheduled task. A connected Task is a separate downstream handoff that starts after this task completes.")
-	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"task"}, "node_name": {"Review support queue"}})
-	require.Len(t, candidate.Nodes, 2)
-	require.Equal(t, models.AutomationNodeTrigger, candidate.Nodes[0].Type)
-	require.Equal(t, models.AutomationNodeAgentTask, candidate.Nodes[1].Type)
-	post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {candidate.Nodes[0].Key}, "to_key": {candidate.Nodes[1].Key}})
-
-	require.Len(t, candidate.Edges, 1)
-	require.NotContains(t, candidate.Nodes[0].Config, "target_node_key", "custom Schedule handoffs are represented only by graph edges")
-	require.Equal(t, "scheduled", candidate.Nodes[0].Config["category"])
-	require.Equal(t, "backlog", candidate.Nodes[1].Config["category"])
-	require.Empty(t, drafts.ValidateCandidate(candidate), "a user-defined Schedule → Agent task graph must be publishable")
-	compiler := service.NewAutomationCompiler(nil, nil, nil, nil, planner)
-	plan, _, err := compiler.PreviewSave(context.Background(), project.ID, candidate)
+	candidate.Edges = []models.AutomationDraftEdge{{Key: "schedule_task", From: "schedule", To: "task", FromPort: "right", ToPort: "left", Condition: map[string]any{}}}
+	yaml, err := service.EncodeAutomationDraftYAML(candidate)
 	require.NoError(t, err)
-	require.Empty(t, plan.Validation)
-	require.Len(t, plan.Effects, 3)
-	var effectTypes []string
-	for _, effect := range plan.Effects {
-		effectTypes = append(effectTypes, effect.ResourceType)
-	}
-	require.ElementsMatch(t, []string{"task", "task", "schedule"}, effectTypes)
-
-	notificationHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"create_notification"}, "node_name": {"Request approval"}})
-	require.Contains(t, notificationHTML, `name="node_request_approval_notification_type"`)
-	require.Contains(t, notificationHTML, "The Alert is created only when that task runs")
-	require.Equal(t, "create_notification", candidate.Nodes[2].Role)
-	approvalHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"human_approval"}, "node_name": {"Human decision"}})
-	require.Contains(t, approvalHTML, "Native Alert approval")
-	require.Equal(t, "native_approval", candidate.Nodes[3].Role)
-	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"outcome"}, "node_name": {"Approved"}})
-	post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {candidate.Nodes[3].Key}, "to_key": {candidate.Nodes[4].Key}})
-	edge := candidate.Edges[len(candidate.Edges)-1]
-	conditionHTML := post(url.Values{"edge_" + edge.Key + "_state": {"approved"}})
-	require.Contains(t, conditionHTML, "Human result")
-	require.Equal(t, map[string]any{"state": "approved"}, candidate.Edges[len(candidate.Edges)-1].Condition)
-
-	githubIssueHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"create_github_issue"}, "node_name": {"Open suggestion issue"}})
-	require.Contains(t, githubIssueHTML, `name="node_open_suggestion_issue_labels"`)
-	require.Contains(t, githubIssueHTML, "Assignment is intentionally unavailable here")
-	require.Equal(t, "create_github_issue", candidate.Nodes[len(candidate.Nodes)-1].Role)
-	assignmentHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"human_assignment"}, "node_name": {"Assigned by human"}})
-	require.Contains(t, assignmentHTML, "GitHub assignment is the approval signal")
-	require.Equal(t, "github_assignment", candidate.Nodes[len(candidate.Nodes)-1].Role)
-	assignmentKey := candidate.Nodes[len(candidate.Nodes)-1].Key
-	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"github_inbox"}, "node_name": {"Assigned issue inbox"}})
-	require.Equal(t, "github_inbox", candidate.Nodes[len(candidate.Nodes)-1].Role)
-	inboxKey := candidate.Nodes[len(candidate.Nodes)-1].Key
-	post(url.Values{"builder_action": {"connect_nodes"}, "from_key": {assignmentKey}, "to_key": {inboxKey}})
-	assignmentEdge := candidate.Edges[len(candidate.Edges)-1]
-	require.Empty(t, assignmentEdge.Condition, "a newly connected human gate must persist before its result is selected")
-	assignedHTML := post(url.Values{"edge_" + assignmentEdge.Key + "_state": {"assigned"}})
-	require.Contains(t, assignedHTML, "Assigned in GitHub")
-	require.Equal(t, map[string]any{"state": "assigned"}, candidate.Edges[len(candidate.Edges)-1].Condition)
-	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"task"}, "node_name": {"Issue implementation"}})
-	require.Equal(t, "task", candidate.Nodes[len(candidate.Nodes)-1].Role)
-	prHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"open_pull_request"}, "node_name": {"Open review PR"}})
-	require.Contains(t, prHTML, `name="node_open_review_pr_base"`)
-	require.Contains(t, prHTML, "Human review and merge remain outside Automation authority")
-	require.Equal(t, "open_pull_request", candidate.Nodes[len(candidate.Nodes)-1].Role)
-	reviewHTML := post(url.Values{"builder_action": {"create_node"}, "node_kind": {"human_review"}, "node_name": {"Human PR review"}})
-	require.Contains(t, reviewHTML, "Automation only observes the linked PR")
-	require.Equal(t, "pull_request_review", candidate.Nodes[len(candidate.Nodes)-1].Role)
+	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {yaml}}).Execute()
+	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+	require.Contains(t, preview.Body.String(), `data-automation-readonly-node="schedule"`)
+	require.Contains(t, preview.Body.String(), `data-automation-readonly-node="task"`)
+	require.NotContains(t, preview.Body.String(), `data-automation-add-node-open`)
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
 }
 
-func TestAutomationBlankAppliedStandaloneScheduleUsesScheduleNodeNameOnSchedulePage(t *testing.T) {
+func TestAutomationBuilderRejectsMalformedYAMLWithoutSideEffects(t *testing.T) {
 	tc := NewTestContext(t)
-	project := tc.CreateProject().WithName("Automation Schedule Projection").Build()
+	project := tc.CreateProject().WithName("Malformed YAML Project").Build()
 	automationRepo := repository.NewAutomationRepo(tc.db)
-	registry := service.NewAutomationAdapterRegistry()
-	drafts := service.NewAutomationDraftService(automationRepo, registry)
-	planner := service.NewAutomationSaveValidator(registry, drafts)
-	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
-	confirmation := service.NewAutomationConfirmationService(automationRepo, tc.execRepo, []byte("schedule-projection-secret-32bytes"))
+	drafts := service.NewAutomationDraftService(automationRepo, service.NewAutomationAdapterRegistry())
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
-	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, confirmation, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+	tc.handler.SetAutomationBuilderServices(drafts, nil, nil, nil, nil, nil)
 
-	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "source": {"blank"},
+	raw := "schema_version: 1\nname: duplicate\nname: duplicate\n"
+	response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "builder_source": {"blank"}, "automation_yaml": {raw}, "save_changes": {"true"},
 	}).Execute()
-	require.Equal(t, 200, created.Code, created.Body.String())
-
-	candidate := automationCandidateFromResponse(t, created)
-	post := func(values url.Values) {
-		t.Helper()
-		raw, marshalErr := json.Marshal(candidate)
-		require.NoError(t, marshalErr)
-		values.Set("project_id", project.ID)
-		values.Set("builder_source", "blank")
-		values.Set("candidate_json", string(raw))
-		response := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(values).Execute()
-		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-		candidate = automationCandidateFromResponse(t, response)
-	}
-	post(url.Values{"builder_action": {"create_node"}, "node_kind": {"schedule"}, "node_name": {"Weekday review"}})
-	require.Zero(t, tableCountHandler(t, tc, "tasks"), "canvas edits must remain resource-free until Save")
-	require.Zero(t, tableCountHandler(t, tc, "schedules"), "canvas edits must remain resource-free until Save")
-
-	rawCandidate, err := json.Marshal(candidate)
-	require.NoError(t, err)
-	published := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "builder_source": {"blank"}, "candidate_json": {string(rawCandidate)}, "save_changes": {"true"},
-		"node_" + candidate.Nodes[0].Key + "_enabled": {"true"},
-	}).Execute()
-	require.Equal(t, http.StatusNoContent, published.Code, published.Body.String())
-	var automationID, versionID string
-	require.NoError(t, tc.db.QueryRow(`SELECT a.id, a.published_version_id FROM automations a WHERE a.project_id = ?`, project.ID).Scan(&automationID, &versionID))
-	require.Equal(t, fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID), published.Header().Get("HX-Redirect"))
-	require.Equal(t, 1, tableCountHandler(t, tc, "tasks"), "Save must immediately create the Schedule node's task")
-	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"), "Save must immediately create the Scheduler entry")
-
-	var scheduleTaskID string
-	require.NoError(t, tc.db.QueryRow(`SELECT resource_id FROM automation_definition_resources r
-		JOIN automation_nodes n ON n.id = r.node_id AND n.version_id = r.version_id
-		WHERE r.automation_id = ? AND r.version_id = ? AND n.node_key = ? AND r.resource_type = 'task'`,
-		automationID, versionID, candidate.Nodes[0].Key).Scan(&scheduleTaskID))
-	var linkedTaskID string
-	require.NoError(t, tc.db.QueryRow(`SELECT task_id FROM schedules WHERE id IN
-		(SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?)`, automationID).Scan(&linkedTaskID))
-	require.Equal(t, scheduleTaskID, linkedTaskID, "the standalone Schedules page entry must be backed by the Schedule node's task")
-	scheduleTask, err := tc.taskRepo.GetByID(context.Background(), scheduleTaskID)
-	require.NoError(t, err)
-	require.Equal(t, models.CategoryScheduled, scheduleTask.Category)
-	require.Equal(t, "Describe the scheduled work this node should perform.", scheduleTask.Prompt)
-
-	schedulePage := tc.HTTP().Get("/schedule?project_id=" + project.ID).Execute()
-	require.Equal(t, 200, schedulePage.Code, schedulePage.Body.String())
-	require.Contains(t, schedulePage.Body.String(), `title="Weekday review"`, "the standalone Schedule node must create a visible Schedules page entry")
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), "YAML did not parse")
+	require.Contains(t, response.Body.String(), `name="automation_yaml"`)
+	require.Contains(t, response.Body.String(), "name: duplicate")
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Zero(t, tableCountHandler(t, tc, "tasks"))
+	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 }
 
 func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(t *testing.T) {
@@ -882,14 +709,16 @@ func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(
 	}).Execute()
 	require.Equal(t, 200, saved.Code, saved.Body.String())
 	require.Empty(t, saved.Header().Get("HX-Redirect"), "invalid designs must remain in the editor")
-	require.Contains(t, saved.Body.String(), "setup items before this design can run")
+	require.Contains(t, saved.Body.String(), "YAML validation failed")
 	require.Zero(t, tableCountHandler(t, tc, "tasks"), "invalid Save must not create partial task resources")
 	require.Zero(t, tableCountHandler(t, tc, "schedules"), "invalid Save must not create partial schedule resources")
 }
 
 func automationCandidateFromResponse(t *testing.T, response *httptest.ResponseRecorder) models.AutomationDraftCandidate {
 	t.Helper()
-	candidate, err := service.DecodeAutomationDraftCandidate([]byte(automationHiddenValueFromResponse(t, response, "candidate_json")))
+	match := regexp.MustCompile(`(?s)<textarea[^>]*name="automation_yaml"[^>]*>(.*?)</textarea>`).FindStringSubmatch(response.Body.String())
+	require.Len(t, match, 2, response.Body.String())
+	candidate, err := service.DecodeAutomationDraftYAML([]byte(html.UnescapeString(match[1])))
 	require.NoError(t, err)
 	return candidate
 }
@@ -949,19 +778,28 @@ func TestAutomationBuilderConfiguresGoalsForOwnedAndImplementationTasks(t *testi
 	candidate, err := drafts.TemplateCandidate(service.AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
 
+	yaml, err := service.EncodeAutomationDraftYAML(candidate)
+	require.NoError(t, err)
 	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
-		"project_id": {project.ID}, "builder_source": {"template"},
-		"candidate_json": {automationDraftCandidateJSONForTest(t, candidate)},
+		"project_id": {project.ID}, "builder_source": {"template"}, "automation_yaml": {yaml},
 	}).Execute()
 	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
-	require.Contains(t, preview.Body.String(), `name="node_vision_suggestions_goal"`)
-	require.Contains(t, preview.Body.String(), `name="node_implementation_goal"`)
+	require.Contains(t, preview.Body.String(), `data-automation-yaml-editor`)
+	require.Contains(t, preview.Body.String(), `goal:`)
 
+	for i := range candidate.Nodes {
+		switch candidate.Nodes[i].Key {
+		case "vision_suggestions":
+			candidate.Nodes[i].Config["goal"] = "Produce one reviewable product suggestion."
+		case "implementation":
+			candidate.Nodes[i].Config["goal"] = "Implement the approved change with tests passing."
+		}
+	}
+	yaml, err = service.EncodeAutomationDraftYAML(candidate)
+	require.NoError(t, err)
 	saved := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "builder_source": {"template"},
-		"candidate_json": {automationDraftCandidateJSONForTest(t, candidate)}, "save_changes": {"true"},
-		"node_vision_suggestions_goal": {"Produce one reviewable product suggestion."},
-		"node_implementation_goal":     {"Implement the approved change with tests passing."},
+		"automation_yaml": {yaml}, "save_changes": {"true"},
 	}).Execute()
 	require.Equal(t, http.StatusNoContent, saved.Code, saved.Body.String())
 
@@ -1090,7 +928,7 @@ func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.
 	require.Equal(t, http.StatusOK, saved.Code, saved.Body.String())
 	require.Empty(t, saved.Header().Get("HX-Redirect"))
 	require.Contains(t, saved.Body.String(), "Save did not apply")
-	require.Regexp(t, `(?s)<details[^>]*data-automation-validation-summary[^>]*open`, saved.Body.String())
+	require.Contains(t, saved.Body.String(), `data-automation-yaml-validation`)
 	require.Contains(t, saved.Body.String(), "Configure connected GitHub authentication")
 	require.Contains(t, saved.Body.String(), "at least one GitHub Authorized User")
 	require.Contains(t, saved.Body.String(), "a project GitHub repository URL or a GitHub remote")
@@ -1341,7 +1179,7 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	}).Execute()
 	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
 	require.Contains(t, preview.Body.String(), `id="automation-builder"`)
-	require.Contains(t, preview.Body.String(), "This template design is browser-local")
+	require.Contains(t, preview.Body.String(), "This template is browser-local until you save its YAML definition.")
 	require.NotContains(t, preview.Body.String(), "Enabled when applied")
 	require.NotContains(t, preview.Body.String(), `_enabled\"`)
 	require.Empty(t, preview.Header().Get("HX-Redirect"), "selecting a template must remain browser-local until Save changes")
@@ -1350,15 +1188,10 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 
 	candidate := automationCandidateFromResponse(t, preview)
-	for i := range candidate.Nodes {
-		if _, scheduled := candidate.Nodes[i].Config["run_at"]; scheduled {
-			candidate.Nodes[i].Config["enabled"] = false
-		}
-	}
-	rawCandidate, err := json.Marshal(candidate)
+	yaml, err := service.EncodeAutomationDraftYAML(candidate)
 	require.NoError(t, err)
 	saveValues := url.Values{
-		"project_id": {project.ID}, "builder_source": {"template"}, "candidate_json": {string(rawCandidate)}, "save_changes": {"true"},
+		"project_id": {project.ID}, "builder_source": {"template"}, "automation_yaml": {yaml}, "save_changes": {"true"},
 	}
 	created := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(saveValues).Execute()
 	require.Equal(t, http.StatusNoContent, created.Code, created.Body.String())
@@ -1372,14 +1205,14 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.Equal(t, tableCountHandler(t, tc, "schedules"), enabledSchedules, "active Automation schedules must always be enabled after Save")
 	var schedulesKeepingContext int
 	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE clear_context_on_start = 0`).Scan(&schedulesKeepingContext))
-	require.Equal(t, tableCountHandler(t, tc, "schedules"), schedulesKeepingContext, "unchecked browser Save values must persist false")
+	require.Zero(t, schedulesKeepingContext, "template YAML preserves clear_context_on_start for its owned schedules")
 	compiledTasks, err := tc.taskRepo.ListByProject(context.Background(), project.ID, "")
 	require.NoError(t, err)
 	require.NotEmpty(t, compiledTasks)
 
 	live := tc.HTTP().Get(fmt.Sprintf("/automations/%s?project_id=%s", automationID, project.ID)).Execute()
 	require.Equal(t, 200, live.Code)
-	require.Contains(t, live.Body.String(), ">Edit automation</button>")
+	require.Contains(t, live.Body.String(), `data-automation-live-edit`)
 	require.NotContains(t, live.Body.String(), "Edit as new draft")
 	cloned := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, 200, cloned.Code)

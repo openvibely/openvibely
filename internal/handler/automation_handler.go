@@ -78,6 +78,16 @@ func (h *Handler) GetAutomationLive(c echo.Context) error {
 	currentTemplateRevision := service.CurrentAutomationTemplateRevision(graph.Version.AdapterKey)
 	graph.TemplateUpdateAvailable = currentTemplateRevision > 0 &&
 		(graph.Automation.TemplateRevision == nil || *graph.Automation.TemplateRevision < currentTemplateRevision)
+	if h.automationDraftSvc != nil {
+		current, currentErr := h.automationDraftSvc.CurrentCandidate(ctx, projectID, graph.Automation.ID)
+		if currentErr != nil {
+			return currentErr
+		}
+		graph.YAML, currentErr = service.EncodeAutomationDraftYAML(current.Candidate)
+		if currentErr != nil {
+			return currentErr
+		}
+	}
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationLiveContent(*graph, projectID, deleteAvailable))
 	}
