@@ -2716,14 +2716,14 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 213, "<div data-automation-yaml-panel hidden style=\"display: none\" class=\"flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6\"><div class=\"flex min-h-0 flex-1 overflow-hidden\" data-automation-yaml-editor-shell><div class=\"group relative w-12 shrink-0 overflow-hidden border-r border-base-300\" data-automation-yaml-gutter><pre class=\"m-0 h-full select-none overflow-hidden whitespace-pre-wrap break-words pr-3 text-right text-base-content/45\" aria-label=\"YAML line numbers\" data-automation-yaml-line-numbers>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 213, "<div data-automation-yaml-panel hidden style=\"display: none\" class=\"flex min-h-[20rem] flex-1 flex-col overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6\"><div class=\"flex min-h-0 flex-1 overflow-hidden\" data-automation-yaml-editor-shell><div class=\"group relative w-12 shrink-0 overflow-hidden border-r border-base-300\" data-automation-yaml-gutter><pre class=\"m-0 h-full select-none overflow-hidden whitespace-pre-wrap break-words pl-3 pr-6 text-left text-base-content/45\" aria-label=\"YAML line numbers\" data-automation-yaml-line-numbers>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var148 string
 		templ_7745c5c3_Var148, templ_7745c5c3_Err = templ.JoinStringErrs(automationYAMLLineNumbers(page.YAML))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 809, Col: 233}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 809, Col: 237}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var148))
 		if templ_7745c5c3_Err != nil {
