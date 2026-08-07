@@ -2167,7 +2167,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			templ_7745c5c3_Var118 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 154, "<div id=\"automation-builder\" class=\"h-full overflow-y-auto min-w-0 max-w-full\" data-automation-draft>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 154, "<div id=\"automation-builder\" class=\"flex h-full min-w-0 max-w-full flex-col overflow-y-auto\" data-automation-draft>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2176,7 +2176,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 			return templ_7745c5c3_Err
 		}
 		if page.AutomationID != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, "<div class=\"mb-6 min-w-0\" data-automation-builder-header><div class=\"flex flex-wrap items-start justify-between gap-3\"><div class=\"min-w-0 flex-1\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, "<div class=\"mb-6 min-w-0 shrink-0\" data-automation-builder-header><div class=\"flex flex-wrap items-start justify-between gap-3\"><div class=\"min-w-0 flex-1\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -2537,7 +2537,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 				return templ_7745c5c3_Err
 			}
 		}
-		var templ_7745c5c3_Var136 = []any{"mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4", templ.KV("flex h-[calc(100dvh-12rem)] min-h-[20rem] flex-col", page.AutomationID != "")}
+		var templ_7745c5c3_Var136 = []any{"mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4", templ.KV("flex flex-1 min-h-[20rem] flex-col", page.AutomationID != "")}
 		templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var136...)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
@@ -2562,7 +2562,7 @@ func AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectI
 		var templ_7745c5c3_Var138 string
 		templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.ResolveAttributeValue(automationDraftEdgesJSON(page.EdgePalette))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 767, Col: 269}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 767, Col: 253}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var138)
 		if templ_7745c5c3_Err != nil {

@@ -258,7 +258,7 @@ func TestAutomationBuilderEditHeaderUsesStandardSpacingAndDescriptionStyle(t *te
 	}
 	header := body[headerStart:headerEnd]
 	for _, want := range []string{
-		`class="mb-6 min-w-0"`,
+		`class="mb-6 min-w-0 shrink-0"`,
 		`class="flex flex-wrap items-start justify-between gap-3"`,
 		`data-automation-breadcrumb`,
 		`data-automation-editable-breadcrumb`,
@@ -839,14 +839,20 @@ func TestAutomationCustomBuilderCanvasMatchesEditLayout(t *testing.T) {
 	}
 
 	edit := render("edit", "automation-edit")
-	for _, want := range []string{`flex h-[calc(100dvh-12rem)] min-h-[20rem] flex-col`, `flex-1 min-h-[20rem]`, `h-full`} {
+	for _, want := range []string{
+		`id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto"`,
+		`class="mb-6 min-w-0 shrink-0" data-automation-builder-header`,
+		`class="mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4 flex flex-1 min-h-[20rem] flex-col"`,
+		`flex-1 min-h-[20rem]`,
+		`h-full`,
+	} {
 		if !strings.Contains(edit, want) {
 			t.Errorf("saved Edit builder must fill the available page height with %q", want)
 		}
 	}
-	for _, forbidden := range []string{`h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem]`} {
+	for _, forbidden := range []string{`flex h-[calc(100dvh-12rem)] min-h-[20rem] flex-col`, `h-[calc(100dvh-26rem)] min-h-[20rem] max-h-[42rem]`} {
 		if strings.Contains(edit, forbidden) {
-			t.Errorf("saved Edit builder must not retain capped viewport sizing %q", forbidden)
+			t.Errorf("saved Edit builder must not retain fixed/capped viewport sizing %q", forbidden)
 		}
 	}
 	for _, forbidden := range []string{`h-[calc(100dvh-22rem)]`, `min-h-[28rem]`, `min-h-[calc(100dvh-15rem)]`, `min-h-[42rem]`} {

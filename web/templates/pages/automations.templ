@@ -675,10 +675,10 @@ templ AutomationBuilder(projects []models.Project, currentProjectID string, page
 }
 
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
-	<div id="automation-builder" class="h-full overflow-y-auto min-w-0 max-w-full" data-automation-draft>
+	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-draft>
 		@layout.PageTitle(page.Result.Candidate.Name)
 		if page.AutomationID != "" {
-			<div class="mb-6 min-w-0" data-automation-builder-header>
+			<div class="mb-6 min-w-0 shrink-0" data-automation-builder-header>
 				<div class="flex flex-wrap items-start justify-between gap-3">
 					<div class="min-w-0 flex-1">@automationEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)</div>
 						<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-builder-header-actions>
@@ -764,7 +764,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</ul>
 				</details>
 			}
-					<section class={ "mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4", templ.KV("flex h-[calc(100dvh-12rem)] min-h-[20rem] flex-col", page.AutomationID != "") } data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
+					<section class={ "mb-5 rounded-box border border-base-300 bg-base-100 p-3 sm:p-4", templ.KV("flex flex-1 min-h-[20rem] flex-col", page.AutomationID != "") } data-automation-draft-canvas data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 						<div class="flex flex-wrap items-start justify-between gap-3">
 							if page.AutomationID != "" {
 								@automationCanvasViewSwitcher()
