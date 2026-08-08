@@ -1165,6 +1165,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						var yamlPendingSelectionStart = 0;
 						var yamlPendingSelectionEnd = 0;
 						var yamlPendingValue = '';
+						var yamlPendingInputType = '';
 						var yamlParseTimer = 0;					var yamlParseRequest = 0;
 					var yamlLineLayoutFrame = 0;
 						function yamlActiveScrollTop() { return yamlEditor ? yamlEditor.scrollTop : 0; }
@@ -1360,11 +1361,12 @@ yamlViewport.scrollTop = 0;
 					}
 					if (yamlEditor) {
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
-							yamlEditor.addEventListener('beforeinput', function() {
+							yamlEditor.addEventListener('beforeinput', function(event) {
 								if (yamlRenderingValue) return;
 								yamlPendingSelectionStart = yamlEditor.selectionStart;
 								yamlPendingSelectionEnd = yamlEditor.selectionEnd;
 								yamlPendingValue = yamlEditor.value;
+								yamlPendingInputType = event && event.inputType ? event.inputType : '';
 							});
 							yamlEditor.addEventListener('input', function() {
 								if (yamlRenderingValue) return;
@@ -1386,11 +1388,22 @@ yamlViewport.scrollTop = 0;
 										var sourceEndLine = yamlVisibleLineMap[endVisibleLine];
 										var sourceStartOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, preEditStart.col);
 										var sourceEndOffset = yamlLineColToSourceOffset(oldSourceLines, sourceEndLine, preEditEnd.col);
-										var visibleEditStartOffset = 0;
-										for (var k = 0; k < startVisibleLine; k++) visibleEditStartOffset += (yamlVisibleLineMap[k] !== undefined ? oldSourceLines[yamlVisibleLineMap[k]].length : 0) + 1;
-										visibleEditStartOffset += preEditStart.col;
-										var insertedText = newVisibleValue.slice(visibleEditStartOffset, postEditOffset);
-										yamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + insertedText + yamlSourceValue.slice(sourceEndOffset);
+										var collapsedDeletion = preEditStart.line === preEditEnd.line && preEditStart.col === preEditEnd.col && newVisibleValue.length < preEditVisibleValue.length;
+										if (collapsedDeletion) {
+											var removedLength = preEditVisibleValue.length - newVisibleValue.length;
+											if (yamlPendingInputType === 'deleteContentForward') {
+												sourceEndOffset = sourceStartOffset + removedLength;
+											} else {
+												sourceStartOffset = Math.max(0, sourceStartOffset - removedLength);
+											}
+											yamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + yamlSourceValue.slice(sourceEndOffset);
+										} else {
+											var visibleEditStartOffset = 0;
+											for (var k = 0; k < startVisibleLine; k++) visibleEditStartOffset += (yamlVisibleLineMap[k] !== undefined ? oldSourceLines[yamlVisibleLineMap[k]].length : 0) + 1;
+											visibleEditStartOffset += preEditStart.col;
+											var insertedText = newVisibleValue.slice(visibleEditStartOffset, postEditOffset);
+											yamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + insertedText + yamlSourceValue.slice(sourceEndOffset);
+										}
 									}
 								}
 								updateYAMLLineNumbers();

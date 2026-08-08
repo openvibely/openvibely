@@ -966,6 +966,16 @@ if (!fold.classList.contains('h-6') || !fold.classList.contains('w-6') || !fold.
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     if (!highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('typing a single character while YAML sections are folded must keep folds intact');
     if (!editor.value.includes('visible_0Z')) fail('typed character while folded did not apply to the visible line');
+    var beforeBackspaceValue = editor.value;
+    var backspaceCursor = beforeBackspaceValue.indexOf('visible_0Z') + 'visible_0Z'.length;
+    editor.setSelectionRange(backspaceCursor, backspaceCursor);
+    editor.dispatchEvent(new Event('beforeinput', {bubbles: true, cancelable: true, inputType: 'deleteContentBackward'}));
+    editor.value = beforeBackspaceValue.slice(0, backspaceCursor - 1) + beforeBackspaceValue.slice(backspaceCursor);
+    editor.setSelectionRange(backspaceCursor - 1, backspaceCursor - 1);
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    if (!highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('backspacing a character while YAML sections are folded must keep folds intact');
+    if (!editor.value.includes('visible_0') || editor.value.includes('visible_0Z')) fail('backspace with a collapsed cursor while folded did not remove the character from the visible line');
     var multilineBefore = editor.value;
     var multilineCursor = multilineBefore.indexOf('visible_1');
     editor.setSelectionRange(multilineCursor, multilineCursor);
@@ -981,7 +991,7 @@ if (!fold.classList.contains('h-6') || !fold.classList.contains('w-6') || !fold.
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     if (highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('expanding a folded section must restore the full YAML view including any edits applied while folded');
     if (!editor.value.includes('hidden collapsed content should not widen later visible lines')) fail('expanding must restore hidden collapsed content that was preserved during folded edits');
-    if (!editor.value.includes('visible_0Z') || !editor.value.includes('inserted_a') || !editor.value.includes('inserted_b')) fail('expanding after folded edits must retain edits applied to visible lines');
+    if (!editor.value.includes('visible_0') || editor.value.includes('visible_0Z') || !editor.value.includes('inserted_a') || !editor.value.includes('inserted_b')) fail('expanding after folded edits must retain edits applied to visible lines');
     editor.value = originalYAML;    editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     click('[data-automation-view-graph]', 'Graph view button');
