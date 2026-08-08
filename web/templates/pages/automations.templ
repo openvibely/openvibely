@@ -978,9 +978,9 @@ templ AutomationBuilder(projects []models.Project, currentProjectID string, page
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
 	@automationYAMLSharedScript()
 	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-draft data-automation-yaml-builder>
-		<div class={ templ.KV("flex h-full min-h-0 shrink-0 flex-col", page.AutomationID != "" || page.Source == "blank") } data-automation-builder-edit-pane>
+		<div class={ templ.KV("flex h-full min-h-0 shrink-0 flex-col", automationBuilderUsesEditShell(page)) } data-automation-builder-edit-pane>
 		@layout.PageTitle(page.Result.Candidate.Name)
-		if page.AutomationID != "" || page.Source == "blank" {
+		if automationBuilderUsesEditShell(page) {
 			<div class="mb-6 min-w-0 shrink-0" data-automation-builder-header>
 				<div class="flex flex-wrap items-start justify-between gap-3">
 					<div class="min-w-0 flex-1">@automationEditableBreadcrumb(currentProjectID, page.Result.Candidate.Name)</div>
@@ -1002,7 +1002,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			</div>
 		} else {
 			@automationBreadcrumb(currentProjectID, "", "", "New Automation", true)
-		}		if page.AutomationID == "" && page.Source != "blank" {
+		}		if !automationBuilderUsesEditShell(page) {
 			<div class="mb-4 flex flex-wrap items-end justify-between gap-3">
 				<div class="min-w-0 flex-1">
 					<label class="form-control max-w-xl"><span class="label-text mb-1 font-medium">Automation name</span><input class="input input-bordered w-full text-xl font-bold sm:text-2xl" form="automation-design-form" name="automation_name" value={ page.Result.Candidate.Name } maxlength="200" required data-automation-name aria-label="Automation name"/></label>
@@ -1041,9 +1041,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
 			</dialog>
 		}
-		if page.AutomationID == "" && page.Source == "template" {
-			<div class="alert alert-info mb-4" role="status"><span>This template is browser-local until you save its YAML definition.</span></div>
-		}
 		if page.AutomationID == "" && page.Source == "describe" {
 			<div class="alert alert-info mb-4" role="status"><span>This generated design is browser-local. Review the graph, then select <strong>Save changes</strong> to create and start the Automation.</span></div>
 		}
@@ -1074,8 +1071,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</ul>
 				</details>
 			}
-				<section class={ "rounded-box border border-base-300 bg-base-100", templ.KV("mb-5 p-3 sm:p-4", page.AutomationID == "" && page.Source != "blank"), templ.KV("mb-0 p-4", page.AutomationID != "" || page.Source == "blank"), templ.KV("flex flex-1 min-h-[20rem] flex-col", page.AutomationID != "" || page.Source == "blank") } data-automation-draft-canvas data-automation-view-root data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
-					<div class={ "flex flex-wrap justify-between gap-3", templ.KV("items-start", page.AutomationID == "" && page.Source != "blank"), templ.KV("mb-3 items-center", page.AutomationID != "" || page.Source == "blank") }>
+				<section class={ "rounded-box border border-base-300 bg-base-100", templ.KV("mb-5 p-3 sm:p-4", !automationBuilderUsesEditShell(page)), templ.KV("mb-0 p-4", automationBuilderUsesEditShell(page)), templ.KV("flex flex-1 min-h-[20rem] flex-col", automationBuilderUsesEditShell(page)) } data-automation-draft-canvas data-automation-view-root data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
+					<div class={ "flex flex-wrap justify-between gap-3", templ.KV("items-start", !automationBuilderUsesEditShell(page)), templ.KV("mb-3 items-center", automationBuilderUsesEditShell(page)) }>
 						@automationBuilderViewSwitcher()					<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-node-tool>
 						<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
 					</div>
@@ -1149,13 +1146,13 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					</div>
 					<form method="dialog" class="modal-backdrop"><button aria-label="Close add node dialog">close</button></form>
 				</dialog>
-					<div data-automation-graph-panel class={ "automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("mt-3", page.AutomationID == "" && page.Source != "blank"), templ.KV("flex-1 min-h-[20rem]", page.AutomationID != "" || page.Source == "blank"), templ.KV("min-h-[calc(100dvh-15rem)]", page.AutomationID == "" && page.Source != "blank") } role="region" aria-label="Automation graph builder">					<div class="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" aria-label="Canvas controls" data-automation-builder-viewport-controls>
+					<div data-automation-graph-panel class={ "automation-canvas-shell relative w-full overflow-hidden rounded-box border border-base-300 bg-base-200/30", templ.KV("mt-3", !automationBuilderUsesEditShell(page)), templ.KV("flex-1 min-h-[20rem]", automationBuilderUsesEditShell(page)), templ.KV("min-h-[calc(100dvh-15rem)]", !automationBuilderUsesEditShell(page)) } role="region" aria-label="Automation graph builder">					<div class="absolute right-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-box border border-base-300 bg-base-100/90 p-1 shadow-sm backdrop-blur" aria-label="Canvas controls" data-automation-builder-viewport-controls>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-out aria-label="Zoom out">−</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-zoom-in aria-label="Zoom in">+</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-fit>Fit</button>
 						<button class="btn btn-ghost btn-sm" type="button" data-automation-reset>Reset layout</button>
 					</div>
-					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class={ "block w-full touch-none select-none", templ.KV("h-full", page.Source == "blank" || page.AutomationID != ""), templ.KV("h-[calc(100dvh-15rem)] min-h-[42rem]", page.AutomationID == "" && page.Source != "blank") } role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
+					<svg data-automation-canvas viewBox={ automationDraftGraphViewBox(page.Result.Candidate.Nodes) } class={ "block w-full touch-none select-none", templ.KV("h-full", automationBuilderUsesEditShell(page)), templ.KV("h-[calc(100dvh-15rem)] min-h-[42rem]", !automationBuilderUsesEditShell(page)) } role="img" aria-label={ page.Result.Candidate.Name + " graph design" }>
 						@automationGraphThemeStyles()
 						<defs>
 							<marker id="automation-draft-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" class="automation-graph-arrow automation-edge-foreground-arrow"></path></marker>
@@ -2017,6 +2014,7 @@ func automationBuilderPostURL(page models.AutomationBuilderPage, currentProjectI
 }
 
 func automationDraftCandidateJSON(candidate models.AutomationDraftCandidate) string { value, _ := json.Marshal(candidate); return string(value) }
+func automationBuilderUsesEditShell(page models.AutomationBuilderPage) bool { return page.AutomationID != "" || page.Source == "blank" || page.Source == "template" }
 func automationYAMLLineNumbers(value string) string {
 	count := strings.Count(value, "\n") + 1
 	lines := make([]string, count)
