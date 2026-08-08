@@ -431,7 +431,18 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					</svg>
 					</div>
 					@automationLiveDetailsPanel(graph)
-					<div class="min-h-[20rem] overflow-auto rounded-box border border-base-300 bg-base-200/20 p-4 font-mono text-sm leading-6" data-automation-yaml-panel hidden aria-label="Saved automation YAML"><pre class="whitespace-pre-wrap break-words">{ graph.YAML }</pre></div>				</div>			if graph.TemplateUpdateAvailable {
+					<div class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6" data-automation-yaml-panel hidden aria-label="Saved automation YAML">
+						<div class="flex min-h-0 flex-1 overflow-hidden" data-automation-yaml-editor-shell>
+							<div class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;" data-automation-yaml-gutter>
+								<pre class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(graph.YAML) }</pre>
+							</div>
+							<div class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport>
+								<pre class="absolute left-0 top-0 m-0 min-h-full w-max min-w-full overflow-hidden whitespace-pre px-3 font-mono text-sm leading-6" aria-hidden="true" data-automation-yaml-highlight></pre>
+								<textarea class="absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-transparent" readonly tabindex="-1" data-automation-yaml-editor data-automation-yaml-readonly spellcheck="false" wrap="off" aria-label="Automation definition (read-only).">{ graph.YAML }</textarea>
+							</div>
+						</div>
+					</div>
+				</div>			if graph.TemplateUpdateAvailable {
 				<dialog id="update-automation-template-modal" class="modal">
 					<div class="modal-box">
 						@ModalCloseButton("document.getElementById('update-automation-template-modal')", "Close template update confirmation")
@@ -561,6 +572,58 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					graphViewButton && graphViewButton.addEventListener('click', function() { selectAutomationLiveView('graph'); });
 					detailsViewButton && detailsViewButton.addEventListener('click', function() { selectAutomationLiveView('details'); });
 					yamlViewButton && yamlViewButton.addEventListener('click', function() { selectAutomationLiveView('yaml'); });
+					(function() {
+						var yamlEditor = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-editor]');
+						var yamlLineNumbers = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-line-numbers]');
+						var yamlHighlight = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-highlight]');
+						var yamlGutter = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-gutter]');
+						if (!yamlEditor || !yamlLineNumbers || !yamlHighlight) return;
+						function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+						function yamlLineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }
+						function yamlIndentationGuides(indent) {
+							if (!indent) return '';
+							var dots = [];
+							for (var column = 0; column < indent; column++) {
+								dots.push('<span class="absolute z-10 rounded-full" style="left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:oklch(var(--bc) / 0.3)" data-automation-yaml-indent-dot aria-hidden="true"></span>');
+							}
+							return '<span class="pointer-events-none absolute inset-y-0 left-0 z-10" style="width:' + indent + 'ch" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden="true">' + dots.join('') + '</span>';
+						}
+						function highlightYAMLLine(line) {
+							var indentation = line.match(/^\s*/)[0], content = line.slice(indentation.length), match = content.match(/^((?:-\s+)?)([^:#][^:]*?)(:)(.*)$/), rendered = escapeYAMLHTML(content);
+							if (/^\s*#/.test(line)) rendered = '<span class="text-base-content/50">' + escapeYAMLHTML(content) + '</span>';
+							else if (match) {
+								var value = match[4], valueClass = 'text-base-content/80';
+								if (/^\s*["']/.test(value)) valueClass = 'text-info';
+								else if (/^\s*(?:true|false|null|~|-?\d+(?:\.\d+)?)\s*(?:#.*)?$/i.test(value)) valueClass = 'text-secondary';
+								rendered = escapeYAMLHTML(match[1]) + '<span class="text-primary" data-automation-yaml-key>' + escapeYAMLHTML(match[2]) + '</span>' + escapeYAMLHTML(match[3]) + '<span class="' + valueClass + '">' + escapeYAMLHTML(value) + '</span>';
+							}
+							return rendered;
+						}
+						function renderYAMLHighlight() {
+							var lines = yamlEditor.value.split('\n'), highlighted = [];
+							lines.forEach(function(line, index) {
+								var indent = yamlLineIndent(line);
+								highlighted.push('<span class="relative block min-h-6 break-words" data-automation-yaml-highlight-line data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '">' + yamlIndentationGuides(indent) + highlightYAMLLine(line) + '</span>');
+							});
+							yamlHighlight.innerHTML = highlighted.join('');
+						}
+						function syncYAMLHighlightScroll() {
+							yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';
+							if (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlEditor.scrollTop;
+						}
+						function scrollYAMLFromWheel(event) {
+							if (!event.deltaY) return;
+							var delta = event.deltaY;
+							if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;
+							if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= yamlEditor.clientHeight;
+							var previousTop = yamlEditor.scrollTop;
+							yamlEditor.scrollTop += delta;
+							if (yamlEditor.scrollTop !== previousTop) { syncYAMLHighlightScroll(); event.preventDefault(); }
+						}
+						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
+						if (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});
+						renderYAMLHighlight();
+					})();
 					var svg = canvasRoot && canvasRoot.querySelector('[data-automation-canvas]');				if (canvasRoot && svg) {
 					var original = svg.getAttribute('viewBox').split(/\s+/).map(Number);
 					var box = original.slice();

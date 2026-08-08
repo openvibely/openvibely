@@ -306,6 +306,51 @@ func TestAutomationBuilderGraphAndYAMLViewsAreNonDivergent(t *testing.T) {
 	}
 }
 
+func TestAutomationLiveYAMLPanelMatchesEditorButIsReadOnly(t *testing.T) {
+	graph := models.AutomationLiveGraph{
+		Automation: models.Automation{ID: "automation-live-yaml", Name: "Live YAML", LifecycleState: models.AutomationActive},
+		Version:    models.AutomationVersion{ID: "saved-snapshot"},
+		YAML:       "schema_version: 1\nname: Live YAML\nnodes: []\n",
+	}
+
+	var out bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-yaml", true).Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation Live YAML: %v", err)
+	}
+	body := out.String()
+
+	for _, want := range []string{
+		`data-automation-yaml-panel`,
+		`data-automation-yaml-editor-shell`,
+		`data-automation-yaml-gutter`,
+		`data-automation-yaml-line-numbers`,
+		`data-automation-yaml-editor-viewport`,
+		`data-automation-yaml-highlight`,
+		`data-automation-yaml-editor`,
+		`data-automation-yaml-readonly`,
+		`readonly`,
+		`tabindex="-1"`,
+		`wrap="off"`,
+		`whitespace-pre`,
+		`schema_version: 1`,
+		`aria-label="Automation definition (read-only).`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("Preview YAML panel must reuse the editable editor's structure and contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`name="automation_yaml"`,
+		`data-automation-yaml-parse-url`,
+		`data-automation-yaml-fold-controls`,
+		`data-automation-yaml-fold`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Errorf("Preview YAML panel must not be a submittable/editable/foldable surface, but found %q", forbidden)
+		}
+	}
+}
+
 func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) {
 	graph := models.AutomationLiveGraph{
 		Automation: models.Automation{
