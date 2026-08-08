@@ -1326,12 +1326,16 @@ func upsertAutomationWorkItem(ctx context.Context, exec SQLExecutor, in Automati
 	if kind == "" {
 		kind = "work"
 	}
+	workItemKey := strings.TrimSpace(in.WorkItemKey)
+	if err := discardStaleAutomationWorkItemProjection(ctx, exec, in.Context.ProjectID, binding.AutomationID, workItemKey); err != nil {
+		return nil, binding, err
+	}
 	_, err := exec.ExecContext(ctx, `INSERT INTO automation_work_items
 		(project_id, automation_id, origin_version_id, origin_invocation_id, work_item_key, kind, title, status)
 		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)
 		ON CONFLICT(automation_id, work_item_key) DO UPDATE SET title = CASE WHEN excluded.title = '' THEN title ELSE excluded.title END,
 		updated_at = CURRENT_TIMESTAMP`, in.Context.ProjectID, binding.AutomationID, binding.VersionID, binding.InvocationID,
-		strings.TrimSpace(in.WorkItemKey), kind, strings.TrimSpace(in.WorkItemTitle), status)
+		workItemKey, kind, strings.TrimSpace(in.WorkItemTitle), status)
 	if err != nil {
 		return nil, binding, fmt.Errorf("upserting automation work item: %w", err)
 	}
@@ -1359,6 +1363,50 @@ func upsertAutomationWorkItem(ctx context.Context, exec SQLExecutor, in Automati
 	}
 	binding.WorkItemID = item.ID
 	return item, binding, nil
+}
+
+func discardStaleAutomationWorkItemProjection(ctx context.Context, exec SQLExecutor, projectID, automationID, workItemKey string) error {
+	if strings.TrimSpace(workItemKey) == "" {
+		return nil
+	}
+	item, err := scanAutomationWorkItem(exec.QueryRowContext(ctx, `SELECT id, project_id, automation_id, origin_version_id,
+		COALESCE(origin_invocation_id, ''), COALESCE(parent_work_item_id, ''), work_item_key, kind, title, status,
+		created_at, updated_at, completed_at FROM automation_work_items WHERE automation_id = ? AND work_item_key = ?`,
+		automationID, workItemKey))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if item.ProjectID != projectID {
+		return errors.New("automation work item project mismatch")
+	}
+	var versionExists int
+	if err := exec.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_versions WHERE id = ? AND automation_id = ? AND project_id = ?`,
+		item.OriginVersionID, automationID, projectID).Scan(&versionExists); err != nil {
+		return err
+	}
+	if versionExists > 0 {
+		return nil
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_transitions WHERE work_item_id = ?`, item.ID); err != nil {
+		return fmt.Errorf("discarding stale automation transitions: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_work_item_positions WHERE work_item_id = ?`, item.ID); err != nil {
+		return fmt.Errorf("discarding stale automation work item positions: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_activity_resources
+		WHERE activity_id IN (SELECT id FROM automation_activities WHERE work_item_id = ?)`, item.ID); err != nil {
+		return fmt.Errorf("discarding stale automation activity resources: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_activities WHERE work_item_id = ?`, item.ID); err != nil {
+		return fmt.Errorf("discarding stale automation activities: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_work_items WHERE id = ? AND automation_id = ? AND project_id = ?`, item.ID, automationID, projectID); err != nil {
+		return fmt.Errorf("discarding stale automation work item: %w", err)
+	}
+	return nil
 }
 
 func upsertAutomationActivity(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding, item *models.AutomationWorkItem) (*models.AutomationActivity, error) {

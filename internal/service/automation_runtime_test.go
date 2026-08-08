@@ -1568,6 +1568,77 @@ func TestAutomationRuntimeThreadInputBindingSurvivesPromotion(t *testing.T) {
 	require.ErrorContains(t, fixture.repo.BindThreadInput(ctx, foreignInput.ID, automationContext, "foreign"), "project mismatch")
 }
 
+func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime.git"
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	repoRef := &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}
+	issue := GitHubIssue{Number: 288, URL: "https://github.com/example/runtime/issues/288", Title: "Stale assigned issue", State: "open", Assignees: []string{"dubee"}}
+	resourceID := githubIssueResourceID(repoRef, issue.Number)
+
+	_, err := fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_artifact_mailbox_owners
+		(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+		VALUES (?, ?, 'github_issue', ?, 'bug_finder', 'issue', 'assignment', 'dev_inbox')`,
+		fixture.project.ID, fixture.definition.Automation.ID, resourceID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `PRAGMA foreign_keys = OFF`)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_work_items
+		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status)
+		VALUES ('stale-github-issue-work-item', ?, ?, 'discarded-version', ?, 'github_issue', 'Old title', 'waiting')`,
+		fixture.project.ID, fixture.definition.Automation.ID, resourceID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_activities
+		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+		VALUES ('stale-github-issue-activity', ?, ?, 'discarded-version', 'discarded-inbox-node', 'stale-github-issue-work-item', 'stale-discovery', 'discover_assigned_issue', 'completed')`,
+		fixture.project.ID, fixture.definition.Automation.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_activity_resources
+		(activity_id, resource_type, resource_id, relation) VALUES ('stale-github-issue-activity', 'github_issue', ?, 'subject')`, resourceID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_work_item_positions
+		(work_item_id, project_id, automation_id, version_id, node_id, state)
+		VALUES ('stale-github-issue-work-item', ?, ?, 'discarded-version', 'discarded-inbox-node', 'waiting')`,
+		fixture.project.ID, fixture.definition.Automation.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_transitions
+		(project_id, automation_id, version_id, work_item_id, activity_id, to_node_id, event_key, state)
+		VALUES (?, ?, 'discarded-version', 'stale-github-issue-work-item', 'stale-github-issue-activity', 'discarded-inbox-node', 'stale-transition', 'waiting')`,
+		fixture.project.ID, fixture.definition.Automation.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `PRAGMA foreign_keys = ON`)
+	require.NoError(t, err)
+
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) { return repoRef, nil },
+		listAssignedIssuesFn: func(_ context.Context, _ *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
+			require.Equal(t, "dubee", assignee)
+			return []GitHubIssue{issue}, nil
+		},
+	}
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
+		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
+	inboxCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "dev_inbox", "stale-assigned-scan")
+
+	out, err := handlers["github_list_assigned_issues"](inboxCtx, json.RawMessage(`{"assignee":"dubee"}`))
+	require.NoError(t, err)
+	require.Contains(t, out, `"Number":288`)
+	var originVersionID, title string
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT origin_version_id, title FROM automation_work_items
+		WHERE automation_id = ? AND work_item_key = ?`, fixture.definition.Automation.ID, resourceID).Scan(&originVersionID, &title))
+	require.Equal(t, fixture.definition.Version.ID, originVersionID)
+	require.Equal(t, issue.Title, title)
+	var staleRows int
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_items WHERE id = 'stale-github-issue-work-item'`).Scan(&staleRows))
+	require.Zero(t, staleRows)
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_activities WHERE id = 'stale-github-issue-activity'`).Scan(&staleRows))
+	require.Zero(t, staleRows)
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions WHERE event_key = 'stale-transition'`).Scan(&staleRows))
+	require.Zero(t, staleRows)
+}
+
 func TestAutomationRuntimeGitHubIssueTaskCreationAllowsLaterInboxInvocation(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
