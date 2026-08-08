@@ -86,6 +86,64 @@ func TestScheduleActionServiceModifyRejectsMalformedInputsWithoutMutation(t *tes
 	}
 }
 
+func TestScheduleActionServiceCreateRejectsMultipleWeeklyDaysWithoutPersistence(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule multi-day validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	_, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "weekly", Days: []string{"mon", "wed", "fri"}})
+	require.Error(t, err)
+	var actionErr *ScheduleActionError
+	require.ErrorAs(t, err, &actionErr)
+	require.Equal(t, ScheduleActionDaysError, actionErr.Kind)
+	require.Contains(t, err.Error(), "one weekly day")
+
+	schedules, listErr := scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, listErr)
+	require.Empty(t, schedules)
+	storedTask, getErr := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, models.CategoryBacklog, storedTask.Category)
+	require.Equal(t, models.StatusCompleted, storedTask.Status)
+}
+
+func TestScheduleActionServiceModifyRejectsMultipleWeeklyDaysWithoutMutation(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Schedule multi-day validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	runAt := time.Date(2030, time.January, 7, 8, 15, 0, 0, time.Local).UTC()
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatWeekly, RepeatInterval: 2, Enabled: true, ClearContextOnStart: false}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	_, err := svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Days: []string{"mon", "wed", "fri"}})
+	require.Error(t, err)
+	var actionErr *ScheduleActionError
+	require.ErrorAs(t, err, &actionErr)
+	require.Equal(t, ScheduleActionDaysError, actionErr.Kind)
+	require.Contains(t, err.Error(), "one weekly day")
+
+	stored, getErr := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, getErr)
+	require.Equal(t, runAt, stored.RunAt)
+	require.Equal(t, models.RepeatWeekly, stored.RepeatType)
+	require.Equal(t, 2, stored.RepeatInterval)
+	require.False(t, stored.ClearContextOnStart)
+}
+
 func TestScheduleActionServiceAcceptsTimeBoundariesAndSupportedWeekdays(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

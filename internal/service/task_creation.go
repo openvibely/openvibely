@@ -960,7 +960,7 @@ type ScheduleTaskRequest struct {
 	Time                string   `json:"time"`                   // Required: HH:MM format (24-hour)
 	Repeat              string   `json:"repeat"`                 // once, daily, weekly, monthly, hours, minutes, seconds (default: daily)
 	Interval            int      `json:"interval"`               // Optional: repeat interval (e.g., 2 = every 2 days/hours/etc., default: 1)
-	Days                []string `json:"days"`                   // Optional: day abbreviations for weekly (mon,tue,wed,thu,fri,sat,sun)
+	Days                []string `json:"days"`                   // Optional: at most one day abbreviation for weekly (mon,tue,wed,thu,fri,sat,sun)
 	ClearContextOnStart *bool    `json:"clear_context_on_start"` // Optional; defaults to true for new schedules
 }
 
@@ -979,7 +979,7 @@ type ModifyScheduleRequest struct {
 	Time                string   `json:"time"`                   // New time in HH:MM format (optional)
 	Repeat              string   `json:"repeat"`                 // New repeat type (optional)
 	Interval            *int     `json:"interval"`               // New interval (optional, pointer to distinguish 0 from unset)
-	Days                []string `json:"days"`                   // New days for weekly (optional)
+	Days                []string `json:"days"`                   // New weekly day (optional; at most one)
 	Enabled             *bool    `json:"enabled"`                // Enable/disable (optional, pointer to distinguish false from unset)
 	ClearContextOnStart *bool    `json:"clear_context_on_start"` // Clear model replay context at each scheduled start (optional)
 }

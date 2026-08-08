@@ -278,9 +278,11 @@ func TestScheduleMutationSchemasDocumentAcceptedInputGrammar(t *testing.T) {
 		}
 		var schema struct {
 			Properties map[string]struct {
-				Pattern string   `json:"pattern"`
-				Enum    []string `json:"enum"`
-				Items   *struct {
+				Pattern     string   `json:"pattern"`
+				Enum        []string `json:"enum"`
+				Description string   `json:"description"`
+				MaxItems    int      `json:"maxItems"`
+				Items       *struct {
 					Enum []string `json:"enum"`
 				} `json:"items"`
 			} `json:"properties"`
@@ -297,6 +299,12 @@ func TestScheduleMutationSchemasDocumentAcceptedInputGrammar(t *testing.T) {
 		}
 		wantDays := []string{"sun", "mon", "tue", "wed", "thu", "fri", "sat"}
 		days := schema.Properties["days"]
+		if days.MaxItems != 1 {
+			t.Fatalf("%s days maxItems = %d, want 1", name, days.MaxItems)
+		}
+		if !strings.Contains(days.Description, "at most one weekday") {
+			t.Fatalf("%s days description = %q, want single-day limit documented", name, days.Description)
+		}
 		if days.Items == nil || !reflect.DeepEqual(days.Items.Enum, wantDays) {
 			t.Fatalf("%s weekday enum = %v, want %v", name, days.Items, wantDays)
 		}

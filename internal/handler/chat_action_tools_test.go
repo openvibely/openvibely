@@ -294,7 +294,7 @@ func TestScheduleTaskRuntimeToolExecutesTypedRequest(t *testing.T) {
 				surface,
 			)
 
-			out, err := handlers["schedule_task"](ctx, json.RawMessage(`{"task_id":"`+task.ID+`","time":"09:30","repeat":"weekly","days":["mon","wed"],"interval":2,"clear_context_on_start":false}`))
+			out, err := handlers["schedule_task"](ctx, json.RawMessage(`{"task_id":"`+task.ID+`","time":"09:30","repeat":"weekly","days":["wed"],"interval":2,"clear_context_on_start":false}`))
 			require.NoError(t, err)
 			require.Contains(t, out, "Scheduled task")
 
@@ -303,7 +303,7 @@ func TestScheduleTaskRuntimeToolExecutesTypedRequest(t *testing.T) {
 			require.Len(t, schedules, 1)
 			require.Equal(t, models.RepeatWeekly, schedules[0].RepeatType)
 			require.Equal(t, 2, schedules[0].RepeatInterval)
-			require.Contains(t, []time.Weekday{time.Monday, time.Wednesday}, schedules[0].RunAt.Local().Weekday())
+			require.Equal(t, time.Wednesday, schedules[0].RunAt.Local().Weekday())
 			require.False(t, schedules[0].ClearContextOnStart)
 			require.NotNil(t, schedules[0].NextRun)
 			require.WithinDuration(t, schedules[0].RunAt, *schedules[0].NextRun, time.Second)

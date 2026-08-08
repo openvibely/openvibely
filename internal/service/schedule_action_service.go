@@ -320,6 +320,9 @@ func scheduleActionRepeatType(raw string, defaultDaily bool) (models.RepeatType,
 }
 
 func validateScheduleActionWeekdays(days []string) error {
+	if len(days) > 1 {
+		return fmt.Errorf("weekly schedules support only one weekly day; create separate weekly schedules for multiple days")
+	}
 	for _, day := range days {
 		if _, ok := scheduleActionWeekday(day); !ok {
 			return fmt.Errorf("unknown weekly day %q: expected sun, mon, tue, wed, thu, fri, or sat", day)
