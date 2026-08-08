@@ -404,6 +404,37 @@ func TestSwarmServiceFollowupPlannerApplicationErrorPreservesRetryRouting(t *tes
 	}
 }
 
+func TestSwarmServiceHandleParentFollowupPreservesPlannerChainConfig(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	repo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(repo, nil, nil)
+	svc := NewSwarmService(taskSvc, repo, nil, nil)
+
+	parent, err := svc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{ProjectID: "default", Title: "Planner chain config", Prompt: "Build export", MaxWorkers: 1})
+	if err != nil {
+		t.Fatalf("CreateSwarmTask: %v", err)
+	}
+	planner, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	if err != nil || planner == nil {
+		t.Fatalf("planner missing: planner=%#v err=%v", planner, err)
+	}
+	fullPlanner := requireFullSwarmTestTask(t, repo, planner.ID)
+	fullPlanner.ChainConfig = `{"enabled":true,"trigger":"on_completion"}`
+	if err := repo.Update(ctx, fullPlanner); err != nil {
+		t.Fatalf("seed planner chain config: %v", err)
+	}
+
+	if err := svc.HandleParentFollowup(ctx, parent.ID, "Update the plan"); err != nil {
+		t.Fatalf("HandleParentFollowup: %v", err)
+	}
+
+	updatedPlanner := requireFullSwarmTestTask(t, repo, planner.ID)
+	if updatedPlanner.ChainConfig != fullPlanner.ChainConfig {
+		t.Fatalf("planner chain config = %q, want %q", updatedPlanner.ChainConfig, fullPlanner.ChainConfig)
+	}
+}
+
 func TestSwarmServiceFollowupPlannerRerunDisambiguatesOccupiedWorkerTitle(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -426,6 +457,11 @@ func TestSwarmServiceFollowupPlannerRerunDisambiguatesOccupiedWorkerTitle(t *tes
 	worker, err := repo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	if err != nil || worker == nil {
 		t.Fatalf("worker missing: worker=%#v err=%v", worker, err)
+	}
+	fullWorker := requireFullSwarmTestTask(t, repo, worker.ID)
+	fullWorker.ChainConfig = `{"enabled":true,"child":"worker"}`
+	if err := repo.Update(ctx, fullWorker); err != nil {
+		t.Fatalf("seed worker chain config: %v", err)
 	}
 	if err := repo.UpdateStatus(ctx, worker.ID, models.StatusCompleted); err != nil {
 		t.Fatalf("complete worker: %v", err)
@@ -463,6 +499,9 @@ func TestSwarmServiceFollowupPlannerRerunDisambiguatesOccupiedWorkerTitle(t *tes
 	}
 	if !strings.Contains(updated.Prompt, "Update backend safely") {
 		t.Fatalf("rerun prompt not updated: %q", updated.Prompt)
+	}
+	if updated.ChainConfig != fullWorker.ChainConfig {
+		t.Fatalf("worker chain config = %q, want %q", updated.ChainConfig, fullWorker.ChainConfig)
 	}
 	storedOccupied, err := repo.GetByID(ctx, occupied.ID)
 	if err != nil || storedOccupied == nil || storedOccupied.Title != occupied.Title {
