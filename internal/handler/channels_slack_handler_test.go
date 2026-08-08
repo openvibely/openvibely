@@ -266,6 +266,17 @@ func TestChannelsSlackCallbackDisconnectAndRemove(t *testing.T) {
 
 func TestChannelsSlackTestConnection(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
+
+	missingReq := httptest.NewRequest(http.MethodPost, "/channels/slack/test", nil)
+	missingRec := httptest.NewRecorder()
+	e.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusOK {
+		t.Fatalf("expected missing-service status 200, got %d", missingRec.Code)
+	}
+	if !strings.Contains(missingRec.Body.String(), "Slack service not configured") {
+		t.Fatalf("expected Slack missing-service body, got %q", missingRec.Body.String())
+	}
+
 	h.SetSlackService(&fakeSlackService{
 		testFn: func(ctx context.Context) error {
 			return nil

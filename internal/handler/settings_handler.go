@@ -740,12 +740,9 @@ func (h *Handler) handleSlackRemove(c echo.Context) error {
 
 func (h *Handler) handleSlackTest(c echo.Context) error {
 	if h.slackSvc == nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Slack service not configured</span></div>`)
+		return renderStandardChannelConnectionTestFeedback(c, "Slack", false, nil)
 	}
-	if err := h.slackSvc.TestConnection(c.Request().Context()); err != nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Connection failed: `+templateEscape(err.Error())+`</span></div>`)
-	}
-	return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`)
+	return renderStandardChannelConnectionTestFeedback(c, "Slack", true, h.slackSvc.TestConnection(c.Request().Context()))
 }
 
 func (h *Handler) handleDiscordConfigure(c echo.Context) error {
@@ -810,12 +807,9 @@ func (h *Handler) handleDiscordRemove(c echo.Context) error {
 
 func (h *Handler) handleDiscordTest(c echo.Context) error {
 	if h.discordSvc == nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Discord service not configured</span></div>`)
+		return renderStandardChannelConnectionTestFeedback(c, "Discord", false, nil)
 	}
-	if err := h.discordSvc.TestConnection(c.Request().Context()); err != nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Connection failed: `+templateEscape(err.Error())+`</span></div>`)
-	}
-	return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`)
+	return renderStandardChannelConnectionTestFeedback(c, "Discord", true, h.discordSvc.TestConnection(c.Request().Context()))
 }
 
 func (h *Handler) handleEmailConfigure(c echo.Context) error {
@@ -898,12 +892,9 @@ func (h *Handler) handleEmailRemove(c echo.Context) error {
 
 func (h *Handler) handleEmailTest(c echo.Context) error {
 	if h.emailService == nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Email service not configured</span></div>`)
+		return renderStandardChannelConnectionTestFeedback(c, "Email", false, nil)
 	}
-	if err := h.emailService.TestConnection(c.Request().Context()); err != nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Connection failed: `+templateEscape(err.Error())+`</span></div>`)
-	}
-	return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`)
+	return renderStandardChannelConnectionTestFeedback(c, "Email", true, h.emailService.TestConnection(c.Request().Context()))
 }
 
 func defaultIfBlank(value, fallback string) string {
@@ -926,6 +917,16 @@ func boolFormValue(value string, fallback bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func renderStandardChannelConnectionTestFeedback(c echo.Context, channelName string, serviceConfigured bool, testErr error) error {
+	if !serviceConfigured {
+		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>`+channelName+` service not configured</span></div>`)
+	}
+	if testErr != nil {
+		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Connection failed: `+templateEscape(testErr.Error())+`</span></div>`)
+	}
+	return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`)
 }
 
 func (h *Handler) buildAbsoluteURL(c echo.Context, path string) string {

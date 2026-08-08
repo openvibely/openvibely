@@ -225,6 +225,17 @@ func TestChannelsDiscordRemoveClearsSettings(t *testing.T) {
 
 func TestChannelsDiscordTestConnection(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
+
+	missingReq := httptest.NewRequest(http.MethodPost, "/channels/discord/test", nil)
+	missingRec := httptest.NewRecorder()
+	e.ServeHTTP(missingRec, missingReq)
+	if missingRec.Code != http.StatusOK {
+		t.Fatalf("expected missing-service status 200, got %d", missingRec.Code)
+	}
+	if !strings.Contains(missingRec.Body.String(), "Discord service not configured") {
+		t.Fatalf("expected Discord missing-service body, got %q", missingRec.Body.String())
+	}
+
 	h.SetDiscordService(&fakeDiscordService{testFn: func(ctx context.Context) error { return nil }})
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/discord/test", nil)
