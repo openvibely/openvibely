@@ -2025,6 +2025,7 @@ func TestHandler_UpdateTask_CategoryChangeFromCompletedToActiveIsMetadataOnly(t 
 	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "finish the objective", service.GoalOptions{Actor: "test"})
 	require.NoError(t, err)
 	require.NoError(t, tc.handler.taskGoalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
+	tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
 
 	form := url.Values{}
 	form.Set("title", task.Title)
@@ -2047,6 +2048,15 @@ func TestHandler_UpdateTask_CategoryChangeFromCompletedToActiveIsMetadataOnly(t 
 	var threadInputs int
 	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE task_id = ?`, task.ID).Scan(&threadInputs))
 	assert.Equal(t, 0, threadInputs, "task detail metadata save must not queue a thread input")
+	assert.Equal(t, 0, tc.handler.workerSvc.QueueSize(), "task detail metadata save must not queue worker work")
+	assert.Equal(t, 0, tc.handler.workerSvc.TotalRunning(), "task detail metadata save must not start worker work")
+	assert.Equal(t, 0, tc.handler.workerSvc.ProjectRunning(updated.ProjectID), "task detail metadata save must not start project worker work")
+	var lifecycleRows int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_executions WHERE task_id = ?`, task.ID).Scan(&lifecycleRows))
+	assert.Equal(t, 0, lifecycleRows, "task detail metadata save must not create lifecycle continuations")
+	var scheduleRuns int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schedules WHERE task_id = ? AND last_run IS NOT NULL`, task.ID).Scan(&scheduleRuns))
+	assert.Equal(t, 0, scheduleRuns, "task detail metadata save must not mark schedule runs")
 	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
 	require.NoError(t, err)
 	require.NotNil(t, resumed)

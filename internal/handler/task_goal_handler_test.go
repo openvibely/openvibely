@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/lifecycle"
@@ -108,6 +109,7 @@ func TestSetTaskGoalOnCompletedTaskDoesNotStartWork(t *testing.T) {
 	if err := tc.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
 	tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithPromptSent(task.Prompt).WithOutput("done").Build()
 
 	rec := tc.HTMX().Post("/tasks/" + task.ID + "/goal").WithForm(url.Values{"goal": {"New metadata-only goal"}}).Execute()
@@ -134,6 +136,7 @@ func TestUpdateTaskGoalOnCompletedTaskDoesNotReactivateFromOriginalPrompt(t *tes
 	if err := tc.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
 	tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithPromptSent(task.Prompt).WithOutput("done").Build()
 
 	form := url.Values{
@@ -172,6 +175,7 @@ func TestUpdateTaskMetadataOnCompletedTaskDoesNotStartWork(t *testing.T) {
 	if err := tc.taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
 	tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithPromptSent(task.Prompt).WithOutput("done").Build()
 
 	form := url.Values{
@@ -226,6 +230,29 @@ func assertCompletedTaskEditDidNotStartWork(t *testing.T, tc *TestContext, taskI
 	}
 	if inputCount != 0 {
 		t.Fatalf("thread input count after metadata save = %d, want 0", inputCount)
+	}
+	if got := tc.handler.workerSvc.QueueSize(); got != 0 {
+		t.Fatalf("worker queue size after metadata save = %d, want 0", got)
+	}
+	if got := tc.handler.workerSvc.TotalRunning(); got != 0 {
+		t.Fatalf("worker running count after metadata save = %d, want 0", got)
+	}
+	if got := tc.handler.workerSvc.ProjectRunning(updated.ProjectID); got != 0 {
+		t.Fatalf("project worker running count after metadata save = %d, want 0", got)
+	}
+	var lifecycleCount int
+	if err := tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM lifecycle_executions WHERE task_id = ?`, taskID).Scan(&lifecycleCount); err != nil {
+		t.Fatalf("count lifecycle executions: %v", err)
+	}
+	if lifecycleCount != 0 {
+		t.Fatalf("lifecycle execution count after metadata save = %d, want 0", lifecycleCount)
+	}
+	var scheduleRuns int
+	if err := tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schedules WHERE task_id = ? AND last_run IS NOT NULL`, taskID).Scan(&scheduleRuns); err != nil {
+		t.Fatalf("count schedule runs: %v", err)
+	}
+	if scheduleRuns != 0 {
+		t.Fatalf("schedule run count after metadata save = %d, want 0", scheduleRuns)
 	}
 }
 
