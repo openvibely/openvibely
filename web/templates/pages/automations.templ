@@ -963,10 +963,10 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						</form>
 					}
 							<div data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6">							<div class="flex min-h-0 flex-1 overflow-hidden" data-automation-yaml-editor-shell>
-										<div class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 4.5rem; flex: 0 0 auto;" data-automation-yaml-gutter>
-											<pre class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-9 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(page.YAML) }</pre>											<div class="pointer-events-none absolute inset-y-0 right-0 z-10 w-8" aria-label="YAML section controls" data-automation-yaml-fold-controls></div>
-											</div>									<div class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport>										<pre class="absolute left-0 right-0 top-0 m-0 min-h-full w-full min-w-0 overflow-hidden whitespace-pre-wrap break-words px-3 font-mono text-sm leading-6" aria-hidden="true" data-automation-yaml-highlight></pre>
-										<textarea class="absolute inset-0 block h-full w-full resize-none overflow-y-auto overflow-x-hidden border-0 bg-transparent whitespace-pre-wrap break-words px-3 font-mono text-sm leading-6 text-transparent outline-none caret-base-content" style="caret-color: oklch(var(--bc));" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor data-automation-yaml-parse-url={ fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID) } spellcheck="false" wrap="soft" aria-label="Automation definition. Hover the line-number gutter to show section controls.">{ page.YAML }</textarea>
+										<div class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;" data-automation-yaml-gutter>
+											<pre class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(page.YAML) }</pre>											<div class="pointer-events-none absolute inset-y-0 right-0 z-10 hidden w-8" aria-label="YAML section controls" data-automation-yaml-fold-controls hidden></div>
+											</div>									<div class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport>										<pre class="absolute left-0 top-0 m-0 min-h-full w-max min-w-full overflow-hidden whitespace-pre px-3 font-mono text-sm leading-6" aria-hidden="true" data-automation-yaml-highlight></pre>
+										<textarea class="absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-base-content" style="caret-color: oklch(var(--bc));" form="automation-design-form" name="automation_yaml" data-automation-yaml-editor data-automation-yaml-parse-url={ fmt.Sprintf("/automations/yaml/parse?project_id=%s", currentProjectID) } spellcheck="false" wrap="off" aria-label="Automation definition.">{ page.YAML }</textarea>
 									</div>							</div>
 							<p class="mt-3 hidden rounded-box border border-error/30 bg-error/10 px-3 py-2 font-sans text-sm text-error" role="alert" data-automation-yaml-diagnostic></p>
 							</div>
@@ -1158,6 +1158,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					var yamlHighlight = builder.querySelector('[data-automation-yaml-highlight]');
 					var yamlDiagnostic = builder.querySelector('[data-automation-yaml-diagnostic]');
 					var yamlDiagnosticLine = 0;
+						var yamlFoldingEnabled = false;
 						var yamlFoldedLines = new Set();
 						var yamlSourceValue = yamlEditor ? yamlEditor.value : '';
 						var yamlVisibleLineMap = [];
@@ -1286,7 +1287,7 @@ var lines = yamlSourceValue.split('\n'), ranges = yamlFoldRanges(lines), highlig
 							while (index < lines.length) {							var foldEnd = ranges[index], canFold = foldEnd !== undefined, isFolded = yamlFoldedLines.has(index), indent = yamlLineIndent(lines[index]);
 							visibleLines.push(index);
 							displayLines.push(lines[index]);
-							lineNumbers.push('<span class="block min-h-6" data-automation-yaml-line-number data-yaml-line="' + (index + 1) + '">' + (index + 1) + '</span>');								if (canFold) {
+							lineNumbers.push('<span class="block min-h-6" data-automation-yaml-line-number data-yaml-line="' + (index + 1) + '">' + (index + 1) + '</span>');								if (canFold && yamlFoldingEnabled) {
 									var visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';
 									controls.push('<button class="pointer-events-auto absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded bg-transparent p-0 text-base-content/60 transition-opacity hover:bg-transparent hover:text-base-content/60 focus-visible:bg-transparent focus-visible:text-base-content/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary' + visibilityClass + '" style="top:0" type="button" data-automation-yaml-fold data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '" aria-label="' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '"><svg class="h-5 w-5 transition-transform' + (isFolded ? ' -rotate-90' : '') + '" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5"></path></svg></button>');
 								}
@@ -1334,36 +1335,6 @@ yamlViewport.scrollTop = 0;
 							for (var i = 0; i < sourceLineIndex; i++) offset += sourceLines[i].length + 1;
 							return offset + col;
 						}
-						function yamlHighlightOffsetForPoint(clientX, clientY) {
-							if (!yamlHighlight) return null;
-							var range;
-							if (document.caretRangeFromPoint) {
-								range = document.caretRangeFromPoint(clientX, clientY);
-							} else if (document.caretPositionFromPoint) {
-								var pos = document.caretPositionFromPoint(clientX, clientY);
-								if (pos && pos.offsetNode) { range = document.createRange(); range.setStart(pos.offsetNode, pos.offset); }
-							}
-							if (!range || !yamlHighlight.contains(range.startContainer)) return null;
-							var lineEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
-							while (lineEl && lineEl !== yamlHighlight && !lineEl.hasAttribute('data-automation-yaml-highlight-line')) lineEl = lineEl.parentElement;
-							if (!lineEl || lineEl === yamlHighlight) return null;
-							var walker = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT, null);
-							var col = 0, node, found = false;
-							while ((node = walker.nextNode())) {
-								if (node === range.startContainer) { col += range.startOffset; found = true; break; }
-								col += node.textContent.length;
-							}
-							if (!found) return null;
-							var sourceLine = Number(lineEl.dataset.yamlLine) - 1;
-							var visibleRow = yamlVisibleLineMap.indexOf(sourceLine);
-							if (visibleRow < 0) return null;
-							var displayLines = yamlEditor ? yamlEditor.value.split('\n') : [];
-							if (visibleRow >= displayLines.length) return null;
-							col = Math.min(col, displayLines[visibleRow].length);
-							var offset = 0;
-							for (var i = 0; i < visibleRow; i++) offset += displayLines[i].length + 1;
-							return offset + col;
-						}
 						function syncYAMLHighlightScroll() {
 							if (!yamlEditor) return;
 							if (yamlHighlight) yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';
@@ -1391,12 +1362,6 @@ yamlViewport.scrollTop = 0;
 					}
 					if (yamlEditor) {
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
-							yamlEditor.addEventListener('mouseup', function(event) {
-								if (yamlEditor.selectionStart !== yamlEditor.selectionEnd) return;
-								var corrected = yamlHighlightOffsetForPoint(event.clientX, event.clientY);
-								if (corrected === null || corrected === yamlEditor.selectionStart) return;
-								yamlEditor.setSelectionRange(corrected, corrected);
-							});
 							yamlEditor.addEventListener('beforeinput', function(event) {
 								if (yamlRenderingValue) return;
 								yamlPendingSelectionStart = yamlEditor.selectionStart;

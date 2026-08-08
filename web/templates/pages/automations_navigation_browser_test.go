@@ -662,13 +662,13 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 		if !strings.Contains(body, `data-automation-yaml-editor-shell`) || !strings.Contains(body, `data-automation-yaml-editor-viewport`) || !strings.Contains(body, `data-automation-yaml-highlight`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `data-automation-yaml-line-numbers`) {
 			t.Errorf("%s YAML editor must fill its panel with a highlighted, foldable line-number gutter", source)
 		}
-		for _, want := range []string{`data-automation-yaml-highlight-line`, `whitespace-pre-wrap break-words`, `wrap="soft"`, `data-automation-yaml-line-number`} {
+		for _, want := range []string{`data-automation-yaml-highlight-line`, `whitespace-pre`, `wrap="off"`, `data-automation-yaml-line-number`} {
 			if !strings.Contains(body, want) {
-				t.Errorf("%s YAML editor must wrap its source across the available panel width: missing %q", source, want)
+				t.Errorf("%s YAML editor must render source without wrapping, relying on horizontal scroll: missing %q", source, want)
 			}
 		}
-		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden`) || !strings.Contains(body, `class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport`) || !strings.Contains(body, `class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 4.5rem; flex: 0 0 auto;"`) || !strings.Contains(body, `class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-9 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;"`) || !strings.Contains(body, `data-automation-yaml-fold-controls`) || !strings.Contains(body, `w-8`) || !strings.Contains(body, `h-6 w-6`) || !strings.Contains(body, `h-5 w-5`) || !strings.Contains(body, `w-full min-w-0 overflow-hidden whitespace-pre-wrap break-words px-3`) || !strings.Contains(body, `data-yaml-indent="' + indent + '"' + hangingIndent`) || !strings.Contains(body, `left:calc(' + column + 'ch + 0.65ch)`) {
-			t.Errorf("%s YAML gutter must reserve a split-diff-style line-number lane plus a separate fold-control lane with indentation-preserving wrapping", source)
+		if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none" class="flex min-h-[20rem] flex-1 flex-col overflow-hidden`) || !strings.Contains(body, `class="relative min-h-0 min-w-0 flex-1 overflow-hidden" data-automation-yaml-editor-viewport`) || !strings.Contains(body, `class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;"`) || !strings.Contains(body, `class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;"`) || !strings.Contains(body, `data-automation-yaml-fold-controls hidden`) || !strings.Contains(body, `left:calc(' + column + 'ch + 0.65ch)`) {
+			t.Errorf("%s YAML gutter must reserve a split-diff-style line-number lane and keep the fold-control lane hidden", source)
 		}
 		if !strings.Contains(body, `detailsButton && detailsButton.addEventListener('click', function() { previewYAMLThenSelect('details'); });`) {
 			t.Errorf("%s Details selector must canonicalize pending YAML before showing card fields", source)
@@ -884,9 +884,11 @@ window.addEventListener('DOMContentLoaded', function() {
 	    var editorShell = document.querySelector('[data-automation-yaml-editor-shell]');
 	    var lineNumbers = document.querySelector('[data-automation-yaml-line-numbers]');    var highlight = document.querySelector('[data-automation-yaml-highlight]');
     var foldControls = document.querySelector('[data-automation-yaml-fold-controls]');
-    var fold = document.querySelector('[data-automation-yaml-fold]');
 	    if (!gutter || !editorShell || !lineNumbers || lineNumbers.querySelectorAll('[data-automation-yaml-line-number]').length < 3) fail('YAML editor did not render a line-number gutter');    if (window.getComputedStyle(lineNumbers).whiteSpace !== 'nowrap') fail('YAML gutter line numbers must not wrap into the section-control lane');
-    if (editor.getAttribute('wrap') !== 'soft') fail('YAML editor must wrap long YAML values within its panel');
+    if (editor.getAttribute('wrap') !== 'off') fail('YAML editor must not wrap long YAML values; horizontal scroll is used instead');
+    if (window.getComputedStyle(editor).whiteSpace !== 'pre') fail('YAML editor must render source with plain pre formatting (no wrap) to keep caret positioning reliable');
+    if (foldControls && window.getComputedStyle(foldControls).display !== 'none') fail('YAML section-fold controls must remain hidden for now');
+    if (document.querySelector('[data-automation-yaml-fold]')) fail('YAML editor must not render any section-fold buttons while folding is disabled');
     if (!highlight || !highlight.querySelector('[data-automation-yaml-key]')) fail('YAML editor did not syntax-highlight YAML keys');
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     var indentGuides = highlight.querySelector('[data-automation-yaml-indent-guides]');
@@ -899,169 +901,31 @@ window.addEventListener('DOMContentLoaded', function() {
     var firstDotBounds = indentDot.getBoundingClientRect();
     var firstRailBounds = Array.from(indentRails).sort(function(left, right) { return left.getBoundingClientRect().left - right.getBoundingClientRect().left; })[0].getBoundingClientRect();
 	    if (firstDotBounds.left <= firstRailBounds.right) fail('the first indentation dot must render visibly after the first vertical grouping rail');    if (!Array.from(indentRails).some(function(rail) { return rail.getBoundingClientRect().height > 24 && window.getComputedStyle(rail).backgroundColor !== 'rgba(0, 0, 0, 0)'; })) fail('YAML indentation rails must continuously span nested YAML rows with a visible color');
-		    if (!lineNumbers.classList.contains('w-full') || !lineNumbers.classList.contains('text-left') || !lineNumbers.classList.contains('text-xs') || !lineNumbers.classList.contains('pr-9') || !foldControls.classList.contains('w-8')) fail('YAML gutter must reserve a line-number lane and a separate inset fold-control lane');
-		    var gutterBounds = gutter.getBoundingClientRect(), editorShellBounds = editorShell.getBoundingClientRect(), numberBounds = lineNumbers.getBoundingClientRect(), foldControlsBounds = foldControls.getBoundingClientRect();
-		    if (gutterBounds.width < 71 || Math.abs(gutterBounds.left - editorShellBounds.left) > 1 || Math.abs(numberBounds.width - gutterBounds.width) > 1 || numberBounds.left < gutterBounds.left - 1 || numberBounds.right > gutterBounds.right + 1 || foldControlsBounds.right > gutterBounds.right + 1) fail('YAML line numbers and fold controls must stay contained in the reserved gutter: shell=' + editorShellBounds.left + ',' + editorShellBounds.right + ' gutter=' + gutterBounds.left + ',' + gutterBounds.right + ' number=' + numberBounds.left + ',' + numberBounds.right + ' controls=' + foldControlsBounds.left + ',' + foldControlsBounds.right);    if (window.getComputedStyle(lineNumbers).textAlign !== 'left' || window.getComputedStyle(lineNumbers).paddingLeft !== '8px' || window.getComputedStyle(lineNumbers).paddingRight !== '36px' || window.getComputedStyle(gutter).minWidth !== '72px') fail('YAML line-number gutter must keep the split-diff left inset and reserve right padding for fold controls: align=' + window.getComputedStyle(lineNumbers).textAlign + ', left=' + window.getComputedStyle(lineNumbers).paddingLeft + ', right=' + window.getComputedStyle(lineNumbers).paddingRight + ', min-width=' + window.getComputedStyle(gutter).minWidth);    var firstLineNumber = lineNumbers.querySelector('[data-automation-yaml-line-number]');
+	    var gutterBounds = gutter.getBoundingClientRect(), editorShellBounds = editorShell.getBoundingClientRect(), numberBounds = lineNumbers.getBoundingClientRect();
+	    if (Math.abs(gutterBounds.left - editorShellBounds.left) > 1 || Math.abs(numberBounds.width - gutterBounds.width) > 1 || numberBounds.left < gutterBounds.left - 1 || numberBounds.right > gutterBounds.right + 1) fail('YAML line numbers must stay contained in the reserved gutter: shell=' + editorShellBounds.left + ',' + editorShellBounds.right + ' gutter=' + gutterBounds.left + ',' + gutterBounds.right + ' number=' + numberBounds.left + ',' + numberBounds.right);    var firstLineNumber = lineNumbers.querySelector('[data-automation-yaml-line-number]');
     var firstLineNumberRange = document.createRange();
     firstLineNumberRange.selectNodeContents(firstLineNumber);
     var firstLineNumberTextBounds = firstLineNumberRange.getBoundingClientRect();
 	    if (Math.abs(firstLineNumberTextBounds.left - (gutterBounds.left + 8)) > 1) fail('YAML line numbers must use the split-diff 8px left inset: text=' + firstLineNumberTextBounds.left + ', gutter=' + gutterBounds.left);    var editorPadding = window.getComputedStyle(editor).paddingLeft, highlightPadding = window.getComputedStyle(highlight).paddingLeft;
     if (editorPadding !== '12px' || highlightPadding !== '12px') fail('YAML source must use the split diff viewer\'s px-3 content inset: editor=' + editorPadding + ', highlight=' + highlightPadding);
     if (highlight.querySelector('[data-automation-yaml-key]').classList.contains('text-warning')) fail('YAML editor keys still use the warning color');
-    if (!foldControls || !fold || fold.parentElement !== foldControls || foldControls.parentElement !== gutter || !fold.dataset.yamlIndent) fail('YAML editor did not render a gutter section-fold control');
-	    var foldBounds = fold.getBoundingClientRect();
-	    if (foldBounds.left < gutterBounds.left - 1 || foldBounds.right > gutterBounds.right + 1) fail('YAML section-fold control is not contained in the line-number gutter');
-	    if (firstLineNumberTextBounds.right > foldBounds.left - 4) fail('YAML line number text must not collide with the fold-control lane: text=' + firstLineNumberTextBounds.right + ', fold=' + foldBounds.left);    if (!fold.classList.contains('opacity-0') || !fold.classList.contains('group-hover:opacity-100')) fail('expanded YAML section-fold control must appear only while hovering the gutter');
-if (!fold.classList.contains('h-6') || !fold.classList.contains('w-6') || !fold.classList.contains('right-1') || !fold.classList.contains('p-0') || !fold.querySelector('svg.h-5.w-5')) fail('YAML editor section-fold control must render a larger centered chevron inset from the gutter edge');
-			    if (Math.abs(foldBounds.right - (gutterBounds.right - 4)) > 1 || foldBounds.left < foldControlsBounds.left - 1 || foldBounds.right > foldControlsBounds.right + 1 || Math.abs((foldBounds.left + foldBounds.width / 2) - (gutterBounds.right - 16)) > 1) fail('YAML section-fold chevron lane must be inset from the gutter border and visually centered in the reserved fold-control lane: gutter=' + gutterBounds.left + ',' + gutterBounds.right + ' controls=' + foldControlsBounds.left + ',' + foldControlsBounds.right + ' fold=' + foldBounds.left + ',' + foldBounds.right + ' center=' + (foldBounds.left + foldBounds.width / 2) + ' expected=' + (gutterBounds.right - 16));		    if (!fold.classList.contains('bg-transparent') || !fold.classList.contains('hover:bg-transparent') || fold.className.includes('hover:bg-base') || fold.className.includes('hover:text-base-content ')) fail('YAML section-fold control must remain a transparent stable-color ghost control on hover: ' + fold.className);	    var originalYAML = editor.value;    editor.value = 'section:\n  message: "' + 'long YAML value '.repeat(40) + '"\nnext: "still visible"\n';
+    var originalYAML = editor.value;
+    editor.value = 'section:\n  message: "' + 'long YAML value '.repeat(40) + '"\nnext: "still visible"\n';
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    var wrappedSource = highlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="2"]');
-    var wrappedNumber = lineNumbers.querySelector('[data-automation-yaml-line-number][data-yaml-line="2"]');
-    var continuedSource = highlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="3"]');
-    var wrappedSourceHeight = wrappedSource && wrappedSource.getBoundingClientRect().height;
-    var wrappedNumberHeight = wrappedNumber && wrappedNumber.getBoundingClientRect().height;
-    if (!wrappedSource || !wrappedNumber || wrappedSourceHeight <= 24 || Math.abs(wrappedSourceHeight - wrappedNumberHeight) > 1) fail('wrapped YAML source did not retain aligned line numbers: source=' + wrappedSourceHeight + ', number=' + wrappedNumberHeight);
-    if (wrappedSource.dataset.yamlIndent !== '2' || window.getComputedStyle(wrappedSource).paddingLeft === '0px' || window.getComputedStyle(wrappedSource).textIndent !== '0px') fail('wrapped YAML values must retain their parent indentation as a hanging indent');
-    if (!continuedSource || window.getComputedStyle(highlight).overflow !== 'visible' || highlight.clientHeight < continuedSource.offsetTop + continuedSource.offsetHeight) fail('wrapped YAML source was clipped before its following logical line');
-    if (document.caretRangeFromPoint) {
-	    var wrappedTextNode = wrappedSource.childNodes[wrappedSource.childNodes.length - 1];
-	    while (wrappedTextNode && wrappedTextNode.nodeType !== 3) wrappedTextNode = wrappedTextNode.previousSibling;
-	    if (wrappedTextNode) {
-		    var wrapProbeRange = document.createRange();
-		    var wrapProbeOffset = Math.min(20, wrappedTextNode.textContent.length);
-		    wrapProbeRange.setStart(wrappedTextNode, wrapProbeOffset);
-		    wrapProbeRange.setEnd(wrappedTextNode, wrapProbeOffset);
-		    var wrapProbeRect = wrapProbeRange.getBoundingClientRect();
-		    if (wrapProbeRect.left > 0 && wrapProbeRect.top > 0) {
-			    editor.setSelectionRange(0, 0);
-			    editor.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, clientX: wrapProbeRect.left, clientY: wrapProbeRect.top + 2}));
-			    var expectedClickOffset = editor.value.indexOf('  message:') + '  message:'.length + wrapProbeOffset - '  message:'.length;
-			    var actualIndentColumn = editor.value.slice(0, editor.selectionStart).split('\n').pop().length;
-			    if (Math.abs(actualIndentColumn - wrapProbeOffset) > 3) fail('clicking a wrapped hanging-indented YAML line must position the caret at the visually clicked character, not offset by the indent width: got column ' + actualIndentColumn + ', expected near ' + wrapProbeOffset);
-		    }
-	    }
-    }
+    var longSourceLine = highlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="2"]');
+    var longNumberLine = lineNumbers.querySelector('[data-automation-yaml-line-number][data-yaml-line="2"]');
+    if (!longSourceLine || !longNumberLine) fail('unwrapped long YAML source did not retain its own line number');
+    if (editor.scrollWidth <= editor.clientWidth) fail('a long YAML value must overflow horizontally instead of wrapping');
+    if (window.getComputedStyle(editor).whiteSpace !== 'pre' || window.getComputedStyle(highlight).whiteSpace !== 'pre') fail('the editable textarea and its highlight overlay must both use plain pre formatting so their unwrapped text geometry stays pixel-identical for caret placement');
+    if (window.getComputedStyle(editor).paddingLeft !== window.getComputedStyle(highlight).paddingLeft) fail('the editable textarea and its highlight overlay must share identical left padding so native clicks land on the correct character');
     editor.value = originalYAML;
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
-    fold = document.querySelector('[data-automation-yaml-fold]');
-    if (!fold) fail('YAML editor did not restore section-fold controls after wrapping source');
     editor.focus();
     if (document.activeElement !== editor) fail('YAML editor did not accept keyboard focus');
     var caretColor = window.getComputedStyle(editor).caretColor;
     if (!caretColor || caretColor === 'auto' || caretColor === 'transparent' || caretColor === 'rgba(0, 0, 0, 0)') fail('YAML editor caret is not visible');
-    var foldedYAML = 'section:\n  message: "' + 'hidden collapsed content should not widen later visible lines '.repeat(20) + '"\n' + Array.from({length: 24}, function(_, index) { return 'visible_' + index + ': "still scrollable"'; }).join('\n') + '\n';
-	    editor.value = foldedYAML;
-	    editor.dispatchEvent(new Event('input', {bubbles: true}));
-	    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-	    editor.scrollTop = 0;
-	    gutter.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true, deltaY: 48}));
-	    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
-	    if (editor.scrollTop <= 0 || !String(highlight.style.transform || '').includes('-' + editor.scrollTop + 'px')) fail('wheel scrolling the YAML gutter must scroll and synchronize the editable textarea');
-	    editor.scrollTop = 0;
-	    editor.dispatchEvent(new Event('scroll', {bubbles: true}));
-	    fold = document.querySelector('[data-automation-yaml-fold]');    if (!fold) fail('YAML editor did not render section-fold controls for the scroll regression');
-    fold.click();
-    if (editor.hidden || !highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('YAML section fold must collapse the source view while keeping the textarea editable');
-    if (editor.value.includes('hidden collapsed content should not widen later visible lines')) fail('folded textarea display must omit hidden collapsed child content so caret geometry follows visible lines');
-    fold = document.querySelector('[data-automation-yaml-fold]');
-    if (!fold || window.getComputedStyle(fold).opacity === '0') fail('collapsed YAML section-fold control must remain visible in the line-number gutter');
-    if (editor.scrollWidth > editor.clientWidth + 1) fail('collapsed hidden YAML content must not widen the editable folded textarea surface: scrollWidth=' + editor.scrollWidth + ', clientWidth=' + editor.clientWidth);
-    var foldedContent = highlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="3"]');
-    var foldedContentTop = foldedContent && foldedContent.getBoundingClientRect().top;
-    gutter.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true, deltaY: 48}));
-    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
-    if (editor.scrollTop <= 0 || editor.hidden || !foldedContent || foldedContent.getBoundingClientRect().top >= foldedContentTop - 1) fail('wheel scrolling the YAML gutter in a collapsed YAML view must scroll the textarea while retaining folded state');
-    var foldedScrollTop = editor.scrollTop;
-    var beforeVisibleValue = editor.value;
-    var typedCursor = beforeVisibleValue.indexOf('visible_0') + 'visible_0'.length;
-    editor.setSelectionRange(typedCursor, typedCursor);
-    editor.dispatchEvent(new Event('beforeinput', {bubbles: true, cancelable: true}));
-    editor.value = beforeVisibleValue.slice(0, typedCursor) + 'Z' + beforeVisibleValue.slice(typedCursor);
-    editor.setSelectionRange(typedCursor + 1, typedCursor + 1);
-    editor.dispatchEvent(new Event('input', {bubbles: true}));
-    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    if (!highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('typing a single character while YAML sections are folded must keep folds intact');
-    if (!editor.value.includes('visible_0Z')) fail('typed character while folded did not apply to the visible line');
-    var beforeBackspaceValue = editor.value;
-    var backspaceCursor = beforeBackspaceValue.indexOf('visible_0Z') + 'visible_0Z'.length;
-    editor.setSelectionRange(backspaceCursor, backspaceCursor);
-    editor.dispatchEvent(new InputEvent('beforeinput', {bubbles: true, cancelable: true, inputType: 'deleteContentBackward'}));
-    editor.value = beforeBackspaceValue.slice(0, backspaceCursor - 1) + beforeBackspaceValue.slice(backspaceCursor);
-    editor.setSelectionRange(backspaceCursor - 1, backspaceCursor - 1);
-    editor.dispatchEvent(new Event('input', {bubbles: true}));
-    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    if (!highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('backspacing a character while YAML sections are folded must keep folds intact');
-    if (!editor.value.includes('visible_0') || editor.value.includes('visible_0Z')) fail('backspace with a collapsed cursor while folded did not remove the character from the visible line');
-    var multilineBefore = editor.value;
-    var multilineCursor = multilineBefore.indexOf('visible_1');
-    editor.setSelectionRange(multilineCursor, multilineCursor);
-    editor.dispatchEvent(new Event('beforeinput', {bubbles: true, cancelable: true}));
-    editor.value = multilineBefore.slice(0, multilineCursor) + 'inserted_a: "x"\ninserted_b: "y"\n' + multilineBefore.slice(multilineCursor);
-    editor.setSelectionRange(multilineCursor + 'inserted_a: "x"\ninserted_b: "y"\n'.length, multilineCursor + 'inserted_a: "x"\ninserted_b: "y"\n'.length);
-    editor.dispatchEvent(new Event('input', {bubbles: true}));
-    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    if (!highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('a multi-line edit while YAML sections are folded must keep folds intact');
-    if (!editor.value.includes('inserted_a') || !editor.value.includes('inserted_b')) fail('multi-line insertion while folded was not applied to the visible textarea');
-    fold = document.querySelector('[data-automation-yaml-fold]');
-    fold.click();
-    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
-    if (highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('expanding a folded section must restore the full YAML view including any edits applied while folded');
-    if (!editor.value.includes('hidden collapsed content should not widen later visible lines')) fail('expanding must restore hidden collapsed content that was preserved during folded edits');
-    if (!editor.value.includes('visible_0') || editor.value.includes('visible_0Z') || !editor.value.includes('inserted_a') || !editor.value.includes('inserted_b')) fail('expanding after folded edits must retain edits applied to visible lines');
-    editor.value = foldedYAML;
-    editor.dispatchEvent(new Event('input', {bubbles: true}));
-    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    fold = document.querySelector('[data-automation-yaml-fold]');
-    fold.click();
-    if (editor.hidden || !highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('re-folding for boundary-edit regression must collapse the source view');
-    var forwardBoundaryBefore = editor.value;
-    var forwardBoundaryCursor = forwardBoundaryBefore.indexOf('section:') + 'section:'.length;
-    editor.setSelectionRange(forwardBoundaryCursor, forwardBoundaryCursor);
-    editor.dispatchEvent(new InputEvent('beforeinput', {bubbles: true, cancelable: true, inputType: 'deleteContentForward'}));
-    editor.value = forwardBoundaryBefore.slice(0, forwardBoundaryCursor) + forwardBoundaryBefore.slice(forwardBoundaryCursor + 1);
-    editor.setSelectionRange(forwardBoundaryCursor, forwardBoundaryCursor);
-    editor.dispatchEvent(new Event('input', {bubbles: true}));
-    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    if (!highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('Delete at the end of a visible line before a fold must keep the fold intact');
-    if (editor.value.indexOf('section:') !== 0) fail('Delete at a fold boundary must leave the line before the fold unmodified: ' + editor.value);
-    if (!highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('Delete at a fold boundary must keep the section folded: ' + editor.value);
-    fold = document.querySelector('[data-automation-yaml-fold]');
-    fold.click();
-    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
-    if (highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('expanding after a forward fold-boundary delete must restore the full YAML view');
-    if (!editor.value.includes('hidden collapsed content should not widen later visible lines')) fail('a Delete at a fold boundary must not corrupt the hidden folded content');
-    if (editor.value.indexOf('\nvisible_0:') >= 0) fail('expanding after a forward fold-boundary delete must merge visible_0 onto the last hidden line, not leave it on its own line: ' + editor.value);
-    if (editor.value.indexOf('visible_0: "still scrollable"') < 0) fail('expanding after a forward fold-boundary delete must retain the merged visible_0 content: ' + editor.value);
-    if (editor.value.indexOf('\nvisible_1:') < 0) fail('expanding after a forward fold-boundary delete must retain the unaffected next visible line on its own line: ' + editor.value);
-    editor.value = foldedYAML;
-    editor.dispatchEvent(new Event('input', {bubbles: true}));
-    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    fold = document.querySelector('[data-automation-yaml-fold]');
-    fold.click();
-    if (editor.hidden || !highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('re-folding for backward boundary-edit regression must collapse the source view');
-    var backwardBoundaryBefore = editor.value;
-    var backwardBoundaryCursor = backwardBoundaryBefore.indexOf('visible_0');
-    editor.setSelectionRange(backwardBoundaryCursor, backwardBoundaryCursor);
-    editor.dispatchEvent(new InputEvent('beforeinput', {bubbles: true, cancelable: true, inputType: 'deleteContentBackward'}));
-    editor.value = backwardBoundaryBefore.slice(0, backwardBoundaryCursor - 1) + backwardBoundaryBefore.slice(backwardBoundaryCursor);
-    editor.setSelectionRange(backwardBoundaryCursor - 1, backwardBoundaryCursor - 1);
-    editor.dispatchEvent(new Event('input', {bubbles: true}));
-    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    if (!highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('Backspace at the start of a visible line after a fold must keep the fold intact');
-    if (editor.value.indexOf('section:') !== 0) fail('Backspace at a fold boundary must leave the line before the fold unmodified: ' + editor.value);
-    if (!highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('Backspace at a fold boundary must keep the section folded: ' + editor.value);
-    if (editor.value.indexOf('visible_1:') < 0) fail('Backspace at a fold boundary must leave the next unaffected visible line intact: ' + editor.value);
-    fold = document.querySelector('[data-automation-yaml-fold]');
-    fold.click();
-    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
-    if (highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('expanding after a backward fold-boundary backspace must restore the full YAML view');
-    if (!editor.value.includes('hidden collapsed content should not widen later visible lines')) fail('a Backspace at a fold boundary must not corrupt the hidden folded content');
-    if (editor.value.indexOf('\nvisible_0:') >= 0) fail('expanding after a backward fold-boundary backspace must merge visible_0 onto the last hidden line, not leave it on its own line: ' + editor.value);
-    if (editor.value.indexOf('visible_0: "still scrollable"') < 0) fail('expanding after a backward fold-boundary backspace must retain the merged visible_0 content: ' + editor.value);
-    if (editor.value.indexOf('\nvisible_1:') < 0) fail('expanding after a backward fold-boundary backspace must retain the unaffected next visible line on its own line: ' + editor.value);
-    editor.value = originalYAML;    editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     click('[data-automation-view-graph]', 'Graph view button');
     if (!isVisible(graph) || isVisible(yaml)) fail('Graph switch did not restore the canvas');
@@ -1138,10 +1002,10 @@ if (!fold.classList.contains('h-6') || !fold.classList.contains('w-6') || !fold.
 					http.Error(w, "Details preview must request the Details initial view", http.StatusBadRequest)
 					return
 				}
-				_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.p-4{padding:16px}.px-0{padding-left:0;padding-right:0}.py-4{padding-top:16px;padding-bottom:16px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:max-content;min-width:72px;position:relative}[data-automation-yaml-fold-controls]{position:absolute;top:0;right:0;bottom:0;width:32px}[data-automation-yaml-fold]{position:absolute;right:4px;width:24px;height:24px}[data-automation-yaml-panel]{height:260px;display:flex;flex-direction:column;overflow:hidden}[data-automation-yaml-editor-shell]{display:flex;flex:1 1 0%%;min-height:0;overflow:hidden}[data-automation-yaml-editor-viewport]{position:relative;min-height:0;flex:1 1 0%%;overflow:hidden}[data-automation-yaml-editor-viewport].overflow-y-auto{overflow-y:auto}[data-automation-yaml-editor-viewport].overflow-x-hidden{overflow-x:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.left-0{left:0}.right-1{right:4px}.inset-y-0{top:0;bottom:0}.whitespace-nowrap{white-space:nowrap}.text-left{text-align:left}.text-right{text-align:right}.px-2{padding-left:8px;padding-right:8px}.py-0{padding-top:0;padding-bottom:0}.pb-0{padding-bottom:0}.pl-2{padding-left:8px}.pr-0{padding-right:0}.pr-7{padding-right:28px}.pr-9{padding-right:36px}.pt-0{padding-top:0}.p-0{padding:0}.w-full{width:100%%}.h-5{height:20px}.w-5{width:20px}.text-xs{font-size:12px;line-height:16px}.font-mono{font-family:monospace}.border-collapse{border-collapse:collapse}.diff-table td{padding-top:1px;padding-bottom:1px;vertical-align:top;line-height:1.5}.diff-line-num{min-width:40px;user-select:none}[data-automation-yaml-line-numbers]{width:100%%;margin:0;font:12px/24px monospace}</style></head><body><div style="position:absolute;visibility:hidden;left:20px;right:20px"><table class="diff-table w-full text-xs font-mono border-collapse"><colgroup><col style="width:40px"/><col style="width:50%%"/><col style="width:40px"/><col style="width:50%%"/></colgroup><tbody><tr><td class="diff-line-num text-right px-2 py-0" data-split-diff-gutter-reference>1</td><td>source</td><td class="diff-line-num text-right px-2 py-0">1</td><td>source</td></tr></tbody></table></div>%s%s</body></html>`, detailsBuilder.String(), runner)
+				_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.p-4{padding:16px}.px-0{padding-left:0;padding-right:0}.py-4{padding-top:16px;padding-bottom:16px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:max-content;min-width:72px;position:relative}[data-automation-yaml-fold-controls]{position:absolute;top:0;right:0;bottom:0;width:32px}[data-automation-yaml-fold]{position:absolute;right:4px;width:24px;height:24px}[data-automation-yaml-panel]{height:260px;display:flex;flex-direction:column;overflow:hidden}[data-automation-yaml-editor-shell]{display:flex;flex:1 1 0%%;min-height:0;overflow:hidden}[data-automation-yaml-editor-viewport]{position:relative;min-height:0;flex:1 1 0%%;overflow:hidden}[data-automation-yaml-editor-viewport].overflow-y-auto{overflow-y:auto}[data-automation-yaml-editor-viewport].overflow-x-hidden{overflow-x:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre;overflow:visible}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre;overflow:auto}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.left-0{left:0}.right-1{right:4px}.inset-y-0{top:0;bottom:0}.whitespace-nowrap{white-space:nowrap}.text-left{text-align:left}.text-right{text-align:right}.px-2{padding-left:8px;padding-right:8px}.py-0{padding-top:0;padding-bottom:0}.pb-0{padding-bottom:0}.pl-2{padding-left:8px}.pr-0{padding-right:0}.pr-7{padding-right:28px}.pr-9{padding-right:36px}.pt-0{padding-top:0}.p-0{padding:0}.w-full{width:100%%}.h-5{height:20px}.w-5{width:20px}.text-xs{font-size:12px;line-height:16px}.font-mono{font-family:monospace}.border-collapse{border-collapse:collapse}.diff-table td{padding-top:1px;padding-bottom:1px;vertical-align:top;line-height:1.5}.diff-line-num{min-width:40px;user-select:none}[data-automation-yaml-line-numbers]{width:100%%;margin:0;font:12px/24px monospace}</style></head><body><div style="position:absolute;visibility:hidden;left:20px;right:20px"><table class="diff-table w-full text-xs font-mono border-collapse"><colgroup><col style="width:40px"/><col style="width:50%%"/><col style="width:40px"/><col style="width:50%%"/></colgroup><tbody><tr><td class="diff-line-num text-right px-2 py-0" data-split-diff-gutter-reference>1</td><td>source</td><td class="diff-line-num text-right px-2 py-0">1</td><td>source</td></tr></tbody></table></div>%s%s</body></html>`, detailsBuilder.String(), runner)
 				return
 			}
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.p-4{padding:16px}.px-0{padding-left:0;padding-right:0}.py-4{padding-top:16px;padding-bottom:16px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:max-content;min-width:72px;position:relative}[data-automation-yaml-fold-controls]{position:absolute;top:0;right:0;bottom:0;width:32px}[data-automation-yaml-fold]{position:absolute;right:4px;width:24px;height:24px}[data-automation-yaml-panel]{height:260px;display:flex;flex-direction:column;overflow:hidden}[data-automation-yaml-editor-shell]{display:flex;flex:1 1 0%%;min-height:0;overflow:hidden}[data-automation-yaml-editor-viewport]{position:relative;min-height:0;flex:1 1 0%%;overflow:hidden}[data-automation-yaml-editor-viewport].overflow-y-auto{overflow-y:auto}[data-automation-yaml-editor-viewport].overflow-x-hidden{overflow-x:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;right:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow:visible;overflow-wrap:break-word}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre-wrap;overflow-wrap:break-word}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.left-0{left:0}.right-1{right:4px}.inset-y-0{top:0;bottom:0}.whitespace-nowrap{white-space:nowrap}.text-left{text-align:left}.text-right{text-align:right}.px-2{padding-left:8px;padding-right:8px}.py-0{padding-top:0;padding-bottom:0}.pb-0{padding-bottom:0}.pl-2{padding-left:8px}.pr-0{padding-right:0}.pr-7{padding-right:28px}.pr-9{padding-right:36px}.pt-0{padding-top:0}.p-0{padding:0}.w-full{width:100%%}.h-5{height:20px}.w-5{width:20px}.text-xs{font-size:12px;line-height:16px}.font-mono{font-family:monospace}.border-collapse{border-collapse:collapse}.diff-table td{padding-top:1px;padding-bottom:1px;vertical-align:top;line-height:1.5}.diff-line-num{min-width:40px;user-select:none}[data-automation-yaml-line-numbers]{width:100%%;margin:0;font:12px/24px monospace}</style></head><body><div style="position:absolute;visibility:hidden;left:20px;right:20px"><table class="diff-table w-full text-xs font-mono border-collapse"><colgroup><col style="width:40px"/><col style="width:50%%"/><col style="width:40px"/><col style="width:50%%"/></colgroup><tbody><tr><td class="diff-line-num text-right px-2 py-0" data-split-diff-gutter-reference>1</td><td>source</td><td class="diff-line-num text-right px-2 py-0">1</td><td>source</td></tr></tbody></table></div>%s%s</body></html>`, builder.String(), runner)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260;--er:0.68 0.15 26}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.p-4{padding:16px}.px-0{padding-left:0;padding-right:0}.py-4{padding-top:16px;padding-bottom:16px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}[data-automation-yaml-gutter]{width:max-content;min-width:72px;position:relative}[data-automation-yaml-fold-controls]{position:absolute;top:0;right:0;bottom:0;width:32px}[data-automation-yaml-fold]{position:absolute;right:4px;width:24px;height:24px}[data-automation-yaml-panel]{height:260px;display:flex;flex-direction:column;overflow:hidden}[data-automation-yaml-editor-shell]{display:flex;flex:1 1 0%%;min-height:0;overflow:hidden}[data-automation-yaml-editor-viewport]{position:relative;min-height:0;flex:1 1 0%%;overflow:hidden}[data-automation-yaml-editor-viewport].overflow-y-auto{overflow-y:auto}[data-automation-yaml-editor-viewport].overflow-x-hidden{overflow-x:hidden}[data-automation-yaml-highlight]{position:absolute;left:0;top:0;box-sizing:border-box;min-height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre;overflow:visible}[data-automation-yaml-editor]{position:absolute;inset:0;box-sizing:border-box;width:100%%;height:100%%;margin:0;padding-left:12px;font:16px/24px monospace;white-space:pre;overflow:auto}[data-automation-yaml-highlight-line],[data-automation-yaml-line-number]{display:block;min-height:24px}.relative{position:relative}.absolute{position:absolute}.left-0{left:0}.right-1{right:4px}.inset-y-0{top:0;bottom:0}.whitespace-nowrap{white-space:nowrap}.text-left{text-align:left}.text-right{text-align:right}.px-2{padding-left:8px;padding-right:8px}.py-0{padding-top:0;padding-bottom:0}.pb-0{padding-bottom:0}.pl-2{padding-left:8px}.pr-0{padding-right:0}.pr-7{padding-right:28px}.pr-9{padding-right:36px}.pt-0{padding-top:0}.p-0{padding:0}.w-full{width:100%%}.h-5{height:20px}.w-5{width:20px}.text-xs{font-size:12px;line-height:16px}.font-mono{font-family:monospace}.border-collapse{border-collapse:collapse}.diff-table td{padding-top:1px;padding-bottom:1px;vertical-align:top;line-height:1.5}.diff-line-num{min-width:40px;user-select:none}[data-automation-yaml-line-numbers]{width:100%%;margin:0;font:12px/24px monospace}</style></head><body><div style="position:absolute;visibility:hidden;left:20px;right:20px"><table class="diff-table w-full text-xs font-mono border-collapse"><colgroup><col style="width:40px"/><col style="width:50%%"/><col style="width:40px"/><col style="width:50%%"/></colgroup><tbody><tr><td class="diff-line-num text-right px-2 py-0" data-split-diff-gutter-reference>1</td><td>source</td><td class="diff-line-num text-right px-2 py-0">1</td><td>source</td></tr></tbody></table></div>%s%s</body></html>`, builder.String(), runner)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
