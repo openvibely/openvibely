@@ -1954,14 +1954,14 @@ func automationLiveContent(graph models.AutomationLiveGraph, currentProjectID st
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, "</pre></div><div class=\"relative min-h-0 min-w-0 flex-1 overflow-hidden\" data-automation-yaml-editor-viewport><pre class=\"absolute left-0 top-0 m-0 min-h-full w-max min-w-full overflow-hidden whitespace-pre px-3 font-mono text-sm leading-6\" aria-hidden=\"true\" data-automation-yaml-highlight></pre><textarea class=\"absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-transparent\" readonly tabindex=\"-1\" data-automation-yaml-editor data-automation-yaml-readonly spellcheck=\"false\" wrap=\"off\" aria-label=\"Automation definition (read-only).\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, "</pre></div><div class=\"relative min-h-0 min-w-0 flex-1 overflow-hidden\" data-automation-yaml-editor-viewport><pre class=\"absolute left-0 top-0 m-0 min-h-full w-max min-w-full overflow-hidden whitespace-pre px-3 font-mono text-sm leading-6\" aria-hidden=\"true\" data-automation-yaml-highlight></pre><textarea class=\"absolute inset-0 block h-full w-full resize-none overflow-auto border-0 bg-transparent whitespace-pre px-3 font-mono text-sm leading-6 text-transparent outline-none caret-transparent cursor-default\" readonly tabindex=\"-1\" data-automation-yaml-editor data-automation-yaml-readonly spellcheck=\"false\" wrap=\"off\" aria-label=\"Automation definition (read-only).\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var111 string
 		templ_7745c5c3_Var111, templ_7745c5c3_Err = templ.JoinStringErrs(graph.YAML)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 486, Col: 380}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/automations.templ`, Line: 486, Col: 395}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var111))
 		if templ_7745c5c3_Err != nil {

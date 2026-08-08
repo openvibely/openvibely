@@ -331,6 +331,7 @@ func TestAutomationLiveYAMLPanelMatchesEditorButIsReadOnly(t *testing.T) {
 		`data-automation-yaml-readonly`,
 		`readonly`,
 		`tabindex="-1"`,
+		`cursor-default`,
 		`wrap="off"`,
 		`whitespace-pre`,
 		`schema_version: 1`,
