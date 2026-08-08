@@ -394,6 +394,13 @@ func (s *AutomationGraphService) ContextForTask(ctx context.Context, projectID, 
 	return s.repo.ContextForTask(ctx, projectID, taskID)
 }
 
+func (s *AutomationGraphService) GitHubIssueTaskProvenance(ctx context.Context, projectID, taskID string) (*repository.AutomationGitHubIssueTaskProvenance, error) {
+	if s == nil || s.repo == nil {
+		return nil, nil
+	}
+	return s.repo.GitHubIssueTaskProvenance(ctx, projectID, taskID)
+}
+
 func (s *AutomationGraphService) GetDefinition(ctx context.Context, projectID, automationID string) (*models.AutomationDefinition, []models.AutomationResourceSummary, error) {
 	definition, err := s.repo.GetDefinition(ctx, projectID, automationID)
 	if err != nil || definition == nil {

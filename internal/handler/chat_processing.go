@@ -1875,6 +1875,32 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 		return outcome
 	}
 
+	// Load task state before publishing the terminal event so any final status
+	// transition is visible when the client refreshes in response to ExecCompleted.
+	task, err := h.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		applog.Infof("[handler] completeWithSuccess task=%s error getting task: %v", taskID, err)
+	}
+	if blocked, reason := h.blockGitHubSDLCSuccessWithoutPullRequest(ctx, task); blocked {
+		if err := h.taskRepo.UpdateStatus(ctx, taskID, models.StatusFailed); err != nil {
+			applog.Infof("[handler] completeWithSuccess task=%s error marking missing GitHub SDLC PR failure: %v", taskID, err)
+		}
+		if task != nil && (task.Category == models.CategoryActive || task.Category == models.CategoryCompleted) {
+			if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryBacklog); err != nil {
+				applog.Infof("[handler] completeWithSuccess task=%s error moving missing GitHub SDLC PR failure to backlog: %v", taskID, err)
+			}
+		}
+		h.sendChannelResponse(ctx, task, channelReply, output, reason, telegramMessageID)
+		if task != nil && h.alertSvc != nil {
+			if err := h.alertSvc.CreateTaskFailedAlert(ctx, task.ProjectID, taskID, execID, task.Title, reason); err != nil {
+				applog.Infof("[handler] completeWithSuccess task=%s error creating missing GitHub SDLC PR failure alert: %v", taskID, err)
+			}
+		}
+		h.publishExecutionTerminal(execID, models.ExecCompleted, "")
+		h.notifySwarmChildTerminal(ctx, taskID)
+		return repository.CompleteSuccessCompleted
+	}
+
 	// Update task status BEFORE git diff capture. The SSE handler detects
 	// ExecCompleted and sends a 'done' event, triggering a client-side page
 	// refresh. If the task status update happens after git diff capture
@@ -1885,9 +1911,8 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 	h.publishExecutionTerminal(execID, models.ExecCompleted, "")
 
 	// Move active tasks to the completed category so they appear in the right column
-	task, err := h.taskRepo.GetByID(ctx, taskID)
 	h.sendChannelResponse(ctx, task, channelReply, output, "", telegramMessageID)
-	if err == nil && task != nil && task.Category == models.CategoryActive {
+	if task != nil && task.Category == models.CategoryActive {
 		if err := h.taskRepo.UpdateCategory(ctx, taskID, models.CategoryCompleted); err != nil {
 			applog.Infof("[handler] completeWithSuccess task=%s error moving to completed category: %v", taskID, err)
 		} else {
@@ -1917,6 +1942,30 @@ func (h *Handler) completeWithSuccess(ctx context.Context, execID, taskID, outpu
 	}
 	h.notifySwarmChildTerminal(ctx, taskID)
 	return repository.CompleteSuccessCompleted
+}
+
+func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, task *models.Task) (bool, string) {
+	if h == nil || task == nil || h.automationGraphSvc == nil {
+		return false, ""
+	}
+	provenance, err := h.automationGraphSvc.GitHubIssueTaskProvenance(ctx, task.ProjectID, task.ID)
+	if err != nil {
+		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
+	}
+	if provenance == nil {
+		return false, ""
+	}
+	if h.taskPullRequestRepo == nil {
+		return true, "GitHub SDLC pull request publication could not be verified because pull request records are unavailable"
+	}
+	pullRequest, err := h.taskPullRequestRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
+	}
+	if pullRequest == nil {
+		return true, "GitHub SDLC implementation completed without publishing a pull request; rerun after resolving PR publication"
+	}
+	return false, ""
 }
 
 func (h *Handler) notifySwarmChildTerminal(ctx context.Context, taskID string) {
