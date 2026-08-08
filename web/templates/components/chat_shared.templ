@@ -2752,6 +2752,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						form._chatNextSubmissionPayload = null;
 						var request = event.detail.xhr || {};
 						request._chatSubmittedIntent = form.getAttribute('data-submit-intent') || 'normal';
+						request._chatSubmittedWasQueued = request._chatSubmittedIntent === 'normal' && composerHasActiveTurn();
 						if (request._chatSubmittedIntent === 'normal') normalRequestInFlight++;
 						request._chatSubmittedMessage = payload ? payload.message : (messageInput ? messageInput.value : '');
 						request._chatSubmittedAttachmentSession = payload ? payload.attachmentSessionID : (sessionInput ? sessionInput.value : '');
@@ -2761,6 +2762,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						if (!event.detail || event.detail.elt !== form) return;
 						var request = event.detail.xhr || {};
 						var completedIntent = request._chatSubmittedIntent || 'normal';
+						var preserveSubmittedMessage = completedIntent === 'steer' || !!request._chatSubmittedWasQueued;
 						var submittedMessage = request._chatSubmittedMessage || '';
 						var submittedAttachmentSession = request._chatSubmittedAttachmentSession || '';
 						var accepted = false;
@@ -2773,7 +2775,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 								rememberSubmittedMessage(submittedMessage);
 								resetMessageHistoryNavigation();
-								if (messageInput && messageInput.value === submittedMessage) messageInput.value = '';
+								if (!preserveSubmittedMessage && messageInput && messageInput.value === submittedMessage) messageInput.value = '';
 								if (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();
 							}
 						}

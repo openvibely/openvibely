@@ -264,6 +264,145 @@ window.htmx = {
 	runHeadlessChromeFixture(t, chrome, server.URL+"/", "iOS composer shortcuts", 5000, 20*time.Second)
 }
 
+func TestChatComposerPreservesSteerInfoDuringSteerAndQueueInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+
+	type requestRecord struct {
+		Path string
+		Form url.Values
+	}
+
+	runSurface := func(t *testing.T, surface string, config ChatInputFormConfig, messagesID, inputID, sendPath, steerPath string) {
+		t.Helper()
+		var form bytes.Buffer
+		if err := ChatInputForm(config).Render(context.Background(), &form); err != nil {
+			t.Fatalf("render %s composer: %v", surface, err)
+		}
+
+		var mu sync.Mutex
+		var records []requestRecord
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/htmx.js":
+				w.Header().Set("Content-Type", "text/javascript")
+				_, _ = w.Write(htmx204)
+			case sendPath, steerPath:
+				_ = r.ParseForm()
+				if r.PostForm.Get("message") == "explicit clear" {
+					time.Sleep(150 * time.Millisecond)
+				}
+				mu.Lock()
+				records = append(records, requestRecord{Path: r.URL.Path, Form: r.PostForm})
+				mu.Unlock()
+				w.Header().Set("Content-Type", "text/html")
+				if r.URL.Path == steerPath {
+					_, _ = w.Write([]byte(`<div data-test-steering-row="true">steering pending</div>`))
+					return
+				}
+				_, _ = w.Write([]byte(`<div data-test-queued-row="true">queued pending</div>`))
+			case "/":
+				w.Header().Set("Content-Type", "text/html")
+				_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
+<script src="/htmx.js"></script>
+<div id=%q><div data-execution-pair="true" data-exec-status="running" data-exec-id="active-turn"></div></div>%s
+<div id="browser-result">pending</div>
+<script>
+(async function() {
+  function fail(message) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', message); document.getElementById('browser-result').textContent = 'FAIL:' + message; throw new Error(message); }
+  function key(input, options) { input.dispatchEvent(new KeyboardEvent('keydown', Object.assign({key:'Enter', bubbles:true, cancelable:true}, options || {}))); }
+  function click(button, options) { button.dispatchEvent(new MouseEvent('click', Object.assign({bubbles:true, cancelable:true}, options || {}))); }
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms || 180); }); }
+  var input = document.getElementById(%q);
+  var form = document.getElementById(%q);
+  var apple = input.placeholder.includes('⌘+⏎ steers');
+  var modifier = apple ? {metaKey:true} : {ctrlKey:true};
+
+  input.value = 'first steer info';
+  key(input, modifier);
+  await wait();
+  if (input.value !== 'first steer info') fail('steer cleared the first visible steer info');
+
+  input.value = 'second steer info';
+  click(document.querySelector('#' + form.id + '-primary-action button'), modifier);
+  await wait();
+  if (input.value !== 'second steer info') fail('second steer did not preserve changed steer info');
+
+  input.value = 'queued steer info';
+  key(input);
+  await wait();
+  if (input.value !== 'queued steer info') fail('active queue cleared visible steer info');
+
+  input.value = 'explicit clear';
+  key(input, modifier);
+  input.value = '';
+  await wait(260);
+  if (input.value !== '') fail('explicitly cleared steer info was restored');
+
+  document.getElementById(%q).innerHTML = '';
+  document.getElementById(form.id + '-primary-action').outerHTML = '<div id="' + form.id + '-primary-action" data-composer-running="false"><button type="submit" aria-label="Send message">Send</button></div>';
+  await wait(50);
+  input.value = 'idle send clears';
+  key(input);
+  await wait();
+  if (input.value !== '') fail('ordinary idle send no longer clears the draft');
+
+  document.getElementById('browser-result').textContent = 'PASS';
+  document.body.setAttribute('data-test-result', 'pass');
+})().catch(function(error) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', error.message); });
+</script></body></html>`, messagesID, form.String(), inputID, config.FormID, messagesID)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer server.Close()
+
+		runHeadlessChromeFixture(t, chrome, server.URL+"/", surface+" steer info persistence", 10000, 25*time.Second)
+
+		mu.Lock()
+		defer mu.Unlock()
+		if len(records) != 5 {
+			t.Fatalf("%s recorded requests = %d, want 5: %+v", surface, len(records), records)
+		}
+		wantPaths := []string{steerPath, steerPath, sendPath, steerPath, sendPath}
+		wantMessages := []string{"first steer info", "second steer info", "queued steer info", "explicit clear", "idle send clears"}
+		for i := range wantPaths {
+			if records[i].Path != wantPaths[i] {
+				t.Fatalf("%s request %d path = %q, want %q: %+v", surface, i, records[i].Path, wantPaths[i], records)
+			}
+			if got := records[i].Form.Get("message"); got != wantMessages[i] {
+				t.Fatalf("%s request %d message = %q, want %q: %+v", surface, i, got, wantMessages[i], records)
+			}
+		}
+	}
+
+	t.Run("chat", func(t *testing.T) {
+		runSurface(t, "chat", ChatInputFormConfig{
+			FormID:        "chat-form",
+			InputID:       "message-input",
+			PostEndpoint:  "/chat/send",
+			SteerEndpoint: "/chat/steer",
+			StopEndpoint:  "/chat/cancel",
+			TargetID:      "chat-messages",
+			IsRunning:     true,
+			ActiveTurnID:  "active-turn",
+		}, "chat-messages", "message-input", "/chat/send", "/chat/steer")
+	})
+
+	t.Run("task thread", func(t *testing.T) {
+		runSurface(t, "task thread", ChatInputFormConfig{
+			FormID:        "task-thread-form",
+			InputID:       "task-message-input",
+			PostEndpoint:  "/tasks/task-1/thread",
+			SteerEndpoint: "/tasks/task-1/thread/steer",
+			StopEndpoint:  "/tasks/task-1/cancel?composer_stop=1",
+			TargetID:      "task-thread-messages",
+			TaskID:        "task-1",
+			IsRunning:     true,
+			ActiveTurnID:  "active-turn",
+		}, "task-thread-messages", "task-message-input", "/tasks/task-1/thread", "/tasks/task-1/thread/steer")
+	})
+}
+
 func TestChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
@@ -331,7 +470,7 @@ func TestChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
 
   if (!document.querySelector('#chat-form #pending-thread-inputs [data-test-steering-row="true"]')) fail('deferred click steer did not render in pending inputs');
   if (document.querySelector('#chat-messages [data-test-steering-row="true"]')) fail('deferred click steer rendered in transcript');
-  if (input.value !== '') fail('accepted deferred click steer did not clear its draft');
+  if (input.value !== 'immediate click steer') fail('accepted deferred click steer did not preserve its draft');
   if (session.value !== '') fail('accepted deferred click steer did not clear its attachment session');
   document.getElementById('browser-result').textContent = 'PASS';
   document.body.setAttribute('data-test-result', 'pass');
