@@ -762,7 +762,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.ProjectRepoRoot,
 	)
 	automationExternalStateSvc := service.NewAutomationExternalStateService(automationRepo, taskPullRequestRepo, projectRepo, githubSvc)
+	automationLiveViewTracker := service.NewAutomationLiveViewTracker()
 	automationReconciler.SetAutomationExternalStateService(automationExternalStateSvc)
+	automationReconciler.SetAutomationLiveViewTracker(automationLiveViewTracker)
 	automationSaveValidator.SetGitHubConnectionProvider(githubSvc)
 	automationCapabilitySvc.SetGitHubConnectionProvider(githubSvc)
 	llmSvc.SetGitHubIssueRuntimeProvider(githubSvc)
@@ -1086,6 +1088,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	h.SetTaskGoalService(taskGoalSvc)
 	h.SetAutomationServices(automationGraphSvc, automationRegistrationSvc)
 	h.SetAutomationExternalStateService(automationExternalStateSvc)
+	h.SetAutomationLiveViewTracker(automationLiveViewTracker)
 	h.SetAutomationBuilderServices(automationDraftSvc, automationCapabilitySvc, automationSaveValidator, automationCompiler, automationConfirmationSvc, automationLifecycleSvc)
 	workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 	h.SetFileChangeBroadcaster(fileChangeBroadcaster)

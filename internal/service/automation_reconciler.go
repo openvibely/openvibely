@@ -20,15 +20,17 @@ type AutomationReconciler struct {
 	executionRepo       *repository.ExecutionRepo
 	workerSvc           *WorkerService
 	externalStateSvc    *AutomationExternalStateService
+	liveViewTracker     *AutomationLiveViewTracker
 	interval            time.Duration
 	externalRefreshEach time.Duration
+	liveViewWindow      time.Duration
 	cancel              context.CancelFunc
 	wg                  sync.WaitGroup
 	updateTracker       *update.WorkTracker
 }
 
 func NewAutomationReconciler(automationRepo *repository.AutomationRepo, executionRepo *repository.ExecutionRepo, workerSvc *WorkerService) *AutomationReconciler {
-	return &AutomationReconciler{automationRepo: automationRepo, executionRepo: executionRepo, workerSvc: workerSvc, interval: 15 * time.Second, externalRefreshEach: 5 * time.Minute}
+	return &AutomationReconciler{automationRepo: automationRepo, executionRepo: executionRepo, workerSvc: workerSvc, interval: 15 * time.Second, externalRefreshEach: 5 * time.Minute, liveViewWindow: time.Minute}
 }
 
 func (r *AutomationReconciler) SetUpdateWorkTracker(tracker *update.WorkTracker) {
@@ -36,10 +38,17 @@ func (r *AutomationReconciler) SetUpdateWorkTracker(tracker *update.WorkTracker)
 }
 
 // SetAutomationExternalStateService enables background refresh of Automations'
-// tracked GitHub pull request state, so the "Refresh GitHub state" action on the
-// Automation preview page stays fresh without requiring a manual click.
+// tracked GitHub pull request state while their Live/Preview page is open, so
+// it stays fresh without requiring a manual click.
 func (r *AutomationReconciler) SetAutomationExternalStateService(svc *AutomationExternalStateService) {
 	r.externalStateSvc = svc
+}
+
+// SetAutomationLiveViewTracker scopes background external-state refresh to
+// Automations whose Live page was recently viewed, avoiding unnecessary
+// GitHub API calls for automations nobody is looking at.
+func (r *AutomationReconciler) SetAutomationLiveViewTracker(tracker *AutomationLiveViewTracker) {
+	r.liveViewTracker = tracker
 }
 
 func (r *AutomationReconciler) Start(ctx context.Context) {
@@ -187,6 +196,9 @@ func (r *AutomationReconciler) refreshStaleExternalState(ctx context.Context) er
 	}
 	for _, pair := range stale {
 		projectID, automationID := pair[0], pair[1]
+		if r.liveViewTracker != nil && !r.liveViewTracker.IsRecentlyViewed(projectID, automationID, r.liveViewWindow) {
+			continue
+		}
 		if _, err := r.externalStateSvc.Refresh(ctx, projectID, automationID, now); err != nil {
 			applog.Infof("[automation-reconciler] external state refresh failed project=%s automation=%s: %v", projectID, automationID, err)
 			continue

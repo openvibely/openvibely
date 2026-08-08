@@ -18,6 +18,10 @@ func (h *Handler) SetAutomationExternalStateService(external *service.Automation
 	h.automationExternalStateSvc = external
 }
 
+func (h *Handler) SetAutomationLiveViewTracker(tracker *service.AutomationLiveViewTracker) {
+	h.automationLiveViewTracker = tracker
+}
+
 func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftService, capabilities *service.AutomationCapabilitySnapshotBuilder, validator *service.AutomationSaveValidator, compiler *service.AutomationCompiler, confirmation *service.AutomationConfirmationService, lifecycle *service.AutomationLifecycleService) {
 	h.automationDraftSvc = drafts
 	h.automationCapabilitySvc = capabilities
@@ -74,6 +78,7 @@ func (h *Handler) GetAutomationLive(c echo.Context) error {
 	if graph == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "automation not found")
 	}
+	h.automationLiveViewTracker.MarkViewed(projectID, graph.Automation.ID)
 	deleteAvailable := true
 	currentTemplateRevision := service.CurrentAutomationTemplateRevision(graph.Version.AdapterKey)
 	graph.TemplateUpdateAvailable = currentTemplateRevision > 0 &&

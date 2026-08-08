@@ -45,6 +45,7 @@ type Handler struct {
 	automationConfirmationSvc  *service.AutomationConfirmationService
 	automationLifecycleSvc     *service.AutomationLifecycleService
 	automationExternalStateSvc *service.AutomationExternalStateService
+	automationLiveViewTracker  *service.AutomationLiveViewTracker
 	llmConfigRepo              *repository.LLMConfigRepo
 	taskRepo                   *repository.TaskRepo
 	scheduleRepo               *repository.ScheduleRepo
