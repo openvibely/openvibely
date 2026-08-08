@@ -99,6 +99,136 @@ func TestUpdateTask_EditFormSavesGoalAndRefreshesReadOnlySummary(t *testing.T) {
 	}
 }
 
+func TestSetTaskGoalOnCompletedTaskDoesNotStartWork(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Completed Goal Save", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original prompt", Priority: 2}
+	if err := tc.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithPromptSent(task.Prompt).WithOutput("done").Build()
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/goal").WithForm(url.Values{"goal": {"New metadata-only goal"}}).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("set goal status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	assertCompletedTaskEditDidNotStartWork(t, tc, task.ID, models.CategoryCompleted, models.StatusCompleted, 1)
+	goal, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	if goal == nil || goal.Objective != "New metadata-only goal" || goal.Status != models.TaskGoalStatusActive {
+		t.Fatalf("unexpected goal after save: %#v", goal)
+	}
+}
+
+func TestUpdateTaskGoalOnCompletedTaskDoesNotReactivateFromOriginalPrompt(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Completed Edit Goal", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original task prompt", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithPromptSent(task.Prompt).WithOutput("done").Build()
+
+	form := url.Values{
+		"title":              {task.Title},
+		"category":           {string(models.CategoryActive)},
+		"priority":           {"3"},
+		"prompt":             {task.Prompt},
+		"tag":                {""},
+		"agent_id":           {agent.ID},
+		"goal_present":       {"1"},
+		"goal":               {"Review the completed work later"},
+		"auto_merge_present": {"1"},
+	}
+	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update task status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	assertCompletedTaskEditDidNotStartWork(t, tc, task.ID, models.CategoryActive, models.StatusCompleted, 1)
+	goal, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get goal: %v", err)
+	}
+	if goal == nil || goal.Objective != "Review the completed work later" {
+		t.Fatalf("unexpected goal after edit: %#v", goal)
+	}
+}
+
+func TestUpdateTaskMetadataOnCompletedTaskDoesNotStartWork(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().WithName("Original Model").Build()
+	newAgent := tc.CreateLLMConfig().WithName("New Model").AsDefault().Build()
+	task := &models.Task{ProjectID: project.ID, Title: "Completed Metadata", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "original prompt", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithPromptSent(task.Prompt).WithOutput("done").Build()
+
+	form := url.Values{
+		"title":              {"Renamed Completed Metadata"},
+		"category":           {string(models.CategoryCompleted)},
+		"priority":           {"4"},
+		"prompt":             {"edited prompt should not run"},
+		"tag":                {string(models.TagBug)},
+		"agent_id":           {newAgent.ID},
+		"auto_merge_present": {"1"},
+	}
+	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update task status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	assertCompletedTaskEditDidNotStartWork(t, tc, task.ID, models.CategoryCompleted, models.StatusCompleted, 1)
+	updated, err := tc.taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated.Title != "Renamed Completed Metadata" || updated.Prompt != "edited prompt should not run" || updated.Priority != 4 || updated.AgentID == nil || *updated.AgentID != newAgent.ID {
+		t.Fatalf("metadata was not saved: %#v", updated)
+	}
+}
+
+func assertCompletedTaskEditDidNotStartWork(t *testing.T, tc *TestContext, taskID string, wantCategory models.TaskCategory, wantStatus models.TaskStatus, wantExecutions int) {
+	t.Helper()
+	ctx := context.Background()
+	updated, err := tc.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if updated == nil || updated.Category != wantCategory || updated.Status != wantStatus {
+		t.Fatalf("task after metadata save = %#v, want category=%s status=%s", updated, wantCategory, wantStatus)
+	}
+	execs, err := tc.execRepo.ListByTaskChronological(ctx, taskID)
+	if err != nil {
+		t.Fatalf("list executions: %v", err)
+	}
+	if len(execs) != wantExecutions {
+		t.Fatalf("execution count after metadata save = %d, want %d; executions=%#v", len(execs), wantExecutions, execs)
+	}
+	for _, exec := range execs {
+		if exec.Status == models.ExecRunning || exec.PromptSent == "edited prompt should not run" {
+			t.Fatalf("metadata save created or started execution: %#v", exec)
+		}
+	}
+	var inputCount int
+	if err := tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE task_id = ?`, taskID).Scan(&inputCount); err != nil {
+		t.Fatalf("count thread inputs: %v", err)
+	}
+	if inputCount != 0 {
+		t.Fatalf("thread input count after metadata save = %d, want 0", inputCount)
+	}
+}
+
 func TestTaskGoalPanelLabelsUserStoppedPause(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

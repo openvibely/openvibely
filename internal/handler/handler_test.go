@@ -2015,7 +2015,7 @@ func TestHandler_UpdateTask_CategoryChangeFromActiveQueuedToCompletedStopsTask(t
 	assert.Equal(t, service.TaskGoalStoppedByUserReason, paused.Reason)
 }
 
-func TestHandler_UpdateTask_CategoryChangeFromCompletedToActive(t *testing.T) {
+func TestHandler_UpdateTask_CategoryChangeFromCompletedToActiveIsMetadataOnly(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
 	task := createTask(t, tc.handler, "default", "Completed Task", func(tk *models.Task) {
@@ -2038,15 +2038,21 @@ func TestHandler_UpdateTask_CategoryChangeFromCompletedToActive(t *testing.T) {
 	if updated.Category != models.CategoryActive {
 		t.Errorf("expected category 'active', got %q", updated.Category)
 	}
-	if updated.Status != models.StatusPending {
-		t.Errorf("expected status 'pending' after moving to active, got %q", updated.Status)
+	if updated.Status != models.StatusCompleted {
+		t.Errorf("expected status to remain completed after metadata edit, got %q", updated.Status)
 	}
+	execs, err := tc.execRepo.ListByTaskChronological(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Empty(t, execs, "task detail metadata save must not create an execution")
+	var threadInputs int
+	require.NoError(t, tc.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_inputs WHERE task_id = ?`, task.ID).Scan(&threadInputs))
+	assert.Equal(t, 0, threadInputs, "task detail metadata save must not queue a thread input")
 	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
 	require.NoError(t, err)
 	require.NotNil(t, resumed)
 	assert.Equal(t, goal.GoalID, resumed.GoalID)
-	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
-	assert.Equal(t, "resumed by user", resumed.Reason)
+	assert.Equal(t, models.TaskGoalStatusPaused, resumed.Status)
+	assert.Equal(t, service.TaskGoalStoppedByUserReason, resumed.Reason)
 }
 
 func TestHandler_UpdateTaskStatus_DragDrop(t *testing.T) {

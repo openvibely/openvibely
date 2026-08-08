@@ -1231,23 +1231,20 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 		}
 	}
 
-	// Category transitions that start or stop execution use the same lifecycle path as drag & drop.
-	if oldCategory != newCategory && newCategory == models.CategoryActive {
-		applog.Infof("[handler] UpdateTask category changed to Active, resetting status and auto-submitting id=%s", taskID)
-		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, models.CategoryActive); err != nil {
-			applog.Infof("[handler] UpdateTask error starting active task: %v", err)
-			return err
-		}
-	} else if stopActiveViaCategoryUpdate {
+	// Task detail edits are metadata saves. They may update the stored category for
+	// display/sorting, but must not activate or enqueue work; explicit Run Now,
+	// drag/drop category changes, schedules, and task-thread follow-ups own those
+	// execution side effects.
+	if stopActiveViaCategoryUpdate {
 		applog.Infof("[handler] UpdateTask category changed from Active while %s, cancelling id=%s", oldStatus, taskID)
 		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, newCategory); err != nil {
 			applog.Infof("[handler] UpdateTask error stopping active task: %v", err)
 			return err
 		}
 	} else if oldCategory != newCategory {
-		applog.Infof("[handler] UpdateTask category changed %s->%s id=%s", oldCategory, newCategory, taskID)
-		if err := h.taskSvc.UpdateCategory(c.Request().Context(), taskID, newCategory); err != nil {
-			applog.Infof("[handler] UpdateTask error changing category: %v", err)
+		applog.Infof("[handler] UpdateTask metadata category changed %s->%s id=%s", oldCategory, newCategory, taskID)
+		if err := h.taskRepo.UpdateCategory(c.Request().Context(), taskID, newCategory); err != nil {
+			applog.Infof("[handler] UpdateTask error changing metadata category: %v", err)
 			return err
 		}
 	}
