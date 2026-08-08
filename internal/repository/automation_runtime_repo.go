@@ -1390,23 +1390,70 @@ func discardStaleAutomationWorkItemProjection(ctx context.Context, exec SQLExecu
 	if versionExists > 0 {
 		return nil
 	}
-	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_transitions WHERE work_item_id = ?`, item.ID); err != nil {
+	workItemIDs, err := staleAutomationWorkItemDescendantIDs(ctx, exec, projectID, automationID, item.ID)
+	if err != nil {
+		return err
+	}
+	if len(workItemIDs) == 0 {
+		return nil
+	}
+	placeholders, args := automationWorkItemIDArgs(workItemIDs)
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_thread_input_bindings WHERE work_item_id IN (`+placeholders+`)`, args...); err != nil {
+		return fmt.Errorf("discarding stale automation thread input bindings: %w", err)
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_transitions WHERE work_item_id IN (`+placeholders+`)`, args...); err != nil {
 		return fmt.Errorf("discarding stale automation transitions: %w", err)
 	}
-	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_work_item_positions WHERE work_item_id = ?`, item.ID); err != nil {
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_work_item_positions WHERE work_item_id IN (`+placeholders+`)`, args...); err != nil {
 		return fmt.Errorf("discarding stale automation work item positions: %w", err)
 	}
 	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_activity_resources
-		WHERE activity_id IN (SELECT id FROM automation_activities WHERE work_item_id = ?)`, item.ID); err != nil {
+		WHERE activity_id IN (SELECT id FROM automation_activities WHERE work_item_id IN (`+placeholders+`))`, args...); err != nil {
 		return fmt.Errorf("discarding stale automation activity resources: %w", err)
 	}
-	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_activities WHERE work_item_id = ?`, item.ID); err != nil {
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_activities WHERE work_item_id IN (`+placeholders+`)`, args...); err != nil {
 		return fmt.Errorf("discarding stale automation activities: %w", err)
 	}
-	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_work_items WHERE id = ? AND automation_id = ? AND project_id = ?`, item.ID, automationID, projectID); err != nil {
-		return fmt.Errorf("discarding stale automation work item: %w", err)
+	for _, workItemID := range workItemIDs {
+		if _, err := exec.ExecContext(ctx, `DELETE FROM automation_work_items WHERE id = ? AND automation_id = ? AND project_id = ?`, workItemID, automationID, projectID); err != nil {
+			return fmt.Errorf("discarding stale automation work item: %w", err)
+		}
 	}
 	return nil
+}
+
+func staleAutomationWorkItemDescendantIDs(ctx context.Context, exec SQLExecutor, projectID, automationID, rootWorkItemID string) ([]string, error) {
+	rows, err := exec.QueryContext(ctx, `WITH RECURSIVE descendants(id, depth) AS (
+		SELECT id, 0 FROM automation_work_items WHERE id = ? AND automation_id = ? AND project_id = ?
+		UNION ALL
+		SELECT child.id, descendants.depth + 1 FROM automation_work_items child
+		JOIN descendants ON child.parent_work_item_id = descendants.id
+		WHERE child.automation_id = ? AND child.project_id = ?
+	)
+	SELECT id FROM descendants ORDER BY depth DESC`, rootWorkItemID, automationID, projectID, automationID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("loading stale automation work item descendants: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func automationWorkItemIDArgs(ids []string) (string, []any) {
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, 0, len(ids))
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	return placeholders, args
 }
 
 func upsertAutomationActivity(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding, item *models.AutomationWorkItem) (*models.AutomationActivity, error) {

@@ -1603,6 +1603,21 @@ func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t 
 		VALUES ('stale-github-issue-work-item', ?, ?, 'discarded-version', 'discarded-inbox-node', 'waiting')`,
 		fixture.project.ID, fixture.definition.Automation.ID)
 	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO thread_inputs
+		(id, scope, project_id, task_id, input_mode, input_status, content, queue_position, source)
+		VALUES ('stale-thread-input', 'task_thread', ?, ?, 'queued', 'pending', 'stale queued follow-up', 1, 'test')`,
+		fixture.project.ID, fixture.task.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_thread_input_bindings
+		(id, thread_input_id, project_id, automation_id, version_id, node_id, work_item_id, binding_key)
+		VALUES ('stale-thread-input-binding', 'stale-thread-input', ?, ?, 'discarded-version', 'discarded-inbox-node', 'stale-github-issue-work-item', 'stale:0')`,
+		fixture.project.ID, fixture.definition.Automation.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_work_items
+		(id, project_id, automation_id, origin_version_id, parent_work_item_id, work_item_key, kind, title, status)
+		VALUES ('stale-child-work-item', ?, ?, 'discarded-version', 'stale-github-issue-work-item', 'stale-child-key', 'work', 'Stale child', 'waiting')`,
+		fixture.project.ID, fixture.definition.Automation.ID)
+	require.NoError(t, err)
 	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_transitions
 		(project_id, automation_id, version_id, work_item_id, activity_id, to_node_id, event_key, state)
 		VALUES (?, ?, 'discarded-version', 'stale-github-issue-work-item', 'stale-github-issue-activity', 'discarded-inbox-node', 'stale-transition', 'waiting')`,
@@ -1636,6 +1651,10 @@ func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t 
 	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_activities WHERE id = 'stale-github-issue-activity'`).Scan(&staleRows))
 	require.Zero(t, staleRows)
 	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_transitions WHERE event_key = 'stale-transition'`).Scan(&staleRows))
+	require.Zero(t, staleRows)
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_thread_input_bindings WHERE id = 'stale-thread-input-binding'`).Scan(&staleRows))
+	require.Zero(t, staleRows)
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_work_items WHERE id = 'stale-child-work-item'`).Scan(&staleRows))
 	require.Zero(t, staleRows)
 }
 
