@@ -1347,7 +1347,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								if (focused && currentLine >= start && currentLine <= end && (!active || column > Number(active.dataset.yamlRailColumn))) active = rail;
 							});
 							if (active) {
-								active.style.backgroundColor = 'oklch(var(--p))';
+								var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+								active.style.backgroundColor = isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)';
 								active.style.width = '2px';
 							}
 						}
@@ -1537,7 +1538,7 @@ yamlViewport.scrollTop = 0;
 								validateYAMLWhileTyping();
 								});						updateYAMLLineNumbers();
 						validateYAMLWhileTyping();
-						yamlEditor.addEventListener('click', updateYAMLActiveRail);
+						yamlEditor.addEventListener('mousedown', function() { window.requestAnimationFrame(updateYAMLActiveRail); });
 						yamlEditor.addEventListener('keyup', updateYAMLActiveRail);
 						yamlEditor.addEventListener('input', updateYAMLActiveRail);
 						yamlEditor.addEventListener('focus', updateYAMLActiveRail);
