@@ -1885,8 +1885,8 @@ yamlViewport.scrollTop = 0;
 					});
 					var automationName = builder.querySelector('[data-automation-name]');
 					if (automationName) automationName.addEventListener('input', syncCandidate);
-					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor) syncCandidate(); });
-					builder.addEventListener('change', function(event) { if (event.target !== yamlEditor) syncCandidate(); });
+					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
+					builder.addEventListener('change', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
 					builder.addEventListener('submit', function() {
 						if (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {
 							var submittedYAML = automationYAMLValue();

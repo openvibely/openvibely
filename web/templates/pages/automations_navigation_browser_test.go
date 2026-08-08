@@ -1185,8 +1185,19 @@ window.addEventListener('DOMContentLoaded', function() {
     click('[data-automation-view-graph]', 'Graph view button');
     if (!isVisible(graph) || isVisible(yaml)) fail('Graph switch did not restore the canvas');
 
+    click('[data-automation-view-yaml]', 'YAML view button before Add node dialog');
+    var yamlCommentMarker = '# manual edit that must survive typing in the Add node dialog';
+    editor.value = editor.value + '\n' + yamlCommentMarker + '\n';
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+    var yamlBeforeTypingNodeName = editor.value;
+    if (yamlBeforeTypingNodeName.indexOf(yamlCommentMarker) < 0) fail('manual YAML edit was not applied before opening the Add node dialog');
     document.getElementById('automation-node-dialog').showModal();
-    document.querySelector('[data-automation-node-dialog] [name="node_name"]').value = 'Fourth';
+    var nodeNameInput = document.querySelector('[data-automation-node-dialog] [name="node_name"]');
+    nodeNameInput.value = 'Fourth';
+    nodeNameInput.dispatchEvent(new Event('input', {bubbles: true}));
+    nodeNameInput.dispatchEvent(new Event('change', {bubbles: true}));
+    if (editor.value !== yamlBeforeTypingNodeName) fail('typing a name in the Add node dialog must not update or reformat the YAML editor before the dialog is saved: ' + editor.value);
     document.querySelector('[data-automation-node-dialog] [name="node_kind"]').value = 'task';
     document.querySelector('[data-automation-node-dialog] form').dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
     var addNodeSubmittedYAML = document.querySelector('[data-automation-node-dialog] [data-automation-yaml-submission]').value;
