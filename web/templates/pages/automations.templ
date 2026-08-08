@@ -1828,11 +1828,17 @@ yamlViewport.scrollTop = 0;
 							if (event.button !== 0 || event.target.closest('[data-connect-port], [data-delete-node]')) return;
 							event.preventDefault(); event.stopPropagation(); try { group.setPointerCapture(event.pointerId); } catch (_) {}
 						var start = graphPoint(event), originX = Number(group.dataset.nodeX), originY = Number(group.dataset.nodeY);
+						var dragFrame = 0;
 						function move(moveEvent) {
 							var point = graphPoint(moveEvent);
-							renderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges(); syncCandidate();
+							renderNode(group, Math.round(originX + point.x - start.x), Math.round(originY + point.y - start.y)); renderEdges();
+							if (!dragFrame) dragFrame = requestAnimationFrame(function() { dragFrame = 0; syncCandidate(); });
 						}
-						function done() { group.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done); }
+						function done() {
+							group.removeEventListener('pointermove', move); group.removeEventListener('pointerup', done); group.removeEventListener('pointercancel', done);
+							if (dragFrame) { cancelAnimationFrame(dragFrame); dragFrame = 0; }
+							syncCandidate();
+						}
 						group.addEventListener('pointermove', move); group.addEventListener('pointerup', done); group.addEventListener('pointercancel', done);
 					});
 						group.addEventListener('keydown', function(event) {

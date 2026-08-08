@@ -1247,11 +1247,21 @@ window.addEventListener('DOMContentLoaded', function() {
     var first = document.querySelector('[data-node-key="first"]');
     if (!first) fail('missing first node');
     var originalTransform = first.getAttribute('transform');
+    var yamlHighlightLayer = document.querySelector('[data-automation-yaml-highlight]');
+    var highlightRebuildCount = 0;
+    var highlightObserver = new MutationObserver(function(mutations) { highlightRebuildCount += mutations.length; });
+    highlightObserver.observe(yamlHighlightLayer, {childList: true});
     first.dispatchEvent(pointEvent('pointerdown', first, 1));
-    var move = pointEvent('pointermove', first, 1);
-    Object.defineProperties(move, {clientX: {value: move.clientX + 40}, clientY: {value: move.clientY + 30}});
-    first.dispatchEvent(move);
+    for (var dragStep = 1; dragStep <= 12; dragStep++) {
+      var stepMove = pointEvent('pointermove', first, 1);
+      Object.defineProperties(stepMove, {clientX: {value: stepMove.clientX + dragStep * 3}, clientY: {value: stepMove.clientY + dragStep * 2}});
+      first.dispatchEvent(stepMove);
+    }
+    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+    if (highlightRebuildCount > 1) fail('dragging a node must throttle YAML highlight rebuilds to at most one per animation frame to avoid visible color flashing, saw ' + highlightRebuildCount + ' rebuilds for 12 pointermove events');
+    await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     first.dispatchEvent(pointEvent('pointerup', first, 1));
+    highlightObserver.disconnect();
     if (first.getAttribute('transform') === originalTransform) fail('dragging a canvas node did not move it');
     if (editor.value.includes('position: {"x":0,"y":0}')) fail('node drag did not update YAML position: ' + editor.value);
     contains(editor, 'YAML-only configuration', 'node drag discarded YAML-only configuration');
