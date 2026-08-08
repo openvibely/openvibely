@@ -959,6 +959,7 @@ if (!fold.classList.contains('h-6') || !fold.classList.contains('w-6') || !fold.
     var beforeVisibleValue = editor.value;
     var typedCursor = beforeVisibleValue.indexOf('visible_0') + 'visible_0'.length;
     editor.setSelectionRange(typedCursor, typedCursor);
+    editor.dispatchEvent(new Event('beforeinput', {bubbles: true, cancelable: true}));
     editor.value = beforeVisibleValue.slice(0, typedCursor) + 'Z' + beforeVisibleValue.slice(typedCursor);
     editor.setSelectionRange(typedCursor + 1, typedCursor + 1);
     editor.dispatchEvent(new Event('input', {bubbles: true}));
@@ -967,8 +968,10 @@ if (!fold.classList.contains('h-6') || !fold.classList.contains('w-6') || !fold.
     if (!editor.value.includes('visible_0Z')) fail('typed character while folded did not apply to the visible line');
     var multilineBefore = editor.value;
     var multilineCursor = multilineBefore.indexOf('visible_1');
-    editor.value = multilineBefore.slice(0, multilineCursor) + 'inserted_a: "x"\ninserted_b: "y"\n' + multilineBefore.slice(multilineCursor);
     editor.setSelectionRange(multilineCursor, multilineCursor);
+    editor.dispatchEvent(new Event('beforeinput', {bubbles: true, cancelable: true}));
+    editor.value = multilineBefore.slice(0, multilineCursor) + 'inserted_a: "x"\ninserted_b: "y"\n' + multilineBefore.slice(multilineCursor);
+    editor.setSelectionRange(multilineCursor + 'inserted_a: "x"\ninserted_b: "y"\n'.length, multilineCursor + 'inserted_a: "x"\ninserted_b: "y"\n'.length);
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     if (!highlight.querySelector('[data-automation-yaml-fold-summary]')) fail('a multi-line edit while YAML sections are folded must keep folds intact');

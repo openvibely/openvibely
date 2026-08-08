@@ -1162,6 +1162,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						var yamlSourceValue = yamlEditor ? yamlEditor.value : '';
 						var yamlVisibleLineMap = [];
 						var yamlRenderingValue = false;
+						var yamlPendingSelectionStart = 0;
+						var yamlPendingSelectionEnd = 0;
+						var yamlPendingValue = '';
 						var yamlParseTimer = 0;					var yamlParseRequest = 0;
 					var yamlLineLayoutFrame = 0;
 						function yamlActiveScrollTop() { return yamlEditor ? yamlEditor.scrollTop : 0; }
@@ -1321,6 +1324,15 @@ yamlViewport.scrollTop = 0;
 							}
 							queueYAMLLineLayout();
 						}
+						function yamlOffsetToLineCol(text, offset) {
+							var prefix = text.slice(0, offset).split('\n');
+							return {line: prefix.length - 1, col: prefix[prefix.length - 1].length};
+						}
+						function yamlLineColToSourceOffset(sourceLines, sourceLineIndex, col) {
+							var offset = 0;
+							for (var i = 0; i < sourceLineIndex; i++) offset += sourceLines[i].length + 1;
+							return offset + col;
+						}
 						function syncYAMLHighlightScroll() {
 							if (!yamlEditor) return;
 							if (yamlHighlight) yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';
@@ -1348,24 +1360,38 @@ yamlViewport.scrollTop = 0;
 					}
 					if (yamlEditor) {
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
+							yamlEditor.addEventListener('beforeinput', function() {
+								if (yamlRenderingValue) return;
+								yamlPendingSelectionStart = yamlEditor.selectionStart;
+								yamlPendingSelectionEnd = yamlEditor.selectionEnd;
+								yamlPendingValue = yamlEditor.value;
+							});
 							yamlEditor.addEventListener('input', function() {
 								if (yamlRenderingValue) return;
 								if (yamlFoldedLines.size === 0) {
 									yamlSourceValue = yamlEditor.value;
 								} else {
 									var oldSourceLines = yamlSourceValue.split('\n');
-									var oldVisible = yamlVisibleLineMap.map(function(sourceIndex) { return oldSourceLines[sourceIndex]; });
-									var newVisible = yamlEditor.value.split('\n');
-									var maxCommon = Math.min(oldVisible.length, newVisible.length);
-									var prefix = 0;
-									while (prefix < maxCommon && oldVisible[prefix] === newVisible[prefix]) prefix++;
-									var suffix = 0;
-									while (suffix < maxCommon - prefix && oldVisible[oldVisible.length - 1 - suffix] === newVisible[newVisible.length - 1 - suffix]) suffix++;
-									var sourceStart = prefix < yamlVisibleLineMap.length ? yamlVisibleLineMap[prefix] : oldSourceLines.length;
-									var oldTailIndex = oldVisible.length - suffix;
-									var sourceEnd = oldTailIndex < yamlVisibleLineMap.length ? yamlVisibleLineMap[oldTailIndex] : oldSourceLines.length;
-									var replacement = newVisible.slice(prefix, newVisible.length - suffix);
-									yamlSourceValue = oldSourceLines.slice(0, sourceStart).concat(replacement, oldSourceLines.slice(sourceEnd)).join('\n');
+									var newVisibleValue = yamlEditor.value;
+									var preEditVisibleValue = yamlPendingValue || newVisibleValue;
+									var preEditStart = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionStart);
+									var preEditEnd = yamlOffsetToLineCol(preEditVisibleValue, yamlPendingSelectionEnd);
+									var postEditOffset = yamlEditor.selectionStart;
+									var startVisibleLine = Math.min(preEditStart.line, yamlVisibleLineMap.length - 1);
+									var endVisibleLine = Math.min(preEditEnd.line, yamlVisibleLineMap.length - 1);
+									if (startVisibleLine < 0 || endVisibleLine < 0 || !yamlVisibleLineMap.length) {
+										yamlSourceValue = newVisibleValue;
+									} else {
+										var sourceStartLine = yamlVisibleLineMap[startVisibleLine];
+										var sourceEndLine = yamlVisibleLineMap[endVisibleLine];
+										var sourceStartOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, preEditStart.col);
+										var sourceEndOffset = yamlLineColToSourceOffset(oldSourceLines, sourceEndLine, preEditEnd.col);
+										var visibleEditStartOffset = 0;
+										for (var k = 0; k < startVisibleLine; k++) visibleEditStartOffset += (yamlVisibleLineMap[k] !== undefined ? oldSourceLines[yamlVisibleLineMap[k]].length : 0) + 1;
+										visibleEditStartOffset += preEditStart.col;
+										var insertedText = newVisibleValue.slice(visibleEditStartOffset, postEditOffset);
+										yamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + insertedText + yamlSourceValue.slice(sourceEndOffset);
+									}
 								}
 								updateYAMLLineNumbers();
 								validateYAMLWhileTyping();
