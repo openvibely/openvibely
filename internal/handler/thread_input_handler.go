@@ -97,7 +97,18 @@ func (h *Handler) ChatQueuedInputSteer(c echo.Context) error {
 	if steering == nil {
 		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRow(steering.ID, steering.Content))
+	if h.chatBroadcaster != nil {
+		h.chatBroadcaster.Publish(events.ChatEvent{
+			Type:           events.ChatTurnSteered,
+			ProjectID:      steering.ProjectID,
+			ExecID:         steering.ID,
+			Message:        steering.Content,
+			Source:         string(steering.Source),
+			Steering:       true,
+			HasAttachments: steering.AttachmentSessionID != "",
+		})
+	}
+	return render(c, http.StatusOK, components.ChatSteeringInputRow(steering.ID, steering.Content, steering.AttachmentSessionID != ""))
 }
 
 func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
@@ -140,5 +151,16 @@ func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
 	if steering == nil {
 		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(steering.ID, steering.Content, taskID))
+	if h.broadcaster != nil {
+		h.broadcaster.Publish(events.TaskEvent{
+			Type:           events.TaskThreadInputSteered,
+			ProjectID:      steering.ProjectID,
+			TaskID:         steering.TaskID,
+			ExecID:         steering.RunExecutionID,
+			Message:        steering.Content,
+			PendingInputID: steering.ID,
+			HasAttachments: steering.AttachmentSessionID != "",
+		})
+	}
+	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(steering.ID, steering.Content, steering.AttachmentSessionID != "", taskID))
 }

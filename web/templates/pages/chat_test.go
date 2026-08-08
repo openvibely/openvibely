@@ -499,11 +499,32 @@ func TestChatContent_LiveSteeringRowsAreCancelable(t *testing.T) {
 	if strings.Contains(branch, "_chatKnownExecIds[data.exec_id]") {
 		t.Fatal("live steering pending-input ids must not pollute the chat execution duplicate guard")
 	}
+	if !strings.Contains(branch, "existingSteeringRow.remove()") || !strings.Contains(branch, "data-input-mode') === 'steering'") {
+		t.Fatal("live steering events must replace stale queued rows without duplicating existing steering rows")
+	}
 	if !strings.Contains(branch, "'/thread-inputs/' + data.exec_id + '/cancel'") {
 		t.Fatal("live steering row must expose cancel action")
 	}
 	if !strings.Contains(branch, "htmx.process(steeringRow)") {
 		t.Fatal("live steering row must process dynamic HTMX controls")
+	}
+	if !strings.Contains(branch, "data.has_attachments") || !strings.Contains(branch, "Attachments included") {
+		t.Fatal("live steering row must render the attachment indicator when the event has attachments")
+	}
+}
+
+func TestChatContent_LiveQueuedRowsShowAttachmentIndicator(t *testing.T) {
+	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
+
+	var buf bytes.Buffer
+	err := renderChatContentForTest(agents, nil, "project-1", map[string][]models.ChatAttachment{}, nil, false).Render(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("render chat content: %v", err)
+	}
+	content := buf.String()
+
+	if !strings.Contains(content, "if (data.has_attachments) queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued'") {
+		t.Fatal("live queued row must render the attachment indicator when the event has attachments")
 	}
 }
 

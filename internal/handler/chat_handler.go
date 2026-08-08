@@ -206,13 +206,14 @@ func (h *Handler) ChatSend(c echo.Context) error {
 		}
 		if h.chatBroadcaster != nil {
 			h.chatBroadcaster.Publish(events.ChatEvent{
-				Type:      events.ChatNewMessage,
-				ProjectID: projectID,
-				ExecID:    queued.ID,
-				Message:   message,
-				Source:    "web",
-				AgentName: agent.Name,
-				Queued:    true,
+				Type:           events.ChatNewMessage,
+				ProjectID:      projectID,
+				ExecID:         queued.ID,
+				Message:        message,
+				Source:         "web",
+				AgentName:      agent.Name,
+				Queued:         true,
+				HasAttachments: queued.AttachmentSessionID != "",
 			})
 		}
 		return render(c, http.StatusOK, components.ChatQueuedInputRowOOB(queued.ID, message, "/chat/queued/"+queued.ID+"/steer", queued.AttachmentSessionID != ""))
@@ -451,15 +452,16 @@ func (h *Handler) ChatSteer(c echo.Context) error {
 	}
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
-			Type:      events.ChatTurnSteered,
-			ProjectID: projectID,
-			ExecID:    input.ID,
-			Message:   message,
-			Source:    "web",
-			Steering:  true,
+			Type:           events.ChatTurnSteered,
+			ProjectID:      projectID,
+			ExecID:         input.ID,
+			Message:        message,
+			Source:         "web",
+			Steering:       true,
+			HasAttachments: input.AttachmentSessionID != "",
 		})
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRow(input.ID, message))
+	return render(c, http.StatusOK, components.ChatSteeringInputRow(input.ID, message, input.AttachmentSessionID != ""))
 }
 
 // ChatPendingInputs returns the current pending-inputs composer fragment for the project.

@@ -4032,6 +4032,88 @@ func TestProcessStreamingResponse_AppliesPreparedSteeringAfterSuccessfulProvider
 	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
 }
 
+func TestProcessStreamingResponse_SendsAndCommitsPreparedSteeringAttachmentsAfterSuccessfulProviderCall(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	originalUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	t.Cleanup(func() { uploadsDir = originalUploadsDir })
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "model used steering attachments"
+	mock.TextOnly = "model used steering attachments"
+	h.llmSvc.SetLLMCaller(mock)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Prepared Successful Steering Attachments Project")
+	task := createTask(t, h, project.ID, "Prepared Successful Steering Attachments Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active prompt"
+		ex.IsFollowup = true
+	})
+	sessionID := "steering-success-session"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	require.NoError(t, os.MkdirAll(pendingDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "notes.txt"), []byte("steering notes"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "screen.png"), []byte("fake-png"), 0644))
+	largeContent := strings.Repeat("x", maxTextAttachmentSize+1)
+	require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "large.txt"), []byte(largeContent), 0644))
+	steering := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           project.ID,
+		TaskID:              task.ID,
+		RunExecutionID:      exec.ID,
+		InputMode:           models.ThreadInputModeSteering,
+		InputStatus:         models.ThreadInputPending,
+		TurnID:              exec.ID,
+		ExpectedTurnID:      exec.ID,
+		Content:             "use attached steering files",
+		AttachmentSessionID: sessionID,
+	}
+	require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:                      exec.ID,
+		TaskID:                      task.ID,
+		Message:                     "active prompt",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		IsTaskFollowup:              true,
+		suppressQueuedTurnPromotion: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount())
+	lastCall := mock.LastCall()
+	require.Contains(t, lastCall.Prompt, "use attached steering files")
+	require.Contains(t, lastCall.Prompt, "steering notes")
+	require.Contains(t, lastCall.Prompt, "large.txt (attached")
+	require.NotContains(t, lastCall.Prompt, largeContent[:50])
+	require.Len(t, lastCall.Attachments, 1)
+	require.Equal(t, filepath.Join(pendingDir, "screen.png"), lastCall.Attachments[0].FilePath)
+	applied, err := h.threadInputRepo.GetByID(ctx, steering.ID)
+	require.NoError(t, err)
+	require.NotNil(t, applied)
+	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
+	chatAttachments, err := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Len(t, chatAttachments, 3)
+	seen := map[string]string{}
+	for _, att := range chatAttachments {
+		seen[att.FileName] = att.FilePath
+		require.FileExists(t, att.FilePath)
+	}
+	require.Contains(t, seen, "notes.txt")
+	require.Contains(t, seen, "screen.png")
+	require.Contains(t, seen, "large.txt")
+	require.NoDirExists(t, pendingDir)
+}
+
 func TestProcessStreamingResponse_DoesNotMovePreparedSteeringAttachmentsWhenProviderCallFails(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

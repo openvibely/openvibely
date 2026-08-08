@@ -5009,12 +5009,15 @@ func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {
 	form := url.Values{}
 	form.Set("message", "Stop and use the new interface")
 	form.Set("expected_turn_id", activeExec.ID)
+	form.Set("attachment_session_id", "task-steering-session")
 	rec := htmxPost(e, "/tasks/"+task.ID+"/thread/steer", form)
 	assertCode(t, rec, http.StatusOK)
 	assertContains(t, rec, "Steering pending")
 	assertContains(t, rec, `data-input-mode="steering"`)
 	assertContains(t, rec, `steering-input-row`)
 	assertContains(t, rec, `aria-label="Cancel pending steering"`)
+	assertContains(t, rec, "Attachments included")
+	assertContains(t, rec, `aria-label="Attachments included with this steering instruction"`)
 	assertContains(t, rec, `M19 7l-.867 12.142`)
 	assertNotContains(t, rec, `>Cancel</button>`)
 
@@ -5026,6 +5029,7 @@ func TestHandler_TaskThreadSteer_CreatesPendingSteeringInput(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, inputs, 1)
 	assert.Equal(t, "Stop and use the new interface", inputs[0].Content)
+	assert.Equal(t, "task-steering-session", inputs[0].AttachmentSessionID)
 }
 
 func TestHandler_TaskThreadCancel_CancelsQueuedFollowups(t *testing.T) {

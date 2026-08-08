@@ -23,6 +23,7 @@ const (
 	TaskThreadExecutionStarted  TaskEventType = "task_thread_execution_started"
 	TaskThreadInputApplied      TaskEventType = "task_thread_input_applied"
 	TaskThreadInputQueued       TaskEventType = "task_thread_input_queued"
+	TaskThreadInputSteered      TaskEventType = "task_thread_input_steered"
 	TaskThreadInputCancelled    TaskEventType = "task_thread_input_cancelled"
 	TaskGoalUpdated             TaskEventType = "task_goal_updated"
 	TaskGoalPaused              TaskEventType = "task_goal_paused"
@@ -54,6 +55,7 @@ type TaskEvent struct {
 	ExecID              string        `json:"exec_id,omitempty"`
 	Message             string        `json:"message,omitempty"`
 	PendingInputID      string        `json:"pending_input_id,omitempty"`
+	HasAttachments      bool          `json:"has_attachments,omitempty"`
 	Phase               string        `json:"phase,omitempty"`
 	TotalReferences     int           `json:"total_references,omitempty"`
 	CompletedReferences int           `json:"completed_references,omitempty"`

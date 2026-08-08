@@ -1022,6 +1022,15 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						return pendingContainer;
 					};
 
+					var createPendingAttachmentBadge = function(label, title) {
+						var badge = document.createElement('div');
+						badge.className = 'badge badge-ghost badge-sm shrink-0 gap-1 text-xs';
+						badge.title = title;
+						badge.setAttribute('aria-label', title);
+						badge.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path></svg><span>' + label + '</span>';
+						return badge;
+					};
+
 					window.syncChatTranscriptRevision = function(expectedExecID) {
 						var root = document.getElementById('chat-page-root');
 						if (!root || typeof fetch === 'undefined') return Promise.resolve(false);
@@ -1126,15 +1135,15 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									return;
 								}
 
-								if (eventType === 'chat_turn_steered') {
-							if (document.querySelector('[data-thread-input-id="' + data.exec_id + '"]')) return;
-							if (data.source === 'web' && window._chatWebSendInProgress) return;
-							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
+									if (eventType === 'chat_turn_steered') {
+								var existingSteeringRow = document.querySelector('[data-thread-input-id="' + data.exec_id + '"]');
+								if (existingSteeringRow && existingSteeringRow.getAttribute('data-input-mode') === 'steering') return;
+								if (!existingSteeringRow && data.source === 'web' && window._chatWebSendInProgress) return;							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
 
-							var pendingContainer = ensureComposerPendingContainer();
-							if (!pendingContainer) return;
-							var steeringRow = document.createElement('div');
-							steeringRow.id = 'thread-input-' + data.exec_id;
+								var pendingContainer = ensureComposerPendingContainer();
+								if (!pendingContainer) return;
+								if (existingSteeringRow) existingSteeringRow.remove();
+								var steeringRow = document.createElement('div');							steeringRow.id = 'thread-input-' + data.exec_id;
 							steeringRow.className = 'steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80';
 							steeringRow.setAttribute('data-thread-input-id', data.exec_id);
 							steeringRow.setAttribute('data-input-mode', 'steering');
@@ -1162,9 +1171,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							cancelSteeringBtn.setAttribute('aria-label', 'Cancel pending steering');
 							cancelSteeringBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';
 							actionWrap.appendChild(cancelSteeringBtn);
-							steeringRow.appendChild(content);
-							steeringRow.appendChild(actionWrap);
-							pendingContainer.appendChild(steeringRow);
+								steeringRow.appendChild(content);
+								if (data.has_attachments) steeringRow.appendChild(createPendingAttachmentBadge('Attachments included', 'Attachments included with this steering instruction'));
+								steeringRow.appendChild(actionWrap);							pendingContainer.appendChild(steeringRow);
 							// CSS handles bottom padding while pending rows exist.
 							if (window.htmx) htmx.process(steeringRow);
 							return;
@@ -1263,6 +1272,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 											cancelBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>';										actionWrap.appendChild(steerBtn);
 										actionWrap.appendChild(cancelBtn);
 										queuedRow.appendChild(queuedPreview);
+										if (data.has_attachments) queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued', 'Attachments queued with this follow-up'));
 										queuedRow.appendChild(actionWrap);
 										pendingContainer.appendChild(queuedRow);
 										// CSS handles bottom padding while pending rows exist.

@@ -9,14 +9,14 @@ import (
 
 func TestTaskEvent_ToSSE_IncludesTaskName(t *testing.T) {
 	event := TaskEvent{
-		Type:      TaskStatusChanged,
-		TaskID:    "abc123",
-		TaskName:  "My Test Task",
-		ProjectID: "proj1",
-		Status:    "completed",
-		OldStatus: "running",
+		Type:           TaskStatusChanged,
+		TaskID:         "abc123",
+		TaskName:       "My Test Task",
+		ProjectID:      "proj1",
+		Status:         "completed",
+		OldStatus:      "running",
+		HasAttachments: true,
 	}
-
 	sse := event.ToSSE()
 
 	// Verify SSE format
@@ -44,6 +44,9 @@ func TestTaskEvent_ToSSE_IncludesTaskName(t *testing.T) {
 	}
 	if parsed["status"] != "completed" {
 		t.Errorf("expected status 'completed', got %v", parsed["status"])
+	}
+	if parsed["has_attachments"] != true {
+		t.Errorf("expected has_attachments true, got %v", parsed["has_attachments"])
 	}
 }
 

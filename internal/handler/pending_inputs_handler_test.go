@@ -113,14 +113,15 @@ func TestChatPendingInputs_IncludesValidPendingSteering(t *testing.T) {
 	}
 
 	steering := &models.ThreadInput{
-		Scope:          models.ThreadInputScopeChat,
-		ProjectID:      p.ID,
-		InputMode:      models.ThreadInputModeSteering,
-		InputStatus:    models.ThreadInputPending,
-		RunExecutionID: exec.ID,
-		TurnID:         exec.ID,
-		ExpectedTurnID: exec.ID,
-		Content:        "unprepared-steer",
+		Scope:               models.ThreadInputScopeChat,
+		ProjectID:           p.ID,
+		InputMode:           models.ThreadInputModeSteering,
+		InputStatus:         models.ThreadInputPending,
+		RunExecutionID:      exec.ID,
+		TurnID:              exec.ID,
+		ExpectedTurnID:      exec.ID,
+		Content:             "unprepared-steer",
+		AttachmentSessionID: "chat-steering-session",
 	}
 	if err := tc.handler.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID); err != nil {
 		t.Fatalf("create steering: %v", err)
@@ -131,6 +132,9 @@ func TestChatPendingInputs_IncludesValidPendingSteering(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "unprepared-steer") {
 		t.Errorf("valid (unprepared) pending steering must appear in pending-inputs fragment, got: %q", body)
+	}
+	if !strings.Contains(body, "Attachments included") || !strings.Contains(body, `aria-label="Attachments included with this steering instruction"`) {
+		t.Errorf("pending steering with attachments must show attachment indicator, got: %q", body)
 	}
 }
 
@@ -246,15 +250,16 @@ func TestTaskThreadPendingInputs_IncludesValidPendingSteering(t *testing.T) {
 	}
 
 	steering := &models.ThreadInput{
-		Scope:          models.ThreadInputScopeTask,
-		ProjectID:      p.ID,
-		TaskID:         task.ID,
-		InputMode:      models.ThreadInputModeSteering,
-		InputStatus:    models.ThreadInputPending,
-		RunExecutionID: exec.ID,
-		TurnID:         exec.ID,
-		ExpectedTurnID: exec.ID,
-		Content:        "task-unprepared-steer",
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           p.ID,
+		TaskID:              task.ID,
+		InputMode:           models.ThreadInputModeSteering,
+		InputStatus:         models.ThreadInputPending,
+		RunExecutionID:      exec.ID,
+		TurnID:              exec.ID,
+		ExpectedTurnID:      exec.ID,
+		Content:             "task-unprepared-steer",
+		AttachmentSessionID: "task-steering-session",
 	}
 	if err := tc.handler.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID); err != nil {
 		t.Fatalf("create steering: %v", err)
@@ -265,6 +270,9 @@ func TestTaskThreadPendingInputs_IncludesValidPendingSteering(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, "task-unprepared-steer") {
 		t.Errorf("valid (unprepared) pending steering must appear in task pending-inputs fragment, got: %q", body)
+	}
+	if !strings.Contains(body, "Attachments included") || !strings.Contains(body, `aria-label="Attachments included with this steering instruction"`) {
+		t.Errorf("task pending steering with attachments must show attachment indicator, got: %q", body)
 	}
 }
 
@@ -309,14 +317,15 @@ func TestTaskThreadQueuedInputSteer_ResponseCarriesTaskID(t *testing.T) {
 	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
 	require.NoError(t, tc.execRepo.Create(ctx, exec))
 	queued := &models.ThreadInput{
-		Scope:          models.ThreadInputScopeTask,
-		ProjectID:      p.ID,
-		TaskID:         task.ID,
-		RunExecutionID: exec.ID,
-		InputMode:      models.ThreadInputModeQueued,
-		InputStatus:    models.ThreadInputPending,
-		ExpectedTurnID: exec.ID,
-		Content:        "convert me",
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           p.ID,
+		TaskID:              task.ID,
+		RunExecutionID:      exec.ID,
+		InputMode:           models.ThreadInputModeQueued,
+		InputStatus:         models.ThreadInputPending,
+		ExpectedTurnID:      exec.ID,
+		Content:             "convert me",
+		AttachmentSessionID: "task-convert-session",
 	}
 	require.NoError(t, tc.handler.threadInputRepo.CreateQueued(ctx, queued))
 
@@ -325,6 +334,15 @@ func TestTaskThreadQueuedInputSteer_ResponseCarriesTaskID(t *testing.T) {
 	body := rec.Body.String()
 	if !strings.Contains(body, `data-task-id="`+task.ID+`"`) || !strings.Contains(body, `data-thread-input-id="`+queued.ID+`"`) {
 		t.Fatalf("task queued-to-steering response must carry task/input identity, got: %q", body)
+	}
+	if !strings.Contains(body, "Attachments included") || !strings.Contains(body, `aria-label="Attachments included with this steering instruction"`) {
+		t.Fatalf("task queued-to-steering response must show attachment indicator, got: %q", body)
+	}
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, queued.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	if stored.InputMode != models.ThreadInputModeSteering || stored.AttachmentSessionID != "task-convert-session" {
+		t.Fatalf("converted task row = %#v, want steering with attachment session", stored)
 	}
 }
 

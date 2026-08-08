@@ -1338,7 +1338,7 @@ func TestPendingThreadInputRows_LeavesComposerOwnedInputsOutOfTranscript(t *test
 func TestChatComposerQueuedInputRows_RenderInsideInputBoxStyle(t *testing.T) {
 	inputs := []models.ThreadInput{
 		{ID: "queued-1", TaskID: "task-1", InputMode: models.ThreadInputModeQueued, Content: "queue this", AttachmentSessionID: "pending-session-1"},
-		{ID: "steer-1", TaskID: "task-1", InputMode: models.ThreadInputModeSteering, Content: "steer this"},
+		{ID: "steer-1", TaskID: "task-1", InputMode: models.ThreadInputModeSteering, Content: "steer this", AttachmentSessionID: "steering-session-1"},
 	}
 	var buf bytes.Buffer
 	err := ChatComposerQueuedInputRows(inputs, func(input models.ThreadInput) string {
@@ -1373,6 +1373,9 @@ func TestChatComposerQueuedInputRows_RenderInsideInputBoxStyle(t *testing.T) {
 	if !strings.Contains(content, `thread-input-steer-1`) || !strings.Contains(content, "Steering pending") || !strings.Contains(content, `aria-label="Cancel pending steering"`) {
 		t.Fatal("composer pending rows should include steering rows with a trash-icon cancel action")
 	}
+	if !strings.Contains(content, "Attachments included") || !strings.Contains(content, `aria-label="Attachments included with this steering instruction"`) {
+		t.Fatal("steering pending row with an attachment session should indicate that attachments are included")
+	}
 	if strings.Contains(content, "Send now") || strings.Contains(content, "btn-warning") || strings.Contains(content, "bg-warning") || strings.Contains(content, ">Cancel</button>") || strings.Contains(content, ">×</button>") {
 		t.Fatal("composer pending rows should avoid old warning/text/× cancel treatments")
 	}
@@ -1390,6 +1393,21 @@ func TestChatQueuedInputRowOOB_WithAttachmentsShowsQueuedAttachmentIndicator(t *
 	}
 	if !strings.Contains(content, "Attachments queued") || !strings.Contains(content, `aria-label="Attachments queued with this follow-up"`) {
 		t.Fatal("OOB queued row should indicate when attachments are queued with the message")
+	}
+}
+
+func TestChatSteeringInputRow_WithAttachmentsShowsIncludedAttachmentIndicator(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatSteeringInputRow("steer-1", "steer this", true).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatSteeringInputRow: %v", err)
+	}
+
+	content := buf.String()
+	if !strings.Contains(content, `thread-input-steer-1`) || !strings.Contains(content, `data-input-mode="steering"`) || !strings.Contains(content, "Steering pending") {
+		t.Fatal("steering row should render as a pending steering row")
+	}
+	if !strings.Contains(content, "Attachments included") || !strings.Contains(content, `aria-label="Attachments included with this steering instruction"`) {
+		t.Fatal("steering row should indicate when attachments are included with the message")
 	}
 }
 
@@ -3545,6 +3563,55 @@ func TestTaskThreadLiveEventsScript_HandlesMixtureProgressWithoutTaskID(t *testi
 	}
 	if !strings.Contains(html, "if (data.type === 'mixture_progress')") || !strings.Contains(html, "window.applyMixtureProgress(data)") {
 		t.Fatal("task-thread live handler must render mixture_progress into the pending assistant status area")
+	}
+}
+
+func TestTaskThreadLiveEventsScript_SteeredRowsReplaceStaleQueuedRows(t *testing.T) {
+	var buf bytes.Buffer
+	if err := TaskThreadLiveEventsScript("task-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render TaskThreadLiveEventsScript: %v", err)
+	}
+	html := buf.String()
+	steeredStart := strings.Index(html, "function renderSteeringRow(data)")
+	if steeredStart == -1 {
+		t.Fatal("expected task-thread steering row renderer")
+	}
+	branchEnd := strings.Index(html[steeredStart:], "var pendingFragmentExecs")
+	if branchEnd == -1 {
+		t.Fatal("expected task-thread steering row renderer terminator")
+	}
+	branch := html[steeredStart : steeredStart+branchEnd]
+	for _, snippet := range []string{
+		"existing.getAttribute('data-input-mode') === 'steering'",
+		"if (existing) existing.remove()",
+		"Steering pending",
+		"Attachments included",
+		"htmx.process(steeringRow)",
+		"if (data.type === 'task_thread_input_steered')",
+	} {
+		if !strings.Contains(html, snippet) && !strings.Contains(branch, snippet) {
+			t.Fatalf("task-thread live steering must include %q", snippet)
+		}
+	}
+}
+
+func TestTaskThreadLiveEventsScript_QueuedRowsShowAttachmentIndicator(t *testing.T) {
+	var buf bytes.Buffer
+	if err := TaskThreadLiveEventsScript("task-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render TaskThreadLiveEventsScript: %v", err)
+	}
+	html := buf.String()
+	queuedStart := strings.Index(html, "function renderQueuedRow(data)")
+	if queuedStart == -1 {
+		t.Fatal("expected task-thread queued row renderer")
+	}
+	branchEnd := strings.Index(html[queuedStart:], "var pendingFragmentExecs")
+	if branchEnd == -1 {
+		t.Fatal("expected task-thread queued row renderer terminator")
+	}
+	branch := html[queuedStart : queuedStart+branchEnd]
+	if !strings.Contains(branch, "data.has_attachments") || !strings.Contains(branch, "Attachments queued") {
+		t.Fatal("task-thread live queued row must render the attachment indicator when the event has attachments")
 	}
 }
 

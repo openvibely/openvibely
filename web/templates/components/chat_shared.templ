@@ -401,22 +401,22 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
 		</div>
-			<div class="chat-bubble-inner">
-				<div id={ "streaming-thinking-" + execID } class="flex flex-col items-start gap-1">
-					<span class="block h-5" aria-hidden="true"></span>
-					@ChatLoadingDots("sm")
-				</div>
-				<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
-				<div
-					id={ "streaming-message-" + execID }
-					class="whitespace-pre-wrap leading-relaxed text-sm hidden"
-					data-exec-id={ execID }
-					data-messages-container={ messagesContainerID }
-					data-pause-polling-target={ pausePollingTargetID }
-					data-is-thread={ boolStr(isThread) }
-					style="word-wrap: break-word;"
-				></div>
-				<div id={ "streaming-dots-" + execID } class="hidden flex items-center gap-1 mt-2 opacity-40">
+		<div class="chat-bubble-inner">
+			<div id={ "streaming-thinking-" + execID } class="flex flex-col items-start gap-1">
+				<span class="block h-5" aria-hidden="true"></span>
+				@ChatLoadingDots("sm")
+			</div>
+			<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
+			<div
+				id={ "streaming-message-" + execID }
+				class="whitespace-pre-wrap leading-relaxed text-sm hidden"
+				data-exec-id={ execID }
+				data-messages-container={ messagesContainerID }
+				data-pause-polling-target={ pausePollingTargetID }
+				data-is-thread={ boolStr(isThread) }
+				style="word-wrap: break-word;"
+			></div>
+			<div id={ "streaming-dots-" + execID } class="hidden flex items-center gap-1 mt-2 opacity-40">
 				@ChatLoadingDots("xs")
 			</div>
 			<script type="text/javascript">
@@ -833,15 +833,15 @@ templ ChatBubbleStreamingResume(role, partialContent, execID, messagesContainerI
 		<div class="text-xs font-semibold opacity-50 mb-2">
 			{ role }
 		</div>
-			<div class="chat-bubble-inner">
-				if partialContent == "" {
-					<div id={ "streaming-thinking-resume-" + execID } class="flex flex-col items-start gap-1">
-						<span class="block h-5" aria-hidden="true"></span>
-						@ChatLoadingDots("sm")
-					</div>
-				}
-				<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
-				<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", len(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
+		<div class="chat-bubble-inner">
+			if partialContent == "" {
+				<div id={ "streaming-thinking-resume-" + execID } class="flex flex-col items-start gap-1">
+					<span class="block h-5" aria-hidden="true"></span>
+					@ChatLoadingDots("sm")
+				</div>
+			}
+			<div id={ "mixture-progress-" + execID } class="mixture-progress hidden mb-2 text-xs opacity-70" data-exec-id={ execID } role="status" aria-live="polite"></div>
+			<div id={ "streaming-message-" + execID } class={ "leading-relaxed text-sm", templ.KV("hidden", partialContent == "") } data-exec-id={ execID } data-initial-byte-length={ fmt.Sprintf("%d", len(partialContent)) } data-messages-container={ messagesContainerID } data-pause-polling-target={ pausePollingTargetID } data-streaming-resume="true" data-raw-revision={ chatContentRevision(partialContent) } data-raw-content={ NormalizeDisplayMarkers(partialContent) } style="word-wrap: break-word;"></div>
 			<script>
 				(function() {
 					var el = document.currentScript.previousElementSibling;
@@ -1277,16 +1277,20 @@ templ ChatQueuedInputRow(inputID, message, steerEndpoint string, hasAttachments 
 	@ChatQueuedInputRowForTask(inputID, message, steerEndpoint, hasAttachments, "")
 }
 
+templ pendingAttachmentBadge(label, title string) {
+	<div class="badge badge-ghost badge-sm shrink-0 gap-1 text-xs" title={ title } aria-label={ title }>
+		<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+			<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path>
+		</svg>
+		<span>{ label }</span>
+	</div>
+}
+
 templ ChatQueuedInputRowForTask(inputID, message, steerEndpoint string, hasAttachments bool, taskID string) {
 	<div id={ "thread-input-" + inputID } class="queued-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="queued" title="Queued follow-up will run after the active response finishes">
 		<div class="min-w-0 flex-1 truncate">{ message }</div>
 		if hasAttachments {
-			<div class="badge badge-ghost badge-sm shrink-0 gap-1 text-xs" title="Attachments queued with this follow-up" aria-label="Attachments queued with this follow-up">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.586-6.586a4 4 0 00-5.657-5.657L5.757 10.757a6 6 0 108.486 8.486L21 12.486"></path>
-				</svg>
-				<span>Attachments queued</span>
-			</div>
+			@pendingAttachmentBadge("Attachments queued", "Attachments queued with this follow-up")
 		}
 		<div class="ml-auto flex shrink-0 items-center gap-2">
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs font-medium" hx-post={ steerEndpoint } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Convert queued follow-up to steering">Steer</button>
@@ -1309,17 +1313,20 @@ templ ChatQueuedInputRowOOBForTask(inputID, message, steerEndpoint string, hasAt
 	</div>
 }
 
-templ ChatSteeringInputRow(inputID, message string) {
-	@ChatSteeringInputRowForTask(inputID, message, "")
+templ ChatSteeringInputRow(inputID, message string, hasAttachments bool) {
+	@ChatSteeringInputRowForTask(inputID, message, hasAttachments, "")
 }
 
-templ ChatSteeringInputRowForTask(inputID, message, taskID string) {
+templ ChatSteeringInputRowForTask(inputID, message string, hasAttachments bool, taskID string) {
 	<div id={ "thread-input-" + inputID } class="steering-input-row flex min-h-8 items-center gap-3 rounded-lg bg-base-300/45 px-3 py-1.5 text-sm text-base-content/80" data-thread-input-id={ inputID } data-task-id={ taskID } data-input-mode="steering" title="Steering instruction will be applied before the active run's next model step">
 		<div class="min-w-0 flex-1">
 			<div class="text-xs font-semibold opacity-70">Steering pending</div>
 			<div class="truncate">{ message }</div>
 			<div class="text-xs opacity-60">Will be applied before the active run's next model step.</div>
 		</div>
+		if hasAttachments {
+			@pendingAttachmentBadge("Attachments included", "Attachments included with this steering instruction")
+		}
 		<div class="ml-auto flex shrink-0 items-center gap-2">
 			<button type="button" class="btn btn-ghost btn-xs h-6 min-h-0 rounded-md px-2 text-xs text-error" hx-post={ "/thread-inputs/" + inputID + "/cancel" } hx-target={ "#thread-input-" + inputID } hx-swap="outerHTML" title="Cancel pending steering" aria-label="Cancel pending steering">
 				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1340,7 +1347,7 @@ templ ChatComposerQueuedInputRowsForTask(inputs []models.ThreadInput, steerEndpo
 			if input.InputMode == models.ThreadInputModeQueued && steerEndpointFor != nil {
 				@ChatQueuedInputRowForTask(input.ID, input.Content, steerEndpointFor(input), input.AttachmentSessionID != "", taskID)
 			} else if input.InputMode == models.ThreadInputModeSteering {
-				@ChatSteeringInputRowForTask(input.ID, input.Content, taskID)
+				@ChatSteeringInputRowForTask(input.ID, input.Content, input.AttachmentSessionID != "", taskID)
 			}
 		}
 	</div>
@@ -1378,24 +1385,24 @@ func chatExecutionIsTerminal(exec models.Execution) bool {
 }
 
 templ chatExecutionPairContent(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
-		<!-- User message: show for followups and first non-followup only -->
-		if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
-			if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
-				@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts)
-			} else {
-				@ChatBubble("User", chatUserContent(exec, task, executions, index))
-			}
+	<!-- User message: show for followups and first non-followup only -->
+	if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
+		if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
+			@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts)
+		} else {
+			@ChatBubble("User", chatUserContent(exec, task, executions, index))
 		}
-		<!-- Assistant response -->
-		if exec.Status == models.ExecCompleted {
-			@ChatBubble("Assistant", exec.Output)
-		} else if exec.Status == models.ExecFailed {
-			@ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
-		} else if exec.Status == models.ExecCancelled {
-			@ChatBubbleError("Assistant", "Cancelled", exec.Output)
-		} else if exec.Status == models.ExecRunning {
-			@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
-		}
+	}
+	<!-- Assistant response -->
+	if exec.Status == models.ExecCompleted {
+		@ChatBubble("Assistant", exec.Output)
+	} else if exec.Status == models.ExecFailed {
+		@ChatBubbleError("Assistant", exec.ErrorMessage, exec.Output)
+	} else if exec.Status == models.ExecCancelled {
+		@ChatBubbleError("Assistant", "Cancelled", exec.Output)
+	} else if exec.Status == models.ExecRunning {
+		@ChatBubbleStreamingResume("Assistant", exec.Output, exec.ID, messagesContainerID, pausePollingTargetID)
+	}
 }
 
 templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
@@ -1506,7 +1513,9 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			if config.TaskID != "" {
 				data-scroll-intent-scope={ config.TaskID }
 				data-model-select-endpoint={ "/tasks/" + config.TaskID + "/thread/model" }
-			} else if config.ProjectID != "" {
+			}
+			else
+			if config.ProjectID != "" {
 				data-scroll-intent-scope={ config.ProjectID }
 			}
 			class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"

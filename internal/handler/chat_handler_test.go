@@ -1926,6 +1926,8 @@ func TestHandler_ChatSteer_FailurePreservesAttachmentSessionForRetry(t *testing.
 	require.NoError(t, err)
 	retried := htmxPost(e, "/chat/steer?project_id="+project.ID, form)
 	require.Equal(t, http.StatusOK, retried.Code)
+	assertContains(t, retried, "Attachments included")
+	assertContains(t, retried, `aria-label="Attachments included with this steering instruction"`)
 	require.FileExists(t, attachmentPath, "successful steering keeps pending files until the steering input is consumed")
 
 	inputs, err := h.threadInputRepo.ListPendingSteering(ctx, activeExec.ID, activeExec.ID)

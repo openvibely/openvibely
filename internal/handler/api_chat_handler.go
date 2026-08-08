@@ -245,13 +245,14 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		}
 		if h.chatBroadcaster != nil {
 			h.chatBroadcaster.Publish(events.ChatEvent{
-				Type:      events.ChatNewMessage,
-				ProjectID: projectID,
-				ExecID:    queued.ID,
-				Message:   message,
-				Source:    "api",
-				AgentName: agent.Name,
-				Queued:    true,
+				Type:           events.ChatNewMessage,
+				ProjectID:      projectID,
+				ExecID:         queued.ID,
+				Message:        message,
+				Source:         "api",
+				AgentName:      agent.Name,
+				Queued:         true,
+				HasAttachments: queued.AttachmentSessionID != "",
 			})
 		}
 		return c.JSON(http.StatusCreated, ChatMessageAcceptedResponse{

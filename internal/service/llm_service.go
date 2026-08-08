@@ -1694,6 +1694,7 @@ func (s *LLMService) publishTaskThreadInputAppliedEvents(execID string, inputs [
 			ExecID:         execID,
 			Message:        input.Content,
 			PendingInputID: input.ID,
+			HasAttachments: input.AttachmentSessionID != "",
 		})
 	}
 }
@@ -1713,6 +1714,7 @@ func (s *LLMService) publishTaskThreadInputQueuedEvents(inputs []models.ThreadIn
 			ExecID:         input.RunExecutionID,
 			Message:        input.Content,
 			PendingInputID: input.ID,
+			HasAttachments: input.AttachmentSessionID != "",
 		})
 	}
 }

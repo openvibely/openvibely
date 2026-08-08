@@ -440,10 +440,16 @@ func TestSidebar_ForwardsChatTurnSteeredEvents(t *testing.T) {
 	if !strings.Contains(html, "|| eventType === 'task_thread_input_cancelled'") {
 		t.Fatal("sidebar dispatcher must forward task thread input cancellation events to task pages")
 	}
+	if !strings.Contains(html, "|| eventType === 'task_thread_input_steered'") {
+		t.Fatal("sidebar dispatcher must forward task thread steering events to task pages")
+	}
 	if !strings.Contains(html, "'chat_turn_steered': handleLiveEvent") {
 		t.Fatal("shared live SSE must subscribe to chat_turn_steered events")
 	}
 	if !strings.Contains(html, "'chat_thread_input_cancelled': handleLiveEvent") || !strings.Contains(html, "'task_thread_input_cancelled': handleLiveEvent") {
 		t.Fatal("shared live SSE must subscribe to pending input cancellation events")
+	}
+	if !strings.Contains(html, "'task_thread_input_steered': handleLiveEvent") {
+		t.Fatal("shared live SSE must subscribe to task thread steering events")
 	}
 }

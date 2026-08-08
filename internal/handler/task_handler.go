@@ -18,6 +18,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/events"
 	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -2256,7 +2257,18 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save steering input")
 	}
-	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(input.ID, message, taskID))
+	if h.broadcaster != nil {
+		h.broadcaster.Publish(events.TaskEvent{
+			Type:           events.TaskThreadInputSteered,
+			ProjectID:      input.ProjectID,
+			TaskID:         input.TaskID,
+			ExecID:         input.RunExecutionID,
+			Message:        input.Content,
+			PendingInputID: input.ID,
+			HasAttachments: input.AttachmentSessionID != "",
+		})
+	}
+	return render(c, http.StatusOK, components.ChatSteeringInputRowForTask(input.ID, message, input.AttachmentSessionID != "", taskID))
 }
 
 // GetTaskThread returns the task thread view (for polling updates)

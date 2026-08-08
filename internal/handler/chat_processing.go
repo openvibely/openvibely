@@ -1041,6 +1041,7 @@ func (h *Handler) publishThreadInputAppliedEvents(params streamingResponseParams
 				ExecID:         params.ExecID,
 				Message:        input.Content,
 				PendingInputID: input.ID,
+				HasAttachments: input.AttachmentSessionID != "",
 			})
 		}
 		if h.chatBroadcaster != nil && input.Scope == models.ThreadInputScopeChat {
@@ -1053,6 +1054,7 @@ func (h *Handler) publishThreadInputAppliedEvents(params streamingResponseParams
 				Source:         string(input.Source),
 				Steering:       true,
 				PendingInputID: input.ID,
+				HasAttachments: input.AttachmentSessionID != "",
 			})
 		}
 	}
@@ -1103,6 +1105,7 @@ func (h *Handler) publishThreadInputQueuedEvents(inputs []models.ThreadInput) {
 				ExecID:         input.RunExecutionID,
 				Message:        input.Content,
 				PendingInputID: input.ID,
+				HasAttachments: input.AttachmentSessionID != "",
 			})
 		}
 		if h.chatBroadcaster != nil && input.Scope == models.ThreadInputScopeChat {
@@ -1114,6 +1117,7 @@ func (h *Handler) publishThreadInputQueuedEvents(inputs []models.ThreadInput) {
 				Source:         string(input.Source),
 				Queued:         true,
 				PendingInputID: input.ID,
+				HasAttachments: input.AttachmentSessionID != "",
 			})
 		}
 	}
