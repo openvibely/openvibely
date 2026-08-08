@@ -1215,7 +1215,61 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						function foregroundEdge(key) { return svg.querySelector('[data-edge-foreground][data-edge-key="' + CSS.escape(key) + '"]'); }
 						function edgeControls(key) { return svg.querySelector('[data-edge-controls][data-edge-key="' + CSS.escape(key) + '"]'); }					function nodePortPoint(key, side) { var group = nodeGroup(key); if (!group) return null; return {x: Number(group.dataset.nodeX) + (side === 'right' ? 170 : 0), y: Number(group.dataset.nodeY) + 52}; }
 					function yamlString(value) { return JSON.stringify(String(value == null ? '' : value)); }
-					function yamlJSON(value, fallback) { var encoded = JSON.stringify(value); return encoded === undefined ? fallback : encoded; }
+					function yamlPlainKeyPattern() { return /^[A-Za-z_][A-Za-z0-9_]*$/; }
+					function yamlKey(key) { return yamlPlainKeyPattern().test(String(key)) ? String(key) : yamlString(key); }
+					function yamlScalar(value) {
+						if (value === null || value === undefined) return 'null';
+						if (typeof value === 'boolean' || typeof value === 'number') return String(value);
+						return yamlString(value);
+					}
+					function yamlIndent(level) { return '  '.repeat(level); }
+					function yamlIsEmptyContainer(value) {
+						if (Array.isArray(value)) return value.length === 0;
+						if (value !== null && typeof value === 'object') return Object.keys(value).length === 0;
+						return false;
+					}
+					function yamlBlockLines(value, level) {
+						if (Array.isArray(value)) {
+							var lines = [];
+							value.forEach(function(item) {
+								if (item !== null && typeof item === 'object' && !yamlIsEmptyContainer(item)) {
+									var subLines = yamlBlockLines(item, level + 1);
+									lines.push(yamlIndent(level) + '- ' + subLines[0].slice(yamlIndent(level + 1).length));
+									subLines.slice(1).forEach(function(line) { lines.push(line); });
+								} else if (item !== null && typeof item === 'object') {
+									lines.push(yamlIndent(level) + '- ' + (Array.isArray(item) ? '[]' : '{}'));
+								} else {
+									lines.push(yamlIndent(level) + '- ' + yamlScalar(item));
+								}
+							});
+							return lines;
+						}
+						if (value !== null && typeof value === 'object') {
+							var lines = [];
+							Object.keys(value).forEach(function(key) {
+								var nested = value[key];
+								if (nested !== null && typeof nested === 'object' && !yamlIsEmptyContainer(nested)) {
+									lines.push(yamlIndent(level) + yamlKey(key) + ':');
+									yamlBlockLines(nested, level + 1).forEach(function(line) { lines.push(line); });
+								} else if (nested !== null && typeof nested === 'object') {
+									lines.push(yamlIndent(level) + yamlKey(key) + ': ' + (Array.isArray(nested) ? '[]' : '{}'));
+								} else {
+									lines.push(yamlIndent(level) + yamlKey(key) + ': ' + yamlScalar(nested));
+								}
+							});
+							return lines;
+						}
+						return [yamlIndent(level) + yamlScalar(value)];
+					}
+					function yamlNestedField(lines, label, value, level) {
+						var normalized = (value && typeof value === 'object') ? value : {};
+						if (yamlIsEmptyContainer(normalized)) {
+							lines.push(yamlIndent(level) + label + ': ' + (Array.isArray(normalized) ? '[]' : '{}'));
+							return;
+						}
+						lines.push(yamlIndent(level) + label + ':');
+						yamlBlockLines(normalized, level + 1).forEach(function(line) { lines.push(line); });
+					}
 					function visualCandidateYAML() {
 						var lines = [
 							'schema_version: ' + Number(candidate.schema_version || 1),
@@ -1230,8 +1284,8 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							lines.push('    name: ' + yamlString(node.name));
 							lines.push('    type: ' + yamlString(node.type));
 							lines.push('    role: ' + yamlString(node.role));
-							lines.push('    config: ' + yamlJSON(node.config || {}, '{}'));
-							if (node.position) lines.push('    position: ' + yamlJSON(node.position, '{}'));
+							yamlNestedField(lines, 'config', node.config || {}, 2);
+							if (node.position) yamlNestedField(lines, 'position', node.position, 2);
 						});
 						lines.push('edges:');
 						(candidate.edges || []).forEach(function(edge) {
@@ -1241,10 +1295,10 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							lines.push('    from_port: ' + yamlString(edge.from_port || 'right'));
 							lines.push('    to_port: ' + yamlString(edge.to_port || 'left'));
 							if (edge.label) lines.push('    label: ' + yamlString(edge.label));
-							if (edge.condition && Object.keys(edge.condition).length) lines.push('    condition: ' + yamlJSON(edge.condition, '{}'));
+							if (edge.condition && Object.keys(edge.condition).length) yamlNestedField(lines, 'condition', edge.condition, 2);
 						});
-						if (candidate.assumptions && candidate.assumptions.length) lines.push('assumptions: ' + yamlJSON(candidate.assumptions, '[]'));
-						if (candidate.warnings && candidate.warnings.length) lines.push('warnings: ' + yamlJSON(candidate.warnings, '[]'));
+						if (candidate.assumptions && candidate.assumptions.length) yamlNestedField(lines, 'assumptions', candidate.assumptions, 0);
+						if (candidate.warnings && candidate.warnings.length) yamlNestedField(lines, 'warnings', candidate.warnings, 0);
 						return lines.join('\n') + '\n';
 					}
 					var yamlEditor = builder.querySelector('[data-automation-yaml-editor]');

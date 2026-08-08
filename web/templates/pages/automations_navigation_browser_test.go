@@ -943,20 +943,27 @@ nodes:
     name: "First"
     type: "agent_task"
     role: "task"
-    config: {"prompt":"YAML-only configuration"}
-    position: {"x":0,"y":0}
+    config:
+      prompt: "YAML-only configuration"
+    position:
+      x: 0
+      y: 0
   - key: "second"
     name: "Second"
     type: "agent_task"
     role: "task"
     config: {}
-    position: {"x":240,"y":0}
+    position:
+      x: 240
+      y: 0
   - key: "third"
     name: "Third"
     type: "outcome"
     role: "completed"
     config: {}
-    position: {"x":480,"y":0}
+    position:
+      x: 480
+      y: 0
 edges:
   - key: "first_second"
     from: "first"
@@ -1150,6 +1157,15 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
     click('[data-automation-view-graph]', 'Graph view button');
     if (!isVisible(graph) || isVisible(yaml)) fail('Graph switch did not restore the canvas');
+
+    document.getElementById('automation-node-dialog').showModal();
+    document.querySelector('[data-automation-node-dialog] [name="node_name"]').value = 'Fourth';
+    document.querySelector('[data-automation-node-dialog] [name="node_kind"]').value = 'task';
+    document.querySelector('[data-automation-node-dialog] form').dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+    var addNodeSubmittedYAML = document.querySelector('[data-automation-node-dialog] [data-automation-yaml-submission]').value;
+    if (/[:\-]\s*\{"/.test(addNodeSubmittedYAML) || /[:\-]\s*\[/.test(addNodeSubmittedYAML)) fail('Add node dialog submission serialized nested YAML fields as inline JSON: ' + addNodeSubmittedYAML);
+    if (!/config:\n\s+prompt:/.test(addNodeSubmittedYAML)) fail('Add node dialog submission did not render node config as block-style YAML: ' + addNodeSubmittedYAML);
+    document.getElementById('automation-node-dialog').close();
 
     var first = document.querySelector('[data-node-key="first"]');
     if (!first) fail('missing first node');
