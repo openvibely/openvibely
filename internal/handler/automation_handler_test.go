@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2275,14 +2276,48 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 	require.NoError(t, err)
 	require.Equal(t, 1, portfolioCounts[definition.Automation.ID].Running)
 	require.Zero(t, portfolioCounts[definition.Automation.ID].CompletedRecently)
-	require.NoError(t, tc.execRepo.Complete(ctx, active.ID, models.ExecCompleted, "", "", 0, 0))
 
-	followup := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Continue the Automation implementation task.", IsFollowup: true}
-	require.NoError(t, tc.handler.threadInputRepo.ClaimQueuedForTaskExecution(ctx, result.QueuedMessageID, followup))
+	started := make(chan testutil.MockLLMCall, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseFollowup := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseFollowup)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "continued"
+	mock.TextOnly = "continued"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+		started <- call
+		<-release
+	}
+	tc.handler.llmSvc.SetLLMCaller(mock)
+
+	require.NoError(t, tc.execRepo.Complete(ctx, active.ID, models.ExecCompleted, "", "", 0, 0))
+	// Completing an execution directly bypasses the normal LLM-service completion
+	// callback, so explicitly run the same promotion hook. The enqueue path also
+	// starts a best-effort promotion check; either contender may win the claim.
+	tc.handler.PromoteQueuedTaskThreadInput(task.ID)
+	promotedExecID := ""
+	select {
+	case call := <-started:
+		require.Equal(t, "Continue the Automation implementation task.", call.Prompt)
+		promotedExecID = call.ExecID
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued Automation continuation to start")
+	}
 	counts, _, _, err = automationRepo.LiveNodeCounts(ctx, project.ID, definition.Automation.ID, definition.Version.ID, time.Now().UTC().Add(-time.Hour))
 	require.NoError(t, err)
 	require.Equal(t, 1, counts[implementation.ID].Running)
 	require.Zero(t, counts[implementation.ID].CompletedRecently)
+
+	releaseFollowup()
+	require.Eventually(t, func() bool {
+		promoted, getErr := tc.handler.threadInputRepo.GetByID(ctx, result.QueuedMessageID)
+		if getErr != nil || promoted == nil || promoted.InputStatus != models.ThreadInputApplied {
+			return false
+		}
+		exec, getErr := tc.execRepo.GetByID(ctx, promotedExecID)
+		return getErr == nil && exec != nil && exec.Status == models.ExecCompleted
+	}, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T) {
