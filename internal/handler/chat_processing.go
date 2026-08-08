@@ -1470,6 +1470,38 @@ func (h *Handler) resolveQueuedInputAgent(ctx context.Context, input models.Thre
 	return agent, agent == nil, nil
 }
 
+func (h *Handler) resolveTaskThreadExecutionAgent(ctx context.Context, task *models.Task) (*models.LLMConfig, bool, error) {
+	if task == nil || h.llmConfigRepo == nil {
+		return nil, true, nil
+	}
+	if task.AgentID != nil && strings.TrimSpace(*task.AgentID) != "" {
+		agent, err := h.llmConfigRepo.GetByID(ctx, strings.TrimSpace(*task.AgentID))
+		if err != nil || agent != nil {
+			return agent, false, err
+		}
+	}
+	if h.projectRepo != nil && strings.TrimSpace(task.ProjectID) != "" {
+		project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+		if err != nil {
+			return nil, false, err
+		}
+		if project != nil && project.DefaultAgentConfigID != nil && strings.TrimSpace(*project.DefaultAgentConfigID) != "" {
+			agent, err := h.llmConfigRepo.GetByID(ctx, strings.TrimSpace(*project.DefaultAgentConfigID))
+			if err != nil || agent != nil {
+				return agent, false, err
+			}
+		}
+	}
+	agent, err := h.selectDefaultAgent(ctx, false)
+	if err != nil {
+		if strings.Contains(err.Error(), "no agents configured") {
+			return nil, true, nil
+		}
+		return nil, false, err
+	}
+	return agent, agent == nil, nil
+}
+
 func (h *Handler) cancelUnstartableQueuedInput(ctx context.Context, input models.ThreadInput) {
 	if h.threadInputRepo == nil || input.ID == "" {
 		return
@@ -1570,12 +1602,12 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 		}
 		return err
 	}
-	agent, err := h.llmConfigRepo.GetByID(ctx, failed.AgentConfigID)
+	agent, _, err := h.resolveTaskThreadExecutionAgent(ctx, task)
 	if err != nil {
 		return err
 	}
 	if agent == nil {
-		return fmt.Errorf("model not found for failed task-thread retry: %s", failed.AgentConfigID)
+		return fmt.Errorf("no model configured for failed task-thread retry: %s", taskID)
 	}
 	exec := &models.Execution{
 		TaskID:        taskID,
@@ -1695,13 +1727,13 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s load error: %v", input.ID, input.TaskID, err)
 		return err
 	}
-	agent, unstartable, err := h.resolveQueuedInputAgent(ctx, input)
+	agent, unstartable, err := h.resolveTaskThreadExecutionAgent(ctx, task)
 	if err != nil {
-		applog.Infof("[handler] startQueuedTaskThreadInput input=%s agent=%s load error: %v", input.ID, input.AgentConfigID, err)
+		applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s model load error: %v", input.ID, task.ID, err)
 		return err
 	}
 	if agent == nil {
-		applog.Infof("[handler] startQueuedTaskThreadInput input=%s agent=%s no usable model", input.ID, input.AgentConfigID)
+		applog.Infof("[handler] startQueuedTaskThreadInput input=%s task=%s no usable current model", input.ID, task.ID)
 		if unstartable {
 			h.cancelUnstartableQueuedInput(ctx, input)
 			h.startNextQueuedTurnAfter(ctx, streamingResponseParams{ProjectID: task.ProjectID, TaskID: task.ID, IsTaskFollowup: true}, "")

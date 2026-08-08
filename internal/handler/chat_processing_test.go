@@ -2869,6 +2869,166 @@ func TestStartQueuedTaskThreadInputPreparesSelectedMemoryForQueuedFollowup(t *te
 	}
 }
 
+func TestResolveTaskThreadExecutionAgentUsesOpenAICodexTaskModelAfterStaleAnthropicRun(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	staleOpus := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Claude Opus 4.8"
+		a.Provider = models.ProviderAnthropic
+		a.AuthMethod = models.AuthMethodOAuth
+		a.Model = "claude-opus-4-8"
+		a.IsDefault = false
+	})
+	codex := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Codex 5.5"
+		a.Provider = models.ProviderOpenAI
+		a.AuthMethod = models.AuthMethodOAuth
+		a.Model = "gpt-5.5"
+		a.IsDefault = true
+	})
+	project := createProject(t, h, "OpenAI Codex Resolver Project")
+	task := createTask(t, h, project.ID, "OpenAI Codex Resolver Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusFailed
+		tk.AgentID = &codex.ID
+	})
+	createExec(t, h, task.ID, staleOpus.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecFailed
+		ex.PromptSent = "failed with expired Anthropic OAuth"
+		ex.ErrorMessage = `OAuth token refresh failed for model config "Claude Opus 4.8" (provider=anthropic model=claude-opus-4-8): refresh failed with HTTP 400`
+	})
+
+	agent, unstartable, err := h.resolveTaskThreadExecutionAgent(ctx, task)
+	require.NoError(t, err)
+	require.False(t, unstartable)
+	require.NotNil(t, agent)
+	require.Equal(t, codex.ID, agent.ID)
+	require.Equal(t, models.ProviderOpenAI, agent.Provider)
+	require.Equal(t, models.AuthMethodOAuth, agent.AuthMethod)
+	require.Equal(t, "gpt-5.5", agent.Model)
+	require.NotEqual(t, staleOpus.ID, agent.ID)
+}
+
+func TestRetryLatestFailedTaskThreadFollowupUsesCurrentTaskModel(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	staleOpus := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Claude Opus 4.8"
+		a.Provider = models.ProviderAnthropic
+		a.AuthMethod = models.AuthMethodOAuth
+		a.Model = "claude-opus-4-8"
+		a.IsDefault = false
+	})
+	codex := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Codex 5.5"
+		a.Provider = models.ProviderTest
+		a.Model = "gpt-5.5"
+		a.IsDefault = true
+	})
+	project := createProject(t, h, "Failed Followup Model Switch Project")
+	task := createTask(t, h, project.ID, "Failed Followup Model Switch Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusFailed
+		tk.AgentID = &codex.ID
+	})
+	createExec(t, h, task.ID, staleOpus.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecFailed
+		ex.PromptSent = "retry the failed follow-up"
+		ex.ErrorMessage = `OAuth token refresh failed for model config "Claude Opus 4.8" (provider=anthropic model=claude-opus-4-8): refresh failed with HTTP 400`
+		ex.IsFollowup = true
+	})
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "retried with codex"
+	mock.TextOnly = "retried with codex"
+	h.llmSvc.SetLLMCaller(mock)
+
+	started, err := h.RetryLatestFailedTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, started)
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	require.Equal(t, codex.ID, mock.LastAgentRequest().Agent.ID)
+	require.NotEqual(t, staleOpus.ID, mock.LastAgentRequest().Agent.ID)
+
+	execs, err := h.execRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	foundRetry := false
+	for _, exec := range execs {
+		if exec.PromptSent == "retry the failed follow-up" && exec.ID != "" && exec.Status != models.ExecFailed {
+			foundRetry = true
+			require.Equal(t, codex.ID, exec.AgentConfigID)
+		}
+	}
+	require.True(t, foundRetry, "expected rerun execution to be recorded with current task model")
+}
+
+func TestStartQueuedTaskThreadInputUsesCurrentTaskModelAfterModelChange(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+
+	staleOpus := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Claude Opus 4.8"
+		a.Provider = models.ProviderAnthropic
+		a.AuthMethod = models.AuthMethodOAuth
+		a.Model = "claude-opus-4-8"
+		a.IsDefault = false
+	})
+	codex := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Codex 5.5"
+		a.Provider = models.ProviderTest
+		a.Model = "gpt-5.5"
+		a.IsDefault = true
+	})
+	project := createProject(t, h, "Queued Followup Model Switch Project")
+	task := createTask(t, h, project.ID, "Queued Followup Model Switch Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusFailed
+		tk.AgentID = &codex.ID
+	})
+	failed := createExec(t, h, task.ID, staleOpus.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecFailed
+		ex.PromptSent = "initial failed run"
+		ex.ErrorMessage = `OAuth token refresh failed for model config "Claude Opus 4.8" (provider=anthropic model=claude-opus-4-8): refresh failed with HTTP 400`
+	})
+	input := &models.ThreadInput{
+		Scope:          models.ThreadInputScopeTask,
+		ProjectID:      project.ID,
+		TaskID:         task.ID,
+		RunExecutionID: failed.ID,
+		AgentConfigID:  staleOpus.ID,
+		InputMode:      models.ThreadInputModeQueued,
+		InputStatus:    models.ThreadInputPending,
+		Content:        "continue after switching to Codex 5.5",
+		Source:         models.TaskOriginWeb,
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, input))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "continued with codex"
+	mock.TextOnly = "continued with codex"
+	h.llmSvc.SetLLMCaller(mock)
+
+	require.NoError(t, h.startQueuedTaskThreadInput(ctx, *input))
+	require.Eventually(t, func() bool { return mock.CallCount() == 1 }, 2*time.Second, 25*time.Millisecond)
+	require.Equal(t, codex.ID, mock.LastAgentRequest().Agent.ID)
+	require.NotEqual(t, staleOpus.ID, mock.LastAgentRequest().Agent.ID)
+
+	execs, err := h.execRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	foundPromoted := false
+	for _, exec := range execs {
+		if exec.PromptSent == input.Content {
+			foundPromoted = true
+			require.Equal(t, codex.ID, exec.AgentConfigID)
+		}
+	}
+	require.True(t, foundPromoted, "expected promoted execution to be recorded with current task model")
+}
+
 func TestStartQueuedTaskThreadInputCancelsQueuedInputWhenNoModelAvailable(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
