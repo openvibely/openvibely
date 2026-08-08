@@ -731,6 +731,7 @@ modelLoop:
 			h.finalizeStreamingTurn(params, output)
 			return
 		}
+		h.recordStreamingUsage(ctx, params, result, string(models.ExecCompleted), "", durationMs)
 	}
 	finalizeLifecycle(nil, result.ChatContext)
 	if params.IsTaskFollowup {
