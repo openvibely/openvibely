@@ -1195,21 +1195,31 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							yamlEditor.value = value;
 							yamlRenderingValue = false;
 						}
-						function applyFoldedYAMLEdit() {
-							if (!yamlEditor || yamlFoldedLines.size === 0) { yamlSourceValue = yamlEditor ? yamlEditor.value : yamlSourceValue; return; }
-							var sourceLines = yamlSourceValue.split('\n'), visibleLines = yamlEditor.value.split('\n'), oldRanges = yamlFoldRanges(sourceLines), nextLines = [], visibleIndex = 0;
-							for (var sourceIndex = 0; sourceIndex < sourceLines.length; sourceIndex++) {
-								var mapped = visibleIndex < yamlVisibleLineMap.length && yamlVisibleLineMap[visibleIndex] === sourceIndex;
-								if (!mapped) continue;
-								nextLines.push(visibleLines[visibleIndex] !== undefined ? visibleLines[visibleIndex] : '');
-								if (yamlFoldedLines.has(sourceIndex) && oldRanges[sourceIndex] !== undefined) {
-									for (var hiddenIndex = sourceIndex + 1; hiddenIndex <= oldRanges[sourceIndex]; hiddenIndex++) nextLines.push(sourceLines[hiddenIndex]);
-									sourceIndex = oldRanges[sourceIndex];
+						function visiblePositionToSourcePosition(visiblePos) {
+							if (yamlFoldedLines.size === 0 || !yamlEditor) return visiblePos;
+							var beforeCursor = yamlEditor.value.slice(0, visiblePos);
+							var visibleLineIndex = (beforeCursor.match(/\n/g) || []).length;
+							var charInLine = visiblePos - (beforeCursor.lastIndexOf('\n') + 1);
+							var sourceLineIndex = visibleLineIndex < yamlVisibleLineMap.length ? yamlVisibleLineMap[visibleLineIndex] : (yamlSourceValue.split('\n').length - 1);
+							var sourceLines = yamlSourceValue.split('\n'), pos = 0;
+							for (var i = 0; i < sourceLineIndex; i++) pos += sourceLines[i].length + 1;
+							return pos + Math.min(charInLine, (sourceLines[sourceLineIndex] || '').length);
+						}
+						function sourcePositionToVisiblePosition(srcPos) {
+							if (yamlFoldedLines.size === 0 || !yamlEditor || !yamlVisibleLineMap.length) return srcPos;
+							var sourceLines = yamlSourceValue.split('\n'), acc = 0;
+							for (var si = 0; si < sourceLines.length; si++) {
+								var lineEnd = acc + sourceLines[si].length;
+								if (srcPos <= lineEnd) {
+									var vi = yamlVisibleLineMap.indexOf(si);
+									if (vi < 0) { for (var k = si - 1; k >= 0; k--) { vi = yamlVisibleLineMap.indexOf(k); if (vi >= 0) break; } if (vi < 0) vi = yamlVisibleLineMap.length - 1; var visLines = yamlEditor.value.split('\n'), vp = 0; for (var j = 0; j < vi; j++) vp += visLines[j].length + 1; return vp + (visLines[vi] || '').length; }
+									var visLines = yamlEditor.value.split('\n'), vp = 0;
+									for (var j = 0; j < vi; j++) vp += visLines[j].length + 1;
+									return vp + Math.min(srcPos - acc, (visLines[vi] || '').length);
 								}
-								visibleIndex++;
+								acc = lineEnd + 1;
 							}
-							while (visibleIndex < visibleLines.length) nextLines.push(visibleLines[visibleIndex++]);
-							yamlSourceValue = nextLines.join('\n');
+							return yamlEditor.value.length;
 						}
 						function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 						function yamlLineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }function yamlFoldRanges(lines) {
@@ -1364,10 +1374,32 @@ yamlViewport.scrollTop = 0;
 					}
 					if (yamlEditor) {
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
+							yamlEditor.addEventListener('beforeinput', function(e) {
+								if (yamlFoldedLines.size === 0 || yamlRenderingValue) return;
+								var ranges = e.getTargetRanges ? e.getTargetRanges() : [];
+								var visStart = ranges.length ? ranges[0].startOffset : yamlEditor.selectionStart;
+								var visEnd = ranges.length ? ranges[0].endOffset : yamlEditor.selectionEnd;
+								var srcStart = visiblePositionToSourcePosition(visStart);
+								var srcEnd = visiblePositionToSourcePosition(visEnd);
+								var insert = '';
+								if (e.inputType === 'insertText') insert = e.data || '';
+								else if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') insert = '\n';
+								else if (e.inputType === 'deleteContentBackward') { if (srcStart === srcEnd && srcStart > 0) srcStart--; }
+								else if (e.inputType === 'deleteContentForward') { if (srcStart === srcEnd && srcEnd < yamlSourceValue.length) srcEnd++; }
+								else if (e.inputType === 'deleteByCut' || e.inputType === 'deleteByDrag') { insert = ''; }
+								else if (e.inputType === 'insertFromPaste' || e.inputType === 'insertFromDrop') { insert = e.dataTransfer ? (e.dataTransfer.getData('text/plain') || '') : ''; }
+								else return;
+								e.preventDefault();
+								yamlSourceValue = yamlSourceValue.slice(0, srcStart) + insert + yamlSourceValue.slice(srcEnd);
+								var newSrcCursor = srcStart + insert.length;
+								updateYAMLLineNumbers();
+								var newVisCursor = sourcePositionToVisiblePosition(newSrcCursor);
+								yamlEditor.setSelectionRange(newVisCursor, newVisCursor);
+								validateYAMLWhileTyping();
+							});
 							yamlEditor.addEventListener('input', function() {
 								if (yamlRenderingValue) return;
-								if (yamlFoldedLines.size > 0) applyFoldedYAMLEdit(); else yamlSourceValue = yamlEditor.value;
-								updateYAMLLineNumbers(); validateYAMLWhileTyping();
+								if (yamlFoldedLines.size === 0) { yamlSourceValue = yamlEditor.value; updateYAMLLineNumbers(); validateYAMLWhileTyping(); }
 							});						updateYAMLLineNumbers();
 						validateYAMLWhileTyping();
 					}
