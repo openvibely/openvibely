@@ -1073,6 +1073,14 @@ type AutomationGitHubIssueTaskCreation struct {
 	Goal            *models.TaskGoal
 }
 
+type AutomationGitHubIssueTaskProvenance struct {
+	ProjectID             string
+	AutomationID          string
+	TaskID                string
+	IssueResourceID       string
+	ImplementationNodeKey string
+}
+
 // CreateOrGetGitHubIssueTask validates the exact current inbox discovery and
 // atomically creates its canonical implementation task plus Automation
 // provenance. The stable work-item activity is the durable one-task claim.
@@ -1148,6 +1156,9 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 		return nil, false, err
 	}
 	if existing != nil {
+		if err := recordGitHubIssueTaskProvenanceWithExecutor(ctx, conn, in.ProjectID, binding.AutomationID, existing.ID, in.IssueResourceID, binding.VersionID, in.TargetNodeID); err != nil {
+			return nil, false, err
+		}
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
@@ -1179,6 +1190,9 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 		FromNodeID: binding.NodeID, ToNodeID: in.TargetNodeID, Transition: models.AutomationTransitionEntered,
 	})
 	if err != nil {
+		return nil, false, err
+	}
+	if err := recordGitHubIssueTaskProvenanceWithExecutor(ctx, conn, in.ProjectID, binding.AutomationID, in.Task.ID, in.IssueResourceID, binding.VersionID, in.TargetNodeID); err != nil {
 		return nil, false, err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
@@ -2672,10 +2686,90 @@ func (r *AutomationRepo) ContextForTask(ctx context.Context, projectID, taskID s
 	return contextForTaskWithExecutor(ctx, r.db, projectID, taskID)
 }
 
+func recordGitHubIssueTaskProvenanceWithExecutor(ctx context.Context, exec SQLExecutor, projectID, automationID, taskID, issueResourceID, versionID, nodeID string) error {
+	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(automationID) == "" || strings.TrimSpace(taskID) == "" || strings.TrimSpace(issueResourceID) == "" || strings.TrimSpace(versionID) == "" || strings.TrimSpace(nodeID) == "" {
+		return errors.New("complete Automation GitHub issue task provenance is required")
+	}
+	var nodeKey string
+	if err := exec.QueryRowContext(ctx, `SELECT node_key FROM automation_nodes
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND id = ? AND node_type = 'agent_task' AND role IN ('task','implementation')`,
+		projectID, automationID, versionID, nodeID).Scan(&nodeKey); err != nil {
+		return fmt.Errorf("loading Automation GitHub implementation node provenance: %w", err)
+	}
+	if strings.TrimSpace(nodeKey) == "" {
+		return errors.New("Automation GitHub implementation node provenance is unavailable")
+	}
+	if _, err := exec.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
+		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key, created_from_version_id, created_from_node_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(project_id, task_id) DO NOTHING`, projectID, automationID, taskID, issueResourceID, nodeKey, versionID, nodeID); err != nil {
+		return fmt.Errorf("recording Automation GitHub issue task provenance: %w", err)
+	}
+	var existingAutomationID, existingIssueResourceID, existingNodeKey string
+	if err := exec.QueryRowContext(ctx, `SELECT automation_id, issue_resource_id, implementation_node_key
+		FROM automation_github_issue_task_provenance WHERE project_id = ? AND task_id = ?`, projectID, taskID).
+		Scan(&existingAutomationID, &existingIssueResourceID, &existingNodeKey); err != nil {
+		return fmt.Errorf("loading recorded Automation GitHub issue task provenance: %w", err)
+	}
+	if existingAutomationID != automationID || existingIssueResourceID != issueResourceID || existingNodeKey != nodeKey {
+		return errors.New("source GitHub issue has conflicting Automation task provenance")
+	}
+	return nil
+}
+
+// GitHubIssueTaskProvenance returns the graph-independent source issue record
+// written when a GitHub inbox created the implementation task. It intentionally
+// does not depend on replaceable graph-version rows, so legitimate tasks can
+// publish PRs after compatible Automation edits while spoofed created_via values
+// still fail closed.
+func (r *AutomationRepo) GitHubIssueTaskProvenance(ctx context.Context, projectID, taskID string) (*AutomationGitHubIssueTaskProvenance, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT project_id, automation_id, task_id, issue_resource_id, implementation_node_key
+		FROM automation_github_issue_task_provenance WHERE project_id = ? AND task_id = ?
+		UNION
+		SELECT activity.project_id, activity.automation_id, task_resource.resource_id, issue_resource.resource_id, node.node_key
+		FROM automation_activities activity
+		JOIN automation_nodes node ON node.id = activity.node_id AND node.version_id = activity.version_id
+			AND node.automation_id = activity.automation_id AND node.project_id = activity.project_id
+		JOIN automation_activity_resources task_resource ON task_resource.activity_id = activity.id
+			AND task_resource.resource_type = 'task' AND task_resource.resource_id = ? AND task_resource.relation = 'child'
+		JOIN automation_activity_resources issue_resource ON issue_resource.activity_id = activity.id
+			AND issue_resource.resource_type = 'github_issue'
+		WHERE activity.project_id = ? AND activity.activity_type = 'create_task' AND activity.work_item_id IS NOT NULL
+			AND activity.activity_key = 'work-item:' || activity.work_item_id || ':implementation-task'
+			AND node.node_type = 'agent_task' AND node.role IN ('task','implementation')
+		ORDER BY automation_id, issue_resource_id, implementation_node_key`, projectID, taskID, taskID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out *AutomationGitHubIssueTaskProvenance
+	for rows.Next() {
+		var candidate AutomationGitHubIssueTaskProvenance
+		if err := rows.Scan(&candidate.ProjectID, &candidate.AutomationID, &candidate.TaskID, &candidate.IssueResourceID, &candidate.ImplementationNodeKey); err != nil {
+			return nil, err
+		}
+		if out != nil && (out.AutomationID != candidate.AutomationID || out.IssueResourceID != candidate.IssueResourceID || out.ImplementationNodeKey != candidate.ImplementationNodeKey) {
+			return nil, errors.New("Automation task has conflicting GitHub source issue provenance")
+		}
+		out = &candidate
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GitHubIssueResourceForTask returns the canonical GitHub issue resource recorded
 // when an Automation GitHub inbox created the implementation task. More than one
 // source issue is ambiguous and therefore rejected.
 func (r *AutomationRepo) GitHubIssueResourceForTask(ctx context.Context, projectID, taskID string) (string, error) {
+	provenance, err := r.GitHubIssueTaskProvenance(ctx, projectID, taskID)
+	if err != nil {
+		return "", err
+	}
+	if provenance != nil {
+		return provenance.IssueResourceID, nil
+	}
 	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT issue_resource.resource_id
 		FROM automation_activities activity
 		JOIN automation_activity_resources task_resource ON task_resource.activity_id = activity.id

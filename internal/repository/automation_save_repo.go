@@ -447,6 +447,25 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 }
 
 func backfillLegacyGitHubIssueTaskOrigins(ctx context.Context, exec SQLExecutor, projectID, automationID, versionID string) error {
+	if _, err := exec.ExecContext(ctx, `INSERT INTO automation_github_issue_task_provenance
+		(project_id, automation_id, task_id, issue_resource_id, implementation_node_key, created_from_version_id, created_from_node_id)
+		SELECT activity.project_id, activity.automation_id, task_resource.resource_id, issue_resource.resource_id,
+			node.node_key, activity.version_id, activity.node_id
+		FROM automation_activities activity
+		JOIN automation_nodes node ON node.id = activity.node_id
+			AND node.version_id = activity.version_id AND node.automation_id = activity.automation_id
+			AND node.project_id = activity.project_id
+		JOIN automation_activity_resources task_resource ON task_resource.activity_id = activity.id
+			AND task_resource.resource_type = 'task' AND task_resource.relation = 'child'
+		JOIN automation_activity_resources issue_resource ON issue_resource.activity_id = activity.id
+			AND issue_resource.resource_type = 'github_issue'
+		WHERE activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?
+			AND activity.activity_type = 'create_task' AND activity.work_item_id IS NOT NULL
+			AND activity.activity_key = 'work-item:' || activity.work_item_id || ':implementation-task'
+			AND node.node_type = 'agent_task' AND node.role IN ('task', 'implementation')
+		ON CONFLICT(project_id, task_id) DO NOTHING`, projectID, automationID, versionID); err != nil {
+		return fmt.Errorf("backfilling Automation GitHub issue task provenance: %w", err)
+	}
 	_, err := exec.ExecContext(ctx, `UPDATE tasks
 		SET created_via = (
 			SELECT 'automation:' || activity.automation_id || ':' || node.node_key

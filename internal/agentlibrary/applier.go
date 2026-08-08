@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -146,8 +147,8 @@ func agentConfigurationEqual(existing, target *models.Agent) bool {
 	}
 	left, right := *existing, *target
 	left.ID, right.ID = "", ""
-	left.CreatedAt, right.CreatedAt = right.CreatedAt, right.CreatedAt
-	left.UpdatedAt, right.UpdatedAt = right.UpdatedAt, right.UpdatedAt
+	left.CreatedAt, right.CreatedAt = time.Time{}, time.Time{}
+	left.UpdatedAt, right.UpdatedAt = time.Time{}, time.Time{}
 	normalizeEmptyAgentSlices(&left)
 	normalizeEmptyAgentSlices(&right)
 	return reflect.DeepEqual(left, right)
@@ -181,8 +182,8 @@ func hookConfigurationEqual(existing, target *models.AgentLifecycleHook) bool {
 	left, right := *existing, *target
 	left.ID, right.ID = "", ""
 	left.AgentID, right.AgentID = "", ""
-	left.CreatedAt, right.CreatedAt = right.CreatedAt, right.CreatedAt
-	left.UpdatedAt, right.UpdatedAt = right.UpdatedAt, right.UpdatedAt
+	left.CreatedAt, right.CreatedAt = time.Time{}, time.Time{}
+	left.UpdatedAt, right.UpdatedAt = time.Time{}, time.Time{}
 	return reflect.DeepEqual(left, right)
 }
 

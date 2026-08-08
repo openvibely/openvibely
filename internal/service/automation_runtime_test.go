@@ -2118,6 +2118,105 @@ func newAutomationGitHubIssueCausalContext(t *testing.T, fixture automationRunti
 	return withAutomationExecution(causalCtx, task.ID, execution.ID)
 }
 
+func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplacement(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime.git"
+	fixture.project.RepoPath = t.TempDir()
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+		},
+		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			return &GitHubAuthenticatedUser{Login: "dev"}, []GitHubIssue{{Number: 42, Title: "Replace-safe issue", State: "open"}}, nil
+		},
+		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 77, URL: "https://github.com/example/runtime/pull/77", State: "open"}, nil
+		},
+	}
+	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
+		TaskPullRequestRepo: repository.NewTaskPullRequestRepo(fixture.repo.DB()), AutomationRepo: fixture.repo, GitHub: provider}
+	handlers := buildGitHubIssueRuntimeHandlers(opts)
+	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "github inbox"}
+	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
+	invocation, _, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, time.Now().UTC(), fixture.schedule.ComputeNextRun(time.Now().UTC()))
+	require.NoError(t, err)
+	devInbox := automationNodeByKey(t, fixture.definition, "dev_inbox")
+	inboxBinding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, InvocationID: invocation.ID, NodeID: devInbox.ID}
+	inboxCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{inboxBinding}})
+	inboxCtx = withAutomationExecution(inboxCtx, fixture.task.ID, execution.ID)
+	_, err = handlers["github_list_my_assigned_issues"](inboxCtx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	workerSvc := newTestWorkerService(t)
+	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
+		taskRepo: fixture.taskRepo, taskSvc: NewTaskService(fixture.taskRepo, nil, workerSvc)}
+	createRuntime := llmSvc.taskControlRuntimeTools(fixture.task)
+	createOutput, handled, isErr, err := createRuntime.Executor(inboxCtx, "create_task", json.RawMessage(`{
+		"title":"Implement issue 42 after graph replacement","prompt":"implement issue 42","category":"backlog",
+		"source_github_issue_number":42
+	}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+	implementationTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Implement issue 42 after graph replacement")
+	require.NoError(t, err)
+	require.NotNil(t, implementationTask)
+	require.Contains(t, createOutput, implementationTask.ID)
+	select {
+	case <-workerSvc.Submitted():
+	case <-time.After(time.Second):
+		t.Fatal("approved GitHub issue task was not submitted")
+	}
+
+	replaced := replaceAutomationGitHubIssueGraph(t, fixture)
+	require.NotEqual(t, fixture.definition.Version.ID, replaced.Version.ID)
+	worktreePath := t.TempDir()
+	require.NoError(t, fixture.taskRepo.UpdateWorktreeInfo(ctx, implementationTask.ID, worktreePath, "task/issue-42-replaced"))
+	implementationTask.WorktreePath = worktreePath
+	implementationTask.WorktreeBranch = "task/issue-42-replaced"
+	implementationExecution := models.Execution{TaskID: implementationTask.ID, Status: models.ExecRunning, PromptSent: "implementation"}
+	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &implementationExecution))
+	originCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, OriginTask: true})
+	originCtx = withAutomationExecution(originCtx, implementationTask.ID, implementationExecution.ID)
+	publishSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
+		taskRepo: fixture.taskRepo, taskPullRequestRepo: opts.TaskPullRequestRepo, githubPRFeedbackRepo: repository.NewGitHubPRFeedbackRepo(fixture.repo.DB()),
+		githubAuthRepo: repository.NewGitHubAuthRepo(fixture.repo.DB()), threadInputRepo: repository.NewThreadInputRepo(fixture.repo.DB())}
+	publishRuntime := publishSvc.AutomationGitHubRuntimeTools(originCtx, *implementationTask, gitHubIssueRuntimeToolDefs(true))
+	require.NotNil(t, publishRuntime)
+	prBody := "## Summary\n- Implements the accepted issue.\n\n## Validation\n- go test ./internal/service\n\nCloses #42"
+	published, handled, isErr, err := publishRuntime.Executor(originCtx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.Contains(t, published, `"created":true`)
+	record, err := opts.TaskPullRequestRepo.GetByTaskID(ctx, implementationTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, record)
+	require.Equal(t, 77, record.PRNumber)
+	require.NotNil(t, record.IssueNumber)
+	require.Equal(t, 42, *record.IssueNumber)
+	require.Equal(t, "https://github.com/example/runtime/issues/42", record.IssueURL)
+
+	spoofed := &models.Task{ProjectID: fixture.project.ID, Title: "Spoofed stale Automation task", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "spoof", CreatedVia: "automation:" + fixture.definition.Automation.ID + ":implementation"}
+	require.NoError(t, fixture.taskRepo.Create(ctx, spoofed))
+	require.NoError(t, fixture.taskRepo.UpdateWorktreeInfo(ctx, spoofed.ID, t.TempDir(), "task/spoofed"))
+	spoofed.WorktreeBranch = "task/spoofed"
+	spoofExecution := models.Execution{TaskID: spoofed.ID, Status: models.ExecRunning, PromptSent: "spoof"}
+	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &spoofExecution))
+	spoofCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, OriginTask: true})
+	spoofCtx = withAutomationExecution(spoofCtx, spoofed.ID, spoofExecution.ID)
+	spoofRuntime := publishSvc.AutomationGitHubRuntimeTools(spoofCtx, *spoofed, gitHubIssueRuntimeToolDefs(true))
+	_, handled, isErr, err = spoofRuntime.Executor(spoofCtx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.ErrorContains(t, err, "trusted Automation task provenance")
+	spoofRecord, err := opts.TaskPullRequestRepo.GetByTaskID(ctx, spoofed.ID)
+	require.NoError(t, err)
+	require.Nil(t, spoofRecord)
+}
+
 func newAutomationGitHubIssueDedupHarness(t *testing.T, provider GitHubIssueRuntimeProvider) (automationRuntimeFixture, func(string) context.Context, func(context.Context, json.RawMessage) (string, error)) {
 	t.Helper()
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)

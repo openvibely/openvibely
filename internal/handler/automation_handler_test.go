@@ -2184,6 +2184,9 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 			if def.Access != llmcontracts.RuntimeToolAccessWrite {
 				continue
 			}
+			if runtimeContext.name == "reconstructed origin" && def.Name == "github_open_pull_request" {
+				continue
+			}
 			writeCount++
 			_, handled, isError, callErr := runtime.Executor(runtimeContext.ctx, def.Name, json.RawMessage(`{}`))
 			require.True(t, handled, runtimeContext.name+": "+def.Name)
