@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"reflect"
 	"strings"
 	"testing"
@@ -2839,5 +2840,137 @@ func TestTaskRepo_ListTasksForDiscovery(t *testing.T) {
 			t.Fatalf("pagination returned duplicate task %q", task.ID)
 		}
 		seen[task.ID] = true
+	}
+}
+
+func TestTaskRepo_ListWithSchedulesByProject_UsesCalendarProjection(t *testing.T) {
+	if got, want := scheduleCalendarTaskSelectColumns, "t.id, t.project_id, t.title, t.category, t.status"; got != want {
+		t.Fatalf("calendar projection changed: got %q, want %q", got, want)
+	}
+	for _, forbidden := range []string{"prompt", "chain_config", "swarm_config"} {
+		if projectionContainsColumn(scheduleCalendarTaskSelectColumns, forbidden) {
+			t.Fatalf("calendar projection must not select unused task column %q: %s", forbidden, scheduleCalendarTaskSelectColumns)
+		}
+	}
+
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	scheduleRepo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	largePrompt := strings.Repeat("p", 64*1024)
+	largeChainConfig := `{"payload":"` + strings.Repeat("c", 16*1024) + `"}`
+	largeSwarmConfig := `{"payload":"` + strings.Repeat("s", 16*1024) + `"}`
+	scheduledWithSchedule := &models.Task{
+		ProjectID:     "default",
+		Title:         "Calendar bounded scheduled task",
+		Category:      models.CategoryActive,
+		Priority:      4,
+		Status:        models.StatusPending,
+		Prompt:        largePrompt,
+		ChainConfig:   largeChainConfig,
+		SwarmConfig:   largeSwarmConfig,
+		SwarmRole:     models.SwarmRoleWorker,
+		SwarmSequence: 7,
+	}
+	if err := repo.Create(ctx, scheduledWithSchedule); err != nil {
+		t.Fatalf("create scheduled task: %v", err)
+	}
+
+	runAt := time.Date(2026, 8, 9, 14, 30, 0, 0, time.UTC)
+	nextRun := runAt.Add(48 * time.Hour)
+	lastRun := runAt.Add(-48 * time.Hour)
+	schedule := &models.Schedule{
+		TaskID:              scheduledWithSchedule.ID,
+		RunAt:               runAt,
+		RepeatType:          models.RepeatDaily,
+		RepeatInterval:      2,
+		Enabled:             false,
+		ClearContextOnStart: true,
+		NextRun:             &nextRun,
+	}
+	if err := scheduleRepo.Create(ctx, schedule); err != nil {
+		t.Fatalf("create schedule: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE schedules SET last_run = ? WHERE id = ?`, lastRun, schedule.ID); err != nil {
+		t.Fatalf("set schedule last_run: %v", err)
+	}
+	insertAutomationScheduleOwner(t, ctx, db, "default", schedule.ID, "Automation Node Override")
+
+	scheduledWithoutSchedule := &models.Task{
+		ProjectID:   "default",
+		Title:       "Calendar scheduled category without schedule",
+		Category:    models.CategoryScheduled,
+		Priority:    1,
+		Status:      models.StatusPending,
+		Prompt:      largePrompt,
+		ChainConfig: largeChainConfig,
+		SwarmConfig: largeSwarmConfig,
+	}
+	if err := repo.Create(ctx, scheduledWithoutSchedule); err != nil {
+		t.Fatalf("create scheduled category task: %v", err)
+	}
+
+	results, err := repo.ListWithSchedulesByProject(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListWithSchedulesByProject: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected two calendar rows, got %d: %#v", len(results), results)
+	}
+
+	byID := make(map[string]TaskWithSchedule, len(results))
+	for _, result := range results {
+		byID[result.Task.ID] = result
+		if result.Task.Prompt != "" || result.Task.ChainConfig != "" || result.Task.SwarmConfig != "" {
+			t.Fatalf("calendar projection materialized unused payloads for task %s: prompt=%d chain_config=%d swarm_config=%d", result.Task.ID, len(result.Task.Prompt), len(result.Task.ChainConfig), len(result.Task.SwarmConfig))
+		}
+	}
+
+	withSchedule := byID[scheduledWithSchedule.ID]
+	if withSchedule.Task.ProjectID != "default" || withSchedule.Task.Title != scheduledWithSchedule.Title || withSchedule.Task.Category != models.CategoryActive || withSchedule.Task.Status != models.StatusPending {
+		t.Fatalf("calendar task fields changed: %+v", withSchedule.Task)
+	}
+	if withSchedule.AutomationScheduleName != "Automation Node Override" {
+		t.Fatalf("expected automation schedule name override, got %q", withSchedule.AutomationScheduleName)
+	}
+	if withSchedule.Schedule == nil {
+		t.Fatal("expected schedule metadata")
+	}
+	if withSchedule.Schedule.ID != schedule.ID || withSchedule.Schedule.TaskID != scheduledWithSchedule.ID || !withSchedule.Schedule.RunAt.Equal(runAt) {
+		t.Fatalf("schedule identity/time fields changed: %+v", withSchedule.Schedule)
+	}
+	if withSchedule.Schedule.RepeatType != models.RepeatDaily || withSchedule.Schedule.RepeatInterval != 2 || withSchedule.Schedule.Enabled || !withSchedule.Schedule.ClearContextOnStart {
+		t.Fatalf("schedule repeat/enabled fields changed: %+v", withSchedule.Schedule)
+	}
+	if withSchedule.Schedule.NextRun == nil || !withSchedule.Schedule.NextRun.Equal(nextRun) {
+		t.Fatalf("schedule next_run changed: %+v", withSchedule.Schedule.NextRun)
+	}
+	if withSchedule.Schedule.LastRun == nil || !withSchedule.Schedule.LastRun.Equal(lastRun) {
+		t.Fatalf("schedule last_run changed: %+v", withSchedule.Schedule.LastRun)
+	}
+
+	withoutSchedule := byID[scheduledWithoutSchedule.ID]
+	if withoutSchedule.Task.Title != scheduledWithoutSchedule.Title || withoutSchedule.Schedule != nil || withoutSchedule.AutomationScheduleName != "" {
+		t.Fatalf("scheduled category row without schedule changed: %+v", withoutSchedule)
+	}
+}
+
+func insertAutomationScheduleOwner(t *testing.T, ctx context.Context, db *sql.DB, projectID, scheduleID, nodeName string) {
+	t.Helper()
+	automationID := "calendar-automation-" + scheduleID
+	versionID := "calendar-version-" + scheduleID
+	nodeID := "calendar-node-" + scheduleID
+	if _, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state) VALUES (?, ?, ?, ?, 'active')`, automationID, projectID, automationID, "Calendar Automation"); err != nil {
+		t.Fatalf("insert automation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key) VALUES (?, ?, ?, 1, 'published', 'manual', 'calendar-test')`, versionID, projectID, automationID); err != nil {
+		t.Fatalf("insert automation version: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json) VALUES (?, ?, ?, ?, 'schedule-trigger', ?, 'trigger', 'schedule', '{}')`, nodeID, projectID, automationID, versionID, nodeName); err != nil {
+		t.Fatalf("insert automation node: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_trigger_owners (schedule_id, project_id, automation_id, version_id, node_id, ownership_state) VALUES (?, ?, ?, ?, ?, 'active')`, scheduleID, projectID, automationID, versionID, nodeID); err != nil {
+		t.Fatalf("insert automation schedule owner: %v", err)
 	}
 }
