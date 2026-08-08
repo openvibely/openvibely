@@ -1158,25 +1158,23 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					var yamlHighlight = builder.querySelector('[data-automation-yaml-highlight]');
 					var yamlDiagnostic = builder.querySelector('[data-automation-yaml-diagnostic]');
 					var yamlDiagnosticLine = 0;
-					var yamlFoldedLines = new Set();
-					var yamlParseTimer = 0;
-					var yamlParseRequest = 0;
+						var yamlFoldedLines = new Set();
+						var yamlSourceValue = yamlEditor ? yamlEditor.value : '';
+						var yamlVisibleLineMap = [];
+						var yamlRenderingValue = false;
+						var yamlParseTimer = 0;					var yamlParseRequest = 0;
 					var yamlLineLayoutFrame = 0;
-					function yamlActiveScrollTop() { return yamlEditor && yamlEditor.hidden && yamlViewport ? yamlViewport.scrollTop : (yamlEditor ? yamlEditor.scrollTop : 0); }
-					function restoreYAMLScrollTop(value) {
-						if (!yamlEditor) return;
-						if (yamlEditor.hidden && yamlViewport) yamlViewport.scrollTop = value;
-						else {
+						function yamlActiveScrollTop() { return yamlEditor ? yamlEditor.scrollTop : 0; }
+						function restoreYAMLScrollTop(value) {
+							if (!yamlEditor) return;
 							yamlEditor.scrollTop = value;
 							if (yamlViewport) yamlViewport.scrollTop = 0;
 							syncYAMLHighlightScroll();
 						}
-					}
-					function scrollYAMLFromWheel(event) {
-						if (!yamlEditor || !event.deltaY) return;
-						var scroller = yamlEditor.hidden && yamlViewport ? yamlViewport : yamlEditor;
-						if (!scroller) return;
-						var delta = event.deltaY;
+						function scrollYAMLFromWheel(event) {
+							if (!yamlEditor || !event.deltaY) return;
+							var scroller = yamlEditor;
+							if (!scroller) return;						var delta = event.deltaY;
 						if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) delta *= 24;
 						if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) delta *= scroller.clientHeight;
 						var previousTop = scroller.scrollTop;
@@ -1190,9 +1188,31 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							event.preventDefault();
 						}
 					}
-					function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-					function yamlLineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }
-function yamlFoldRanges(lines) {
+						function automationYAMLValue() { return yamlFoldedLines.size > 0 ? yamlSourceValue : (yamlEditor ? yamlEditor.value : yamlSourceValue); }
+						function setYAMLEditorDisplay(value) {
+							if (!yamlEditor || yamlEditor.value === value) return;
+							yamlRenderingValue = true;
+							yamlEditor.value = value;
+							yamlRenderingValue = false;
+						}
+						function applyFoldedYAMLEdit() {
+							if (!yamlEditor || yamlFoldedLines.size === 0) { yamlSourceValue = yamlEditor ? yamlEditor.value : yamlSourceValue; return; }
+							var sourceLines = yamlSourceValue.split('\n'), visibleLines = yamlEditor.value.split('\n'), oldRanges = yamlFoldRanges(sourceLines), nextLines = [], visibleIndex = 0;
+							for (var sourceIndex = 0; sourceIndex < sourceLines.length; sourceIndex++) {
+								var mapped = visibleIndex < yamlVisibleLineMap.length && yamlVisibleLineMap[visibleIndex] === sourceIndex;
+								if (!mapped) continue;
+								nextLines.push(visibleLines[visibleIndex] !== undefined ? visibleLines[visibleIndex] : '');
+								if (yamlFoldedLines.has(sourceIndex) && oldRanges[sourceIndex] !== undefined) {
+									for (var hiddenIndex = sourceIndex + 1; hiddenIndex <= oldRanges[sourceIndex]; hiddenIndex++) nextLines.push(sourceLines[hiddenIndex]);
+									sourceIndex = oldRanges[sourceIndex];
+								}
+								visibleIndex++;
+							}
+							while (visibleIndex < visibleLines.length) nextLines.push(visibleLines[visibleIndex++]);
+							yamlSourceValue = nextLines.join('\n');
+						}
+						function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+						function yamlLineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }function yamlFoldRanges(lines) {
 							var ranges = {};						for (var index = 0; index < lines.length; index++) {
 							var line = lines[index];
 							if (!line.trim() || line.trim().charAt(0) === '#') continue;
@@ -1272,11 +1292,12 @@ function yamlFoldRanges(lines) {
 					}
 						function updateYAMLLineNumbers() {
 							if (!yamlEditor || !yamlLineNumbers || !yamlFoldControls || !yamlHighlight) return;
-var lines = yamlEditor.value.split('\n'), ranges = yamlFoldRanges(lines), highlighted = [], lineNumbers = [], controls = [], visibleLines = [], index = 0;
+var lines = yamlSourceValue.split('\n'), ranges = yamlFoldRanges(lines), highlighted = [], lineNumbers = [], controls = [], visibleLines = [], displayLines = [], index = 0;
 							reconcileYAMLFolds(ranges);
 							var folded = yamlFoldedLines.size > 0;
 							while (index < lines.length) {							var foldEnd = ranges[index], canFold = foldEnd !== undefined, isFolded = yamlFoldedLines.has(index), indent = yamlLineIndent(lines[index]);
 							visibleLines.push(index);
+							displayLines.push(lines[index]);
 							lineNumbers.push('<span class="block min-h-6" data-automation-yaml-line-number data-yaml-line="' + (index + 1) + '">' + (index + 1) + '</span>');								if (canFold) {
 									var visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';
 									controls.push('<button class="pointer-events-auto absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded bg-transparent p-0 text-base-content/60 transition-opacity hover:bg-transparent hover:text-base-content/60 focus-visible:bg-transparent focus-visible:text-base-content/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary' + visibilityClass + '" style="top:0" type="button" data-automation-yaml-fold data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '" aria-label="' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '"><svg class="h-5 w-5 transition-transform' + (isFolded ? ' -rotate-90' : '') + '" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5"></path></svg></button>');
@@ -1288,8 +1309,10 @@ var lines = yamlEditor.value.split('\n'), ranges = yamlFoldRanges(lines), highli
 							yamlHighlight.innerHTML = yamlContinuousIndentationRails(lines, visibleLines) + highlighted.join('');
 							yamlLineNumbers.innerHTML = lineNumbers.join('');
 							yamlFoldControls.innerHTML = controls.join('');
+							yamlVisibleLineMap = visibleLines.slice();
 							if (folded) {
-								yamlEditor.hidden = true;
+								yamlEditor.hidden = false;
+								setYAMLEditorDisplay(displayLines.join('\n'));
 								yamlHighlight.classList.remove('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');
 								yamlHighlight.classList.add('min-h-full');
 								yamlHighlight.style.transform = '';
@@ -1301,6 +1324,8 @@ yamlViewport.classList.remove('overflow-hidden');
 										yamlViewport.setAttribute('aria-label', 'Collapsed YAML source');								}
 							} else {
 								yamlEditor.hidden = false;
+								setYAMLEditorDisplay(yamlSourceValue);
+								yamlVisibleLineMap = [];
 								yamlHighlight.classList.add('absolute', 'left-0', 'right-0', 'top-0', 'min-h-full');
 								if (yamlViewport) {
 yamlViewport.scrollTop = 0;
@@ -1313,7 +1338,7 @@ yamlViewport.scrollTop = 0;
 							queueYAMLLineLayout();
 						}
 						function syncYAMLHighlightScroll() {
-							if (!yamlEditor || yamlEditor.hidden) return;
+							if (!yamlEditor) return;
 							if (yamlHighlight) yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';
 							if (yamlFoldControls) yamlFoldControls.style.transform = 'translateY(' + (-yamlEditor.scrollTop) + 'px)';
 							if (yamlLineNumbers) yamlLineNumbers.scrollTop = yamlEditor.scrollTop;
@@ -1331,7 +1356,7 @@ yamlViewport.scrollTop = 0;
 						var request = ++yamlParseRequest;
 						window.clearTimeout(yamlParseTimer);
 						yamlParseTimer = window.setTimeout(function() {
-							fetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: yamlEditor.value})})
+							fetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})
 								.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })
 								.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })
 								.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });
@@ -1339,8 +1364,11 @@ yamlViewport.scrollTop = 0;
 					}
 					if (yamlEditor) {
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
-						yamlEditor.addEventListener('input', function() { updateYAMLLineNumbers(); validateYAMLWhileTyping(); });
-						updateYAMLLineNumbers();
+							yamlEditor.addEventListener('input', function() {
+								if (yamlRenderingValue) return;
+								if (yamlFoldedLines.size > 0) applyFoldedYAMLEdit(); else yamlSourceValue = yamlEditor.value;
+								updateYAMLLineNumbers(); validateYAMLWhileTyping();
+							});						updateYAMLLineNumbers();
 						validateYAMLWhileTyping();
 					}
 					if (yamlFoldControls) yamlFoldControls.addEventListener('click', function(event) {
@@ -1369,12 +1397,12 @@ yamlViewport.scrollTop = 0;
 						builder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });
 						if (writeYAML !== false) {
 							var serializedYAML = visualCandidateYAML();
-							if (yamlEditor) {
-								yamlEditor.value = serializedYAML;
-								yamlFoldedLines.clear();
-								updateYAMLLineNumbers();
-							}
-							builder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = serializedYAML; });
+								if (yamlEditor) {
+									yamlSourceValue = serializedYAML;
+									yamlFoldedLines.clear();
+									setYAMLEditorDisplay(serializedYAML);
+									updateYAMLLineNumbers();
+								}							builder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = serializedYAML; });
 						}
 					}					function applyViewBox() { svg.setAttribute('viewBox', viewBox.join(' ')); }
 				function graphPoint(event) {
@@ -1619,8 +1647,10 @@ yamlViewport.scrollTop = 0;
 					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor) syncCandidate(); });
 					builder.addEventListener('change', function(event) { if (event.target !== yamlEditor) syncCandidate(); });
 					builder.addEventListener('submit', function() {
-						if (yamlEditor && yamlEditor.value !== visualCandidateYAML()) {
-							builder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = yamlEditor.value; });
+						if (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {
+							var submittedYAML = automationYAMLValue();
+							setYAMLEditorDisplay(submittedYAML);
+							builder.querySelectorAll('[data-automation-yaml-submission]').forEach(function(input) { input.value = submittedYAML; });
 							return;
 						}
 						syncCandidate();
@@ -1653,7 +1683,7 @@ yamlViewport.scrollTop = 0;
 						}
 						function previewYAMLThenSelect(view) {
 							var form = document.getElementById('automation-design-form');
-							if (yamlEditor && form && yamlEditor.value !== visualCandidateYAML()) {
+							if (yamlEditor && form && automationYAMLValue() !== visualCandidateYAML()) {
 								var initialView = form.querySelector('[data-automation-initial-view]');
 								if (initialView) initialView.value = view === 'details' ? 'details' : '';
 								form.requestSubmit();
