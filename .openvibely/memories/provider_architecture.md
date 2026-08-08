@@ -4,7 +4,7 @@ type: project
 created: 2026-05-09
 updated: 2026-08-06
 source: task
-source_id: 24aa433a878ff6d110da71336cf32ae1
+source_id: bfbfa775d28bee31e8fa9e1a35c1d7db
 confidence: high
 title: Provider Architecture
 ---
@@ -36,6 +36,7 @@ Provider/model selection facts:
 - OpenAI supports Responses API, Completions API, and Codex CLI fallback. OpenAI Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
 - OpenAI supports `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; `gpt-5.6-sol` is the default for empty or unknown first-party OpenAI model selections. All three use a 1,050,000-token context window, have a 128,000-token maximum output, support `none`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning, and default to `medium`.
 - The GPT-5.6 Sol/Terra/Luna family uses the Codex Responses Lite request shape for both OpenAI API-key and ChatGPT OAuth configurations. The primary transport is the Responses WebSocket beta, with Responses Lite HTTP streaming fallback when WebSockets are unavailable. Lite request transformation carries all-turn reasoning context, encrypted reasoning content, developer instructions/additional function tools, and strips unsupported hosted web-search/image-generation tools. GPT-5.6 image payloads preserve exactly `detail: "auto"`; other models and unselected values such as `original` and `high` omit `detail`, and `original` has no explicit selection contract.
+- OpenAI announced Fast mode for long-context GPT-5.6 Sol/Terra/Luna requests on 2026-08-05. OpenVibely currently has no persisted service-tier setting or request plumbing in either Responses WebSocket or Lite HTTP transport, so this opt-in capability is tracked as `openvibely/openvibely#295`; it is a performance-tier gap rather than missing model support. The bounded implementation would carry an opt-in tier through `LLMConfig`, `SendOptions`, and `AgenticOptions`, with availability/cost compatibility guards and UI/docs/tests.
 - Responses Lite WebSocket state is conversation-scoped and credential/account-aware rather than shared across every request for one model config. Reusable states serialize turns per conversation, send compatible incremental turns with `previous_response_id`, reconnect a stale reused socket once, avoid replay after partial output, and fall back to HTTP for subsequent turns after an unrecoverable transport failure. The adapter leases active states, bounds the idle cache, closes evicted/private sockets, and prevents credential rotation or OAuth account changes from reusing an old authenticated connection.
 - Anthropic uses `ProviderAnthropic`; OAuth/API key path uses `pkg/anthropicclient`; CLI path uses subprocess. Helpers live in `models/llm_config.go`.
 - Ollama uses `/api/chat`, `ollama_base_url` migration 056, defaulting to `http://localhost:11434`.
