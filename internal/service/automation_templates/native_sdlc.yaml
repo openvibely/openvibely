@@ -180,8 +180,8 @@ nodes:
 
             Only after execute_tasks succeeds, call complete_alert_processing. If creation, linkage, or task execution fails, call fail_alert_processing with a concise error so the linked task can be inspected and recovered; do not report processing complete. Call release_alert_claim only when no task was linked and immediate retry by another scan is appropriate.
         repeat_interval: 1
-        repeat_type: hours
-        run_at: "09:00"
+        repeat_type: daily
+        run_at: "10:00"
         skills: []
         source_files: []
         target_node_key: inbox

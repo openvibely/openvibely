@@ -194,8 +194,8 @@ nodes:
 
             When implementation work is complete in a task branch, use `github_open_pull_request` for that task and include issue metadata so the task PR record stays linked. Do not use local `git push` or GitHub CLI as a fallback if the tool fails; report the tool error so GitHub token/API publication can be fixed.
         repeat_interval: 1
-        repeat_type: hours
-        run_at: "09:00"
+        repeat_type: daily
+        run_at: "10:00"
         skills: []
         source_files: []
         target_node_key: dev_inbox

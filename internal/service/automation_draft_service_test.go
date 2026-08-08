@@ -228,13 +228,17 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 		require.Contains(t, prompt, "Approval authorizes task creation only")
 	}
 
-	inboxPrompt, _ := automationDraftNodeByKey(t, candidate, "inbox").Config["prompt"].(string)
+	inboxNode := automationDraftNodeByKey(t, candidate, "inbox")
+	inboxPrompt, _ := inboxNode.Config["prompt"].(string)
 	for _, required := range []string{
 		"decision_state=approved", "implementation_task_linked=false", "get_alert", "claim_alert",
 		"create_alert_implementation_task", "complete_alert_processing", "fail_alert_processing", "release_alert_claim",
 	} {
 		require.Contains(t, inboxPrompt, required)
 	}
+	require.Equal(t, string(models.RepeatDaily), inboxNode.Config["repeat_type"], "inbox checker must run once daily, not hourly")
+	require.EqualValues(t, 1, inboxNode.Config["repeat_interval"])
+	require.Equal(t, "10:00", inboxNode.Config["run_at"], "inbox checker must run an hour after the daily drivers")
 	require.Contains(t, inboxPrompt, "atomically links at most one task")
 	require.Contains(t, inboxPrompt, "The created task is the implementation task")
 	require.Contains(t, inboxPrompt, "directly instruct it to implement the reviewed change")
@@ -454,13 +458,14 @@ func TestGitHubSDLCTemplateUsesAutomationOwnedPrompts(t *testing.T) {
 	expectedCadence := map[string]struct {
 		repeatType string
 		interval   int
+		runAt      string
 	}{
-		"vision_suggestions":  {repeatType: string(models.RepeatDaily), interval: 1},
-		"bug_finder":          {repeatType: string(models.RepeatDaily), interval: 1},
-		"optimization_finder": {repeatType: string(models.RepeatDaily), interval: 1},
-		"redundancy_finder":   {repeatType: string(models.RepeatDaily), interval: 1},
-		"dev_inbox":           {repeatType: string(models.RepeatHours), interval: 1},
-		"auditor":             {repeatType: string(models.RepeatWeekly), interval: 1},
+		"vision_suggestions":  {repeatType: string(models.RepeatDaily), interval: 1, runAt: "09:00"},
+		"bug_finder":          {repeatType: string(models.RepeatDaily), interval: 1, runAt: "09:00"},
+		"optimization_finder": {repeatType: string(models.RepeatDaily), interval: 1, runAt: "09:00"},
+		"redundancy_finder":   {repeatType: string(models.RepeatDaily), interval: 1, runAt: "09:00"},
+		"dev_inbox":           {repeatType: string(models.RepeatDaily), interval: 1, runAt: "10:00"},
+		"auditor":             {repeatType: string(models.RepeatWeekly), interval: 1, runAt: "09:00"},
 	}
 	for nodeKey, prompt := range promptsByNode {
 		node := automationDraftNodeByKey(t, candidate, nodeKey)
@@ -470,6 +475,7 @@ func TestGitHubSDLCTemplateUsesAutomationOwnedPrompts(t *testing.T) {
 		require.NotContains(t, node.Config["prompt"], "repository-wide current issue listing or search")
 		require.Equal(t, expectedCadence[nodeKey].repeatType, node.Config["repeat_type"], "%s cadence must match the maintained template", nodeKey)
 		require.EqualValues(t, expectedCadence[nodeKey].interval, node.Config["repeat_interval"])
+		require.Equal(t, expectedCadence[nodeKey].runAt, node.Config["run_at"], "%s run_at must match the maintained template", nodeKey)
 	}
 }
 

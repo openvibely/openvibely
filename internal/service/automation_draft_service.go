@@ -183,7 +183,7 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 			if node.Role == "loop_auditor" {
 				config["repeat_type"] = string(models.RepeatWeekly)
 			} else if strings.Contains(node.Key, "inbox") {
-				config["repeat_type"] = string(models.RepeatHours)
+				config["run_at"] = "10:00"
 			}
 		}
 		if adapter.Key == AutomationAdapterNativeSDLC && node.Role == "implementation" {
