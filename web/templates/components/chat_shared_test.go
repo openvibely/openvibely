@@ -3584,6 +3584,7 @@ func TestTaskThreadLiveEventsScript_SteeredRowsReplaceStaleQueuedRows(t *testing
 	for _, snippet := range []string{
 		"existing.getAttribute('data-input-mode') === 'steering'",
 		"queuedSteerInFlight[data.pending_input_id]",
+		"directSteerInFlight && !existing",
 		"if (existing) existing.remove()",
 		"Steering pending",
 		"Attachments included",
@@ -3596,6 +3597,9 @@ func TestTaskThreadLiveEventsScript_SteeredRowsReplaceStaleQueuedRows(t *testing
 	}
 	for _, snippet := range []string{
 		"window._taskThreadQueuedSteerRequestHandlers = window._taskThreadQueuedSteerRequestHandlers || {}",
+		"directSteerInFlight = true",
+		"directSteerInFlight = false",
+		"if (directSteerClearTimer) clearTimeout(directSteerClearTimer)",
 		"document.body.addEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler)",
 		"document.body.addEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler)",
 		"window._taskThreadQueuedSteerRequestHandlers[taskId] = {",

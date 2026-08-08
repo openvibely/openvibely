@@ -936,37 +936,52 @@ templ TaskThreadLiveEventsScript(taskID string) {
 					var threadView = document.getElementById('task-thread-view');
 					var taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';
 					if (!taskId) return;
-					var queuedSteerInFlight = {};
-					var queuedSteerClearTimers = {};
-					function taskQueuedSteerInputID(triggerEl) {
+						var queuedSteerInFlight = {};
+						var queuedSteerClearTimers = {};
+						var directSteerInFlight = false;
+						var directSteerClearTimer = null;					function taskQueuedSteerInputID(triggerEl) {
 						if (!triggerEl || !triggerEl.getAttribute) return '';
 						var hxPost = triggerEl.getAttribute('hx-post') || '';
 						var match = hxPost.match(/^\/tasks\/[^\/]+\/thread\/queued\/([^\/]+)\/steer$/);
 						return match ? match[1] : '';
 					}
-					var queuedSteerBeforeRequestHandler = function(event) {
-						if (!currentTaskThreadView()) return;
-						var inputID = taskQueuedSteerInputID(event.detail && event.detail.elt);
-						if (!inputID) return;
-						queuedSteerInFlight[inputID] = true;
-						if (queuedSteerClearTimers[inputID]) clearTimeout(queuedSteerClearTimers[inputID]);
-					};
-					var queuedSteerAfterRequestHandler = function(event) {
-						var inputID = taskQueuedSteerInputID(event.detail && event.detail.elt);
-						if (!inputID) return;
-						queuedSteerClearTimers[inputID] = setTimeout(function() {
-							delete queuedSteerInFlight[inputID];
-							delete queuedSteerClearTimers[inputID];
-						}, 1000);
-					};
-					function clearQueuedSteerRequestGuards() {
-						Object.keys(queuedSteerClearTimers).forEach(function(inputID) {
-							clearTimeout(queuedSteerClearTimers[inputID]);
-						});
-						queuedSteerInFlight = {};
-						queuedSteerClearTimers = {};
-					}
-					window._taskThreadLiveHandlers = window._taskThreadLiveHandlers || {};
+						var queuedSteerBeforeRequestHandler = function(event) {
+							if (!currentTaskThreadView()) return;
+							var triggerEl = event.detail && event.detail.elt;
+							if (triggerEl && triggerEl.id === 'task-thread-form' && triggerEl.getAttribute('data-submit-intent') === 'steer') {
+								directSteerInFlight = true;
+								if (directSteerClearTimer) clearTimeout(directSteerClearTimer);
+							}
+							var inputID = taskQueuedSteerInputID(triggerEl);
+							if (!inputID) return;
+							queuedSteerInFlight[inputID] = true;
+							if (queuedSteerClearTimers[inputID]) clearTimeout(queuedSteerClearTimers[inputID]);
+						};
+						var queuedSteerAfterRequestHandler = function(event) {
+							var triggerEl = event.detail && event.detail.elt;
+							if (triggerEl && triggerEl.id === 'task-thread-form' && directSteerInFlight) {
+								directSteerClearTimer = setTimeout(function() {
+									directSteerInFlight = false;
+									directSteerClearTimer = null;
+								}, 1000);
+							}
+							var inputID = taskQueuedSteerInputID(triggerEl);
+							if (!inputID) return;
+							queuedSteerClearTimers[inputID] = setTimeout(function() {
+								delete queuedSteerInFlight[inputID];
+								delete queuedSteerClearTimers[inputID];
+							}, 1000);
+						};
+						function clearQueuedSteerRequestGuards() {
+							Object.keys(queuedSteerClearTimers).forEach(function(inputID) {
+								clearTimeout(queuedSteerClearTimers[inputID]);
+							});
+							if (directSteerClearTimer) clearTimeout(directSteerClearTimer);
+							queuedSteerInFlight = {};
+							queuedSteerClearTimers = {};
+							directSteerInFlight = false;
+							directSteerClearTimer = null;
+						}					window._taskThreadLiveHandlers = window._taskThreadLiveHandlers || {};
 					window._taskThreadQueuedSteerRequestHandlers = window._taskThreadQueuedSteerRequestHandlers || {};
 					if (window._taskThreadLiveHandlers[taskId]) {
 						window.removeEventListener('sse-task-event', window._taskThreadLiveHandlers[taskId]);
@@ -1152,9 +1167,9 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							if (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;
 							var selector = '[data-thread-input-id="' + data.pending_input_id + '"][data-task-id="' + taskId + '"]';
 								var existing = document.querySelector(selector);
-								if (existing && existing.getAttribute('data-input-mode') === 'steering') return;
-								if (queuedSteerInFlight[data.pending_input_id]) return;
-								var pendingContainer = ensureComposerPendingContainer();							if (!pendingContainer) return;
+									if (existing && existing.getAttribute('data-input-mode') === 'steering') return;
+									if (directSteerInFlight && !existing) return;
+									if (queuedSteerInFlight[data.pending_input_id]) return;								var pendingContainer = ensureComposerPendingContainer();							if (!pendingContainer) return;
 							if (existing) existing.remove();
 							var steeringRow = document.createElement('div');
 							steeringRow.id = 'thread-input-' + data.pending_input_id;

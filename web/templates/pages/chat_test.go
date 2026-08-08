@@ -505,6 +505,9 @@ func TestChatContent_LiveSteeringRowsAreCancelable(t *testing.T) {
 	if !strings.Contains(branch, "window._chatQueuedSteerInFlight[data.exec_id]") {
 		t.Fatal("same-tab queued-to-steer live events must not remove the local HTMX swap target")
 	}
+	if !strings.Contains(content, "window._chatDirectSteerInFlight = true") || !strings.Contains(branch, "window._chatDirectSteerInFlight") {
+		t.Fatal("same-tab direct steering live events must not duplicate the local HTMX steering row")
+	}
 	if !strings.Contains(branch, "'/thread-inputs/' + data.exec_id + '/cancel'") {
 		t.Fatal("live steering row must expose cancel action")
 	}

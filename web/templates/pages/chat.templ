@@ -592,6 +592,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					// until the shared composer confirms that the send was accepted.
 					window._chatQueuedSteerInFlight = window._chatQueuedSteerInFlight || {};
 					window._chatQueuedSteerClearTimers = window._chatQueuedSteerClearTimers || {};
+					window._chatDirectSteerInFlight = false;
+					window._chatDirectSteerClearTimer = null;
 					function chatQueuedSteerInputID(triggerEl) {
 						if (!triggerEl || !triggerEl.getAttribute) return '';
 						var hxPost = triggerEl.getAttribute('hx-post') || '';
@@ -607,6 +609,10 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
 							// Flag that a web send is in progress (prevents live SSE duplication)
 							window._chatWebSendInProgress = true;
+							if (triggerEl.getAttribute('data-submit-intent') === 'steer') {
+								window._chatDirectSteerInFlight = true;
+								if (window._chatDirectSteerClearTimer) clearTimeout(window._chatDirectSteerClearTimer);
+							}
 						}
 						var queuedSteerID = chatQueuedSteerInputID(triggerEl);
 						if (queuedSteerID) {
@@ -621,6 +627,12 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							// Queued sends can return only out-of-band composer updates, so do
 							// not rely on a chat-messages swap to clear web-send suppression.
 							window._chatWebSendInProgress = false;
+							if (window._chatDirectSteerInFlight) {
+								window._chatDirectSteerClearTimer = setTimeout(function() {
+									window._chatDirectSteerInFlight = false;
+									window._chatDirectSteerClearTimer = null;
+								}, 1000);
+							}
 						}
 						var queuedSteerID = chatQueuedSteerInputID(triggerEl);
 						if (queuedSteerID) {
@@ -1170,8 +1182,9 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 								var existingSteeringRow = document.querySelector('[data-thread-input-id="' + data.exec_id + '"]');
 								if (existingSteeringRow && existingSteeringRow.getAttribute('data-input-mode') === 'steering') return;
 								if (window._chatQueuedSteerInFlight && window._chatQueuedSteerInFlight[data.exec_id]) return;
-								if (!existingSteeringRow && data.source === 'web' && window._chatWebSendInProgress) return;							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
-
+									if (data.source === 'web' && window._chatDirectSteerInFlight) return;
+									if (!existingSteeringRow && data.source === 'web' && window._chatWebSendInProgress) return;
+									if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
 								var pendingContainer = ensureComposerPendingContainer();
 								if (!pendingContainer) return;
 								if (existingSteeringRow) existingSteeringRow.remove();

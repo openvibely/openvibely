@@ -320,18 +320,15 @@ func TestChatComposerPreservesSteerInfoDuringSteerAndQueueInChrome(t *testing.T)
   input.value = 'first steer info';
   key(input, modifier);
   await wait();
-  if (input.value !== 'first steer info') fail('steer cleared the first visible steer info');
-
+	  if (input.value !== '') fail('accepted steer did not clear the first visible steer info');
   input.value = 'second steer info';
   click(document.querySelector('#' + form.id + '-primary-action button'), modifier);
   await wait();
-  if (input.value !== 'second steer info') fail('second steer did not preserve changed steer info');
-
+	  if (input.value !== '') fail('accepted second steer did not clear changed steer info');
   input.value = 'queued steer info';
   key(input);
   await wait();
-  if (input.value !== 'queued steer info') fail('active queue cleared visible steer info');
-
+	  if (input.value !== '') fail('accepted active queue did not clear visible steer info');
   input.value = 'explicit clear';
   key(input, modifier);
   input.value = '';
@@ -403,6 +400,98 @@ func TestChatComposerPreservesSteerInfoDuringSteerAndQueueInChrome(t *testing.T)
 	})
 }
 
+func TestChatComposerStaleSteerConflictFallsBackToNormalSendInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+
+	type requestRecord struct {
+		Path string
+		Form url.Values
+	}
+	var mu sync.Mutex
+	var records []requestRecord
+
+	var form bytes.Buffer
+	if err := ChatInputForm(ChatInputFormConfig{
+		FormID:        "chat-form",
+		InputID:       "message-input",
+		PostEndpoint:  "/chat/send",
+		SteerEndpoint: "/chat/steer",
+		TargetID:      "chat-messages",
+		IsRunning:     true,
+		ActiveTurnID:  "active-turn",
+	}).Render(context.Background(), &form); err != nil {
+		t.Fatalf("render composer: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmx204)
+		case "/chat/steer":
+			_ = r.ParseForm()
+			mu.Lock()
+			records = append(records, requestRecord{Path: r.URL.Path, Form: r.PostForm})
+			mu.Unlock()
+			http.Error(w, "active turn changed; queue the message instead", http.StatusConflict)
+		case "/chat/send":
+			_ = r.ParseForm()
+			mu.Lock()
+			records = append(records, requestRecord{Path: r.URL.Path, Form: r.PostForm})
+			mu.Unlock()
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = w.Write([]byte(`<div data-test-queued-row="true">queued pending</div>`))
+		case "/":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
+<script src="/htmx.js"></script>
+<div id="chat-messages"><div data-execution-pair="true" data-exec-status="running" data-exec-id="active-turn"></div></div>%s
+<div id="browser-result">pending</div>
+<script>
+(async function() {
+  function fail(message) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', message); document.getElementById('browser-result').textContent = 'FAIL:' + message; throw new Error(message); }
+  function key(input, options) { input.dispatchEvent(new KeyboardEvent('keydown', Object.assign({key:'Enter', bubbles:true, cancelable:true}, options || {}))); }
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms || 180); }); }
+  var input = document.getElementById('message-input');
+  var session = document.querySelector('#chat-form input[name="attachment_session_id"]');
+  var apple = input.placeholder.includes('⌘+⏎ steers');
+  var modifier = apple ? {metaKey:true} : {ctrlKey:true};
+  input.value = 'late steer should queue';
+  session.value = 'late-session';
+  key(input, modifier);
+  await wait(450);
+  if (input.value !== '') fail('accepted fallback queue did not clear the draft');
+  if (session.value !== '') fail('accepted fallback queue did not clear the attachment session');
+  document.getElementById('browser-result').textContent = 'PASS';
+  document.body.setAttribute('data-test-result', 'pass');
+})().catch(function(error) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', error.message); });
+</script></body></html>`, form.String())
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	runHeadlessChromeFixture(t, chrome, server.URL+"/", "stale steer fallback", 10000, 25*time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(records) != 2 {
+		t.Fatalf("recorded requests = %d, want 2: %+v", len(records), records)
+	}
+	if records[0].Path != "/chat/steer" || records[1].Path != "/chat/send" {
+		t.Fatalf("request paths = %q, %q; records: %+v", records[0].Path, records[1].Path, records)
+	}
+	for i, record := range records {
+		if got := record.Form.Get("message"); got != "late steer should queue" {
+			t.Fatalf("request %d message = %q: %+v", i, got, records)
+		}
+		if got := record.Form.Get("attachment_session_id"); got != "late-session" {
+			t.Fatalf("request %d attachment session = %q: %+v", i, got, records)
+		}
+	}
+}
+
 func TestChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
 	chrome := testChromePath(t)
 
@@ -470,9 +559,8 @@ func TestChatComposerImmediateModifierClickSteersInChrome(t *testing.T) {
 
   if (!document.querySelector('#chat-form #pending-thread-inputs [data-test-steering-row="true"]')) fail('deferred click steer did not render in pending inputs');
   if (document.querySelector('#chat-messages [data-test-steering-row="true"]')) fail('deferred click steer rendered in transcript');
-  if (input.value !== 'immediate click steer') fail('accepted deferred click steer did not preserve its draft');
-  if (session.value !== '') fail('accepted deferred click steer did not clear its attachment session');
-  document.getElementById('browser-result').textContent = 'PASS';
+	  if (input.value !== '') fail('accepted deferred click steer did not clear its draft');
+	  if (session.value !== '') fail('accepted deferred click steer did not clear its attachment session');  document.getElementById('browser-result').textContent = 'PASS';
   document.body.setAttribute('data-test-result', 'pass');
 })();
 </script></body></html>`, form.String())
