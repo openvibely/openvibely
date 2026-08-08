@@ -69,17 +69,28 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 										</svg>
 									</label>
 									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
-										<li>
-											<button
-												type="button"
-												class="w-full"
-												data-automation-card-edit={ card.Automation.ID }
-												data-automation-edit-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
-												data-project-id={ currentProjectID }
-												onclick="event.stopPropagation(); openAutomationCardEdit(this)"
-											>Edit</button>
-										</li>
-										if card.Automation.LifecycleState == models.AutomationActive {
+											<li>
+												<button
+													type="button"
+													class="w-full"
+													data-automation-card-edit={ card.Automation.ID }
+													data-automation-edit-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
+													data-project-id={ currentProjectID }
+													onclick="event.stopPropagation(); openAutomationCardEdit(this)"
+												>Edit</button>
+											</li>
+											if card.TemplateUpdateAvailable {
+												<li>
+													<button
+														type="button"
+														class="w-full"
+														data-automation-card-update-template={ card.Automation.ID }
+														data-automation-update-template-url={ fmt.Sprintf("/automations/%s/builder?project_id=%s", card.Automation.ID, currentProjectID) }
+														data-project-id={ currentProjectID }
+														onclick="event.stopPropagation(); openAutomationCardUpdateTemplate(this)"
+													>Update to latest template</button>
+												</li>
+											}										if card.Automation.LifecycleState == models.AutomationActive {
 											<li>
 												<button
 													class="w-full"
@@ -212,6 +223,23 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 			</div>
 			<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
 		</dialog>
+		<dialog id="update-automation-card-template-modal" class="modal">
+			<div class="modal-box">
+				@ModalCloseButton("document.getElementById('update-automation-card-template-modal')", "Close template update confirmation")
+				<h3 class="pr-10 text-lg font-bold">Update to latest template</h3>
+				<p class="py-4">This replaces the current nodes, connections, prompts, and schedules with the latest maintained template.</p>
+				<div class="rounded-lg bg-base-200 p-3 text-sm text-base-content/70">The Automation name and lifecycle state are preserved. Template customizations are not merged.</div>
+				<div class="modal-action">
+					<button class="btn" type="button" onclick="document.getElementById('update-automation-card-template-modal').close()">Cancel</button>
+					<form id="update-automation-card-template-form" method="post" action="">
+						<input type="hidden" name="project_id" value={ currentProjectID }/>
+						<input type="hidden" name="update_template" value="true"/>
+						<button class="btn btn-primary" type="submit">Update to latest</button>
+					</form>
+				</div>
+			</div>
+			<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
+		</dialog>
 		<script>
 			window.openAutomationNewModal = function(event, modalID) {
 				if (event) {
@@ -284,6 +312,32 @@ templ automationsContent(cards []models.AutomationCard, currentProjectID string,
 				if (!modal || !name || !form) return;
 				name.textContent = button.dataset.automationName || 'this automation';
 				form.setAttribute('action', button.dataset.automationDeleteUrl || '');
+				modal.showModal();
+			};
+
+			window.openAutomationCardUpdateTemplate = function(button) {
+				if (!button) return;
+				var modal = document.getElementById('update-automation-card-template-modal');
+				var form = document.getElementById('update-automation-card-template-form');
+				if (!modal || !form) return;
+				var url = button.dataset.automationUpdateTemplateUrl || '';
+				form.setAttribute('action', url);
+				if (window.htmx) {
+					form.onsubmit = function(event) {
+						event.preventDefault();
+						event.stopImmediatePropagation();
+						window.htmx.ajax('POST', url, {
+							source: form,
+							target: '#main-content',
+							swap: 'innerHTML',
+							values: { project_id: button.dataset.projectId || '', update_template: 'true' }
+						});
+						modal.close();
+						return false;
+					};
+				} else {
+					form.onsubmit = null;
+				}
 				modal.showModal();
 			};
 		</script>

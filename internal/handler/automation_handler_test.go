@@ -1176,6 +1176,11 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	require.Contains(t, liveOutdated.Body.String(), `id="update-automation-template-modal"`)
 	require.Contains(t, liveOutdated.Body.String(), `action="/automations/`+automationID+`/builder?project_id=`+project.ID+`"`)
 	require.Contains(t, liveOutdated.Body.String(), `name="update_template" value="true"`)
+	portfolioOutdated := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, portfolioOutdated.Code, portfolioOutdated.Body.String())
+	require.Contains(t, portfolioOutdated.Body.String(), `data-automation-card-update-template="`+automationID+`"`)
+	require.Contains(t, portfolioOutdated.Body.String(), `data-automation-update-template-url="/automations/`+automationID+`/builder?project_id=`+project.ID+`"`)
+	require.Contains(t, portfolioOutdated.Body.String(), `id="update-automation-card-template-modal"`)
 	outdated := tc.HTMX().Post("/automations/" + automationID + "/builder?project_id=" + project.ID).WithForm(url.Values{"project_id": {project.ID}}).Execute()
 	require.Equal(t, http.StatusOK, outdated.Code, outdated.Body.String())
 	require.Contains(t, outdated.Body.String(), `data-update-automation-template-open`)
@@ -1217,6 +1222,9 @@ func TestAutomationLegacyMaintainedTemplateCanReplaceWithLatestRevision(t *testi
 	liveCurrent := tc.HTTP().Get("/automations/" + automationID + "?project_id=" + project.ID).Execute()
 	require.Equal(t, http.StatusOK, liveCurrent.Code, liveCurrent.Body.String())
 	require.NotContains(t, liveCurrent.Body.String(), `data-automation-live-update-template`)
+	portfolioCurrent := tc.HTTP().Get("/automations?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusOK, portfolioCurrent.Code, portfolioCurrent.Body.String())
+	require.NotContains(t, portfolioCurrent.Body.String(), `data-automation-card-update-template`)
 }
 
 func automationNodeByKeyHandler(nodes []models.AutomationNode, key string) *models.AutomationNode {

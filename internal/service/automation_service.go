@@ -272,6 +272,9 @@ func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]
 			continue
 		}
 		card := models.AutomationCard{Automation: definition.Automation, Version: definition.Version, Counts: portfolioCounts[automation.ID]}
+		currentTemplateRevision := CurrentAutomationTemplateRevision(definition.Version.AdapterKey)
+		card.TemplateUpdateAvailable = currentTemplateRevision > 0 &&
+			(definition.Automation.TemplateRevision == nil || *definition.Automation.TemplateRevision < currentTemplateRevision)
 		if definition.Version.ID != "" {
 			card.Resources, err = s.repo.ListResourceSummaries(ctx, projectID, automation.ID, definition.Version.ID, 12)
 			if err != nil {
