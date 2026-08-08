@@ -1041,9 +1041,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 				<form method="dialog" class="modal-backdrop"><button>Cancel</button></form>
 			</dialog>
 		}
-		if page.AutomationID == "" && page.Source == "describe" {
-			<div class="alert alert-info mb-4" role="status"><span>This generated design is browser-local. Review the graph, then select <strong>Save changes</strong> to create and start the Automation.</span></div>
-		}
 		if page.Error != "" {
 			<div class="alert alert-error mb-4" role="alert">{ page.Error }</div>
 		}
@@ -2003,7 +2000,9 @@ func automationBuilderPostURL(page models.AutomationBuilderPage, currentProjectI
 }
 
 func automationDraftCandidateJSON(candidate models.AutomationDraftCandidate) string { value, _ := json.Marshal(candidate); return string(value) }
-func automationBuilderUsesEditShell(page models.AutomationBuilderPage) bool { return page.AutomationID != "" || page.Source == "blank" || page.Source == "template" }
+func automationBuilderUsesEditShell(page models.AutomationBuilderPage) bool {
+	return page.AutomationID != "" || page.Source == "blank" || page.Source == "template" || page.Source == "describe"
+}
 func automationYAMLLineNumbers(value string) string {
 	count := strings.Count(value, "\n") + 1
 	lines := make([]string, count)

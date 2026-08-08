@@ -1808,6 +1808,49 @@ func TestAutomationDescribeFailureIsVisibleAndPreservesInput(t *testing.T) {
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 }
 
+func TestAutomationDescribePreviewUsesEditShell(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Describe save surface").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	tc.handler.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+	model := models.LLMConfig{Name: "Automation generator", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, tc.llmConfigRepo.Create(ctx, &model))
+	candidate := automationChatCustomApprovalCandidate(t, drafts)
+	candidate.Name = "Review Vision Daily"
+	candidate.Description = "Review the vision every day and ask for approval."
+	candidateJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = string(candidateJSON)
+	tc.handler.llmSvc.SetLLMCaller(mock)
+
+	preview := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+		"project_id": {project.ID}, "source": {"describe"}, "description": {"Review vision daily and request approval"},
+	}).Execute()
+
+	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+	previewBody := preview.Body.String()
+	require.Contains(t, previewBody, `id="automation-builder"`)
+	require.Contains(t, previewBody, `data-automation-editable-breadcrumb`)
+	require.Contains(t, previewBody, `data-automation-builder-header-actions`)
+	require.Contains(t, previewBody, `data-automation-builder-save`)
+	require.Contains(t, previewBody, `name="automation_name" value="Review Vision Daily"`)
+	require.NotContains(t, previewBody, "This generated design is browser-local.")
+	require.NotContains(t, previewBody, `New Automation`)
+	require.NotContains(t, previewBody, `Saving validates and applies this Automation immediately.`)
+	require.Empty(t, preview.Header().Get("HX-Redirect"), "Describe preview must remain browser-local until Save")
+	require.Equal(t, 1, mock.CallCount())
+	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Zero(t, tableCountHandler(t, tc, "tasks"))
+	require.Zero(t, tableCountHandler(t, tc, "schedules"))
+}
+
 func TestAutomationCanonicalChatRuntimeExecutesPreviewAndDirectSave(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
