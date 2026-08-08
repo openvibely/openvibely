@@ -213,29 +213,6 @@ nodes:
       position:
         x: 1100
         "y": 270
-    - key: auditor
-      name: Loop Auditor
-      type: trigger
-      role: loop_auditor
-      config:
-        category: scheduled
-        clear_context_on_start: true
-        enabled: true
-        goal: ""
-        priority: 2
-        prompt: |-
-            Audit this project's Native SDLC loop for stale notifications, expired or failed claims, missing notification/task links, duplicate implementation work, and blocked tasks.
-
-            Inspect only project-scoped OpenVibely notification and task state. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification and task state is authoritative for this loop. Report each actionable audit finding through create_notification with concrete evidence and a stable idempotency key. The auditor does not bypass approval, create or alter implementation work, merge, release, or deploy.
-        repeat_interval: 1
-        repeat_type: weekly
-        run_at: "09:00"
-        skills: []
-        source_files: []
-        target_node_key: auditor
-      position:
-        x: 880
-        "y": 450
 edges:
     - key: vision_to_notification
       from: vision_suggestions

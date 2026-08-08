@@ -316,11 +316,10 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	guideText := string(guideBody)
 
 	for _, want := range []string{
-		"Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, Notification Inbox, and Loop Auditor",
+		"Vision Suggestions, Bug Finder, Optimization Finder, Redundancy Finder, and Notification Inbox",
 		"Do not create separate runner tasks",
 		"usually daily",
 		"commonly hourly",
-		"usually weekly",
 		"must not create implementation tasks or modify code",
 		"Do not list, search, or inspect GitHub issues for duplicate detection",
 		"Native notification idempotency",
@@ -337,7 +336,7 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"run notification intake",
 		"destructive remediation",
 		"register_automation_resources",
-		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `inbox`, and `auditor`",
+		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, and `inbox`",
 	} {
 		if !strings.Contains(skillText, want) {
 			t.Fatalf("Native bootstrap skill missing %q", want)
@@ -468,13 +467,12 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"`GitHub Bug Finder` | Daily",
 		"`GitHub Optimization Finder` | Daily",
 		"`GitHub Redundancy Finder` | Daily",
-		"`GitHub Loop Auditor` | Weekly",
 		"These finder tasks open GitHub issues only; Dev Inbox remains the path that turns assigned issues into implementation tasks",
 		"Offering, Bug Finder, Optimization Finder, and Redundancy Finder tasks should open issues only",
 		"register_automation_resources",
 		"`github_sdlc`",
 		"`github-sdlc/default`",
-		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, `dev_inbox`, and `auditor`",
+		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, and `dev_inbox`",
 		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
 		"the server prevents duplicate Automation-created issues using trusted local state",
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
@@ -533,6 +531,7 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"Avoid duplicates by searching/inspecting existing visible work",
 		"Start with two scheduled tasks before adding more scanner/finder loops",
 		"You can later add Bug Finder, Optimization Finder, Redundancy Finder, and Loop Auditor tasks",
+		"Loop Auditor",
 		"optional Loop Auditor",
 		"When a prompt names a specific GitHub repository URL, pass `repo_url` to issue create/read/list/comment/label tools",
 		"prompts may pass `repo_url` when they name a specific GitHub repository URL",

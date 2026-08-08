@@ -247,29 +247,6 @@ nodes:
       position:
         x: 1540
         "y": 270
-    - key: auditor
-      name: Loop Auditor
-      type: trigger
-      role: loop_auditor
-      config:
-        category: scheduled
-        clear_context_on_start: true
-        enabled: true
-        goal: ""
-        priority: 2
-        prompt: |-
-            Review GitHub SDLC loop state for stale labels, blocked work, duplicate tasks, missing issue/task/PR links, and unexpected assignments.
-
-            Inspect and report findings only. Do not create, execute, modify, or link implementation tasks, and do not open pull requests. The Dev Inbox alone creates implementation tasks after a GitHub issue is assigned to an authorized inbox identity. Use a human-review notification or report the finding when follow-up is needed.
-        repeat_interval: 1
-        repeat_type: weekly
-        run_at: "09:00"
-        skills: []
-        source_files: []
-        target_node_key: auditor
-      position:
-        x: 880
-        "y": 450
 edges:
     - key: vision_to_issue
       from: vision_suggestions
