@@ -502,6 +502,9 @@ func TestChatContent_LiveSteeringRowsAreCancelable(t *testing.T) {
 	if !strings.Contains(branch, "existingSteeringRow.remove()") || !strings.Contains(branch, "data-input-mode') === 'steering'") {
 		t.Fatal("live steering events must replace stale queued rows without duplicating existing steering rows")
 	}
+	if !strings.Contains(branch, "window._chatQueuedSteerInFlight[data.exec_id]") {
+		t.Fatal("same-tab queued-to-steer live events must not remove the local HTMX swap target")
+	}
 	if !strings.Contains(branch, "'/thread-inputs/' + data.exec_id + '/cancel'") {
 		t.Fatal("live steering row must expose cancel action")
 	}
@@ -513,7 +516,7 @@ func TestChatContent_LiveSteeringRowsAreCancelable(t *testing.T) {
 	}
 }
 
-func TestChatContent_LiveQueuedRowsShowAttachmentIndicator(t *testing.T) {
+func TestChatContent_LiveQueuedAttachmentEventsReachQueuedRowBranch(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
@@ -523,8 +526,26 @@ func TestChatContent_LiveQueuedRowsShowAttachmentIndicator(t *testing.T) {
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, "if (data.has_attachments) queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued'") {
-		t.Fatal("live queued row must render the attachment indicator when the event has attachments")
+	chatNewStart := strings.Index(content, "if (eventType === 'chat_new_message')")
+	if chatNewStart == -1 {
+		t.Fatal("expected live chat_new_message branch")
+	}
+	branchEnd := strings.Index(content[chatNewStart:], "// Scroll to bottom")
+	if branchEnd == -1 {
+		t.Fatal("expected live chat_new_message branch terminator")
+	}
+	branch := content[chatNewStart : chatNewStart+branchEnd]
+	attachmentRefresh := strings.Index(branch, "if (data.has_attachments && !data.queued)")
+	queuedBranch := strings.Index(branch, "if (data.queued)")
+	queuedBadge := strings.Index(branch, "queuedRow.appendChild(createPendingAttachmentBadge('Attachments queued'")
+	if attachmentRefresh == -1 {
+		t.Fatal("attachment transcript refresh must be gated to non-queued events so queued attachment rows render")
+	}
+	if queuedBranch == -1 || queuedBadge == -1 || !(queuedBranch < queuedBadge) {
+		t.Fatal("live queued row branch must render the queued attachment indicator")
+	}
+	if strings.Contains(branch, "if (data.has_attachments) {") {
+		t.Fatal("queued attachment events must not be consumed by the non-queued attachment refresh branch")
 	}
 }
 

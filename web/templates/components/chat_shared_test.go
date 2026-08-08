@@ -3583,6 +3583,7 @@ func TestTaskThreadLiveEventsScript_SteeredRowsReplaceStaleQueuedRows(t *testing
 	branch := html[steeredStart : steeredStart+branchEnd]
 	for _, snippet := range []string{
 		"existing.getAttribute('data-input-mode') === 'steering'",
+		"queuedSteerInFlight[data.pending_input_id]",
 		"if (existing) existing.remove()",
 		"Steering pending",
 		"Attachments included",
@@ -3591,6 +3592,20 @@ func TestTaskThreadLiveEventsScript_SteeredRowsReplaceStaleQueuedRows(t *testing
 	} {
 		if !strings.Contains(html, snippet) && !strings.Contains(branch, snippet) {
 			t.Fatalf("task-thread live steering must include %q", snippet)
+		}
+	}
+	for _, snippet := range []string{
+		"window._taskThreadQueuedSteerRequestHandlers = window._taskThreadQueuedSteerRequestHandlers || {}",
+		"document.body.addEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler)",
+		"document.body.addEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler)",
+		"window._taskThreadQueuedSteerRequestHandlers[taskId] = {",
+		"document.body.removeEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler)",
+		"document.body.removeEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler)",
+		"delete window._taskThreadQueuedSteerRequestHandlers[taskId]",
+		"clearQueuedSteerRequestGuards()",
+	} {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("task-thread live script must manage local queued-to-steer request guard: missing %q", snippet)
 		}
 	}
 }

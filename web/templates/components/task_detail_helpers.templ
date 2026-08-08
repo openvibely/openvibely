@@ -933,13 +933,49 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 templ TaskThreadLiveEventsScript(taskID string) {
 	<script type="text/javascript">
 			(function() {
-				var threadView = document.getElementById('task-thread-view');
-				var taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';
-				if (!taskId) return;
-				window._taskThreadLiveHandlers = window._taskThreadLiveHandlers || {};
-				if (window._taskThreadLiveHandlers[taskId]) {
-					window.removeEventListener('sse-task-event', window._taskThreadLiveHandlers[taskId]);
-				}
+					var threadView = document.getElementById('task-thread-view');
+					var taskId = threadView ? (threadView.getAttribute('data-task-id') || '') : '';
+					if (!taskId) return;
+					var queuedSteerInFlight = {};
+					var queuedSteerClearTimers = {};
+					function taskQueuedSteerInputID(triggerEl) {
+						if (!triggerEl || !triggerEl.getAttribute) return '';
+						var hxPost = triggerEl.getAttribute('hx-post') || '';
+						var match = hxPost.match(/^\/tasks\/[^\/]+\/thread\/queued\/([^\/]+)\/steer$/);
+						return match ? match[1] : '';
+					}
+					var queuedSteerBeforeRequestHandler = function(event) {
+						if (!currentTaskThreadView()) return;
+						var inputID = taskQueuedSteerInputID(event.detail && event.detail.elt);
+						if (!inputID) return;
+						queuedSteerInFlight[inputID] = true;
+						if (queuedSteerClearTimers[inputID]) clearTimeout(queuedSteerClearTimers[inputID]);
+					};
+					var queuedSteerAfterRequestHandler = function(event) {
+						var inputID = taskQueuedSteerInputID(event.detail && event.detail.elt);
+						if (!inputID) return;
+						queuedSteerClearTimers[inputID] = setTimeout(function() {
+							delete queuedSteerInFlight[inputID];
+							delete queuedSteerClearTimers[inputID];
+						}, 1000);
+					};
+					function clearQueuedSteerRequestGuards() {
+						Object.keys(queuedSteerClearTimers).forEach(function(inputID) {
+							clearTimeout(queuedSteerClearTimers[inputID]);
+						});
+						queuedSteerInFlight = {};
+						queuedSteerClearTimers = {};
+					}
+					window._taskThreadLiveHandlers = window._taskThreadLiveHandlers || {};
+					window._taskThreadQueuedSteerRequestHandlers = window._taskThreadQueuedSteerRequestHandlers || {};
+					if (window._taskThreadLiveHandlers[taskId]) {
+						window.removeEventListener('sse-task-event', window._taskThreadLiveHandlers[taskId]);
+					}
+					if (window._taskThreadQueuedSteerRequestHandlers[taskId]) {
+						document.body.removeEventListener('htmx:beforeRequest', window._taskThreadQueuedSteerRequestHandlers[taskId].beforeRequest);
+						document.body.removeEventListener('htmx:afterRequest', window._taskThreadQueuedSteerRequestHandlers[taskId].afterRequest);
+						delete window._taskThreadQueuedSteerRequestHandlers[taskId];
+					}
 						function currentTaskThreadView() {
 							var view = document.getElementById('task-thread-view');
 							return view && view.getAttribute('data-task-id') === taskId ? view : null;
@@ -1115,10 +1151,10 @@ templ TaskThreadLiveEventsScript(taskID string) {
 						function renderSteeringRow(data) {
 							if (!data || data.task_id !== taskId || !data.pending_input_id || !currentTaskThreadView()) return;
 							var selector = '[data-thread-input-id="' + data.pending_input_id + '"][data-task-id="' + taskId + '"]';
-							var existing = document.querySelector(selector);
-							if (existing && existing.getAttribute('data-input-mode') === 'steering') return;
-							var pendingContainer = ensureComposerPendingContainer();
-							if (!pendingContainer) return;
+								var existing = document.querySelector(selector);
+								if (existing && existing.getAttribute('data-input-mode') === 'steering') return;
+								if (queuedSteerInFlight[data.pending_input_id]) return;
+								var pendingContainer = ensureComposerPendingContainer();							if (!pendingContainer) return;
 							if (existing) existing.remove();
 							var steeringRow = document.createElement('div');
 							steeringRow.id = 'thread-input-' + data.pending_input_id;
@@ -1253,11 +1289,16 @@ templ TaskThreadLiveEventsScript(taskID string) {
 								if (data.type === 'task_thread_input_queued') {
 									renderQueuedRow(data);
 								}				};
-					window._taskThreadLiveHandlers[taskId] = handler;
-					window.addEventListener('sse-task-event', handler);
-					window.addEventListener('sse-chat-live-event', chatHandler);
-					consumePendingExecutionEvent();
-
+						window._taskThreadLiveHandlers[taskId] = handler;
+						window.addEventListener('sse-task-event', handler);
+						window.addEventListener('sse-chat-live-event', chatHandler);
+						document.body.addEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler);
+						document.body.addEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler);
+						window._taskThreadQueuedSteerRequestHandlers[taskId] = {
+							beforeRequest: queuedSteerBeforeRequestHandler,
+							afterRequest: queuedSteerAfterRequestHandler,
+						};
+						consumePendingExecutionEvent();
 					// On SSE reconnect (e.g. after tab blur/refocus), refresh the pending-inputs
 				// container so any steering rows missed while the tab was hidden are reconciled.
 				// The server query excludes prepared/in-flight steering (expected_turn_id=NULL),
@@ -1283,10 +1324,13 @@ templ TaskThreadLiveEventsScript(taskID string) {
 							window.removeEventListener('sse-task-event', handler);
 							window.removeEventListener('sse-chat-live-event', chatHandler);
 							delete window._taskThreadLiveHandlers[taskId];
-							window.removeEventListener('sse-live-connected', reconnectHandler);
-							delete window._taskThreadReconnectHandlers[taskId];
-							document.body.removeEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);
-						}
+								window.removeEventListener('sse-live-connected', reconnectHandler);
+								delete window._taskThreadReconnectHandlers[taskId];
+								document.body.removeEventListener('htmx:beforeRequest', queuedSteerBeforeRequestHandler);
+								document.body.removeEventListener('htmx:afterRequest', queuedSteerAfterRequestHandler);
+								delete window._taskThreadQueuedSteerRequestHandlers[taskId];
+								clearQueuedSteerRequestGuards();
+								document.body.removeEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);						}
 					};
 					document.body.addEventListener('htmx:beforeSwap', cleanupTaskThreadLiveHandlers);
 			})();

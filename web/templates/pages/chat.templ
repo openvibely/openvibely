@@ -97,14 +97,26 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			</div>
 		</div>
 		<!-- Chat Messages Container -->
-				<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>			if hasEarlier && len(chatHistory) > 0 {
+		<div id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true" data-window-limit={ fmt.Sprintf("%d", windowLimit) } data-earlier-url-base={ "/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit) } data-scroll-intent-scope={ currentProjectID }>
+			if hasEarlier && len(chatHistory) > 0 {
 				@components.ChatEarlierMessagesLoader("chat-messages", "/chat?project_id="+currentProjectID+"&before="+chatHistory[0].ID+"&limit="+fmt.Sprintf("%d", windowLimit), windowLimit)
 			}
 			if len(chatHistory) == 0 && len(pendingInputs) == 0 {
 				@components.ChatEmptyState("Start a conversation by typing a message below")
 			} else {
 				for _, exec := range chatHistory {
-					<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ components.ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled { hx-preserve="true" }>
+					<div
+						id={ "chat-execution-" + exec.ID }
+						class="chat-execution-pair space-y-6"
+						data-execution-pair="true"
+						data-exec-id={ exec.ID }
+						data-exec-status={ string(exec.Status) }
+						data-execution-revision={ components.ChatExecutionRevision(exec) }
+						data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }
+						if exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled {
+							hx-preserve="true"
+						}
+					>
 						if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
 							@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
 						} else {
@@ -158,7 +170,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 		@components.ChatAutoScrollScript()
 		@components.ChatStreamingResumeInitScript()
 		<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
-				<script>
+		<script>
 					window.initializeChatTranscriptScroll = function() {
 						var chatRoot = document.getElementById('chat-page-root');
 						var chatMessages = document.getElementById('chat-messages');
@@ -576,8 +588,16 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 			if (!window._chatSwapHandlerAttached) {
 				window._chatSwapHandlerAttached = true;
 
-				// Track request-local Chat streaming state without changing scroll intent
-				// until the shared composer confirms that the send was accepted.
+					// Track request-local Chat streaming state without changing scroll intent
+					// until the shared composer confirms that the send was accepted.
+					window._chatQueuedSteerInFlight = window._chatQueuedSteerInFlight || {};
+					window._chatQueuedSteerClearTimers = window._chatQueuedSteerClearTimers || {};
+					function chatQueuedSteerInputID(triggerEl) {
+						if (!triggerEl || !triggerEl.getAttribute) return '';
+						var hxPost = triggerEl.getAttribute('hx-post') || '';
+						var match = hxPost.match(/^\/chat\/queued\/([^\/]+)\/steer$/);
+						return match ? match[1] : '';
+					}
 					document.body.addEventListener('htmx:beforeRequest', function(event) {
 						var triggerEl = event.detail.elt;
 						if (triggerEl && triggerEl.id === 'chat-form') {
@@ -588,6 +608,11 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							// Flag that a web send is in progress (prevents live SSE duplication)
 							window._chatWebSendInProgress = true;
 						}
+						var queuedSteerID = chatQueuedSteerInputID(triggerEl);
+						if (queuedSteerID) {
+							window._chatQueuedSteerInFlight[queuedSteerID] = true;
+							if (window._chatQueuedSteerClearTimers[queuedSteerID]) clearTimeout(window._chatQueuedSteerClearTimers[queuedSteerID]);
+						}
 					});
 
 					document.body.addEventListener('htmx:afterRequest', function(event) {
@@ -597,8 +622,14 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							// not rely on a chat-messages swap to clear web-send suppression.
 							window._chatWebSendInProgress = false;
 						}
-					});
-				document.body.addEventListener('htmx:afterSwap', function(event) {
+						var queuedSteerID = chatQueuedSteerInputID(triggerEl);
+						if (queuedSteerID) {
+							window._chatQueuedSteerClearTimers[queuedSteerID] = setTimeout(function() {
+								delete window._chatQueuedSteerInFlight[queuedSteerID];
+								delete window._chatQueuedSteerClearTimers[queuedSteerID];
+							}, 1000);
+						}
+					});				document.body.addEventListener('htmx:afterSwap', function(event) {
 					var swapTarget = event.detail.target;
 					var isChatMessagesSwap = !!(swapTarget && swapTarget.id === 'chat-messages');
 					var isChatRootSwap = !!(swapTarget && swapTarget.id === 'chat-page-root');
@@ -1138,6 +1169,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									if (eventType === 'chat_turn_steered') {
 								var existingSteeringRow = document.querySelector('[data-thread-input-id="' + data.exec_id + '"]');
 								if (existingSteeringRow && existingSteeringRow.getAttribute('data-input-mode') === 'steering') return;
+								if (window._chatQueuedSteerInFlight && window._chatQueuedSteerInFlight[data.exec_id]) return;
 								if (!existingSteeringRow && data.source === 'web' && window._chatWebSendInProgress) return;							if (window.hidePlanCompletionPrompt) window.hidePlanCompletionPrompt();
 
 								var pendingContainer = ensureComposerPendingContainer();
@@ -1190,7 +1222,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 									return;
 								}
 									if (eventType === 'chat_new_message') {
-									if (data.has_attachments) {
+									if (data.has_attachments && !data.queued) {
 										var chatContainer = document.getElementById('chat-page-root');
 										var pid = chatContainer ? chatContainer.getAttribute('data-project-id') : projectId;
 										if (chatContainer && pid && typeof htmx !== 'undefined') {
