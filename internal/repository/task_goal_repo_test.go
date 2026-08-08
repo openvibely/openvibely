@@ -76,6 +76,73 @@ func TestTaskGoalRepo_BlockedAuditAndStaleGoalGuard(t *testing.T) {
 	}
 }
 
+func TestTaskGoalRepo_ResumeStoppedByUserConditional(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := createGoalTestProject(t, ctx, db)
+	taskRepo := NewTaskRepo(db, nil)
+	task := createGoalTestTask(t, ctx, taskRepo, project.ID)
+	repo := NewTaskGoalRepo(db)
+
+	goal := &models.TaskGoal{TaskID: task.ID, GoalID: "goal-1", Objective: "Ship it", Status: models.TaskGoalStatusActive}
+	if err := repo.CreateOrReplace(ctx, goal); err != nil {
+		t.Fatalf("create goal: %v", err)
+	}
+	if _, err := repo.UpdateStatus(ctx, task.ID, goal.GoalID, models.TaskGoalStatusPaused, "stopped by user", false); err != nil {
+		t.Fatalf("pause stopped by user: %v", err)
+	}
+
+	// Positive: eligible paused/stopped-by-user goal resumes and clears audit.
+	resumed, err := repo.ResumeStoppedByUser(ctx, task.ID, goal.GoalID, "stopped by user", "resumed by web")
+	if err != nil {
+		t.Fatalf("resume stopped by user: %v", err)
+	}
+	if resumed == nil || resumed.Status != models.TaskGoalStatusActive || resumed.GoalID != goal.GoalID {
+		t.Fatalf("resumed goal = %+v", resumed)
+	}
+	if resumed.AchievedAt != nil || resumed.BlockerCount != 0 || resumed.BlockerKey != "" {
+		t.Fatalf("expected cleared audit after resume, got %+v", resumed)
+	}
+
+	// Changed state (cleared) between read and write must be a no-op.
+	if _, err := repo.UpdateStatus(ctx, task.ID, goal.GoalID, models.TaskGoalStatusPaused, "stopped by user", false); err != nil {
+		t.Fatalf("re-pause stopped by user: %v", err)
+	}
+	if err := repo.Clear(ctx, task.ID, "cleared by user"); err != nil {
+		t.Fatalf("clear goal: %v", err)
+	}
+	noop, err := repo.ResumeStoppedByUser(ctx, task.ID, goal.GoalID, "stopped by user", "resumed by web")
+	if err != nil {
+		t.Fatalf("conditional resume on cleared goal: %v", err)
+	}
+	if noop != nil {
+		t.Fatalf("expected nil no-op on cleared goal, got %+v", noop)
+	}
+	current, err := repo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get current: %v", err)
+	}
+	if current.Status != models.TaskGoalStatusCleared || current.Reason != "cleared by user" {
+		t.Fatalf("expected cleared goal preserved, got %+v", current)
+	}
+
+	// Paused with a different reason must also be a no-op.
+	if _, err := repo.UpdateStatus(ctx, task.ID, goal.GoalID, models.TaskGoalStatusPaused, "paused by user", false); err != nil {
+		t.Fatalf("pause with other reason: %v", err)
+	}
+	noop2, err := repo.ResumeStoppedByUser(ctx, task.ID, goal.GoalID, "stopped by user", "resumed by web")
+	if err != nil {
+		t.Fatalf("conditional resume on other-reason pause: %v", err)
+	}
+	if noop2 != nil {
+		t.Fatalf("expected nil no-op on other-reason pause, got %+v", noop2)
+	}
+	current, _ = repo.GetByTaskID(ctx, task.ID)
+	if current.Status != models.TaskGoalStatusPaused || current.Reason != "paused by user" {
+		t.Fatalf("expected other-reason pause preserved, got %+v", current)
+	}
+}
+
 func TestTaskRepo_ImmediateTransactionCommitUsesCallerContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)

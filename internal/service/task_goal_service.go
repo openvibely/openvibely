@@ -114,12 +114,15 @@ func (s *TaskGoalService) ResumeGoalStoppedByUser(ctx context.Context, taskID st
 	if goal.Status != models.TaskGoalStatusPaused || strings.TrimSpace(goal.Reason) != TaskGoalStoppedByUserReason {
 		return nil, nil
 	}
-	updated, err := s.repo.UpdateStatus(ctx, taskID, goal.GoalID, models.TaskGoalStatusActive, reasonForActor(actor, "resumed"), true)
+	updated, err := s.repo.ResumeStoppedByUser(ctx, taskID, goal.GoalID, TaskGoalStoppedByUserReason, reasonForActor(actor, "resumed"))
 	if err != nil {
 		return nil, err
 	}
 	if updated == nil {
-		return nil, ErrTaskGoalStaleUpdate
+		// The goal changed between the eligibility read and this conditional
+		// write (cleared, replaced, achieved, or paused for another reason).
+		// Preserve the newer state as a benign no-op rather than an error.
+		return nil, nil
 	}
 	s.publishGoalEvent(events.TaskGoalResumed, updated)
 	return updated, nil

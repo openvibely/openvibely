@@ -245,6 +245,45 @@ func TestTaskService_RunTask_DoesNotResumeExplicitlyPausedGoal(t *testing.T) {
 	assert.Equal(t, "paused by user", paused.Reason)
 }
 
+func TestTaskService_RunTask_ProceedsWhenAutomaticResumeIsNoOp(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := NewTaskGoalService(goalRepo, taskRepo, nil)
+	svc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	task := &models.Task{ProjectID: "default", Title: "Concurrent Clear Start", Category: models.CategoryBacklog, Status: models.StatusCancelled, Prompt: "continue"}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	_, err := goalSvc.SetGoal(ctx, task.ID, "finish the objective", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	require.NoError(t, goalSvc.PauseActiveGoalStoppedByUser(ctx, task.ID))
+
+	// Simulate a concurrent clear landing before manual start's automatic resume.
+	require.NoError(t, goalRepo.Clear(ctx, task.ID, "cleared by user"))
+
+	// Manual start must still proceed (no error) and submit the task despite the
+	// resume being a benign no-op.
+	require.NoError(t, svc.RunTask(ctx, task.ID))
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		assert.Equal(t, task.ID, submitted.ID)
+	case <-time.After(time.Second):
+		t.Fatal("expected task to be submitted despite no-op goal resume")
+	}
+
+	// The cleared goal must be preserved, not resurrected to active.
+	current, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, current)
+	assert.Equal(t, models.TaskGoalStatusCleared, current.Status)
+	assert.Equal(t, "cleared by user", current.Reason)
+}
+
 func TestTaskService_UpdateStatus_RunningActiveResumesGoalPausedByUserStop(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

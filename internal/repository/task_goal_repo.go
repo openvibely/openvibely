@@ -133,6 +133,19 @@ func (r *TaskGoalRepo) UpdateStatus(ctx context.Context, taskID string, goalID s
 		RETURNING `+taskGoalSelectColumns, status, reason, taskID, goalID)
 }
 
+// ResumeStoppedByUser atomically transitions a goal to active only when it is
+// still paused with the given stopped-by-user reason at write time. It returns
+// nil without error when no row matches, so a concurrent clear, replacement,
+// achieved transition, or pause with another reason is preserved as a no-op.
+func (r *TaskGoalRepo) ResumeStoppedByUser(ctx context.Context, taskID string, goalID string, stoppedReason string, reason string) (*models.TaskGoal, error) {
+	return r.updateReturning(ctx, `
+		UPDATE task_goals
+		SET status = 'active', reason = ?, blocker_key = '', blocker_count = 0, blocker_reason = '', blocker_last_seen_at = NULL,
+			last_checked_at = datetime('now'), achieved_at = NULL, updated_at = datetime('now')
+		WHERE task_id = ? AND goal_id = ? AND status = 'paused' AND reason = ?
+		RETURNING `+taskGoalSelectColumns, reason, taskID, goalID, stoppedReason)
+}
+
 func (r *TaskGoalRepo) ReactivateAchieved(ctx context.Context, taskID string, reason string) (*models.TaskGoal, error) {
 	return r.updateReturning(ctx, `
 		UPDATE task_goals
