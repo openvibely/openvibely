@@ -1370,8 +1370,17 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						function reconcileYAMLFolds(ranges) {
 							Array.from(yamlFoldedLines).forEach(function(line) { if (ranges[line] === undefined) yamlFoldedLines.delete(line); });
 						}
-						function yamlContinuousIndentationRails(lines, visibleLines) {
-						var rails = [], maxIndent = 0;
+						function yamlActiveRailInfo() {
+							if (!yamlEditor || document.activeElement !== yamlEditor) return null;
+							return {line: yamlOffsetToLineCol(yamlEditor.value, yamlEditor.selectionStart).line + 1};
+						}
+						function yamlRailColor(active) {
+							if (!active) return 'oklch(var(--bc) / 0.3)';
+							var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+							return isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)';
+						}
+						function yamlContinuousIndentationRails(lines, visibleLines, activeInfo) {
+						var rails = [], maxIndent = 0, candidates = [];
 						visibleLines.forEach(function(lineIndex) { maxIndent = Math.max(maxIndent, yamlLineIndent(lines[lineIndex])); });
 						for (var column = 0; column < maxIndent; column += 2) {
 							var startLine = 0, endLine = 0;
@@ -1381,31 +1390,39 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 									if (!startLine) startLine = lineIndex + 1;
 									endLine = lineIndex + 1;
 								} else if (startLine) {
-										rails.push('<span class="pointer-events-none absolute transition-colors" style="left:calc(0.75rem + ' + column + 'ch);top:0;height:0;width:1px;z-index:20;background-color:oklch(var(--bc) / 0.3)" data-automation-yaml-indent-rail data-yaml-rail-start="' + startLine + '" data-yaml-rail-end="' + endLine + '" data-yaml-rail-column="' + column + '" aria-hidden="true"></span>');									startLine = 0;
+									candidates.push({column: column, start: startLine, end: endLine});
+									startLine = 0;
 								}
 							});
-								if (startLine) rails.push('<span class="pointer-events-none absolute transition-colors" style="left:calc(0.75rem + ' + column + 'ch);top:0;height:0;width:1px;z-index:20;background-color:oklch(var(--bc) / 0.3)" data-automation-yaml-indent-rail data-yaml-rail-start="' + startLine + '" data-yaml-rail-end="' + endLine + '" data-yaml-rail-column="' + column + '" aria-hidden="true"></span>');						}
+							if (startLine) candidates.push({column: column, start: startLine, end: endLine});
+						}
+							var activeCandidate = null;
+							if (activeInfo) {
+								candidates.forEach(function(candidate) {
+									var withinGroup = activeInfo.line >= candidate.start && activeInfo.line <= candidate.end;
+									var onGroupHeader = activeInfo.line === candidate.start - 1;
+									if ((withinGroup || onGroupHeader) && (!activeCandidate || candidate.column > activeCandidate.column)) activeCandidate = candidate;
+								});
+							}
+							candidates.forEach(function(candidate) {
+								var color = yamlRailColor(candidate === activeCandidate);
+								rails.push('<span class="pointer-events-none absolute transition-colors" style="left:calc(0.75rem + ' + candidate.column + 'ch);top:0;height:0;width:1px;z-index:20;background-color:' + color + '" data-automation-yaml-indent-rail data-yaml-rail-start="' + candidate.start + '" data-yaml-rail-end="' + candidate.end + '" data-yaml-rail-column="' + candidate.column + '" aria-hidden="true"></span>');
+							});
 						return rails.join('');
 					}
 						function updateYAMLActiveRail() {
 							if (!yamlHighlight || !yamlEditor) return;
 							var rails = yamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]');
 							if (!rails.length) return;
-							var focused = document.activeElement === yamlEditor;
-							var currentLine = focused ? yamlOffsetToLineCol(yamlEditor.value, yamlEditor.selectionStart).line + 1 : -1;
+							var activeInfo = yamlActiveRailInfo();
 							var active = null;
 							rails.forEach(function(rail) {
-								rail.style.backgroundColor = 'oklch(var(--bc) / 0.3)';
-								rail.style.width = '1px';
 								var start = Number(rail.dataset.yamlRailStart), end = Number(rail.dataset.yamlRailEnd), column = Number(rail.dataset.yamlRailColumn);
-								var withinGroup = currentLine >= start && currentLine <= end;
-								var onGroupHeader = currentLine === start - 1;
-								if (focused && (withinGroup || onGroupHeader) && (!active || column > Number(active.dataset.yamlRailColumn))) active = rail;
+								var withinGroup = activeInfo && activeInfo.line >= start && activeInfo.line <= end;
+								var onGroupHeader = activeInfo && activeInfo.line === start - 1;
+								if (activeInfo && (withinGroup || onGroupHeader) && (!active || column > Number(active.dataset.yamlRailColumn))) active = rail;
 							});
-							if (active) {
-								var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-								active.style.backgroundColor = isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)';
-							}
+							rails.forEach(function(rail) { rail.style.backgroundColor = yamlRailColor(rail === active); });
 						}
 						function layoutYAMLIndentationRails() {
 						if (!yamlHighlight) return;
@@ -1449,7 +1466,7 @@ var lines = yamlSourceValue.split('\n'), ranges = yamlFoldRanges(lines), highlig
 								}
 								highlighted.push(yamlShared.renderLineSpan(lines[index], index + 1, {diagnosticLine: yamlDiagnosticLine, folded: isFolded}));								if (isFolded) index = foldEnd + 1; else index++;
 							}
-							yamlHighlight.innerHTML = yamlContinuousIndentationRails(lines, visibleLines) + highlighted.join('');
+							yamlHighlight.innerHTML = yamlContinuousIndentationRails(lines, visibleLines, yamlActiveRailInfo()) + highlighted.join('');
 							yamlLineNumbers.innerHTML = lineNumbers.join('');
 							yamlFoldControls.innerHTML = controls.join('');
 							yamlVisibleLineMap = visibleLines.slice();

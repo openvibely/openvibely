@@ -857,7 +857,7 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s YAML indentation must use visual-only guides over source spaces: missing %q", source, want)
 			}
 		}
-		if !strings.Contains(body, `data-automation-yaml-indent-rail`) || !strings.Contains(body, `width:1px;z-index:20;background-color:oklch(var(--bc) / 0.3)`) {
+		if !strings.Contains(body, `data-automation-yaml-indent-rail`) || !strings.Contains(body, `width:1px;z-index:20;background-color:`) || !strings.Contains(body, `function yamlRailColor(active)`) || !strings.Contains(body, `oklch(var(--bc) / 0.3)`) {
 			t.Errorf("%s YAML indentation rails must use a visible continuous theme-colored layer", source)
 		}
 		if strings.Contains(body, `marker = column % 2 === 0 ? '│' : '·'`) {
@@ -1182,6 +1182,28 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     var headerActiveColor = window.getComputedStyle(nestedRail).backgroundColor;
     if (headerActiveColor === inactiveColor) fail('clicking the top-level field for a group must highlight the associated vertical rail');
+    editor.setSelectionRange(lineOffset, lineOffset);
+    editor.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true, clientX: railLineRect.left + 1, clientY: railLineRect.top + 2}));
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    var beforeTypingColor = window.getComputedStyle(Array.from(highlight.querySelectorAll('[data-automation-yaml-indent-rail]')).find(function(rail) { return Number(rail.dataset.yamlRailColumn) === 2 && Number(rail.dataset.yamlRailStart) === 34; })).backgroundColor;
+    if (beforeTypingColor === inactiveColor) fail('rail must be active before typing regression begins');
+    var railLineEndOffset = lineOffset + editor.value.split('\n')[railStartLine - 1].length;
+    editor.setRangeText('x', railLineEndOffset, railLineEndOffset, 'end');
+    editor.setSelectionRange(railLineEndOffset + 1, railLineEndOffset + 1);
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    var afterTypingRail = Array.from(highlight.querySelectorAll('[data-automation-yaml-indent-rail]')).find(function(rail) { return Number(rail.dataset.yamlRailColumn) === 2 && Number(rail.dataset.yamlRailStart) === 34; });
+    if (!afterTypingRail) fail('rail disappeared after typing a character inside the group');
+    var afterTypingColor = window.getComputedStyle(afterTypingRail).backgroundColor;
+    if (afterTypingColor === inactiveColor) fail('typing inside a highlighted YAML group must not flash the rail back to its inactive color: got=' + afterTypingColor);
+    if (afterTypingColor !== beforeTypingColor) fail('typing inside a highlighted YAML group must keep the rail continuously active without flashing: before=' + beforeTypingColor + ' after=' + afterTypingColor);
+    editor.value = tabBeforeValue;
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    editor.setSelectionRange(lineOffset, lineOffset);
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    nestedRail = Array.from(highlight.querySelectorAll('[data-automation-yaml-indent-rail]')).find(function(rail) { return Number(rail.dataset.yamlRailColumn) === 2 && Number(rail.dataset.yamlRailStart) === 34; });
+    if (!nestedRail) fail('expected an indentation rail at column 2 for the edge item fields after restoring typed edit');
     document.documentElement.setAttribute('data-theme', 'dark');
     editor.dispatchEvent(new KeyboardEvent('keyup', {bubbles: true, key: 'ArrowRight'}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
