@@ -15,20 +15,12 @@ var discordNumericUserIDPattern = regexp.MustCompile(`^[0-9]+$`)
 
 // ListDiscordAuthorizedUsers returns the authorized Discord users list for a project.
 func (h *Handler) ListDiscordAuthorizedUsers(c echo.Context) error {
-	if h.discordAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Discord auth not configured")
-	}
-	return h.discordAuthorizedUserCRUD().listUsers(c, c.QueryParam("project_id"))
+	return h.discordAuthorizedUserCRUD().listHandler(c)
 }
 
 // AddDiscordAuthorizedUser adds a new authorized Discord user.
 func (h *Handler) AddDiscordAuthorizedUser(c echo.Context) error {
-	if h.discordAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Discord auth not configured")
-	}
-
-	projectID := c.FormValue("project_id")
-	return h.discordAuthorizedUserCRUD().createUser(c, projectID, func(ctx context.Context) error {
+	return h.discordAuthorizedUserCRUD().createHandler(c, func(ctx context.Context, projectID string) error {
 		discordUserID := strings.TrimSpace(c.FormValue("discord_user_id"))
 		displayName := strings.TrimSpace(c.FormValue("display_name"))
 		if discordUserID == "" {
@@ -53,23 +45,20 @@ func (h *Handler) AddDiscordAuthorizedUser(c echo.Context) error {
 
 // RemoveDiscordAuthorizedUser removes an authorized Discord user.
 func (h *Handler) RemoveDiscordAuthorizedUser(c echo.Context) error {
-	if h.discordAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Discord auth not configured")
-	}
-	return h.discordAuthorizedUserCRUD().deleteUser(
-		c,
-		c.Param("id"),
-		c.QueryParam("project_id"),
-		authorizedUserProjectLookup(h.discordAuthRepo.GetByID, func(user *models.DiscordAuthorizedUser) string {
-			return user.ProjectID
-		}),
-		h.discordAuthRepo.Delete,
-	)
+	return h.discordAuthorizedUserCRUD().deleteHandler(c)
 }
 
 func (h *Handler) discordAuthorizedUserCRUD() authorizedUserCRUD[models.DiscordAuthorizedUser] {
-	return authorizedUserCRUD[models.DiscordAuthorizedUser]{
-		list:   h.discordAuthRepo.ListByProject,
-		render: components.DiscordAuthorizedUsersList,
+	crud := authorizedUserCRUD[models.DiscordAuthorizedUser]{
+		render:               components.DiscordAuthorizedUsersList,
+		notConfiguredMessage: "Discord auth not configured",
+		configured:           h.discordAuthRepo != nil,
 	}
+	if h.discordAuthRepo != nil {
+		crud.list = h.discordAuthRepo.ListByProject
+		crud.getByID = h.discordAuthRepo.GetByID
+		crud.delete = h.discordAuthRepo.Delete
+		crud.projectID = func(user *models.DiscordAuthorizedUser) string { return user.ProjectID }
+	}
+	return crud
 }
