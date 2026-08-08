@@ -382,6 +382,59 @@ func TestThreadInputRepo_ClaimQueuedChatPersistsSlackContextWithClaim(t *testing
 	}
 }
 
+func TestThreadInputRepo_ClaimQueuedChatPersistsEmailContextWithClaim(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	project := createThreadInputProject(t, ctx, db)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+
+	input := &models.ThreadInput{
+		Scope:           models.ThreadInputScopeChat,
+		ProjectID:       project.ID,
+		AgentConfigID:   agent.ID,
+		InputMode:       models.ThreadInputModeQueued,
+		Content:         "queued email",
+		ChatMode:        models.ChatModeOrchestrate,
+		Source:          models.TaskOriginEmail,
+		EmailFrom:       "sender@example.com",
+		EmailMessageID:  "<message-1@example.com>",
+		EmailReferences: "<root@example.com>",
+		EmailSubject:    "Original subject",
+		EmailSessionKey: "sender@example.com|thread-root",
+	}
+	if err := repo.CreateQueued(ctx, input); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+
+	task := &models.Task{ProjectID: project.ID, Title: "Queued Email", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: input.Content, CreatedVia: models.TaskOriginEmail}
+	exec := &models.Execution{AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: input.Content}
+	if err := repo.ClaimQueuedForChatExecution(ctx, input.ID, task, exec, nil, &models.EmailTaskContext{
+		EmailFrom:       "sender@example.com",
+		EmailMessageID:  "<message-1@example.com>",
+		EmailReferences: "<root@example.com>",
+		EmailSubject:    "Original subject",
+		EmailSessionKey: "sender@example.com|thread-root",
+	}, nil); err != nil {
+		t.Fatalf("ClaimQueuedForChatExecution: %v", err)
+	}
+
+	etc, err := NewEmailTaskContextRepo(db).GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByTaskID: %v", err)
+	}
+	if etc == nil || etc.EmailFrom != "sender@example.com" || etc.EmailMessageID != "<message-1@example.com>" || etc.EmailReferences != "<root@example.com>" || etc.EmailSubject != "Original subject" || etc.EmailSessionKey != "sender@example.com|thread-root" {
+		t.Fatalf("email context not persisted with queued claim: %#v", etc)
+	}
+	stored, err := repo.GetByID(ctx, input.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputApplied || stored.RunExecutionID != exec.ID {
+		t.Fatalf("queued input should be applied to created execution, got %#v", stored)
+	}
+}
+
 func TestThreadInputRepo_ClaimQueuedChatPersistsDiscordContextWithClaim(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

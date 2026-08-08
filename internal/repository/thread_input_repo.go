@@ -11,7 +11,10 @@ import (
 )
 
 type ThreadInputRepo struct {
-	db *sql.DB
+	db                     *sql.DB
+	slackTaskContextRepo   *SlackTaskContextRepo
+	emailTaskContextRepo   *EmailTaskContextRepo
+	discordTaskContextRepo *DiscordTaskContextRepo
 }
 
 var (
@@ -22,7 +25,12 @@ var (
 )
 
 func NewThreadInputRepo(db *sql.DB) *ThreadInputRepo {
-	return &ThreadInputRepo{db: db}
+	return &ThreadInputRepo{
+		db:                     db,
+		slackTaskContextRepo:   NewSlackTaskContextRepo(db),
+		emailTaskContextRepo:   NewEmailTaskContextRepo(db),
+		discordTaskContextRepo: NewDiscordTaskContextRepo(db),
+	}
 }
 
 func defaultThreadTaskJSON(raw string) string {
@@ -854,49 +862,20 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 
 		if slackContext != nil {
 			slackContext.TaskID = task.ID
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO slack_task_context (task_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id, updated_at)
-						 VALUES (?, ?, ?, ?, ?, datetime('now'))
-						 ON CONFLICT(task_id) DO UPDATE SET
-						 slack_team_id = excluded.slack_team_id,
-						 slack_channel_id = excluded.slack_channel_id,
-						 slack_thread_ts = excluded.slack_thread_ts,
-						 slack_user_id = excluded.slack_user_id,
-						 updated_at = datetime('now')`,
-				slackContext.TaskID, slackContext.SlackTeamID, slackContext.SlackChannelID, slackContext.SlackThreadTS, slackContext.SlackUserID); err != nil {
+			if err := r.slackTaskContextRepo.UpsertWithExecutor(ctx, tx, slackContext); err != nil {
 				return fmt.Errorf("creating queued slack context: %w", err)
 			}
 		}
 		if emailContext != nil {
-			ectx := emailContext
-			ectx.TaskID = task.ID
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO email_task_context (task_id, email_from, email_message_id, email_references, email_subject, email_session_key, updated_at)
-							 VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-							 ON CONFLICT(task_id) DO UPDATE SET
-							 email_from = excluded.email_from,
-							 email_message_id = excluded.email_message_id,
-							 email_references = excluded.email_references,
-							 email_subject = excluded.email_subject,
-							 email_session_key = excluded.email_session_key,
-							 updated_at = datetime('now')`,
-				ectx.TaskID, ectx.EmailFrom, ectx.EmailMessageID, ectx.EmailReferences, ectx.EmailSubject, ectx.EmailSessionKey); err != nil {
+			emailContext.TaskID = task.ID
+			if err := r.emailTaskContextRepo.UpsertWithExecutor(ctx, tx, emailContext); err != nil {
 				return fmt.Errorf("creating queued email context: %w", err)
 			}
 		}
 
 		if discordContext != nil {
 			discordContext.TaskID = task.ID
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO discord_task_context (task_id, discord_channel_id, discord_thread_id, discord_message_id, discord_user_id, updated_at)
-				 VALUES (?, ?, ?, ?, ?, datetime('now'))
-				 ON CONFLICT(task_id) DO UPDATE SET
-				 discord_channel_id = excluded.discord_channel_id,
-				 discord_thread_id = excluded.discord_thread_id,
-				 discord_message_id = excluded.discord_message_id,
-				 discord_user_id = excluded.discord_user_id,
-				 updated_at = datetime('now')`,
-				discordContext.TaskID, discordContext.DiscordChannelID, discordContext.DiscordThreadID, discordContext.DiscordMessageID, discordContext.DiscordUserID); err != nil {
+			if err := r.discordTaskContextRepo.UpsertWithExecutor(ctx, tx, discordContext); err != nil {
 				return fmt.Errorf("creating queued discord context: %w", err)
 			}
 		}

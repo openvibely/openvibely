@@ -47,7 +47,7 @@ func TestDiscordTaskContextRepo_UpsertGetDelete(t *testing.T) {
 
 	dtc.DiscordThreadID = "thread-2"
 	dtc.DiscordMessageID = "msg-2"
-	require.NoError(t, repo.Upsert(ctx, dtc))
+	require.NoError(t, repo.UpsertWithExecutor(ctx, db, dtc))
 
 	got, err = repo.GetByTaskID(ctx, task.ID)
 	require.NoError(t, err)

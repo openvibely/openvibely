@@ -18,10 +18,15 @@ func NewDiscordTaskContextRepo(db *sql.DB) *DiscordTaskContextRepo {
 }
 
 func (r *DiscordTaskContextRepo) Upsert(ctx context.Context, dtc *models.DiscordTaskContext) error {
+	return r.UpsertWithExecutor(ctx, r.db, dtc)
+}
+
+// UpsertWithExecutor persists Discord task context using the caller's transaction.
+func (r *DiscordTaskContextRepo) UpsertWithExecutor(ctx context.Context, exec SQLExecutor, dtc *models.DiscordTaskContext) error {
 	if dtc == nil {
 		return fmt.Errorf("discord task context is nil")
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := exec.ExecContext(ctx,
 		`INSERT INTO discord_task_context (task_id, discord_channel_id, discord_thread_id, discord_message_id, discord_user_id, updated_at)
 		 VALUES (?, ?, ?, ?, ?, datetime('now'))
 		 ON CONFLICT(task_id) DO UPDATE SET
