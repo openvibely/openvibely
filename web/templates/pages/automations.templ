@@ -352,7 +352,52 @@ templ automationBuilderViewSwitcher() {
 	</div>
 }
 
+// automationYAMLSharedScript defines the single source of truth for YAML line
+// rendering (syntax highlighting, indentation guides and hanging indent) used
+// by both the editable builder editor and the read-only preview panel, so
+// they can never visually drift apart from one another.
+templ automationYAMLSharedScript() {
+	<script>
+		window.openVibelyYAML = window.openVibelyYAML || (function() {
+			function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+			function lineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }
+			function indentationGuides(indent) {
+				if (!indent) return '';
+				var dots = [];
+				for (var column = 0; column < indent; column++) {
+					dots.push('<span class="absolute z-10 rounded-full" style="left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:oklch(var(--bc) / 0.3)" data-automation-yaml-indent-dot aria-hidden="true"></span>');
+				}
+				return '<span class="pointer-events-none absolute inset-y-0 left-0 z-10" style="width:' + indent + 'ch" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden="true">' + dots.join('') + '</span>';
+			}
+			function highlightLine(line, lineNumber, diagnosticLine) {
+				var indentation = line.match(/^\s*/)[0], content = line.slice(indentation.length), match = content.match(/^((?:-\s+)?)([^:#][^:]*?)(:)(.*)$/), rendered = escapeYAMLHTML(content);
+				if (/^\s*#/.test(line)) rendered = '<span class="text-base-content/50">' + escapeYAMLHTML(content) + '</span>';
+				else if (match) {
+					var value = match[4], valueClass = 'text-base-content/80';
+					if (/^\s*["']/.test(value)) valueClass = 'text-info';
+					else if (/^\s*(?:true|false|null|~|-?\d+(?:\.\d+)?)\s*(?:#.*)?$/i.test(value)) valueClass = 'text-secondary';
+					rendered = escapeYAMLHTML(match[1]) + '<span class="text-primary" data-automation-yaml-key>' + escapeYAMLHTML(match[2]) + '</span>' + escapeYAMLHTML(match[3]) + '<span class="' + valueClass + '">' + escapeYAMLHTML(value) + '</span>';
+				}
+				if (diagnosticLine && lineNumber === diagnosticLine) rendered = '<span class="decoration-error underline decoration-wavy" style="text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: oklch(var(--er)); text-decoration-thickness: 1px" data-automation-yaml-error-line>' + rendered + '</span>';
+				return rendered;
+			}
+			// renderLineSpan renders one complete, self-contained highlighted line
+			// (indent guide + hanging indent + syntax highlighting + optional fold
+			// summary), identically for every caller so indentation can never
+			// silently diverge between the editable and read-only YAML views.
+			function renderLineSpan(line, lineNumber, options) {
+				options = options || {};
+				var indent = lineIndent(line), hangingIndent = indent ? ' style="padding-left:' + indent + 'ch"' : '', rendered = highlightLine(line, lineNumber, options.diagnosticLine);
+				if (options.folded) rendered += '<span class="ml-2 text-base-content/45" data-automation-yaml-fold-summary>…</span>';
+				return '<span class="relative block min-h-6 break-words" data-automation-yaml-highlight-line data-yaml-line="' + lineNumber + '" data-yaml-indent="' + indent + '"' + hangingIndent + '>' + indentationGuides(indent) + rendered + '</span>';
+			}
+			return {escapeHTML: escapeYAMLHTML, lineIndent: lineIndent, indentationGuides: indentationGuides, highlightLine: highlightLine, renderLineSpan: renderLineSpan};
+		})();
+	</script>
+}
+
 templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
+		@automationYAMLSharedScript()
 		<div id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
 			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }
 			data-external-refresh-url={ fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", graph.Automation.ID, currentProjectID) }>
@@ -581,6 +626,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						var yamlHighlight = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-highlight]');
 						var yamlGutter = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-gutter]');
 						if (!yamlEditor || !yamlLineNumbers || !yamlHighlight) return;
+						var shared = window.openVibelyYAML;
 						function renderYAMLLineNumbers() {
 							var lines = yamlEditor.value.split('\n'), numbers = [];
 							lines.forEach(function(line, index) {
@@ -588,33 +634,9 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 							});
 							yamlLineNumbers.innerHTML = numbers.join('');
 						}
-						function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-						function yamlLineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }
-						function yamlIndentationGuides(indent) {
-							if (!indent) return '';
-							var dots = [];
-							for (var column = 0; column < indent; column++) {
-								dots.push('<span class="absolute z-10 rounded-full" style="left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:oklch(var(--bc) / 0.3)" data-automation-yaml-indent-dot aria-hidden="true"></span>');
-							}
-							return '<span class="pointer-events-none absolute inset-y-0 left-0 z-10" style="width:' + indent + 'ch" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden="true">' + dots.join('') + '</span>';
-						}
-						function highlightYAMLLine(line) {
-							var indentation = line.match(/^\s*/)[0], content = line.slice(indentation.length), match = content.match(/^((?:-\s+)?)([^:#][^:]*?)(:)(.*)$/), rendered = escapeYAMLHTML(content);
-							if (/^\s*#/.test(line)) rendered = '<span class="text-base-content/50">' + escapeYAMLHTML(content) + '</span>';
-							else if (match) {
-								var value = match[4], valueClass = 'text-base-content/80';
-								if (/^\s*["']/.test(value)) valueClass = 'text-info';
-								else if (/^\s*(?:true|false|null|~|-?\d+(?:\.\d+)?)\s*(?:#.*)?$/i.test(value)) valueClass = 'text-secondary';
-								rendered = escapeYAMLHTML(match[1]) + '<span class="text-primary" data-automation-yaml-key>' + escapeYAMLHTML(match[2]) + '</span>' + escapeYAMLHTML(match[3]) + '<span class="' + valueClass + '">' + escapeYAMLHTML(value) + '</span>';
-							}
-							return rendered;
-						}
 						function renderYAMLHighlight() {
 							var lines = yamlEditor.value.split('\n'), highlighted = [];
-							lines.forEach(function(line, index) {
-								var indent = yamlLineIndent(line);
-								highlighted.push('<span class="relative block min-h-6 break-words" data-automation-yaml-highlight-line data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '">' + yamlIndentationGuides(indent) + highlightYAMLLine(line) + '</span>');
-							});
+							lines.forEach(function(line, index) { highlighted.push(shared.renderLineSpan(line, index + 1)); });
 							yamlHighlight.innerHTML = highlighted.join('');
 						}
 						function syncYAMLHighlightScroll() {
@@ -922,6 +944,7 @@ templ AutomationBuilder(projects []models.Project, currentProjectID string, page
 }
 
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
+	@automationYAMLSharedScript()
 	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-draft data-automation-yaml-builder>
 		<div class={ templ.KV("flex h-full min-h-0 shrink-0 flex-col", page.AutomationID != "" || page.Source == "blank") } data-automation-builder-edit-pane>
 		@layout.PageTitle(page.Result.Candidate.Name)
@@ -1232,6 +1255,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 					var yamlHighlight = builder.querySelector('[data-automation-yaml-highlight]');
 					var yamlDiagnostic = builder.querySelector('[data-automation-yaml-diagnostic]');
 					var yamlDiagnosticLine = 0;
+					var yamlShared = window.openVibelyYAML;
 						var yamlFoldingEnabled = false;
 						var yamlFoldedLines = new Set();
 						var yamlSourceValue = yamlEditor ? yamlEditor.value : '';
@@ -1274,8 +1298,9 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							yamlEditor.value = value;
 							yamlRenderingValue = false;
 						}
-						function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
-						function yamlLineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }function yamlFoldRanges(lines) {
+						function escapeYAMLHTML(value) { return yamlShared.escapeHTML(value); }
+						function yamlLineIndent(line) { return yamlShared.lineIndent(line); }
+						function yamlFoldRanges(lines) {
 							var ranges = {};						for (var index = 0; index < lines.length; index++) {
 							var line = lines[index];
 							if (!line.trim() || line.trim().charAt(0) === '#') continue;
@@ -1291,13 +1316,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						function reconcileYAMLFolds(ranges) {
 							Array.from(yamlFoldedLines).forEach(function(line) { if (ranges[line] === undefined) yamlFoldedLines.delete(line); });
 						}
-							function yamlIndentationGuides(indent) {							if (!indent) return '';
-							var dots = [];
-							for (var column = 0; column < indent; column++) {
-								dots.push('<span class="absolute z-10 rounded-full" style="left:calc(' + column + 'ch + 0.65ch);top:50%;width:2px;height:2px;transform:translate(-50%,-50%);background-color:oklch(var(--bc) / 0.3)" data-automation-yaml-indent-dot aria-hidden="true"></span>');
-							}
-							return '<span class="pointer-events-none absolute inset-y-0 left-0 z-10" style="width:' + indent + 'ch" data-automation-yaml-indent-guides data-automation-yaml-indent-guide aria-hidden="true">' + dots.join('') + '</span>';
-						}					function yamlContinuousIndentationRails(lines, visibleLines) {
+						function yamlContinuousIndentationRails(lines, visibleLines) {
 						var rails = [], maxIndent = 0;
 						visibleLines.forEach(function(lineIndex) { maxIndent = Math.max(maxIndent, yamlLineIndent(lines[lineIndex])); });
 						for (var column = 0; column < maxIndent; column += 2) {
@@ -1314,18 +1333,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								if (startLine) rails.push('<span class="pointer-events-none absolute" style="left:calc(0.75rem + ' + column + 'ch);top:0;height:0;width:1px;z-index:20;background-color:oklch(var(--bc) / 0.3)" data-automation-yaml-indent-rail data-yaml-rail-start="' + startLine + '" data-yaml-rail-end="' + endLine + '" aria-hidden="true"></span>');						}
 						return rails.join('');
 					}
-						function highlightYAMLLine(line, lineNumber) {
-							var indentation = line.match(/^\s*/)[0], content = line.slice(indentation.length), match = content.match(/^((?:-\s+)?)([^:#][^:]*?)(:)(.*)$/), rendered = escapeYAMLHTML(content);
-							if (/^\s*#/.test(line)) rendered = '<span class="text-base-content/50">' + escapeYAMLHTML(content) + '</span>';
-							else if (match) {
-								var value = match[4], valueClass = 'text-base-content/80';
-								if (/^\s*["']/.test(value)) valueClass = 'text-info';
-								else if (/^\s*(?:true|false|null|~|-?\d+(?:\.\d+)?)\s*(?:#.*)?$/i.test(value)) valueClass = 'text-secondary';
-								rendered = escapeYAMLHTML(match[1]) + '<span class="text-primary" data-automation-yaml-key>' + escapeYAMLHTML(match[2]) + '</span>' + escapeYAMLHTML(match[3]) + '<span class="' + valueClass + '">' + escapeYAMLHTML(value) + '</span>';
-							}
-							if (lineNumber === yamlDiagnosticLine) rendered = '<span class="decoration-error underline decoration-wavy" style="text-decoration-line: underline; text-decoration-style: wavy; text-decoration-color: oklch(var(--er)); text-decoration-thickness: 1px" data-automation-yaml-error-line>' + rendered + '</span>';
-							return rendered;
-						}					function layoutYAMLIndentationRails() {
+						function layoutYAMLIndentationRails() {
 						if (!yamlHighlight) return;
 						yamlHighlight.querySelectorAll('[data-automation-yaml-indent-rail]').forEach(function(rail) {
 							var start = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-line="' + rail.dataset.yamlRailStart + '"]');
@@ -1365,9 +1373,7 @@ var lines = yamlSourceValue.split('\n'), ranges = yamlFoldRanges(lines), highlig
 									var visibilityClass = isFolded ? '' : ' opacity-0 group-hover:opacity-100 focus-visible:opacity-100';
 									controls.push('<button class="pointer-events-auto absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded bg-transparent p-0 text-base-content/60 transition-opacity hover:bg-transparent hover:text-base-content/60 focus-visible:bg-transparent focus-visible:text-base-content/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary' + visibilityClass + '" style="top:0" type="button" data-automation-yaml-fold data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '" aria-label="' + (isFolded ? 'Expand' : 'Collapse') + ' YAML section starting on line ' + (index + 1) + '"><svg class="h-5 w-5 transition-transform' + (isFolded ? ' -rotate-90' : '') + '" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 7.5 10 12.5 15 7.5"></path></svg></button>');
 								}
-								var rendered = highlightYAMLLine(lines[index], index + 1), indentationGuide = yamlIndentationGuides(indent), hangingIndent = indent ? ' style="padding-left:' + indent + 'ch"' : '';
-								if (isFolded) rendered += '<span class="ml-2 text-base-content/45" data-automation-yaml-fold-summary>…</span>';
-								highlighted.push('<span class="relative block min-h-6 break-words" data-automation-yaml-highlight-line data-yaml-line="' + (index + 1) + '" data-yaml-indent="' + indent + '"' + hangingIndent + '>' + indentationGuide + rendered + '</span>');								if (isFolded) index = foldEnd + 1; else index++;
+								highlighted.push(yamlShared.renderLineSpan(lines[index], index + 1, {diagnosticLine: yamlDiagnosticLine, folded: isFolded}));								if (isFolded) index = foldEnd + 1; else index++;
 							}
 							yamlHighlight.innerHTML = yamlContinuousIndentationRails(lines, visibleLines) + highlighted.join('');
 							yamlLineNumbers.innerHTML = lineNumbers.join('');

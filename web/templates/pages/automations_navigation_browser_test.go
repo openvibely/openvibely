@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -339,13 +340,20 @@ func TestAutomationLiveYAMLPanelMatchesEditorButIsReadOnly(t *testing.T) {
 			t.Errorf("Preview YAML panel must reuse the editable editor's structure and contain %q", want)
 		}
 	}
+	// Strip <script> contents before checking for forbidden markup: the page
+	// includes a shared YAML rendering script (used by both the editable
+	// builder and this read-only panel) whose JS source text legitimately
+	// contains strings like "data-automation-yaml-fold-summary" as string
+	// literals for the builder's fold feature. Those are not DOM elements
+	// rendered on this read-only page, so they must not fail this check.
+	markupOnly := regexp.MustCompile(`(?s)<script>.*?</script>`).ReplaceAllString(body, "")
 	for _, forbidden := range []string{
 		`name="automation_yaml"`,
 		`data-automation-yaml-parse-url`,
 		`data-automation-yaml-fold-controls`,
 		`data-automation-yaml-fold`,
 	} {
-		if strings.Contains(body, forbidden) {
+		if strings.Contains(markupOnly, forbidden) {
 			t.Errorf("Preview YAML panel must not be a submittable/editable/foldable surface, but found %q", forbidden)
 		}
 	}
@@ -411,6 +419,10 @@ window.addEventListener('DOMContentLoaded', function() {
     if (lineNumbersEl && lineNumberEls.length > 1 && lastNumberTop <= firstNumberTop) fail('Live/Preview YAML line numbers must stack vertically, not collapse onto one row');
     var yamlHighlight = yamlPanel.querySelector('[data-automation-yaml-highlight]');
     if (!yamlHighlight || !yamlHighlight.querySelector('[data-automation-yaml-key]')) fail('Live/Preview YAML panel did not syntax-highlight the read-only YAML');
+    var indentedLine = yamlHighlight.querySelector('[data-automation-yaml-highlight-line][data-yaml-indent="4"]');
+    if (!indentedLine) fail('Live/Preview YAML panel did not render an indented line for the nested "name: First" source line');
+    if (window.getComputedStyle(indentedLine).paddingLeft === '0px') fail('Live/Preview YAML panel must reuse the editable editor hanging-indent rendering, but nested lines have no left padding');
+    if (!indentedLine.textContent.includes('First')) fail('Live/Preview YAML indented line did not render its text content');
     detailsButton.click();
     if (isVisible(graphPanel) || !isVisible(detailsPanel) || isVisible(yamlPanel)) fail('selecting Details must hide the graph and YAML panels and show only the details panel');
     graphButton.click();
@@ -425,7 +437,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%%}.whitespace-nowrap{white-space:nowrap}.min-h-6{min-height:24px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body><script>window.htmx = {ajax: function() { return Promise.resolve(); }};</script>%s%s</body></html>`, out.String(), runner)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%%}.whitespace-nowrap{white-space:nowrap}.whitespace-pre{white-space:pre}.block{display:block}.min-h-6{min-height:24px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body><script>window.htmx = {ajax: function() { return Promise.resolve(); }};</script>%s%s</body></html>`, out.String(), runner)
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)
