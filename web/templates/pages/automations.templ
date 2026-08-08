@@ -1391,14 +1391,30 @@ yamlViewport.scrollTop = 0;
 										var collapsedDeletion = preEditStart.line === preEditEnd.line && preEditStart.col === preEditEnd.col && newVisibleValue.length < preEditVisibleValue.length;
 										if (collapsedDeletion) {
 											var removedLength = preEditVisibleValue.length - newVisibleValue.length;
+											var sourceLineText = oldSourceLines[sourceStartLine] || '';
 											if (yamlPendingInputType === 'deleteContentForward') {
-												sourceEndOffset = sourceStartOffset + removedLength;
+												var nextVisibleSourceLine = yamlVisibleLineMap[startVisibleLine + 1];
+												var atFoldBoundaryForward = preEditStart.col === sourceLineText.length && nextVisibleSourceLine !== undefined && nextVisibleSourceLine !== sourceStartLine + 1;
+												if (atFoldBoundaryForward) {
+													var forwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, nextVisibleSourceLine, 0) - 1;
+													sourceStartOffset = forwardBoundaryOffset;
+													sourceEndOffset = forwardBoundaryOffset + removedLength;
+												} else {
+													sourceEndOffset = sourceStartOffset + removedLength;
+												}
 											} else {
-												sourceStartOffset = Math.max(0, sourceStartOffset - removedLength);
+												var prevVisibleSourceLine = startVisibleLine > 0 ? yamlVisibleLineMap[startVisibleLine - 1] : undefined;
+												var atFoldBoundaryBackward = preEditStart.col === 0 && startVisibleLine > 0 && prevVisibleSourceLine !== sourceStartLine - 1;
+												if (atFoldBoundaryBackward) {
+													var backwardBoundaryOffset = yamlLineColToSourceOffset(oldSourceLines, sourceStartLine, 0) - 1;
+													sourceStartOffset = Math.max(0, backwardBoundaryOffset);
+													sourceEndOffset = sourceStartOffset + removedLength;
+												} else {
+													sourceStartOffset = Math.max(0, sourceStartOffset - removedLength);
+												}
 											}
-											yamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + yamlSourceValue.slice(sourceEndOffset);
-										} else {
-											var visibleEditStartOffset = 0;
+										yamlSourceValue = yamlSourceValue.slice(0, sourceStartOffset) + yamlSourceValue.slice(sourceEndOffset);
+									} else {											var visibleEditStartOffset = 0;
 											for (var k = 0; k < startVisibleLine; k++) visibleEditStartOffset += (yamlVisibleLineMap[k] !== undefined ? oldSourceLines[yamlVisibleLineMap[k]].length : 0) + 1;
 											visibleEditStartOffset += preEditStart.col;
 											var insertedText = newVisibleValue.slice(visibleEditStartOffset, postEditOffset);
