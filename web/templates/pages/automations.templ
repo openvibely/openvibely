@@ -431,7 +431,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					</svg>
 					</div>
 					@automationLiveDetailsPanel(graph)
-					<div class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6" data-automation-yaml-panel hidden aria-label="Saved automation YAML">
+					<div class="flex min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6" data-automation-yaml-panel hidden style="display: none" aria-label="Saved automation YAML">
 						<div class="flex min-h-0 flex-1 overflow-hidden" data-automation-yaml-editor-shell>
 							<div class="group relative shrink-0 overflow-hidden border-r border-base-300" style="box-sizing: border-box; width: max-content; min-width: 3.25rem; flex: 0 0 auto;" data-automation-yaml-gutter>
 								<pre class="m-0 h-full w-full min-w-0 select-none overflow-hidden whitespace-nowrap pb-0 pl-2 pr-2 pt-0 text-left text-xs text-base-content/45" style="box-sizing: border-box; text-align: left !important;" aria-label="YAML line numbers" data-automation-yaml-line-numbers>{ automationYAMLLineNumbers(graph.YAML) }</pre>
@@ -560,8 +560,11 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					function selectAutomationLiveView(view) {
 						if (!graphPanel || !detailsPanel || !yamlPanel) return;
 						graphPanel.hidden = view !== 'graph';
+						graphPanel.style.display = view !== 'graph' ? 'none' : '';
 						detailsPanel.hidden = view !== 'details';
+						detailsPanel.style.display = view !== 'details' ? 'none' : '';
 						yamlPanel.hidden = view !== 'yaml';
+						yamlPanel.style.display = view === 'yaml' ? 'flex' : 'none';
 						graphViewButton.classList.toggle('btn-active', view === 'graph');
 						detailsViewButton.classList.toggle('btn-active', view === 'details');
 						yamlViewButton.classList.toggle('btn-active', view === 'yaml');
@@ -578,6 +581,13 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						var yamlHighlight = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-highlight]');
 						var yamlGutter = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-gutter]');
 						if (!yamlEditor || !yamlLineNumbers || !yamlHighlight) return;
+						function renderYAMLLineNumbers() {
+							var lines = yamlEditor.value.split('\n'), numbers = [];
+							lines.forEach(function(line, index) {
+								numbers.push('<span class="block min-h-6" data-automation-yaml-line-number data-yaml-line="' + (index + 1) + '">' + (index + 1) + '</span>');
+							});
+							yamlLineNumbers.innerHTML = numbers.join('');
+						}
 						function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 						function yamlLineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }
 						function yamlIndentationGuides(indent) {
@@ -622,6 +632,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						}
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
 						if (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});
+						renderYAMLLineNumbers();
 						renderYAMLHighlight();
 					})();
 					var svg = canvasRoot && canvasRoot.querySelector('[data-automation-canvas]');				if (canvasRoot && svg) {

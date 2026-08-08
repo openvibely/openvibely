@@ -349,6 +349,127 @@ func TestAutomationLiveYAMLPanelMatchesEditorButIsReadOnly(t *testing.T) {
 			t.Errorf("Preview YAML panel must not be a submittable/editable/foldable surface, but found %q", forbidden)
 		}
 	}
+	// The YAML panel's class list includes Tailwind's "flex" utility (display: flex),
+	// which has equal specificity to the browser's default `[hidden] { display: none }`
+	// UA rule. Without an explicit inline `display: none` fallback matching the `hidden`
+	// attribute, a later-loaded `.flex` utility rule can win the cascade and force the
+	// panel to always render regardless of which view is selected.
+	if !strings.Contains(body, `data-automation-yaml-panel hidden style="display: none"`) {
+		t.Error("Preview YAML panel must pair the hidden attribute with an inline display:none fallback so a flex utility class cannot override it")
+	}
+}
+
+// TestAutomationLiveYAMLViewSwitcherActuallyTogglesVisibility exercises the Live/Preview
+// page's Graph/Details/YAML switcher in a real browser using a CSS fixture that defines
+// `.flex { display: flex }`, matching production Tailwind output. This guards against a
+// regression where the YAML panel's `flex` utility class visually wins the CSS cascade
+// over the `hidden` attribute, leaving the YAML panel always visible (shrinking the graph
+// and details panels) regardless of which switcher button is selected.
+func TestAutomationLiveYAMLViewSwitcherActuallyTogglesVisibility(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	graph := models.AutomationLiveGraph{
+		Automation: models.Automation{ID: "automation-live-switch", Name: "Live Switch", LifecycleState: models.AutomationActive},
+		Version:    models.AutomationVersion{ID: "saved-snapshot"},
+		Nodes: []models.AutomationLiveNode{{
+			AutomationNode: models.AutomationNode{ID: "node-switch", NodeKey: "first", Name: "First", NodeType: models.AutomationNodeAgentTask, Role: "task"},
+		}},
+		YAML: "schema_version: 1\nname: Live Switch\nnodes:\n  - key: \"first\"\n    name: First\n",
+	}
+	var out bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-switch", true).Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation Live view-switcher fixture: %v", err)
+	}
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function fail(message) { throw new Error(message); }
+  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method: 'POST'}); }
+  function isVisible(element) {
+    return !element.hidden && window.getComputedStyle(element).display !== 'none' && element.getClientRects().length > 0;
+  }
+  (async function() {
+    await new Promise(function(resolve) { window.setTimeout(resolve, 200); });
+    var graphPanel = document.querySelector('[data-automation-graph-panel]');
+    var detailsPanel = document.querySelector('[data-automation-live-details-panel]');
+    var yamlPanel = document.querySelector('[data-automation-yaml-panel]');
+    var yamlButton = document.querySelector('[data-automation-view-yaml]');
+    var detailsButton = document.querySelector('[data-automation-view-details]');
+    var graphButton = document.querySelector('[data-automation-view-graph]');
+    if (!graphPanel || !detailsPanel || !yamlPanel || !yamlButton || !detailsButton || !graphButton) fail('missing Live view switcher elements');
+    if (!isVisible(graphPanel) || isVisible(detailsPanel) || isVisible(yamlPanel)) fail('initial Live view must show only the graph panel');
+    yamlButton.click();
+    if (isVisible(graphPanel) || isVisible(detailsPanel) || !isVisible(yamlPanel)) fail('selecting YAML must hide the graph and details panels and show only the YAML panel');
+    var yamlTextarea = yamlPanel.querySelector('[data-automation-yaml-editor]');
+    if (!yamlTextarea || !yamlTextarea.value.includes('schema_version: 1')) fail('YAML panel did not render the saved automation YAML when selected');
+    if (!yamlTextarea.hasAttribute('readonly')) fail('Live/Preview YAML panel textarea must be read-only');
+    var lineNumberEls = yamlPanel.querySelectorAll('[data-automation-yaml-line-number]');
+    var expectedLineCount = yamlTextarea.value.split('\n').length;
+    if (lineNumberEls.length !== expectedLineCount) fail('Live/Preview YAML panel must render one line-number element per source line, got ' + lineNumberEls.length + ' expected ' + expectedLineCount);
+    var lineNumbersEl = yamlPanel.querySelector('[data-automation-yaml-line-numbers]');
+    var firstNumberTop = lineNumberEls[0] && lineNumberEls[0].getBoundingClientRect().top;
+    var lastNumberTop = lineNumberEls[lineNumberEls.length - 1] && lineNumberEls[lineNumberEls.length - 1].getBoundingClientRect().top;
+    if (lineNumbersEl && lineNumberEls.length > 1 && lastNumberTop <= firstNumberTop) fail('Live/Preview YAML line numbers must stack vertically, not collapse onto one row');
+    var yamlHighlight = yamlPanel.querySelector('[data-automation-yaml-highlight]');
+    if (!yamlHighlight || !yamlHighlight.querySelector('[data-automation-yaml-key]')) fail('Live/Preview YAML panel did not syntax-highlight the read-only YAML');
+    detailsButton.click();
+    if (isVisible(graphPanel) || !isVisible(detailsPanel) || isVisible(yamlPanel)) fail('selecting Details must hide the graph and YAML panels and show only the details panel');
+    graphButton.click();
+    if (!isVisible(graphPanel) || isVisible(detailsPanel) || isVisible(yamlPanel)) fail('selecting Graph must hide the details and YAML panels and show only the graph panel');
+    report('pass', '');
+  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+
+	browserResult := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%%}.whitespace-nowrap{white-space:nowrap}.min-h-6{min-height:24px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body><script>window.htmx = {ajax: function() { return Promise.resolve(); }};</script>%s%s</body></html>`, out.String(), runner)
+		case "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "automation-live-view-switcher.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new",
+		"--no-sandbox",
+		"--disable-gpu",
+		"--disable-software-rasterizer",
+		"--disable-dev-shm-usage",
+		"--disable-background-networking",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--window-size=1200,700",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-live-view-switcher-profile"),
+		server.URL,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	defer stopBrowserProcess(cmd)
+
+	select {
+	case outcome := <-browserResult:
+		if outcome != "pass:" {
+			stderr, _ := os.ReadFile(stderrPath)
+			t.Fatalf("Automation Live view-switcher regression failed: %s\n%s", outcome, strings.TrimSpace(string(stderr)))
+		}
+	case <-time.After(20 * time.Second):
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("timed out waiting for Automation Live view-switcher regression\n%s", strings.TrimSpace(string(stderr)))
+	}
 }
 
 func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) {
