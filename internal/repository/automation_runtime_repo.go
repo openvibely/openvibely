@@ -2337,6 +2337,40 @@ func (r *AutomationRepo) AutomationExternalState(ctx context.Context, projectID,
 	return state, nil
 }
 
+// ListAutomationsWithStaleExternalPullRequests returns (project_id, automation_id) pairs
+// that track at least one GitHub pull request resource whose stored state has not been
+// refreshed since staleBefore, so a background job can proactively refresh their state
+// without requiring a manual "Refresh GitHub state" click.
+func (r *AutomationRepo) ListAutomationsWithStaleExternalPullRequests(ctx context.Context, staleBefore time.Time, limit int) ([][2]string, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 200
+	}
+	rows, err := r.db.QueryContext(ctx, `SELECT a.project_id, a.automation_id
+		FROM automation_activities a
+		JOIN automation_activity_resources pull_resource ON pull_resource.activity_id = a.id
+			AND pull_resource.resource_type = 'pull_request'
+		JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
+			AND task_resource.resource_type = 'task'
+		JOIN task_pull_requests pr ON pr.task_id = task_resource.resource_id
+		GROUP BY a.project_id, a.automation_id
+		HAVING MIN(pr.updated_at) < ?
+		ORDER BY a.project_id, a.automation_id
+		LIMIT ?`, staleBefore.UTC().Format("2006-01-02 15:04:05"), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result [][2]string
+	for rows.Next() {
+		var value [2]string
+		if err := rows.Scan(&value[0], &value[1]); err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
 func (r *AutomationRepo) BindingsForActivityResource(ctx context.Context, projectID, automationID, resourceType, resourceID string) (models.AutomationContext, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT a.automation_id, a.version_id, COALESCE(a.invocation_id, ''),
 		a.node_id, COALESCE(a.work_item_id, '')

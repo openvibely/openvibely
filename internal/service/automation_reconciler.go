@@ -16,21 +16,30 @@ import (
 // prepared executions after a process restart. Existing Task and Execution rows
 // remain authoritative; this service never rewrites their state.
 type AutomationReconciler struct {
-	automationRepo *repository.AutomationRepo
-	executionRepo  *repository.ExecutionRepo
-	workerSvc      *WorkerService
-	interval       time.Duration
-	cancel         context.CancelFunc
-	wg             sync.WaitGroup
-	updateTracker  *update.WorkTracker
+	automationRepo      *repository.AutomationRepo
+	executionRepo       *repository.ExecutionRepo
+	workerSvc           *WorkerService
+	externalStateSvc    *AutomationExternalStateService
+	interval            time.Duration
+	externalRefreshEach time.Duration
+	cancel              context.CancelFunc
+	wg                  sync.WaitGroup
+	updateTracker       *update.WorkTracker
 }
 
 func NewAutomationReconciler(automationRepo *repository.AutomationRepo, executionRepo *repository.ExecutionRepo, workerSvc *WorkerService) *AutomationReconciler {
-	return &AutomationReconciler{automationRepo: automationRepo, executionRepo: executionRepo, workerSvc: workerSvc, interval: 15 * time.Second}
+	return &AutomationReconciler{automationRepo: automationRepo, executionRepo: executionRepo, workerSvc: workerSvc, interval: 15 * time.Second, externalRefreshEach: 5 * time.Minute}
 }
 
 func (r *AutomationReconciler) SetUpdateWorkTracker(tracker *update.WorkTracker) {
 	r.updateTracker = tracker
+}
+
+// SetAutomationExternalStateService enables background refresh of Automations'
+// tracked GitHub pull request state, so the "Refresh GitHub state" action on the
+// Automation preview page stays fresh without requiring a manual click.
+func (r *AutomationReconciler) SetAutomationExternalStateService(svc *AutomationExternalStateService) {
+	r.externalStateSvc = svc
 }
 
 func (r *AutomationReconciler) Start(ctx context.Context) {
@@ -158,5 +167,31 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 			automationobs.String("execution_id", dispatch.ExecutionID))
 		applog.Infof("[automation-reconciler] resubmitted prepared dispatch=%s execution=%s", dispatch.ID, dispatch.ExecutionID)
 	}
-	return r.automationRepo.RecomputeAutomationHealthForAll(ctx, time.Now().UTC(), 100)
+	if err := r.automationRepo.RecomputeAutomationHealthForAll(ctx, time.Now().UTC(), 100); err != nil {
+		return err
+	}
+	return r.refreshStaleExternalState(ctx)
+}
+
+// refreshStaleExternalState proactively refreshes tracked GitHub pull request
+// state for Automations whose state has gone stale, so their health and graph
+// stay current without requiring a manual "Refresh GitHub state" click.
+func (r *AutomationReconciler) refreshStaleExternalState(ctx context.Context) error {
+	if r.externalStateSvc == nil {
+		return nil
+	}
+	now := time.Now().UTC()
+	stale, err := r.automationRepo.ListAutomationsWithStaleExternalPullRequests(ctx, now.Add(-r.externalRefreshEach), 100)
+	if err != nil {
+		return err
+	}
+	for _, pair := range stale {
+		projectID, automationID := pair[0], pair[1]
+		if _, err := r.externalStateSvc.Refresh(ctx, projectID, automationID, now); err != nil {
+			applog.Infof("[automation-reconciler] external state refresh failed project=%s automation=%s: %v", projectID, automationID, err)
+			continue
+		}
+		applog.Infof("[automation-reconciler] refreshed external GitHub state project=%s automation=%s", projectID, automationID)
+	}
+	return nil
 }

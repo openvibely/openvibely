@@ -762,6 +762,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		cfg.ProjectRepoRoot,
 	)
 	automationExternalStateSvc := service.NewAutomationExternalStateService(automationRepo, taskPullRequestRepo, projectRepo, githubSvc)
+	automationReconciler.SetAutomationExternalStateService(automationExternalStateSvc)
 	automationSaveValidator.SetGitHubConnectionProvider(githubSvc)
 	automationCapabilitySvc.SetGitHubConnectionProvider(githubSvc)
 	llmSvc.SetGitHubIssueRuntimeProvider(githubSvc)

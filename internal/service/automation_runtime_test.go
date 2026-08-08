@@ -3137,6 +3137,57 @@ func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjec
 	require.Equal(t, fixture.project.RepoPath, provider.resolvedPath, "Automation external refresh must fall back to the project's local Git remote")
 }
 
+func TestAutomationReconcilerRefreshesStaleExternalPullRequestStateInBackground(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime"
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+
+	openPR := automationNodeByKey(t, fixture.definition, "open_pr")
+	review := automationNodeByKey(t, fixture.definition, "review")
+	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: openPR.ID}
+	contextValue := models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: contextValue, Binding: binding, WorkItemKey: "github:example/runtime:issue:99",
+		ActivityKey: "github:example/runtime:pull:9:open", ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}, {ResourceType: "pull_request", ResourceID: "github:example/runtime:pull:9"}},
+		EventKey:  "github:example/runtime:pull:9:review", FromNodeID: openPR.ID, ToNodeID: review.ID, Transition: models.AutomationTransitionWaiting,
+	})
+	require.NoError(t, err)
+
+	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	record := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 9, PRURL: "https://github.com/example/runtime/pull/9", PRState: "open"}
+	require.NoError(t, pullRequests.Upsert(ctx, &record))
+	now := time.Now().UTC().Truncate(time.Second)
+	_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = datetime(?) WHERE id = ?`,
+		now.Add(-time.Hour).Format("2006-01-02 15:04:05"), record.ID)
+	require.NoError(t, err)
+
+	stale, err := fixture.repo.ListAutomationsWithStaleExternalPullRequests(ctx, now.Add(-5*time.Minute), 100)
+	require.NoError(t, err)
+	require.Len(t, stale, 1, "an Automation with a stale tracked pull request must be discovered for background refresh")
+	require.Equal(t, [2]string{fixture.project.ID, fixture.definition.Automation.ID}, stale[0])
+
+	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 9, URL: record.PRURL, State: "closed", Merged: true}}
+	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
+	reconciler := NewAutomationReconciler(fixture.repo, repository.NewExecutionRepo(fixture.repo.DB()), NewWorkerService(nil, 1, nil))
+	reconciler.SetAutomationExternalStateService(external)
+	require.NoError(t, reconciler.ReconcileOnce(ctx))
+
+	require.Equal(t, 1, provider.calls, "the reconciler must refresh stale tracked pull request state automatically, without a manual click")
+	stored, err := pullRequests.GetByTaskID(ctx, fixture.task.ID)
+	require.NoError(t, err)
+	require.Equal(t, "merged", stored.PRState)
+
+	stale, err = fixture.repo.ListAutomationsWithStaleExternalPullRequests(ctx, now.Add(-5*time.Minute), 100)
+	require.NoError(t, err)
+	require.Empty(t, stale, "a background refresh must clear the automation from the stale list")
+
+	require.NoError(t, reconciler.ReconcileOnce(ctx))
+	require.Equal(t, 1, provider.calls, "a background refresh must not repeatedly hit GitHub once the state is no longer stale")
+}
+
 func TestAutomationRuntimeNativeNotificationRequiresProducerActionEdge(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Native notification producer authorization")
 	ctx := context.Background()
