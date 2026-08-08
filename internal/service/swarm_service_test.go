@@ -16,6 +16,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func requireFullSwarmTestTask(t testing.TB, repo *repository.TaskRepo, id string) *models.Task {
+	t.Helper()
+	task, err := repo.GetByID(context.Background(), id)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	return task
+}
+
 func TestAttachSwarmChildrenPreservesPreviouslyAttachedChildren(t *testing.T) {
 	parent := models.Task{ID: "parent", SwarmRole: models.SwarmRoleParent}
 	child := models.Task{ID: "child", SwarmRole: models.SwarmRoleWorker, Status: models.StatusRunning, SwarmSequence: 1}
@@ -329,7 +337,7 @@ func TestSwarmServiceFollowupPlannerApplicationErrorPreservesRetryRouting(t *tes
 		t.Fatalf("coordinating planner missing: planner=%#v err=%v", planner, err)
 	}
 	followupJSON := fmt.Sprintf(`{"workers":[{"task_id":%q,"title":"Backend worker","prompt":"Update backend","worker_kind":"backend","ownership":["internal/service"],"isolation":"worktree","required":true}]}`, worker.ID)
-	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: planner.Prompt}
+	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: requireFullSwarmTestTask(t, repo, planner.ID).Prompt}
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatalf("create follow-up planner execution: %v", err)
 	}
@@ -495,7 +503,7 @@ func TestSwarmServiceFollowupPlannerRetryReconcilesPartiallyCreatedWorkers(t *te
 	}
 
 	followupJSON := `{"workers":[{"title":"New worker one","prompt":"Build first new part","worker_kind":"backend","ownership":["internal/newone"],"isolation":"worktree","required":true},{"title":"New worker two","prompt":"Build second new part","worker_kind":"backend","ownership":["internal/newtwo"],"isolation":"worktree","required":true}]}`
-	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: planner.Prompt}
+	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: requireFullSwarmTestTask(t, repo, planner.ID).Prompt}
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatalf("create follow-up planner execution: %v", err)
 	}
@@ -728,7 +736,7 @@ func TestSwarmServiceAppliesPlannerOutputOnPlannerCompletion(t *testing.T) {
 	if err != nil || planner == nil {
 		t.Fatalf("planner missing: %v", err)
 	}
-	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: planner.Prompt}
+	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: requireFullSwarmTestTask(t, repo, planner.ID).Prompt}
 	if err := execRepo.Create(context.Background(), exec); err != nil {
 		t.Fatalf("create planner execution: %v", err)
 	}
@@ -836,7 +844,7 @@ func TestSwarmServiceTerminalizesChildSwarmStatusOnCompletion(t *testing.T) {
 	if merger.Status != models.StatusPending || merger.SwarmStatus != "ready" {
 		t.Fatalf("merger not started after reviewer completion: status=%s swarm_status=%s", merger.Status, merger.SwarmStatus)
 	}
-	exec := &models.Execution{TaskID: merger.ID, Status: models.ExecRunning, PromptSent: merger.Prompt}
+	exec := &models.Execution{TaskID: merger.ID, Status: models.ExecRunning, PromptSent: requireFullSwarmTestTask(t, repo, merger.ID).Prompt}
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatal(err)
 	}
@@ -1204,7 +1212,7 @@ func TestSwarmServiceInvalidPlannerExecutionBlocksParent(t *testing.T) {
 	if err != nil || planner == nil {
 		t.Fatalf("planner missing: %v", err)
 	}
-	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: planner.Prompt}
+	exec := &models.Execution{TaskID: planner.ID, Status: models.ExecRunning, PromptSent: requireFullSwarmTestTask(t, repo, planner.ID).Prompt}
 	if err := execRepo.Create(context.Background(), exec); err != nil {
 		t.Fatal(err)
 	}
@@ -1276,7 +1284,7 @@ func TestSwarmServiceMergerCompletionPersistsParentResult(t *testing.T) {
 	if merger == nil {
 		t.Fatal("merger missing")
 	}
-	exec := &models.Execution{TaskID: merger.ID, Status: models.ExecRunning, PromptSent: merger.Prompt}
+	exec := &models.Execution{TaskID: merger.ID, Status: models.ExecRunning, PromptSent: requireFullSwarmTestTask(t, repo, merger.ID).Prompt}
 	if err := execRepo.Create(context.Background(), exec); err != nil {
 		t.Fatal(err)
 	}
@@ -1552,8 +1560,12 @@ func TestSwarmServiceParentFollowupCoordinatesAffectedWorkers(t *testing.T) {
 		t.Fatal(err)
 	}
 	planner, _ = repo.FindSwarmChildByRole(context.Background(), parent.ID, models.SwarmRolePlanner)
-	if planner == nil || planner.Status != models.StatusPending || !strings.Contains(planner.Prompt, "Only update backend behavior") {
+	if planner == nil || planner.Status != models.StatusPending {
 		t.Fatalf("planner was not prepared for coordination follow-up: %#v", planner)
+	}
+	fullPlanner := requireFullSwarmTestTask(t, repo, planner.ID)
+	if !strings.Contains(fullPlanner.Prompt, "Only update backend behavior") {
+		t.Fatalf("planner prompt was not prepared for coordination follow-up: %q", fullPlanner.Prompt)
 	}
 	followupOutput := PlannerOutput{Workers: []PlannerWorker{{TaskID: backend.ID, Title: "Backend worker", Prompt: "Update backend only", WorkerKind: "backend", Ownership: []string{"internal/service"}, Isolation: "worktree", Required: true}}, ReviewerPrompt: "Review backend update", MergerPrompt: "Integrate backend update"}
 	if err := svc.ApplyPlannerOutput(context.Background(), planner.ID, followupOutput); err != nil {
@@ -1905,7 +1917,7 @@ func TestSwarmServiceOnChildCompletedIgnoresStaleMergerCompletion(t *testing.T) 
 	if reviewer == nil || merger == nil {
 		t.Fatal("reviewer/merger missing")
 	}
-	exec := &models.Execution{TaskID: merger.ID, Status: models.ExecRunning, PromptSent: merger.Prompt}
+	exec := &models.Execution{TaskID: merger.ID, Status: models.ExecRunning, PromptSent: requireFullSwarmTestTask(t, repo, merger.ID).Prompt}
 	if err := execRepo.Create(ctx, exec); err != nil {
 		t.Fatal(err)
 	}
@@ -2576,7 +2588,7 @@ func TestSwarmServiceRecomputeRecoversMissedReviewerCompletionCallback(t *testin
 
 	// Merger completion is durable before its callback; reconciliation must still
 	// publish the result and terminalize the parent without another merger run.
-	mergerExec := &models.Execution{TaskID: f.merger.ID, Status: models.ExecRunning, PromptSent: f.merger.Prompt}
+	mergerExec := &models.Execution{TaskID: f.merger.ID, Status: models.ExecRunning, PromptSent: requireFullSwarmTestTask(t, f.repo, f.merger.ID).Prompt}
 	require.NoError(t, f.execRepo.Create(f.ctx, mergerExec))
 	require.NoError(t, f.execRepo.Complete(f.ctx, mergerExec.ID, models.ExecCompleted, "recovered merged result", "", 0, 1))
 	require.NoError(t, f.repo.UpdateStatus(f.ctx, f.merger.ID, models.StatusCompleted))

@@ -19,6 +19,8 @@ const taskSelectColumns = `id, project_id, title, category, priority, status, pr
 
 const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, merge_target_branch, merge_status`
 
+const swarmChildTaskSelectColumns = `id, project_id, title, category, priority, status, agent_id, agent_definition_id, tag, display_order, parent_task_id, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
+
 const scheduleCalendarTaskSelectColumns = `t.id, t.project_id, t.title, t.category, t.status`
 
 const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
@@ -1099,13 +1101,16 @@ func (r *TaskRepo) DeleteBlockedChildrenByParent(ctx context.Context, parentTask
 	return nil
 }
 
+// ListSwarmChildren returns the child metadata needed for swarm orchestration and
+// rendering. It intentionally omits Prompt and ChainConfig so repeated status
+// checks do not materialize full child instructions or chaining payloads.
 func (r *TaskRepo) ListSwarmChildren(ctx context.Context, parentTaskID string) ([]models.Task, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+taskSelectColumns+`
-			 FROM tasks WHERE parent_task_id = ? AND swarm_role IN ('planner','worker','reviewer','merger','integrator')
-			 ORDER BY swarm_sequence ASC,
-			 CASE swarm_role WHEN 'planner' THEN 0 WHEN 'worker' THEN 1 WHEN 'reviewer' THEN 2 WHEN 'merger' THEN 3 WHEN 'integrator' THEN 3 ELSE 9 END,
-			 created_at ASC`, parentTaskID)
+		`SELECT `+swarmChildTaskSelectColumns+`
+				 FROM tasks WHERE parent_task_id = ? AND swarm_role IN ('planner','worker','reviewer','merger','integrator')
+				 ORDER BY swarm_sequence ASC,
+				 CASE swarm_role WHEN 'planner' THEN 0 WHEN 'worker' THEN 1 WHEN 'reviewer' THEN 2 WHEN 'merger' THEN 3 WHEN 'integrator' THEN 3 ELSE 9 END,
+				 created_at ASC`, parentTaskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing swarm children: %w", err)
 	}
@@ -1113,9 +1118,8 @@ func (r *TaskRepo) ListSwarmChildren(ctx context.Context, parentTaskID string) (
 
 	var tasks []models.Task
 	for rows.Next() {
-		var t models.Task
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+		t, err := scanSwarmChildTask(rows.Scan)
+		if err != nil {
 			return nil, fmt.Errorf("scanning swarm child: %w", err)
 		}
 		tasks = append(tasks, t)
@@ -1123,17 +1127,37 @@ func (r *TaskRepo) ListSwarmChildren(ctx context.Context, parentTaskID string) (
 	return tasks, rows.Err()
 }
 
+// FindSwarmChildByRole returns the child metadata needed for swarm role
+// orchestration. Use GetByID when callers need full Prompt or ChainConfig data.
 func (r *TaskRepo) FindSwarmChildByRole(ctx context.Context, parentTaskID string, role models.SwarmRole) (*models.Task, error) {
 	if role == models.SwarmRoleMerger {
-		return r.getOne(ctx,
-			`SELECT `+taskSelectColumns+`
-			 FROM tasks WHERE parent_task_id = ? AND swarm_role IN ('merger','integrator')
-			 ORDER BY swarm_sequence ASC, CASE swarm_role WHEN 'merger' THEN 0 WHEN 'integrator' THEN 1 ELSE 9 END, created_at ASC LIMIT 1`, parentTaskID)
+		return r.getOneSwarmChild(ctx,
+			`SELECT `+swarmChildTaskSelectColumns+`
+				 FROM tasks WHERE parent_task_id = ? AND swarm_role IN ('merger','integrator')
+				 ORDER BY swarm_sequence ASC, CASE swarm_role WHEN 'merger' THEN 0 WHEN 'integrator' THEN 1 ELSE 9 END, created_at ASC LIMIT 1`, parentTaskID)
 	}
-	return r.getOne(ctx,
-		`SELECT `+taskSelectColumns+`
-			 FROM tasks WHERE parent_task_id = ? AND swarm_role = ?
-			 ORDER BY swarm_sequence ASC, created_at ASC LIMIT 1`, parentTaskID, role)
+	return r.getOneSwarmChild(ctx,
+		`SELECT `+swarmChildTaskSelectColumns+`
+				 FROM tasks WHERE parent_task_id = ? AND swarm_role = ?
+				 ORDER BY swarm_sequence ASC, created_at ASC LIMIT 1`, parentTaskID, role)
+}
+
+func (r *TaskRepo) getOneSwarmChild(ctx context.Context, query string, args ...any) (*models.Task, error) {
+	t, err := scanSwarmChildTask(r.db.QueryRowContext(ctx, query, args...).Scan)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting swarm child: %w", err)
+	}
+	return &t, nil
+}
+
+func scanSwarmChildTask(scan func(dest ...any) error) (models.Task, error) {
+	var t models.Task
+	err := scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
+		&t.Priority, &t.Status, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt)
+	return t, err
 }
 
 func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models.SwarmRole, status, config string, sequence int) error {

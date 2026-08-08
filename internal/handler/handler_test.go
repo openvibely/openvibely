@@ -3876,7 +3876,10 @@ func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testi
 	require.NotNil(t, planner)
 	assert.Equal(t, models.StatusPending, planner.Status)
 	assert.Equal(t, "coordinating", planner.SwarmStatus)
-	assert.Contains(t, planner.Prompt, "Update only the API worker")
+	fullPlanner, err := h.taskRepo.GetByID(ctx, planner.ID)
+	require.NoError(t, err)
+	require.NotNil(t, fullPlanner)
+	assert.Contains(t, fullPlanner.Prompt, "Update only the API worker")
 }
 
 func TestHandler_SwarmFollowupChildCreatesTaskThreadExecution(t *testing.T) {
@@ -4408,13 +4411,16 @@ func TestHandler_UpdateTask_NotifiesPendingSwarmChildCancellation(t *testing.T) 
 	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
 	require.NoError(t, err)
 	require.NotNil(t, worker)
+	fullWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
+	require.NoError(t, err)
+	require.NotNil(t, fullWorker)
 	require.NoError(t, h.taskRepo.UpdateStatus(ctx, worker.ID, models.StatusPending))
 	require.NoError(t, h.taskRepo.UpdateCategory(ctx, worker.ID, models.CategoryActive))
 
 	form := url.Values{}
 	form.Set("title", "Edited pending worker")
 	form.Set("category", string(models.CategoryCompleted))
-	form.Set("prompt", worker.Prompt)
+	form.Set("prompt", fullWorker.Prompt)
 	form.Set("priority", "3")
 	rec := htmxPut(e, "/tasks/"+worker.ID, form)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
