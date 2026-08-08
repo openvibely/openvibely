@@ -913,6 +913,23 @@ func TestAutomationBuilderRendersDeleteControls(t *testing.T) {
 			t.Errorf("interactive builder must render delete control %q", want)
 		}
 	}
+	if strings.Contains(body, `>Delete node<`) || strings.Contains(body, `>Delete connection<`) {
+		t.Error("Details view node/edge delete controls must be icon-only trash-can buttons, not text labels")
+	}
+	if !strings.Contains(body, `name="remove_node" value="first" aria-label="Delete node First"`) {
+		t.Error("Details view is missing an icon-only delete-node button with an accessible label")
+	}
+	if !strings.Contains(body, `name="remove_edge" value="first_second" aria-label="Delete connection First to Second"`) {
+		t.Error("Details view is missing an icon-only delete-connection button with an accessible label")
+	}
+	deleteNodeButtonStart := strings.Index(body, `name="remove_node" value="first"`)
+	deleteEdgeButtonStart := strings.Index(body, `name="remove_edge" value="first_second"`)
+	if deleteNodeButtonStart < 0 || !strings.Contains(body[deleteNodeButtonStart:deleteNodeButtonStart+400], `<svg`) {
+		t.Error("Details view delete-node button must render a trash-can SVG icon")
+	}
+	if deleteEdgeButtonStart < 0 || !strings.Contains(body[deleteEdgeButtonStart:deleteEdgeButtonStart+400], `<svg`) {
+		t.Error("Details view delete-connection button must render a trash-can SVG icon")
+	}
 }
 
 func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
