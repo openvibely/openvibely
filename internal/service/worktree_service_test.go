@@ -3121,6 +3121,105 @@ func TestCleanupMergedWorktrees(t *testing.T) {
 	}
 }
 
+func TestCleanupMergedWorktrees_EmptyMergeTargetSkipsBranchDeletionWithNonTerminalDescendant(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	mainBranch := GetDefaultBranch(repoDir)
+
+	project := &models.Project{
+		Name:     "Cleanup Descendant Project",
+		RepoPath: repoDir,
+	}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, "worktree_cleanup", "after_merge"); err != nil {
+		t.Fatal(err)
+	}
+
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	parent := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Merged Parent With Active Child",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+	}
+	if err := taskRepo.Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+
+	wtPath, wtBranch, err := ws.SetupWorktree(ctx, parent, repoDir)
+	if err != nil {
+		t.Fatalf("SetupWorktree failed: %v", err)
+	}
+	if err := taskRepo.UpdateAutoMerge(ctx, parent.ID, false, ""); err != nil {
+		t.Fatalf("clear merge target branch fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "descendant_guard.txt"), []byte("descendant guard\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "descendant guard worktree commit"); err != nil {
+		t.Fatalf("CommitWorktreeChanges failed: %v", err)
+	}
+
+	cmd := exec.Command("git", "checkout", mainBranch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("checkout main failed: %v\n%s", err, out)
+	}
+	cmd = exec.Command("git", "merge", "--no-ff", "-m", "manual merge descendant guard", wtBranch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("manual merge failed: %v\n%s", err, out)
+	}
+
+	if err := taskRepo.UpdateStatus(ctx, parent.ID, models.StatusCompleted); err != nil {
+		t.Fatal(err)
+	}
+	child := &models.Task{
+		ProjectID:    project.ID,
+		Title:        "Active Child Blocks Branch Deletion",
+		Category:     models.CategoryActive,
+		Status:       models.StatusPending,
+		ParentTaskID: &parent.ID,
+		Prompt:       "child remains active",
+	}
+	if err := taskRepo.Create(ctx, child); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ws.CleanupMergedWorktrees(ctx); err != nil {
+		t.Fatalf("CleanupMergedWorktrees failed: %v", err)
+	}
+
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Fatal("worktree directory should be removed")
+	}
+	cmd = exec.Command("git", "rev-parse", "--verify", wtBranch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("branch should remain because a descendant is non-terminal: %v\n%s", err, out)
+	}
+	dbTask, err := taskRepo.GetByID(ctx, parent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dbTask.MergeTargetBranch != "" {
+		t.Fatalf("expected empty merge_target_branch fixture, got %q", dbTask.MergeTargetBranch)
+	}
+	if dbTask.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("expected merge_status=merged, got %q", dbTask.MergeStatus)
+	}
+	if dbTask.WorktreePath != "" || dbTask.WorktreeBranch != "" {
+		t.Fatalf("expected worktree metadata cleared, got path=%q branch=%q", dbTask.WorktreePath, dbTask.WorktreeBranch)
+	}
+}
+
 func TestCleanupMergedWorktrees_KeepPolicy(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

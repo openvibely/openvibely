@@ -17,6 +17,8 @@ var ErrDuplicateTask = errors.New("task with this name already exists in this pr
 
 const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
 
+const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, merge_target_branch, merge_status`
+
 const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 			EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 			t.created_at, t.updated_at, t.completed_at`
@@ -1748,9 +1750,10 @@ func (r *TaskRepo) ClearWorktreeInfo(ctx context.Context, id string) error {
 	return nil
 }
 
-// ListWithWorktrees returns all tasks that have active worktrees.
+// ListWithWorktrees returns all tasks that have active worktrees with only
+// the columns needed by periodic cleanup decisions.
 func (r *TaskRepo) ListWithWorktrees(ctx context.Context) ([]models.Task, error) {
-	query := `SELECT ` + taskSelectColumns + `
+	query := `SELECT ` + worktreeCleanupTaskSelectColumns + `
 		 FROM tasks WHERE worktree_path != '' AND worktree_branch != ''
 		 ORDER BY created_at ASC`
 
@@ -1763,9 +1766,8 @@ func (r *TaskRepo) ListWithWorktrees(ctx context.Context) ([]models.Task, error)
 	var tasks []models.Task
 	for rows.Next() {
 		var t models.Task
-		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
-			return nil, fmt.Errorf("scanning task: %w", err)
+		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Status, &t.WorktreePath, &t.WorktreeBranch, &t.MergeTargetBranch, &t.MergeStatus); err != nil {
+			return nil, fmt.Errorf("scanning task worktree cleanup row: %w", err)
 		}
 		tasks = append(tasks, t)
 	}
