@@ -1578,12 +1578,7 @@ func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t 
 	issue := GitHubIssue{Number: 288, URL: "https://github.com/example/runtime/issues/288", Title: "Stale assigned issue", State: "open", Assignees: []string{"dubee"}}
 	resourceID := githubIssueResourceID(repoRef, issue.Number)
 
-	_, err := fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_artifact_mailbox_owners
-		(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
-		VALUES (?, ?, 'github_issue', ?, 'bug_finder', 'issue', 'assignment', 'dev_inbox')`,
-		fixture.project.ID, fixture.definition.Automation.ID, resourceID)
-	require.NoError(t, err)
-	_, err = fixture.repo.DB().ExecContext(ctx, `PRAGMA foreign_keys = OFF`)
+	_, err := fixture.repo.DB().ExecContext(ctx, `PRAGMA foreign_keys = OFF`)
 	require.NoError(t, err)
 	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_work_items
 		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status)
@@ -1680,6 +1675,9 @@ func TestAutomationRuntimeGitHubIssueTaskCreationAllowsLaterInboxInvocation(t *t
 	recorded, err := recordGitHubIssueCreated(producerCtx, opts, repoRef, &issue, "cross-invocation-issue")
 	require.NoError(t, err)
 	require.Equal(t, 1, recorded)
+	var githubMailboxOwners int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners WHERE artifact_type = 'github_issue'`).Scan(&githubMailboxOwners))
+	require.Zero(t, githubMailboxOwners, "GitHub issue discovery no longer relies on durable issue-key mailbox owner mappings")
 
 	inboxCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "dev_inbox", "inbox-invocation-b")
 	filtered, err := filterGitHubAssignedIssuesForAutomationInbox(inboxCtx, opts, repoRef, []GitHubIssue{issue})

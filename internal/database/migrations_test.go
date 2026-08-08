@@ -839,8 +839,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 144 {
-		t.Fatalf("max goose version = %d, want 144", maxVersion)
+	if maxVersion != 145 {
+		t.Fatalf("max goose version = %d, want 145", maxVersion)
 	}
 }
 
@@ -991,8 +991,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 144 {
-		t.Fatalf("max goose version = %d, want 144", maxVersion)
+	if maxVersion != 145 {
+		t.Fatalf("max goose version = %d, want 145", maxVersion)
 	}
 }
 
@@ -1478,8 +1478,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 144 {
-		t.Fatalf("max goose version = %d, want 144", maxVersion)
+	if maxVersion != 145 {
+		t.Fatalf("max goose version = %d, want 145", maxVersion)
 	}
 }
 
@@ -1830,8 +1830,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 144 {
-		t.Fatalf("max goose version = %d, want 144", maxVersion)
+	if maxVersion != 145 {
+		t.Fatalf("max goose version = %d, want 145", maxVersion)
 	}
 }
 
@@ -2357,6 +2357,48 @@ func TestMigration134ArtifactMailboxOwnershipSurvivesGraphReplacementWithoutBack
 	}
 	if count != 0 {
 		t.Fatalf("logical mailbox ownership must cascade when the stable Automation is deleted: got %d rows", count)
+	}
+}
+
+func TestMigration145RetiresGitHubIssueMailboxOwnershipOnly(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "retire-github-mailbox-ownership-145.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 144); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-145', 'Migration 145', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state, published_version_id)
+			VALUES ('automation-145', 'project-145', 'retire-github-owner-145', 'Retire GitHub owner', 'active', 'version-145');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-145', 'project-145', 'automation-145', 1, 'published', 'manual', 'custom');
+		INSERT INTO automation_artifact_mailbox_owners
+			(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+			VALUES
+			('project-145', 'automation-145', 'alert', 'alert-145', 'producer', 'notification', 'approval', 'inbox'),
+			('project-145', 'automation-145', 'github_issue', 'github:example/runtime:issue:145', 'producer', 'issue', 'assignment', 'dev_inbox');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 145); err != nil {
+		t.Fatal(err)
+	}
+	var alertOwners, githubOwners int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners WHERE artifact_type = 'alert'`).Scan(&alertOwners); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners WHERE artifact_type = 'github_issue'`).Scan(&githubOwners); err != nil {
+		t.Fatal(err)
+	}
+	if alertOwners != 1 || githubOwners != 0 {
+		t.Fatalf("migration 145 must preserve alert owners and delete GitHub issue owners: alerts=%d github=%d", alertOwners, githubOwners)
 	}
 }
 

@@ -1514,8 +1514,6 @@ func recordAutomationArtifactMailboxOwners(ctx context.Context, exec SQLExecutor
 	switch strings.TrimSpace(in.ActivityType) {
 	case "create_notification":
 		artifactType, actionRole, gateRole, mailboxRole = "alert", "create_notification", "native_approval", "native_inbox"
-	case "create_github_issue":
-		artifactType, actionRole, gateRole, mailboxRole = "github_issue", "create_github_issue", "github_assignment", "github_inbox"
 	default:
 		return nil
 	}
@@ -2372,40 +2370,6 @@ func (r *AutomationRepo) AutomationExternalState(ctx context.Context, projectID,
 		state.Stale = updated.Before(staleBefore.UTC())
 	}
 	return state, nil
-}
-
-func (r *AutomationRepo) GitHubIssueOwnedByInbox(ctx context.Context, projectID string, binding models.AutomationBinding, resourceID string) (bool, error) {
-	var owned bool
-	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(
-		SELECT 1
-		FROM automation_artifact_mailbox_owners owner
-		JOIN automation_nodes inbox ON inbox.project_id = owner.project_id
-			AND inbox.automation_id = owner.automation_id AND inbox.version_id = ?
-			AND inbox.id = ? AND inbox.node_key = owner.mailbox_node_key AND inbox.role = 'github_inbox'
-		JOIN automation_edges inbox_edge ON inbox_edge.target_node_id = inbox.id
-			AND inbox_edge.project_id = inbox.project_id AND inbox_edge.automation_id = inbox.automation_id
-			AND inbox_edge.version_id = inbox.version_id
-		JOIN automation_nodes assignment ON assignment.id = inbox_edge.source_node_id
-			AND assignment.project_id = inbox.project_id AND assignment.automation_id = inbox.automation_id
-			AND assignment.version_id = inbox.version_id AND assignment.node_key = owner.gate_node_key
-			AND assignment.role = 'github_assignment'
-		JOIN automation_edges assignment_edge ON assignment_edge.target_node_id = assignment.id
-			AND assignment_edge.project_id = assignment.project_id AND assignment_edge.automation_id = assignment.automation_id
-			AND assignment_edge.version_id = assignment.version_id
-		JOIN automation_nodes action ON action.id = assignment_edge.source_node_id
-			AND action.project_id = assignment.project_id AND action.automation_id = assignment.automation_id
-			AND action.version_id = assignment.version_id AND action.node_key = owner.action_node_key
-			AND action.role = 'create_github_issue'
-		JOIN automation_edges producer_edge ON producer_edge.target_node_id = action.id
-			AND producer_edge.project_id = action.project_id AND producer_edge.automation_id = action.automation_id
-			AND producer_edge.version_id = action.version_id
-		JOIN automation_nodes producer ON producer.id = producer_edge.source_node_id
-			AND producer.project_id = action.project_id AND producer.automation_id = action.automation_id
-			AND producer.version_id = action.version_id AND producer.node_key = owner.producer_node_key
-		WHERE owner.project_id = ? AND owner.automation_id = ?
-			AND owner.artifact_type = 'github_issue' AND owner.artifact_id = ?
-	)`, binding.VersionID, binding.NodeID, projectID, binding.AutomationID, resourceID).Scan(&owned)
-	return owned, err
 }
 
 func (r *AutomationRepo) BindingsForActivityResource(ctx context.Context, projectID, automationID, resourceType, resourceID string) (models.AutomationContext, error) {
