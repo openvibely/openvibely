@@ -889,6 +889,7 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 			<input type="hidden" name="project_id" value={ currentProjectID }/>
 			<input type="hidden" name="builder_source" value={ page.Source }/>
 			<input type="hidden" name="save_changes" value="true"/>
+			<input type="hidden" name="automation_name" value={ page.Result.Candidate.Name } data-automation-details-name/>
 			<input type="hidden" name="candidate_json" value={ automationDraftCandidateJSON(page.Result.Candidate) }/>
 			<div class="grid grid-cols-1 gap-4 xl:grid-cols-2" data-automation-node-details>
 				for _, node := range page.Result.Candidate.Nodes {
@@ -1666,7 +1667,9 @@ yamlViewport.scrollTop = 0;
 						if (yamlGutter) yamlGutter.addEventListener('wheel', scrollYAMLFromWheel, {passive: false});
 						window.addEventListener('resize', queueYAMLLineLayout);					function syncCandidate(writeYAML) {
 						var automationName = builder.querySelector('[data-automation-name]');
-						if (automationName) candidate.name = automationName.value;
+						var automationNameValue = automationName ? automationName.value : '';
+						if (automationName) candidate.name = automationNameValue;
+						builder.querySelectorAll('[data-automation-details-name]').forEach(function(input) { input.value = automationNameValue; });
 						builder.querySelectorAll('[data-candidate-json]').forEach(function(input) { input.value = JSON.stringify(candidate); });
 						if (writeYAML !== false) {
 							var serializedYAML = visualCandidateYAML();
@@ -1921,9 +1924,8 @@ yamlViewport.scrollTop = 0;
 					builder.addEventListener('htmx:beforeCleanupElement', function(event) {
 						if (event.target === builder) clearActiveConnection();
 					});
-					var automationName = builder.querySelector('[data-automation-name]');
-					if (automationName) automationName.addEventListener('input', syncCandidate);
-					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
+						var automationName = builder.querySelector('[data-automation-name]');
+						if (automationName) automationName.addEventListener('input', syncCandidate);					builder.addEventListener('input', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
 					builder.addEventListener('change', function(event) { if (event.target !== yamlEditor && !event.target.closest('[data-automation-node-dialog]')) syncCandidate(); });
 					builder.addEventListener('submit', function() {
 						if (yamlEditor && automationYAMLValue() !== visualCandidateYAML()) {
@@ -1976,6 +1978,7 @@ yamlViewport.scrollTop = 0;
 							button.addEventListener('click', function(event) {
 								if (!detailsPanel || detailsPanel.hidden || !detailsForm) return;
 								event.preventDefault();
+								syncCandidate();
 								detailsForm.requestSubmit();
 							});
 						});

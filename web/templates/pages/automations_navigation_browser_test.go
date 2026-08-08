@@ -953,6 +953,133 @@ func TestAutomationBuilderRendersDeleteControls(t *testing.T) {
 	}
 }
 
+func TestAutomationBuilderDetailsHeaderSaveSubmitsBreadcrumbNameInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion:  1,
+		Name:           "Original Details Name",
+		AutomationType: "custom",
+		AdapterKey:     "custom",
+		Nodes: []models.AutomationDraftNode{{
+			Key:      "first",
+			Name:     "First",
+			Type:     models.AutomationNodeAgentTask,
+			Role:     "task",
+			Config:   map[string]any{"prompt": "Details prompt", "priority": 2},
+			Position: &models.AutomationDraftPoint{X: 0, Y: 0},
+		}},
+	}
+	page := models.AutomationBuilderPage{
+		Source: "blank",
+		Result: models.AutomationDraftResult{Candidate: candidate},
+		YAML:   "schema_version: 1\nname: Original Details Name\nautomation_type: custom\nadapter_key: custom\nnodes:\n  - key: first\n    name: First\n    type: agent_task\n    role: task\n",
+	}
+	var out bytes.Buffer
+	if err := AutomationBuilderContent(page, "project-details-save").Render(context.Background(), &out); err != nil {
+		t.Fatalf("render Automation builder Details save fixture: %v", err)
+	}
+
+	const editedName = "Edited Details Breadcrumb Name"
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method: 'POST'}); }
+  function fail(message) { report('fail', message); }
+  try {
+    var name = document.querySelector('[data-automation-name]');
+    var detailsButton = document.querySelector('[data-automation-view-details]');
+    var detailsPanel = document.querySelector('[data-automation-details-panel]');
+    var save = document.querySelector('[data-automation-builder-save]');
+    if (!name || !detailsButton || !detailsPanel || !save) return fail('missing Details header-save fixture elements');
+    name.value = '` + editedName + `';
+    name.dispatchEvent(new Event('input', {bubbles: true}));
+    detailsButton.click();
+    if (detailsPanel.hidden || window.getComputedStyle(detailsPanel).display === 'none') return fail('Details panel was not selected before header save');
+    save.click();
+  } catch (error) {
+    fail(String(error && error.stack || error));
+  }
+});
+</script>`
+
+	browserResult := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}svg[data-automation-canvas]{display:block;width:100%%;height:400px}</style></head><body>%s%s</body></html>`, out.String(), runner)
+		case "/automations/builder":
+			if r.Method != http.MethodPost {
+				http.NotFound(w, r)
+				return
+			}
+			if err := r.ParseForm(); err != nil {
+				browserResult <- "fail:" + err.Error()
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if got := r.FormValue("automation_name"); got != editedName {
+				browserResult <- "fail:Details header save submitted automation_name=" + got
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			if r.FormValue("save_changes") != "true" {
+				browserResult <- "fail:Details header save did not submit save_changes=true"
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			if r.FormValue("candidate_json") == "" {
+				browserResult <- "fail:Details header save did not submit candidate_json"
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			browserResult <- "pass:"
+			w.WriteHeader(http.StatusNoContent)
+		case "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "automation-details-header-save.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new",
+		"--no-sandbox",
+		"--disable-gpu",
+		"--disable-software-rasterizer",
+		"--disable-dev-shm-usage",
+		"--disable-background-networking",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--window-size=1000,700",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-details-header-save-profile"),
+		server.URL,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	defer stopBrowserProcess(cmd)
+
+	select {
+	case outcome := <-browserResult:
+		if outcome != "pass:" {
+			stderr, _ := os.ReadFile(stderrPath)
+			t.Fatalf("Automation Details header-save regression failed: %s\n%s", outcome, strings.TrimSpace(string(stderr)))
+		}
+	case <-time.After(20 * time.Second):
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("timed out waiting for Automation Details header-save regression\n%s", strings.TrimSpace(string(stderr)))
+	}
+}
+
 func TestAutomationGraphAndNavigationInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	candidate := models.AutomationDraftCandidate{
