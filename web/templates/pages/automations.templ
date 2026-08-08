@@ -1398,12 +1398,13 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 								rail.style.backgroundColor = 'oklch(var(--bc) / 0.3)';
 								rail.style.width = '1px';
 								var start = Number(rail.dataset.yamlRailStart), end = Number(rail.dataset.yamlRailEnd), column = Number(rail.dataset.yamlRailColumn);
-								if (focused && currentLine >= start && currentLine <= end && (!active || column > Number(active.dataset.yamlRailColumn))) active = rail;
+								var withinGroup = currentLine >= start && currentLine <= end;
+								var onGroupHeader = currentLine === start - 1;
+								if (focused && (withinGroup || onGroupHeader) && (!active || column > Number(active.dataset.yamlRailColumn))) active = rail;
 							});
 							if (active) {
 								var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
 								active.style.backgroundColor = isDark ? 'rgba(212, 212, 212, 0.8)' : 'rgba(64, 64, 64, 0.6)';
-								active.style.width = '2px';
 							}
 						}
 						function layoutYAMLIndentationRails() {
@@ -1517,14 +1518,28 @@ yamlViewport.scrollTop = 0;
 					if (yamlEditor) {
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
 							yamlEditor.addEventListener('keydown', function(event) {
-								if (event.key !== 'Tab' || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) return;
+								if (event.key !== 'Tab' || event.altKey || event.metaKey || event.ctrlKey) return;
 								event.preventDefault();
+								var value = yamlEditor.value;
 								var start = yamlEditor.selectionStart, end = yamlEditor.selectionEnd;
-								yamlPendingSelectionStart = start;
-								yamlPendingSelectionEnd = end;
-								yamlPendingValue = yamlEditor.value;
-								yamlPendingInputType = 'insertText';
-								yamlEditor.setRangeText('  ', start, end, 'end');
+								yamlPendingValue = value;
+								if (event.shiftKey) {
+									var lineStart = value.lastIndexOf('\n', start - 1) + 1;
+									var removable = 0;
+									while (removable < 2 && value.charAt(lineStart + removable) === ' ') removable++;
+									if (removable === 0) return;
+									yamlPendingSelectionStart = start;
+									yamlPendingSelectionEnd = end;
+									yamlPendingInputType = 'deleteContentBackward';
+									yamlEditor.setRangeText('', lineStart, lineStart + removable, 'preserve');
+									yamlEditor.selectionStart = Math.max(lineStart, start - removable);
+									yamlEditor.selectionEnd = Math.max(lineStart, end - removable);
+								} else {
+									yamlPendingSelectionStart = start;
+									yamlPendingSelectionEnd = end;
+									yamlPendingInputType = 'insertText';
+									yamlEditor.setRangeText('  ', start, end, 'end');
+								}
 								yamlEditor.dispatchEvent(new Event('input', {bubbles: true}));
 							});
 							yamlEditor.addEventListener('beforeinput', function(event) {
