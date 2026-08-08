@@ -352,6 +352,128 @@ func TestScheduleTaskRuntimeToolExecutesTypedRequest(t *testing.T) {
 	}
 }
 
+func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("schedule omitted task reference", func(t *testing.T) {
+		h, _, _, _ := setupTestHandlerWithDB(t)
+		project := createProject(t, h, "Current Schedule Omitted Project")
+		task := createTask(t, h, project.ID, "Schedule current task omitted")
+		handlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+		out, err := handlers["schedule_task"](ctx, json.RawMessage(`{"time":"09:30"}`))
+		require.NoError(t, err)
+		require.Contains(t, out, "Scheduled task")
+
+		schedules, err := h.scheduleRepo.ListByTask(ctx, task.ID)
+		require.NoError(t, err)
+		require.Len(t, schedules, 1)
+		require.Equal(t, task.ID, schedules[0].TaskID)
+	})
+
+	t.Run("schedule explicit current task_id", func(t *testing.T) {
+		h, _, _, _ := setupTestHandlerWithDB(t)
+		project := createProject(t, h, "Current Schedule Explicit Project")
+		task := createTask(t, h, project.ID, "Schedule current task explicit")
+		handlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+		out, err := handlers["schedule_task"](ctx, json.RawMessage(`{"task_id":"current","time":"09:30"}`))
+		require.NoError(t, err)
+		require.Contains(t, out, "Scheduled task")
+
+		schedules, err := h.scheduleRepo.ListByTask(ctx, task.ID)
+		require.NoError(t, err)
+		require.Len(t, schedules, 1)
+		require.Equal(t, task.ID, schedules[0].TaskID)
+	})
+
+	t.Run("modify explicit current task_id without schedule_id", func(t *testing.T) {
+		h, _, _, _ := setupTestHandlerWithDB(t)
+		project := createProject(t, h, "Current Modify Schedule Project")
+		task := createTask(t, h, project.ID, "Modify current task schedule")
+		schedule := createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
+		handlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+		out, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"task_id":"current","enabled":false}`))
+		require.NoError(t, err)
+		require.Contains(t, out, "Updated schedule")
+
+		modified, err := h.scheduleRepo.GetByID(ctx, schedule.ID)
+		require.NoError(t, err)
+		require.False(t, modified.Enabled)
+	})
+
+	t.Run("modify omitted task reference without schedule_id", func(t *testing.T) {
+		h, _, _, _ := setupTestHandlerWithDB(t)
+		project := createProject(t, h, "Current Modify Schedule Omitted Project")
+		task := createTask(t, h, project.ID, "Modify current task schedule omitted")
+		schedule := createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
+		handlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+		out, err := handlers["modify_schedule"](ctx, json.RawMessage(`{"enabled":false}`))
+		require.NoError(t, err)
+		require.Contains(t, out, "Updated schedule")
+
+		modified, err := h.scheduleRepo.GetByID(ctx, schedule.ID)
+		require.NoError(t, err)
+		require.False(t, modified.Enabled)
+	})
+
+	t.Run("delete explicit current task_id without schedule_id", func(t *testing.T) {
+		h, _, _, _ := setupTestHandlerWithDB(t)
+		project := createProject(t, h, "Current Delete Schedule Project")
+		task := createTask(t, h, project.ID, "Delete current task schedule")
+		createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
+		handlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+		out, err := handlers["delete_schedule"](ctx, json.RawMessage(`{"task_id":"current"}`))
+		require.NoError(t, err)
+		require.Contains(t, out, "Deleted schedule")
+
+		remaining, err := h.scheduleRepo.ListByTask(ctx, task.ID)
+		require.NoError(t, err)
+		require.Empty(t, remaining)
+	})
+
+	t.Run("delete omitted task reference without schedule_id", func(t *testing.T) {
+		h, _, _, _ := setupTestHandlerWithDB(t)
+		project := createProject(t, h, "Current Delete Schedule Omitted Project")
+		task := createTask(t, h, project.ID, "Delete current task schedule omitted")
+		createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
+		handlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+		out, err := handlers["delete_schedule"](ctx, json.RawMessage(`{}`))
+		require.NoError(t, err)
+		require.Contains(t, out, "Deleted schedule")
+
+		remaining, err := h.scheduleRepo.ListByTask(ctx, task.ID)
+		require.NoError(t, err)
+		require.Empty(t, remaining)
+	})
+
+	t.Run("current outside task follow-up is rejected", func(t *testing.T) {
+		h, _, _, _ := setupTestHandlerWithDB(t)
+		project := createProject(t, h, "Current Schedule Outside Project")
+		task := createTask(t, h, project.ID, "Outside current task schedule")
+		createSchedule(t, h, task.ID, time.Now().UTC().Add(time.Hour))
+		handlers := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+		for name, input := range map[string]json.RawMessage{
+			"schedule_task":   json.RawMessage(`{"task_id":"current","time":"09:30"}`),
+			"modify_schedule": json.RawMessage(`{"task_id":"current","enabled":false}`),
+			"delete_schedule": json.RawMessage(`{"task_id":"current"}`),
+		} {
+			out, err := handlers[name](ctx, input)
+			require.ErrorContains(t, err, "only valid in a persisted task thread", "tool=%s out=%q", name, out)
+		}
+
+		schedules, err := h.scheduleRepo.ListByTask(ctx, task.ID)
+		require.NoError(t, err)
+		require.Len(t, schedules, 1)
+		require.True(t, schedules[0].Enabled)
+	})
+}
+
 func TestChatActionSummaryCollector_AppendsCreatedAndEdited(t *testing.T) {
 	collector := newChatActionSummaryCollector()
 	collector.addCreated("\n---\nCreated 1 task(s):\n- \"Fix login\" (active) [TASK_ID:abc123]")

@@ -356,6 +356,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
+			if err := h.normalizeScheduleToolTaskReference(ctx, params, &req.TaskID, &req.Title, true); err != nil {
+				return "", err
+			}
 			return strings.TrimSpace(h.executeChatScheduleRequests(ctx, params.ProjectID, []service.ScheduleTaskRequest{req})), nil
 		},
 		"delete_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
@@ -363,11 +366,17 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
+			if err := h.normalizeScheduleToolTaskReference(ctx, params, &req.TaskID, &req.Title, strings.TrimSpace(req.ScheduleID) == ""); err != nil {
+				return "", err
+			}
 			return strings.TrimSpace(h.executeChatDeleteScheduleRequests(ctx, params.ProjectID, []service.DeleteScheduleRequest{req})), nil
 		},
 		"modify_schedule": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ModifyScheduleRequest
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := h.normalizeScheduleToolTaskReference(ctx, params, &req.TaskID, &req.Title, strings.TrimSpace(req.ScheduleID) == ""); err != nil {
 				return "", err
 			}
 			return strings.TrimSpace(h.executeChatModifyScheduleRequests(ctx, params.ProjectID, []service.ModifyScheduleRequest{req})), nil
@@ -900,6 +909,27 @@ type taskGoalToolInput struct {
 	Message     string `json:"message"`
 	Origin      string `json:"origin"`
 	OriginAgent string `json:"origin_agent"`
+}
+
+func (h *Handler) normalizeScheduleToolTaskReference(ctx context.Context, params streamingResponseParams, taskID, title *string, defaultOmittedToCurrent bool) error {
+	if taskID == nil || title == nil {
+		return nil
+	}
+	trimmedTaskID := strings.TrimSpace(*taskID)
+	trimmedTitle := strings.TrimSpace(*title)
+	if trimmedTaskID != "current" {
+		if trimmedTaskID != "" || trimmedTitle != "" || !defaultOmittedToCurrent || !params.IsTaskFollowup || params.TaskID == "" {
+			return nil
+		}
+		trimmedTaskID = "current"
+	}
+	resolvedTaskID, err := h.resolveTaskIDForTool(ctx, params, trimmedTaskID, trimmedTitle)
+	if err != nil {
+		return err
+	}
+	*taskID = resolvedTaskID
+	*title = ""
+	return nil
 }
 
 func (h *Handler) resolveTaskIDForTool(ctx context.Context, params streamingResponseParams, taskID, title string) (string, error) {
