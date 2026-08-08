@@ -1334,6 +1334,36 @@ yamlViewport.scrollTop = 0;
 							for (var i = 0; i < sourceLineIndex; i++) offset += sourceLines[i].length + 1;
 							return offset + col;
 						}
+						function yamlHighlightOffsetForPoint(clientX, clientY) {
+							if (!yamlHighlight) return null;
+							var range;
+							if (document.caretRangeFromPoint) {
+								range = document.caretRangeFromPoint(clientX, clientY);
+							} else if (document.caretPositionFromPoint) {
+								var pos = document.caretPositionFromPoint(clientX, clientY);
+								if (pos && pos.offsetNode) { range = document.createRange(); range.setStart(pos.offsetNode, pos.offset); }
+							}
+							if (!range || !yamlHighlight.contains(range.startContainer)) return null;
+							var lineEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+							while (lineEl && lineEl !== yamlHighlight && !lineEl.hasAttribute('data-automation-yaml-highlight-line')) lineEl = lineEl.parentElement;
+							if (!lineEl || lineEl === yamlHighlight) return null;
+							var walker = document.createTreeWalker(lineEl, NodeFilter.SHOW_TEXT, null);
+							var col = 0, node, found = false;
+							while ((node = walker.nextNode())) {
+								if (node === range.startContainer) { col += range.startOffset; found = true; break; }
+								col += node.textContent.length;
+							}
+							if (!found) return null;
+							var sourceLine = Number(lineEl.dataset.yamlLine) - 1;
+							var visibleRow = yamlVisibleLineMap.indexOf(sourceLine);
+							if (visibleRow < 0) return null;
+							var displayLines = yamlEditor ? yamlEditor.value.split('\n') : [];
+							if (visibleRow >= displayLines.length) return null;
+							col = Math.min(col, displayLines[visibleRow].length);
+							var offset = 0;
+							for (var i = 0; i < visibleRow; i++) offset += displayLines[i].length + 1;
+							return offset + col;
+						}
 						function syncYAMLHighlightScroll() {
 							if (!yamlEditor) return;
 							if (yamlHighlight) yamlHighlight.style.transform = 'translate(' + (-yamlEditor.scrollLeft) + 'px, ' + (-yamlEditor.scrollTop) + 'px)';
@@ -1361,6 +1391,12 @@ yamlViewport.scrollTop = 0;
 					}
 					if (yamlEditor) {
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
+							yamlEditor.addEventListener('mouseup', function(event) {
+								if (yamlEditor.selectionStart !== yamlEditor.selectionEnd) return;
+								var corrected = yamlHighlightOffsetForPoint(event.clientX, event.clientY);
+								if (corrected === null || corrected === yamlEditor.selectionStart) return;
+								yamlEditor.setSelectionRange(corrected, corrected);
+							});
 							yamlEditor.addEventListener('beforeinput', function(event) {
 								if (yamlRenderingValue) return;
 								yamlPendingSelectionStart = yamlEditor.selectionStart;

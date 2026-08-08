@@ -924,6 +924,24 @@ if (!fold.classList.contains('h-6') || !fold.classList.contains('w-6') || !fold.
     if (!wrappedSource || !wrappedNumber || wrappedSourceHeight <= 24 || Math.abs(wrappedSourceHeight - wrappedNumberHeight) > 1) fail('wrapped YAML source did not retain aligned line numbers: source=' + wrappedSourceHeight + ', number=' + wrappedNumberHeight);
     if (wrappedSource.dataset.yamlIndent !== '2' || window.getComputedStyle(wrappedSource).paddingLeft === '0px' || window.getComputedStyle(wrappedSource).textIndent !== '0px') fail('wrapped YAML values must retain their parent indentation as a hanging indent');
     if (!continuedSource || window.getComputedStyle(highlight).overflow !== 'visible' || highlight.clientHeight < continuedSource.offsetTop + continuedSource.offsetHeight) fail('wrapped YAML source was clipped before its following logical line');
+    if (document.caretRangeFromPoint) {
+	    var wrappedTextNode = wrappedSource.childNodes[wrappedSource.childNodes.length - 1];
+	    while (wrappedTextNode && wrappedTextNode.nodeType !== 3) wrappedTextNode = wrappedTextNode.previousSibling;
+	    if (wrappedTextNode) {
+		    var wrapProbeRange = document.createRange();
+		    var wrapProbeOffset = Math.min(20, wrappedTextNode.textContent.length);
+		    wrapProbeRange.setStart(wrappedTextNode, wrapProbeOffset);
+		    wrapProbeRange.setEnd(wrappedTextNode, wrapProbeOffset);
+		    var wrapProbeRect = wrapProbeRange.getBoundingClientRect();
+		    if (wrapProbeRect.left > 0 && wrapProbeRect.top > 0) {
+			    editor.setSelectionRange(0, 0);
+			    editor.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true, clientX: wrapProbeRect.left, clientY: wrapProbeRect.top + 2}));
+			    var expectedClickOffset = editor.value.indexOf('  message:') + '  message:'.length + wrapProbeOffset - '  message:'.length;
+			    var actualIndentColumn = editor.value.slice(0, editor.selectionStart).split('\n').pop().length;
+			    if (Math.abs(actualIndentColumn - wrapProbeOffset) > 3) fail('clicking a wrapped hanging-indented YAML line must position the caret at the visually clicked character, not offset by the indent width: got column ' + actualIndentColumn + ', expected near ' + wrapProbeOffset);
+		    }
+	    }
+    }
     editor.value = originalYAML;
     editor.dispatchEvent(new Event('input', {bubbles: true}));
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
