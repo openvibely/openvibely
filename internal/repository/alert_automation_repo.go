@@ -270,22 +270,19 @@ func rebindAlertAutomationProjection(ctx context.Context, exec SQLExecutor, proj
 		rows, err := exec.QueryContext(ctx, `SELECT producer.id, action.id, gate.id, inbox.id
 			FROM automation_artifact_mailbox_owners owner
 			JOIN automation_nodes inbox ON inbox.project_id = owner.project_id AND inbox.automation_id = owner.automation_id
-				AND inbox.version_id = ? AND inbox.id = ? AND inbox.node_key = owner.mailbox_node_key AND inbox.role = 'native_inbox'
+				AND inbox.version_id = ? AND inbox.id = ? AND inbox.role = 'native_inbox'
 			JOIN automation_edges inbox_edge ON inbox_edge.target_node_id = inbox.id
 				AND inbox_edge.project_id = inbox.project_id AND inbox_edge.automation_id = inbox.automation_id AND inbox_edge.version_id = inbox.version_id
 			JOIN automation_nodes gate ON gate.id = inbox_edge.source_node_id AND gate.project_id = inbox.project_id
-				AND gate.automation_id = inbox.automation_id AND gate.version_id = inbox.version_id
-				AND gate.node_key = owner.gate_node_key AND gate.role = 'native_approval'
+				AND gate.automation_id = inbox.automation_id AND gate.version_id = inbox.version_id AND gate.role = 'native_approval'
 			JOIN automation_edges gate_edge ON gate_edge.target_node_id = gate.id
 				AND gate_edge.project_id = gate.project_id AND gate_edge.automation_id = gate.automation_id AND gate_edge.version_id = gate.version_id
 			JOIN automation_nodes action ON action.id = gate_edge.source_node_id AND action.project_id = gate.project_id
-				AND action.automation_id = gate.automation_id AND action.version_id = gate.version_id
-				AND action.node_key = owner.action_node_key AND action.role = 'create_notification'
+				AND action.automation_id = gate.automation_id AND action.version_id = gate.version_id AND action.role = 'create_notification'
 			JOIN automation_edges producer_edge ON producer_edge.target_node_id = action.id
 				AND producer_edge.project_id = action.project_id AND producer_edge.automation_id = action.automation_id AND producer_edge.version_id = action.version_id
 			JOIN automation_nodes producer ON producer.id = producer_edge.source_node_id AND producer.project_id = action.project_id
 				AND producer.automation_id = action.automation_id AND producer.version_id = action.version_id
-				AND producer.node_key = owner.producer_node_key
 			WHERE owner.project_id = ? AND owner.automation_id = ? AND owner.artifact_type = 'alert' AND owner.artifact_id = ?`,
 			inboxBinding.VersionID, inboxBinding.NodeID, projectID, inboxBinding.AutomationID, alertID)
 		if err != nil {

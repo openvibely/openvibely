@@ -1510,53 +1510,18 @@ func upsertAutomationActivity(ctx context.Context, exec SQLExecutor, in Automati
 }
 
 func recordAutomationArtifactMailboxOwners(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding) error {
-	var artifactType, actionRole, gateRole, mailboxRole string
-	switch strings.TrimSpace(in.ActivityType) {
-	case "create_notification":
-		artifactType, actionRole, gateRole, mailboxRole = "alert", "create_notification", "native_approval", "native_inbox"
-	default:
+	if strings.TrimSpace(in.ActivityType) != "create_notification" {
 		return nil
-	}
-
-	var producerKey, actionKey, gateKey, mailboxKey string
-	err := exec.QueryRowContext(ctx, `SELECT producer.node_key, action.node_key, gate.node_key, mailbox.node_key
-		FROM automation_nodes producer
-		JOIN automation_edges action_edge ON action_edge.source_node_id = producer.id
-			AND action_edge.project_id = producer.project_id AND action_edge.automation_id = producer.automation_id
-			AND action_edge.version_id = producer.version_id
-		JOIN automation_nodes action ON action.id = action_edge.target_node_id
-			AND action.project_id = producer.project_id AND action.automation_id = producer.automation_id
-			AND action.version_id = producer.version_id
-		JOIN automation_edges gate_edge ON gate_edge.source_node_id = action.id
-			AND gate_edge.project_id = action.project_id AND gate_edge.automation_id = action.automation_id
-			AND gate_edge.version_id = action.version_id
-		JOIN automation_nodes gate ON gate.id = gate_edge.target_node_id
-			AND gate.project_id = action.project_id AND gate.automation_id = action.automation_id
-			AND gate.version_id = action.version_id
-		JOIN automation_edges mailbox_edge ON mailbox_edge.source_node_id = gate.id
-			AND mailbox_edge.project_id = action.project_id AND mailbox_edge.automation_id = action.automation_id
-			AND mailbox_edge.version_id = action.version_id
-		JOIN automation_nodes mailbox ON mailbox.id = mailbox_edge.target_node_id
-			AND mailbox.project_id = action.project_id AND mailbox.automation_id = action.automation_id
-			AND mailbox.version_id = action.version_id
-		WHERE producer.project_id = ? AND producer.automation_id = ? AND producer.version_id = ? AND producer.id = ?
-			AND action.id = ? AND action.role = ? AND gate.role = ? AND mailbox.role = ?`, in.Context.ProjectID,
-		binding.AutomationID, binding.VersionID, in.FromNodeID, binding.NodeID, actionRole, gateRole, mailboxRole).Scan(&producerKey, &actionKey, &gateKey, &mailboxKey)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("resolving Automation artifact mailbox ownership: %w", err)
 	}
 	for _, resource := range in.Resources {
-		if strings.TrimSpace(resource.ResourceType) != artifactType || strings.TrimSpace(resource.ResourceID) == "" {
+		if strings.TrimSpace(resource.ResourceType) != "alert" || strings.TrimSpace(resource.ResourceID) == "" {
 			continue
 		}
 		if _, err := exec.ExecContext(ctx, `INSERT INTO automation_artifact_mailbox_owners
 			(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, 'alert', ?, '', '', '', '')
 			ON CONFLICT(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key) DO NOTHING`,
-			in.Context.ProjectID, binding.AutomationID, artifactType, strings.TrimSpace(resource.ResourceID), producerKey, actionKey, gateKey, mailboxKey); err != nil {
+			in.Context.ProjectID, binding.AutomationID, strings.TrimSpace(resource.ResourceID)); err != nil {
 			return fmt.Errorf("recording Automation artifact mailbox ownership: %w", err)
 		}
 	}

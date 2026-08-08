@@ -839,8 +839,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 145 {
-		t.Fatalf("max goose version = %d, want 145", maxVersion)
+	if maxVersion != 146 {
+		t.Fatalf("max goose version = %d, want 146", maxVersion)
 	}
 }
 
@@ -991,8 +991,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 145 {
-		t.Fatalf("max goose version = %d, want 145", maxVersion)
+	if maxVersion != 146 {
+		t.Fatalf("max goose version = %d, want 146", maxVersion)
 	}
 }
 
@@ -1478,8 +1478,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 145 {
-		t.Fatalf("max goose version = %d, want 145", maxVersion)
+	if maxVersion != 146 {
+		t.Fatalf("max goose version = %d, want 146", maxVersion)
 	}
 }
 
@@ -1830,8 +1830,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 145 {
-		t.Fatalf("max goose version = %d, want 145", maxVersion)
+	if maxVersion != 146 {
+		t.Fatalf("max goose version = %d, want 146", maxVersion)
 	}
 }
 
@@ -2399,6 +2399,54 @@ func TestMigration145RetiresGitHubIssueMailboxOwnershipOnly(t *testing.T) {
 	}
 	if alertOwners != 1 || githubOwners != 0 {
 		t.Fatalf("migration 145 must preserve alert owners and delete GitHub issue owners: alerts=%d github=%d", alertOwners, githubOwners)
+	}
+}
+
+func TestMigration146SimplifiesNativeAlertMailboxOwnership(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "simplify-native-alert-mailbox-ownership-146.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 145); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-146', 'Migration 146', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state, published_version_id)
+			VALUES ('automation-146', 'project-146', 'simplify-native-owner-146', 'Simplify Native owner', 'active', 'version-146');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-146', 'project-146', 'automation-146', 1, 'published', 'manual', 'custom');
+		INSERT INTO automation_artifact_mailbox_owners
+			(project_id, automation_id, artifact_type, artifact_id, producer_node_key, action_node_key, gate_node_key, mailbox_node_key)
+			VALUES
+			('project-146', 'automation-146', 'alert', 'alert-146', 'producer', 'notification', 'approval', 'inbox'),
+			('project-146', 'automation-146', 'alert', 'alert-146', 'producer2', 'notification2', 'approval2', 'inbox2'),
+			('project-146', 'automation-146', 'alert', 'other-alert-146', 'producer', 'notification', 'approval', 'inbox');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 146); err != nil {
+		t.Fatal(err)
+	}
+	var owners int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners WHERE artifact_type = 'alert' AND artifact_id = 'alert-146'`).Scan(&owners); err != nil {
+		t.Fatal(err)
+	}
+	if owners != 1 {
+		t.Fatalf("migration 146 must collapse duplicate alert topology owner rows: got %d", owners)
+	}
+	var keyedRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_artifact_mailbox_owners
+		WHERE artifact_type = 'alert' AND (producer_node_key <> '' OR action_node_key <> '' OR gate_node_key <> '' OR mailbox_node_key <> '')`).Scan(&keyedRows); err != nil {
+		t.Fatal(err)
+	}
+	if keyedRows != 0 {
+		t.Fatalf("migration 146 must remove Native alert topology keys: got %d keyed rows", keyedRows)
 	}
 }
 

@@ -3246,6 +3246,14 @@ func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate
 	}}})
 	alert, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Survive Native edit", IdempotencyKey: "survive-native-edit"})
 	require.NoError(t, err)
+	var producerKey, actionKey, gateKey, mailboxKey string
+	require.NoError(t, h.db.QueryRow(`SELECT producer_node_key, action_node_key, gate_node_key, mailbox_node_key
+		FROM automation_artifact_mailbox_owners WHERE project_id = ? AND automation_id = ? AND artifact_type = 'alert' AND artifact_id = ?`,
+		h.project.ID, first.Definition.Automation.ID, alert.ID).Scan(&producerKey, &actionKey, &gateKey, &mailboxKey))
+	require.Empty(t, producerKey)
+	require.Empty(t, actionKey)
+	require.Empty(t, gateKey)
+	require.Empty(t, mailboxKey)
 	require.NoError(t, alertSvc.SetDecision(ctx, h.project.ID, alert.ID, models.AlertDecisionApproved))
 
 	candidate.Description = "Updated configuration with the same logical mailbox."
@@ -3350,7 +3358,7 @@ func TestAutomationRuntimeGitHubInboxOwnershipSurvivesCompatibleAutomationUpdate
 	require.Equal(t, second.Definition.Version.ID, issueContext.Bindings[0].VersionID, "retained issue work must project onto the current graph revision")
 }
 
-func TestAutomationRuntimeNativeInboxOwnershipDoesNotMoveToRenamedMailbox(t *testing.T) {
+func TestAutomationRuntimeNativeInboxOwnershipMovesToCurrentRenamedMailbox(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Renamed Native mailbox")
 	ctx := context.Background()
 	candidate := customNativeMailboxCandidate("Renamed Native mailbox")
@@ -3391,12 +3399,12 @@ func TestAutomationRuntimeNativeInboxOwnershipDoesNotMoveToRenamedMailbox(t *tes
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: h.project.ID, CallerTaskID: "replacement-native-inbox", AlertSvc: alertSvc, TaskRepo: h.taskRepo})
 	output, err := handlers["list_alerts"](inboxCtx, json.RawMessage(`{"decision_state":"approved","processing_state":"unclaimed"}`))
 	require.NoError(t, err)
-	require.NotContains(t, output, alert.ID)
+	require.Contains(t, output, alert.ID)
 	_, err = handlers["claim_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+alert.ID+`","lease_seconds":60}`))
-	require.ErrorContains(t, err, "not owned by this Automation inbox")
+	require.NoError(t, err, "a current Native inbox in the same Automation must be allowed to process owned notifications after inbox replacement")
 }
 
-func TestAutomationRuntimeCustomNativeInboxRequiresExactProducerProvenance(t *testing.T) {
+func TestAutomationRuntimeCustomNativeInboxRequiresSameAutomationOwnership(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Scoped Native runtime")
 	ctx := context.Background()
 	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: customNativeMailboxCandidate("First Native mailbox")})
