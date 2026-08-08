@@ -13,20 +13,12 @@ import (
 
 // ListTelegramAuthorizedUsers returns the authorized users list for a project.
 func (h *Handler) ListTelegramAuthorizedUsers(c echo.Context) error {
-	if h.telegramAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Telegram auth not configured")
-	}
-	return h.telegramAuthorizedUserCRUD().listUsers(c, c.QueryParam("project_id"))
+	return h.telegramAuthorizedUserCRUD().listHandler(c)
 }
 
 // AddTelegramAuthorizedUser adds a new authorized Telegram user.
 func (h *Handler) AddTelegramAuthorizedUser(c echo.Context) error {
-	if h.telegramAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Telegram auth not configured")
-	}
-
-	projectID := c.FormValue("project_id")
-	return h.telegramAuthorizedUserCRUD().createUser(c, projectID, func(ctx context.Context) error {
+	return h.telegramAuthorizedUserCRUD().createHandler(c, func(ctx context.Context, projectID string) error {
 		userIDOrUsername := c.FormValue("user_id_or_username")
 		displayName := c.FormValue("display_name")
 		if userIDOrUsername == "" {
@@ -53,23 +45,20 @@ func (h *Handler) AddTelegramAuthorizedUser(c echo.Context) error {
 
 // RemoveTelegramAuthorizedUser removes an authorized Telegram user.
 func (h *Handler) RemoveTelegramAuthorizedUser(c echo.Context) error {
-	if h.telegramAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Telegram auth not configured")
-	}
-	return h.telegramAuthorizedUserCRUD().deleteUser(
-		c,
-		c.Param("id"),
-		c.QueryParam("project_id"),
-		authorizedUserProjectLookup(h.telegramAuthRepo.GetByID, func(user *models.TelegramAuthorizedUser) string {
-			return user.ProjectID
-		}),
-		h.telegramAuthRepo.Delete,
-	)
+	return h.telegramAuthorizedUserCRUD().deleteHandler(c)
 }
 
 func (h *Handler) telegramAuthorizedUserCRUD() authorizedUserCRUD[models.TelegramAuthorizedUser] {
-	return authorizedUserCRUD[models.TelegramAuthorizedUser]{
-		list:   h.telegramAuthRepo.ListByProject,
-		render: components.TelegramAuthorizedUsersList,
+	crud := authorizedUserCRUD[models.TelegramAuthorizedUser]{
+		render:               components.TelegramAuthorizedUsersList,
+		notConfiguredMessage: "Telegram auth not configured",
+		configured:           h.telegramAuthRepo != nil,
 	}
+	if h.telegramAuthRepo != nil {
+		crud.list = h.telegramAuthRepo.ListByProject
+		crud.getByID = h.telegramAuthRepo.GetByID
+		crud.delete = h.telegramAuthRepo.Delete
+		crud.projectID = func(user *models.TelegramAuthorizedUser) string { return user.ProjectID }
+	}
+	return crud
 }

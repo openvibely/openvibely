@@ -12,20 +12,12 @@ import (
 
 // ListSlackAuthorizedUsers returns the authorized Slack users list for a project.
 func (h *Handler) ListSlackAuthorizedUsers(c echo.Context) error {
-	if h.slackAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Slack auth not configured")
-	}
-	return h.slackAuthorizedUserCRUD().listUsers(c, c.QueryParam("project_id"))
+	return h.slackAuthorizedUserCRUD().listHandler(c)
 }
 
 // AddSlackAuthorizedUser adds a new authorized Slack user.
 func (h *Handler) AddSlackAuthorizedUser(c echo.Context) error {
-	if h.slackAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Slack auth not configured")
-	}
-
-	projectID := c.FormValue("project_id")
-	return h.slackAuthorizedUserCRUD().createUser(c, projectID, func(ctx context.Context) error {
+	return h.slackAuthorizedUserCRUD().createHandler(c, func(ctx context.Context, projectID string) error {
 		slackUserID := strings.TrimSpace(c.FormValue("slack_user_id"))
 		displayName := strings.TrimSpace(c.FormValue("display_name"))
 		if slackUserID == "" {
@@ -47,23 +39,20 @@ func (h *Handler) AddSlackAuthorizedUser(c echo.Context) error {
 
 // RemoveSlackAuthorizedUser removes an authorized Slack user.
 func (h *Handler) RemoveSlackAuthorizedUser(c echo.Context) error {
-	if h.slackAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Slack auth not configured")
-	}
-	return h.slackAuthorizedUserCRUD().deleteUser(
-		c,
-		c.Param("id"),
-		c.QueryParam("project_id"),
-		authorizedUserProjectLookup(h.slackAuthRepo.GetByID, func(user *models.SlackAuthorizedUser) string {
-			return user.ProjectID
-		}),
-		h.slackAuthRepo.Delete,
-	)
+	return h.slackAuthorizedUserCRUD().deleteHandler(c)
 }
 
 func (h *Handler) slackAuthorizedUserCRUD() authorizedUserCRUD[models.SlackAuthorizedUser] {
-	return authorizedUserCRUD[models.SlackAuthorizedUser]{
-		list:   h.slackAuthRepo.ListByProject,
-		render: components.SlackAuthorizedUsersList,
+	crud := authorizedUserCRUD[models.SlackAuthorizedUser]{
+		render:               components.SlackAuthorizedUsersList,
+		notConfiguredMessage: "Slack auth not configured",
+		configured:           h.slackAuthRepo != nil,
 	}
+	if h.slackAuthRepo != nil {
+		crud.list = h.slackAuthRepo.ListByProject
+		crud.getByID = h.slackAuthRepo.GetByID
+		crud.delete = h.slackAuthRepo.Delete
+		crud.projectID = func(user *models.SlackAuthorizedUser) string { return user.ProjectID }
+	}
+	return crud
 }

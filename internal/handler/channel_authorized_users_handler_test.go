@@ -160,4 +160,109 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 			return "record-project", true, nil
 		}, func(context.Context, string) error { return nil }), http.StatusInternalServerError, "Failed to load authorized users")
 	})
+
+	t.Run("adapter guard returns channel not configured message", func(t *testing.T) {
+		c, _ := newContext()
+		crud := authorizedUserCRUD[string]{notConfiguredMessage: "Channel auth not configured"}
+		assertHTTPError(t, crud.listHandler(c), http.StatusInternalServerError, "Channel auth not configured")
+		assertHTTPError(t, crud.createHandler(c, func(context.Context, string) error {
+			t.Fatal("create should not run when repository is missing")
+			return nil
+		}), http.StatusInternalServerError, "Channel auth not configured")
+	})
+
+	t.Run("adapter reads list query project", func(t *testing.T) {
+		e := echo.New()
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodGet, "/?project_id=query-project", nil), rec)
+		crud := newCRUD(func(_ context.Context, projectID string) ([]string, error) {
+			if projectID != "query-project" {
+				t.Fatalf("expected query project, got %q", projectID)
+			}
+			return []string{"user-1"}, nil
+		})
+		crud.configured = true
+		if err := crud.listHandler(c); err != nil {
+			t.Fatalf("listHandler failed: %v", err)
+		}
+		if rec.Code != http.StatusOK || rec.Body.String() != "query-project:user-1" {
+			t.Fatalf("unexpected list response: %d %q", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("adapter reads create form project and reloads", func(t *testing.T) {
+		e := echo.New()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("project_id=form-project"))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+		c := e.NewContext(req, rec)
+		created := false
+		crud := newCRUD(func(_ context.Context, projectID string) ([]string, error) {
+			if projectID != "form-project" {
+				t.Fatalf("expected form project reload, got %q", projectID)
+			}
+			if !created {
+				t.Fatal("list called before create")
+			}
+			return []string{"user-1"}, nil
+		})
+		crud.configured = true
+		if err := crud.createHandler(c, func(_ context.Context, projectID string) error {
+			if projectID != "form-project" {
+				t.Fatalf("expected form project create, got %q", projectID)
+			}
+			created = true
+			return nil
+		}); err != nil {
+			t.Fatalf("createHandler failed: %v", err)
+		}
+		if rec.Code != http.StatusOK || rec.Body.String() != "form-project:user-1" {
+			t.Fatalf("unexpected create response: %d %q", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("adapter wires delete lookup and fallback project", func(t *testing.T) {
+		type authRecord struct{ ProjectID string }
+		e := echo.New()
+		rec := httptest.NewRecorder()
+		c := e.NewContext(httptest.NewRequest(http.MethodDelete, "/authorized/user-1", nil), rec)
+		c.SetParamNames("id")
+		c.SetParamValues("user-1")
+		deleted := false
+		crud := authorizedUserCRUD[authRecord]{
+			list: func(_ context.Context, projectID string) ([]authRecord, error) {
+				if projectID != "record-project" {
+					t.Fatalf("expected record project fallback, got %q", projectID)
+				}
+				if !deleted {
+					t.Fatal("list called before delete")
+				}
+				return nil, nil
+			},
+			render: func(_ []authRecord, projectID string) templ.Component {
+				return templ.Raw(projectID)
+			},
+			getByID: func(_ context.Context, id string) (*authRecord, error) {
+				if id != "user-1" {
+					t.Fatalf("expected lookup id user-1, got %q", id)
+				}
+				return &authRecord{ProjectID: "record-project"}, nil
+			},
+			delete: func(_ context.Context, id string) error {
+				if id != "user-1" {
+					t.Fatalf("expected delete id user-1, got %q", id)
+				}
+				deleted = true
+				return nil
+			},
+			projectID:  func(record *authRecord) string { return record.ProjectID },
+			configured: true,
+		}
+		if err := crud.deleteHandler(c); err != nil {
+			t.Fatalf("deleteHandler failed: %v", err)
+		}
+		if rec.Code != http.StatusOK || rec.Body.String() != "record-project" {
+			t.Fatalf("unexpected delete response: %d %q", rec.Code, rec.Body.String())
+		}
+	})
 }

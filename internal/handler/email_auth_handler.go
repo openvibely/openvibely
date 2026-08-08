@@ -13,20 +13,12 @@ import (
 
 // ListEmailAuthorizedSenders returns the authorized email senders list for a project.
 func (h *Handler) ListEmailAuthorizedSenders(c echo.Context) error {
-	if h.emailAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Email auth not configured")
-	}
-	return h.emailAuthorizedUserCRUD().listUsers(c, c.QueryParam("project_id"))
+	return h.emailAuthorizedUserCRUD().listHandler(c)
 }
 
 // AddEmailAuthorizedSender adds a new authorized email sender.
 func (h *Handler) AddEmailAuthorizedSender(c echo.Context) error {
-	if h.emailAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Email auth not configured")
-	}
-
-	projectID := c.FormValue("project_id")
-	return h.emailAuthorizedUserCRUD().createUser(c, projectID, func(ctx context.Context) error {
+	return h.emailAuthorizedUserCRUD().createHandler(c, func(ctx context.Context, projectID string) error {
 		emailAddress := repository.NormalizeEmailAddress(c.FormValue("authorized_email_address"))
 		displayName := strings.TrimSpace(c.FormValue("display_name"))
 		if emailAddress == "" {
@@ -47,23 +39,20 @@ func (h *Handler) AddEmailAuthorizedSender(c echo.Context) error {
 
 // RemoveEmailAuthorizedSender removes an authorized email sender.
 func (h *Handler) RemoveEmailAuthorizedSender(c echo.Context) error {
-	if h.emailAuthRepo == nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "Email auth not configured")
-	}
-	return h.emailAuthorizedUserCRUD().deleteUser(
-		c,
-		c.Param("id"),
-		c.QueryParam("project_id"),
-		authorizedUserProjectLookup(h.emailAuthRepo.GetByID, func(sender *models.EmailAuthorizedSender) string {
-			return sender.ProjectID
-		}),
-		h.emailAuthRepo.Delete,
-	)
+	return h.emailAuthorizedUserCRUD().deleteHandler(c)
 }
 
 func (h *Handler) emailAuthorizedUserCRUD() authorizedUserCRUD[models.EmailAuthorizedSender] {
-	return authorizedUserCRUD[models.EmailAuthorizedSender]{
-		list:   h.emailAuthRepo.ListByProject,
-		render: components.EmailAuthorizedSendersList,
+	crud := authorizedUserCRUD[models.EmailAuthorizedSender]{
+		render:               components.EmailAuthorizedSendersList,
+		notConfiguredMessage: "Email auth not configured",
+		configured:           h.emailAuthRepo != nil,
 	}
+	if h.emailAuthRepo != nil {
+		crud.list = h.emailAuthRepo.ListByProject
+		crud.getByID = h.emailAuthRepo.GetByID
+		crud.delete = h.emailAuthRepo.Delete
+		crud.projectID = func(sender *models.EmailAuthorizedSender) string { return sender.ProjectID }
+	}
+	return crud
 }
