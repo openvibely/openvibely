@@ -1195,32 +1195,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 							yamlEditor.value = value;
 							yamlRenderingValue = false;
 						}
-						function visiblePositionToSourcePosition(visiblePos) {
-							if (yamlFoldedLines.size === 0 || !yamlEditor) return visiblePos;
-							var beforeCursor = yamlEditor.value.slice(0, visiblePos);
-							var visibleLineIndex = (beforeCursor.match(/\n/g) || []).length;
-							var charInLine = visiblePos - (beforeCursor.lastIndexOf('\n') + 1);
-							var sourceLineIndex = visibleLineIndex < yamlVisibleLineMap.length ? yamlVisibleLineMap[visibleLineIndex] : (yamlSourceValue.split('\n').length - 1);
-							var sourceLines = yamlSourceValue.split('\n'), pos = 0;
-							for (var i = 0; i < sourceLineIndex; i++) pos += sourceLines[i].length + 1;
-							return pos + Math.min(charInLine, (sourceLines[sourceLineIndex] || '').length);
-						}
-						function sourcePositionToVisiblePosition(srcPos) {
-							if (yamlFoldedLines.size === 0 || !yamlEditor || !yamlVisibleLineMap.length) return srcPos;
-							var sourceLines = yamlSourceValue.split('\n'), acc = 0;
-							for (var si = 0; si < sourceLines.length; si++) {
-								var lineEnd = acc + sourceLines[si].length;
-								if (srcPos <= lineEnd) {
-									var vi = yamlVisibleLineMap.indexOf(si);
-									if (vi < 0) { for (var k = si - 1; k >= 0; k--) { vi = yamlVisibleLineMap.indexOf(k); if (vi >= 0) break; } if (vi < 0) vi = yamlVisibleLineMap.length - 1; var visLines = yamlEditor.value.split('\n'), vp = 0; for (var j = 0; j < vi; j++) vp += visLines[j].length + 1; return vp + (visLines[vi] || '').length; }
-									var visLines = yamlEditor.value.split('\n'), vp = 0;
-									for (var j = 0; j < vi; j++) vp += visLines[j].length + 1;
-									return vp + Math.min(srcPos - acc, (visLines[vi] || '').length);
-								}
-								acc = lineEnd + 1;
-							}
-							return yamlEditor.value.length;
-						}
 						function escapeYAMLHTML(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 						function yamlLineIndent(line) { var match = line.match(/^\s*/); return match ? match[0].length : 0; }function yamlFoldRanges(lines) {
 							var ranges = {};						for (var index = 0; index < lines.length; index++) {
@@ -1374,32 +1348,27 @@ yamlViewport.scrollTop = 0;
 					}
 					if (yamlEditor) {
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
-							yamlEditor.addEventListener('beforeinput', function(e) {
-								if (yamlFoldedLines.size === 0 || yamlRenderingValue) return;
-								var ranges = e.getTargetRanges ? e.getTargetRanges() : [];
-								var visStart = ranges.length ? ranges[0].startOffset : yamlEditor.selectionStart;
-								var visEnd = ranges.length ? ranges[0].endOffset : yamlEditor.selectionEnd;
-								var srcStart = visiblePositionToSourcePosition(visStart);
-								var srcEnd = visiblePositionToSourcePosition(visEnd);
-								var insert = '';
-								if (e.inputType === 'insertText') insert = e.data || '';
-								else if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') insert = '\n';
-								else if (e.inputType === 'deleteContentBackward') { if (srcStart === srcEnd && srcStart > 0) srcStart--; }
-								else if (e.inputType === 'deleteContentForward') { if (srcStart === srcEnd && srcEnd < yamlSourceValue.length) srcEnd++; }
-								else if (e.inputType === 'deleteByCut' || e.inputType === 'deleteByDrag') { insert = ''; }
-								else if (e.inputType === 'insertFromPaste' || e.inputType === 'insertFromDrop') { insert = e.dataTransfer ? (e.dataTransfer.getData('text/plain') || '') : ''; }
-								else return;
-								e.preventDefault();
-								yamlSourceValue = yamlSourceValue.slice(0, srcStart) + insert + yamlSourceValue.slice(srcEnd);
-								var newSrcCursor = srcStart + insert.length;
-								updateYAMLLineNumbers();
-								var newVisCursor = sourcePositionToVisiblePosition(newSrcCursor);
-								yamlEditor.setSelectionRange(newVisCursor, newVisCursor);
-								validateYAMLWhileTyping();
-							});
 							yamlEditor.addEventListener('input', function() {
 								if (yamlRenderingValue) return;
-								if (yamlFoldedLines.size === 0) { yamlSourceValue = yamlEditor.value; updateYAMLLineNumbers(); validateYAMLWhileTyping(); }
+								if (yamlFoldedLines.size === 0) {
+									yamlSourceValue = yamlEditor.value;
+								} else {
+									var oldSourceLines = yamlSourceValue.split('\n');
+									var oldVisible = yamlVisibleLineMap.map(function(sourceIndex) { return oldSourceLines[sourceIndex]; });
+									var newVisible = yamlEditor.value.split('\n');
+									var maxCommon = Math.min(oldVisible.length, newVisible.length);
+									var prefix = 0;
+									while (prefix < maxCommon && oldVisible[prefix] === newVisible[prefix]) prefix++;
+									var suffix = 0;
+									while (suffix < maxCommon - prefix && oldVisible[oldVisible.length - 1 - suffix] === newVisible[newVisible.length - 1 - suffix]) suffix++;
+									var sourceStart = prefix < yamlVisibleLineMap.length ? yamlVisibleLineMap[prefix] : oldSourceLines.length;
+									var oldTailIndex = oldVisible.length - suffix;
+									var sourceEnd = oldTailIndex < yamlVisibleLineMap.length ? yamlVisibleLineMap[oldTailIndex] : oldSourceLines.length;
+									var replacement = newVisible.slice(prefix, newVisible.length - suffix);
+									yamlSourceValue = oldSourceLines.slice(0, sourceStart).concat(replacement, oldSourceLines.slice(sourceEnd)).join('\n');
+								}
+								updateYAMLLineNumbers();
+								validateYAMLWhileTyping();
 							});						updateYAMLLineNumbers();
 						validateYAMLWhileTyping();
 					}
