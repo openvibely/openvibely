@@ -388,6 +388,10 @@ func TestAutomationLiveYAMLViewSwitcherActuallyTogglesVisibility(t *testing.T) {
 	if err := AutomationLiveContent(graph, "project-live-switch", true).Render(context.Background(), &out); err != nil {
 		t.Fatalf("render Automation Live view-switcher fixture: %v", err)
 	}
+	var fresh bytes.Buffer
+	if err := AutomationLiveContent(graph, "project-live-switch", true).Render(context.Background(), &fresh); err != nil {
+		t.Fatalf("render Automation Live view-switcher refresh fixture: %v", err)
+	}
 
 	runner := `<script>
 window.addEventListener('DOMContentLoaded', function() {
@@ -428,6 +432,23 @@ window.addEventListener('DOMContentLoaded', function() {
     if (isVisible(graphPanel) || !isVisible(detailsPanel) || isVisible(yamlPanel)) fail('selecting Details must hide the graph and YAML panels and show only the details panel');
     graphButton.click();
     if (!isVisible(graphPanel) || isVisible(detailsPanel) || isVisible(yamlPanel)) fail('selecting Graph must hide the details and YAML panels and show only the graph panel');
+    yamlButton.click();
+    if (isVisible(graphPanel) || isVisible(detailsPanel) || !isVisible(yamlPanel)) fail('re-selecting YAML must show only the YAML panel');
+    var freshContainer = document.getElementById('automation-live-fresh-markup');
+    var liveRoot = document.getElementById('automation-live');
+    var replacement = freshContainer.querySelector('#automation-live');
+    liveRoot.replaceWith(replacement);
+    Array.from(freshContainer.querySelectorAll('script')).forEach(function(script) {
+      var clone = document.createElement('script');
+      clone.textContent = script.textContent;
+      document.body.appendChild(clone);
+      clone.remove();
+    });
+    await new Promise(function(resolve) { window.setTimeout(resolve, 200); });
+    graphPanel = document.querySelector('[data-automation-graph-panel]');
+    detailsPanel = document.querySelector('[data-automation-live-details-panel]');
+    yamlPanel = document.querySelector('[data-automation-yaml-panel]');
+    if (isVisible(graphPanel) || isVisible(detailsPanel) || !isVisible(yamlPanel)) fail('a background htmx refresh swap must not reset the selected YAML view back to Graph');
     report('pass', '');
   })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
@@ -438,7 +459,7 @@ window.addEventListener('DOMContentLoaded', function() {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%%}.whitespace-nowrap{white-space:nowrap}.whitespace-pre{white-space:pre}.block{display:block}.min-h-6{min-height:24px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body><script>window.htmx = {ajax: function() { return Promise.resolve(); }};</script>%s%s</body></html>`, out.String(), runner)
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><style>:root{--bc:20%% 0.02 260}body{margin:0;padding:20px}*{box-sizing:border-box}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%%}.whitespace-nowrap{white-space:nowrap}.whitespace-pre{white-space:pre}.block{display:block}.min-h-6{min-height:24px}svg[data-automation-canvas]{display:block;width:100%%;height:600px}</style></head><body><script>window.htmx = {ajax: function() { return Promise.resolve(); }};</script>%s%s<div id="automation-live-fresh-markup" hidden>%s</div></body></html>`, out.String(), runner, fresh.String())
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
 			w.WriteHeader(http.StatusNoContent)

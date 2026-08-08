@@ -528,6 +528,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 				if (state.automationId !== liveRoot.dataset.automationId) {
 					state.generation = 0;
 					state.automationId = liveRoot.dataset.automationId;
+					window._automationLiveSelectedView = '';
 				}
 				if (state.timer) clearInterval(state.timer);
 				window.openVibelyAutomationLiveRefresh = function(method, url) {
@@ -617,9 +618,12 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 						detailsViewButton.setAttribute('aria-pressed', String(view === 'details'));
 						yamlViewButton.setAttribute('aria-pressed', String(view === 'yaml'));
 					}
-					graphViewButton && graphViewButton.addEventListener('click', function() { selectAutomationLiveView('graph'); });
-					detailsViewButton && detailsViewButton.addEventListener('click', function() { selectAutomationLiveView('details'); });
-					yamlViewButton && yamlViewButton.addEventListener('click', function() { selectAutomationLiveView('yaml'); });
+					graphViewButton && graphViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'graph'; selectAutomationLiveView('graph'); });
+					detailsViewButton && detailsViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'details'; selectAutomationLiveView('details'); });
+					yamlViewButton && yamlViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'yaml'; selectAutomationLiveView('yaml'); });
+					if (window._automationLiveSelectedView && window._automationLiveSelectedView !== 'graph') {
+						selectAutomationLiveView(window._automationLiveSelectedView);
+					}
 					(function() {
 						var yamlEditor = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-editor]');
 						var yamlLineNumbers = yamlPanel && yamlPanel.querySelector('[data-automation-yaml-line-numbers]');
