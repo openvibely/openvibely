@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,6 +35,89 @@ func createHistoryInvocation(t *testing.T, fixture automationRuntimeFixture, suf
 			&invocation.ErrorMessage)
 	require.NoError(t, err)
 	return invocation
+}
+
+func newAutomationWorkItemHistoryBenchFixture(tb testing.TB, rowCount int) (*sql.DB, *repository.AutomationRepo, string, string) {
+	tb.Helper()
+	ctx := context.Background()
+	db := testutil.NewTestDB(tb)
+	projectRepo := repository.NewProjectRepo(db)
+	project := models.Project{Name: "Automation work item history"}
+	require.NoError(tb, projectRepo.Create(ctx, &project))
+	automationID := "automation-work-items-history"
+	versionID := "version-work-items-history"
+	_, err := db.ExecContext(ctx, `INSERT INTO automations
+		(id, project_id, stable_key, name, automation_type, lifecycle_state, created_via)
+		VALUES (?, ?, ?, 'Work item history', 'custom', 'active', 'web')`, automationID, project.ID, automationID)
+	require.NoError(tb, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+		(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
+		VALUES (?, ?, ?, 1, 'published', 'manual', 'custom', 1, CURRENT_TIMESTAMP)`, versionID, project.ID, automationID)
+	require.NoError(tb, err)
+	_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ?`, versionID, automationID)
+	require.NoError(tb, err)
+	seedAutomationWorkItemHistoryRows(tb, db, project.ID, automationID, versionID, rowCount)
+	return db, repository.NewAutomationRepo(db), project.ID, automationID
+}
+
+func seedAutomationWorkItemHistoryRows(tb testing.TB, db *sql.DB, projectID, automationID, versionID string, rowCount int) {
+	tb.Helper()
+	if rowCount == 0 {
+		return
+	}
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(tb, err)
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO automation_work_items
+		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 'test', ?, ?, ?, ?)`)
+	require.NoError(tb, err)
+	defer stmt.Close()
+	statuses := []string{"active", "waiting", "completed", "failed"}
+	base := time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < rowCount; i++ {
+		id := fmt.Sprintf("history-work-item-%06d", i)
+		createdAt := base.Add(time.Duration(i) * time.Second).Format("2006-01-02 15:04:05")
+		_, err = stmt.ExecContext(ctx, id, projectID, automationID, versionID, "history:key:"+id, "History "+id, statuses[i%len(statuses)], createdAt, createdAt)
+		require.NoError(tb, err)
+	}
+	require.NoError(tb, tx.Commit())
+}
+
+func explainAutomationWorkItemsHistoryPlan(tb testing.TB, db *sql.DB, projectID, automationID, status string, withCursor bool) string {
+	tb.Helper()
+	query := `SELECT id, project_id, automation_id, origin_version_id, COALESCE(origin_invocation_id, ''),
+		COALESCE(parent_work_item_id, ''), work_item_key, kind, title, status, created_at, updated_at, completed_at
+		FROM automation_work_items WHERE project_id = ? AND automation_id = ?`
+	args := []any{projectID, automationID}
+	if status != "" {
+		query += ` AND status = ?`
+		args = append(args, status)
+	}
+	if withCursor {
+		query += ` AND (datetime(created_at) < datetime(?) OR (datetime(created_at) = datetime(?) AND id < ?))`
+		args = append(args, "2026-01-01 00:30:00", "2026-01-01 00:30:00", "history-work-item-001800")
+	}
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
+	args = append(args, 21)
+	rows, err := db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
+	require.NoError(tb, err)
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		require.NoError(tb, rows.Scan(&id, &parent, &unused, &detail))
+		details = append(details, detail)
+	}
+	require.NoError(tb, rows.Err())
+	return strings.Join(details, "; ")
+}
+
+func assertAutomationWorkItemsHistoryPlan(t *testing.T, plan, wantIndex string) {
+	t.Helper()
+	require.Contains(t, plan, wantIndex)
+	require.NotContains(t, plan, "USE TEMP B-TREE FOR ORDER BY")
 }
 
 func TestAutomationHistoryStablePaginationAndProjectIsolation(t *testing.T) {
@@ -286,25 +372,118 @@ func TestAutomationHistoryWorkItemPaginationIsStableAndFilterBound(t *testing.T)
 	ctx := context.Background()
 	producer := automationNodeByKey(t, fixture.definition, "vision_suggestions")
 	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: producer.ID}
-	for i := 0; i < 4; i++ {
-		_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+	for i := 0; i < 6; i++ {
+		item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
 			Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
 			WorkItemKey: fmt.Sprintf("work-item:paged:%d", i), WorkItemKind: "test", ActivityKey: fmt.Sprintf("work-item:paged:%d:create", i), ActivityType: "producer", ActivityStatus: models.AutomationActivityRunning,
 		})
 		require.NoError(t, err)
+		if i >= 4 {
+			_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE automation_work_items SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, item.ID)
+			require.NoError(t, err)
+		}
 	}
 	_, err := fixture.repo.DB().Exec(`UPDATE automation_work_items SET created_at = '2026-01-01 00:00:00' WHERE automation_id = ?`, fixture.definition.Automation.ID)
 	require.NoError(t, err)
+
+	unfilteredFirst, err := fixture.repo.ListAutomationWorkItems(ctx, fixture.project.ID, fixture.definition.Automation.ID, "", 3, "")
+	require.NoError(t, err)
+	require.Len(t, unfilteredFirst.Items, 3)
+	require.NotEmpty(t, unfilteredFirst.NextCursor)
+	unfilteredSecond, err := fixture.repo.ListAutomationWorkItems(ctx, fixture.project.ID, fixture.definition.Automation.ID, "", 3, unfilteredFirst.NextCursor)
+	require.NoError(t, err)
+	require.Len(t, unfilteredSecond.Items, 3)
+	combined := append(append([]models.AutomationWorkItem{}, unfilteredFirst.Items...), unfilteredSecond.Items...)
+	for i := 1; i < len(combined); i++ {
+		require.Greater(t, combined[i-1].ID, combined[i].ID)
+	}
 
 	first, err := fixture.repo.ListAutomationWorkItems(ctx, fixture.project.ID, fixture.definition.Automation.ID, "active", 2, "")
 	require.NoError(t, err)
 	require.Len(t, first.Items, 2)
 	require.NotEmpty(t, first.NextCursor)
+	for _, item := range first.Items {
+		require.Equal(t, models.AutomationWorkItemActive, item.Status)
+	}
 	second, err := fixture.repo.ListAutomationWorkItems(ctx, fixture.project.ID, fixture.definition.Automation.ID, "active", 2, first.NextCursor)
 	require.NoError(t, err)
 	require.Len(t, second.Items, 2)
+	for _, item := range second.Items {
+		require.Equal(t, models.AutomationWorkItemActive, item.Status)
+	}
+	completed, err := fixture.repo.ListAutomationWorkItems(ctx, fixture.project.ID, fixture.definition.Automation.ID, "completed", 10, "")
+	require.NoError(t, err)
+	require.Len(t, completed.Items, 2)
+	for _, item := range completed.Items {
+		require.Equal(t, models.AutomationWorkItemCompleted, item.Status)
+	}
 	_, err = fixture.repo.ListAutomationWorkItems(ctx, fixture.project.ID, fixture.definition.Automation.ID, "completed", 2, first.NextCursor)
 	require.ErrorIs(t, err, repository.ErrAutomationCursor)
+}
+
+func TestAutomationHistoryWorkItemQueryPlanUsesCreatedAtIndexes(t *testing.T) {
+	db, _, projectID, automationID := newAutomationWorkItemHistoryBenchFixture(t, 2000)
+
+	assertAutomationWorkItemsHistoryPlan(t,
+		explainAutomationWorkItemsHistoryPlan(t, db, projectID, automationID, "", false),
+		"idx_automation_work_items_history")
+	assertAutomationWorkItemsHistoryPlan(t,
+		explainAutomationWorkItemsHistoryPlan(t, db, projectID, automationID, "", true),
+		"idx_automation_work_items_history")
+	assertAutomationWorkItemsHistoryPlan(t,
+		explainAutomationWorkItemsHistoryPlan(t, db, projectID, automationID, "active", false),
+		"idx_automation_work_items_history_status")
+	assertAutomationWorkItemsHistoryPlan(t,
+		explainAutomationWorkItemsHistoryPlan(t, db, projectID, automationID, "active", true),
+		"idx_automation_work_items_history_status")
+}
+
+func setAutomationWorkItemHistoryIndexes(tb testing.TB, db *sql.DB, candidate bool) {
+	tb.Helper()
+	if !candidate {
+		_, err := db.Exec(`DROP INDEX IF EXISTS idx_automation_work_items_history;
+			DROP INDEX IF EXISTS idx_automation_work_items_history_status;`)
+		require.NoError(tb, err)
+		return
+	}
+	_, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_automation_work_items_history
+			ON automation_work_items(project_id, automation_id, created_at DESC, id DESC);
+		CREATE INDEX IF NOT EXISTS idx_automation_work_items_history_status
+			ON automation_work_items(project_id, automation_id, status, created_at DESC, id DESC);`)
+	require.NoError(tb, err)
+}
+
+func BenchmarkAutomationWorkItemsHistoryQuery(b *testing.B) {
+	for _, tc := range []struct {
+		name      string
+		status    string
+		candidate bool
+	}{
+		{name: "BaselineUnfilteredTempSort", candidate: false},
+		{name: "IndexedUnfiltered", candidate: true},
+		{name: "BaselineStatusTempSort", status: "active", candidate: false},
+		{name: "IndexedStatus", status: "active", candidate: true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db, repo, projectID, automationID := newAutomationWorkItemHistoryBenchFixture(b, 10000)
+			setAutomationWorkItemHistoryIndexes(b, db, tc.candidate)
+			plan := explainAutomationWorkItemsHistoryPlan(b, db, projectID, automationID, tc.status, false)
+			if tc.candidate {
+				require.NotContains(b, plan, "USE TEMP B-TREE FOR ORDER BY")
+			} else {
+				require.Contains(b, plan, "USE TEMP B-TREE FOR ORDER BY")
+			}
+			ctx := context.Background()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				page, err := repo.ListAutomationWorkItems(ctx, projectID, automationID, tc.status, 20, "")
+				require.NoError(b, err)
+				require.Len(b, page.Items, 20)
+				require.NotEmpty(b, page.NextCursor)
+			}
+		})
+	}
 }
 
 func TestAutomationHistoryHealthReconciliationCoversEverySavedAutomationBeyondOneBatch(t *testing.T) {
