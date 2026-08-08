@@ -642,6 +642,34 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	if schedules[0].RepeatType != models.RepeatDaily || !schedules[0].Enabled {
 		t.Fatalf("unexpected schedule: repeat=%q enabled=%v", schedules[0].RepeatType, schedules[0].Enabled)
 	}
+	if !schedules[0].ClearContextOnStart {
+		t.Fatal("expected skill library maintenance schedule to clear context on start")
+	}
+	originalRunAt := schedules[0].RunAt
+	originalNextRun := schedules[0].NextRun
+	if err := scheduleRepo.UpdateClearContextOnStart(ctx, schedules[0].ID, task.ID, false); err != nil {
+		t.Fatalf("make schedule stale clear-context policy: %v", err)
+	}
+
+	if err := svc.EnsureProject(ctx, projectID); err != nil {
+		t.Fatalf("EnsureProject repairs stale schedule context policy: %v", err)
+	}
+	schedules, err = scheduleRepo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListByTask repaired: %v", err)
+	}
+	if len(schedules) != 1 {
+		t.Fatalf("expected idempotent schedule creation, got %d schedules", len(schedules))
+	}
+	if !schedules[0].ClearContextOnStart {
+		t.Fatal("expected stale skill library maintenance schedule clear-context flag to be repaired")
+	}
+	if !schedules[0].RunAt.Equal(originalRunAt) {
+		t.Fatalf("repair changed run_at: got %s want %s", schedules[0].RunAt, originalRunAt)
+	}
+	if originalNextRun == nil || schedules[0].NextRun == nil || !schedules[0].NextRun.Equal(*originalNextRun) {
+		t.Fatalf("repair changed next_run: got %v want %v", schedules[0].NextRun, originalNextRun)
+	}
 
 	if err := svc.EnsureProject(ctx, projectID); err != nil {
 		t.Fatalf("EnsureProject second: %v", err)

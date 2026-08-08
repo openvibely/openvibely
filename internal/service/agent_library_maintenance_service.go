@@ -368,6 +368,14 @@ func (s *AgentLibraryMaintenanceService) EnsureProject(ctx context.Context, proj
 		return err
 	}
 	if len(schedules) > 0 {
+		for _, schedule := range schedules {
+			if schedule.ClearContextOnStart {
+				continue
+			}
+			if err := s.scheduleRepo.UpdateClearContextOnStart(ctx, schedule.ID, task.ID, true); err != nil {
+				return fmt.Errorf("repair skill library maintenance schedule clear context on start: %w", err)
+			}
+		}
 		return nil
 	}
 	runAt := time.Now().UTC().Add(24 * time.Hour)

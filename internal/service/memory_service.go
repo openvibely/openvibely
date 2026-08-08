@@ -331,6 +331,14 @@ func (s *MemoryService) ensureConsolidationTaskSchedule(ctx context.Context, pro
 		return err
 	}
 	if len(schedules) > 0 {
+		for _, schedule := range schedules {
+			if schedule.ClearContextOnStart {
+				continue
+			}
+			if err := s.scheduleRepo.UpdateClearContextOnStart(ctx, schedule.ID, task.ID, true); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	runAt := time.Now().UTC().Add(24 * time.Hour)

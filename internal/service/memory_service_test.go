@@ -166,6 +166,68 @@ func TestMemoryService_EnsureProject_WithRepoPath(t *testing.T) {
 	if schedules[0].RepeatType != models.RepeatDaily {
 		t.Errorf("expected daily schedule, got %q", schedules[0].RepeatType)
 	}
+	if !schedules[0].ClearContextOnStart {
+		t.Fatal("expected memory consolidation schedule to clear context on start")
+	}
+}
+
+func TestMemoryService_EnsureProject_RepairsMaintenanceScheduleClearContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+
+	resolver, _ := memory.NewPathResolver("", "")
+	store := memory.NewFileStore(resolver)
+
+	svc := NewMemoryService(taskRepo, scheduleRepo, agentRepo, projectRepo, store, resolver)
+
+	p := &models.Project{Name: "Repair Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(context.Background(), p); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	ctx := context.Background()
+	if err := svc.EnsureProject(ctx, p.ID); err != nil {
+		t.Fatalf("EnsureProject initial: %v", err)
+	}
+	task, err := taskRepo.GetByProjectAndTitle(ctx, p.ID, memoryConsolidationTaskTitle)
+	if err != nil || task == nil {
+		t.Fatalf("expected consolidation task: %v", err)
+	}
+	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListByTask initial: %v", err)
+	}
+	if len(schedules) != 1 {
+		t.Fatalf("expected one schedule, got %d", len(schedules))
+	}
+	originalRunAt := schedules[0].RunAt
+	originalNextRun := schedules[0].NextRun
+	if err := scheduleRepo.UpdateClearContextOnStart(ctx, schedules[0].ID, task.ID, false); err != nil {
+		t.Fatalf("make schedule stale: %v", err)
+	}
+
+	if err := svc.EnsureProject(ctx, p.ID); err != nil {
+		t.Fatalf("EnsureProject repair: %v", err)
+	}
+	repaired, err := scheduleRepo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("ListByTask repaired: %v", err)
+	}
+	if len(repaired) != 1 {
+		t.Fatalf("expected one repaired schedule, got %d", len(repaired))
+	}
+	if !repaired[0].ClearContextOnStart {
+		t.Fatal("expected stale memory consolidation schedule clear-context flag to be repaired")
+	}
+	if !repaired[0].RunAt.Equal(originalRunAt) {
+		t.Fatalf("repair changed run_at: got %s want %s", repaired[0].RunAt, originalRunAt)
+	}
+	if originalNextRun == nil || repaired[0].NextRun == nil || !repaired[0].NextRun.Equal(*originalNextRun) {
+		t.Fatalf("repair changed next_run: got %v want %v", repaired[0].NextRun, originalNextRun)
+	}
 }
 
 // TestMemoryService_EnsureProject_WithRepoPath_Idempotent verifies that calling

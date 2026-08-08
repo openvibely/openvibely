@@ -460,6 +460,7 @@ func assertSingleScheduledSystemTask(t *testing.T, db *sql.DB, title, systemKind
 		  AND s.repeat_type = 'daily'
 		  AND s.repeat_interval = 1
 		  AND s.enabled = 1
+		  AND s.clear_context_on_start = 1
 	`, title, systemKind).Scan(&count); err != nil {
 		t.Fatalf("count scheduled system task %s: %v", title, err)
 	}
