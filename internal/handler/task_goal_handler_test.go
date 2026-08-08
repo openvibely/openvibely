@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -437,6 +438,95 @@ func TestGoalAgentSendToTaskRejectsNonActiveGoalStates(t *testing.T) {
 				t.Fatalf("%s goal continuation queued pending inputs: %+v", status, pending)
 			}
 		})
+	}
+}
+
+func TestTaskGoalRuntimeToolsRejectForeignRawTaskID(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	projectA := tc.CreateProject().WithName("Runtime Project A").Build()
+	projectB := tc.CreateProject().WithName("Runtime Project B").Build()
+	sharedTitle := "Shared Runtime Goal Task"
+	localTask := &models.Task{ProjectID: projectA.ID, Title: sharedTitle, Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "local prompt", Priority: 2}
+	if err := tc.taskRepo.Create(ctx, localTask); err != nil {
+		t.Fatalf("create local task: %v", err)
+	}
+	foreignTask := &models.Task{ProjectID: projectB.ID, Title: sharedTitle, Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "foreign prompt", Priority: 2}
+	if err := tc.taskRepo.Create(ctx, foreignTask); err != nil {
+		t.Fatalf("create foreign task: %v", err)
+	}
+	foreignGoal, err := tc.handler.taskGoalSvc.SetGoal(ctx, foreignTask.ID, "Foreign objective", service.GoalOptions{Actor: "test"})
+	if err != nil {
+		t.Fatalf("set foreign goal: %v", err)
+	}
+
+	params := streamingResponseParams{ProjectID: projectA.ID, AgentDefinition: &models.Agent{Tools: []string{"mark_task_goal_achieved", "report_task_goal_blocked"}}}
+	handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	expectForeignTaskRejected := func(name, payload string) {
+		t.Helper()
+		out, err := handlers[name](ctx, []byte(payload))
+		if err == nil || !strings.Contains(err.Error(), "belongs to a different project") {
+			t.Fatalf("expected %s to reject foreign task id, out=%q err=%v", name, out, err)
+		}
+	}
+
+	expectForeignTaskRejected("set_task_goal", `{"task_id":"`+foreignTask.ID+`","goal":"changed from Project A"}`)
+	goal, err := tc.handler.taskGoalSvc.GetGoal(ctx, foreignTask.ID)
+	if err != nil {
+		t.Fatalf("get foreign goal after rejected set: %v", err)
+	}
+	if goal == nil || goal.Objective != "Foreign objective" || goal.Status != models.TaskGoalStatusActive {
+		t.Fatalf("foreign goal mutated by rejected set: %#v", goal)
+	}
+
+	out, err := handlers["get_task_goal"](ctx, []byte(`{"task_id":"`+foreignTask.ID+`"}`))
+	if err == nil || !strings.Contains(err.Error(), "belongs to a different project") {
+		t.Fatalf("expected get_task_goal to reject foreign task id, out=%q err=%v", out, err)
+	}
+	if strings.Contains(out, "Foreign objective") {
+		t.Fatalf("get_task_goal leaked foreign goal output: %s", out)
+	}
+
+	expectForeignTaskRejected("pause_task_goal", `{"task_id":"`+foreignTask.ID+`"}`)
+	goal, err = tc.handler.taskGoalSvc.GetGoal(ctx, foreignTask.ID)
+	if err != nil {
+		t.Fatalf("get foreign goal after rejected pause: %v", err)
+	}
+	if goal == nil || goal.Status != models.TaskGoalStatusActive {
+		t.Fatalf("foreign goal status mutated by rejected pause: %#v", goal)
+	}
+
+	expectForeignTaskRejected("send_to_task", `{"task_id":"`+foreignTask.ID+`","message":"queued from Project A"}`)
+	pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, foreignTask.ID)
+	if err != nil {
+		t.Fatalf("list foreign pending inputs: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("send_to_task queued foreign pending inputs: %+v", pending)
+	}
+
+	out, err = handlers["set_task_goal"](ctx, []byte(`{"title":"`+sharedTitle+`","goal":"Local objective"}`))
+	if err != nil {
+		t.Fatalf("set_task_goal by shared title should resolve current project task: out=%q err=%v", out, err)
+	}
+	localGoal, err := tc.handler.taskGoalSvc.GetGoal(ctx, localTask.ID)
+	if err != nil {
+		t.Fatalf("get local title goal: %v", err)
+	}
+	if localGoal == nil || localGoal.Objective != "Local objective" {
+		t.Fatalf("title resolution did not set local task goal: %#v", localGoal)
+	}
+	goal, err = tc.handler.taskGoalSvc.GetGoal(ctx, foreignTask.ID)
+	if err != nil {
+		t.Fatalf("get foreign goal after title set: %v", err)
+	}
+	if goal == nil || goal.GoalID != foreignGoal.GoalID || goal.Objective != "Foreign objective" || goal.Status != models.TaskGoalStatusActive {
+		t.Fatalf("title resolution touched foreign goal: %#v", goal)
+	}
+
+	out, err = handlers["set_task_goal"](ctx, []byte(`{"task_id":"current","goal":"should fail outside follow-up"}`))
+	if err == nil || !strings.Contains(err.Error(), "only valid in a persisted task thread") {
+		t.Fatalf("expected current alias outside follow-up to reject, out=%q err=%v", out, err)
 	}
 }
 

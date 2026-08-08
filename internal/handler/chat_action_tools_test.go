@@ -891,14 +891,15 @@ func TestGitHubPRRuntimeToolsShareTargetRejections(t *testing.T) {
 	} {
 		t.Run(action.name+"/missing_task", func(t *testing.T) {
 			_, err := handlers[action.name](ctx, action.input("missing-task"))
-			if err == nil || err.Error() != "task not found in current project" {
+			if err == nil || err.Error() != "task missing-task not found" {
 				t.Fatalf("expected shared missing-task rejection, got %v", err)
 			}
 		})
 		t.Run(action.name+"/cross_project_task", func(t *testing.T) {
 			_, err := handlers[action.name](ctx, action.input(otherTask.ID))
-			if err == nil || err.Error() != "task not found in current project" {
-				t.Fatalf("expected shared cross-project rejection, got %v", err)
+			want := "task " + otherTask.ID + " belongs to a different project"
+			if err == nil || err.Error() != want {
+				t.Fatalf("expected shared cross-project rejection %q, got %v", want, err)
 			}
 		})
 	}

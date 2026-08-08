@@ -908,10 +908,14 @@ func (h *Handler) resolveTaskIDForTool(ctx context.Context, params streamingResp
 		if !params.IsTaskFollowup || params.TaskID == "" {
 			return "", fmt.Errorf("task_id current is only valid in a persisted task thread")
 		}
-		return params.TaskID, nil
+		taskID = params.TaskID
 	}
 	if taskID != "" {
-		return taskID, nil
+		task, err := h.resolveTaskReference(ctx, params.ProjectID, taskID, "")
+		if err != nil {
+			return "", err
+		}
+		return task.ID, nil
 	}
 	if strings.TrimSpace(title) != "" {
 		task, err := h.resolveTaskReference(ctx, params.ProjectID, "", title)
