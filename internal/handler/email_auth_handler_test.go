@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -184,6 +185,66 @@ func TestEmailConfigurePresetsRemove(t *testing.T) {
 	if password != "" {
 		t.Fatal("expected email password cleared")
 	}
+}
+
+func TestChannelsEmailTestConnection(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		h, e, _, _ := setupTestHandlerWithDB(t)
+		h.SetEmailService(&testEmailService{testFn: func(ctx context.Context) error { return nil }})
+
+		rec := htmxPost(e, "/channels/email/test", nil)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+		want := `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`
+		if rec.Body.String() != want {
+			t.Fatalf("expected success feedback %q, got %q", want, rec.Body.String())
+		}
+	})
+
+	t.Run("failure escapes service error", func(t *testing.T) {
+		h, e, _, _ := setupTestHandlerWithDB(t)
+		h.SetEmailService(&testEmailService{testFn: func(ctx context.Context) error {
+			return errors.New(`smtp <bad> & "quoted"`)
+		}})
+
+		rec := htmxPost(e, "/channels/email/test", nil)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+		want := `<div class="flex items-center gap-2 text-error"><span>Connection failed: smtp &lt;bad&gt; &amp; &quot;quoted&quot;</span></div>`
+		if rec.Body.String() != want {
+			t.Fatalf("expected escaped failure feedback %q, got %q", want, rec.Body.String())
+		}
+	})
+
+	t.Run("service missing uses email channel name", func(t *testing.T) {
+		_, e, _, _ := setupTestHandlerWithDB(t)
+
+		rec := htmxPost(e, "/channels/email/test", nil)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d", rec.Code)
+		}
+		want := `<div class="flex items-center gap-2 text-error"><span>Email service not configured</span></div>`
+		if rec.Body.String() != want {
+			t.Fatalf("expected missing-service feedback %q, got %q", want, rec.Body.String())
+		}
+	})
+}
+
+type testEmailService struct {
+	EmailServiceProvider
+	testFn func(context.Context) error
+}
+
+func (s *testEmailService) TestConnection(ctx context.Context) error {
+	if s != nil && s.testFn != nil {
+		return s.testFn(ctx)
+	}
+	return nil
 }
 
 func TestChannelsPageEmailUI(t *testing.T) {
