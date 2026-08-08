@@ -1524,6 +1524,8 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 	require.NotContains(t, previewBody, "This template is browser-local until you save its YAML definition.")
 	require.NotContains(t, previewBody, `New Automation`)
 	require.NotContains(t, previewBody, `Saving validates and applies this Automation immediately.`)
+	require.NotContains(t, previewBody, "Suggested nodes")
+	require.NotContains(t, previewBody, "Quick-add nodes understood by this Automation’s runtime.")
 	require.NotContains(t, previewBody, "Enabled when applied")
 	require.NotContains(t, previewBody, `_enabled\"`)
 	require.Empty(t, preview.Header().Get("HX-Redirect"), "selecting a template must remain browser-local until Save changes")

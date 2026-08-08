@@ -1132,17 +1132,6 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						<label class="form-control"><span class="label-text">Name</span><input class="input input-bordered" name="node_name" maxlength="200" placeholder="Review result" required autofocus/></label>
 						<div class="modal-action"><button class="btn btn-ghost" type="button" onclick="document.getElementById('automation-node-dialog').close()">Cancel</button><button class="btn btn-primary" type="submit" data-automation-create-node>Add node</button></div>
 					</form>
-					if page.Source == "template" {
-						<details class="mt-5 border-t border-base-300 pt-4"><summary class="cursor-pointer text-sm font-semibold">Suggested nodes</summary><p class="mt-1 text-xs text-base-content/60">Quick-add nodes understood by this Automation’s runtime.</p>
-							<div class="mt-2 space-y-1">
-								for _, node := range page.NodePalette {
-									if !automationDraftHasNode(page.Result.Candidate.Nodes, node.Key) {
-										<form method="post" action={ templ.SafeURL(automationBuilderPostURL(page, currentProjectID)) } hx-post={ automationBuilderPostURL(page, currentProjectID) } hx-target="#main-content"><input type="hidden" name="project_id" value={ currentProjectID }/><input type="hidden" name="builder_source" value={ page.Source }/><input type="hidden" value={ automationDraftCandidateJSON(page.Result.Candidate) } data-candidate-json/><input type="hidden" name="automation_yaml" value={ page.YAML } data-automation-yaml-submission/><input type="hidden" name="builder_action" value="add_node"/><input type="hidden" name="node_key" value={ node.Key }/><button class="btn btn-ghost h-auto min-h-11 w-full justify-start py-2 text-left" type="submit" data-automation-add-node><span><span class="block text-sm font-medium">{ node.Name }</span><span class="block text-xs font-normal text-base-content/55">{ automationNodeTypeLabel(node.Type) }</span></span></button></form>
-									}
-								}
-							</div>
-						</details>
-					}
 					</div>
 					<form method="dialog" class="modal-backdrop"><button aria-label="Close add node dialog">close</button></form>
 				</dialog>
