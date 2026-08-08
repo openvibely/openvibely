@@ -616,7 +616,7 @@ modelLoop:
 			return
 		}
 		pendingSteering = preparedSteeringBatch{}
-		preparedAfter, steeringErr := h.preparePendingSteeringInputs(ctx, &params, result.Output)
+		preparedAfter, steeringErr := h.preparePendingTextSteeringInputs(ctx, &params, result.Output)
 		if steeringErr != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering after model call: %v", params.ExecID, steeringErr)
 		}
@@ -703,7 +703,7 @@ modelLoop:
 		return
 	}
 	if completionOutcome == repository.CompleteSuccessPendingSteering {
-		prepared, steeringErr := h.preparePendingSteeringInputsFromPersistedReplay(ctx, &params, output)
+		prepared, steeringErr := h.preparePendingTextSteeringInputsFromPersistedReplay(ctx, &params, output)
 		if steeringErr != nil {
 			finalizeLifecycle(steeringErr, result.ChatContext)
 			applog.Infof("[handler] processStreamingResponse exec=%s error preparing steering after deferred completion: %v", params.ExecID, steeringErr)
@@ -712,11 +712,12 @@ modelLoop:
 			return
 		}
 		if prepared.count() > 0 {
-			applog.Infof("[handler] processStreamingResponse exec=%s prepared %d steering inputs after deferred completion; continuing active turn", params.ExecID, prepared.count())
+			applog.Infof("[handler] processStreamingResponse exec=%s prepared %d text steering inputs after deferred completion; continuing active turn", params.ExecID, prepared.count())
 			pendingSteering = prepared
 			goto modelLoop
 		}
-		applog.Infof("[handler] processStreamingResponse exec=%s completion deferred but no steering was claimable; retrying completion", params.ExecID)
+		applog.Infof("[handler] processStreamingResponse exec=%s completion deferred with no text steering; requeueing remaining steering inputs", params.ExecID)
+		h.requeuePendingSteeringForExecution(ctx, params.ExecID)
 		completionOutcome = h.completeWithSuccess(ctx, params.ExecID, params.TaskID, output, params.WorkDir, tokensUsed, durationMs, params.TelegramInitialAckMessageID, params.ChannelReply)
 		if completionOutcome == repository.CompleteSuccessAlreadyTerminal {
 			finalizeLifecycle(nil, result.ChatContext)
@@ -794,7 +795,11 @@ func (h *Handler) waitForFinalSteeringInputs(ctx context.Context, params *stream
 	poll := time.NewTicker(finalSteeringPollInterval)
 	defer poll.Stop()
 	for {
-		prepared, err := h.preparePendingSteeringInputs(ctx, params, previousAssistantOutput)
+		// Once an outer provider call has returned, attachment-bearing steering can no
+		// longer be represented as a separate user attachment on this execution. Only
+		// text steering may continue the current turn; attachment steering is requeued
+		// by the deferred-completion path and processed as the next normal message.
+		prepared, err := h.preparePendingTextSteeringInputs(ctx, params, previousAssistantOutput)
 		if prepared.count() > 0 || err != nil {
 			return prepared, err
 		}
@@ -862,6 +867,15 @@ func (h *Handler) claimPendingSteeringInputsWithOptions(ctx context.Context, par
 
 func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
 	batch, err := h.claimPendingSteeringInputs(ctx, params)
+	return h.prepareClaimedSteeringInputs(ctx, params, previousAssistantOutput, batch, err)
+}
+
+func (h *Handler) preparePendingTextSteeringInputs(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
+	batch, err := h.claimPendingTextSteeringInputs(ctx, params)
+	return h.prepareClaimedSteeringInputs(ctx, params, previousAssistantOutput, batch, err)
+}
+
+func (h *Handler) prepareClaimedSteeringInputs(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string, batch preparedSteeringBatch, err error) (preparedSteeringBatch, error) {
 	if err != nil || batch.count() == 0 {
 		return batch, err
 	}
@@ -913,6 +927,15 @@ func (h *Handler) preparePendingSteeringInputs(ctx context.Context, params *stre
 
 func (h *Handler) preparePendingSteeringInputsFromPersistedReplay(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
 	batch, err := h.preparePendingSteeringInputs(ctx, params, previousAssistantOutput)
+	return h.collapsePreparedSteeringReplay(params, batch, err)
+}
+
+func (h *Handler) preparePendingTextSteeringInputsFromPersistedReplay(ctx context.Context, params *streamingResponseParams, previousAssistantOutput string) (preparedSteeringBatch, error) {
+	batch, err := h.preparePendingTextSteeringInputs(ctx, params, previousAssistantOutput)
+	return h.collapsePreparedSteeringReplay(params, batch, err)
+}
+
+func (h *Handler) collapsePreparedSteeringReplay(params *streamingResponseParams, batch preparedSteeringBatch, err error) (preparedSteeringBatch, error) {
 	if err != nil || batch.count() == 0 {
 		return batch, err
 	}

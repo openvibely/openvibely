@@ -4032,6 +4032,77 @@ func TestProcessStreamingResponse_AppliesPreparedSteeringAfterSuccessfulProvider
 	require.Equal(t, models.ThreadInputApplied, applied.InputStatus)
 }
 
+func TestProcessStreamingResponse_RequeuesLateAttachmentSteeringInsteadOfCommittingToCompletedChatTurn(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	originalUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	t.Cleanup(func() { uploadsDir = originalUploadsDir })
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Late Chat Steering Attachment Project")
+	activeTask := createTask(t, h, project.ID, "Late Chat Steering Attachment Task", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+	})
+	exec := createExec(t, h, activeTask.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "tell me a story about a cow"
+	})
+	sessionID := "late-chat-steering-session"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	var steeringID string
+	var createLateSteering sync.Once
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "cow story complete"
+	mock.TextOnly = "cow story complete"
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		createLateSteering.Do(func() {
+			require.NoError(t, os.MkdirAll(pendingDir, 0755))
+			require.NoError(t, os.WriteFile(filepath.Join(pendingDir, "screen.png"), []byte("fake-png"), 0644))
+			steering := &models.ThreadInput{
+				Scope:               models.ThreadInputScopeChat,
+				ProjectID:           project.ID,
+				RunExecutionID:      exec.ID,
+				InputMode:           models.ThreadInputModeSteering,
+				InputStatus:         models.ThreadInputPending,
+				TurnID:              exec.ID,
+				ExpectedTurnID:      exec.ID,
+				Content:             "what is in the image?",
+				AttachmentSessionID: sessionID,
+			}
+			require.NoError(t, h.threadInputRepo.CreateSteeringForActiveExecution(ctx, steering, exec.ID))
+			steeringID = steering.ID
+		})
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:                      exec.ID,
+		TaskID:                      activeTask.ID,
+		Message:                     "tell me a story about a cow",
+		Agent:                       *agent,
+		ProjectID:                   project.ID,
+		suppressQueuedTurnPromotion: true,
+	})
+
+	require.Equal(t, 1, mock.CallCount(), "late attachment steering must not trigger a continuation on the completed turn")
+	chatAttachments, err := h.chatAttachmentRepo.ListByExecution(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Empty(t, chatAttachments, "late steering attachments must not be published on the original user turn")
+	requeued, err := h.threadInputRepo.GetByID(ctx, steeringID)
+	require.NoError(t, err)
+	require.NotNil(t, requeued)
+	require.Equal(t, models.ThreadInputPending, requeued.InputStatus)
+	require.Equal(t, models.ThreadInputModeQueued, requeued.InputMode)
+	require.Empty(t, requeued.TurnID)
+	require.Empty(t, requeued.ExpectedTurnID)
+	require.Equal(t, sessionID, requeued.AttachmentSessionID)
+	require.FileExists(t, filepath.Join(pendingDir, "screen.png"))
+}
+
 func TestProcessStreamingResponse_SendsAndCommitsPreparedSteeringAttachmentsAfterSuccessfulProviderCall(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil
