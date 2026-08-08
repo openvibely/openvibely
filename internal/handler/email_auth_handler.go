@@ -54,13 +54,9 @@ func (h *Handler) RemoveEmailAuthorizedSender(c echo.Context) error {
 		c,
 		c.Param("id"),
 		c.QueryParam("project_id"),
-		func(ctx context.Context, id string) (string, bool, error) {
-			sender, err := h.emailAuthRepo.GetByID(ctx, id)
-			if err != nil || sender == nil {
-				return "", sender != nil, err
-			}
-			return sender.ProjectID, true, nil
-		},
+		authorizedUserProjectLookup(h.emailAuthRepo.GetByID, func(sender *models.EmailAuthorizedSender) string {
+			return sender.ProjectID
+		}),
 		h.emailAuthRepo.Delete,
 	)
 }

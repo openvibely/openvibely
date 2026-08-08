@@ -54,13 +54,9 @@ func (h *Handler) RemoveSlackAuthorizedUser(c echo.Context) error {
 		c,
 		c.Param("id"),
 		c.QueryParam("project_id"),
-		func(ctx context.Context, id string) (string, bool, error) {
-			user, err := h.slackAuthRepo.GetByID(ctx, id)
-			if err != nil || user == nil {
-				return "", user != nil, err
-			}
-			return user.ProjectID, true, nil
-		},
+		authorizedUserProjectLookup(h.slackAuthRepo.GetByID, func(user *models.SlackAuthorizedUser) string {
+			return user.ProjectID
+		}),
 		h.slackAuthRepo.Delete,
 	)
 }

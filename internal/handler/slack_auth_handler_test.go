@@ -55,7 +55,8 @@ func TestAddSlackAuthorizedUser(t *testing.T) {
 }
 
 func TestRemoveSlackAuthorizedUser(t *testing.T) {
-	_, e, repo, projectID := setupSlackAuthHandler(t)
+	h, e, repo, projectID := setupSlackAuthHandler(t)
+	otherProject := createProject(t, h, "Other Slack Auth Project")
 
 	user := &models.SlackAuthorizedUser{
 		ProjectID:   projectID,
@@ -66,20 +67,33 @@ func TestRemoveSlackAuthorizedUser(t *testing.T) {
 	if err := repo.Create(context.Background(), user); err != nil {
 		t.Fatalf("failed to create slack auth user: %v", err)
 	}
+	otherUser := &models.SlackAuthorizedUser{ProjectID: otherProject.ID, SlackUserID: "U888", DisplayName: "Other Slack User", AddedBy: "web"}
+	if err := repo.Create(context.Background(), otherUser); err != nil {
+		t.Fatalf("failed to create other slack auth user: %v", err)
+	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/channels/slack/authorized-users/"+user.ID+"?project_id="+projectID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/channels/slack/authorized-users/"+user.ID, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
 	assertCode(t, rec, http.StatusOK)
-	assertContains(t, rec, "No authorized users configured")
+	assertNotContains(t, rec, "To Remove")
+	assertContains(t, rec, "Other Slack User")
+	assertContains(t, rec, `name="project_id" value="`+projectID+`"`)
 
-	users, err := repo.ListByProject(context.Background(), projectID)
+	deleted, err := repo.GetByID(context.Background(), user.ID)
 	if err != nil {
-		t.Fatalf("list slack auth users failed: %v", err)
+		t.Fatalf("get deleted slack auth user failed: %v", err)
 	}
-	if len(users) != 0 {
-		t.Fatalf("expected 0 users after removal, got %d", len(users))
+	if deleted != nil {
+		t.Fatalf("expected deleted user to be removed, got %#v", deleted)
+	}
+	remaining, err := repo.GetByID(context.Background(), otherUser.ID)
+	if err != nil {
+		t.Fatalf("get other slack auth user failed: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("expected other project user to remain")
 	}
 }
 

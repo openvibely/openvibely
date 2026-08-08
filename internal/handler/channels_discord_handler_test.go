@@ -248,6 +248,7 @@ func TestChannelsDiscordTestConnection(t *testing.T) {
 func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Discord Auth Handler Project")
+	otherProject := createProject(t, h, "Other Discord Auth Handler Project")
 
 	form := url.Values{}
 	form.Set("project_id", project.ID)
@@ -275,19 +276,54 @@ func TestDiscordAuthorizedUsersHandlers(t *testing.T) {
 		t.Fatalf("expected non-numeric Discord ID rejected with numeric guidance, got %d %q", invalidRec.Code, invalidRec.Body.String())
 	}
 
-	users, err := h.discordAuthRepo.ListByProject(context.Background(), project.ID)
-	if err != nil || len(users) != 1 {
-		t.Fatalf("expected one discord user, got %d err=%v", len(users), err)
+	otherUser := &models.DiscordAuthorizedUser{ProjectID: otherProject.ID, DiscordUserID: "67890", DisplayName: "Other Discord User", AddedBy: "test"}
+	if err := h.discordAuthRepo.Create(context.Background(), otherUser); err != nil {
+		t.Fatalf("seed other discord user: %v", err)
 	}
 
-	delReq := httptest.NewRequest(http.MethodDelete, "/channels/discord/authorized-users/"+users[0].ID+"?project_id="+project.ID, nil)
+	users, err := h.discordAuthRepo.ListByProject(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("list discord users: %v", err)
+	}
+	var user *models.DiscordAuthorizedUser
+	for i := range users {
+		if users[i].DiscordUserID == "12345" {
+			user = &users[i]
+			break
+		}
+	}
+	if user == nil {
+		t.Fatalf("expected added discord user in %#v", users)
+	}
+
+	delReq := httptest.NewRequest(http.MethodDelete, "/channels/discord/authorized-users/"+user.ID, nil)
 	delRec := httptest.NewRecorder()
 	e.ServeHTTP(delRec, delReq)
 
 	if delRec.Code != http.StatusOK {
 		t.Fatalf("expected delete status 200, got %d %q", delRec.Code, delRec.Body.String())
 	}
-	if !strings.Contains(delRec.Body.String(), "No authorized users configured. Access is denied until authorized users are added.") {
-		t.Fatalf("expected deny-by-default empty state, got %q", delRec.Body.String())
+	if strings.Contains(delRec.Body.String(), "ID: 12345") {
+		t.Fatalf("expected removed user to disappear from response, got %q", delRec.Body.String())
+	}
+	if !strings.Contains(delRec.Body.String(), "Other Discord User") {
+		t.Fatalf("expected other system-level user to remain visible, got %q", delRec.Body.String())
+	}
+	if !strings.Contains(delRec.Body.String(), `name="project_id" value="`+project.ID+`"`) {
+		t.Fatalf("expected omitted project_id delete to reload with record project %q, got %q", project.ID, delRec.Body.String())
+	}
+	deleted, err := h.discordAuthRepo.GetByID(context.Background(), user.ID)
+	if err != nil {
+		t.Fatalf("get deleted discord user: %v", err)
+	}
+	if deleted != nil {
+		t.Fatalf("expected deleted discord user removed, got %#v", deleted)
+	}
+	remaining, err := h.discordAuthRepo.GetByID(context.Background(), otherUser.ID)
+	if err != nil {
+		t.Fatalf("get other discord user: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("expected other project user to remain")
 	}
 }
