@@ -46,36 +46,40 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	}
 
 	runner := `<style>
-	.hidden { display: none; }
-	details > div { position: relative; margin-top: 0.75rem; padding-right: 2rem; }
-	[data-alert-copy] { position: absolute; right: 0; top: 0; width: 1.5rem; height: 1.5rem; }
-	.min-h-6 { min-height: 1.5rem; }
-	</style><script>
-	window.addEventListener('DOMContentLoaded', function() {
-	  function report(status, message) { fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
-	  function fail(message) { throw new Error(message); }
-	  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
-	  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
-	  (async function() {
-	    var copied = [];
-	    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied.push(text); return Promise.resolve(); }}});
-	    var operational = document.querySelector('#alert-operational-1 [data-alert-copy]');
-	    var notification = document.querySelector('#alert-notification-1 [data-alert-copy]');
-	    var emptyBody = document.querySelector('#alert-empty-body-1 [data-alert-copy]');
-	    if (!operational || !notification) fail('missing inspect copy buttons');
-	    if (emptyBody) fail('body-less alert exposed a copy button');
-	    operational.click();
-	    await wait(0);
-	    if (operational.textContent.trim() !== 'Copied') fail('success feedback was not shown');
-	    if (copied[0] !== 'Compiler diagnostics\nline 2') fail('operational alert copied more than its body: ' + copied[0]);
-	    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function() { return Promise.reject(new Error('denied')); }}});
-	    notification.click();
-	    await wait(0);
-	    if (notification.textContent.trim() !== 'Copy failed') fail('failure feedback was not shown');
-	    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied.push(text); return Promise.resolve(); }}});
-	    notification.click();
-	    await wait(0);
-	    if (copied[1] !== 'Check the patch.') fail('notification copied more than its body: ' + copied[1]);
+		.hidden { display: none; }
+		details > div { position: relative; margin-top: 0.75rem; padding-right: 2rem; }
+		[data-alert-copy] { position: absolute; right: 0; top: 0; width: 1.5rem; height: 1.5rem; }
+		.min-h-6 { min-height: 1.5rem; }
+		</style><script>
+		window.addEventListener('DOMContentLoaded', function() {
+		  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+		  function fail(message) { throw new Error(message); }
+		  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+		  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
+		  (async function() {
+		    await report('progress', 'dom-ready');
+		    var copied = [];
+		    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied.push(text); return Promise.resolve(); }}});
+		    var operational = document.querySelector('#alert-operational-1 [data-alert-copy]');
+		    var notification = document.querySelector('#alert-notification-1 [data-alert-copy]');
+		    var emptyBody = document.querySelector('#alert-empty-body-1 [data-alert-copy]');
+		    if (!operational || !notification) fail('missing inspect copy buttons');
+		    if (emptyBody) fail('body-less alert exposed a copy button');
+		    await report('progress', 'buttons-ready');
+		    operational.click();
+		    await wait(0);
+		    if (operational.textContent.trim() !== 'Copied') fail('success feedback was not shown');
+		    if (copied[0] !== 'Compiler diagnostics\nline 2') fail('operational alert copied more than its body: ' + copied[0]);
+		    await report('progress', 'success-feedback-ready');
+		    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function() { return Promise.reject(new Error('denied')); }}});
+		    notification.click();
+		    await wait(0);
+		    if (notification.textContent.trim() !== 'Copy failed') fail('failure feedback was not shown');
+		    await report('progress', 'failure-feedback-ready');
+		    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied.push(text); return Promise.resolve(); }}});
+		    notification.click();
+		    await wait(0);
+		    if (copied[1] !== 'Check the patch.') fail('notification copied more than its body: ' + copied[1]);
 	    report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});
@@ -107,23 +111,32 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	defer os.RemoveAll(profileDir)
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
-		"--disable-dev-shm-usage", "--disable-background-networking", "--no-first-run", "--no-default-browser-check",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check",
 		"--user-data-dir="+profileDir, server.URL,
 	)
 	cmd.Stderr = stderrFile
 	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
-	var outcome string
-	select {
-	case outcome = <-browserResult:
-	case <-time.After(10 * time.Second):
-		outcome = "fail:timed out waiting for browser result"
+	var outcome, lastProgress string
+	deadline := time.After(20 * time.Second)
+	for outcome == "" {
+		select {
+		case result := <-browserResult:
+			if strings.HasPrefix(result, "progress:") {
+				lastProgress = strings.TrimPrefix(result, "progress:")
+				continue
+			}
+			outcome = result
+		case <-deadline:
+			outcome = "fail:timed out waiting for browser result; last progress=" + lastProgress
+		}
 	}
 	stopBrowserProcess(cmd)
 	if !strings.HasPrefix(outcome, "pass:") {
 		stderr, _ := os.ReadFile(stderrPath)
-		t.Fatalf("Alerts inspect copy browser regression failed: %s\nChrome stderr:\n%s", outcome, stderr)
+		t.Fatalf("Alerts inspect copy browser regression failed: %s\nLast browser progress: %s\nChrome stderr:\n%s", outcome, lastProgress, stderr)
 	}
 }
 
