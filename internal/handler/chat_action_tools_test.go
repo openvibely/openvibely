@@ -999,6 +999,9 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if err := authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Alice", Permission: "approve"}); err != nil {
 		t.Fatalf("configure authorized actor: %v", err)
 	}
+	if err := authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Dev-Bot", Permission: "triage"}); err != nil {
+		t.Fatalf("configure dev-bot authorized actor: %v", err)
+	}
 	var sawMyAssignedIssues bool
 	var createdRepo, commentedRepo, labeledRepo string
 	h.SetGitHubService(&fakeGitHubService{
@@ -1058,7 +1061,7 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("github_get_project_inbox returned error: %v", err)
 	}
-	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"assignees":["alice"]`) || !strings.Contains(out, `"legacy_inbox"`) || !strings.Contains(out, `"github_login":"dev-bot"`) {
+	if !strings.Contains(out, `"configured":true`) || !strings.Contains(out, `"alice"`) || !strings.Contains(out, `"dev-bot"`) || !strings.Contains(out, `"legacy_inbox"`) || !strings.Contains(out, `"github_login":"dev-bot"`) {
 		t.Fatalf("expected authorized-user assignee output with legacy inbox metadata, got %s", out)
 	}
 	out, err = handlers["github_is_actor_authorized"](ctx, json.RawMessage(`{"github_login":"ALICE"}`))
@@ -1088,6 +1091,9 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	}
 	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
 		t.Fatalf("expected explicit-assignee assigned issues output, got %s", out)
+	}
+	if _, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"mallory"}`)); err == nil || !strings.Contains(err.Error(), "not authorized") {
+		t.Fatalf("expected unauthorized explicit-assignee error, got %v", err)
 	}
 	out, err = handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(`{"repo_url":"https://github.com/example/other"}`))
 	if err != nil {

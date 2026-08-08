@@ -1633,8 +1633,10 @@ func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t 
 			return []GitHubIssue{issue}, nil
 		},
 	}
+	githubAuthRepo := repository.NewGitHubAuthRepo(fixture.repo.DB())
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "dubee"}))
 	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
-		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
+		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHubAuthRepo: githubAuthRepo, GitHub: provider})
 	inboxCtx := newAutomationGitHubIssueCausalContext(t, fixture, fixture.definition, fixture.task, "dev_inbox", "stale-assigned-scan")
 
 	out, err := handlers["github_list_assigned_issues"](inboxCtx, json.RawMessage(`{"assignee":"dubee"}`))
@@ -1858,10 +1860,10 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Contains(t, assignedOutput, `"Number":42`)
 	require.Contains(t, assignedOutput, `"Number":43`)
 	require.Contains(t, assignedOutput, `"Number":44`)
-	require.NotContains(t, assignedOutput, `"Number":45`)
+	require.Contains(t, assignedOutput, `"Number":45`)
 	var issueItems int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND kind = 'github_issue'`, fixture.definition.Automation.ID).Scan(&issueItems))
-	require.Equal(t, 3, issueItems, "the inbox must retain only issues created by its Automation producers")
+	require.Equal(t, 4, issueItems, "the inbox must record every issue returned by an authorized assignment scan, including manually created issues")
 
 	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(fixture.taskRepo, nil, workerSvc)
@@ -1892,6 +1894,23 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	afterInvalidTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
 	require.NoError(t, err)
 	require.Len(t, afterInvalidTasks, len(beforeTasks), "an undiscovered issue must fail before any task is persisted")
+
+	manualOutput, handled, isErr, manualErr := runtime.Executor(inboxCtx, "create_task", json.RawMessage(`{
+		"title":"Manual assigned issue task","prompt":"implement manually created issue 45","category":"backlog",
+		"source_github_issue_number":45
+	}`))
+	require.NoError(t, manualErr)
+	require.True(t, handled)
+	require.False(t, isErr)
+	manualTask, err := fixture.taskRepo.GetByProjectAndTitle(ctx, fixture.project.ID, "Manual assigned issue task")
+	require.NoError(t, err)
+	require.Contains(t, manualOutput, manualTask.ID)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, manualTask.ID, submitted.ID, "a manually created GitHub issue assigned to the PAT owner must be submitted")
+	case <-time.After(time.Second):
+		t.Fatal("manually assigned GitHub issue task was not submitted to the worker")
+	}
 
 	configuredRepoURL := fixture.project.RepoURL
 	fixture.project.RepoURL = ""
@@ -1959,7 +1978,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Contains(t, secondOutput, implementationTask.ID)
 	afterDuplicateTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
 	require.NoError(t, err)
-	require.Len(t, afterDuplicateTasks, len(beforeTasks)+2, "one issue work item must have at most one implementation task")
+	require.Len(t, afterDuplicateTasks, len(beforeTasks)+3, "one issue work item must have at most one implementation task")
 
 	telegram := &TelegramService{taskSvc: taskSvc, taskRepo: fixture.taskRepo, llmSvc: llmSvc}
 	telegramHandlers := telegram.telegramActionHandlersForTask(fixture.project.ID, fixture.task.ID, 123, 456, nil)
@@ -1971,7 +1990,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Contains(t, channelOutput, implementationTask.ID)
 	afterChannelTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
 	require.NoError(t, err)
-	require.Len(t, afterChannelTasks, len(beforeTasks)+2, "task-bound channel create_task must use exact Automation provenance")
+	require.Len(t, afterChannelTasks, len(beforeTasks)+3, "task-bound channel create_task must use exact Automation provenance")
 
 	type taskCreationCallResult struct {
 		output  string
@@ -2006,7 +2025,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	}
 	afterConcurrentTasks, err := fixture.taskRepo.ListByProject(ctx, fixture.project.ID, "")
 	require.NoError(t, err)
-	require.Len(t, afterConcurrentTasks, len(beforeTasks)+3, "concurrent creation must persist one canonical task for issue 43")
+	require.Len(t, afterConcurrentTasks, len(beforeTasks)+4, "concurrent creation must persist one canonical task for issue 43")
 	var issue43Task *models.Task
 	for i := range afterConcurrentTasks {
 		if strings.Contains(afterConcurrentTasks[i].Title, "concurrent title for issue 43") {
@@ -2069,8 +2088,8 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activity_resources WHERE resource_type = 'pull_request' AND resource_id = 'github:example/runtime:pull:7'`).Scan(&prResources))
 	require.Equal(t, 1, prResources)
 	edgeExpectations := map[string]int{
-		"bug_to_issue": 3, "issue_to_assignment": 3, "assignment_to_inbox": 3,
-		"inbox_to_implementation": 3, "implementation_to_pr": 1, "pr_to_review": 1,
+		"bug_to_issue": 3, "issue_to_assignment": 3, "assignment_to_inbox": 4,
+		"inbox_to_implementation": 4, "implementation_to_pr": 1, "pr_to_review": 1,
 	}
 	for edgeKey, expected := range edgeExpectations {
 		var edgeTransitions int

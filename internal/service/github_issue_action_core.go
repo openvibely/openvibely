@@ -162,14 +162,18 @@ func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context,
 }
 
 func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, input json.RawMessage, postprocess GitHubAssignedIssuesPostprocessor) (string, error) {
-	var assignee string
-	_, repo, err := c.requestAndRepo(ctx, input, func(req GitHubIssueActionRequest) error {
-		assignee = strings.TrimSpace(req.Assignee)
-		if assignee == "" {
-			return fmt.Errorf("assignee is required")
-		}
-		return nil
-	})
+	req, err := c.request(input)
+	if err != nil {
+		return "", err
+	}
+	assignee := strings.TrimSpace(req.Assignee)
+	if assignee == "" {
+		return "", fmt.Errorf("assignee is required")
+	}
+	if err := c.requireAuthorizedAssignee(ctx, assignee); err != nil {
+		return "", err
+	}
+	repo, err := c.resolve(ctx, req.RepoURL)
 	if err != nil {
 		return "", err
 	}
@@ -185,20 +189,40 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, i
 }
 
 func (c *GitHubIssueActionCore) ExecuteListAssignedIssuesWithPRs(ctx context.Context, input json.RawMessage) (string, error) {
-	req, repo, err := c.requestAndRepo(ctx, input, func(req GitHubIssueActionRequest) error {
-		if strings.TrimSpace(req.Assignee) == "" {
-			return fmt.Errorf("assignee is required")
-		}
-		return nil
-	})
+	req, err := c.request(input)
 	if err != nil {
 		return "", err
 	}
-	items, err := c.provider.ListAssignedIssuesWithPullRequests(ctx, repo, req.Assignee)
+	assignee := strings.TrimSpace(req.Assignee)
+	if assignee == "" {
+		return "", fmt.Errorf("assignee is required")
+	}
+	if err := c.requireAuthorizedAssignee(ctx, assignee); err != nil {
+		return "", err
+	}
+	repo, err := c.resolve(ctx, req.RepoURL)
+	if err != nil {
+		return "", err
+	}
+	items, err := c.provider.ListAssignedIssuesWithPullRequests(ctx, repo, assignee)
 	if err != nil {
 		return "", err
 	}
 	return githubIssueActionJSON(map[string]any{"ok": true, "items": items, "skipped_without_pr": "Assigned issues without an associated pull request are skipped."})
+}
+
+func (c *GitHubIssueActionCore) requireAuthorizedAssignee(ctx context.Context, assignee string) error {
+	if c.auth == nil {
+		return fmt.Errorf("github auth repository unavailable")
+	}
+	authorized, err := c.auth.IsActorAuthorized(ctx, assignee)
+	if err != nil {
+		return err
+	}
+	if !authorized {
+		return fmt.Errorf("GitHub assignee %s is not authorized", repository.NormalizeGitHubLogin(assignee))
+	}
+	return nil
 }
 
 func (c *GitHubIssueActionCore) ExecuteCommentOnIssue(ctx context.Context, input json.RawMessage) (string, error) {

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 )
 
 type fakeGitHubIssueActionProvider struct {
@@ -40,7 +41,9 @@ func (f *fakeGitHubIssueActionProvider) AddLabelsToIssue(_ context.Context, _ *G
 	return nil
 }
 
-type fakeGitHubIssueAuthorizationStore struct{}
+type fakeGitHubIssueAuthorizationStore struct {
+	authorized map[string]bool
+}
 
 func (fakeGitHubIssueAuthorizationStore) ListAuthorizedInboxAssignees(context.Context) ([]models.GitHubAuthorizedActor, error) {
 	return []models.GitHubAuthorizedActor{{GitHubLogin: " Alice "}}, nil
@@ -48,8 +51,11 @@ func (fakeGitHubIssueAuthorizationStore) ListAuthorizedInboxAssignees(context.Co
 func (fakeGitHubIssueAuthorizationStore) GetEnabledProjectInbox(context.Context, string) (*models.GitHubProjectInbox, error) {
 	return &models.GitHubProjectInbox{GitHubLogin: "legacy", Enabled: true}, nil
 }
-func (fakeGitHubIssueAuthorizationStore) IsActorAuthorized(context.Context, string) (bool, error) {
-	return true, nil
+func (f fakeGitHubIssueAuthorizationStore) IsActorAuthorized(_ context.Context, login string) (bool, error) {
+	if f.authorized == nil {
+		return true, nil
+	}
+	return f.authorized[repository.NormalizeGitHubLogin(login)], nil
 }
 
 func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *testing.T) {
@@ -136,6 +142,32 @@ func TestGitHubIssueActionCoreAssignedIssueValidationPrecedesRepoResolution(t *t
 	} {
 		if _, err := execute(context.Background(), json.RawMessage(`{"repo_url":"ignored"}`)); err == nil || err.Error() != "assignee is required" {
 			t.Fatalf("error=%v, want assignee is required", err)
+		}
+	}
+	if resolveCalls != 0 {
+		t.Fatalf("resolve calls=%d, want 0", resolveCalls)
+	}
+}
+
+func TestGitHubIssueActionCoreListAssignedIssuesRejectsUnauthorizedAssigneeBeforeRepoResolution(t *testing.T) {
+	resolveCalls := 0
+	provider := &fakeGitHubIssueActionProvider{}
+	core := NewGitHubIssueActionCore(provider, fakeGitHubIssueAuthorizationStore{authorized: map[string]bool{"alice": true}}, "",
+		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
+		func(context.Context, string) (*GitHubRepoRef, error) {
+			resolveCalls++
+			return &GitHubRepoRef{FullName: "owner/repo"}, nil
+		})
+
+	for _, execute := range []func(context.Context, json.RawMessage) (string, error){
+		func(ctx context.Context, input json.RawMessage) (string, error) {
+			return core.ExecuteListAssignedIssues(ctx, input, nil)
+		},
+		core.ExecuteListAssignedIssuesWithPRs,
+	} {
+		_, err := execute(context.Background(), json.RawMessage(`{"assignee":"mallory","repo_url":"ignored"}`))
+		if err == nil || err.Error() != "GitHub assignee mallory is not authorized" {
+			t.Fatalf("error=%v, want unauthorized assignee", err)
 		}
 	}
 	if resolveCalls != 0 {

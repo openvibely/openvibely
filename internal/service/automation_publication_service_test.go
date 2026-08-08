@@ -1064,10 +1064,10 @@ func TestAutomationCustomScheduledGitHubInboxCreatesRuntimeIssueTasksWithoutRela
 	}
 	inboxTask, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, "inbox", "task"))
 	require.NoError(t, err)
-	require.Contains(t, inboxTask.Prompt, "Only process assigned issues created by the connected upstream producers on this inbox's assignment branch in this same Automation")
+	require.Contains(t, inboxTask.Prompt, "Process open issues assigned to the PAT owner or configured GitHub Authorized Users for this inbox")
+	require.Contains(t, inboxTask.Prompt, "whether the issue was created by this Automation or manually in GitHub")
 	require.Contains(t, inboxTask.Prompt, `Producer: "Find model releases"`)
 	require.Contains(t, inboxTask.Prompt, `Purpose: "Find relevant model releases."`)
-	require.Contains(t, inboxTask.Prompt, "exact trusted local Automation, graph-version, and producer-branch creation records")
 	require.Contains(t, inboxTask.Prompt, "Create at most one visible task per actionable assigned issue")
 	require.NotContains(t, inboxTask.Prompt, "Connected Task handoff")
 }

@@ -376,7 +376,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_assigned_issues",
-		Description:  "List open GitHub issues assigned to the provided GitHub login, defaulting to the current project repository. Pull request objects are omitted. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
+		Description:  "List open GitHub issues assigned to a configured GitHub Authorized User, defaulting to the current project repository. Pull request objects are omitted. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,

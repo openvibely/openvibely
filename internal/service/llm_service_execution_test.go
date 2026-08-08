@@ -4152,13 +4152,15 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 			return nil
 		},
 	}
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Dev-Bot"}))
 	rt := buildGitHubIssueRuntimeTools(githubIssueRuntimeOptions{
 		ProjectID:            project.ID,
 		ProjectRepo:          projectRepo,
 		TaskRepo:             taskRepo,
 		TaskPullRequestRepo:  prRepo,
 		GitHubPRFeedbackRepo: feedbackRepo,
-		GitHubAuthRepo:       repository.NewGitHubAuthRepo(db),
+		GitHubAuthRepo:       githubAuthRepo,
 		ThreadInputRepo:      threadInputRepo,
 		GitHub:               provider,
 	})
@@ -4311,7 +4313,6 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if !strings.Contains(out, `"authorized":false`) {
 		t.Fatalf("expected deny-by-default authorization output, got %s", out)
 	}
-	githubAuthRepo := repository.NewGitHubAuthRepo(db)
 	if err := githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "Dev-Bot", Permission: "triage"}); err != nil {
 		t.Fatalf("configure github authorized user: %v", err)
 	}

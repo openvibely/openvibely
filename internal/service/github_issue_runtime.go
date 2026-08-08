@@ -948,33 +948,8 @@ func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOption
 	return recordedBindings, nil
 }
 
-func filterGitHubAssignedIssuesForAutomationInbox(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
-	automationContext, automationBound := AutomationContextFromContext(ctx)
-	if !automationBound || automationContext.ProjectID != opts.ProjectID {
-		return issues, nil
-	}
-	if opts.AutomationRepo == nil {
-		return nil, errors.New("Automation repository unavailable for assigned issue ownership check")
-	}
-	filtered := make([]GitHubIssue, 0, len(issues))
-	for _, issue := range issues {
-		resourceID := githubIssueResourceID(repo, issue.Number)
-		owned := false
-		for _, binding := range automationContext.Bindings {
-			matches, err := opts.AutomationRepo.GitHubIssueOwnedByInbox(ctx, opts.ProjectID, binding, resourceID)
-			if err != nil {
-				return nil, err
-			}
-			if matches {
-				owned = true
-				break
-			}
-		}
-		if owned {
-			filtered = append(filtered, issue)
-		}
-	}
-	return filtered, nil
+func filterGitHubAssignedIssuesForAutomationInbox(_ context.Context, _ githubIssueRuntimeOptions, _ *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
+	return issues, nil
 }
 
 func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, issues []GitHubIssue) error {
