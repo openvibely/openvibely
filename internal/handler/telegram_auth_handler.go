@@ -60,13 +60,9 @@ func (h *Handler) RemoveTelegramAuthorizedUser(c echo.Context) error {
 		c,
 		c.Param("id"),
 		c.QueryParam("project_id"),
-		func(ctx context.Context, id string) (string, bool, error) {
-			user, err := h.telegramAuthRepo.GetByID(ctx, id)
-			if err != nil || user == nil {
-				return "", user != nil, err
-			}
-			return user.ProjectID, true, nil
-		},
+		authorizedUserProjectLookup(h.telegramAuthRepo.GetByID, func(user *models.TelegramAuthorizedUser) string {
+			return user.ProjectID
+		}),
 		h.telegramAuthRepo.Delete,
 	)
 }

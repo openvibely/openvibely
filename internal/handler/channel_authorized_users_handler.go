@@ -13,6 +13,19 @@ type authorizedUserCRUD[T any] struct {
 	render func([]T, string) templ.Component
 }
 
+func authorizedUserProjectLookup[T any](
+	getByID func(context.Context, string) (*T, error),
+	projectID func(*T) string,
+) func(context.Context, string) (string, bool, error) {
+	return func(ctx context.Context, id string) (string, bool, error) {
+		user, err := getByID(ctx, id)
+		if err != nil || user == nil {
+			return "", user != nil, err
+		}
+		return projectID(user), true, nil
+	}
+}
+
 func (crud authorizedUserCRUD[T]) listUsers(c echo.Context, projectID string) error {
 	if projectID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project_id is required")

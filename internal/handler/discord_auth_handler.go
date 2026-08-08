@@ -60,13 +60,9 @@ func (h *Handler) RemoveDiscordAuthorizedUser(c echo.Context) error {
 		c,
 		c.Param("id"),
 		c.QueryParam("project_id"),
-		func(ctx context.Context, id string) (string, bool, error) {
-			user, err := h.discordAuthRepo.GetByID(ctx, id)
-			if err != nil || user == nil {
-				return "", user != nil, err
-			}
-			return user.ProjectID, true, nil
-		},
+		authorizedUserProjectLookup(h.discordAuthRepo.GetByID, func(user *models.DiscordAuthorizedUser) string {
+			return user.ProjectID
+		}),
 		h.discordAuthRepo.Delete,
 	)
 }

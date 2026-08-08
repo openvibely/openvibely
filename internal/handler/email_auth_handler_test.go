@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,6 +16,7 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetEmailAuthRepo(repository.NewEmailAuthRepo(db))
 	project := createProject(t, h, "Email Auth UI")
+	otherProject := createProject(t, h, "Other Email Auth UI")
 
 	rec := htmxGet(e, "/channels/email/authorized-senders?project_id="+project.ID)
 	if rec.Code != http.StatusOK {
@@ -32,19 +34,53 @@ func TestEmailAuthorizedSendersHandlers(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "alice@example.com") {
 		t.Fatal("expected normalized sender in response")
 	}
+	otherSender := &models.EmailAuthorizedSender{ProjectID: otherProject.ID, EmailAddress: "bob@example.com", DisplayName: "Other Email Sender", AddedBy: "test"}
+	if err := h.emailAuthRepo.Create(context.Background(), otherSender); err != nil {
+		t.Fatalf("seed other email sender: %v", err)
+	}
 
 	senders, err := h.emailAuthRepo.ListByProject(httptest.NewRequest(http.MethodGet, "/", nil).Context(), project.ID)
-	if err != nil || len(senders) != 1 {
-		t.Fatalf("expected one sender, got %d err=%v", len(senders), err)
+	if err != nil {
+		t.Fatalf("list senders: %v", err)
 	}
-	if senders[0].EmailAddress != "alice@example.com" {
-		t.Fatalf("expected authorized sender address, got %q", senders[0].EmailAddress)
+	var sender *models.EmailAuthorizedSender
+	for i := range senders {
+		if senders[i].EmailAddress == "alice@example.com" {
+			sender = &senders[i]
+			break
+		}
 	}
-	req := httptest.NewRequest(http.MethodDelete, "/channels/email/authorized-senders/"+senders[0].ID+"?project_id="+project.ID, nil)
+	if sender == nil {
+		t.Fatalf("expected normalized authorized sender in %#v", senders)
+	}
+	req := httptest.NewRequest(http.MethodDelete, "/channels/email/authorized-senders/"+sender.ID, nil)
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected remove 200, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "alice@example.com") {
+		t.Fatalf("expected removed sender to disappear from response, got %q", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Other Email Sender") {
+		t.Fatalf("expected other system-level sender to remain visible, got %q", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `name="project_id" value="`+project.ID+`"`) {
+		t.Fatalf("expected omitted project_id delete to reload with record project %q, got %q", project.ID, rec.Body.String())
+	}
+	deleted, err := h.emailAuthRepo.GetByID(context.Background(), sender.ID)
+	if err != nil {
+		t.Fatalf("get deleted email sender: %v", err)
+	}
+	if deleted != nil {
+		t.Fatalf("expected deleted email sender removed, got %#v", deleted)
+	}
+	remaining, err := h.emailAuthRepo.GetByID(context.Background(), otherSender.ID)
+	if err != nil {
+		t.Fatalf("get other email sender: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("expected other project sender to remain")
 	}
 }
 

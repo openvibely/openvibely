@@ -181,7 +181,8 @@ func TestAddTelegramAuthorizedUser_MissingUser(t *testing.T) {
 }
 
 func TestRemoveTelegramAuthorizedUser(t *testing.T) {
-	_, e, telegramAuthRepo, projectID := setupTelegramAuthHandler(t)
+	h, e, telegramAuthRepo, projectID := setupTelegramAuthHandler(t)
+	otherProject := createProject(t, h, "Other Telegram Auth Project")
 	ctx := context.Background()
 
 	// Add a user first
@@ -194,8 +195,12 @@ func TestRemoveTelegramAuthorizedUser(t *testing.T) {
 	if err := telegramAuthRepo.Create(ctx, user); err != nil {
 		t.Fatalf("failed to create user: %v", err)
 	}
+	otherUser := &models.TelegramAuthorizedUser{ProjectID: otherProject.ID, TelegramUserID: 888, DisplayName: "Other Telegram User", AddedBy: "web"}
+	if err := telegramAuthRepo.Create(ctx, otherUser); err != nil {
+		t.Fatalf("failed to create other user: %v", err)
+	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/channels/telegram/authorized-users/"+user.ID+"?project_id="+projectID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/channels/telegram/authorized-users/"+user.ID, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -203,19 +208,32 @@ func TestRemoveTelegramAuthorizedUser(t *testing.T) {
 		t.Errorf("expected 200, got %d", rec.Code)
 	}
 
-	// Verify list is empty
+	// Verify the response reload keeps the deleted record's project context.
 	body := rec.Body.String()
-	if !strings.Contains(body, "No authorized users configured") {
-		t.Error("expected empty state after removal")
+	if strings.Contains(body, "To Remove") {
+		t.Errorf("expected removed user to disappear from response, got %q", body)
+	}
+	if !strings.Contains(body, "Other Telegram User") {
+		t.Errorf("expected other system-level user to remain visible, got %q", body)
+	}
+	if !strings.Contains(body, `name="project_id" value="`+projectID+`"`) {
+		t.Errorf("expected omitted project_id delete to reload with record project %q, got %q", projectID, body)
 	}
 
 	// Verify in DB
-	users, err := telegramAuthRepo.ListByProject(ctx, projectID)
+	deleted, err := telegramAuthRepo.GetByID(ctx, user.ID)
 	if err != nil {
-		t.Fatalf("ListByProject failed: %v", err)
+		t.Fatalf("GetByID deleted user failed: %v", err)
 	}
-	if len(users) != 0 {
-		t.Errorf("expected 0 users, got %d", len(users))
+	if deleted != nil {
+		t.Fatalf("expected deleted user to be removed, got %#v", deleted)
+	}
+	remaining, err := telegramAuthRepo.GetByID(ctx, otherUser.ID)
+	if err != nil {
+		t.Fatalf("GetByID other user failed: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("expected other project user to remain")
 	}
 }
 

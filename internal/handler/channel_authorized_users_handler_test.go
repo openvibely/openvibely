@@ -37,6 +37,38 @@ func TestAuthorizedUserCRUDOrchestration(t *testing.T) {
 		}
 	}
 
+	t.Run("project lookup adapts typed records", func(t *testing.T) {
+		type authRecord struct{ ProjectID string }
+		lookup := authorizedUserProjectLookup(func(ctx context.Context, id string) (*authRecord, error) {
+			if id != "user-1" {
+				t.Fatalf("expected lookup id user-1, got %q", id)
+			}
+			return &authRecord{ProjectID: "record-project"}, nil
+		}, func(record *authRecord) string {
+			return record.ProjectID
+		})
+		projectID, found, err := lookup(context.Background(), "user-1")
+		if err != nil || !found || projectID != "record-project" {
+			t.Fatalf("expected found record-project without error, got project=%q found=%v err=%v", projectID, found, err)
+		}
+
+		lookup = authorizedUserProjectLookup(func(context.Context, string) (*authRecord, error) {
+			return nil, nil
+		}, func(record *authRecord) string { return record.ProjectID })
+		projectID, found, err = lookup(context.Background(), "missing")
+		if err != nil || found || projectID != "" {
+			t.Fatalf("expected missing record without error, got project=%q found=%v err=%v", projectID, found, err)
+		}
+
+		lookup = authorizedUserProjectLookup(func(context.Context, string) (*authRecord, error) {
+			return &authRecord{ProjectID: "record-project"}, errors.New("lookup failed")
+		}, func(record *authRecord) string { return record.ProjectID })
+		projectID, found, err = lookup(context.Background(), "user-1")
+		if err == nil || !found || projectID != "" {
+			t.Fatalf("expected lookup error with found record marker, got project=%q found=%v err=%v", projectID, found, err)
+		}
+	})
+
 	t.Run("list validates project and maps repository failure", func(t *testing.T) {
 		c, _ := newContext()
 		crud := newCRUD(func(context.Context, string) ([]string, error) {
