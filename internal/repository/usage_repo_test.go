@@ -2,6 +2,10 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"os"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -389,4 +393,178 @@ func TestUsageRepo_ModelUsageGlobalVisibility(t *testing.T) {
 	if totals.TotalTokens != 210 {
 		t.Errorf("expected total_tokens=210, got %d", totals.TotalTokens)
 	}
+}
+
+func TestUsageRepo_ProjectDateBoundedAggregatePlansAvoidTempGroupBy(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	filter := UsageFilter{
+		ProjectID: "project-plan",
+		DateFrom:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		DateTo:    time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+		GroupBy:   "day",
+	}
+
+	periodExpr, source, where, args := usageEventSourceWithPeriod(filter, "day")
+	assertNoTempGroupBy(t, db, "GetDailyUsage", `
+		SELECT `+periodExpr+` AS period,
+		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0),
+		       COALESCE(SUM(total_tokens), 0), SUM(cost_usd), COUNT(cost_usd), COUNT(*)
+		FROM `+source+` `+where+`
+		GROUP BY period
+		ORDER BY period ASC`, args...)
+	assertNoTempGroupBy(t, db, "GetDailyUsageByModel", `
+		SELECT `+periodExpr+` AS period, provider, model,
+		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0),
+		       COALESCE(SUM(total_tokens), 0), SUM(cost_usd), COUNT(cost_usd), COUNT(*)
+		FROM `+source+` `+where+`
+		GROUP BY period, provider, model
+		ORDER BY period ASC, provider ASC, model ASC`, args...)
+
+	for _, groupBy := range []string{"hour", "day", "week", "month"} {
+		filter.GroupBy = groupBy
+		periodExpr, source, where, args = usageEventSourceWithPeriod(filter, groupBy)
+		assertNoTempGroupBy(t, db, "GetUsageRateBuckets/"+groupBy, `
+			SELECT `+periodExpr+` AS period, COALESCE(SUM(total_tokens), 0), COUNT(*)
+			FROM `+source+` `+where+`
+			GROUP BY period
+			ORDER BY period ASC`, args...)
+		assertNoTempGroupBy(t, db, "GetUsageRateBucketsByModel/"+groupBy, `
+			SELECT `+periodExpr+` AS period, provider, model, COALESCE(SUM(total_tokens), 0), COUNT(*)
+			FROM `+source+` `+where+`
+			GROUP BY period, provider, model
+			ORDER BY period ASC, provider ASC, model ASC`, args...)
+	}
+
+	source, where, args = usageEventSourceForModelBreakdown(filter)
+	assertNoTempGroupBy(t, db, "GetModelUsageBreakdown", `
+		SELECT provider, model, COALESCE(SUM(total_tokens), 0), COALESCE(SUM(input_tokens), 0),
+		       COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(reasoning_output_tokens), 0),
+		       SUM(cost_usd), COUNT(cost_usd), COUNT(*)
+		FROM `+source+` `+where+`
+		GROUP BY provider, model
+		ORDER BY COALESCE(SUM(total_tokens), 0) DESC, provider ASC, model ASC`, args...)
+}
+
+func TestUsageRepo_LocalBucketIndexesPreserveDSTSensitiveLocaltimeSemantics(t *testing.T) {
+	oldTZ, hadTZ := os.LookupEnv("TZ")
+	oldLocal := time.Local
+	t.Cleanup(func() {
+		if hadTZ {
+			_ = os.Setenv("TZ", oldTZ)
+		} else {
+			_ = os.Unsetenv("TZ")
+		}
+		time.Local = oldLocal
+	})
+	if err := os.Setenv("TZ", "America/New_York"); err != nil {
+		t.Fatalf("set TZ: %v", err)
+	}
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	time.Local = loc
+
+	db := testutil.NewTestDB(t)
+	repo := NewUsageRepo(db)
+	ctx := context.Background()
+	projectID := "project-dst"
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name) VALUES (?, ?)`, projectID, "DST Usage Project"); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+
+	events := []time.Time{
+		time.Date(2026, 3, 8, 6, 30, 0, 0, time.UTC),
+		time.Date(2026, 3, 8, 7, 30, 0, 0, time.UTC),
+		time.Date(2026, 11, 1, 5, 30, 0, 0, time.UTC),
+		time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC),
+	}
+	for i, eventTime := range events {
+		if err := repo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+			Provider:    "openai",
+			ProjectID:   projectID,
+			Model:       "gpt-dst",
+			Operation:   "task",
+			Status:      "completed",
+			InputTokens: 10 + i,
+			TotalTokens: 10 + i,
+			OccurredAt:  eventTime,
+		}); err != nil {
+			t.Fatalf("RecordUsageEvent[%d]: %v", i, err)
+		}
+	}
+
+	filter := UsageFilter{
+		ProjectID: projectID,
+		DateFrom:  time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC),
+		DateTo:    time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC),
+	}
+	for _, groupBy := range []string{"hour", "day", "week", "month"} {
+		filter.GroupBy = groupBy
+		legacy := legacyUsageRateBuckets(t, db, filter)
+		optimized, err := repo.GetUsageRateBuckets(ctx, filter)
+		if err != nil {
+			t.Fatalf("GetUsageRateBuckets(%s): %v", groupBy, err)
+		}
+		if !reflect.DeepEqual(optimized, legacy) {
+			t.Fatalf("%s localtime bucket mismatch\noptimized=%+v\nlegacy=%+v", groupBy, optimized, legacy)
+		}
+	}
+}
+
+func legacyUsageRateBuckets(t *testing.T, db *sql.DB, filter UsageFilter) []models.UsageRatePoint {
+	t.Helper()
+	where, args := usageWhere(filter)
+	periodExpr := usagePeriodExpression(filter.GroupBy)
+	rows, err := db.QueryContext(context.Background(), `
+		SELECT `+periodExpr+` AS period, COALESCE(SUM(total_tokens), 0), COUNT(*)
+		FROM llm_usage_events `+where+`
+		GROUP BY period
+		ORDER BY period ASC`, args...)
+	if err != nil {
+		t.Fatalf("legacy usage rate buckets: %v", err)
+	}
+	defer rows.Close()
+	var points []models.UsageRatePoint
+	for rows.Next() {
+		var point models.UsageRatePoint
+		if err := rows.Scan(&point.Period, &point.TotalTokens, &point.CallCount); err != nil {
+			t.Fatalf("scan legacy usage rate: %v", err)
+		}
+		points = append(points, point)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate legacy usage rate: %v", err)
+	}
+	return points
+}
+
+func assertNoTempGroupBy(t *testing.T, db *sql.DB, name, query string, args ...any) {
+	t.Helper()
+	plan := explainUsageQueryPlan(t, db, query, args...)
+	if strings.Contains(plan, "USE TEMP B-TREE FOR GROUP BY") {
+		t.Fatalf("%s plan still uses temp GROUP BY B-tree:\n%s", name, plan)
+	}
+}
+
+func explainUsageQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatalf("explain query plan: %v", err)
+	}
+	defer rows.Close()
+	var parts []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		parts = append(parts, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	return strings.Join(parts, "\n")
 }
