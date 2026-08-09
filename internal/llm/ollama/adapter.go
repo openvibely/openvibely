@@ -86,7 +86,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		}, err
 
 	case llmcontracts.OperationDirect:
-		output, tokens, err := a.callDirect(ctx, req.Message, req.Attachments, agent)
+		output, tokens, err := a.callDirect(ctx, req.Message, req.Attachments, agent, req.ProjectInstructions)
 		return llmcontracts.AgentResult{
 			Output: output,
 			Usage:  llmusage.FromTotal(tokens),
@@ -98,7 +98,9 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 }
 
 // callDirect calls the Ollama API for task execution (non-chat).
-func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig) (string, int, error) {
+// projectInstructions carries the calling agent's own system prompt; the
+// provider wrapper folds the agent definition into it.
+func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, projectInstructions string) (string, int, error) {
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callDirect model=%s base_url=%s prompt_len=%d attachments=%d", agent.Model, baseURL, len(prompt), len(attachments))
 
@@ -109,9 +111,15 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 		userMsg.Images = images
 	}
 
+	messages := make([]chatMessage, 0, 2)
+	if strings.TrimSpace(projectInstructions) != "" {
+		messages = append(messages, chatMessage{Role: "system", Content: projectInstructions})
+	}
+	messages = append(messages, userMsg)
+
 	reqBody := chatRequest{
 		Model:    agent.Model,
-		Messages: []chatMessage{userMsg},
+		Messages: messages,
 		Stream:   false,
 		Options:  opts,
 	}

@@ -938,3 +938,85 @@ func TestPersistReasoningContentClearsStaleReasoning(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, replay[execution.ID], 1)
 }
+
+// A lifecycle hook must receive its own agent prompt (folded into
+// ProjectInstructions by the provider wrapper) while skipping the shared
+// coding-agent framing. Previously the lifecycle branch sent an empty System.
+func TestCallDirectLifecycleHookKeepsAgentPromptDropsCodingFraming(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"{}\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil, nil)
+	if _, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation:           llmcontracts.OperationDirect,
+		Message:             "HOOK PROMPT",
+		ProjectInstructions: "SENTINEL_AGENT_PROMPT",
+		LifecycleHookCall:   true,
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodAPIKey, Model: "provider/model",
+			APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/",
+			PresetSlug: "vllm", Transport: "chat_completions",
+		},
+	}, "."); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	payload, _ := json.Marshal(gotBody)
+	body := string(payload)
+	if !strings.Contains(body, "SENTINEL_AGENT_PROMPT") {
+		t.Fatalf("lifecycle hook lost its agent prompt: %s", body)
+	}
+	if strings.Contains(body, "expert software engineer") {
+		t.Fatalf("lifecycle hook must not receive the coding-agent system prompt: %s", body)
+	}
+}
+
+// Ordinary direct calls keep both the agent prompt and the coding framing.
+func TestCallDirectNonLifecycleKeepsBothPrompts(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &gotBody)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	adapter := New(nil, nil)
+	if _, err := adapter.Call(context.Background(), llmcontracts.AgentRequest{
+		Operation:           llmcontracts.OperationDirect,
+		Message:             "DO WORK",
+		ProjectInstructions: "SENTINEL_AGENT_PROMPT",
+		Agent: models.LLMConfig{
+			Name: "Compatible", Provider: models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodAPIKey, Model: "provider/model",
+			APIKey: "sk-compatible", BaseURL: srv.URL + "/v1/",
+			PresetSlug: "vllm", Transport: "chat_completions",
+		},
+	}, "."); err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+
+	payload, _ := json.Marshal(gotBody)
+	body := string(payload)
+	for _, want := range []string{"SENTINEL_AGENT_PROMPT", "expert software engineer"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("ordinary direct call missing %q: %s", want, body)
+		}
+	}
+}

@@ -676,3 +676,75 @@ func TestComposeRuntimeToolFilter_PlanBlocksActionToolsAndMutations(t *testing.T
 		t.Fatalf("expected mutating tools to be blocked in plan mode")
 	}
 }
+
+// A lifecycle hook on the OpenAI direct path must receive its own agent prompt
+// (the provider wrapper folds the agent definition into ProjectInstructions)
+// while skipping the shared coding-agent framing. Before this, CallDirect built
+// its system prompt from "" and system agents ran with no identity at all.
+func TestCallDirectLifecycleHookSendsAgentPromptWithoutCodingFraming(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-1","status":"completed","model":"gpt-test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{}"}]}]}`))
+	}))
+	defer srv.Close()
+
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	adapter := New(nil, nil, nil)
+	_, _, err := adapter.CallDirect(context.Background(), "HOOK PROMPT", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, ".", "SENTINEL_AGENT_PROMPT", true, true)
+	if err != nil {
+		t.Fatalf("CallDirect: %v", err)
+	}
+
+	payload, _ := json.Marshal(gotBody)
+	body := string(payload)
+	if !strings.Contains(body, "SENTINEL_AGENT_PROMPT") {
+		t.Fatalf("lifecycle hook lost its agent prompt: %s", body)
+	}
+	if strings.Contains(body, "expert software engineer") {
+		t.Fatalf("lifecycle hook must not receive the coding-agent system prompt: %s", body)
+	}
+}
+
+// Ordinary direct calls keep both the agent prompt and the coding-agent framing.
+func TestCallDirectNonLifecycleKeepsCodingFraming(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-1","status":"completed","model":"gpt-test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}`))
+	}))
+	defer srv.Close()
+
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	adapter := New(nil, nil, nil)
+	_, _, err := adapter.CallDirect(context.Background(), "DO WORK", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, ".", "SENTINEL_AGENT_PROMPT", true, false)
+	if err != nil {
+		t.Fatalf("CallDirect: %v", err)
+	}
+
+	payload, _ := json.Marshal(gotBody)
+	body := string(payload)
+	for _, want := range []string{"SENTINEL_AGENT_PROMPT", "expert software engineer"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("ordinary direct call missing %q: %s", want, body)
+		}
+	}
+}

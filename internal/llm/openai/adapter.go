@@ -332,8 +332,13 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 }
 
 // CallDirect makes a non-streaming OpenAI API call.
-func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, disableTools bool) (string, llmcontracts.Usage, error) {
-	applog.Infof("[openai-adapter] CallDirect model=%s output_budget=%d attachments=%d auth_method=%s disable_tools=%v", agent.Model, openAIDirectOutputBudget, len(attachments), agent.AuthMethod, disableTools)
+// CallDirect issues a non-streaming direct request. projectInstructions carries
+// the calling agent's own system prompt (the provider wrapper folds the agent
+// definition into it); lifecycleHookCall marks a request made on behalf of a
+// lifecycle hook, which keeps that agent prompt but drops the shared
+// coding-agent framing it has no use for.
+func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, disableTools bool, lifecycleHookCall bool) (string, llmcontracts.Usage, error) {
+	applog.Infof("[openai-adapter] CallDirect model=%s output_budget=%d attachments=%d auth_method=%s disable_tools=%v lifecycle_hook=%v", agent.Model, openAIDirectOutputBudget, len(attachments), agent.AuthMethod, disableTools, lifecycleHookCall)
 
 	client, releaseTransport, err := a.getClient(ctx, agent, "")
 	if err != nil {
@@ -354,16 +359,24 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 		return "", llmusage.FromTotal(0), fmt.Errorf("convert attachments: %w", err)
 	}
 
+	effectiveWorkDir := workDir
+	if effectiveWorkDir == "" {
+		effectiveWorkDir = "."
+	}
+	// A lifecycle hook keeps its agent's own prompt but skips the shared
+	// coding-agent system prompt; every other direct call gets both.
+	systemPrompt := projectInstructions
+	if !lifecycleHookCall {
+		systemPrompt = llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir)
+	}
+	systemPrompt = applyOpenAIOAuthSystemPrompt(systemPrompt, agent)
+
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	if rt != nil && len(rt.Definitions) > 0 && !disableTools {
-		effectiveWorkDir := workDir
-		if effectiveWorkDir == "" {
-			effectiveWorkDir = "."
-		}
 		resp, err := client.SendAgentic(ctx, fullPrompt, &openaiclient.AgenticOptions{
 			Model:                  agent.Model,
 			MaxOutputTokens:        openAIDirectOutputBudget,
-			System:                 applyOpenAIOAuthSystemPrompt(llmprompt.BuildAgentSystemPrompt("", effectiveWorkDir), agent),
+			System:                 systemPrompt,
 			ReasoningEffort:        reasoningEffort(agent.Model, agent.ReasoningEffort),
 			ReasoningSummary:       "auto",
 			WorkDir:                effectiveWorkDir,
@@ -385,6 +398,7 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	resp, err := client.Send(ctx, fullPrompt, &openaiclient.SendOptions{
 		Model:               agent.Model,
 		MaxOutputTokens:     openAIDirectOutputBudget,
+		System:              systemPrompt,
 		ReasoningEffort:     reasoningEffort(agent.Model, agent.ReasoningEffort),
 		DisableTools:        disableTools,
 		SuppressToolMarkers: disableTools,

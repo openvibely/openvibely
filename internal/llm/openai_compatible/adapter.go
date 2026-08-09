@@ -272,10 +272,17 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		return "", llmusage.FromTotal(0), err
 	}
 	systemPrompt := ""
-	if !req.RawDirectPrompt && !req.LifecycleHookCall {
-		// Lifecycle hooks are structured JSON steps, not coding turns; the
-		// shared coding-agent system prompt is wasted context for them.
-		systemPrompt = llmprompt.BuildAgentSystemPrompt("", effectiveWorkDir(workDir))
+	switch {
+	case req.RawDirectPrompt:
+		// Message is already fully composed; send it untouched.
+	case req.LifecycleHookCall:
+		// Lifecycle hooks are structured JSON steps, not coding turns. Keep the
+		// hook agent's own prompt — the provider wrapper folded the agent
+		// definition into ProjectInstructions — and drop the shared
+		// coding-agent framing it has no use for.
+		systemPrompt = req.ProjectInstructions
+	default:
+		systemPrompt = llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir))
 	}
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{
 		Model:            strings.TrimSpace(req.Agent.Model),
