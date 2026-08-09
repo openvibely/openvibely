@@ -1452,6 +1452,26 @@ func TestAutomationSavePreviewRejectsUnavailableGitHubIntegrationWithoutPersiste
 	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
 }
 
+func TestAutomationSaveValidationIssueAppearsInPreviewAndBlocksPersistence(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Shared save validation")
+	candidate := customScheduledTaskCandidate("Shared save validation", "Review one request.")
+	candidate.Nodes[0].Config["agent_ref"] = " missing-agent "
+
+	plan, normalized, err := h.compiler.PreviewSave(context.Background(), h.project.ID, candidate)
+	require.NoError(t, err)
+	require.Equal(t, "missing-agent", normalized.Nodes[0].Config["agent_ref"], "preview must still return the normalized candidate")
+	require.Contains(t, issueCodes(plan.Validation), "agent_ref")
+
+	_, err = h.compiler.Save(context.Background(), AutomationSaveRequest{
+		ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate,
+	})
+	require.ErrorContains(t, err, "automation graph validation failed: Agent selection cannot be resolved because project capabilities are unavailable.")
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automations`))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_definition_resources`))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM tasks`))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM schedules`))
+}
+
 func customTaskOnlyCandidate(name, prompt string, category models.TaskCategory) models.AutomationDraftCandidate {
 	return models.AutomationDraftCandidate{SchemaVersion: 1, Name: name, Description: "Atomic custom root",
 		AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
