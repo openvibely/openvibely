@@ -68,6 +68,9 @@ func (s *TaskService) resumeGoalStoppedByUser(ctx context.Context, taskID string
 }
 
 func (s *TaskService) submitActivatedTask(ctx context.Context, task models.Task, actor string) error {
+	if s.workerSvc != nil {
+		s.workerSvc.ClearCancellationRequested(task.ID)
+	}
 	s.resumeGoalStoppedByUser(ctx, task.ID, actor)
 	if task.SwarmRole == models.SwarmRoleParent {
 		if s.swarmSvc == nil {
@@ -281,6 +284,9 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	isCancellableActiveWork := task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && models.IsSwarmChildRole(task.SwarmRole))
 	if category != models.CategoryActive && isCancellableActiveWork {
 		applog.Infof("[task-svc] UpdateCategory cancelling active task id=%s status=%s (moved to %s)", id, task.Status, category)
+		if s.workerSvc != nil {
+			s.workerSvc.MarkCancellationRequested(id)
+		}
 		if s.goalSvc != nil {
 			if err := s.goalSvc.PauseActiveGoalStoppedByUser(ctx, id); err != nil && !errors.Is(err, ErrTaskGoalNotFound) {
 				applog.Infof("[task-svc] UpdateCategory error pausing active goal after user stop id=%s: %v", id, err)
@@ -510,6 +516,10 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) error {
 	if task.Status != models.StatusRunning && task.Status != models.StatusQueued && !(task.Status == models.StatusPending && task.Category == models.CategoryActive) {
 		applog.Infof("[task-svc] CancelTask task not cancellable id=%s status=%s category=%s", id, task.Status, task.Category)
 		return fmt.Errorf("task is not running, queued, or active pending")
+	}
+
+	if s.workerSvc != nil {
+		s.workerSvc.MarkCancellationRequested(id)
 	}
 
 	if s.goalSvc != nil {

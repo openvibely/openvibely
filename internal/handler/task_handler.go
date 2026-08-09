@@ -1439,6 +1439,9 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	projectID := task.ProjectID
 
 	composerStop := c.QueryParam("composer_stop") == "1"
+	if h.workerSvc != nil && (task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) {
+		h.workerSvc.MarkCancellationRequested(taskID)
+	}
 	if !composerStop && h.threadInputRepo != nil {
 		if err := h.threadInputRepo.CancelPendingForTask(c.Request().Context(), taskID); err != nil {
 			applog.Infof("[handler] CancelTask error cancelling pending thread inputs task=%s: %v", taskID, err)

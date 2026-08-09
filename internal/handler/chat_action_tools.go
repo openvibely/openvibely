@@ -1017,6 +1017,9 @@ func (h *Handler) rejectCancelledLifecycleSendToTask(ctx context.Context, destin
 		if taskID == "" {
 			continue
 		}
+		if h.workerSvc != nil && h.workerSvc.IsCancellationRequested(taskID) {
+			return fmt.Errorf("cancelled lifecycle task %s cannot enqueue continuation", taskID)
+		}
 		task, err := h.taskRepo.GetByID(ctx, taskID)
 		if err != nil {
 			return err
