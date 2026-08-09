@@ -200,6 +200,58 @@ func TestMaintainedSDLCTemplatesKeepDiscoveryParityAndSchedulesOwnTheirTasks(t *
 	}
 }
 
+func TestAutomationDraftScheduleConfigValidationMatchesForCustomAndMaintainedSchedules(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+	cases := []struct {
+		name    string
+		field   string
+		value   any
+		code    string
+		message string
+	}{
+		{name: "malformed run_at", field: "run_at", value: "25:99", code: "run_at", message: "Trigger time must use HH:MM local time."},
+		{name: "unsupported repeat_type", field: "repeat_type", value: "yearly", code: "repeat_type", message: "Unsupported schedule repeat type."},
+		{name: "oversized repeat_interval", field: "repeat_interval", value: models.MaxScheduleRepeatInterval + 1, code: "repeat_interval", message: "Schedule interval must be between 1 and 365."},
+		{name: "disabled schedule", field: "enabled", value: false, code: "enabled", message: "Schedule execution is controlled by the Automation lifecycle and must be enabled."},
+		{name: "non-bool clear_context_on_start", field: "clear_context_on_start", value: "yes", code: "clear_context_on_start", message: "Clear context on start must be true or false."},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			custom := customFixedScheduleCandidate(t, drafts)
+			custom.Nodes[0].Config[tc.field] = tc.value
+			customIssue := validationIssueByNodeAndCode(t, drafts.ValidateCandidate(custom), "schedule", tc.code)
+			require.Equal(t, tc.message, customIssue.Message)
+
+			maintained, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+			require.NoError(t, err)
+			maintained = cloneAutomationDraftCandidate(maintained)
+			idx := automationDraftNodeIndexByKey(t, maintained, "vision_suggestions")
+			maintained.Nodes[idx].Config[tc.field] = tc.value
+			maintainedIssue := validationIssueByNodeAndCode(t, drafts.ValidateCandidate(maintained), "vision_suggestions", tc.code)
+			require.Equal(t, customIssue.Message, maintainedIssue.Message)
+		})
+	}
+}
+
+func TestAutomationDraftScheduleTargetValidationRemainsMaintainedAdapterSpecific(t *testing.T) {
+	drafts := NewAutomationDraftService(nil, NewAutomationAdapterRegistry())
+
+	custom := customFixedScheduleCandidate(t, drafts)
+	custom.Nodes[0].Config["target_node_key"] = "other"
+	customCodes := issueCodes(drafts.ValidateCandidate(custom))
+	require.NotContains(t, customCodes, "schedule_target")
+	require.Contains(t, customCodes, "unknown_config")
+
+	maintained, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	maintained = cloneAutomationDraftCandidate(maintained)
+	idx := automationDraftNodeIndexByKey(t, maintained, "vision_suggestions")
+	maintained.Nodes[idx].Config["target_node_key"] = "implementation"
+	issue := validationIssueByNodeAndCode(t, drafts.ValidateCandidate(maintained), "vision_suggestions", "schedule_target")
+	require.Equal(t, "Trigger target is fixed by the registered adapter.", issue.Message)
+}
+
 func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t *testing.T) {
 	candidate, err := NewAutomationDraftService(nil, NewAutomationAdapterRegistry()).TemplateCandidate(AutomationAdapterNativeSDLC)
 	require.NoError(t, err)
@@ -1116,6 +1168,28 @@ func automationDraftNodeIndexByKey(t *testing.T, candidate models.AutomationDraf
 	}
 	t.Fatalf("candidate has no %s node", key)
 	return -1
+}
+
+func customFixedScheduleCandidate(t *testing.T, drafts *AutomationDraftService) models.AutomationDraftCandidate {
+	t.Helper()
+	candidate, err := drafts.BlankCandidate(AutomationAdapterCustom)
+	require.NoError(t, err)
+	candidate.Nodes = []models.AutomationDraftNode{
+		{Key: "schedule", Name: "Schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Run the scheduled work.", "category": "scheduled", "priority": 2, "run_at": "09:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}},
+	}
+	candidate.Edges = nil
+	return candidate
+}
+
+func validationIssueByNodeAndCode(t *testing.T, issues []models.AutomationValidationIssue, nodeKey, code string) models.AutomationValidationIssue {
+	t.Helper()
+	for _, issue := range issues {
+		if issue.NodeKey == nodeKey && issue.Code == code {
+			return issue
+		}
+	}
+	t.Fatalf("no %s issue for %s in %#v", code, nodeKey, issues)
+	return models.AutomationValidationIssue{}
 }
 
 func issueCodes(issues []models.AutomationValidationIssue) []string {
