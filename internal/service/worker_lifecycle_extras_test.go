@@ -14,6 +14,7 @@ func afterCompleteExtrasFixture() map[string]any {
 		lifecycle.LearningSnapshotKey:       lifecycle.LearningInputSnapshot{TaskID: "task-1", SkillWritePolicy: []string{"policy"}},
 		lifecycle.AssignedAgentKey:          lifecycle.AssignedAgentIdentity{Key: "backend_reviewer"},
 		lifecycle.TaskGoalKey:               &models.TaskGoal{TaskID: "task-1", Objective: "ship it"},
+		lifecycle.ExecutionErrorKey:         "worktree build failed: exit status 1",
 	}
 }
 
@@ -74,6 +75,9 @@ func TestAfterCompleteExtrasFollowDeclaredPayload(t *testing.T) {
 					t.Fatalf("undeclared block %q was sent, got %v", key, got)
 				}
 			}
+			if !got[lifecycle.ExecutionErrorKey] {
+				t.Fatalf("failed-execution details must reach every hook regardless of payload, got %v", got)
+			}
 		})
 	}
 }
@@ -83,9 +87,10 @@ func TestAfterCompleteExtrasFollowDeclaredPayload(t *testing.T) {
 func TestAfterCompleteExtrasDoNotMutateSharedPayload(t *testing.T) {
 	w := &WorkerService{}
 	shared := afterCompleteExtrasFixture()
+	before := len(shared)
 	input := lifecycle.HookInput{TaskID: "task-1", Extras: shared}
 	w.lifecycleHookInput(context.Background(), hookWithPayload(`{"blocks":["conversation_transcript"]}`), input)
-	if len(shared) != 4 {
+	if len(shared) != before {
 		t.Fatalf("scoping one hook mutated the shared slot payload: %v", shared)
 	}
 }
@@ -163,5 +168,53 @@ func TestAssignedAgentIdentityCarriesAgentRecognitionFields(t *testing.T) {
 	})
 	if identity.Key != "memory_curator" || identity.SystemKind != models.AgentSystemKindMemoryCurator {
 		t.Fatalf("assigned_agent lost the fields update_memory checks: %#v", identity)
+	}
+}
+
+// A failed execution must reach every after-complete hook even when its
+// declared payload omits the block. Without this the Goal Agent evaluates a
+// crashed run as an ordinary turn and queues continuation work off bad
+// evidence, and Memory Curator records a failure as though it succeeded.
+func TestFailedExecutionDetailsSurvivePayloadFiltering(t *testing.T) {
+	w := &WorkerService{}
+	for _, payload := range []string{
+		`{"blocks":["conversation_transcript","task_goal"]}`,
+		`{"blocks":["conversation_transcript","assigned_agent"]}`,
+		`{"blocks":["conversation_transcript","learning_snapshot"]}`,
+		`{"blocks":["conversation_transcript"]}`,
+	} {
+		input := lifecycle.HookInput{TaskID: "task-1", Extras: afterCompleteExtrasFixture()}
+		got := w.lifecycleHookInput(context.Background(), hookWithPayload(payload), input)
+		detail, ok := got.Extras[lifecycle.ExecutionErrorKey].(string)
+		if !ok || detail == "" {
+			t.Fatalf("payload %q dropped the execution failure: %v", payload, got.Extras)
+		}
+	}
+}
+
+// A successful run carries no failure block, so absence stays meaningful.
+func TestSuccessfulExecutionCarriesNoFailureBlock(t *testing.T) {
+	w := &WorkerService{}
+	extras := afterCompleteExtrasFixture()
+	delete(extras, lifecycle.ExecutionErrorKey)
+	got := w.lifecycleHookInput(context.Background(),
+		hookWithPayload(`{"blocks":["conversation_transcript","task_goal"]}`),
+		lifecycle.HookInput{TaskID: "task-1", Extras: extras})
+	if _, present := got.Extras[lifecycle.ExecutionErrorKey]; present {
+		t.Fatalf("successful run must not carry a failure block: %v", got.Extras)
+	}
+}
+
+func TestAlwaysDeliveredBlocks(t *testing.T) {
+	if !lifecycle.AlwaysDelivered(lifecycle.ExecutionErrorKey) {
+		t.Fatal("execution failure details must be always-delivered")
+	}
+	for _, optional := range []string{
+		lifecycle.ConversationTranscriptKey, lifecycle.LearningSnapshotKey,
+		lifecycle.AssignedAgentKey, lifecycle.TaskGoalKey,
+	} {
+		if lifecycle.AlwaysDelivered(optional) {
+			t.Fatalf("%q must stay declarable, not always-delivered", optional)
+		}
 	}
 }

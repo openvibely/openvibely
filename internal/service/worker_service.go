@@ -681,7 +681,7 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 		if in.Extras == nil {
 			in.Extras = make(map[string]any)
 		}
-		in.Extras["execution_error"] = runErr.Error()
+		in.Extras[lifecycle.ExecutionErrorKey] = runErr.Error()
 	}
 	if when == models.LifecycleAfterComplete {
 		if in.Extras == nil {
@@ -746,7 +746,9 @@ func (w *WorkerService) routeHookInput(ctx context.Context, hook models.AgentLif
 //
 // A hook that declares no payload receives everything, which is the default
 // for user-created agents and for any declaration written before payload
-// selection existed.
+// selection existed. Blocks reporting the outcome of the turn itself are
+// delivered even when undeclared (see lifecycle.AlwaysDelivered), so a hook
+// can never mistake a failed execution for a successful one.
 func (w *WorkerService) afterCompleteHookInput(_ context.Context, hook models.AgentLifecycleHook, input lifecycle.HookInput) lifecycle.HookInput {
 	payload := lifecycle.ParseHookPayload(hook.PayloadJSON)
 	if payload.SelectsAllBlocks() || len(input.Extras) == 0 {

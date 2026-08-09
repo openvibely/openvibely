@@ -183,6 +183,25 @@ const AssignedAgentKey = "assigned_agent"
 // TaskGoalKey is the HookInput.Extras key for the task's active goal.
 const TaskGoalKey = "task_goal"
 
+// ExecutionErrorKey is the HookInput.Extras key carrying the error from a task
+// execution that failed. It is absent when the execution succeeded.
+const ExecutionErrorKey = "execution_error"
+
+// alwaysDeliveredBlocks are context blocks every hook receives regardless of
+// the payload it declared. They describe the outcome of the turn itself rather
+// than optional context, so filtering them out would let a hook evaluate a
+// failed run as though it had succeeded.
+var alwaysDeliveredBlocks = map[string]struct{}{
+	ExecutionErrorKey: {},
+}
+
+// AlwaysDelivered reports whether a context block is delivered to every hook
+// regardless of its declared payload.
+func AlwaysDelivered(block string) bool {
+	_, ok := alwaysDeliveredBlocks[strings.TrimSpace(block)]
+	return ok
+}
+
 // AssignedAgentIdentity is the compact identity of the agent that ran the task,
 // for hooks that only need to recognize which agent produced the turn.
 type AssignedAgentIdentity struct {
@@ -232,9 +251,11 @@ func ParseHookPayload(raw string) HookPayload {
 // therefore receive every context block the slot produced.
 func (p HookPayload) SelectsAllBlocks() bool { return len(p.Blocks) == 0 }
 
-// Allows reports whether the hook declared the supplied context block.
+// Allows reports whether the hook receives the supplied context block: either
+// it declared the block, it declared no payload at all, or the block is
+// delivered to every hook regardless of declaration.
 func (p HookPayload) Allows(block string) bool {
-	if p.SelectsAllBlocks() {
+	if p.SelectsAllBlocks() || AlwaysDelivered(block) {
 		return true
 	}
 	for _, declared := range p.Blocks {
