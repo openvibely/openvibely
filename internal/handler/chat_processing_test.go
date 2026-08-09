@@ -6250,6 +6250,40 @@ func TestFollowupNoChangesDoesNotResetMergeStatus(t *testing.T) {
 	}
 }
 
+func TestStartPendingTaskThreadFollowup_ClearsCancellationRequestForPromotedRun(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Queued Followup Clears Stop Marker Project")
+	task := createTask(t, h, project.ID, "Queued Followup Clears Stop Marker Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusCancelled
+		task.AgentID = &agent.ID
+		task.Prompt = "original prompt"
+	})
+	queued := &models.ThreadInput{
+		Scope:         models.ThreadInputScopeTask,
+		ProjectID:     project.ID,
+		TaskID:        task.ID,
+		AgentConfigID: agent.ID,
+		InputMode:     models.ThreadInputModeQueued,
+		Content:       "legitimate queued follow-up after stop",
+	}
+	require.NoError(t, h.threadInputRepo.CreateQueued(ctx, queued))
+	h.workerSvc.MarkCancellationRequested(task.ID)
+	require.True(t, h.workerSvc.IsCancellationRequested(task.ID))
+	h.llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+
+	handled, err := h.StartPendingTaskThreadFollowup(ctx, task.ID)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, h.workerSvc.IsCancellationRequested(task.ID), "promoted queued follow-up should clear stale stop intent")
+	updated, err := h.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryActive, updated.Category)
+	require.Equal(t, models.StatusQueued, updated.Status)
+}
+
 func TestStartPendingTaskThreadFollowup_AlreadyActiveIsHandled(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()

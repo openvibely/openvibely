@@ -319,6 +319,9 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return rollbackActivation(err)
 			}
 			if handled {
+				if s.workerSvc != nil {
+					s.workerSvc.ClearCancellationRequested(id)
+				}
 				applog.Infof("[task-svc] UpdateCategory promoted queued task-thread follow-up id=%s", id)
 				return nil
 			}
@@ -330,6 +333,9 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return rollbackActivation(err)
 			}
 			if handled {
+				if s.workerSvc != nil {
+					s.workerSvc.ClearCancellationRequested(id)
+				}
 				applog.Infof("[task-svc] UpdateCategory retried failed task-thread follow-up id=%s", id)
 				return nil
 			}
@@ -461,6 +467,9 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			return err
 		}
 		if handled {
+			if s.workerSvc != nil {
+				s.workerSvc.ClearCancellationRequested(id)
+			}
 			applog.Infof("[task-svc] RunTask promoted queued task-thread follow-up id=%s", id)
 			return nil
 		}
@@ -472,6 +481,9 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			return err
 		}
 		if handled {
+			if s.workerSvc != nil {
+				s.workerSvc.ClearCancellationRequested(id)
+			}
 			applog.Infof("[task-svc] RunTask retried failed task-thread follow-up id=%s", id)
 			return nil
 		}

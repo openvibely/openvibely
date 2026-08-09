@@ -313,7 +313,7 @@ func isLifecycleCancellation(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.Canceled) {
 		return true
 	}
 	msg := strings.ToLower(strings.TrimSpace(err.Error()))

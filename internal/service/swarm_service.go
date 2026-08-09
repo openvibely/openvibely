@@ -1125,14 +1125,21 @@ func (s *SwarmService) CancelSwarm(ctx context.Context, parentTaskID string) err
 		return err
 	}
 	for _, child := range children {
+		cancellable := child.Status == models.StatusPending || child.Status == models.StatusQueued || child.Status == models.StatusRunning || child.Status == models.StatusBlocked
+		if cancellable && s.workerSvc != nil {
+			s.workerSvc.MarkCancellationRequested(child.ID)
+		}
 		if child.Status == models.StatusRunning && s.workerSvc != nil {
 			s.workerSvc.CancelRunningTask(child.ID)
 		}
-		if child.Status == models.StatusPending || child.Status == models.StatusQueued || child.Status == models.StatusRunning || child.Status == models.StatusBlocked {
+		if cancellable {
 			_ = s.taskRepo.UpdateStatus(ctx, child.ID, models.StatusCancelled)
 		}
 	}
 	if parent, err := s.taskRepo.GetByID(ctx, parentTaskID); err == nil && parent != nil {
+		if s.workerSvc != nil {
+			s.workerSvc.MarkCancellationRequested(parent.ID)
+		}
 		return s.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusCancelled)
 	}
 	return nil

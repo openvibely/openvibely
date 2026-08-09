@@ -1541,6 +1541,9 @@ func (h *Handler) StartPendingTaskThreadFollowup(ctx context.Context, taskID str
 		return false, err
 	}
 	if active {
+		if h.workerSvc != nil {
+			h.workerSvc.ClearCancellationRequested(taskID)
+		}
 		return true, nil
 	}
 	queued, err := h.threadInputRepo.FindOldestQueuedForTask(ctx, taskID)
@@ -1566,6 +1569,9 @@ func (h *Handler) RetryLatestFailedTaskThreadFollowup(ctx context.Context, taskI
 		return false, err
 	}
 	if active {
+		if h.workerSvc != nil {
+			h.workerSvc.ClearCancellationRequested(taskID)
+		}
 		return true, nil
 	}
 	failed, err := h.execRepo.GetLatestFailedFollowupByTask(ctx, taskID)
@@ -1624,6 +1630,9 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 	if !started {
 		go h.PromoteQueuedTaskThreadInput(taskID)
 		return nil
+	}
+	if h.workerSvc != nil {
+		h.workerSvc.ClearCancellationRequested(taskID)
 	}
 	if err := h.applySwarmChildFollowupRetryStart(ctx, task, failed.PromptSent); err != nil {
 		h.completeWithFailure(ctx, exec.ID, taskID, err.Error(), 0)
@@ -1753,6 +1762,9 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 			applog.Infof("[handler] startQueuedTaskThreadInput input=%s claim error: %v", input.ID, err)
 		}
 		return err
+	}
+	if h.workerSvc != nil {
+		h.workerSvc.ClearCancellationRequested(input.TaskID)
 	}
 	if err := h.applySwarmChildFollowupStart(ctx, task, input.Content); err != nil {
 		applog.Infof("[handler] startQueuedTaskThreadInput input=%s swarm child follow-up routing failed: %v", input.ID, err)

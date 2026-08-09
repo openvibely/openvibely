@@ -332,6 +332,36 @@ func TestPrepareLifecycleTurn_AfterCompleteStillRunsForOrdinaryFailure(t *testin
 	}
 }
 
+func TestPrepareLifecycleTurn_AfterCompleteStillRunsForDeadlineFailure(t *testing.T) {
+	ctx := context.Background()
+	done := make(chan lifecycle.HookInput, 1)
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{
+		ID:             "learn",
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "observe_task_for_learning",
+		OutputContract: models.OutputContractLearningSummary,
+		Enabled:        true,
+	}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, _ models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+		done <- in
+		return json.RawMessage(`{"summary":"observed timeout","nothing_to_save":true}`), nil
+	}), nil)
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleRunner(runner)
+
+	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-timeout", Status: models.StatusRunning})
+	turn.AfterComplete(context.DeadlineExceeded, llmcontracts.ChatContext{})
+
+	select {
+	case in := <-done:
+		if got, _ := in.Extras[lifecycle.ExecutionErrorKey].(string); got != context.DeadlineExceeded.Error() {
+			t.Fatalf("after_complete timeout metadata = %q, want %q", got, context.DeadlineExceeded.Error())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for after_complete hook after deadline failure")
+	}
+}
+
 func TestPrepareLifecycleTurn_AfterCompletePreservesRuntimeTools(t *testing.T) {
 	ctx := context.Background()
 	done := make(chan error, 1)
