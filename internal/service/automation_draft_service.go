@@ -1274,28 +1274,7 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "priority", Message: "Schedule task priority must be between 1 and 4."})
 		}
 		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
-		runAt, runAtOK := node.Config["run_at"].(string)
-		if !runAtOK {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
-		} else if _, err := time.Parse("15:04", runAt); err != nil {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
-		}
-		repeat, repeatOK := node.Config["repeat_type"].(string)
-		if !repeatOK || !map[string]bool{"once": true, "minutes": true, "hours": true, "daily": true, "weekly": true, "monthly": true}[repeat] {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_type", Message: "Unsupported schedule repeat type."})
-		}
-		interval, intervalOK := draftInt(node.Config["repeat_interval"])
-		if !intervalOK || models.ValidateScheduleRepeatInterval(interval) != nil {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
-		}
-		if enabled, enabledOK := node.Config["enabled"].(bool); !enabledOK || !enabled {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Schedule execution is controlled by the Automation lifecycle and must be enabled."})
-		}
-		if clearContextOnStart, present := node.Config["clear_context_on_start"]; present {
-			if _, valid := clearContextOnStart.(bool); !valid {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "clear_context_on_start", Message: "Clear context on start must be true or false."})
-			}
-		}
+		issues = append(issues, validateAutomationScheduleConfig(node)...)
 	}
 	if goal, present := node.Config["goal"]; present {
 		if text, ok := goal.(string); !ok || len(strings.TrimSpace(text)) > MaxTaskGoalLength {
@@ -1307,6 +1286,33 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	}
 	if node.Type == models.AutomationNodeHumanGate {
 		issues = append(issues, validateAutomationHumanGateConfig(node, node.Role)...)
+	}
+	return issues
+}
+
+func validateAutomationScheduleConfig(node models.AutomationDraftNode) []models.AutomationValidationIssue {
+	var issues []models.AutomationValidationIssue
+	runAt, runAtOK := node.Config["run_at"].(string)
+	if !runAtOK {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
+	} else if _, err := time.Parse("15:04", runAt); err != nil {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
+	}
+	repeat, repeatOK := node.Config["repeat_type"].(string)
+	if !repeatOK || !map[string]bool{"once": true, "minutes": true, "hours": true, "daily": true, "weekly": true, "monthly": true}[repeat] {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_type", Message: "Unsupported schedule repeat type."})
+	}
+	interval, intervalOK := draftInt(node.Config["repeat_interval"])
+	if !intervalOK || models.ValidateScheduleRepeatInterval(interval) != nil {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
+	}
+	if enabled, enabledOK := node.Config["enabled"].(bool); !enabledOK || !enabled {
+		issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Schedule execution is controlled by the Automation lifecycle and must be enabled."})
+	}
+	if clearContextOnStart, present := node.Config["clear_context_on_start"]; present {
+		if _, valid := clearContextOnStart.(bool); !valid {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "clear_context_on_start", Message: "Clear context on start must be true or false."})
+		}
 	}
 	return issues
 }
@@ -1429,28 +1435,7 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		if !targetOK || target == "" || target != adapterScheduleTarget(adapter, node.Key) {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "schedule_target", Message: "Trigger target is fixed by the registered adapter."})
 		}
-		runAt, runAtOK := node.Config["run_at"].(string)
-		if !runAtOK {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
-		} else if _, err := time.Parse("15:04", runAt); err != nil {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "run_at", Message: "Trigger time must use HH:MM local time."})
-		}
-		repeat, repeatOK := node.Config["repeat_type"].(string)
-		if !repeatOK || !map[string]bool{"once": true, "minutes": true, "hours": true, "daily": true, "weekly": true, "monthly": true}[repeat] {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_type", Message: "Unsupported schedule repeat type."})
-		}
-		interval, ok := draftInt(node.Config["repeat_interval"])
-		if !ok || models.ValidateScheduleRepeatInterval(interval) != nil {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "repeat_interval", Message: "Schedule interval must be between 1 and 365."})
-		}
-		if enabled, ok := node.Config["enabled"].(bool); !ok || !enabled {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "enabled", Message: "Schedule execution is controlled by the Automation lifecycle and must be enabled."})
-		}
-		if clearContextOnStart, present := node.Config["clear_context_on_start"]; present {
-			if _, valid := clearContextOnStart.(bool); !valid {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "clear_context_on_start", Message: "Clear context on start must be true or false."})
-			}
-		}
+		issues = append(issues, validateAutomationScheduleConfig(node)...)
 	}
 	switch canonical.Role {
 	case "create_notification", "create_github_issue", "open_pull_request":
