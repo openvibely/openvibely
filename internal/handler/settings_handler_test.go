@@ -51,6 +51,31 @@ func assertChannelsRefreshTrigger(t *testing.T, rec *httptest.ResponseRecorder) 
 	assert.Empty(t, rec.Header().Get("Location"))
 }
 
+func TestReturnToChannelsHTMXTriggersChannelsRefresh(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/channels/github/configure", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	require.NoError(t, returnToChannels(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assertChannelsRefreshTrigger(t, rec)
+}
+
+func TestReturnToChannelsNonHTMXRedirectsToChannels(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/channels/github/configure", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	require.NoError(t, returnToChannels(c))
+	assert.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Equal(t, "/channels", rec.Header().Get("Location"))
+	assert.Empty(t, rec.Header().Get("HX-Trigger"))
+	assert.Empty(t, rec.Header().Get("HX-Refresh"))
+}
+
 func TestHandleTelegramSaveHTMXTriggersChannelsRefresh(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 
