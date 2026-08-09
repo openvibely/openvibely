@@ -455,6 +455,9 @@ func TestAgentLibraryMaintenanceService_SyncRootDeclarationsSeedsProtectedGoalAg
 	if !strings.Contains(hooks[0].RunPolicyJSON, `"always"`) {
 		t.Fatalf("Goal Agent hook must run after any task turn with an active goal, got run policy %s", hooks[0].RunPolicyJSON)
 	}
+	if hooks[0].PayloadJSON != `{"blocks":["conversation_transcript","task_goal"]}` {
+		t.Fatalf("Goal Agent hook must declare compact after-complete payload, got %s", hooks[0].PayloadJSON)
+	}
 }
 
 func TestAgentLibraryMaintenanceService_SyncRootDeclarationsRepairsLegacyGoalAgentByKey(t *testing.T) {
@@ -511,6 +514,9 @@ func TestAgentLibraryMaintenanceService_SyncRootDeclarationsRepairsLegacyGoalAge
 	}
 	if !strings.Contains(hooks[0].RunPolicyJSON, `"always"`) {
 		t.Fatalf("repaired Goal Agent hook must run after any task turn with an active goal, got run policy %s", hooks[0].RunPolicyJSON)
+	}
+	if hooks[0].PayloadJSON != `{"blocks":["conversation_transcript","task_goal"]}` {
+		t.Fatalf("repaired Goal Agent hook must declare compact after-complete payload, got %s", hooks[0].PayloadJSON)
 	}
 }
 
@@ -595,10 +601,21 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	if hook, ok := have["after_complete/observe_task_for_learning"]; !ok || hook.OutputContract != models.OutputContractLearningSummary || hook.Blocking || !hook.Enabled {
 		t.Fatalf("bad observe hook: %#v", hook)
 	}
+	if hook := have["route_task/route_task"]; hook.PayloadJSON != "{}" {
+		t.Fatalf("Skill Curator route hook should stay unscoped, got payload %s", hook.PayloadJSON)
+	}
+	if hook := have["after_complete/observe_task_for_learning"]; hook.PayloadJSON != `{"blocks":["conversation_transcript","learning_snapshot"]}` {
+		t.Fatalf("Skill Curator observe hook must declare compact after-complete payload, got %s", hook.PayloadJSON)
+	}
 	staleRoute := have["route_task/route_task"]
 	staleRoute.Blocking = true
 	if err := lifecycleRepo.UpdateHook(ctx, &staleRoute); err != nil {
 		t.Fatalf("make route hook stale blocking: %v", err)
+	}
+	staleObserve := have["after_complete/observe_task_for_learning"]
+	staleObserve.PayloadJSON = "{}"
+	if err := lifecycleRepo.UpdateHook(ctx, &staleObserve); err != nil {
+		t.Fatalf("make observe hook stale payload: %v", err)
 	}
 	if err := svc.EnsureProject(ctx, projectID); err != nil {
 		t.Fatalf("EnsureProject repairs route blocking: %v", err)
@@ -610,6 +627,9 @@ func TestAgentLibraryMaintenanceService_EnsureProjectCreatesVisibleScheduledTask
 	for _, hook := range repairedHooks {
 		if hook.When == models.LifecycleRouteTask && hook.SkillKey == "route_task" && hook.Blocking {
 			t.Fatalf("Skill Curator route hook should repair to non-blocking: %#v", hook)
+		}
+		if hook.When == models.LifecycleAfterComplete && hook.SkillKey == "observe_task_for_learning" && hook.PayloadJSON != `{"blocks":["conversation_transcript","learning_snapshot"]}` {
+			t.Fatalf("Skill Curator observe hook should repair stale payload: %#v", hook)
 		}
 	}
 	task, err := taskRepo.GetByProjectAndTitle(ctx, projectID, agentLibraryMaintenanceTaskTitle)
