@@ -231,3 +231,68 @@ func TestRenderSkillMarkdown_RoundTrips(t *testing.T) {
 		t.Fatalf("body lost: %q", body)
 	}
 }
+
+// A hook's declared payload must survive parsing and reach the hook row, so an
+// agent author controls its own context from its declaration file.
+func TestHookPayloadDeclarationReachesHookRow(t *testing.T) {
+	decl, _, err := ParseDeclaration(`---
+kind: openvibely.agent_skill
+version: 1
+agent:
+  key: custom_reviewer
+  name: Custom Reviewer
+lifecycle_hooks:
+  after_complete:
+    enabled: true
+    skill: review_after
+    output_contract: activity_summary
+    payload:
+      - conversation_transcript
+      - assigned_agent
+---
+
+# Custom Reviewer
+`)
+	if err != nil {
+		t.Fatalf("ParseDeclaration: %v", err)
+	}
+	hookDecl := decl.LifecycleHooks["after_complete"]
+	if len(hookDecl.Payload) != 2 || hookDecl.Payload[0] != "conversation_transcript" || hookDecl.Payload[1] != "assigned_agent" {
+		t.Fatalf("payload not parsed from declaration: %#v", hookDecl.Payload)
+	}
+
+	hooks := importHooks(decl)
+	if len(hooks) != 1 {
+		t.Fatalf("expected one imported hook, got %d", len(hooks))
+	}
+	if hooks[0].PayloadJSON != `{"blocks":["conversation_transcript","assigned_agent"]}` {
+		t.Fatalf("payload did not reach the hook row: %q", hooks[0].PayloadJSON)
+	}
+}
+
+// Declarations that omit payload keep an empty value, which the runtime reads
+// as "send every context block".
+func TestHookWithoutPayloadDeclarationStaysUnscoped(t *testing.T) {
+	decl, _, err := ParseDeclaration(`---
+kind: openvibely.agent_skill
+version: 1
+agent:
+  key: custom_reviewer
+  name: Custom Reviewer
+lifecycle_hooks:
+  after_complete:
+    enabled: true
+    skill: review_after
+    output_contract: activity_summary
+---
+
+# Custom Reviewer
+`)
+	if err != nil {
+		t.Fatalf("ParseDeclaration: %v", err)
+	}
+	hooks := importHooks(decl)
+	if len(hooks) != 1 || hooks[0].PayloadJSON != "" {
+		t.Fatalf("expected empty payload for undeclared hook, got %#v", hooks)
+	}
+}

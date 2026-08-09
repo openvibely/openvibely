@@ -272,7 +272,9 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		return "", llmusage.FromTotal(0), err
 	}
 	systemPrompt := ""
-	if !req.RawDirectPrompt {
+	if !req.RawDirectPrompt && !req.LifecycleHookCall {
+		// Lifecycle hooks are structured JSON steps, not coding turns; the
+		// shared coding-agent system prompt is wasted context for them.
 		systemPrompt = llmprompt.BuildAgentSystemPrompt("", effectiveWorkDir(workDir))
 	}
 	resp, err := client.SendCompletions(ctx, prompt, &openaiclient.CompletionsOptions{

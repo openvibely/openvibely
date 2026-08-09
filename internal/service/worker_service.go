@@ -687,10 +687,12 @@ func (w *WorkerService) runLifecycleSlotWithExtras(ctx context.Context, when mod
 		if in.Extras == nil {
 			in.Extras = make(map[string]any)
 		}
+		snapshot := w.buildLearningSnapshot(ctx, task, taskRunID, runErr)
 		in.Extras[lifecycle.ConversationTranscriptKey] = chatContext
-		in.Extras[lifecycle.LearningSnapshotKey] = w.buildLearningSnapshot(ctx, task, taskRunID, runErr)
+		in.Extras[lifecycle.LearningSnapshotKey] = snapshot
+		in.Extras[lifecycle.AssignedAgentKey] = assignedAgentIdentity(snapshot)
 		if goal := w.evaluableTaskGoal(ctx, task.ID); goal != nil {
-			in.Extras["task_goal"] = goal
+			in.Extras[lifecycle.TaskGoalKey] = goal
 		}
 	}
 	result, err := w.lifecycleRunner.RunSlotFiltered(ctx, when, in, include)
@@ -714,9 +716,17 @@ func promptSafeTaskTitle(task models.Task) string {
 }
 
 func (w *WorkerService) lifecycleHookInput(ctx context.Context, hook models.AgentLifecycleHook, input lifecycle.HookInput) lifecycle.HookInput {
-	if hook.When != models.LifecycleRouteTask {
+	switch hook.When {
+	case models.LifecycleRouteTask:
+		return w.routeHookInput(ctx, hook, input)
+	case models.LifecycleAfterComplete:
+		return w.afterCompleteHookInput(ctx, hook, input)
+	default:
 		return input
 	}
+}
+
+func (w *WorkerService) routeHookInput(ctx context.Context, hook models.AgentLifecycleHook, input lifecycle.HookInput) lifecycle.HookInput {
 	input.Extras = withoutRouteIndexes(input.Extras)
 	switch hook.OutputContract {
 	case models.OutputContractSelectedSkills:
@@ -726,6 +736,29 @@ func (w *WorkerService) lifecycleHookInput(ctx context.Context, hook models.Agen
 	case models.OutputContractSelectedMemories:
 		input.Extras = withHookExtra(input.Extras, "available_memories", w.availableMemoryIndex(ctx, models.Task{ID: input.TaskID, ProjectID: input.ProjectID}))
 	}
+	return input
+}
+
+// afterCompleteHookInput narrows the shared after-complete extras to the
+// context blocks the hook declared in its agent declaration. The slot builds
+// one payload for every hook, so without this each hook pays for blocks its
+// skill never reads.
+//
+// A hook that declares no payload receives everything, which is the default
+// for user-created agents and for any declaration written before payload
+// selection existed.
+func (w *WorkerService) afterCompleteHookInput(_ context.Context, hook models.AgentLifecycleHook, input lifecycle.HookInput) lifecycle.HookInput {
+	payload := lifecycle.ParseHookPayload(hook.PayloadJSON)
+	if payload.SelectsAllBlocks() || len(input.Extras) == 0 {
+		return input
+	}
+	extras := make(map[string]any, len(payload.Blocks))
+	for key, value := range input.Extras {
+		if payload.Allows(key) {
+			extras[key] = value
+		}
+	}
+	input.Extras = extras
 	return input
 }
 

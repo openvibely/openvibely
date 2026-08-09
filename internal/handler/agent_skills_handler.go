@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentskills"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
 )
@@ -523,6 +524,9 @@ func (h *Handler) lifecycleHookDeclsForAgent(ctx context.Context, agentID string
 			if err := json.Unmarshal([]byte(hook.ScheduleJSON), &schedule); err == nil {
 				decl.ScheduleCron = strings.TrimSpace(schedule["cron"])
 			}
+		}
+		if payload := lifecycle.ParseHookPayload(hook.PayloadJSON); !payload.SelectsAllBlocks() {
+			decl.Payload = payload.Blocks
 		}
 		out[when] = decl
 	}

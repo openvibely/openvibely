@@ -44,6 +44,10 @@ type AgentLifecycleHook struct {
 	PermissionsJSON string                  `json:"permissions_json,omitempty"`
 	RunPolicyJSON   string                  `json:"run_policy_json,omitempty"`
 	ScheduleJSON    string                  `json:"schedule_json,omitempty"`
+	// PayloadJSON declares which lifecycle context blocks this hook's skill
+	// reads, as {"blocks":["conversation_transcript",...]}. Empty or absent
+	// means the hook receives every block the slot produced.
+	PayloadJSON string `json:"payload_json,omitempty"`
 	CreatedAt       time.Time               `json:"created_at"`
 	UpdatedAt       time.Time               `json:"updated_at"`
 }

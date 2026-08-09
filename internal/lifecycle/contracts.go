@@ -175,6 +175,76 @@ const LearningSnapshotKey = "learning_snapshot"
 // statuses, or lifecycle internals.
 const ConversationTranscriptKey = "conversation_transcript"
 
+// AssignedAgentKey is the HookInput.Extras key for the compact identity of the
+// task's assigned agent. Hooks that only need to know which agent ran the task
+// can declare this block instead of the full LearningSnapshotKey.
+const AssignedAgentKey = "assigned_agent"
+
+// TaskGoalKey is the HookInput.Extras key for the task's active goal.
+const TaskGoalKey = "task_goal"
+
+// AssignedAgentIdentity is the compact identity of the agent that ran the task,
+// for hooks that only need to recognize which agent produced the turn.
+type AssignedAgentIdentity struct {
+	Key        string `json:"key,omitempty"`
+	Name       string `json:"name,omitempty"`
+	SystemKind string `json:"system_kind,omitempty"`
+}
+
+// HookPayload is the parsed form of AgentLifecycleHook.PayloadJSON. It names
+// the lifecycle context blocks an agent's hook skill reads. An empty Blocks
+// list means "every block the slot produced", which is the default for hooks
+// that declare no payload.
+type HookPayload struct {
+	Blocks []string `json:"blocks,omitempty"`
+}
+
+// ParseHookPayload reads a hook's declared payload. Unset, empty, or malformed
+// JSON yields a zero HookPayload, which callers treat as "send everything" so a
+// bad declaration never silently starves a hook of context.
+func ParseHookPayload(raw string) HookPayload {
+	var payload HookPayload
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return payload
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return HookPayload{}
+	}
+	cleaned := make([]string, 0, len(payload.Blocks))
+	seen := map[string]struct{}{}
+	for _, block := range payload.Blocks {
+		block = strings.TrimSpace(block)
+		if block == "" {
+			continue
+		}
+		if _, ok := seen[block]; ok {
+			continue
+		}
+		seen[block] = struct{}{}
+		cleaned = append(cleaned, block)
+	}
+	payload.Blocks = cleaned
+	return payload
+}
+
+// SelectsAllBlocks reports whether the hook declared no payload and should
+// therefore receive every context block the slot produced.
+func (p HookPayload) SelectsAllBlocks() bool { return len(p.Blocks) == 0 }
+
+// Allows reports whether the hook declared the supplied context block.
+func (p HookPayload) Allows(block string) bool {
+	if p.SelectsAllBlocks() {
+		return true
+	}
+	for _, declared := range p.Blocks {
+		if declared == block {
+			return true
+		}
+	}
+	return false
+}
+
 // LibraryUpdateSummary is the validated payload for scheduled/explicit
 // library maintenance runs.
 type LibraryUpdateSummary struct {

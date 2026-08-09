@@ -104,6 +104,7 @@ func (i *LLMHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleH
 		return nil, err
 	}
 	callCtx := contextWithHookRuntimeTools(ctx, hook, agentDef)
+	callCtx = llmcontracts.WithLifecycleHookCall(callCtx)
 	callCtx = WithHookAgent(callCtx, HookAgent{AgentID: hook.AgentID, SystemKind: systemKindForHookAgent(agentDef), Tools: hookAgentTools(agentDef), TaskID: input.TaskID, TaskRunID: input.TaskRunID})
 	if err := validateRequiredLifecycleRuntimeTools(hook, agentDef, llmcontracts.RuntimeToolsFromContext(callCtx)); err != nil {
 		RecordTraceEvent(callCtx, "available_tools_missing", map[string]any{"error": err.Error(), "tools": runtimeToolNamesForTrace(callCtx)})
@@ -120,7 +121,7 @@ func (i *LLMHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleH
 	RecordTraceEvent(callCtx, "available_tools", map[string]any{"tools": runtimeToolNamesForTrace(callCtx)})
 	var reply string
 	callAgentDef := agentDefinitionForHookCall(hook, agentDef)
-	if noToolsCaller, ok := i.caller.(AgentDefinitionNoToolsCaller); ok && callAgentDef != nil && isMemoryRecallRouteHook(hook, agentDef) {
+	if noToolsCaller, ok := i.caller.(AgentDefinitionNoToolsCaller); ok && callAgentDef != nil && isSelectionOnlyRouteHook(hook, agentDef) {
 		reply, _, err = noToolsCaller.CallAgentDirectWithDefinitionNoTools(callCtx, prompt, nil, cfg, input.WorkDir, callAgentDef)
 	} else if defCaller, ok := i.caller.(AgentDefinitionCaller); ok && callAgentDef != nil {
 		reply, _, err = defCaller.CallAgentDirectWithDefinition(callCtx, prompt, nil, cfg, input.WorkDir, callAgentDef)
@@ -207,8 +208,12 @@ func renderOutputContractPrompt(contract models.LifecycleOutputContract) string 
 	return fmt.Sprintf(outputContractPromptTemplate, contract, spec)
 }
 
+// sanitizedHookInputForPrompt strips fields that renderHookPrompt already
+// emits as their own prompt section. Leaving them in the JSON block would send
+// the same text to the model twice.
 func sanitizedHookInputForPrompt(input HookInput) HookInput {
 	input.SkillBody = ""
+	input.PromptOverride = ""
 	input.PreviousOutputs = sanitizeHookOutputsForPrompt(input.PreviousOutputs)
 	return input
 }
@@ -309,14 +314,14 @@ func filterRuntimeToolsForHook(rt *llmcontracts.RuntimeTools, hook models.AgentL
 	if rt == nil || agentDef == nil {
 		return rt
 	}
-	if isMemoryRecallRouteHook(hook, agentDef) {
+	if isSelectionOnlyRouteHook(hook, agentDef) {
 		return &llmcontracts.RuntimeTools{SkipDefaultTools: true}
 	}
 	return rt
 }
 
 func agentDefinitionForHookCall(hook models.AgentLifecycleHook, agentDef *models.Agent) *models.Agent {
-	if agentDef == nil || !isMemoryRecallRouteHook(hook, agentDef) {
+	if agentDef == nil || !isSelectionOnlyRouteHook(hook, agentDef) {
 		return agentDef
 	}
 	copyDef := *agentDef
@@ -327,8 +332,26 @@ func agentDefinitionForHookCall(hook models.AgentLifecycleHook, agentDef *models
 	return &copyDef
 }
 
-func isMemoryRecallRouteHook(hook models.AgentLifecycleHook, agentDef *models.Agent) bool {
-	return agentDef != nil && agentDef.SystemKind == models.AgentSystemKindMemoryCurator && hook.When == models.LifecycleRouteTask && hook.OutputContract == models.OutputContractSelectedMemories
+// isSelectionOnlyRouteHook reports whether a route_task hook is a pure
+// selection step whose index already arrives in the hook payload. These hooks
+// need no tools at all: attaching them costs tool-schema tokens on every task
+// turn and invites a classifier into a tool loop that re-sends the whole
+// prompt each iteration.
+//
+// Scoped to built-in system agents so custom route hooks, whose skill bodies
+// may legitimately call read tools, keep their existing tool access.
+func isSelectionOnlyRouteHook(hook models.AgentLifecycleHook, agentDef *models.Agent) bool {
+	if agentDef == nil || hook.When != models.LifecycleRouteTask {
+		return false
+	}
+	switch agentDef.SystemKind {
+	case models.AgentSystemKindMemoryCurator:
+		return hook.OutputContract == models.OutputContractSelectedMemories
+	case models.AgentSystemKindSkillCurator:
+		return hook.OutputContract == models.OutputContractSelectedSkills
+	default:
+		return false
+	}
 }
 
 func allowedRuntimeToolNamesForAgent(agentDef *models.Agent) map[string]struct{} {

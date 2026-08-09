@@ -131,7 +131,7 @@ func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 		ReasoningEffort: "low",
 		AuthMethod:      models.AuthMethodAPIKey,
 		APIKey:          "test-key",
-	}, ".", "", nil, nil, nil, true, true, false)
+	}, ".", "", nil, nil, nil, true, true, false, false)
 	if err == nil {
 		t.Fatal("expected refusal stop_reason to return an error")
 	}
@@ -184,7 +184,7 @@ func TestCallDirectRawPromptOmitsOpenVibelySystemTaskPromptAndTools(t *testing.T
 		ReasoningEffort: "max",
 		AuthMethod:      models.AuthMethodAPIKey,
 		APIKey:          "test-key",
-	}, "/secret/workdir", "project instructions", nil, nil, nil, true, true, true)
+	}, "/secret/workdir", "project instructions", nil, nil, nil, true, true, true, false)
 	if err != nil {
 		t.Fatalf("callDirect: %v", err)
 	}
@@ -469,5 +469,67 @@ func TestResolveChatToolPolicy(t *testing.T) {
 					tc.follow, tc.mode, tc.rt == nil, gotDisable, gotSkip, tc.wantD, tc.wantS)
 			}
 		})
+	}
+}
+
+// Lifecycle hooks return structured JSON. They must keep their own agent
+// prompt but drop the shared coding-agent system prompt, the take-direct-action
+// header, and provider web tools, all of which are wasted context for them.
+func TestCallDirectLifecycleHookDropsCodingAgentFraming(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		events := []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-test","usage":{"input_tokens":4}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"{}"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`,
+			`{"type":"message_stop"}`,
+		}
+		for _, evt := range events {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	adapter := New(nil, nil, nil)
+	_, _, err := adapter.callDirect(context.Background(), "HOOK PROMPT", nil, models.LLMConfig{
+		Name:       "Claude API",
+		Provider:   models.ProviderAnthropic,
+		Model:      "claude-opus-5",
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "test-key",
+	}, "/repo", "AGENT OWN PROMPT", nil, nil, nil, true, true, false, true)
+	if err != nil {
+		t.Fatalf("callDirect: %v", err)
+	}
+
+	systemBlocks, _ := json.Marshal(gotBody["system"])
+	system := string(systemBlocks)
+	if !strings.Contains(system, "AGENT OWN PROMPT") {
+		t.Fatalf("lifecycle hook must keep its own agent prompt, got %s", system)
+	}
+	if strings.Contains(system, "expert software engineer") {
+		t.Fatalf("lifecycle hook must not receive the coding-agent system prompt, got %s", system)
+	}
+
+	messages, _ := json.Marshal(gotBody["messages"])
+	if strings.Contains(string(messages), "Do not use plan mode") {
+		t.Fatalf("lifecycle hook must not receive the task prompt header, got %s", messages)
+	}
+
+	tools, _ := json.Marshal(gotBody["tools"])
+	if strings.Contains(string(tools), "web_search") || strings.Contains(string(tools), "web_fetch") {
+		t.Fatalf("lifecycle hook must not receive provider web tools, got %s", tools)
 	}
 }

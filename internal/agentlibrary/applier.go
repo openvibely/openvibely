@@ -394,6 +394,14 @@ func importHooks(decl *SkillDeclaration) []models.AgentLifecycleHook {
 		if h.Enabled != nil {
 			enabled = *h.Enabled
 		}
+		// An omitted payload stays empty, which the runtime reads as "send every
+		// context block" — the behavior every declaration had before payload
+		// selection existed.
+		payloadJSON := ""
+		if len(h.Payload) > 0 {
+			b, _ := json.Marshal(map[string]any{"blocks": h.Payload})
+			payloadJSON = string(b)
+		}
 		out = append(out, models.AgentLifecycleHook{
 			When:            models.LifecycleWhen(when),
 			SkillKey:        firstNonEmpty(h.Skill, decl.Skill.Key),
@@ -404,6 +412,7 @@ func importHooks(decl *SkillDeclaration) []models.AgentLifecycleHook {
 			PermissionsJSON: string(permJSON),
 			RunPolicyJSON:   string(runJSON),
 			ScheduleJSON:    scheduleJSON,
+			PayloadJSON:     payloadJSON,
 		})
 	}
 	return out

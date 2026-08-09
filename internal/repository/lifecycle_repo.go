@@ -23,7 +23,7 @@ func NewLifecycleRepo(db *sql.DB) *LifecycleRepo {
 
 const hookCols = `id, agent_id, when_slot, skill_key, prompt_override, output_contract,
                   blocking, enabled, permissions_json, run_policy_json, schedule_json,
-                  created_at, updated_at`
+                  payload_json, created_at, updated_at`
 
 // prefixedHookCols returns hookCols with each column prefixed by the supplied
 // table alias. Used by HooksForWhen so the JOIN against agents does not need
@@ -32,7 +32,7 @@ func prefixedHookCols(alias string) string {
 	cols := []string{
 		"id", "agent_id", "when_slot", "skill_key", "prompt_override", "output_contract",
 		"blocking", "enabled", "permissions_json", "run_policy_json", "schedule_json",
-		"created_at", "updated_at",
+		"payload_json", "created_at", "updated_at",
 	}
 	out := ""
 	for i, c := range cols {
@@ -46,13 +46,16 @@ func prefixedHookCols(alias string) string {
 
 func scanHook(row interface{ Scan(...any) error }) (*models.AgentLifecycleHook, error) {
 	var h models.AgentLifecycleHook
-	var scheduleJSON sql.NullString
+	var scheduleJSON, payloadJSON sql.NullString
 	var blocking, enabled int
 	var when, contract string
 	if err := row.Scan(&h.ID, &h.AgentID, &when, &h.SkillKey, &h.PromptOverride, &contract,
 		&blocking, &enabled, &h.PermissionsJSON, &h.RunPolicyJSON, &scheduleJSON,
-		&h.CreatedAt, &h.UpdatedAt); err != nil {
+		&payloadJSON, &h.CreatedAt, &h.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if payloadJSON.Valid {
+		h.PayloadJSON = payloadJSON.String
 	}
 	h.When = models.LifecycleWhen(when)
 	h.OutputContract = models.LifecycleOutputContract(contract)
@@ -82,6 +85,10 @@ func (r *LifecycleRepo) CreateHook(ctx context.Context, h *models.AgentLifecycle
 	if runPolicy == "" {
 		runPolicy = "{}"
 	}
+	payload := h.PayloadJSON
+	if payload == "" {
+		payload = "{}"
+	}
 	var schedule any
 	if h.ScheduleJSON != "" {
 		schedule = h.ScheduleJSON
@@ -89,11 +96,11 @@ func (r *LifecycleRepo) CreateHook(ctx context.Context, h *models.AgentLifecycle
 	err := r.db.QueryRowContext(ctx, `
         INSERT INTO agent_lifecycle_hooks
             (id, agent_id, when_slot, skill_key, prompt_override, output_contract,
-             blocking, enabled, permissions_json, run_policy_json, schedule_json)
-        VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             blocking, enabled, permissions_json, run_policy_json, schedule_json, payload_json)
+        VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id, created_at, updated_at`,
 		h.AgentID, string(h.When), h.SkillKey, h.PromptOverride, string(h.OutputContract),
-		blocking, enabled, permissions, runPolicy, schedule,
+		blocking, enabled, permissions, runPolicy, schedule, payload,
 	).Scan(&h.ID, &h.CreatedAt, &h.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("creating lifecycle hook: %w", err)
@@ -119,6 +126,10 @@ func (r *LifecycleRepo) UpdateHook(ctx context.Context, h *models.AgentLifecycle
 	if runPolicy == "" {
 		runPolicy = "{}"
 	}
+	payload := h.PayloadJSON
+	if payload == "" {
+		payload = "{}"
+	}
 	var schedule any
 	if h.ScheduleJSON != "" {
 		schedule = h.ScheduleJSON
@@ -127,10 +138,10 @@ func (r *LifecycleRepo) UpdateHook(ctx context.Context, h *models.AgentLifecycle
         UPDATE agent_lifecycle_hooks
         SET when_slot = ?, skill_key = ?, prompt_override = ?, output_contract = ?,
             blocking = ?, enabled = ?, permissions_json = ?, run_policy_json = ?,
-            schedule_json = ?, updated_at = datetime('now')
+            schedule_json = ?, payload_json = ?, updated_at = datetime('now')
         WHERE id = ?`,
 		string(h.When), h.SkillKey, h.PromptOverride, string(h.OutputContract),
-		blocking, enabled, permissions, runPolicy, schedule, h.ID,
+		blocking, enabled, permissions, runPolicy, schedule, payload, h.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("updating lifecycle hook: %w", err)

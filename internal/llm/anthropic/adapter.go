@@ -485,7 +485,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 			req.DisableTools = false
 		}
 		skipDefaultTools := agentSkipDefaultTools(req.AgentDefinition) || runtimeSkipDefaultTools(rt)
-		output, usage, err := a.callDirect(ctx, req.Message, req.Attachments, agent, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, req.DisableTools, skipDefaultTools, req.RawDirectPrompt)
+		output, usage, err := a.callDirect(ctx, req.Message, req.Attachments, agent, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, req.DisableTools, skipDefaultTools, req.RawDirectPrompt, req.LifecycleHookCall)
 		return llmcontracts.AgentResult{
 			Output:     output,
 			Usage:      usage,
@@ -498,7 +498,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 }
 
 // callDirect calls the Anthropic API using OAuth tokens.
-func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool, skipDefaultTools bool, rawDirectPrompt bool) (string, llmcontracts.Usage, error) {
+func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, extraTools []anthropicclient.ToolDefinition, toolExecutor func(context.Context, string, json.RawMessage) (string, bool, error), toolFilter func(string) bool, disableTools bool, skipDefaultTools bool, rawDirectPrompt bool, lifecycleHookCall bool) (string, llmcontracts.Usage, error) {
 	maxTokens := claudeCodeMaxOutputTokens(agent.Model)
 	applog.Infof("[anthropic] callDirect model=%s max_tokens=%d workDir=%s attachments=%d disable_tools=%v", agent.Model, maxTokens, workDir, len(attachments), disableTools)
 
@@ -515,7 +515,16 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 	fullPrompt := prompt
 	systemPrompt := ""
 	webSearchEnabled := false
-	if !rawDirectPrompt {
+	switch {
+	case rawDirectPrompt:
+		// Message is already fully composed; send it untouched.
+	case lifecycleHookCall:
+		// Lifecycle hooks return structured JSON; they do not edit files, run
+		// builds, or browse. Keep the hook agent's own prompt so its identity
+		// and rules survive, but drop the shared coding-agent system prompt,
+		// the take-direct-action header, and provider web tools.
+		systemPrompt = projectInstructions
+	default:
 		fullPrompt = llmprompt.BuildTaskPromptHeader() + prompt
 		systemPrompt = llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir)
 		webSearchEnabled = true

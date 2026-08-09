@@ -2054,14 +2054,15 @@ func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message 
 		}
 	}
 	req, err := llmnormalize.NormalizeRequest(llmcontracts.AgentRequest{
-		Ctx:             callCtx,
-		Operation:       llmcontracts.OperationDirect,
-		Message:         message,
-		Attachments:     attachments,
-		Agent:           agent,
-		WorkDir:         workDir,
-		DisableTools:    disableTools,
-		AgentDefinition: agentDef,
+		Ctx:               callCtx,
+		Operation:         llmcontracts.OperationDirect,
+		Message:           message,
+		Attachments:       attachments,
+		Agent:             agent,
+		WorkDir:           workDir,
+		DisableTools:      disableTools,
+		AgentDefinition:   agentDef,
+		LifecycleHookCall: llmcontracts.LifecycleHookCallFromContext(ctx),
 	})
 	if err != nil {
 		return "", 0, err

@@ -690,6 +690,11 @@ func lifecycleHookFromAgentDeclaration(agentID string, when models.LifecycleWhen
 	if h.Enabled != nil {
 		enabled = *h.Enabled
 	}
+	payload := ""
+	if len(h.Payload) > 0 {
+		b, _ := json.Marshal(map[string]any{"blocks": h.Payload})
+		payload = string(b)
+	}
 	return &models.AgentLifecycleHook{
 		AgentID:         agentID,
 		When:            when,
@@ -701,6 +706,7 @@ func lifecycleHookFromAgentDeclaration(agentID string, when models.LifecycleWhen
 		PermissionsJSON: string(permissions),
 		RunPolicyJSON:   string(runPolicy),
 		ScheduleJSON:    schedule,
+		PayloadJSON:     payload,
 	}
 }
 
@@ -711,6 +717,18 @@ func findAgentLifecycleHook(hooks []models.AgentLifecycleHook, when models.Lifec
 		}
 	}
 	return nil
+}
+
+// normalizedHookPayloadJSON collapses the two ways "this hook declared no
+// payload" is spelled: an empty string from a declaration, and the "{}" default
+// the hooks table stores. Without this, every warm sync of an undeclared hook
+// would look like a change and rewrite the row.
+func normalizedHookPayloadJSON(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "{}" {
+		return ""
+	}
+	return raw
 }
 
 func sameLifecycleHook(a *models.AgentLifecycleHook, b *models.AgentLifecycleHook) bool {
@@ -726,7 +744,8 @@ func sameLifecycleHook(a *models.AgentLifecycleHook, b *models.AgentLifecycleHoo
 		a.Enabled == b.Enabled &&
 		strings.TrimSpace(a.PermissionsJSON) == strings.TrimSpace(b.PermissionsJSON) &&
 		strings.TrimSpace(a.RunPolicyJSON) == strings.TrimSpace(b.RunPolicyJSON) &&
-		strings.TrimSpace(a.ScheduleJSON) == strings.TrimSpace(b.ScheduleJSON)
+		strings.TrimSpace(a.ScheduleJSON) == strings.TrimSpace(b.ScheduleJSON) &&
+		normalizedHookPayloadJSON(a.PayloadJSON) == normalizedHookPayloadJSON(b.PayloadJSON)
 }
 
 func toolConfigFromAgentDeclaration(cfg agentlibrary.ToolConfigBlock) models.AgentToolConfig {

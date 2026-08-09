@@ -127,6 +127,11 @@ type HookDecl struct {
 	Schedule       string          `yaml:"schedule"`
 	RunPolicy      string          `yaml:"run_policy"`
 	Permissions    map[string]bool `yaml:"permissions"`
+	// Payload names the lifecycle context blocks this hook's skill reads, for
+	// example conversation_transcript or task_goal. Omit it to receive every
+	// block the slot produced; declare it to keep unread context out of the
+	// hook's prompt.
+	Payload []string `yaml:"payload"`
 }
 
 // SplitFrontmatter returns the YAML frontmatter block and the remaining body.
