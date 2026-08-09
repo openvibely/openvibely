@@ -395,7 +395,7 @@ func TestUsageRepo_ModelUsageGlobalVisibility(t *testing.T) {
 	}
 }
 
-func TestUsageRepo_ProjectDateBoundedAggregatePlansAvoidTempGroupBy(t *testing.T) {
+func TestUsageRepo_ProjectDateBoundedAggregatePlansAvoidTempBTree(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	filter := UsageFilter{
 		ProjectID: "project-plan",
@@ -403,68 +403,76 @@ func TestUsageRepo_ProjectDateBoundedAggregatePlansAvoidTempGroupBy(t *testing.T
 		DateTo:    time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 		GroupBy:   "day",
 	}
-
-	periodExpr, source, where, args := usageEventSourceWithPeriod(filter, "day")
-	assertNoTempGroupBy(t, db, "GetDailyUsage", `
-		SELECT `+periodExpr+` AS period,
-		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0),
-		       COALESCE(SUM(total_tokens), 0), SUM(cost_usd), COUNT(cost_usd), COUNT(*)
+	source, where, args := usageAggregateScanSource(filter)
+	assertNoTempBTree(t, db, "project/date-bounded usage aggregate scan", `
+		SELECT provider, model, input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens,
+		       total_tokens, cost_usd, occurred_at
 		FROM `+source+` `+where+`
-		GROUP BY period
-		ORDER BY period ASC`, args...)
-	assertNoTempGroupBy(t, db, "GetDailyUsageByModel", `
-		SELECT `+periodExpr+` AS period, provider, model,
-		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0),
-		       COALESCE(SUM(total_tokens), 0), SUM(cost_usd), COUNT(cost_usd), COUNT(*)
-		FROM `+source+` `+where+`
-		GROUP BY period, provider, model
-		ORDER BY period ASC, provider ASC, model ASC`, args...)
-
-	for _, groupBy := range []string{"hour", "day", "week", "month"} {
-		filter.GroupBy = groupBy
-		periodExpr, source, where, args = usageEventSourceWithPeriod(filter, groupBy)
-		assertNoTempGroupBy(t, db, "GetUsageRateBuckets/"+groupBy, `
-			SELECT `+periodExpr+` AS period, COALESCE(SUM(total_tokens), 0), COUNT(*)
-			FROM `+source+` `+where+`
-			GROUP BY period
-			ORDER BY period ASC`, args...)
-		assertNoTempGroupBy(t, db, "GetUsageRateBucketsByModel/"+groupBy, `
-			SELECT `+periodExpr+` AS period, provider, model, COALESCE(SUM(total_tokens), 0), COUNT(*)
-			FROM `+source+` `+where+`
-			GROUP BY period, provider, model
-			ORDER BY period ASC, provider ASC, model ASC`, args...)
-	}
-
-	source, where, args = usageEventSourceForModelBreakdown(filter)
-	assertNoTempGroupBy(t, db, "GetModelUsageBreakdown", `
-		SELECT provider, model, COALESCE(SUM(total_tokens), 0), COALESCE(SUM(input_tokens), 0),
-		       COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(reasoning_output_tokens), 0),
-		       SUM(cost_usd), COUNT(cost_usd), COUNT(*)
-		FROM `+source+` `+where+`
-		GROUP BY provider, model
-		ORDER BY COALESCE(SUM(total_tokens), 0) DESC, provider ASC, model ASC`, args...)
+		ORDER BY occurred_at ASC`, args...)
 }
 
-func TestUsageRepo_LocalBucketIndexesPreserveDSTSensitiveLocaltimeSemantics(t *testing.T) {
-	oldTZ, hadTZ := os.LookupEnv("TZ")
-	oldLocal := time.Local
-	t.Cleanup(func() {
-		if hadTZ {
-			_ = os.Setenv("TZ", oldTZ)
-		} else {
-			_ = os.Unsetenv("TZ")
-		}
-		time.Local = oldLocal
-	})
-	if err := os.Setenv("TZ", "America/New_York"); err != nil {
-		t.Fatalf("set TZ: %v", err)
+func TestUsageRepo_ProjectDateBoundedAggregatesComputeLocaltimeAtReadTime(t *testing.T) {
+	setUsageRepoTestLocalTimezone(t, "UTC")
+	db := testutil.NewTestDB(t)
+	repo := NewUsageRepo(db)
+	ctx := context.Background()
+	projectID := "project-timezone-change"
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name) VALUES (?, ?)`, projectID, "Timezone Change Usage Project"); err != nil {
+		t.Fatalf("insert project: %v", err)
 	}
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		t.Fatalf("load location: %v", err)
-	}
-	time.Local = loc
 
+	eventTime := time.Date(2026, 1, 1, 2, 30, 0, 0, time.UTC)
+	cost := 0.25
+	if err := repo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+		Provider:          "openai",
+		ProjectID:         projectID,
+		Model:             "gpt-timezone",
+		Operation:         "task",
+		Status:            "completed",
+		InputTokens:       12,
+		OutputTokens:      7,
+		CachedInputTokens: 3,
+		TotalTokens:       19,
+		CostUSD:           &cost,
+		OccurredAt:        eventTime,
+	}); err != nil {
+		t.Fatalf("RecordUsageEvent: %v", err)
+	}
+
+	setUsageRepoTestLocalTimezone(t, "America/Los_Angeles")
+	filter := UsageFilter{
+		ProjectID: projectID,
+		DateFrom:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		DateTo:    time.Date(2026, 1, 1, 23, 59, 59, 0, time.UTC),
+		GroupBy:   "day",
+	}
+
+	daily, err := repo.GetDailyUsage(ctx, filter)
+	if err != nil {
+		t.Fatalf("GetDailyUsage: %v", err)
+	}
+	if len(daily) != 1 || daily[0].Period != "2025-12-31" {
+		t.Fatalf("GetDailyUsage period after timezone change = %+v, want one 2025-12-31 bucket", daily)
+	}
+	byModel, err := repo.GetDailyUsageByModel(ctx, filter)
+	if err != nil {
+		t.Fatalf("GetDailyUsageByModel: %v", err)
+	}
+	if len(byModel) != 1 || byModel[0].Period != "2025-12-31" || byModel[0].Provider != "openai" || byModel[0].Model != "gpt-timezone" {
+		t.Fatalf("GetDailyUsageByModel after timezone change = %+v, want one openai/gpt-timezone 2025-12-31 bucket", byModel)
+	}
+	legacy := legacyUsageRateBuckets(t, db, filter)
+	optimized, err := repo.GetUsageRateBuckets(ctx, filter)
+	if err != nil {
+		t.Fatalf("GetUsageRateBuckets: %v", err)
+	}
+	if !reflect.DeepEqual(optimized, legacy) {
+		t.Fatalf("read-time localtime mismatch after timezone change\noptimized=%+v\nlegacy=%+v", optimized, legacy)
+	}
+}
+
+func TestUsageRepo_ProjectDateBoundedAggregatesPreserveDSTSensitiveLocaltimeSemantics(t *testing.T) {
+	setUsageRepoTestLocalTimezone(t, "America/New_York")
 	db := testutil.NewTestDB(t)
 	repo := NewUsageRepo(db)
 	ctx := context.Background()
@@ -512,6 +520,28 @@ func TestUsageRepo_LocalBucketIndexesPreserveDSTSensitiveLocaltimeSemantics(t *t
 	}
 }
 
+func setUsageRepoTestLocalTimezone(t *testing.T, name string) {
+	t.Helper()
+	oldTZ, hadTZ := os.LookupEnv("TZ")
+	oldLocal := time.Local
+	t.Cleanup(func() {
+		if hadTZ {
+			_ = os.Setenv("TZ", oldTZ)
+		} else {
+			_ = os.Unsetenv("TZ")
+		}
+		time.Local = oldLocal
+	})
+	if err := os.Setenv("TZ", name); err != nil {
+		t.Fatalf("set TZ: %v", err)
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		t.Fatalf("load location: %v", err)
+	}
+	time.Local = loc
+}
+
 func legacyUsageRateBuckets(t *testing.T, db *sql.DB, filter UsageFilter) []models.UsageRatePoint {
 	t.Helper()
 	where, args := usageWhere(filter)
@@ -539,11 +569,11 @@ func legacyUsageRateBuckets(t *testing.T, db *sql.DB, filter UsageFilter) []mode
 	return points
 }
 
-func assertNoTempGroupBy(t *testing.T, db *sql.DB, name, query string, args ...any) {
+func assertNoTempBTree(t *testing.T, db *sql.DB, name, query string, args ...any) {
 	t.Helper()
 	plan := explainUsageQueryPlan(t, db, query, args...)
-	if strings.Contains(plan, "USE TEMP B-TREE FOR GROUP BY") {
-		t.Fatalf("%s plan still uses temp GROUP BY B-tree:\n%s", name, plan)
+	if strings.Contains(plan, "USE TEMP B-TREE") {
+		t.Fatalf("%s plan still uses a temp B-tree:\n%s", name, plan)
 	}
 }
 
