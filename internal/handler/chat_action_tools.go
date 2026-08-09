@@ -1024,11 +1024,31 @@ func (h *Handler) rejectCancelledLifecycleSendToTask(ctx context.Context, destin
 		if err != nil {
 			return err
 		}
-		if task != nil && task.Status == models.StatusCancelled {
+		if task != nil && task.Status == models.StatusCancelled && !lifecycleHookMayContinueFromCancelledSource(agent, taskID) {
 			return fmt.Errorf("cancelled lifecycle task %s cannot enqueue continuation", taskID)
 		}
 	}
 	return nil
+}
+
+func lifecycleHookMayContinueFromCancelledSource(agent lifecycle.HookAgent, taskID string) bool {
+	if strings.TrimSpace(agent.TaskID) == "" || strings.TrimSpace(agent.TaskID) != strings.TrimSpace(taskID) {
+		return false
+	}
+	return lifecycleHookHasNonCancellationExecutionError(agent.ExecutionError)
+}
+
+func lifecycleHookHasNonCancellationExecutionError(executionError string) bool {
+	msg := strings.ToLower(strings.TrimSpace(executionError))
+	if msg == "" {
+		return false
+	}
+	switch msg {
+	case "task cancelled", "task canceled", "task cancelled by user", "task canceled by user", "context canceled", "context cancelled":
+		return false
+	default:
+		return true
+	}
 }
 
 func (h *Handler) rejectStaleLifecycleSendToTask(ctx context.Context) error {

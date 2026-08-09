@@ -1417,9 +1417,15 @@ func TestProcessStreamingResponse_CancelledTaskFollowupSkipsAfterCompleteHooksAn
 }
 
 func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancelledFinalStatus(t *testing.T) {
-	h, _, llmConfigRepo := setupTestHandler(t)
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	h.workerSvc.SetTaskRepo(h.taskRepo)
 	ctx := context.Background()
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
+	h.SetTaskGoalService(goalSvc)
+	h.taskSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetAfterCompleteRuntimeToolProvider(h.GoalAgentAfterCompleteRuntimeTools)
 	agent := createAgent(t, llmConfigRepo)
 	project := createProject(t, h, "Deadline Lifecycle Race Project")
 	task := createTask(t, h, project.ID, "Deadline Lifecycle Race Task", func(tk *models.Task) {
@@ -1434,9 +1440,22 @@ func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancell
 	})
 
 	afterInput := make(chan lifecycle.HookInput, 1)
+	type deadlineToolResult struct {
+		output  string
+		handled bool
+		isError bool
+		err     error
+	}
+	toolResult := make(chan deadlineToolResult, 1)
 	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{{ID: "learn-deadline", When: models.LifecycleAfterComplete, SkillKey: "observe_task_for_learning", OutputContract: models.OutputContractLearningSummary, Blocking: true, Enabled: true}}}
 	invoker := &chatMemoryHookInvoker{onInvoke: func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) error {
 		if hook.When == models.LifecycleAfterComplete {
+			if rt := llmcontracts.RuntimeToolsFromContext(ctx); rt != nil {
+				executionError, _ := in.Extras[lifecycle.ExecutionErrorKey].(string)
+				hookCtx := lifecycle.WithHookAgent(ctx, lifecycle.HookAgent{AgentID: "deadline-hook", Tools: []string{"send_to_task"}, TaskID: in.TaskID, TaskRunID: in.TaskRunID, ExecutionError: executionError})
+				output, handled, isError, err := rt.Executor(hookCtx, "send_to_task", json.RawMessage(`{"task_id":"current","message":"continue failure evaluation after timeout"}`))
+				toolResult <- deadlineToolResult{output: output, handled: handled, isError: isError, err: err}
+			}
 			afterInput <- in
 		}
 		return nil
@@ -1472,6 +1491,25 @@ func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancell
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for after_complete hook after deadline failure")
 	}
+	var queuedID string
+	select {
+	case result := <-toolResult:
+		require.True(t, result.handled, "deadline lifecycle send_to_task should be available")
+		require.False(t, result.isError, "ordinary timeout lifecycle continuation should not be rejected as cancelled")
+		require.NoError(t, result.err, "ordinary timeout lifecycle continuation should not be rejected as cancelled")
+		var payload struct {
+			QueuedMessageID string `json:"queued_message_id"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(result.output), &payload))
+		queuedID = payload.QueuedMessageID
+		require.NotEmpty(t, queuedID)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for deadline lifecycle send_to_task result")
+	}
+	queued, err := h.threadInputRepo.GetByID(ctx, queuedID)
+	require.NoError(t, err)
+	require.NotNil(t, queued)
+	require.Equal(t, "continue failure evaluation after timeout", queued.Content)
 	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.ExecCancelled, updatedExec.Status)
