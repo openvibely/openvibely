@@ -113,6 +113,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 						data-skill-enabled={ func() string { if skill.Enabled { return "true" } else { return "false" } }() }
 						data-skill-always-use={ func() string { if skill.AlwaysUse { return "true" } else { return "false" } }() }
 						data-search-card
+						data-skill-scroll-anchor={ skill.Handle }
 						data-search-text={ skillSearchText(skill) }
 						onclick="editSkillFromData(this)"
 					>
@@ -305,18 +306,153 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					}
 				}
 
-				function replaceSkillsContainer(html) {
-					if (typeof window.replaceSearchableCardContainer === 'function') {
-						window.replaceSearchableCardContainer('#skills-container', html);
-						return;
-					}
-					var container = document.getElementById('skills-container');
-					if (!container) return;
-					container.outerHTML = html;
-					var nextContainer = document.getElementById('skills-container');
-					if (window.htmx) htmx.process(nextContainer);
-					refreshSkillsContainerSearch();
+				function skillAnchorSelector(handle) {
+					var escaped = (window.CSS && CSS.escape) ? CSS.escape(handle) : String(handle || '').split('\\').join('\\\\').split('"').join('\\"');
+					return '[data-skill-scroll-anchor="' + escaped + '"]';
 				}
+
+				function visibleSkillCards(root) {
+					if (!root) return [];
+					return Array.prototype.slice.call(root.querySelectorAll('[data-skill-scroll-anchor]')).filter(function(card) {
+						return card.getClientRects().length > 0;
+					});
+				}
+
+				function skillFocusCandidates(cards, activeHandle) {
+					var handles = cards.map(function(card) { return card.dataset.skillHandle || ''; }).filter(Boolean);
+					var index = handles.indexOf(activeHandle || '');
+					if (index < 0) return handles.slice(0, 1);
+					var candidates = [activeHandle];
+					for (var distance = 1; distance < handles.length; distance++) {
+						if (index + distance < handles.length) candidates.push(handles[index + distance]);
+						if (index - distance >= 0) candidates.push(handles[index - distance]);
+					}
+					return candidates;
+				}
+
+				function captureSkillsViewportState(root, activeHandle) {
+					root = root || document.getElementById('skills-container');
+					if (!root) return null;
+					var cards = visibleSkillCards(root);
+					var viewportTop = 0;
+					var viewportBottom = window.innerHeight || document.documentElement.clientHeight || 0;
+					var viewportCards = cards.filter(function(card) {
+						var rect = card.getBoundingClientRect();
+						return rect.bottom > viewportTop && rect.top < viewportBottom;
+					});
+					var anchors = (viewportCards.length ? viewportCards : cards).map(function(card) {
+						return {id: card.dataset.skillHandle || '', top: card.getBoundingClientRect().top};
+					}).filter(function(anchor) {
+						return anchor.id;
+					}).sort(function(a, b) {
+						return Math.abs(a.top - viewportTop) - Math.abs(b.top - viewportTop);
+					});
+					var focusIDs = skillFocusCandidates(cards, activeHandle || '');
+					if (activeHandle && focusIDs.length > 1) {
+						var prioritized = [];
+						for (var j = 1; j < focusIDs.length; j++) {
+							var candidate = root.querySelector(skillAnchorSelector(focusIDs[j]));
+							if (candidate && candidate.getClientRects().length > 0) {
+								prioritized.push({id: focusIDs[j], top: candidate.getBoundingClientRect().top});
+							}
+						}
+						anchors = prioritized.concat(anchors.filter(function(anchor) {
+							return focusIDs.indexOf(anchor.id) < 1;
+						}));
+					}
+					return {
+						anchors: anchors,
+						windowScrollY: window.scrollY || window.pageYOffset || 0,
+						focusIDs: focusIDs
+					};
+				}
+
+				function restoreSkillsViewportState(root, saved) {
+					root = root || document.getElementById('skills-container');
+					if (!root || !saved) return;
+					refreshSkillsContainerSearch();
+					var anchor = null;
+					var savedAnchor = null;
+					for (var i = 0; i < (saved.anchors || []).length; i++) {
+						anchor = root.querySelector(skillAnchorSelector(saved.anchors[i].id));
+						if (anchor && anchor.getClientRects().length > 0) {
+							savedAnchor = saved.anchors[i];
+							break;
+						}
+					}
+					if (anchor && savedAnchor) {
+						var delta = anchor.getBoundingClientRect().top - savedAnchor.top;
+						if (Math.abs(delta) > 1) window.scrollBy(0, delta);
+					} else if (Math.abs((window.scrollY || window.pageYOffset || 0) - saved.windowScrollY) > 1) {
+						window.scrollTo(0, saved.windowScrollY || 0);
+					}
+				}
+
+				function focusAfterSkillsSwap(root, saved) {
+					if (!root || !saved) return;
+					var focusTarget = null;
+					for (var i = 0; i < (saved.focusIDs || []).length; i++) {
+						var card = root.querySelector(skillAnchorSelector(saved.focusIDs[i]));
+						if (card && card.getClientRects().length > 0) {
+							focusTarget = card.querySelector('.dropdown label, button');
+							if (focusTarget) break;
+						}
+					}
+					if (!focusTarget) focusTarget = root.querySelector('[data-card-search]');
+					if (focusTarget) focusTarget.focus({preventScroll: true});
+				}
+
+				function replaceSkillsContainer(html, options) {
+					var container = document.getElementById('skills-container');
+					var saved = options && options.preserveScroll === false ? null : captureSkillsViewportState(container, options && options.focusHandle);
+					var nextContainer = null;
+					if (typeof window.replaceSearchableCardContainer === 'function') {
+						nextContainer = window.replaceSearchableCardContainer('#skills-container', html);
+					} else if (container) {
+						container.outerHTML = html;
+						nextContainer = document.getElementById('skills-container');
+						if (window.htmx) htmx.process(nextContainer);
+						refreshSkillsContainerSearch();
+					}
+					if (nextContainer && saved) {
+						restoreSkillsViewportState(nextContainer, saved);
+						focusAfterSkillsSwap(nextContainer, saved);
+					}
+				}
+
+				(function installSkillsViewportPreservation() {
+					var state = window.openVibelySkillsViewport || (window.openVibelySkillsViewport = {});
+					if (state.installed) return;
+					state.installed = true;
+
+					document.body.addEventListener('htmx:beforeSwap', function(event) {
+						var target = event.detail && event.detail.target;
+						var root = document.getElementById('skills-container');
+						if (!target || target.id !== 'skills-container' || !root) return;
+						state.swap = state.preparedSwap || captureSkillsViewportState(root, state.pendingFocusHandle || '');
+						state.preparedSwap = null;
+						state.pendingFocusHandle = '';
+					});
+
+					document.body.addEventListener('htmx:afterSwap', function(event) {
+						var target = event.detail && event.detail.target;
+						var root = document.getElementById('skills-container');
+						var saved = state.swap;
+						if (!target || target.id !== 'skills-container' || !root || !saved) return;
+						state.swap = null;
+						root.openVibelySkillsViewportSwap = saved;
+						restoreSkillsViewportState(root, saved);
+					});
+
+					document.body.addEventListener('htmx:afterSettle', function(event) {
+						var target = event.detail && event.detail.target;
+						var root = document.getElementById('skills-container');
+						var saved = root && root.openVibelySkillsViewportSwap;
+						if (!target || target.id !== 'skills-container' || !root || !saved) return;
+						delete root.openVibelySkillsViewportSwap;
+						focusAfterSkillsSwap(root, saved);
+					});
+				})();
 
 				function setSkillModalError(message) {
 					var el = document.getElementById('skill_error');
@@ -428,12 +564,20 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 
 				function confirmDeleteSkill() {
 					if (!deleteSkillHandle) return;
+					var state = window.openVibelySkillsViewport || (window.openVibelySkillsViewport = {});
+					state.pendingFocusHandle = deleteSkillHandle;
+					state.preparedSwap = captureSkillsViewportState(document.getElementById('skills-container'), deleteSkillHandle);
 					var modal = document.getElementById('delete_skill_confirm_modal');
-					if (modal) modal.close();
+					if (modal) {
+						if (document.activeElement && modal.contains(document.activeElement)) document.activeElement.blur();
+						modal.close();
+					}
 					htmx.ajax('DELETE', '/skills/' + encodeURIComponent(deleteSkillHandle) + '?scope=' + encodeURIComponent(deleteSkillScope) + currentSkillsProjectQuery().replace(/^\?/, '&'), {
 						target: '#skills-container',
-						swap: 'outerHTML'
+						swap: 'outerHTML show:none'
 					}).catch(function(xhr) {
+						state.preparedSwap = null;
+						state.pendingFocusHandle = '';
 						alert((xhr && xhr.responseText) || 'Failed to delete skill.');
 					});
 				}
