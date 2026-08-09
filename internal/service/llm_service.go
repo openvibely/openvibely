@@ -486,6 +486,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		CallerTaskID:          task.ID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
+		WorkerSvc:             workerFromTaskService(s.taskSvc),
 		LLMConfigRepo:         s.llmConfigRepo,
 		AgentRepo:             s.agentRepo,
 		SettingsRepo:          nil,

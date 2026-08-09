@@ -527,6 +527,40 @@ func TestUpdateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T)
 	}
 }
 
+func TestUpdateSchedule_ClearsCancellationRequestWhenResettingScheduledTaskPending(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).
+		WithCategory(models.CategoryScheduled).
+		WithStatus(models.StatusCancelled).
+		Build()
+	schedule := tc.CreateSchedule(task.ID).Build()
+	tc.handler.workerSvc.MarkCancellationRequested(task.ID)
+	if !tc.handler.workerSvc.IsCancellationRequested(task.ID) {
+		t.Fatal("expected test setup cancellation marker")
+	}
+
+	rec := tc.HTTP().Put("/schedules/" + schedule.ID).WithForm(url.Values{
+		"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}).Execute()
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected redirect, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if tc.handler.workerSvc.IsCancellationRequested(task.ID) {
+		t.Fatal("schedule edit pending reset should clear stale cancellation marker")
+	}
+	updated, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != models.StatusPending {
+		t.Fatalf("status=%s, want pending", updated.Status)
+	}
+}
+
 func TestUpdateSchedule_Success_Redirect(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()

@@ -365,6 +365,9 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models
 			applog.Infof("[task-svc] UpdateStatus error fetching task: %v", err)
 			return err
 		}
+		if task != nil && (task.Category == models.CategoryActive || task.Category == models.CategoryScheduled) && s.workerSvc != nil {
+			s.workerSvc.ClearCancellationRequested(id)
+		}
 		if task != nil && task.Category == models.CategoryActive {
 			if status == models.StatusPending {
 				applog.Infof("[task-svc] UpdateStatus activating pending active task id=%s", id)

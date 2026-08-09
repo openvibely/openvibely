@@ -48,10 +48,15 @@ type ScheduleActionResult struct {
 type ScheduleActionService struct {
 	taskRepo     *repository.TaskRepo
 	scheduleRepo *repository.ScheduleRepo
+	workerSvc    *WorkerService
 }
 
-func NewScheduleActionService(taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo) *ScheduleActionService {
-	return &ScheduleActionService{taskRepo: taskRepo, scheduleRepo: scheduleRepo}
+func NewScheduleActionService(taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, workerSvc ...*WorkerService) *ScheduleActionService {
+	svc := &ScheduleActionService{taskRepo: taskRepo, scheduleRepo: scheduleRepo}
+	if len(workerSvc) > 0 {
+		svc.workerSvc = workerSvc[0]
+	}
+	return svc
 }
 
 func (s *ScheduleActionService) Create(ctx context.Context, projectID string, req ScheduleTaskRequest) (*ScheduleActionResult, error) {
@@ -100,12 +105,19 @@ func (s *ScheduleActionService) Create(ctx context.Context, projectID string, re
 	if task.Category != models.CategoryScheduled {
 		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
 			result.Warnings = append(result.Warnings, err)
+		} else {
+			task.Category = models.CategoryScheduled
 		}
-		if task.Status != models.StatusPending {
-			if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
-				result.Warnings = append(result.Warnings, err)
-			}
+	}
+	if task.Status != models.StatusPending {
+		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
+			result.Warnings = append(result.Warnings, err)
+		} else {
+			task.Status = models.StatusPending
 		}
+	}
+	if task.Category == models.CategoryScheduled && task.Status == models.StatusPending && s.workerSvc != nil {
+		s.workerSvc.ClearCancellationRequested(task.ID)
 	}
 	return result, nil
 }

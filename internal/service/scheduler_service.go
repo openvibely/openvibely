@@ -227,9 +227,11 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 				continue
 			}
 		} else {
+			if s.workerSvc != nil {
+				s.workerSvc.ClearCancellationRequested(task.ID)
+			}
 			s.workerSvc.Submit(*task)
 		}
-
 		// Compute next run
 		nextRun := sched.ComputeNextRun(now)
 		if nextRun != nil {

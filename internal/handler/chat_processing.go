@@ -2839,7 +2839,7 @@ func (h *Handler) executeChatScheduleRequests(ctx context.Context, projectID str
 	if len(requests) == 0 {
 		return ""
 	}
-	actions := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo)
+	actions := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc)
 	var results []string
 	for _, req := range requests {
 		result, err := actions.Create(ctx, projectID, req)
@@ -2890,7 +2890,7 @@ func (h *Handler) executeChatDeleteScheduleRequests(ctx context.Context, project
 	if len(requests) == 0 {
 		return ""
 	}
-	actions := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo)
+	actions := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc)
 	var results []string
 	for _, req := range requests {
 		result, err := actions.Delete(ctx, projectID, req)
@@ -2924,7 +2924,7 @@ func (h *Handler) executeChatModifyScheduleRequests(ctx context.Context, project
 	if len(requests) == 0 {
 		return ""
 	}
-	actions := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo)
+	actions := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc)
 	var results []string
 	for _, req := range requests {
 		result, err := actions.Modify(ctx, projectID, req)
