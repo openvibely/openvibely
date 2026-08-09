@@ -235,6 +235,59 @@ func TestAutomationManualRunSkipsBusyEntryAndRejectsInactiveLifecycle(t *testing
 	}
 }
 
+func TestAutomationRuntimeAdvancesStaleTerminalScheduledOccurrence(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+
+	due := time.Now().UTC().Truncate(time.Hour).Add(-3 * time.Hour)
+	firstClaimAt := due.Add(5 * time.Second)
+	staleEditAt := due.Add(2*time.Hour + time.Minute)
+	fixture.schedule.RunAt = due
+	fixture.schedule.NextRun = &due
+	fixture.schedule.LastRun = nil
+	fixture.schedule.RepeatType = models.RepeatHours
+	fixture.schedule.RepeatInterval = 1
+	require.NoError(t, fixture.schedRepo.Update(ctx, &fixture.schedule))
+
+	firstNext := fixture.schedule.ComputeNextRun(firstClaimAt)
+	invocation, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, firstClaimAt, firstNext)
+	require.NoError(t, err)
+	require.NotNil(t, dispatch)
+	require.Equal(t, models.AutomationInvocationClaimed, invocation.Status)
+
+	leased, err := fixture.repo.LeaseNextDispatch(ctx, "stale-terminal-test", time.Now().UTC(), time.Minute)
+	require.NoError(t, err)
+	require.NotNil(t, leased)
+	require.Equal(t, dispatch.ID, leased.ID)
+	execution, err := fixture.taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "stale-terminal-test")
+	require.NoError(t, err)
+	require.NoError(t, fixture.repo.CompleteDispatch(ctx, dispatch.ID, execution.ID, models.ExecCompleted, ""))
+
+	stale, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
+	require.NoError(t, err)
+	stale.NextRun = &due
+	require.NoError(t, fixture.schedRepo.Update(ctx, stale))
+
+	repairNext := stale.ComputeNextRun(staleEditAt)
+	repeatedInvocation, repeatedDispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, *stale, staleEditAt, repairNext)
+	require.NoError(t, err)
+	require.Equal(t, invocation.ID, repeatedInvocation.ID)
+	require.Equal(t, dispatch.ID, repeatedDispatch.ID)
+
+	repaired, err := fixture.schedRepo.GetByID(ctx, fixture.schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, repaired.NextRun)
+	require.True(t, repaired.NextRun.Equal(*repairNext), "stale completed occurrence must advance to the next future hourly run")
+	require.NotNil(t, repaired.LastRun)
+	require.True(t, repaired.LastRun.Equal(firstClaimAt.UTC()), "repair must not rewrite the original run marker")
+
+	var invocationCount, dispatchCount int
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_invocations WHERE trigger_resource_id = ?`, fixture.schedule.ID).Scan(&invocationCount))
+	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_dispatch_outbox WHERE invocation_id = ?`, invocation.ID).Scan(&dispatchCount))
+	require.Equal(t, 1, invocationCount)
+	require.Equal(t, 1, dispatchCount)
+}
+
 func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()

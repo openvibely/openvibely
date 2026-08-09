@@ -325,6 +325,12 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	if existing, dispatch, err := loadInvocationForOccurrence(ctx, conn, schedule.ID, occurrenceKey); err != nil {
 		return nil, nil, err
 	} else if existing != nil {
+		if automationInvocationTerminal(existing.Status) {
+			if _, err := conn.ExecContext(ctx, `UPDATE schedules SET next_run = ?, updated_at = CURRENT_TIMESTAMP
+				WHERE id = ? AND enabled = 1 AND next_run = ? AND next_run <= ?`, nextRun, schedule.ID, due, now.UTC()); err != nil {
+				return nil, nil, fmt.Errorf("advancing completed automation occurrence: %w", err)
+			}
+		}
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, nil, err
 		}
@@ -499,6 +505,15 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 		AutomationID: owner.AutomationID, VersionID: owner.VersionID, InvocationID: invocation.ID, NodeID: owner.NodeID,
 	})
 	return invocation, dispatch, nil
+}
+
+func automationInvocationTerminal(status models.AutomationInvocationStatus) bool {
+	switch status {
+	case models.AutomationInvocationCompleted, models.AutomationInvocationFailed, models.AutomationInvocationCancelled, models.AutomationInvocationSkipped:
+		return true
+	default:
+		return false
+	}
 }
 
 func loadInvocationForOccurrence(ctx context.Context, exec SQLExecutor, scheduleID, occurrenceKey string) (*models.AutomationInvocation, *models.AutomationDispatch, error) {
