@@ -268,9 +268,13 @@ func TestCardSearch_SkillsManualRefreshReappliesActiveSearch(t *testing.T) {
 	for _, want := range []string{
 		`window.refreshCardSearches = initAllCardSearches`,
 		`window.replaceSearchableCardContainer = replaceSearchableCardContainer`,
-		`function replaceSkillsContainer(html)`,
-		`window.replaceSearchableCardContainer('#skills-container', html);`,
-		`refreshSkillsContainerSearch();`,
+		`data-skill-scroll-anchor`,
+		`function captureSkillsViewportState(root, activeHandle)`,
+		`function restoreSkillsViewportState(root, saved)`,
+		`function replaceSkillsContainer(html, options)`,
+		`nextContainer = window.replaceSearchableCardContainer('#skills-container', html);`,
+		`state.preparedSwap = captureSkillsViewportState(document.getElementById('skills-container'), deleteSkillHandle);`,
+		`swap: 'outerHTML show:none'`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected Skills page search refresh contract to contain %q", want)
