@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-07-30
-source: consolidation
-source_id: memory_consolidation_2026_07_29
+updated: 2026-08-08
+source: update_memory
+source_id: 94602490c473d53d68c494a85b835155:7f2c6e9617461062
 confidence: high
 title: Usage Analytics
 ---
@@ -18,6 +18,7 @@ Durable analytics model:
 - Usage rows are stored locally in `llm_usage_events`.
 - OAuth account-limit snapshots are stored in `account_usage_snapshots`, with extra/model-specific account limits stored in `account_usage_extra_limits`.
 - Usage capture is one final row per completed provider model call at the owning execution/call-site boundary, not per streamed chunk.
+- Late attachment-bearing steering discovered after the provider call returns is requeued and the original execution's second successful completion still records the final provider usage row.
 - Skill analytics event semantics distinguish selection, consumption, and skill changes: `selected` records routed/available skills, `loaded` records successful full-body `skill_view` loads, `viewed` records successful `skill_view` access, `created` records skill creation, and `edited` records app-managed skill updates/mutations.
 - Agent-owned lifecycle hook executions record real hook starts as `selected` skill analytics events with `source=lifecycle_hook`/`surface=lifecycle_hook`, `skill_scope=agent_owned`, and owning project/task/agent metadata; hook body resolution does not synthesize `loaded` or `viewed` events.
 - Lifecycle hook analytics keep ordinary task-execution foreign keys intact by storing the lifecycle execution identifier in the analytics turn/thread field rather than `skill_analytics_events.execution_id`.

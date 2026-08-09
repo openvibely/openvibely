@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-06
-source: task
-source_id: bfbfa775d28bee31e8fa9e1a35c1d7db
+updated: 2026-08-08
+source: update_memory
+source_id: 3926c85f9eecbf034bd787200334470d:0995055c6f28c7e3
 confidence: high
 title: Provider Architecture
 ---
@@ -29,7 +29,7 @@ Current model-call shape:
 
 Provider/model selection facts:
 - Provider/model selection is based on the selected `models.LLMConfig`, especially `Provider`, `Model`, and `AuthMethod`; the model string alone does not choose the provider.
-- Normal task runs select model config in this order: `Task.AgentID`, then project `DefaultAgentConfigID`, then global default `agent_configs.is_default = 1`.
+- Normal task runs and task-thread execution starts, including failed follow-up retries and promoted queued task-thread inputs, select model config in this order: current `Task.AgentID`, then project `DefaultAgentConfigID`, then global default `agent_configs.is_default = 1`. Stored per-run/queued model IDs are evidence for history/accounting, not immutable task-thread rerun assignment.
 - Interactive chat selection differs: explicit `agent_id` uses that model config, `agent_id=default` uses the global default, and empty/`auto` triggers complexity/vision-based model selection.
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not the provider/model.
 - Known execution-evidence gap tracked in `openvibely/openvibely#128`: the actual per-run model identity is stored but is not shown in task-thread execution history. The proposed slice exposes that existing identity per execution without changing model-selection behavior.
@@ -48,6 +48,7 @@ Provider/model selection facts:
 - Default model request deadlines for the primary HTTP model clients are 10 minutes for Anthropic, OpenAI, and Ollama; lifecycle `after_complete` hook execution also uses a 10-minute deadline.
 - Known streaming-timeout defects are tracked in `openvibely/openvibely#54`, the Claude CLI follow-up-specific report `openvibely/openvibely#64`, and SDK tool-argument streaming report `openvibely/openvibely#68`. CLI Chat and follow-up paths suppress Claude/Codex thinking via `WriteEvent(..., skipThinking=true)`, while inactivity reset currently occurs only through `Writer.Write`, so actively emitted hidden reasoning can be canceled as inactive. Separately, OpenAI `response.function_call_arguments.delta` and Anthropic `input_json_delta` are buffered without invoking a writer callback, so a continuously advancing tool call can be canceled before tool-use completion. Validation should cover both hidden-thinking and tool-argument deltas resetting inactivity without requiring rendered output. Check all three issues before filing further reports because their scopes may overlap.
 - OpenAI and Anthropic task/chat requests use the shared base system prompt plus provider-neutral worktree/project/lifecycle instructions; removed OpenAI OAuth-specific `working_with_user` prompt files should not be reintroduced.
+- Lifecycle `OperationDirect` calls are structured hook steps, not coding turns. Direct providers must preserve the hook agent's own prompt through `ProjectInstructions` while omitting the shared coding-agent framing. This applies to native OpenAI/GPT Responses paths, OpenAI-compatible Chat Completions, and Anthropic direct calls; GPT WebSocket vs HTTP is only transport after prompt assembly.
 
 OpenAI-compatible provider facts:
 - `ProviderOpenAICompatible` is a separate generic Chat Completions path for inference servers/gateways that expose OpenAI-style `/chat/completions`; provider/model selection still comes from `LLMConfig.Provider`.

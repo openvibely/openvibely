@@ -52,11 +52,6 @@ always_use:
 ## openvibely_chat_thread_turn_workflow
 
 [OpenVibely Chat And Thread Turn Workflow](openvibely_chat_thread_turn_workflow/SKILL.md) — Implement OpenVibely Chat/task-thread follow-up queuing and mid-stream steering without conflating the two behaviors.
-
-## openvibely_audit_review_workflow
-
-[OpenVibely Audit Review Workflow](openvibely_audit_review_workflow/SKILL.md) — Perform audit-only reviews of OpenVibely task changes without editing files, while verifying the correct worktree and implementation scope first.
-
 ## openvibely_task_goals_workflow
 
 [OpenVibely Task Goals Workflow](openvibely_task_goals_workflow/SKILL.md) — Implement and review OpenVibely task goal persistence, tools, UI, and continuation behavior.
@@ -88,19 +83,9 @@ always_use:
 ## openvibely_followup_route_task_routing
 
 [OpenVibely Follow-Up Route Task Routing](openvibely_followup_route_task_routing/SKILL.md) — Ensure task-thread follow-up lifecycle routing uses the current user turn for skill and memory selection.
-
-## openvibely_backlog_task_management
-
-[OpenVibely Backlog Task Management](openvibely_backlog_task_management/SKILL.md) — Create or update OpenVibely backlog tasks without accidentally starting them.
-
 ## openvibely_release_workflow
 
 [OpenVibely Release Workflow](openvibely_release_workflow/SKILL.md) — Automate the OpenVibely release process — preflight, artifact builds, AI-synthesized release notes, docs updates, and GitHub release publishing — for a given semver version.
-
-## openvibely_local_resource_diagnostics
-
-[OpenVibely Local Resource Diagnostics](openvibely_local_resource_diagnostics/SKILL.md) — Inspect local macOS CPU, memory, and fan-pressure causes without disrupting OpenVibely or system processes.
-
 ## openvibely_worktree_merge_lineage_workflow
 
 [OpenVibely Worktree Merge And Lineage Workflow](openvibely_worktree_merge_lineage_workflow/SKILL.md) — Implement and audit OpenVibely task worktrees, merge actions, Changes tab recovery, cleanup, and chained-task lineage.
@@ -132,10 +117,6 @@ always_use:
 ## openvibely_skill_analytics_workflow
 
 [OpenVibely Skill Analytics Workflow](openvibely_skill_analytics_workflow/SKILL.md) — Implement and audit OpenVibely Skill Curator analytics telemetry, aggregations, and dashboard surfaces.
-## openvibely_spec_runbook_workflow
-
-[OpenVibely Spec And Runbook Workflow](openvibely_spec_runbook_workflow/SKILL.md) — Resolve and follow OpenVibely source-of-truth specs and sibling runbooks before implementation.
-
 ## openvibely_skill_import_workflow
 
 [OpenVibely Skill Import Workflow](openvibely_skill_import_workflow/SKILL.md) — Implement and audit OpenVibely skill package import across runtime tools, UI upload, YAML normalization, grants, and catalog indexing.
@@ -213,11 +194,6 @@ always_use:
 ## openvibely_docker_image_workflow
 
 [OpenVibely Docker Image Workflow](openvibely_docker_image_workflow/SKILL.md) — Safely change OpenVibely production and coding-agent images while keeping consumers, release publishing, documentation, runtime validation, and sandbox boundaries aligned.
-
-## audit_persistent_state_machine_durability
-
-[Audit Persistent State Machine Durability](audit_persistent_state_machine_durability/SKILL.md) — Audit persistence failures, irreversible side effects, cleanup, and restart recovery across durable state machines.
-
 ## openvibely_update_lifecycle_workflow
 
 [OpenVibely Update Lifecycle Workflow](openvibely_update_lifecycle_workflow/SKILL.md) — Implement, audit, and explain OpenVibely update staging, draining, admission, restart validation, rollback, and durable recovery.
@@ -229,11 +205,6 @@ always_use:
 ## openvibely_task_category_transition_workflow
 
 [OpenVibely Task Category Transition Workflow](openvibely_task_category_transition_workflow/SKILL.md) — Implement and audit OpenVibely task category changes without bypassing completion, ordering, activation, cancellation, or goal lifecycle behavior.
-
-## openvibely_redundancy_finder_workflow
-
-[OpenVibely Redundancy Finder Workflow](openvibely_redundancy_finder_workflow/SKILL.md) — Perform focused, read-only OpenVibely duplication audits and publish actionable consolidation issues.
-
 ## openvibely_optimization_finder_workflow
 
 [OpenVibely Optimization Finder Workflow](openvibely_optimization_finder_workflow/SKILL.md) — Perform focused, evidence-backed, read-only OpenVibely performance audits and publish actionable GitHub performance issues.
@@ -252,4 +223,12 @@ always_use:
 
 ## openvibely_query_projection_workflow
 
-[OpenVibely Query Projection Workflow](openvibely_query_projection_workflow/SKILL.md) — Optimize summary/list database reads with compact private projections without changing response contracts.
+[OpenVibely Query Projection Workflow](openvibely_query_projection_workflow/SKILL.md) — Optimize summary/list/background-scan database reads with compact private projections without changing response contracts.
+
+## openvibely_redundancy_finder_workflow
+
+[OpenVibely Redundancy Finder Workflow](openvibely_redundancy_finder_workflow/SKILL.md) — Perform focused, read-only OpenVibely duplication audits and publish actionable GitHub redundancy issues.
+
+## openvibely_bug_finder_workflow
+
+[OpenVibely Bug Finder Workflow](openvibely_bug_finder_workflow/SKILL.md) — Perform focused, evidence-backed, read-only OpenVibely correctness audits and publish actionable GitHub bug issues.

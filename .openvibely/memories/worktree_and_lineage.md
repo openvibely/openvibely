@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-08-07
-source: consolidation
-source_id: memory_consolidation_2026_08_04
+updated: 2026-08-08
+source: task
+source_id: fa9b72b6c6b20ecdf64b85b02fa08afe:5f78852317a4a4c3
 confidence: high
 title: Worktree and Lineage
 ---
@@ -31,7 +31,7 @@ Durable worktree model:
 - Final diff capture and post-execution commit/merge/status handling use the same explicit managed-worktree distinction as streaming, established only after successful worktree setup. A `DisableRuntimeWorktree` direct-checkout execution with retained `task.WorktreePath` metadata must persist its `git diff HEAD` result and must not capture, commit, merge, or update the status of stale worktree lineage; scoped direct-checkout execution remains non-worktree even when its effective work directory changes.
 - `GetWorktreeDiffWithUncommitted` prefers a live target-relative diff against the actual working tree (`captureWorktreeDiffAgainstTarget`, gated on `isGitWorktreeDir`/`gitRefExists`). Stale or mismatched persisted branch/path metadata is recovered from the checked-out conventional task lineage before full-tab, direct lazy-file, streaming, or completion diff resolution; it must not silently switch a managed worktree to an execution diff or `HEAD` base. Selected-base/recovery diagnostics should be emitted at transition points rather than noisy polling intervals.
 - Cleanup policy supports after-merge, keep, and manual.
-- Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task.
+- Periodic cleanup removes merged worktrees and detects orphaned worktrees with no corresponding task. Its task scan uses a compact `TaskRepo.ListWithWorktrees` projection containing only IDs, project ID, status, worktree path/branch, merge target branch, and merge status; preserve merged-branch detection, worktree removal, status update, target fallback, descendant-guarded branch deletion, and orphan cleanup when changing this path.
 - Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.
 - Known task-chaining gaps, tracked in [GitHub #276](https://github.com/openvibely/openvibely/issues/276) (filed 2026-08-07): child creation/activation does not consume persisted `ChildModel`; later `ChildAgentID` edits do not update an already blocked child; and chain handoff failures are reduced to application logs after parent completion, potentially leaving a pre-created child blocked without durable user-facing failure evidence. These remain pending suggestions rather than approved implementation work.
 - Task Changes currently supports inline comments and a `Submit Review` action, but submission routes feedback back to the agent, clears comments, and does not persist an explicit human approval or changes-requested outcome; this review-state gap is tracked by suggestion issue [GitHub #221](https://github.com/openvibely/openvibely/issues/221).

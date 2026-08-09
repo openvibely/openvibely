@@ -1,17 +1,17 @@
 # Memory Index
 
-- [Managed Memory](managed_memory.md) - Storage boundaries, lifecycle ownership, recall/update/consolidation contracts, and exclusions.
-- [Coding Agent Product Discipline](coding_agent_product_discipline.md) - User interaction, review boundaries, prompt/docs, validation, and release preferences.
-- [OpenVibely Architecture](openvibely_architecture.md) - Go server/desktop architecture, storage, OAuth, deployment, development, and logging.
-- [OpenVibely Update System](openvibely_update_system.md) - Signed packaged updates, drain/admission, apply/recovery, release trust, and validation.
-- [Agent Lifecycle and Skills](agent_lifecycle_and_skills.md) - Built-in agents, skill catalogs, lifecycle hooks, goals/loops, tools, schedules, and UI.
-- [Provider Architecture](provider_architecture.md) - Provider adapters, normalized requests, model selection, mixtures, runtime tools, and OAuth.
-- [Chat and Task-Thread Behavior](chat_thread_system.md) - Modes, queueing, steering, actions, swarms, follow-ups, goals, cancellation, scheduling, and recovery.
-- [Realtime and Frontend Patterns](realtime_and_frontend_patterns.md) - SSE, streaming, rendering safety, scrolling/windowing, responsive UI, and shared tokens.
-- [Worktree and Lineage](worktree_and_lineage.md) - Isolated worktrees, diffs, merge/recovery, cleanup, commits, chained-task lineage, and known review-comment/GitHub-PR sync/UI gaps (#221, #271, #284, #286).
-- [Integrations and Channels](integrations_and_channels.md) - GitHub, webhooks, Slack, Telegram, Discord, Email, outbound messaging, migration renumbering after main conflicts, migration count (144), the fixed webhook priority-scale bug (#287, PR #290), and authorization-handler consolidation opportunity (2026-08-07 Redundancy Finder audit).
-- [Usage Analytics](usage_analytics.md) - Local model/skill usage, token normalization, Analytics UI/API, account snapshots, and privacy.
-- [Testing Coverage and Performance](testing_coverage_and_performance.md) - Coverage priorities, validation conventions, performance seams, and environment caveats.
-- [Product Vision and Reviewable Autonomy](product_vision_and_autonomy.md) - Product direction, review boundaries, user priorities, recursive improvement, and naming constraints.
-- [Alerts and Actionable Notifications](alerts_and_actionable_notifications.md) - Project-scoped alerts, approval workflow, claims/task linkage, tools, and UI.
-- [Automation Graphs](automation_graphs.md) - Project-scoped builder, current-graph saves, custom topologies, safety, runtime projection, and UI.
+- [Managed Memory](managed_memory.md) - Memory storage boundaries, lifecycle ownership, recall/update/consolidation contracts, safe tooling, and exclusions.
+- [Coding Agent Product Discipline](coding_agent_product_discipline.md) - User preferences for interaction, scope control, audits, prompt/docs work, validation, releases, and release notes.
+- [OpenVibely Architecture](openvibely_architecture.md) - Go server/desktop architecture, storage/runtime state, OAuth/hosted deployment, Docker direction, workers, schedules, logging, and local development.
+- [OpenVibely Update System](openvibely_update_system.md) - Signed packaged updates, standalone/desktop replacement, drain/admission, rollback/recovery, release trust, telemetry, and validation.
+- [Agent Lifecycle and Skills](agent_lifecycle_and_skills.md) - Built-in agents, skill catalogs/imports, lifecycle hooks, goals/loops, schedules, tool grants, and skill-maintenance boundaries.
+- [Provider Architecture](provider_architecture.md) - Provider adapters, normalized requests, model selection, OpenAI/Anthropic/Ollama/OpenAI-compatible support, mixtures, OAuth, provider-native tools, and runtime-tool exposure.
+- [Chat and Task-Thread Behavior](chat_thread_system.md) - Chat/task-thread queueing, steering, attachments, admission, runtime actions, status controls, goals, cancellation, scheduling, capacity, and swarms.
+- [Realtime and Frontend Patterns](realtime_and_frontend_patterns.md) - Shared SSE, execution streams, diff invalidation, chat/thread rendering, composer UI, transcript safety, HTMX navigation, responsive UI, card search, and Automation YAML editor behavior.
+- [Worktree and Lineage](worktree_and_lineage.md) - Isolated worktrees, startup sync, target-relative diffs, merge/rebase/recovery, cleanup, commit messages, follow-up lineage, review comments, and GitHub publication evidence.
+- [Integrations and Channels](integrations_and_channels.md) - GitHub, Slack, Telegram, Discord, Email, webhooks, shared channel ingress/runtime, outbound targets, authorization, rich messaging, attachment handling, and channel/GitHub gaps.
+- [Usage Analytics](usage_analytics.md) - Local model/skill usage, token normalization, OAuth account snapshots, Analytics UI/API, project scoping, and privacy.
+- [Testing Coverage and Performance](testing_coverage_and_performance.md) - Coverage priorities, validation conventions, real-browser requirements, performance seams, bounded projections, and CI dependency caching.
+- [Product Vision and Reviewable Autonomy](product_vision_and_autonomy.md) - Product direction, review-gated autonomy, user-priority and bootstrap principles, GitHub/Native SDLC direction, naming constraints, and recurring vision themes.
+- [Alerts and Actionable Notifications](alerts_and_actionable_notifications.md) - Project-scoped alerts, actionable notification approvals, claims/task linkage, runtime tools, Alerts UI behavior, and notification content standards.
+- [Automation Graphs](automation_graphs.md) - Project-scoped YAML-first Automation builder, maintained/custom topology, save/runtime projection, approval boundaries, GitHub/Native SDLC handoffs, and graph/runtime/UI gaps.
