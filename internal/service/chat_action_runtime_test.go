@@ -698,7 +698,7 @@ func TestRunChannelTaskThreadSendStartsDirectFollowupWithReplyContext(t *testing
 	require.Equal(t, models.CategoryActive, updated.Category)
 }
 
-func TestBuildChannelGoalActionHandlersSetGoalUsesSharedTaskResolution(t *testing.T) {
+func TestBuildChannelGoalActionHandlersUseSharedGoalRuntime(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(db)
@@ -708,13 +708,26 @@ func TestBuildChannelGoalActionHandlersSetGoalUsesSharedTaskResolution(t *testin
 	task := &models.Task{ProjectID: project.ID, Title: "Goal target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
 	require.NoError(t, taskRepo.Create(ctx, task))
 	handlers := buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, TaskGoalSvc: NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)})
-	payload, err := json.Marshal(channelGoalToolInput{Title: "Goal target", Goal: "Finish the shared refactor"})
+	payload, err := json.Marshal(TaskGoalRuntimeToolInput{Title: "Goal target", Goal: "Finish the shared refactor"})
 	require.NoError(t, err)
 
-	result, err := handlers["set_task_goal"](ctx, payload)
+	setResult, err := handlers["set_task_goal"](ctx, payload)
 	require.NoError(t, err)
-	require.Contains(t, result, "Finish the shared refactor")
-	require.Contains(t, result, task.ID)
+	require.Contains(t, setResult, "Finish the shared refactor")
+	require.Contains(t, setResult, task.ID)
+
+	getResult, err := handlers["get_task_goal"](ctx, []byte(`{"task_id":"`+task.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, getResult, "Finish the shared refactor")
+	require.Contains(t, getResult, task.ID)
+
+	pauseResult, err := handlers["pause_task_goal"](ctx, []byte(`{"task_id":"`+task.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, pauseResult, string(models.TaskGoalStatusPaused))
+
+	resumeResult, err := handlers["resume_task_goal"](ctx, []byte(`{"task_id":"`+task.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, resumeResult, string(models.TaskGoalStatusActive))
 }
 
 func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t *testing.T) {

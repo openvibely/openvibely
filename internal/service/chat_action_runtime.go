@@ -276,96 +276,16 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 }
 
 func buildChannelGoalActionHandlers(opts channelGoalActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
-	resolveTask := func(ctx context.Context, input json.RawMessage) (*models.Task, channelGoalToolInput, error) {
-		if opts.TaskGoalSvc == nil {
-			return nil, channelGoalToolInput{}, fmt.Errorf("task goal service unavailable")
-		}
-		var req channelGoalToolInput
-		if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
-			return nil, req, err
-		}
-		task, err := resolveChannelTaskReference(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
-		return task, req, err
-	}
-	return map[string]chatcontrol.RuntimeActionHandler{
-		"set_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			task, req, err := resolveTask(ctx, input)
+	return BuildTaskGoalRuntimeActionHandlers(TaskGoalRuntimeActionOptions{
+		TaskGoalSvc: opts.TaskGoalSvc,
+		ResolveTaskID: func(ctx context.Context, req TaskGoalRuntimeToolInput) (string, error) {
+			task, err := resolveChannelTaskReference(ctx, opts.TaskRepo, opts.ProjectID, req.TaskID, req.Title)
 			if err != nil {
 				return "", err
 			}
-			goal, err := opts.TaskGoalSvc.SetGoal(ctx, task.ID, req.Goal, GoalOptions{Actor: "assistant"})
-			if err != nil {
-				return "", err
-			}
-			return channelGoalToolJSON(goal)
+			return task.ID, nil
 		},
-		"clear_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			task, _, err := resolveTask(ctx, input)
-			if err != nil {
-				return "", err
-			}
-			if err := opts.TaskGoalSvc.ClearGoal(ctx, task.ID, "assistant"); err != nil {
-				return "", err
-			}
-			goal, _ := opts.TaskGoalSvc.GetGoal(ctx, task.ID)
-			return channelGoalToolJSON(goal)
-		},
-		"get_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			task, _, err := resolveTask(ctx, input)
-			if err != nil {
-				return "", err
-			}
-			goal, err := opts.TaskGoalSvc.GetGoal(ctx, task.ID)
-			if err != nil {
-				return "", err
-			}
-			return channelGoalToolJSON(goal)
-		},
-		"pause_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			task, _, err := resolveTask(ctx, input)
-			if err != nil {
-				return "", err
-			}
-			if err := opts.TaskGoalSvc.PauseGoal(ctx, task.ID, "assistant"); err != nil {
-				return "", err
-			}
-			goal, _ := opts.TaskGoalSvc.GetGoal(ctx, task.ID)
-			return channelGoalToolJSON(goal)
-		},
-		"resume_task_goal": func(ctx context.Context, input json.RawMessage) (string, error) {
-			task, _, err := resolveTask(ctx, input)
-			if err != nil {
-				return "", err
-			}
-			if err := opts.TaskGoalSvc.ResumeGoal(ctx, task.ID, "assistant"); err != nil {
-				return "", err
-			}
-			goal, _ := opts.TaskGoalSvc.GetGoal(ctx, task.ID)
-			return channelGoalToolJSON(goal)
-		},
-		"mark_task_goal_achieved": func(ctx context.Context, input json.RawMessage) (string, error) {
-			task, req, err := resolveTask(ctx, input)
-			if err != nil {
-				return "", err
-			}
-			goal, err := opts.TaskGoalSvc.MarkAchieved(ctx, task.ID, req.GoalID, req.Reason)
-			if err != nil {
-				return "", err
-			}
-			return channelGoalToolJSON(goal)
-		},
-		"report_task_goal_blocked": func(ctx context.Context, input json.RawMessage) (string, error) {
-			task, req, err := resolveTask(ctx, input)
-			if err != nil {
-				return "", err
-			}
-			goal, err := opts.TaskGoalSvc.RecordBlockedReport(ctx, task.ID, req.GoalID, req.BlockerKey, req.Reason)
-			if err != nil {
-				return "", err
-			}
-			return channelGoalToolJSON(goal)
-		},
-	}
+	})
 }
 
 func buildChannelThreadActionHandlers(opts channelThreadActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
@@ -1541,27 +1461,6 @@ func (c *channelActionSummaryCollector) appendToOutput(output string) string {
 		return output
 	}
 	return output + summary
-}
-
-// channelGoalToolInput is the shared input struct for task goal tool calls
-// from channel surfaces (Telegram, Slack).
-type channelGoalToolInput struct {
-	TaskID     string `json:"task_id"`
-	Title      string `json:"title"`
-	Goal       string `json:"goal"`
-	GoalID     string `json:"goal_id"`
-	Reason     string `json:"reason"`
-	BlockerKey string `json:"blocker_key"`
-}
-
-// channelGoalToolJSON serializes a task goal as a JSON string for channel tool responses.
-func channelGoalToolJSON(goal *models.TaskGoal) (string, error) {
-	payload := map[string]any{"ok": true, "goal": goal}
-	if goal != nil {
-		payload["task_id"] = goal.TaskID
-	}
-	b, err := json.Marshal(payload)
-	return string(b), err
 }
 
 // actionToolDefinitions returns tool definitions from the canonical registry

@@ -709,6 +709,21 @@ func TestTaskGoalTools_CurrentAliasAndSendToTaskQueuesOnly(t *testing.T) {
 	if err != nil || goal == nil {
 		t.Fatalf("get goal after set: %v %#v", err, goal)
 	}
+	getOut, err := handlers["get_task_goal"](context.Background(), []byte(`{"task_id":"current"}`))
+	if err != nil {
+		t.Fatalf("get current goal: %v", err)
+	}
+	if !strings.Contains(getOut, "Ship complete") || !strings.Contains(getOut, task.ID) {
+		t.Fatalf("get current goal output = %s", getOut)
+	}
+	apiHandlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceAPI)
+	apiGetOut, err := apiHandlers["get_task_goal"](context.Background(), []byte(`{"task_id":"current"}`))
+	if err != nil {
+		t.Fatalf("api get current goal: %v", err)
+	}
+	if !strings.Contains(apiGetOut, "Ship complete") || !strings.Contains(apiGetOut, task.ID) {
+		t.Fatalf("api get current goal output = %s", apiGetOut)
+	}
 	if _, err := handlers["mark_task_goal_achieved"](context.Background(), []byte(`{"task_id":"current","goal_id":"`+goal.GoalID+`","reason":"done"}`)); err == nil || !strings.Contains(err.Error(), "explicit agent tool grant") {
 		t.Fatalf("ungranted assistant marked goal achieved, err=%v", err)
 	}
