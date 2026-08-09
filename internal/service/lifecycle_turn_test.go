@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -270,6 +271,64 @@ func TestPrepareLifecycleTurn_AfterCompleteDoesNotRebuildFromExecutions(t *testi
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("chat context should not include %q: %s", forbidden, encoded)
 		}
+	}
+}
+
+func TestPrepareLifecycleTurn_AfterCompleteSkipsHooksForCancellation(t *testing.T) {
+	ctx := context.Background()
+	invoked := make(chan struct{}, 1)
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{
+		ID:             "learn",
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "observe_task_for_learning",
+		OutputContract: models.OutputContractLearningSummary,
+		Enabled:        true,
+	}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, _ models.AgentLifecycleHook, _ lifecycle.HookInput) (json.RawMessage, error) {
+		invoked <- struct{}{}
+		return json.RawMessage(`{"summary":"should not run","nothing_to_save":true}`), nil
+	}), nil)
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleRunner(runner)
+
+	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-cancelled", Status: models.StatusRunning})
+	turn.AfterComplete(context.Canceled, llmcontracts.ChatContext{})
+
+	select {
+	case <-invoked:
+		t.Fatal("after_complete hook ran for a cancelled task turn")
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestPrepareLifecycleTurn_AfterCompleteStillRunsForOrdinaryFailure(t *testing.T) {
+	ctx := context.Background()
+	done := make(chan lifecycle.HookInput, 1)
+	store := &routeHookStore{hooks: []models.AgentLifecycleHook{{
+		ID:             "learn",
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "observe_task_for_learning",
+		OutputContract: models.OutputContractLearningSummary,
+		Enabled:        true,
+	}}}
+	runner := lifecycle.NewRunner(store, routeHookInvokerFunc(func(_ context.Context, _ models.AgentLifecycleHook, in lifecycle.HookInput) (json.RawMessage, error) {
+		done <- in
+		return json.RawMessage(`{"summary":"observed failure","nothing_to_save":true}`), nil
+	}), nil)
+	worker := NewWorkerService(nil, 0, nil)
+	worker.SetLifecycleRunner(runner)
+
+	turn := worker.PrepareLifecycleTurn(ctx, models.Task{ID: "task-failed", Status: models.StatusRunning})
+	runErr := errors.New("provider failed")
+	turn.AfterComplete(runErr, llmcontracts.ChatContext{})
+
+	select {
+	case in := <-done:
+		if got, _ := in.Extras[lifecycle.ExecutionErrorKey].(string); got != runErr.Error() {
+			t.Fatalf("after_complete failure metadata = %q, want %q", got, runErr.Error())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for after_complete hook after ordinary failure")
 	}
 }
 

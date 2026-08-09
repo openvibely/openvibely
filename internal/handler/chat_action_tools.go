@@ -983,6 +983,9 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 	if err := h.rejectStaleLifecycleSendToTask(ctx); err != nil {
 		return "", err
 	}
+	if err := h.rejectCancelledLifecycleSendToTask(ctx, taskID); err != nil {
+		return "", err
+	}
 	if origin == models.TaskOriginSystemAgent && originAgent == models.AgentSystemKindGoal && h.taskGoalSvc != nil {
 		goal, goalErr := h.taskGoalSvc.GetEvaluableGoal(ctx, taskID)
 		if goalErr != nil {
@@ -1003,6 +1006,26 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 func isGoalLifecycleHookAgent(ctx context.Context) bool {
 	agent, ok := lifecycle.HookAgentFromContext(ctx)
 	return ok && agent.SystemKind == models.AgentSystemKindGoal
+}
+
+func (h *Handler) rejectCancelledLifecycleSendToTask(ctx context.Context, destinationTaskID string) error {
+	agent, ok := lifecycle.HookAgentFromContext(ctx)
+	if !ok || h.taskRepo == nil {
+		return nil
+	}
+	for _, taskID := range []string{strings.TrimSpace(agent.TaskID), strings.TrimSpace(destinationTaskID)} {
+		if taskID == "" {
+			continue
+		}
+		task, err := h.taskRepo.GetByID(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if task != nil && task.Status == models.StatusCancelled {
+			return fmt.Errorf("cancelled lifecycle task %s cannot enqueue continuation", taskID)
+		}
+	}
+	return nil
 }
 
 func (h *Handler) rejectStaleLifecycleSendToTask(ctx context.Context) error {

@@ -604,7 +604,11 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	var chatContext llmcontracts.ChatContext
 	_, chatContext, executionErr = w.llmSvc.executeTaskWithChatContext(taskCtx, task)
 
-	turn.AfterComplete(executionErr, chatContext)
+	afterCompleteErr := executionErr
+	if taskCtx.Err() != nil {
+		afterCompleteErr = taskCtx.Err()
+	}
+	turn.AfterComplete(afterCompleteErr, chatContext)
 }
 
 func (w *WorkerService) failRunningExecutionsAfterPanic(ctx context.Context, taskID string, panicErr error) {

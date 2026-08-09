@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"time"
 
@@ -279,6 +280,10 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 		if w.lifecycleRunner == nil {
 			return
 		}
+		if isLifecycleCancellation(err) {
+			applog.Infof("[lifecycle-turn] skipping after_complete for cancelled task=%s run=%s: %v", task.ID, runID, err)
+			return
+		}
 		// Run after_complete in a detached goroutine so it never blocks
 		// caller dispatch. Runbook §Execution And Queueing line 1806.
 		go func(t models.Task, taskRunID string, runErr error, taskChatContext llmcontracts.ChatContext, rt *llmcontracts.RuntimeTools, turn lifecycleTurnContext) {
@@ -293,12 +298,45 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			if rt != nil {
 				bgCtx = llmcontracts.WithRuntimeTools(bgCtx, rt)
 			}
+			if w.taskIsCancelled(bgCtx, t.ID) {
+				applog.Infof("[lifecycle-turn] skipping after_complete for task=%s run=%s because task is cancelled", t.ID, taskRunID)
+				return
+			}
 			result := w.runLifecycleSlotFiltered(bgCtx, models.LifecycleAfterComplete, t, taskRunID, runErr, taskChatContext, w.afterCompleteHookEligible(bgCtx, t))
 			w.publishGoalEvaluationAfterComplete(bgCtx, t, result)
 		}(task, runID, err, chatContext, llmcontracts.CompositeRuntimeTools(hookMutationTools, afterCompleteRuntimeTools), lifecycleTurnContext{Catalog: taskCatalog, SelectedSkillHandles: selectedSkillHandles, SelectedSkillsProvenance: selectedSkillsProvenance, AssignedAgent: assignedAgent, AfterCompleteRuntimeTools: afterCompleteRuntimeTools, TaskThreadTurn: incomingTurn.TaskThreadTurn, TurnPrompt: incomingTurn.TurnPrompt, TaskRunID: runID})
 	}
 	return LifecycleTurn{Ctx: ctx, Task: task, AfterComplete: after}
 }
+
+func isLifecycleCancellation(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch msg {
+	case "task cancelled", "task canceled", "task cancelled by user", "task canceled by user", "context canceled", "context cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
+func (w *WorkerService) taskIsCancelled(ctx context.Context, taskID string) bool {
+	if w == nil || w.taskRepo == nil || taskID == "" {
+		return false
+	}
+	task, err := w.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		applog.Infof("[lifecycle-turn] cancelled-state check failed task=%s: %v", taskID, err)
+		return false
+	}
+	return task != nil && task.Status == models.StatusCancelled
+}
+
 func (w *WorkerService) publishGoalEvaluationAfterComplete(ctx context.Context, task models.Task, result lifecycle.SlotResult) {
 	if w == nil || w.taskGoalSvc == nil || !slotResultContainsGoalAgent(ctx, w, result) {
 		return

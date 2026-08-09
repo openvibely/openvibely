@@ -1336,6 +1336,86 @@ func TestProcessStreamingResponse_GoalAgentQueuedFollowupDoesNotReactivateAchiev
 	require.NotNil(t, latest.AchievedAt)
 }
 
+func TestProcessStreamingResponse_CancelledTaskFollowupSkipsAfterCompleteHooksAndContinuations(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
+	h.SetTaskGoalService(goalSvc)
+	h.taskSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetTaskGoalService(goalSvc)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Cancelled Followup Lifecycle Project")
+	task := createTask(t, h, project.ID, "Cancelled Followup Lifecycle Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Continue task"
+	})
+	_, err := h.taskGoalSvc.SetGoal(ctx, task.ID, "Do not restart after stop", service.GoalOptions{})
+	require.NoError(t, err)
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "followup that gets stopped"
+	})
+	goalAgent := &models.Agent{Key: models.AgentSystemKindGoal, Name: "System: Goal Agent", Model: "inherit", Tools: []string{"get_task_goal", "send_to_task", "mark_task_goal_achieved", "report_task_goal_blocked"}, SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
+	require.NoError(t, agentRepo.Create(ctx, goalAgent))
+
+	afterInvoked := make(chan struct{}, 1)
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{{ID: "goal-hook-cancelled", AgentID: goalAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}}}
+	invoker := &chatMemoryHookInvoker{onInvoke: func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) error {
+		if hook.When == models.LifecycleAfterComplete {
+			afterInvoked <- struct{}{}
+			if rt := llmcontracts.RuntimeToolsFromContext(ctx); rt != nil {
+				_, _, _, _ = rt.Executor(ctx, "send_to_task", json.RawMessage(`{"task_id":"current","message":"stale continuation after cancel"}`))
+			}
+		}
+		return nil
+	}}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "partial completion after stop"
+	mock.TextOnly = "partial completion after stop"
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		require.NoError(t, h.taskSvc.CancelTask(context.Background(), task.ID))
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "followup that gets stopped",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+		ChatMode:       models.ChatModeOrchestrate,
+		InputOrigin:    models.TaskOriginWeb,
+	})
+
+	select {
+	case <-afterInvoked:
+		t.Fatal("cancelled task-thread follow-up invoked after_complete hook")
+	case <-time.After(150 * time.Millisecond):
+	}
+	pending, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Empty(t, pending, "cancelled lifecycle hook must not enqueue follow-up work")
+	latestGoal, err := h.taskGoalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, latestGoal)
+	require.Equal(t, models.TaskGoalStatusPaused, latestGoal.Status, "cancellation should only apply required user-stop goal pause")
+	require.Equal(t, service.TaskGoalStoppedByUserReason, latestGoal.Reason)
+	require.Nil(t, latestGoal.AchievedAt, "after_complete must not mark a cancelled run's goal achieved")
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCancelled, updatedExec.Status)
+}
+
 func TestProcessStreamingResponse_GenericAfterCompleteRunsGoalAgentWithoutAutoEnqueue(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()

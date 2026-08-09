@@ -442,6 +442,49 @@ func TestGoalAgentSendToTaskQueuesCurrentRunWhenOlderAfterCompleteRowsAreLate(t 
 	}
 }
 
+func TestLifecycleSendToTaskRejectsCancelledSourceOrDestination(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	sourceTask := &models.Task{ProjectID: project.ID, Title: "Cancelled source lifecycle task", Category: models.CategoryBacklog, Status: models.StatusCancelled, Prompt: "source", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, sourceTask); err != nil {
+		t.Fatalf("create source task: %v", err)
+	}
+	destinationTask := &models.Task{ProjectID: project.ID, Title: "Cancelled destination lifecycle task", Category: models.CategoryBacklog, Status: models.StatusCancelled, Prompt: "destination", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, destinationTask); err != nil {
+		t.Fatalf("create destination task: %v", err)
+	}
+	activeTask := &models.Task{ProjectID: project.ID, Title: "Active lifecycle task", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "active", Priority: 2, AgentID: &agent.ID}
+	if err := tc.taskRepo.Create(ctx, activeTask); err != nil {
+		t.Fatalf("create active task: %v", err)
+	}
+	params := streamingResponseParams{TaskID: sourceTask.ID, ProjectID: project.ID, IsTaskFollowup: true, AgentDefinition: &models.Agent{Tools: []string{"send_to_task"}}}
+	handlers := tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
+	cancelledSourceCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskID: sourceTask.ID, TaskRunID: "run-cancelled-source"})
+	out, err := handlers["send_to_task"](cancelledSourceCtx, []byte(`{"task_id":"`+activeTask.ID+`","message":"do not queue from cancelled source"}`))
+	if err == nil || !strings.Contains(err.Error(), "cancelled lifecycle task") {
+		t.Fatalf("expected cancelled source continuation rejection, out=%q err=%v", out, err)
+	}
+
+	params.TaskID = activeTask.ID
+	handlers = tc.handler.chatActionHandlers(params, nil, models.ChatModeOrchestrate, "web")
+	activeSourceCtx := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "hook-agent", Tools: []string{"send_to_task"}, TaskID: activeTask.ID, TaskRunID: "run-active-source"})
+	out, err = handlers["send_to_task"](activeSourceCtx, []byte(`{"task_id":"`+destinationTask.ID+`","message":"do not queue to cancelled destination"}`))
+	if err == nil || !strings.Contains(err.Error(), "cancelled lifecycle task") {
+		t.Fatalf("expected cancelled destination continuation rejection, out=%q err=%v", out, err)
+	}
+	for _, taskID := range []string{sourceTask.ID, destinationTask.ID, activeTask.ID} {
+		pending, err := tc.handler.threadInputRepo.ListPendingForTask(ctx, taskID)
+		if err != nil {
+			t.Fatalf("list pending for %s: %v", taskID, err)
+		}
+		if len(pending) != 0 {
+			t.Fatalf("cancelled lifecycle continuation queued pending inputs for %s: %+v", taskID, pending)
+		}
+	}
+}
+
 func TestLifecycleSendToTaskRejectsStaleTaskRunContinuation(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()
