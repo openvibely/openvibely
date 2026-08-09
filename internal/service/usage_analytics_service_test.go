@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -1576,5 +1577,82 @@ func TestOpenAIUsageEndpointMatchesRunbookPathStyles(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("openAIUsageEndpoint(%q) = %q, want %q", tc.base, got, tc.want)
 		}
+	}
+}
+
+func BenchmarkUsageAnalyticsServiceBuildAnalyticsUsage50K(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	ctx := context.Background()
+	seedUsageAnalyticsBenchmarkEvents(b, db, ctx, 50000)
+	usageRepo := repository.NewUsageRepo(db)
+	svc := NewUsageAnalyticsService(usageRepo, nil)
+	filter := repository.UsageFilter{
+		ProjectID: "bench-project-0",
+		DateFrom:  time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		DateTo:    time.Date(2026, 4, 1, 23, 59, 59, 0, time.UTC),
+		GroupBy:   "day",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := svc.BuildAnalyticsUsage(ctx, filter); err != nil {
+			b.Fatalf("BuildAnalyticsUsage: %v", err)
+		}
+	}
+}
+
+func seedUsageAnalyticsBenchmarkEvents(b *testing.B, db *sql.DB, ctx context.Context, count int) {
+	b.Helper()
+	for i := 0; i < 3; i++ {
+		if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name) VALUES (?, ?)`, fmt.Sprintf("bench-project-%d", i), fmt.Sprintf("Bench Project %d", i)); err != nil {
+			b.Fatalf("insert project: %v", err)
+		}
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		b.Fatalf("begin seed tx: %v", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO llm_usage_events (
+			id, provider, account_id, project_id, model, operation, status,
+			input_tokens, output_tokens, cached_input_tokens, reasoning_output_tokens, total_tokens, cost_usd, raw_usage_json, occurred_at
+		) VALUES (?, ?, ?, ?, ?, 'task', 'completed', ?, ?, ?, ?, ?, ?, '{}', ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		b.Fatalf("prepare seed usage: %v", err)
+	}
+	defer stmt.Close()
+	providers := []string{"openai", "anthropic"}
+	models := []string{"gpt-5", "gpt-5-mini", "claude-sonnet", "claude-opus"}
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < count; i++ {
+		input := 100 + i%37
+		output := 40 + i%23
+		cached := i % 17
+		reasoning := i % 11
+		total := input + output
+		cost := float64(total) / 1000000
+		occurred := base.Add(time.Duration(i%2160) * time.Hour)
+		if _, err := stmt.ExecContext(ctx,
+			fmt.Sprintf("bench-usage-%05d", i),
+			providers[i%len(providers)],
+			fmt.Sprintf("acct-%d", i%5),
+			fmt.Sprintf("bench-project-%d", i%3),
+			models[i%len(models)],
+			input,
+			output,
+			cached,
+			reasoning,
+			total,
+			cost,
+			occurred.Format("2006-01-02 15:04:05"),
+		); err != nil {
+			_ = tx.Rollback()
+			b.Fatalf("insert usage event %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		b.Fatalf("commit seed tx: %v", err)
 	}
 }

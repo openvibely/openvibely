@@ -203,14 +203,15 @@ func (r *UsageRepo) GetUsageTotals(ctx context.Context, filter UsageFilter) (*mo
 }
 
 func (r *UsageRepo) GetDailyUsage(ctx context.Context, filter UsageFilter) ([]models.DailyUsagePoint, error) {
-	where, args := usageWhere(filter)
+	periodExpr, source, where, args := usageEventSourceWithPeriod(filter, "day")
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT date(occurred_at, 'localtime') AS period,
+		SELECT `+periodExpr+` AS period,
 		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0),
 		       COALESCE(SUM(total_tokens), 0), SUM(cost_usd), COUNT(cost_usd), COUNT(*)
-		FROM llm_usage_events `+where+`
+		FROM `+source+` `+where+`
 		GROUP BY period
 		ORDER BY period ASC`, args...)
+
 	if err != nil {
 		return nil, fmt.Errorf("getting daily usage: %w", err)
 	}
@@ -233,14 +234,15 @@ func (r *UsageRepo) GetDailyUsage(ctx context.Context, filter UsageFilter) ([]mo
 }
 
 func (r *UsageRepo) GetDailyUsageByModel(ctx context.Context, filter UsageFilter) ([]models.DailyUsagePoint, error) {
-	where, args := usageWhere(filter)
+	periodExpr, source, where, args := usageEventSourceWithPeriod(filter, "day")
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT date(occurred_at, 'localtime') AS period, provider, model,
+		SELECT `+periodExpr+` AS period, provider, model,
 		       COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0),
 		       COALESCE(SUM(total_tokens), 0), SUM(cost_usd), COUNT(cost_usd), COUNT(*)
-		FROM llm_usage_events `+where+`
+		FROM `+source+` `+where+`
 		GROUP BY period, provider, model
 		ORDER BY period ASC, provider ASC, model ASC`, args...)
+
 	if err != nil {
 		return nil, fmt.Errorf("getting daily usage by model: %w", err)
 	}
@@ -263,13 +265,13 @@ func (r *UsageRepo) GetDailyUsageByModel(ctx context.Context, filter UsageFilter
 }
 
 func (r *UsageRepo) GetUsageRateBuckets(ctx context.Context, filter UsageFilter) ([]models.UsageRatePoint, error) {
-	where, args := usageWhere(filter)
-	periodExpr := usagePeriodExpression(filter.GroupBy)
+	periodExpr, source, where, args := usageEventSourceWithPeriod(filter, filter.GroupBy)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT `+periodExpr+` AS period, COALESCE(SUM(total_tokens), 0), COUNT(*)
-		FROM llm_usage_events `+where+`
+		FROM `+source+` `+where+`
 		GROUP BY period
 		ORDER BY period ASC`, args...)
+
 	if err != nil {
 		return nil, fmt.Errorf("getting usage rate buckets: %w", err)
 	}
@@ -287,13 +289,13 @@ func (r *UsageRepo) GetUsageRateBuckets(ctx context.Context, filter UsageFilter)
 }
 
 func (r *UsageRepo) GetUsageRateBucketsByModel(ctx context.Context, filter UsageFilter) ([]models.UsageRatePoint, error) {
-	where, args := usageWhere(filter)
-	periodExpr := usagePeriodExpression(filter.GroupBy)
+	periodExpr, source, where, args := usageEventSourceWithPeriod(filter, filter.GroupBy)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT `+periodExpr+` AS period, provider, model, COALESCE(SUM(total_tokens), 0), COUNT(*)
-		FROM llm_usage_events `+where+`
+		FROM `+source+` `+where+`
 		GROUP BY period, provider, model
 		ORDER BY period ASC, provider ASC, model ASC`, args...)
+
 	if err != nil {
 		return nil, fmt.Errorf("getting usage rate buckets by model: %w", err)
 	}
@@ -311,14 +313,15 @@ func (r *UsageRepo) GetUsageRateBucketsByModel(ctx context.Context, filter Usage
 }
 
 func (r *UsageRepo) GetModelUsageBreakdown(ctx context.Context, filter UsageFilter) ([]models.ModelUsagePoint, error) {
-	where, args := usageWhere(filter)
+	source, where, args := usageEventSourceForModelBreakdown(filter)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT provider, model, COALESCE(SUM(total_tokens), 0), COALESCE(SUM(input_tokens), 0),
 		       COALESCE(SUM(output_tokens), 0), COALESCE(SUM(cached_input_tokens), 0), COALESCE(SUM(reasoning_output_tokens), 0),
 		       SUM(cost_usd), COUNT(cost_usd), COUNT(*)
-		FROM llm_usage_events `+where+`
+		FROM `+source+` `+where+`
 		GROUP BY provider, model
 		ORDER BY COALESCE(SUM(total_tokens), 0) DESC, provider ASC, model ASC`, args...)
+
 	if err != nil {
 		return nil, fmt.Errorf("getting model usage breakdown: %w", err)
 	}
@@ -348,6 +351,95 @@ func (r *UsageRepo) GetModelUsageBreakdown(ctx context.Context, filter UsageFilt
 		}
 	}
 	return points, nil
+}
+
+func usageEventSourceWithPeriod(filter UsageFilter, groupBy string) (string, string, string, []any) {
+	where, args := usageWhere(filter)
+	periodExpr := usagePeriodExpression(groupBy)
+	source := "llm_usage_events"
+	if shouldUseProjectLocalBucketIndex(filter, groupBy) {
+		bucket := normalizedUsageGroupBy(groupBy)
+		periodExpr = usagePeriodColumn(bucket)
+		source += " INDEXED BY " + usagePeriodIndex(bucket)
+		where, args = usageWhereWithLocalPeriodBounds(filter, periodExpr, bucket)
+	}
+	return periodExpr, source, where, args
+}
+
+func usageEventSourceForModelBreakdown(filter UsageFilter) (string, string, []any) {
+	where, args := usageWhere(filter)
+	source := "llm_usage_events"
+	if filter.ProjectID != "" && !filter.DateFrom.IsZero() && !filter.DateTo.IsZero() {
+		source += " INDEXED BY idx_llm_usage_events_project_provider_model_time"
+	}
+	return source, where, args
+}
+
+func shouldUseProjectLocalBucketIndex(filter UsageFilter, groupBy string) bool {
+	return filter.ProjectID != "" && !filter.DateFrom.IsZero() && !filter.DateTo.IsZero() && usagePeriodColumn(normalizedUsageGroupBy(groupBy)) != ""
+}
+
+func usageWhereWithLocalPeriodBounds(filter UsageFilter, periodColumn, groupBy string) (string, []any) {
+	where, args := usageWhere(filter)
+	if !filter.DateFrom.IsZero() {
+		where += " AND " + periodColumn + " >= " + usagePeriodParameterExpression(groupBy)
+		args = append(args, formatSQLiteTime(filter.DateFrom))
+	}
+	if !filter.DateTo.IsZero() {
+		where += " AND " + periodColumn + " <= " + usagePeriodParameterExpression(groupBy)
+		args = append(args, formatSQLiteTime(filter.DateTo))
+	}
+	return where, args
+}
+
+func normalizedUsageGroupBy(groupBy string) string {
+	switch groupBy {
+	case "hour", "week", "month":
+		return groupBy
+	default:
+		return "day"
+	}
+}
+
+func usagePeriodColumn(groupBy string) string {
+	switch groupBy {
+	case "hour":
+		return "occurred_local_hour"
+	case "week":
+		return "occurred_local_week"
+	case "month":
+		return "occurred_local_month"
+	case "day":
+		return "occurred_local_day"
+	default:
+		return ""
+	}
+}
+
+func usagePeriodIndex(groupBy string) string {
+	switch groupBy {
+	case "hour":
+		return "idx_llm_usage_events_project_local_hour_model"
+	case "week":
+		return "idx_llm_usage_events_project_local_week_model"
+	case "month":
+		return "idx_llm_usage_events_project_local_month_model"
+	default:
+		return "idx_llm_usage_events_project_local_day_model"
+	}
+}
+
+func usagePeriodParameterExpression(groupBy string) string {
+	switch groupBy {
+	case "hour":
+		return "strftime('%Y-%m-%d %H:00:00', ?, 'localtime')"
+	case "week":
+		return "strftime('%Y-W%W', ?, 'localtime')"
+	case "month":
+		return "strftime('%Y-%m', ?, 'localtime')"
+	default:
+		return "date(?, 'localtime')"
+	}
 }
 
 func usageWhere(filter UsageFilter) (string, []any) {
