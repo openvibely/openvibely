@@ -1416,6 +1416,67 @@ func TestProcessStreamingResponse_CancelledTaskFollowupSkipsAfterCompleteHooksAn
 	require.Equal(t, models.ExecCancelled, updatedExec.Status)
 }
 
+func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancelledFinalStatus(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc.SetTaskRepo(h.taskRepo)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Deadline Lifecycle Race Project")
+	task := createTask(t, h, project.ID, "Deadline Lifecycle Race Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusRunning
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Continue task"
+	})
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "followup that times out"
+	})
+
+	afterInput := make(chan lifecycle.HookInput, 1)
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{{ID: "learn-deadline", When: models.LifecycleAfterComplete, SkillKey: "observe_task_for_learning", OutputContract: models.OutputContractLearningSummary, Blocking: true, Enabled: true}}}
+	invoker := &chatMemoryHookInvoker{onInvoke: func(ctx context.Context, hook models.AgentLifecycleHook, in lifecycle.HookInput) error {
+		if hook.When == models.LifecycleAfterComplete {
+			afterInput <- in
+		}
+		return nil
+	}}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+
+	mock := testutil.NewMockLLMCaller()
+	mock.Err = context.DeadlineExceeded
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		// Simulate the finalization race: by the time the detached after_complete
+		// goroutine performs its persisted task-state preflight, the task has
+		// already been marked cancelled by timeout handling.
+		require.NoError(t, h.taskRepo.UpdateStatus(context.Background(), task.ID, models.StatusCancelled))
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.processStreamingResponse(streamingResponseParams{
+		ExecID:         exec.ID,
+		TaskID:         task.ID,
+		Message:        "followup that times out",
+		Agent:          *agent,
+		ProjectID:      project.ID,
+		IsTaskFollowup: true,
+		ChatMode:       models.ChatModeOrchestrate,
+		InputOrigin:    models.TaskOriginWeb,
+	})
+
+	select {
+	case in := <-afterInput:
+		if got, _ := in.Extras[lifecycle.ExecutionErrorKey].(string); got != context.DeadlineExceeded.Error() {
+			t.Fatalf("after_complete deadline metadata = %q, want %q", got, context.DeadlineExceeded.Error())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for after_complete hook after deadline failure")
+	}
+	updatedExec, err := h.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCancelled, updatedExec.Status)
+}
+
 func TestProcessStreamingResponse_GenericAfterCompleteRunsGoalAgentWithoutAutoEnqueue(t *testing.T) {
 	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()

@@ -298,8 +298,8 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 			if rt != nil {
 				bgCtx = llmcontracts.WithRuntimeTools(bgCtx, rt)
 			}
-			if w.taskIsCancelled(bgCtx, t.ID) {
-				applog.Infof("[lifecycle-turn] skipping after_complete for task=%s run=%s because task is cancelled", t.ID, taskRunID)
+			if w.shouldSkipAfterCompleteForCancellation(bgCtx, t.ID, runErr) {
+				applog.Infof("[lifecycle-turn] skipping after_complete for task=%s run=%s because task cancellation was requested", t.ID, taskRunID)
 				return
 			}
 			result := w.runLifecycleSlotFiltered(bgCtx, models.LifecycleAfterComplete, t, taskRunID, runErr, taskChatContext, w.afterCompleteHookEligible(bgCtx, t))
@@ -323,6 +323,17 @@ func isLifecycleCancellation(err error) bool {
 	default:
 		return false
 	}
+}
+
+func (w *WorkerService) shouldSkipAfterCompleteForCancellation(ctx context.Context, taskID string, runErr error) bool {
+	if isLifecycleCancellation(runErr) || w.IsCancellationRequested(taskID) {
+		return true
+	}
+	// A successful model return can race with a user stop that persisted cancelled
+	// status before the detached hook starts. For ordinary failures, including
+	// timeouts/deadlines, after_complete must still run with execution_error even
+	// if later terminal bookkeeping stores the execution/task as cancelled.
+	return runErr == nil && w.taskIsCancelled(ctx, taskID)
 }
 
 func (w *WorkerService) taskIsCancelled(ctx context.Context, taskID string) bool {
