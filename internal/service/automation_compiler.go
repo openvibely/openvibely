@@ -57,28 +57,36 @@ func (c *AutomationCompiler) SetAgentRepository(agentRepo *repository.AgentRepo)
 	c.agentRepo = agentRepo
 }
 
-func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (*models.AutomationSavePlan, models.AutomationDraftCandidate, error) {
+func (c *AutomationCompiler) validateSaveCandidate(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (models.AutomationDraftCandidate, []models.AutomationValidationIssue, error) {
 	if c == nil || c.validator == nil || c.validator.drafts == nil || c.validator.registry == nil {
-		return nil, candidate, errors.New("automation save is unavailable")
+		return candidate, nil, errors.New("automation save is unavailable")
 	}
 	normalized, err := c.validator.drafts.NormalizeCandidate(candidate)
 	if err != nil {
-		return nil, candidate, err
+		return candidate, nil, err
 	}
 	issues, err := c.validator.drafts.validateCandidateForProject(ctx, projectID, normalized)
 	if err != nil {
-		return nil, normalized, err
+		return normalized, nil, err
 	}
 	capabilityIssues, err := c.validator.capabilityIssues(ctx, projectID, normalized)
 	if err != nil {
-		return nil, normalized, err
+		return normalized, nil, err
 	}
 	agentIssues, err := c.validator.agentIssues(ctx, projectID, normalized)
 	if err != nil {
-		return nil, normalized, err
+		return normalized, nil, err
 	}
 	issues = append(issues, capabilityIssues...)
 	issues = append(issues, agentIssues...)
+	return normalized, issues, nil
+}
+
+func (c *AutomationCompiler) PreviewSave(ctx context.Context, projectID string, candidate models.AutomationDraftCandidate) (*models.AutomationSavePlan, models.AutomationDraftCandidate, error) {
+	normalized, issues, err := c.validateSaveCandidate(ctx, projectID, candidate)
+	if err != nil {
+		return nil, normalized, err
+	}
 	plan := &models.AutomationSavePlan{Validation: issues, WillNot: []string{"merge pull requests", "release software", "deploy software"}}
 	if len(issues) > 0 {
 		automationobs.Event("automation.save.validation_failure", automationobs.String("project_id", projectID), automationobs.String("adapter_key", normalized.AdapterKey))
@@ -158,24 +166,10 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 	if strings.TrimSpace(request.ProjectID) == "" {
 		return nil, errors.New("project is required")
 	}
-	candidate, err := c.validator.drafts.NormalizeCandidate(request.Candidate)
+	candidate, issues, err := c.validateSaveCandidate(ctx, request.ProjectID, request.Candidate)
 	if err != nil {
 		return nil, err
 	}
-	issues, err := c.validator.drafts.validateCandidateForProject(ctx, request.ProjectID, candidate)
-	if err != nil {
-		return nil, err
-	}
-	capabilityIssues, err := c.validator.capabilityIssues(ctx, request.ProjectID, candidate)
-	if err != nil {
-		return nil, err
-	}
-	agentIssues, err := c.validator.agentIssues(ctx, request.ProjectID, candidate)
-	if err != nil {
-		return nil, err
-	}
-	issues = append(issues, capabilityIssues...)
-	issues = append(issues, agentIssues...)
 	if len(issues) > 0 {
 		return nil, fmt.Errorf("automation graph validation failed: %s", issues[0].Message)
 	}
