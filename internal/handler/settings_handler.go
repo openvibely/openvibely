@@ -59,6 +59,13 @@ func triggerChannelsRefresh(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
+func returnToChannels(c echo.Context) error {
+	if isHTMX(c) {
+		return triggerChannelsRefresh(c)
+	}
+	return c.Redirect(http.StatusSeeOther, "/channels")
+}
+
 // handleChannels renders the channels (integrations) page
 func (h *Handler) handleChannels(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
@@ -378,10 +385,7 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		h.telegramService = svc
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 // handleTelegramTest tests the Telegram bot connection
@@ -454,10 +458,7 @@ func (h *Handler) handleTelegramRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleGitHubConnect(c echo.Context) error {
@@ -537,10 +538,7 @@ func (h *Handler) handleGitHubConfigure(c echo.Context) error {
 		}
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleGitHubCallback(c echo.Context) error {
@@ -561,10 +559,7 @@ func (h *Handler) handleGitHubDisconnect(c echo.Context) error {
 	if err := h.githubSvc.Disconnect(c.Request().Context()); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to disconnect GitHub")
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleGitHubRemove(c echo.Context) error {
@@ -586,10 +581,7 @@ func (h *Handler) handleGitHubRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleSlackConfigure(c echo.Context) error {
@@ -664,10 +656,7 @@ func (h *Handler) handleSlackConfigure(c echo.Context) error {
 		_ = h.slackSvc.ReloadFromSettings(c.Request().Context())
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleSlackConnect(c echo.Context) error {
@@ -702,10 +691,7 @@ func (h *Handler) handleSlackDisconnect(c echo.Context) error {
 	if err := h.slackSvc.Disconnect(c.Request().Context()); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to disconnect Slack")
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleSlackRemove(c echo.Context) error {
@@ -732,10 +718,7 @@ func (h *Handler) handleSlackRemove(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
 
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleSlackTest(c echo.Context) error {
@@ -774,10 +757,7 @@ func (h *Handler) handleDiscordConfigure(c echo.Context) error {
 			applog.Infof("warning: failed to reload discord gateway after settings save: %v", err)
 		}
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleDiscordRemove(c echo.Context) error {
@@ -799,10 +779,7 @@ func (h *Handler) handleDiscordRemove(c echo.Context) error {
 	if resetErr != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(resetErr)
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleDiscordTest(c echo.Context) error {
@@ -856,10 +833,7 @@ func (h *Handler) handleEmailConfigure(c echo.Context) error {
 	if h.emailService != nil {
 		_ = h.emailService.ReloadFromSettings(c.Request().Context())
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleEmailRemove(c echo.Context) error {
@@ -884,10 +858,7 @@ func (h *Handler) handleEmailRemove(c echo.Context) error {
 	}); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove channel settings").SetInternal(err)
 	}
-	if isHTMX(c) {
-		return triggerChannelsRefresh(c)
-	}
-	return c.Redirect(http.StatusSeeOther, "/channels")
+	return returnToChannels(c)
 }
 
 func (h *Handler) handleEmailTest(c echo.Context) error {
