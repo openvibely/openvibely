@@ -305,8 +305,8 @@ func TestUpdateSchedule_WeeklyTimezoneRoundTrip(t *testing.T) {
 }
 
 // TestCreateSchedule_PastDateRecurring verifies that creating a recurring schedule
-// with a past RunAt immediately computes the next future occurrence, rather than
-// setting NextRun to the past date and letting the scheduler race.
+// with a past RunAt leaves NextRun at RunAt so the scheduler picks up the missed
+// occurrence immediately and advances it after execution.
 func TestCreateSchedule_PastDateRecurring(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

@@ -51,12 +51,53 @@ type ScheduleActionService struct {
 	workerSvc    *WorkerService
 }
 
+// CreateScheduleForTaskRequest is the normalized schedule creation contract used
+// after each surface has parsed its own input format.
+type CreateScheduleForTaskRequest struct {
+	TaskID              string
+	RunAt               time.Time
+	RepeatType          models.RepeatType
+	RepeatInterval      int
+	ClearContextOnStart *bool
+}
+
 func NewScheduleActionService(taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, workerSvc ...*WorkerService) *ScheduleActionService {
 	svc := &ScheduleActionService{taskRepo: taskRepo, scheduleRepo: scheduleRepo}
 	if len(workerSvc) > 0 {
 		svc.workerSvc = workerSvc[0]
 	}
 	return svc
+}
+
+func (s *ScheduleActionService) CreateForTask(ctx context.Context, req CreateScheduleForTaskRequest) (*models.Schedule, error) {
+	if s.scheduleRepo == nil {
+		return nil, fmt.Errorf("schedule repository not available")
+	}
+	interval := req.RepeatInterval
+	if interval == 0 {
+		interval = 1
+	}
+	if err := models.ValidateScheduleRepeatInterval(interval); err != nil {
+		return nil, err
+	}
+	clearContext := true
+	if req.ClearContextOnStart != nil {
+		clearContext = *req.ClearContextOnStart
+	}
+	schedule := &models.Schedule{
+		TaskID:              req.TaskID,
+		RunAt:               req.RunAt,
+		RepeatType:          req.RepeatType,
+		RepeatInterval:      interval,
+		Enabled:             true,
+		ClearContextOnStart: clearContext,
+	}
+	// ScheduleRepo.Create owns the lower-level initial NextRun rule: absent
+	// NextRun starts at RunAt so past recurring schedules are due immediately.
+	if err := s.scheduleRepo.Create(ctx, schedule); err != nil {
+		return nil, err
+	}
+	return schedule, nil
 }
 
 func (s *ScheduleActionService) Create(ctx context.Context, projectID string, req ScheduleTaskRequest) (*ScheduleActionResult, error) {
@@ -87,18 +128,14 @@ func (s *ScheduleActionService) Create(ctx context.Context, projectID string, re
 	}
 	now := time.Now().Local()
 	runAt := scheduleActionRunAt(now, hour, minute, repeatType, req.Days)
-	clearContext := true
-	if req.ClearContextOnStart != nil {
-		clearContext = *req.ClearContextOnStart
-	}
-	schedule := &models.Schedule{
-		TaskID: task.ID, RunAt: runAt.UTC(), RepeatType: repeatType, RepeatInterval: interval,
-		Enabled: true, ClearContextOnStart: clearContext,
-	}
-	if s.scheduleRepo == nil {
-		return result, actionError(ScheduleActionPersistError, "", fmt.Errorf("schedule repository not available"))
-	}
-	if err := s.scheduleRepo.Create(ctx, schedule); err != nil {
+	schedule, err := s.CreateForTask(ctx, CreateScheduleForTaskRequest{
+		TaskID:              task.ID,
+		RunAt:               runAt.UTC(),
+		RepeatType:          repeatType,
+		RepeatInterval:      interval,
+		ClearContextOnStart: req.ClearContextOnStart,
+	})
+	if err != nil {
 		return result, actionError(ScheduleActionPersistError, "", err)
 	}
 	result.Schedule = schedule

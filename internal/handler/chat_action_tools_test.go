@@ -352,6 +352,33 @@ func TestScheduleTaskRuntimeToolExecutesTypedRequest(t *testing.T) {
 	}
 }
 
+func TestScheduleTaskRuntimeToolDefaultsScheduleFields(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Runtime Schedule Defaults Project")
+	task := createTask(t, h, project.ID, "Schedule defaults")
+	handlers := h.chatActionHandlers(
+		streamingResponseParams{ExecID: "schedule-defaults-exec", ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+
+	out, err := handlers["schedule_task"](ctx, json.RawMessage(`{"task_id":"`+task.ID+`","time":"09:30"}`))
+	require.NoError(t, err)
+	require.Contains(t, out, "Scheduled task")
+
+	schedules, err := h.scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+	require.Equal(t, models.RepeatDaily, schedules[0].RepeatType)
+	require.Equal(t, 1, schedules[0].RepeatInterval)
+	require.True(t, schedules[0].Enabled)
+	require.True(t, schedules[0].ClearContextOnStart)
+	require.NotNil(t, schedules[0].NextRun)
+	require.WithinDuration(t, schedules[0].RunAt, *schedules[0].NextRun, time.Second)
+}
+
 func TestScheduleRuntimeToolsResolveCurrentTaskInTaskThread(t *testing.T) {
 	ctx := context.Background()
 
