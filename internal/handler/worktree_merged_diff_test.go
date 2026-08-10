@@ -1048,6 +1048,62 @@ func TestHandler_TaskChangesEndpointsShareActiveLiveWorktreeResolution(t *testin
 	}
 }
 
+func TestHandler_TaskChangesEndpointsShareMergedPreservedDiffResolution(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := gitCurrentBranch(t, repoDir)
+	taskBranch := "task/merged-equivalent-preserved-diff"
+
+	runGit(t, repoDir, "checkout", "-b", taskBranch)
+	if err := os.WriteFile(filepath.Join(repoDir, "merged_equivalent.txt"), []byte("merged branch content\n"), 0644); err != nil {
+		t.Fatalf("write merged file: %v", err)
+	}
+	runGit(t, repoDir, "add", "merged_equivalent.txt")
+	runGit(t, repoDir, "commit", "-m", "merged equivalent change")
+	runGit(t, repoDir, "checkout", targetBranch)
+	runGit(t, repoDir, "merge", "--ff-only", taskBranch)
+
+	project := &models.Project{Name: "Merged Equivalent Changes Project", RepoPath: repoDir}
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Merged equivalent changes",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		WorktreePath:      t.TempDir(),
+		WorktreeBranch:    taskBranch,
+		MergeTargetBranch: targetBranch,
+		MergeStatus:       models.MergeStatusMerged,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	agentID := firstAgentID(t, h)
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agentID, Status: models.ExecCompleted, PromptSent: "merged equivalent"}
+	if err := h.execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	preservedDiff := "diff --git a/preserved_merged.txt b/preserved_merged.txt\n+preserved merged endpoint-equivalent diff\n"
+	if err := h.execRepo.UpdateDiffOutput(ctx, exec.ID, preservedDiff); err != nil {
+		t.Fatalf("update preserved diff: %v", err)
+	}
+
+	fullBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID, false)
+	worktreeBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes/worktree", task.ID, true)
+
+	assertBodyContainsAll(t, fullBody, "preserved_merged.txt", "preserved merged endpoint-equivalent diff")
+	assertBodyContainsAll(t, worktreeBody, "preserved_merged.txt", "preserved merged endpoint-equivalent diff")
+	assertBodyOmitsAll(t, fullBody, "merged branch content", "/worktree/merge", "Merge commit", "Fast-forward only", "Squash merge")
+	assertBodyOmitsAll(t, worktreeBody, "merged branch content", "/worktree/merge", "Merge commit", "Fast-forward only", "Squash merge")
+}
+
 func TestHandler_TaskChangesEndpointsShareMissingWorktreeFallbackResolution(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	defer db.Close()
