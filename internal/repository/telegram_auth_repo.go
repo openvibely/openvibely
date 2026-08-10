@@ -9,6 +9,10 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+const telegramAuthorizedUsersListQuery = `SELECT id, project_id, telegram_user_id, telegram_username, display_name, added_at, added_by
+			 FROM telegram_authorized_users
+			 ORDER BY added_at ASC`
+
 // TelegramAuthRepo handles database operations for Telegram authorized users.
 type TelegramAuthRepo struct {
 	db *sql.DB
@@ -22,10 +26,7 @@ func NewTelegramAuthRepo(db *sql.DB) *TelegramAuthRepo {
 // ListByProject returns all system-level authorized Telegram users.
 // projectID is accepted for UI compatibility but does not scope inbound authorization.
 func (r *TelegramAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.TelegramAuthorizedUser, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, project_id, telegram_user_id, telegram_username, display_name, added_at, added_by
-		 FROM telegram_authorized_users
-		 ORDER BY added_at ASC`)
+	rows, err := r.db.QueryContext(ctx, telegramAuthorizedUsersListQuery)
 	if err != nil {
 		return nil, fmt.Errorf("list telegram auth users: %w", err)
 	}

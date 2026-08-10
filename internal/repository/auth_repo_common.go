@@ -86,12 +86,15 @@ func deleteByTaskID(ctx context.Context, db *sql.DB, table, taskID, errLabel str
 // added_at ASC, selecting the standard id/project_id/<userCol>/display_name/
 // added_at/added_by column shape shared by Discord/Slack/Email auth repos.
 // listErrLabel and scanErrLabel are used only in wrapped error messages.
-func listAuthorizedUsers[T any](ctx context.Context, db *sql.DB, table, userCol, listErrLabel, scanErrLabel string, scan func(rows *sql.Rows) (T, error)) ([]T, error) {
-	query := fmt.Sprintf(
+func authorizedUsersListQuery(table, userCol string) string {
+	return fmt.Sprintf(
 		`SELECT id, project_id, %s, display_name, added_at, added_by
 		 FROM %s
 		 ORDER BY added_at ASC`, userCol, table)
-	rows, err := db.QueryContext(ctx, query)
+}
+
+func listAuthorizedUsers[T any](ctx context.Context, db *sql.DB, table, userCol, listErrLabel, scanErrLabel string, scan func(rows *sql.Rows) (T, error)) ([]T, error) {
+	rows, err := db.QueryContext(ctx, authorizedUsersListQuery(table, userCol))
 	if err != nil {
 		return nil, fmt.Errorf("list %s: %w", listErrLabel, err)
 	}
