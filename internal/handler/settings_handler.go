@@ -294,10 +294,61 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		}
 	}
 
-	if isHTMX(c) {
-		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, resolvedProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubAPIEndpoint, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
+	channelView := pages.ChannelsSettingsView{
+		TelegramToken:                token,
+		IsBotRunning:                 isBotRunning,
+		AuthorizedUsers:              authorizedUsers,
+		SlackAuthorizedUsers:         slackAuthorizedUsers,
+		DiscordAuthorizedUsers:       discordAuthorizedUsers,
+		CurrentProjectID:             resolvedProjectID,
+		SendResponses:                sendResponses,
+		RichMessagesV2:               richMessagesV2,
+		GitHubStatus:                 githubStatus,
+		GitHubAuthMode:               githubAuthMode,
+		GitHubAppID:                  githubAppID,
+		GitHubAppSlug:                githubAppSlug,
+		GitHubPrivateKeyValue:        githubPrivateKeyValue,
+		GitHubPATValue:               githubPATValue,
+		GitHubAPIEndpoint:            githubAPIEndpoint,
+		GitHubHasPrivateKey:          githubHasPrivateKey,
+		GitHubHasPAT:                 githubHasPAT,
+		SlackStatus:                  slackStatus,
+		SlackClientID:                slackClientID,
+		SlackClientSecret:            slackClientSecret,
+		SlackAppToken:                slackAppToken,
+		SlackBotToken:                slackBotToken,
+		SlackBotTokenMode:            slackBotTokenMode,
+		SlackHasClientID:             slackHasClientID,
+		SlackHasClientSecret:         slackHasClientSecret,
+		SlackHasAppToken:             slackHasAppToken,
+		SlackHasBotToken:             slackHasBotToken,
+		SlackSendResponses:           slackSendResponses,
+		DiscordStatus:                discordStatus,
+		DiscordBotToken:              discordBotToken,
+		DiscordSendResponses:         discordSendResponses,
+		EmailStatus:                  emailStatus,
+		EmailAuthorizedSenders:       emailAuthorizedSenders,
+		EmailPasswordValue:           emailPasswordValue,
+		EmailSendResponses:           emailSendResponses,
+		EmailSkipAttachments:         emailSkipAttachments,
+		EmailMarkExistingSeenOnStart: emailMarkExistingSeenOnStart,
+		EmailPollIntervalSeconds:     emailPollIntervalSeconds,
+		HasTelegramChannel:           hasTelegramChannel,
+		HasGitHubChannel:             hasGitHubChannel,
+		HasSlackChannel:              hasSlackChannel,
+		HasDiscordChannel:            hasDiscordChannel,
+		HasEmailChannel:              hasEmailChannel,
+		Webhooks:                     webhooks,
+		Agents:                       agents,
+		WebhookAgents:                webhookAgents,
+		ChannelTargets:               channelTargets,
+		SendMessageExplicitTargets:   sendMessageExplicitTargets,
 	}
-	return render(c, http.StatusOK, pages.SettingsPage(token, isBotRunning, projects, resolvedProjectID, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubAPIEndpoint, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))
+
+	if isHTMX(c) {
+		return render(c, http.StatusOK, pages.SettingsContent(channelView))
+	}
+	return render(c, http.StatusOK, pages.SettingsPage(projects, channelView))
 }
 
 // handleAppSettings renders the application settings page (personality, etc.)
