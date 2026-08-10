@@ -147,6 +147,19 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	}
 	applog.Infof("[handler] CreateSchedule success id=%s next_run=%v", s.ID, s.NextRun)
 
+	// Reset terminal task status to pending so a newly-created one-time schedule
+	// is eligible when due instead of being skipped forever by the scheduler.
+	if h.taskSvc != nil && s.RepeatType == models.RepeatOnce && s.NextRun != nil {
+		task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+		if err == nil && task != nil && task.Status != models.StatusPending && task.Status != models.StatusRunning {
+			if err := h.taskSvc.UpdateStatus(c.Request().Context(), task.ID, models.StatusPending); err != nil {
+				applog.Infof("[handler] CreateSchedule error resetting task status to pending: %v", err)
+			} else {
+				applog.Infof("[handler] CreateSchedule reset task=%s status to pending (was %s)", task.ID, task.Status)
+			}
+		}
+	}
+
 	// For HTMX requests, return the updated task detail content
 	if isHTMX {
 		return h.renderScheduleTaskDetail(c, taskID, "CreateSchedule error fetching task", false)

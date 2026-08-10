@@ -167,6 +167,46 @@ func TestCreateSchedule_Success_Redirect(t *testing.T) {
 	}
 }
 
+func TestCreateSchedule_OneTimeResetsCompletedScheduledTask(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).
+		WithCategory(models.CategoryScheduled).
+		WithStatus(models.StatusCompleted).
+		Build()
+
+	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
+		"run_at":          {runAt},
+		"repeat_type":     {"once"},
+		"repeat_interval": {"1"},
+	}).Execute()
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("list schedules: %v", err)
+	}
+	if len(schedules) != 1 {
+		t.Fatalf("expected one persisted schedule, got %d", len(schedules))
+	}
+	if schedules[0].RepeatType != models.RepeatOnce || schedules[0].NextRun == nil {
+		t.Fatalf("expected runnable one-time schedule, got repeat=%s next_run=%v", schedules[0].RepeatType, schedules[0].NextRun)
+	}
+	stored, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if stored.Category != models.CategoryScheduled {
+		t.Fatalf("category = %s, want %s", stored.Category, models.CategoryScheduled)
+	}
+	if stored.Status != models.StatusPending {
+		t.Fatalf("status = %s, want %s", stored.Status, models.StatusPending)
+	}
+}
+
 func TestCreateSchedule_HTMX_Success(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
