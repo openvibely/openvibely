@@ -2308,7 +2308,7 @@ func (r *AutomationRepo) ListAutomationPullRequests(ctx context.Context, project
 	if limit <= 0 || limit > 20 {
 		limit = 20
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT pr.id, pr.task_id, pr.pr_number, pr.pr_url, pr.pr_state,
+	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT pr.id, pr.task_id, pr.pr_number, pr.pr_url, pr.pr_state, pr.published_head_sha,
 		pr.issue_number, pr.issue_url, pr.created_at, pr.updated_at
 		FROM task_pull_requests pr
 		JOIN tasks t ON t.id = pr.task_id
@@ -2328,7 +2328,7 @@ func (r *AutomationRepo) ListAutomationPullRequests(ctx context.Context, project
 	var result []models.TaskPullRequest
 	for rows.Next() {
 		var pull models.TaskPullRequest
-		if err := rows.Scan(&pull.ID, &pull.TaskID, &pull.PRNumber, &pull.PRURL, &pull.PRState,
+		if err := rows.Scan(&pull.ID, &pull.TaskID, &pull.PRNumber, &pull.PRURL, &pull.PRState, &pull.PublishedHeadSHA,
 			&pull.IssueNumber, &pull.IssueURL, &pull.CreatedAt, &pull.UpdatedAt); err != nil {
 			return nil, err
 		}

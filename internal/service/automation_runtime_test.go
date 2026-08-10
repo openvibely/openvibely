@@ -1867,10 +1867,9 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
 			return &GitHubAuthenticatedUser{Login: "dev"}, []GitHubIssue{{Number: 42, Title: "Exact issue", State: "open"}, {Number: 43, Title: "Second owned issue", State: "open"}, {Number: 44, Title: "Local remote issue", State: "open"}, {Number: 45, Title: "Unrelated assigned issue", State: "open"}}, nil
 		},
-		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
-			return &GitHubPullRequest{Number: 7, URL: "https://github.example.com/example/runtime/pull/7", State: "open"}, nil
-		},
-	}
+		createPRFn: func(_ context.Context, repo *GitHubRepoRef, req GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 7, URL: "https://github.example.com/example/runtime/pull/7", State: "open", HeadRef: req.Head, HeadRepoFullName: repo.FullName, HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		}}
 	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
 		TaskPullRequestRepo: repository.NewTaskPullRequestRepo(fixture.repo.DB()), AutomationRepo: fixture.repo, GitHub: provider}
 	handlers := buildGitHubIssueRuntimeHandlers(opts)
@@ -2125,7 +2124,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, openedOutput, `"created":true`)
 	provider.getPullRequestFn = func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
-		return &GitHubPullRequest{Number: 7, URL: "https://github.example.com/example/runtime/pull/7", State: "open", HeadRef: implementationTask.WorktreeBranch, HeadRepoFullName: "example/runtime"}, nil
+		return &GitHubPullRequest{Number: 7, URL: "https://github.example.com/example/runtime/pull/7", State: "open", HeadRef: implementationTask.WorktreeBranch, HeadRepoFullName: "example/runtime", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 	}
 	var recordedIssueURL string
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT issue_url FROM task_pull_requests WHERE task_id = ?`, implementationTask.ID).Scan(&recordedIssueURL))
@@ -2188,10 +2187,9 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
 			return &GitHubAuthenticatedUser{Login: "dev"}, []GitHubIssue{{Number: 42, Title: "Replace-safe issue", State: "open"}}, nil
 		},
-		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
-			return &GitHubPullRequest{Number: 77, URL: "https://github.com/example/runtime/pull/77", State: "open"}, nil
-		},
-	}
+		createPRFn: func(_ context.Context, repo *GitHubRepoRef, req GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 77, URL: "https://github.com/example/runtime/pull/77", State: "open", HeadRef: req.Head, HeadRepoFullName: repo.FullName, HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		}}
 	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
 		TaskPullRequestRepo: repository.NewTaskPullRequestRepo(fixture.repo.DB()), AutomationRepo: fixture.repo, GitHub: provider}
 	handlers := buildGitHubIssueRuntimeHandlers(opts)
@@ -2253,7 +2251,7 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 	require.False(t, isErr)
 	require.Contains(t, published, `"created":true`)
 	provider.getPullRequestFn = func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
-		return &GitHubPullRequest{Number: 77, URL: "https://github.com/example/runtime/pull/77", State: "open", HeadRef: implementationTask.WorktreeBranch, HeadRepoFullName: "example/runtime"}, nil
+		return &GitHubPullRequest{Number: 77, URL: "https://github.com/example/runtime/pull/77", State: "open", HeadRef: implementationTask.WorktreeBranch, HeadRepoFullName: "example/runtime", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 	}
 	reused, handled, isErr, err := publishRuntime.Executor(originCtx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
 	require.NoError(t, err)

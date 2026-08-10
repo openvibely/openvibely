@@ -1479,7 +1479,7 @@ func TestPublishBranchUsesGitHubAPIWithoutGitPush(t *testing.T) {
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	err = svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	_, err = svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:       repoDir,
 		Branch:         "task/api-publish",
 		BaseBranch:     "main",
@@ -1600,7 +1600,7 @@ func TestPublishBranchPublishesCleanCommittedLocalBranchChanges(t *testing.T) {
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1684,7 +1684,7 @@ func TestPublishBranchParentsExistingRemoteTaskBranch(t *testing.T) {
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1742,7 +1742,7 @@ func TestPublishBranchNoOpsWhenDesiredTreeMatchesRemoteTaskBranch(t *testing.T) 
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = server.URL
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1790,7 +1790,7 @@ func TestPublishBranchNoOpsWhenNoChangesAndRemoteTaskBranchExists(t *testing.T) 
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1855,7 +1855,7 @@ func TestPublishBranchCreatesRemoteBranchAtBaseWhenNoChangesAndBranchAbsent(t *t
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -1922,7 +1922,7 @@ func TestPublishBranchNoChangesConcurrentBranchCreationSucceeds(t *testing.T) {
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = server.URL
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -2023,7 +2023,7 @@ func TestPublishBranchRetriesWithLatestRemoteBranchParentOnNonFastForward(t *tes
 		}
 		return defaultRunGit(ctx, dir, extraEnv, args...)
 	}
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -2118,7 +2118,7 @@ func TestPublishBranchRetriesAfterConcurrentBranchCreation(t *testing.T) {
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = server.URL
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -2196,7 +2196,7 @@ func TestPublishBranchConcurrentBranchCreationNoOpsWhenDesiredTreeMatches(t *tes
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = server.URL
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",
@@ -2271,7 +2271,7 @@ func TestPublishBranchRaceNoOpsWhenLatestRemoteTreeMatchesDesiredTree(t *testing
 
 	svc := NewGitHubService(settingsRepo, "", "", "", "")
 	svc.apiBaseURL = server.URL
-	if err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
+	if _, err := svc.PublishBranch(ctx, &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}, GitHubPublishBranchRequest{
 		RepoPath:      repoDir,
 		Branch:        "task/api-publish",
 		BaseBranch:    "main",

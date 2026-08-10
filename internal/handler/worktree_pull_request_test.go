@@ -63,17 +63,16 @@ func TestCreateTaskPullRequest_UsesGlobalEnterpriseEndpointAndIgnoresRequestOver
 		resolveRepoFn: func(_ context.Context, _, _ string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "acme", Name: "widgets", FullName: "acme/widgets", CloneURL: "https://github.example.com/acme/widgets.git", HTMLURL: "https://github.example.com/acme/widgets"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, _ service.GitHubPublishBranchRequest) error {
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, _ service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
 			publishedEndpoint = repo.APIBaseURL
-			return nil
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		findPRFn: func(context.Context, *service.GitHubRepoRef, string) (*service.GitHubPullRequest, error) {
 			return nil, nil
 		},
-		createPRFn: func(context.Context, *service.GitHubRepoRef, service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
-			return &service.GitHubPullRequest{Number: 81, URL: "https://github.example.com/acme/widgets/pull/81", State: "open"}, nil
-		},
-	})
+		createPRFn: func(_ context.Context, _ *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 81, URL: "https://github.example.com/acme/widgets/pull/81", State: "open", HeadRef: createReq.Head, HeadRepoFullName: "acme/widgets", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
+		}})
 	project := &models.Project{Name: "Enterprise PR", RepoPath: "/tmp/repo"}
 	if err := h.projectSvc.Create(context.Background(), project); err != nil {
 		t.Fatal(err)
@@ -114,14 +113,14 @@ func TestCreateTaskPullRequest_CreatesAndPersistsPR(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", CloneURL: "https://github.com/openvibely/openvibely.git", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
-			return nil
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
 			return nil, nil
 		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
-			return &service.GitHubPullRequest{Number: 77, URL: "https://github.com/openvibely/openvibely/pull/77", State: "open"}, nil
+			return &service.GitHubPullRequest{Number: 77, URL: "https://github.com/openvibely/openvibely/pull/77", State: "open", HeadRef: createReq.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 	})
 
@@ -171,15 +170,15 @@ func TestCreateTaskPullRequest_PublishesDirtyWorktreeWithDiffSummaryMessage(t *t
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", CloneURL: "https://github.com/openvibely/openvibely.git", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
 			publishedReq = publishReq
-			return nil
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
 			return nil, nil
 		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
-			return &service.GitHubPullRequest{Number: 78, URL: "https://github.com/openvibely/openvibely/pull/78", State: "open"}, nil
+			return &service.GitHubPullRequest{Number: 78, URL: "https://github.com/openvibely/openvibely/pull/78", State: "open", HeadRef: createReq.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 	})
 
@@ -241,17 +240,17 @@ func TestCreateTaskPullRequest_ReusesExistingTaskPR(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, _ *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
+		publishBranchFn: func(_ context.Context, _ *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
 			publishCalls++
 			publishedReq = publishReq
-			return nil
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
-			return &service.GitHubPullRequest{Number: 22, URL: "https://github.com/openvibely/openvibely/pull/22", State: "open", HeadRef: "task/existing", HeadRepoFullName: "openvibely/openvibely"}, nil
+			return &service.GitHubPullRequest{Number: 22, URL: "https://github.com/openvibely/openvibely/pull/22", State: "open", HeadRef: "task/existing", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
 			createCalls++
-			return &service.GitHubPullRequest{Number: 1, URL: "https://github.com/x/y/pull/1", State: "open"}, nil
+			return &service.GitHubPullRequest{Number: 1, URL: "https://github.com/x/y/pull/1", State: "open", HeadRef: createReq.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 	})
 
@@ -329,8 +328,8 @@ func TestCreateTaskPullRequest_PublishBranchFailureShowsToast(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
-			return fmt.Errorf("authentication failed: bad credentials")
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return nil, fmt.Errorf("authentication failed: bad credentials")
 		},
 	})
 
@@ -369,15 +368,15 @@ func TestCreateTaskPullRequest_CreatePRAlreadyExistsRecoversByFindingPR(t *testi
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
-			return nil
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
 			findCalls++
 			if findCalls == 1 {
 				return nil, nil
 			}
-			return &service.GitHubPullRequest{Number: 88, URL: "https://github.com/openvibely/openvibely/pull/88", State: "open"}, nil
+			return &service.GitHubPullRequest{Number: 88, URL: "https://github.com/openvibely/openvibely/pull/88", State: "open", HeadRef: branch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
 			return nil, fmt.Errorf("github API request failed (422): Validation Failed; A pull request already exists for openvibely:task/create-fail")
@@ -426,8 +425,8 @@ func TestCreateTaskPullRequest_CreatePRFailureShowsToast(t *testing.T) {
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			return &service.GitHubRepoRef{Owner: "openvibely", Name: "openvibely", FullName: "openvibely/openvibely", HTMLURL: "https://github.com/openvibely/openvibely"}, nil
 		},
-		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error {
-			return nil
+		publishBranchFn: func(_ context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error) {
+			return &service.GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 		},
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
 			return nil, nil

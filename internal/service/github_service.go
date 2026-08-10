@@ -76,6 +76,7 @@ type GitHubPullRequest struct {
 	Merged           bool
 	HeadRef          string
 	HeadRepoFullName string
+	HeadSHA          string
 }
 
 type GitHubIssue struct {
@@ -163,6 +164,10 @@ type GitHubPublishBranchRequest struct {
 	CommitMessage  string
 	CommitterName  string
 	CommitterEmail string
+}
+
+type GitHubPublishBranchResult struct {
+	HeadSHA string
 }
 
 type GitHubReplaceBranchHeadRequest struct {
@@ -698,25 +703,25 @@ func isGitHubCommitSHA(value string) bool {
 	return true
 }
 
-func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error {
+func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
 	if repo == nil {
-		return fmt.Errorf("repository reference is required")
+		return nil, fmt.Errorf("repository reference is required")
 	}
 	branch := strings.TrimSpace(publishReq.Branch)
 	if branch == "" {
-		return fmt.Errorf("branch is required")
+		return nil, fmt.Errorf("branch is required")
 	}
 	baseBranch := strings.TrimSpace(publishReq.BaseBranch)
 	if baseBranch == "" {
 		defaultBranch, err := s.DefaultBranch(ctx, repo)
 		if err != nil {
-			return fmt.Errorf("resolving default branch: %w", err)
+			return nil, fmt.Errorf("resolving default branch: %w", err)
 		}
 		baseBranch = defaultBranch
 	}
 	message := strings.TrimSpace(publishReq.CommitMessage)
 	if message == "" {
-		return fmt.Errorf("commit message is required")
+		return nil, fmt.Errorf("commit message is required")
 	}
 
 	dir := strings.TrimSpace(publishReq.WorktreePath)
@@ -724,21 +729,21 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		dir = strings.TrimSpace(publishReq.RepoPath)
 	}
 	if dir == "" {
-		return fmt.Errorf("repository path is required")
+		return nil, fmt.Errorf("repository path is required")
 	}
 
 	changes, err := collectGitHubBranchChanges(ctx, dir, baseBranch)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	token, err := s.createOperationAccessToken(ctx, githubAPIBaseURLForRepo(repo, s.apiBaseURL))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	remoteBaseSHA, err := s.githubBranchCommitSHA(ctx, token, repo, baseBranch)
 	if err != nil {
-		return fmt.Errorf("resolving remote base branch %q: %w", baseBranch, err)
+		return nil, fmt.Errorf("resolving remote base branch %q: %w", baseBranch, err)
 	}
 	parentSHA := remoteBaseSHA
 	remoteBranchSHA := ""
@@ -746,69 +751,75 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		remoteBranchSHA = sha
 		parentSHA = sha
 	} else if !isGitHubRefMissingError(err) {
-		return fmt.Errorf("resolving remote publish branch %q: %w", branch, err)
+		return nil, fmt.Errorf("resolving remote publish branch %q: %w", branch, err)
 	}
 	if len(changes) == 0 {
 		if remoteBranchSHA != "" {
-			return nil
+			return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
 		}
+		publishedSHA := remoteBaseSHA
 		if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, remoteBaseSHA, false); err != nil {
 			if !isGitHubRefAlreadyExistsError(err) {
-				return err
+				return nil, err
 			}
-			if _, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch); refErr != nil {
-				return fmt.Errorf("confirming concurrently created remote publish branch %q: %w", branch, refErr)
+			concurrentSHA, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch)
+			if refErr != nil {
+				return nil, fmt.Errorf("confirming concurrently created remote publish branch %q: %w", branch, refErr)
 			}
+			publishedSHA = concurrentSHA
 		}
-		return nil
+		return &GitHubPublishBranchResult{HeadSHA: publishedSHA}, nil
 	}
 	baseTreeSHA, err := s.githubCommitTreeSHA(ctx, token, repo, remoteBaseSHA)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	treeSHA, err := s.createGitHubTree(ctx, token, repo, baseTreeSHA, changes)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if remoteBranchSHA != "" {
 		remoteBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, remoteBranchSHA)
 		if treeErr != nil {
-			return fmt.Errorf("resolving remote publish branch tree %q: %w", branch, treeErr)
+			return nil, fmt.Errorf("resolving remote publish branch tree %q: %w", branch, treeErr)
 		}
 		if remoteBranchTreeSHA == treeSHA {
-			return nil
+			return &GitHubPublishBranchResult{HeadSHA: remoteBranchSHA}, nil
 		}
 	}
 	commitSHA, err := s.createGitHubCommit(ctx, token, repo, message, treeSHA, parentSHA, publishReq.CommitterName, publishReq.CommitterEmail)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, commitSHA, false); err != nil {
 		nonFastForward := isGitHubNonFastForwardError(err)
 		if !nonFastForward && !isGitHubRefAlreadyExistsError(err) {
-			return err
+			return nil, err
 		}
 		latestBranchSHA, refErr := s.githubBranchCommitSHA(ctx, token, repo, branch)
 		if refErr != nil {
-			return fmt.Errorf("refreshing remote publish branch %q after update rejection: %w", branch, refErr)
+			return nil, fmt.Errorf("refreshing remote publish branch %q after update rejection: %w", branch, refErr)
 		}
 		if nonFastForward && latestBranchSHA == parentSHA {
-			return err
+			return nil, err
 		}
 		latestBranchTreeSHA, treeErr := s.githubCommitTreeSHA(ctx, token, repo, latestBranchSHA)
 		if treeErr != nil {
-			return fmt.Errorf("resolving refreshed remote publish branch tree %q: %w", branch, treeErr)
+			return nil, fmt.Errorf("resolving refreshed remote publish branch tree %q: %w", branch, treeErr)
 		}
 		if latestBranchTreeSHA == treeSHA {
-			return nil
+			return &GitHubPublishBranchResult{HeadSHA: latestBranchSHA}, nil
 		}
 		retryCommitSHA, retryErr := s.createGitHubCommit(ctx, token, repo, message, treeSHA, latestBranchSHA, publishReq.CommitterName, publishReq.CommitterEmail)
 		if retryErr != nil {
-			return retryErr
+			return nil, retryErr
 		}
-		return s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, retryCommitSHA, false)
+		if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, retryCommitSHA, false); err != nil {
+			return nil, err
+		}
+		return &GitHubPublishBranchResult{HeadSHA: retryCommitSHA}, nil
 	}
-	return nil
+	return &GitHubPublishBranchResult{HeadSHA: commitSHA}, nil
 }
 
 func (s *GitHubService) publishExistingLocalCommit(ctx context.Context, repo *GitHubRepoRef, branch, sha string, force bool) error {
@@ -1254,6 +1265,7 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 		Merged bool   `json:"merged"`
 		Head   struct {
 			Ref  string `json:"ref"`
+			SHA  string `json:"sha"`
 			Repo struct {
 				FullName string `json:"full_name"`
 			} `json:"repo"`
@@ -1262,7 +1274,7 @@ func (s *GitHubService) GetPullRequest(ctx context.Context, repo *GitHubRepoRef,
 	if err := s.doGitHubJSON(req, &pr); err != nil {
 		return nil, err
 	}
-	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, State: pr.State, Merged: pr.Merged, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName}, nil
+	return &GitHubPullRequest{Number: pr.Number, URL: pr.URL, State: pr.State, Merged: pr.Merged, HeadRef: pr.Head.Ref, HeadRepoFullName: pr.Head.Repo.FullName, HeadSHA: pr.Head.SHA}, nil
 }
 
 func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
@@ -1291,6 +1303,13 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 		Number int    `json:"number"`
 		URL    string `json:"html_url"`
 		State  string `json:"state"`
+		Head   struct {
+			Ref  string `json:"ref"`
+			SHA  string `json:"sha"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
 	}
 	if err := s.doGitHubJSON(req, &prs); err != nil {
 		return nil, err
@@ -1305,7 +1324,7 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 			break
 		}
 	}
-	return &GitHubPullRequest{Number: selected.Number, URL: selected.URL, State: selected.State}, nil
+	return &GitHubPullRequest{Number: selected.Number, URL: selected.URL, State: selected.State, HeadRef: selected.Head.Ref, HeadRepoFullName: selected.Head.Repo.FullName, HeadSHA: selected.Head.SHA}, nil
 }
 
 func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
@@ -1342,12 +1361,19 @@ func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoR
 		Number int    `json:"number"`
 		URL    string `json:"html_url"`
 		State  string `json:"state"`
+		Head   struct {
+			Ref  string `json:"ref"`
+			SHA  string `json:"sha"`
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
 	}
 	if err := s.doGitHubJSON(req, &created); err != nil {
 		return nil, err
 	}
 
-	return &GitHubPullRequest{Number: created.Number, URL: created.URL, State: created.State}, nil
+	return &GitHubPullRequest{Number: created.Number, URL: created.URL, State: created.State, HeadRef: created.Head.Ref, HeadRepoFullName: created.Head.Repo.FullName, HeadSHA: created.Head.SHA}, nil
 }
 
 func (s *GitHubService) EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, requested []string) error {

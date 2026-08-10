@@ -2013,8 +2013,8 @@ func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, 
 	if err != nil {
 		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
 	}
-	if err := service.ValidateTaskPullRequestLiveState(project, task, repoRef, livePR); err != nil {
-		return true, fmt.Sprintf("GitHub SDLC implementation linked pull request #%d is not reviewable: %v; rerun after resolving PR publication", pullRequest.PRNumber, err)
+	if err := service.ValidateTaskPullRequestCurrentPublication(project, task, repoRef, livePR, pullRequest.PublishedHeadSHA); err != nil {
+		return true, fmt.Sprintf("GitHub SDLC implementation linked pull request #%d is not reviewable with the current published task work: %v; rerun after resolving PR publication", pullRequest.PRNumber, err)
 	}
 	return false, ""
 }

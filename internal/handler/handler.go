@@ -130,7 +130,7 @@ type GitHubServiceProvider interface {
 	RecloneProjectRepo(ctx context.Context, projectID, currentRepoPath, repoURL string) (string, string, error)
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error)
 	DefaultBranch(ctx context.Context, repo *service.GitHubRepoRef) (string, error)
-	PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) error
+	PublishBranch(ctx context.Context, repo *service.GitHubRepoRef, publishReq service.GitHubPublishBranchRequest) (*service.GitHubPublishBranchResult, error)
 	FindPullRequestByBranch(ctx context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error)
 	GetPullRequest(ctx context.Context, repo *service.GitHubRepoRef, number int) (*service.GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error)

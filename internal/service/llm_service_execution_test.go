@@ -3791,7 +3791,7 @@ type fakeGitHubIssueRuntimeProvider struct {
 	listIssuesPRFn       func(context.Context, *GitHubRepoRef, string) ([]GitHubIssueWithPullRequest, error)
 	listPRFeedbackFn     func(context.Context, *GitHubRepoRef, int) ([]GitHubPullRequestFeedback, error)
 	commentIssueFn       func(context.Context, *GitHubRepoRef, int, string) error
-	publishBranchFn      func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) error
+	publishBranchFn      func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error)
 	replaceBranchHeadFn  func(context.Context, *GitHubRepoRef, GitHubReplaceBranchHeadRequest) error
 	getPullRequestFn     func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	findBranchPRFn       func(context.Context, *GitHubRepoRef, string) (*GitHubPullRequest, error)
@@ -3809,11 +3809,11 @@ func (f *fakeGitHubIssueRuntimeProvider) DefaultBranch(ctx context.Context, repo
 	return "main", nil
 }
 
-func (f *fakeGitHubIssueRuntimeProvider) PublishBranch(ctx context.Context, repo *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+func (f *fakeGitHubIssueRuntimeProvider) PublishBranch(ctx context.Context, repo *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
 	if f.publishBranchFn != nil {
 		return f.publishBranchFn(ctx, repo, req)
 	}
-	return nil
+	return &GitHubPublishBranchResult{HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) ReplaceBranchHead(ctx context.Context, repo *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
@@ -3841,7 +3841,7 @@ func (f *fakeGitHubIssueRuntimeProvider) CreatePullRequest(ctx context.Context, 
 	if f.createPRFn != nil {
 		return f.createPRFn(ctx, repo, req)
 	}
-	return &GitHubPullRequest{Number: 101, URL: "https://github.com/openvibely/openvibely/pull/101", State: "open"}, nil
+	return &GitHubPullRequest{Number: 101, URL: "https://github.com/openvibely/openvibely/pull/101", State: "open", HeadRef: req.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, labels []string) error {
@@ -4144,9 +4144,9 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
 			switch number {
 			case 202:
-				return &GitHubPullRequest{Number: number, URL: "https://github.com/openvibely/openvibely/pull/202", State: "open", HeadRef: "task/existing-runtime-pr", HeadRepoFullName: "openvibely/openvibely"}, nil
+				return &GitHubPullRequest{Number: number, URL: "https://github.com/openvibely/openvibely/pull/202", State: "open", HeadRef: "task/existing-runtime-pr", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 			case 203:
-				return &GitHubPullRequest{Number: number, URL: "https://github.com/openvibely/openvibely/pull/203", State: "open", HeadRef: "task/existing-runtime-pr-url", HeadRepoFullName: "openvibely/openvibely"}, nil
+				return &GitHubPullRequest{Number: number, URL: "https://github.com/openvibely/openvibely/pull/203", State: "open", HeadRef: "task/existing-runtime-pr-url", HeadRepoFullName: "openvibely/openvibely", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 			default:
 				return nil, fmt.Errorf("unexpected pull request #%d", number)
 			}

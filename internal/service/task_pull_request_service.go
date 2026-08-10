@@ -12,7 +12,7 @@ import (
 type TaskPullRequestGitHubProvider interface {
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error)
 	DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error)
-	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error
+	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error)
 	GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error)
 	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
@@ -79,6 +79,24 @@ func ValidateTaskPullRequestLiveState(project *models.Project, task *models.Task
 	}
 	if !strings.EqualFold(strings.TrimSpace(pr.HeadRepoFullName), expectedRepo) {
 		return fmt.Errorf("pull request #%d head repository %q does not match project repository %q", pr.Number, pr.HeadRepoFullName, expectedRepo)
+	}
+	return nil
+}
+
+func ValidateTaskPullRequestCurrentPublication(project *models.Project, task *models.Task, repoRef *GitHubRepoRef, pr *GitHubPullRequest, publishedHeadSHA string) error {
+	if err := ValidateTaskPullRequestLiveState(project, task, repoRef, pr); err != nil {
+		return err
+	}
+	publishedHeadSHA = strings.TrimSpace(publishedHeadSHA)
+	if publishedHeadSHA == "" {
+		return fmt.Errorf("pull request publication head is not recorded")
+	}
+	liveHeadSHA := strings.TrimSpace(pr.HeadSHA)
+	if liveHeadSHA == "" {
+		return fmt.Errorf("pull request #%d head sha is unavailable", pr.Number)
+	}
+	if !strings.EqualFold(liveHeadSHA, publishedHeadSHA) {
+		return fmt.Errorf("pull request #%d head sha %q does not match published branch head %q", pr.Number, liveHeadSHA, publishedHeadSHA)
 	}
 	return nil
 }
@@ -233,7 +251,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if commitMessage == "" {
 		commitMessage = fmt.Sprintf("Prepare task %s", task.ID)
 	}
-	if err := s.github.PublishBranch(ctx, repoRef, GitHubPublishBranchRequest{
+	publishResult, err := s.github.PublishBranch(ctx, repoRef, GitHubPublishBranchRequest{
 		RepoPath:       project.RepoPath,
 		WorktreePath:   task.WorktreePath,
 		Branch:         task.WorktreeBranch,
@@ -241,24 +259,33 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		CommitMessage:  commitMessage,
 		CommitterName:  "OpenVibely Bot",
 		CommitterEmail: "bot@openvibely.ai",
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, fmt.Errorf("publishing branch: %w", err)
+	}
+	publishedHeadSHA := ""
+	if publishResult != nil {
+		publishedHeadSHA = strings.TrimSpace(publishResult.HeadSHA)
+	}
+	if publishedHeadSHA == "" {
+		return nil, fmt.Errorf("publishing branch did not return a remote head sha")
 	}
 	if existingPR != nil && IsOpenPullRequestState(existingPR.PRState) {
 		livePR, err := s.github.GetPullRequest(ctx, repoRef, existingPR.PRNumber)
 		if err != nil {
 			return nil, fmt.Errorf("verifying existing pull request #%d: %w", existingPR.PRNumber, err)
 		}
-		if err := ValidateTaskPullRequestLiveState(project, task, repoRef, livePR); err == nil {
+		if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, livePR, publishedHeadSHA); err == nil {
 			liveURL := strings.TrimSpace(livePR.URL)
 			liveState := strings.TrimSpace(livePR.State)
-			changed := existingPR.PRURL != liveURL || existingPR.PRState != liveState
+			changed := existingPR.PRURL != liveURL || existingPR.PRState != liveState || existingPR.PublishedHeadSHA != publishedHeadSHA
 			existingPR.PRURL = liveURL
 			existingPR.PRState = liveState
+			existingPR.PublishedHeadSHA = publishedHeadSHA
 			changed = mergeTaskPullRequestIssueMetadata(existingPR, opts) || changed
 			if changed {
 				if err := s.repo.Upsert(ctx, existingPR); err != nil {
-					return nil, fmt.Errorf("saving pull request issue metadata: %w", err)
+					return nil, fmt.Errorf("saving pull request publication state: %w", err)
 				}
 			}
 			return &OpenTaskPullRequestResult{
@@ -299,17 +326,26 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if pr == nil {
 		return nil, fmt.Errorf("pull request was not created or found")
 	}
-	if !IsOpenPullRequestState(pr.State) {
-		return nil, fmt.Errorf("pull request #%d is %s", pr.Number, strings.TrimSpace(pr.State))
+	prNumber := pr.Number
+	if strings.TrimSpace(pr.HeadRef) == "" || strings.TrimSpace(pr.HeadRepoFullName) == "" || strings.TrimSpace(pr.HeadSHA) == "" {
+		livePR, err := s.github.GetPullRequest(ctx, repoRef, prNumber)
+		if err != nil {
+			return nil, fmt.Errorf("verifying pull request #%d: %w", prNumber, err)
+		}
+		pr = livePR
+	}
+	if err := ValidateTaskPullRequestCurrentPublication(project, task, repoRef, pr, publishedHeadSHA); err != nil {
+		return nil, fmt.Errorf("pull request #%d is not current: %w", prNumber, err)
 	}
 
 	record := &models.TaskPullRequest{
-		TaskID:      task.ID,
-		PRNumber:    pr.Number,
-		PRURL:       pr.URL,
-		PRState:     pr.State,
-		IssueNumber: opts.IssueNumber,
-		IssueURL:    strings.TrimSpace(opts.IssueURL),
+		TaskID:           task.ID,
+		PRNumber:         pr.Number,
+		PRURL:            pr.URL,
+		PRState:          pr.State,
+		PublishedHeadSHA: publishedHeadSHA,
+		IssueNumber:      opts.IssueNumber,
+		IssueURL:         strings.TrimSpace(opts.IssueURL),
 	}
 	if err := s.repo.Upsert(ctx, record); err != nil {
 		return nil, fmt.Errorf("saving pull request record: %w", err)
@@ -391,5 +427,5 @@ func taskPullRequestRecordToGitHubPR(record *models.TaskPullRequest) *GitHubPull
 	if record == nil {
 		return nil
 	}
-	return &GitHubPullRequest{Number: record.PRNumber, URL: record.PRURL, State: record.PRState}
+	return &GitHubPullRequest{Number: record.PRNumber, URL: record.PRURL, State: record.PRState, HeadSHA: record.PublishedHeadSHA}
 }
