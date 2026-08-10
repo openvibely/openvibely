@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -2063,10 +2064,16 @@ type telegramAuthorizationStoreStub struct {
 }
 
 func (s telegramAuthorizationStoreStub) IsAuthorized(ctx context.Context, projectID string, userID int64, username string) (bool, error) {
+	if s.isAuthorized == nil {
+		return false, fmt.Errorf("unexpected project authorization lookup")
+	}
 	return s.isAuthorized(ctx, projectID, userID, username)
 }
 
 func (s telegramAuthorizationStoreStub) IsAuthorizedAnywhere(ctx context.Context, userID int64, username string) (bool, error) {
+	if s.isAuthorizedAnywhere == nil {
+		return false, fmt.Errorf("unexpected global authorization lookup")
+	}
 	return s.isAuthorizedAnywhere(ctx, userID, username)
 }
 
@@ -2083,10 +2090,10 @@ func TestTelegramService_CheckAuthorizationRepositoryErrorsDeny(t *testing.T) {
 		store     telegramAuthorizationStoreStub
 	}{
 		{
-			name:      "project-specific lookup",
+			name:      "active-project global lookup",
 			projectID: "project-1",
 			store: telegramAuthorizationStoreStub{
-				isAuthorized: func(context.Context, string, int64, string) (bool, error) {
+				isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
 					return false, lookupErr
 				},
 			},
@@ -2095,18 +2102,6 @@ func TestTelegramService_CheckAuthorizationRepositoryErrorsDeny(t *testing.T) {
 			name:      "no-project global lookup",
 			projectID: "",
 			store: telegramAuthorizationStoreStub{
-				isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
-					return false, lookupErr
-				},
-			},
-		},
-		{
-			name:      "cross-project fallback lookup",
-			projectID: "project-2",
-			store: telegramAuthorizationStoreStub{
-				isAuthorized: func(context.Context, string, int64, string) (bool, error) {
-					return false, nil
-				},
 				isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
 					return false, lookupErr
 				},
@@ -2131,7 +2126,7 @@ func TestTelegramService_HandleUpdateAuthorizationStorageFailureStopsCommandProc
 	var sent []string
 	svc := &TelegramService{
 		telegramAuthRepo: telegramAuthorizationStoreStub{
-			isAuthorized: func(context.Context, string, int64, string) (bool, error) {
+			isAuthorizedAnywhere: func(context.Context, int64, string) (bool, error) {
 				return false, fmt.Errorf("database closed")
 			},
 		},
@@ -2267,6 +2262,72 @@ func TestTelegramService_CheckAuthorization(t *testing.T) {
 		assert.False(t, svcWithAuth.checkAuthorization(999, "hacker", project.ID),
 			"with auth repo set, unauthorized user must be blocked")
 	})
+}
+
+func TestTelegramService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	telegramAuthRepo := repository.NewTelegramAuthRepo(db)
+
+	project := &models.Project{Name: "Telegram Single Auth Lookup"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	seedTelegramAuthorizedUsers(t, db, project.ID, 1000, 1000)
+
+	svc := &TelegramService{
+		projectRepo:      projectRepo,
+		telegramAuthRepo: telegramAuthRepo,
+		userProjects:     make(map[int64]string),
+	}
+	counter.Reset()
+	counter.SetEnabled(true)
+	authorized := svc.checkAuthorization(999999, "unknown", project.ID)
+	counter.SetEnabled(false)
+
+	require.False(t, authorized)
+	statements := counter.Statements()
+	require.Len(t, statements, 1, "rejected active-project authorization should issue one statement: %q", statements)
+	require.Equal(t, 1, countChannelAuthTableStatements(statements, "telegram_authorized_users"), "statements: %q", statements)
+}
+
+func BenchmarkTelegramRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	telegramAuthRepo := repository.NewTelegramAuthRepo(db)
+	project := &models.Project{Name: "Telegram Rejected Auth Benchmark"}
+	require.NoError(b, projectRepo.Create(ctx, project))
+	seedTelegramAuthorizedUsers(b, db, project.ID, 1000, 100000)
+	svc := &TelegramService{
+		projectRepo:      projectRepo,
+		telegramAuthRepo: telegramAuthRepo,
+		userProjects:     make(map[int64]string),
+	}
+	originalLogOutput := log.Writer()
+	log.SetOutput(io.Discard)
+	b.Cleanup(func() { log.SetOutput(originalLogOutput) })
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if svc.checkAuthorization(999999999, "unknown", project.ID) {
+			b.Fatal("unexpected authorized rejected Telegram user")
+		}
+	}
+}
+
+func seedTelegramAuthorizedUsers(tb testing.TB, db *sql.DB, projectID string, firstUserID int64, count int) {
+	tb.Helper()
+	tx, err := db.Begin()
+	require.NoError(tb, err)
+	stmt, err := tx.Prepare(`INSERT INTO telegram_authorized_users (project_id, telegram_user_id, display_name, added_by) VALUES (?, ?, ?, ?)`)
+	require.NoError(tb, err)
+	for i := 0; i < count; i++ {
+		_, err = stmt.Exec(projectID, firstUserID+int64(i), "Benchmark User", "test")
+		require.NoError(tb, err)
+	}
+	require.NoError(tb, stmt.Close())
+	require.NoError(tb, tx.Commit())
 }
 
 // --- App Settings Tests ---

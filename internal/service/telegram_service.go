@@ -252,32 +252,19 @@ func (s *TelegramService) checkAuthorization(userID int64, username string, proj
 
 	ctx := context.Background()
 
-	if projectID == "" {
-		// No project selected yet — check if user is authorized in ANY project
-		authorized, err := s.telegramAuthRepo.IsAuthorizedAnywhere(ctx, userID, username)
-		if err != nil {
-			applog.Infof("[telegram] global authorization lookup failed for user_id=%d: %v", userID, err)
-			return false
-		}
-		applog.Infof("[telegram] auth check: user %d (%s) global authorized=%v", userID, username, authorized)
-		return authorized
-	}
-
-	// Check if this specific user is authorized for the project
-	authorized, err := s.telegramAuthRepo.IsAuthorized(ctx, projectID, userID, username)
+	authorized, err := s.telegramAuthRepo.IsAuthorizedAnywhere(ctx, userID, username)
 	if err != nil {
-		applog.Infof("[telegram] project authorization lookup failed for user_id=%d project_id=%s: %v", userID, projectID, err)
+		if projectID == "" {
+			applog.Infof("[telegram] global authorization lookup failed for user_id=%d: %v", userID, err)
+		} else {
+			applog.Infof("[telegram] project authorization lookup failed for user_id=%d project_id=%s: %v", userID, projectID, err)
+		}
 		return false
 	}
 
-	// If not authorized for the specific project, fall back to checking any project.
-	// Users may have been added to a different project than their current active one.
-	if !authorized {
-		authorized, err = s.telegramAuthRepo.IsAuthorizedAnywhere(ctx, userID, username)
-		if err != nil {
-			applog.Infof("[telegram] fallback global authorization lookup failed for user_id=%d project_id=%s: %v", userID, projectID, err)
-			return false
-		}
+	if projectID == "" {
+		applog.Infof("[telegram] auth check: user %d (%s) global authorized=%v", userID, username, authorized)
+		return authorized
 	}
 
 	applog.Infof("[telegram] auth check: user %d (%s) project=%s authorized=%v", userID, username, projectID, authorized)

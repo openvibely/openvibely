@@ -1662,7 +1662,8 @@ func countChannelAuthTableStatements(statements []string, table string) int {
 	needle := " from " + strings.ToLower(table) + " where "
 	count := 0
 	for _, statement := range statements {
-		if strings.Contains(strings.ToLower(statement), needle) {
+		normalized := " " + strings.Join(strings.Fields(strings.ToLower(statement)), " ") + " "
+		if strings.Contains(normalized, needle) {
 			count++
 		}
 	}
