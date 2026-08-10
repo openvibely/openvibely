@@ -777,6 +777,53 @@ func (i *acceptanceInspectingInstaller) Stage(ctx context.Context, release Verif
 	return i.countingInstaller.Stage(ctx, release)
 }
 
+func TestCoordinatorManualAcceptanceWithoutStagedArtifactReachesReady(t *testing.T) {
+	now := time.Unix(1000, 0).UTC()
+	tracker := NewWorkTracker()
+	finishWork, err := tracker.Start(WorkTask)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finishWork()
+	drain := NewDrainManager(tracker.Active, nil, 0, func() time.Time { return now })
+	drain.SetWorkTracker(tracker)
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json"), Now: func() time.Time { return now }})
+	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionDocker}, "stable", drain, nil, true, "", nil)
+	t.Cleanup(func() { _ = coordinator.Cancel() })
+	coordinator.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}}
+	coordinator.state = StateAvailable
+	coordinator.recoveryCtx = context.Background()
+
+	if err := coordinator.Accept(context.Background(), 10*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	waitForCoordinatorState(t, coordinator, StateWaitingForIdle)
+	if tracker.Admit() {
+		t.Fatal("manual accepted update left admission open while draining")
+	}
+	finishWork()
+	waitForCoordinatorState(t, coordinator, StateReady)
+	if snapshot := coordinator.Snapshot(); snapshot.Drain.State != DrainStateReady || tracker.Admit() {
+		t.Fatalf("manual accepted update did not keep admission closed while ready: %#v admit=%v", snapshot, tracker.Admit())
+	}
+}
+
+func TestCoordinatorAcceptedPackagedUpdateWithoutStagedArtifactFails(t *testing.T) {
+	now := time.Unix(1000, 0).UTC()
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json"), Now: func() time.Time { return now }})
+	drain := NewDrainManager(nil, nil, 0, func() time.Time { return now })
+	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, &countingInstaller{}, false, "", nil)
+	coordinator.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}}
+	coordinator.state = StateAvailable
+
+	if err := coordinator.Accept(context.Background(), 10*time.Minute); err == nil {
+		t.Fatal("accepted packaged update without staged artifact")
+	}
+	if snapshot := coordinator.Snapshot(); snapshot.State != StateAvailable || snapshot.Drain.State != DrainStateIdle {
+		t.Fatalf("packaged unstaged update changed state: %#v", snapshot)
+	}
+}
+
 func TestCoordinatorPackagedReplacementIsStagedBeforeApproval(t *testing.T) {
 	now := time.Unix(1000, 0).UTC()
 	root := t.TempDir()
