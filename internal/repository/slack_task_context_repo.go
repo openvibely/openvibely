@@ -17,6 +17,29 @@ func NewSlackTaskContextRepo(db *sql.DB) *SlackTaskContextRepo {
 	return &SlackTaskContextRepo{db: db}
 }
 
+var slackTaskContextLifecycle = taskContextLifecycle[models.SlackTaskContext]{
+	table:           "slack_task_context",
+	errLabel:        "slack task context",
+	metadataColumns: []string{"slack_team_id", "slack_channel_id", "slack_thread_ts", "slack_user_id"},
+	selectColumns:   "task_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id, created_at, updated_at",
+	values: func(stc models.SlackTaskContext) (string, []any) {
+		return stc.TaskID, []any{stc.SlackTeamID, stc.SlackChannelID, stc.SlackThreadTS, stc.SlackUserID}
+	},
+	scan: func(row taskContextScanner) (models.SlackTaskContext, error) {
+		var stc models.SlackTaskContext
+		err := row.Scan(
+			&stc.TaskID,
+			&stc.SlackTeamID,
+			&stc.SlackChannelID,
+			&stc.SlackThreadTS,
+			&stc.SlackUserID,
+			&stc.CreatedAt,
+			&stc.UpdatedAt,
+		)
+		return stc, err
+	},
+}
+
 func (r *SlackTaskContextRepo) Upsert(ctx context.Context, stc *models.SlackTaskContext) error {
 	return r.UpsertWithExecutor(ctx, r.db, stc)
 }
@@ -26,44 +49,11 @@ func (r *SlackTaskContextRepo) UpsertWithExecutor(ctx context.Context, exec SQLE
 	if stc == nil {
 		return fmt.Errorf("slack task context is nil")
 	}
-	_, err := exec.ExecContext(ctx,
-		`INSERT INTO slack_task_context (task_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id, updated_at)
-		 VALUES (?, ?, ?, ?, ?, datetime('now'))
-		 ON CONFLICT(task_id) DO UPDATE SET
-		 slack_team_id = excluded.slack_team_id,
-		 slack_channel_id = excluded.slack_channel_id,
-		 slack_thread_ts = excluded.slack_thread_ts,
-		 slack_user_id = excluded.slack_user_id,
-		 updated_at = datetime('now')`,
-		stc.TaskID, stc.SlackTeamID, stc.SlackChannelID, stc.SlackThreadTS, stc.SlackUserID)
-	if err != nil {
-		return fmt.Errorf("upsert slack task context: %w", err)
-	}
-	return nil
+	return slackTaskContextLifecycle.Upsert(ctx, exec, *stc)
 }
 
 func (r *SlackTaskContextRepo) GetByTaskID(ctx context.Context, taskID string) (*models.SlackTaskContext, error) {
-	var stc models.SlackTaskContext
-	err := r.db.QueryRowContext(ctx,
-		`SELECT task_id, slack_team_id, slack_channel_id, slack_thread_ts, slack_user_id, created_at, updated_at
-		 FROM slack_task_context WHERE task_id = ?`,
-		taskID,
-	).Scan(
-		&stc.TaskID,
-		&stc.SlackTeamID,
-		&stc.SlackChannelID,
-		&stc.SlackThreadTS,
-		&stc.SlackUserID,
-		&stc.CreatedAt,
-		&stc.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get slack task context: %w", err)
-	}
-	return &stc, nil
+	return slackTaskContextLifecycle.GetByTaskID(ctx, r.db, taskID)
 }
 
 func (r *SlackTaskContextRepo) DeleteByTaskID(ctx context.Context, taskID string) error {

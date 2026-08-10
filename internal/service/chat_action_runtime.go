@@ -778,7 +778,7 @@ func channelListAgentsResult(ctx context.Context, repo *repository.AgentRepo, un
 		}
 		return "Agent definitions not available."
 	}
-	agents, err := repo.List(ctx)
+	agents, err := repo.ListRuntimeSummaries(ctx)
 	if err != nil {
 		return "Error retrieving agent definitions: " + err.Error()
 	}
@@ -792,7 +792,7 @@ func channelListAgentsResult(ctx context.Context, repo *repository.AgentRepo, un
 		if a.Model != "inherit" {
 			modelStr = fmt.Sprintf(", model: %s", a.Model)
 		}
-		sb.WriteString(fmt.Sprintf("- %s — %s%s, %d skills, %d MCP servers\n", a.Name, a.Description, modelStr, len(a.Skills), len(a.MCPServers)))
+		sb.WriteString(fmt.Sprintf("- %s — %s%s, %d skills, %d MCP servers\n", a.Name, a.Description, modelStr, a.SkillCount, a.MCPServerCount))
 	}
 	return strings.TrimSpace(sb.String())
 }

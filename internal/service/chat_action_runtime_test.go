@@ -1074,3 +1074,38 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 	require.NoError(t, err)
 	require.Nil(t, planner)
 }
+
+func TestChannelListAgentsResultUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := repository.NewAgentRepo(db)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents: %v", err)
+	}
+
+	agents := []*models.Agent{
+		{Name: "Alpha Agent", Description: "alpha description", Model: "inherit", Skills: []models.SkillConfig{{Name: "one"}}, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Bravo Agent", Description: "bravo description", Model: "gpt-5", MCPServers: []models.MCPServerConfig{{Name: "one"}, {Name: "two"}}, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Archived Agent", Description: "hidden", Model: "gpt-5", GeneratedStatus: models.AgentStatusArchived, Enabled: true, SelectableAsPrimary: true},
+	}
+	for _, agent := range agents {
+		require.NoError(t, repo.Create(ctx, agent))
+	}
+
+	out := channelListAgentsResult(ctx, repo, "")
+	alphaLine := "- Alpha Agent — alpha description, 1 skills, 0 MCP servers"
+	bravoLine := "- Bravo Agent — bravo description, model: gpt-5, 0 skills, 2 MCP servers"
+	require.Contains(t, out, "Configured Agents:")
+	require.Contains(t, out, alphaLine)
+	require.Contains(t, out, bravoLine)
+	require.NotContains(t, out, "Archived Agent")
+	require.Less(t, strings.Index(out, alphaLine), strings.Index(out, bravoLine), "agents should remain ordered by name ASC")
+
+	require.Equal(t, "Agent definitions not available.", channelListAgentsResult(ctx, nil, ""))
+	require.Equal(t, "Channel unavailable.", channelListAgentsResult(ctx, nil, "Channel unavailable."))
+
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents for empty result: %v", err)
+	}
+	require.Equal(t, "No agents configured.", channelListAgentsResult(ctx, repo, ""))
+}
