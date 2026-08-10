@@ -80,11 +80,11 @@ func personalityDescriptionForKey(key string, customPersonalities []models.Custo
 	return ""
 }
 
-func personalityPromptForKey(key string, customPersonalities []models.CustomPersonality) string {
+func personalityPromptPreviewForKey(key string, customPersonalities []models.CustomPersonality) string {
 	if cp, ok := customByKey(customPersonalities, key); ok {
-		return cp.SystemPrompt
+		return cp.SystemPromptPreview
 	}
-	return service.GetPersonalityPrompt(key)
+	return truncatePrompt(service.GetPersonalityPrompt(key), 150)
 }
 
 func boolString(v bool) string {
@@ -100,11 +100,11 @@ templ builtInPersonalityCard(p service.PersonalityInfo, personality string, cust
 		data-personality-key={ p.Key }
 		data-personality-name={ personalityNameForKey(p.Key, customPersonalities) }
 		data-personality-description={ personalityDescriptionForKey(p.Key, customPersonalities) }
-		data-personality-prompt={ personalityPromptForKey(p.Key, customPersonalities) }
+		data-personality-preview={ personalityPromptPreviewForKey(p.Key, customPersonalities) }
 		data-personality-is-preset="true"
 		data-personality-has-custom={ boolString(personalityHasCustomEntry(p.Key, customPersonalities)) }
 		data-search-card
-		data-search-text={ personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptForKey(p.Key, customPersonalities) }
+		data-search-text={ personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptPreviewForKey(p.Key, customPersonalities) }
 		onclick="editPersonalityFromData(this)"
 	>
 		<div class="card-body relative">
@@ -144,7 +144,7 @@ templ builtInPersonalityCard(p service.PersonalityInfo, personality string, cust
 					}
 				</h3>
 				<p class="text-sm opacity-60 mt-1">{ personalityDescriptionForKey(p.Key, customPersonalities) }</p>
-				<p class="text-sm opacity-40 mt-1 line-clamp-2">{ truncatePrompt(personalityPromptForKey(p.Key, customPersonalities), 150) }</p>
+				<p class="text-sm opacity-40 mt-1 line-clamp-2">{ personalityPromptPreviewForKey(p.Key, customPersonalities) }</p>
 			</div>
 		</div>
 	</div>
@@ -156,11 +156,11 @@ templ customPersonalityCard(cp models.CustomPersonality, personality string) {
 		data-personality-key={ cp.Key }
 		data-personality-name={ cp.Name }
 		data-personality-description={ cp.Description }
-		data-personality-prompt={ cp.SystemPrompt }
+		data-personality-preview={ cp.SystemPromptPreview }
 		data-personality-is-preset="false"
 		data-personality-has-custom="true"
 		data-search-card
-		data-search-text={ cp.Name + " " + cp.Description + " " + cp.SystemPrompt }
+		data-search-text={ cp.Name + " " + cp.Description + " " + cp.SystemPromptPreview }
 		onclick="editPersonalityFromData(this)"
 	>
 		<div class="card-body relative">
@@ -211,7 +211,7 @@ templ customPersonalityCard(cp models.CustomPersonality, personality string) {
 				if cp.Description != "" {
 					<p class="text-sm opacity-60 mt-1">{ cp.Description }</p>
 				}
-				<p class="text-sm opacity-40 mt-1 line-clamp-2">{ truncatePrompt(cp.SystemPrompt, 150) }</p>
+				<p class="text-sm opacity-40 mt-1 line-clamp-2">{ cp.SystemPromptPreview }</p>
 			</div>
 		</div>
 	</div>
@@ -227,7 +227,6 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 			</button>
 		</div>
 		@CardSearchInput("personality", "Search personalities...")
-
 		<div class="grid gap-4">
 			if personality != "" {
 				for _, p := range service.AllPersonalities() {
@@ -247,7 +246,6 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 				data-personality-key=""
 				data-personality-name="Base"
 				data-personality-description=""
-				data-personality-prompt=""
 				data-personality-is-preset="true"
 				data-personality-has-custom="false"
 				data-personality-is-default-card="true"
@@ -288,7 +286,6 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 					</div>
 				</div>
 			</div>
-
 			<!-- Built-in personality cards -->
 			for _, p := range service.AllPersonalities() {
 				if p.Key != "" && p.Key != personality {
@@ -297,11 +294,11 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 						data-personality-key={ p.Key }
 						data-personality-name={ personalityNameForKey(p.Key, customPersonalities) }
 						data-personality-description={ personalityDescriptionForKey(p.Key, customPersonalities) }
-						data-personality-prompt={ personalityPromptForKey(p.Key, customPersonalities) }
+						data-personality-preview={ personalityPromptPreviewForKey(p.Key, customPersonalities) }
 						data-personality-is-preset="true"
 						data-personality-has-custom={ boolString(personalityHasCustomEntry(p.Key, customPersonalities)) }
 						data-search-card
-						data-search-text={ personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptForKey(p.Key, customPersonalities) }
+						data-search-text={ personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptPreviewForKey(p.Key, customPersonalities) }
 						onclick="editPersonalityFromData(this)"
 					>
 						<div class="card-body relative">
@@ -341,84 +338,82 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 									}
 								</h3>
 								<p class="text-sm opacity-60 mt-1">{ personalityDescriptionForKey(p.Key, customPersonalities) }</p>
-								<p class="text-sm opacity-40 mt-1 line-clamp-2">{ truncatePrompt(personalityPromptForKey(p.Key, customPersonalities), 150) }</p>
+								<p class="text-sm opacity-40 mt-1 line-clamp-2">{ personalityPromptPreviewForKey(p.Key, customPersonalities) }</p>
 							</div>
 						</div>
 					</div>
 				}
 			}
-
 			<!-- Non-preset custom personality cards -->
 			for _, cp := range nonPresetCustoms(customPersonalities) {
 				if cp.Key != personality {
 					<div
-					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
-					data-personality-key={ cp.Key }
-					data-personality-name={ cp.Name }
-					data-personality-description={ cp.Description }
-					data-personality-prompt={ cp.SystemPrompt }
-					data-personality-is-preset="false"
-					data-personality-has-custom="true"
-					data-search-card
-					data-search-text={ cp.Name + " " + cp.Description + " " + cp.SystemPrompt }
-					onclick="editPersonalityFromData(this)"
-				>
-					<div class="card-body relative">
-						<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-							<div class="dropdown dropdown-end">
-								<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-									<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-									</svg>
-								</label>
-								<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
-									<li>
-										<button onclick="editPersonalityFromData(this.closest('[data-personality-key]'))">Edit</button>
-									</li>
-									if personality != cp.Key {
+						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
+						data-personality-key={ cp.Key }
+						data-personality-name={ cp.Name }
+						data-personality-description={ cp.Description }
+						data-personality-preview={ cp.SystemPromptPreview }
+						data-personality-is-preset="false"
+						data-personality-has-custom="true"
+						data-search-card
+						data-search-text={ cp.Name + " " + cp.Description + " " + cp.SystemPromptPreview }
+						onclick="editPersonalityFromData(this)"
+					>
+						<div class="card-body relative">
+							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
+								<div class="dropdown dropdown-end">
+									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
+										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
+										</svg>
+									</label>
+									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
+										<li>
+											<button onclick="editPersonalityFromData(this.closest('[data-personality-key]'))">Edit</button>
+										</li>
+										if personality != cp.Key {
+											<li>
+												<button
+													hx-post={ "/personality/save?personality=" + cp.Key }
+													hx-target="#personality-section"
+													hx-swap="outerHTML"
+												>
+													Set as Default
+												</button>
+											</li>
+										}
 										<li>
 											<button
-												hx-post={ "/personality/save?personality=" + cp.Key }
+												class="text-error"
+												hx-delete={ "/personality/custom/" + cp.Key }
 												hx-target="#personality-section"
 												hx-swap="outerHTML"
+												hx-confirm="Delete this custom personality?"
 											>
-												Set as Default
+												Delete
 											</button>
 										</li>
+									</ul>
+								</div>
+							</div>
+							<div class="pr-12">
+								<h3 class="font-bold">
+									{ cp.Name }
+									if personality == cp.Key {
+										<span class="badge badge-sm ml-2 ov-badge-default">Active</span>
 									}
-									<li>
-										<button
-											class="text-error"
-											hx-delete={ "/personality/custom/" + cp.Key }
-											hx-target="#personality-section"
-											hx-swap="outerHTML"
-											hx-confirm="Delete this custom personality?"
-										>
-											Delete
-										</button>
-									</li>
-								</ul>
+									<span class="badge badge-ghost badge-sm ml-1">Custom</span>
+								</h3>
+								if cp.Description != "" {
+									<p class="text-sm opacity-60 mt-1">{ cp.Description }</p>
+								}
+								<p class="text-sm opacity-40 mt-1 line-clamp-2">{ cp.SystemPromptPreview }</p>
 							</div>
 						</div>
-						<div class="pr-12">
-							<h3 class="font-bold">
-								{ cp.Name }
-								if personality == cp.Key {
-									<span class="badge badge-sm ml-2 ov-badge-default">Active</span>
-								}
-								<span class="badge badge-ghost badge-sm ml-1">Custom</span>
-							</h3>
-							if cp.Description != "" {
-								<p class="text-sm opacity-60 mt-1">{ cp.Description }</p>
-							}
-							<p class="text-sm opacity-40 mt-1 line-clamp-2">{ truncatePrompt(cp.SystemPrompt, 150) }</p>
-						</div>
 					</div>
-				</div>
-			}
+				}
 			}
 		</div>
-
 		<!-- Create/Edit Personality Modal -->
 		<dialog id="personality_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
 			<div class="modal-box">
@@ -454,9 +449,11 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 				<button>close</button>
 			</form>
 		</dialog>
-
 		<script type="text/javascript">
+			window.openVibelyPersonalityEditGeneration = window.openVibelyPersonalityEditGeneration || 0;
+
 			function openNewPersonalityModal() {
+				window.openVibelyPersonalityEditGeneration++;
 				var form = document.getElementById('personality_form');
 				document.getElementById('personality_modal_title').textContent = 'New Custom Personality';
 				form.removeAttribute('hx-put');
@@ -468,6 +465,7 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 				document.getElementById('personality_description').value = '';
 				document.getElementById('personality_prompt').value = '';
 				document.getElementById('personality_submit_btn').textContent = 'Create';
+				document.getElementById('personality_submit_btn').disabled = false;
 				document.getElementById('personality_modal_extra_actions').innerHTML = '';
 				personality_modal.showModal();
 			}
@@ -477,9 +475,9 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 				var key = card.dataset.personalityKey || '';
 				var name = card.dataset.personalityName || '';
 				var description = card.dataset.personalityDescription || '';
-				var prompt = card.dataset.personalityPrompt || '';
 				var isPreset = card.dataset.personalityIsPreset === 'true';
 				var hasCustom = card.dataset.personalityHasCustom === 'true';
+				var requestGeneration = ++window.openVibelyPersonalityEditGeneration;
 
 				var form = document.getElementById('personality_form');
 				document.getElementById('personality_modal_title').textContent = 'Edit: ' + name;
@@ -491,15 +489,18 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 
 				document.getElementById('personality_name').value = name;
 				document.getElementById('personality_description').value = description;
-				document.getElementById('personality_prompt').value = prompt;
+				document.getElementById('personality_prompt').value = '';
+				document.getElementById('personality_prompt').placeholder = 'Loading full prompt...';
 
+				var submitBtn = document.getElementById('personality_submit_btn');
 				if (isPreset && hasCustom) {
-					document.getElementById('personality_submit_btn').textContent = 'Save Changes';
+					submitBtn.textContent = 'Save Changes';
 				} else if (isPreset && !hasCustom) {
-					document.getElementById('personality_submit_btn').textContent = 'Save Override';
+					submitBtn.textContent = 'Save Override';
 				} else {
-					document.getElementById('personality_submit_btn').textContent = 'Save Changes';
+					submitBtn.textContent = 'Save Changes';
 				}
+				submitBtn.disabled = true;
 
 				// Extra actions: Reset to Default (for preset overrides) or Delete (for custom)
 				var extras = document.getElementById('personality_modal_extra_actions');
@@ -551,6 +552,25 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 				}
 
 				personality_modal.showModal();
+
+				fetch('/personality/custom/' + encodeURIComponent(key), { headers: { 'Accept': 'application/json' } })
+					.then(function(response) {
+						if (!response.ok) throw new Error('Failed to load personality');
+						return response.json();
+					})
+					.then(function(detail) {
+						if (requestGeneration !== window.openVibelyPersonalityEditGeneration) return;
+						document.getElementById('personality_modal_title').textContent = 'Edit: ' + (detail.name || name);
+						document.getElementById('personality_name').value = detail.name || name;
+						document.getElementById('personality_description').value = detail.description || '';
+						document.getElementById('personality_prompt').value = detail.system_prompt || '';
+						document.getElementById('personality_prompt').placeholder = 'Describe how the AI should behave...';
+						submitBtn.disabled = false;
+					})
+					.catch(function() {
+						if (requestGeneration !== window.openVibelyPersonalityEditGeneration) return;
+						document.getElementById('personality_prompt').placeholder = 'Unable to load prompt. Close and try again.';
+					});
 			}
 
 			function closePersonalityModal() {
