@@ -610,9 +610,9 @@ func (c *Coordinator) superviseAcceptedUpdate(ctx context.Context) {
 
 func (c *Coordinator) continueAcceptedUpdate(ctx context.Context, lease time.Duration) error {
 	c.mu.RLock()
-	staged := c.state == StateAvailable && c.staged != nil
+	readyToApply := c.state == StateAvailable && (c.manual || c.staged != nil)
 	c.mu.RUnlock()
-	if !staged {
+	if !readyToApply {
 		return errors.New("accepted update replacement is not staged")
 	}
 	return c.Apply(ctx, lease)
