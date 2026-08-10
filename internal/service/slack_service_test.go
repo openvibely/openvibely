@@ -1600,6 +1600,75 @@ func TestSlackService_CheckAuthorization_FallsBackToAnyProject(t *testing.T) {
 	require.False(t, svc.checkAuthorization(ctx, projectB.ID, "U_BLOCKED"))
 }
 
+func TestSlackService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	slackAuthRepo := repository.NewSlackAuthRepo(db)
+
+	project := &models.Project{Name: "Slack Single Auth Lookup"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	seedChannelAuthorizedUsers(t, db, "slack_authorized_users", "slack_user_id", project.ID, "U_SEEDED", 1000)
+
+	svc := NewSlackService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, slackAuthRepo)
+	counter.Reset()
+	counter.SetEnabled(true)
+	authorized := svc.checkAuthorization(ctx, project.ID, "U_REJECTED")
+	counter.SetEnabled(false)
+
+	require.False(t, authorized)
+	statements := counter.Statements()
+	require.Len(t, statements, 1, "rejected active-project authorization should issue one statement: %q", statements)
+	require.Equal(t, 1, countChannelAuthTableStatements(statements, "slack_authorized_users"), "statements: %q", statements)
+}
+
+func BenchmarkSlackRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	project := &models.Project{Name: "Slack Rejected Auth Benchmark"}
+	require.NoError(b, projectRepo.Create(ctx, project))
+	seedChannelAuthorizedUsers(b, db, "slack_authorized_users", "slack_user_id", project.ID, "U_BENCH", 100000)
+	svc := NewSlackService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, slackAuthRepo)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if svc.checkAuthorization(ctx, project.ID, "U_REJECTED") {
+			b.Fatal("unexpected authorized rejected Slack user")
+		}
+	}
+}
+
+func seedChannelAuthorizedUsers(tb testing.TB, db *sql.DB, table, userColumn, projectID, userPrefix string, count int) {
+	tb.Helper()
+	tx, err := db.Begin()
+	require.NoError(tb, err)
+	stmt, err := tx.Prepare(fmt.Sprintf(`INSERT INTO %s (project_id, %s, display_name, added_by) VALUES (?, ?, ?, ?)`, table, userColumn))
+	require.NoError(tb, err)
+	for i := 0; i < count; i++ {
+		userID := fmt.Sprintf("%s_%06d", userPrefix, i)
+		_, err = stmt.Exec(projectID, userID, "Benchmark User", "test")
+		require.NoError(tb, err)
+	}
+	require.NoError(tb, stmt.Close())
+	require.NoError(tb, tx.Commit())
+}
+
+func countChannelAuthTableStatements(statements []string, table string) int {
+	needle := " from " + strings.ToLower(table) + " where "
+	count := 0
+	for _, statement := range statements {
+		if strings.Contains(strings.ToLower(statement), needle) {
+			count++
+		}
+	}
+	return count
+}
+
 func TestSlackService_CheckAuthorization_NoUsersConfiguredDenyAll(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

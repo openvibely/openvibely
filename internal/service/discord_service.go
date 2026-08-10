@@ -603,28 +603,16 @@ func (s *DiscordService) checkAuthorization(ctx context.Context, projectID, disc
 	if s.discordAuthRepo == nil {
 		return true
 	}
-	if strings.TrimSpace(projectID) == "" {
-		authorized, err := s.discordAuthRepo.IsAuthorizedAnywhere(ctx, discordUserID)
-		if err != nil {
+	authorized, err := s.discordAuthRepo.IsAuthorizedAnywhere(ctx, discordUserID)
+	if err != nil {
+		if strings.TrimSpace(projectID) == "" {
 			applog.Infof("[discord] auth check error for user=%s anywhere: %v", discordUserID, err)
-			return false
+		} else {
+			applog.Infof("[discord] auth check error for user=%s project=%s: %v", discordUserID, projectID, err)
 		}
-		return authorized
-	}
-	authorized, err := s.discordAuthRepo.IsAuthorized(ctx, projectID, discordUserID)
-	if err != nil {
-		applog.Infof("[discord] auth check error for user=%s project=%s: %v", discordUserID, projectID, err)
 		return false
 	}
-	if authorized {
-		return true
-	}
-	authorizedAnywhere, err := s.discordAuthRepo.IsAuthorizedAnywhere(ctx, discordUserID)
-	if err != nil {
-		applog.Infof("[discord] auth check error for user=%s fallback-anywhere: %v", discordUserID, err)
-		return false
-	}
-	return authorizedAnywhere
+	return authorized
 }
 
 func (s *DiscordService) getActiveProject(ctx context.Context, userID string) string {
@@ -747,6 +735,7 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
+		WorkerSvc:             s.workerSvc,
 		LLMConfigRepo:         s.llmConfigRepo,
 		AgentRepo:             s.agentRepo,
 		SettingsRepo:          s.settingsRepo,
