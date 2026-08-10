@@ -272,6 +272,66 @@ func buildWebhookTaskPrompt(endpoint *models.WebhookEndpoint, eventType, summary
 
 // --- CRUD handlers ---
 
+type webhookDetailResponse struct {
+	ID                 string   `json:"id"`
+	ProjectID          string   `json:"project_id"`
+	Name               string   `json:"name"`
+	Enabled            bool     `json:"enabled"`
+	PathToken          string   `json:"path_token"`
+	Secret             string   `json:"secret"`
+	SystemInstructions string   `json:"system_instructions"`
+	TitleTemplate      string   `json:"title_template"`
+	PromptTemplate     string   `json:"prompt_template"`
+	DefaultPriority    int      `json:"default_priority"`
+	AgentIDs           []string `json:"agent_ids"`
+}
+
+func (h *Handler) HandleWebhookDetail(c echo.Context) error {
+	if h.webhookRepo == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "webhook repository not configured")
+	}
+
+	projectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if projectID == "" {
+		var err error
+		projectID, err = h.getCurrentProjectID(c)
+		if err != nil || projectID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "project not found")
+		}
+	}
+
+	w, err := h.webhookRepo.GetByIDForProject(c.Request().Context(), c.Param("id"), projectID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load webhook")
+	}
+	if w == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
+	}
+
+	agentAssignments, err := h.webhookRepo.GetEndpointAgents(c.Request().Context(), w.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load webhook agents")
+	}
+	agentIDs := make([]string, 0, len(agentAssignments))
+	for _, assignment := range agentAssignments {
+		agentIDs = append(agentIDs, assignment.AgentDefinitionID)
+	}
+
+	return c.JSON(http.StatusOK, webhookDetailResponse{
+		ID:                 w.ID,
+		ProjectID:          w.ProjectID,
+		Name:               w.Name,
+		Enabled:            w.Enabled,
+		PathToken:          w.PathToken,
+		Secret:             w.Secret,
+		SystemInstructions: w.SystemInstructions,
+		TitleTemplate:      w.TitleTemplate,
+		PromptTemplate:     w.PromptTemplate,
+		DefaultPriority:    w.DefaultPriority,
+		AgentIDs:           agentIDs,
+	})
+}
+
 func (h *Handler) HandleWebhookCreate(c echo.Context) error {
 	if h.webhookRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "webhook repository not configured")

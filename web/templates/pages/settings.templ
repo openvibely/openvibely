@@ -578,10 +578,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						data-webhook-name={ wh.Name }
 						data-webhook-enabled={ fmt.Sprintf("%t", wh.Enabled) }
 						data-webhook-token={ wh.PathToken }
-						data-webhook-secret={ wh.Secret }
-						data-webhook-system={ wh.SystemInstructions }
 						data-webhook-default-priority={ fmt.Sprintf("%d", wh.DefaultPriority) }
-						data-webhook-agent-ids={ selectedWebhookAgentIDs(webhooks, webhookAgents, wh.ID) }
 					onclick={ templ.ComponentScript{Call: fmt.Sprintf("openWebhookEditModal('%s')", wh.ID)} }
 				>
 				<div class="card-body relative">
@@ -1164,7 +1161,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				<div class="px-6 pt-6 pb-2 pr-14">
 					<h3 id="webhook_modal_title" class="font-bold text-lg">Add Webhook</h3>
 				</div>
-				<form id="webhook_form" hx-post={ "/channels/webhooks?project_id=" + currentProjectID } hx-swap="none" data-project-id={ currentProjectID } class="flex flex-col h-[78vh]">
+				<form id="webhook_form" hx-post={ "/channels/webhooks?project_id=" + currentProjectID } hx-swap="none" data-project-id={ currentProjectID } data-webhook-mode="create" data-webhook-detail-ready="true" onsubmit="return submitWebhookForm(event)" class="flex flex-col h-[78vh]">
 					<input type="hidden" name="project_id" value={ currentProjectID }/>
 					<div class="px-6 pb-3 border-b border-base-300">
 						<div role="tablist" class="tabs tabs-bordered tabs-sm w-full overflow-x-auto flex-nowrap">
@@ -1217,6 +1214,14 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 									<option value="4">Urgent</option>
 								</select>
 							</div>
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Title Template</span></label>
+								<input type="text" id="webhook_title_template" name="title_template" class="input input-bordered w-full" placeholder="Optional task title template"/>
+							</div>
+							<div class="form-control mb-3">
+								<label class="label"><span class="label-text">Prompt Template</span></label>
+								<textarea id="webhook_prompt_template" name="prompt_template" class="textarea textarea-bordered w-full h-24" placeholder="Optional task prompt template"></textarea>
+							</div>
 						</div>
 
 						<div data-webhook-section-panel="agents" class="h-full overflow-y-auto pr-1 hidden">
@@ -1246,7 +1251,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						<form method="dialog" class="inline">
 							<button type="button" class="btn" onclick="closeWebhookModal()">Cancel</button>
 						</form>
-						<button type="submit" class="btn btn-primary" onclick="serializeWebhookAgentData()">Save Webhook</button>
+						<button type="submit" id="webhook_submit_button" class="btn btn-primary">Save Webhook</button>
 					</div>
 				</form>
 			</div>
@@ -1311,8 +1316,29 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					var webhookAvailableAgents = [];
 					var selectedWebhookAgentIDs = [];
 					var activeWebhookSection = 'config';
-			function setWebhookSection(sectionName) {
-				const sectionNameMap = {
+					var webhookEditRequestGeneration = 0;
+
+				function setWebhookSubmitState(enabled, label) {
+					var button = document.getElementById('webhook_submit_button');
+					if (!button) return;
+					button.disabled = !enabled;
+					button.classList.toggle('btn-disabled', !enabled);
+					button.textContent = label || 'Save Webhook';
+				}
+
+				function submitWebhookForm(event) {
+					var form = document.getElementById('webhook_form');
+					if (form && form.dataset.webhookMode === 'edit' && form.dataset.webhookDetailReady !== 'true') {
+						if (event) event.preventDefault();
+						if (window.showToast) window.showToast('Webhook details are still loading', 'failed');
+						return false;
+					}
+					serializeWebhookAgentData();
+					return true;
+				}
+
+				function setWebhookSection(sectionName) {
+					const sectionNameMap = {
 					config: 'config',
 					agents: 'agents'
 				};
@@ -1506,9 +1532,14 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					var pid = form.getAttribute('data-project-id') || '';
 					form.setAttribute('hx-post', '/channels/webhooks?project_id=' + encodeURIComponent(pid));
 					form.removeAttribute('hx-put');
+					form.dataset.webhookMode = 'create';
+					form.dataset.webhookDetailReady = 'true';
+					setWebhookSubmitState(true, 'Save Webhook');
 					document.getElementById('webhook_name').value = '';
 					document.getElementById('webhook_enabled').checked = true;
 					document.getElementById('webhook_system_instructions').value = '';
+					document.getElementById('webhook_title_template').value = '';
+					document.getElementById('webhook_prompt_template').value = '';
 					document.getElementById('webhook_default_priority').value = '2';
 					document.getElementById('webhook_url_display').textContent = '(Save first to generate URL)';
 					document.getElementById('webhook_secret_display').value = '';
@@ -1531,38 +1562,69 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				function openWebhookEditModal(id) {
 					var modal = document.getElementById('webhook_modal');
 					if (!modal) return;
+					closeAllDropdownMenus();
 					document.getElementById('webhook_modal_title').textContent = 'Edit Webhook';
 					var form = document.getElementById('webhook_form');
 					var pid = form.getAttribute('data-project-id') || '';
 					form.removeAttribute('hx-post');
 					form.setAttribute('hx-put', '/channels/webhooks/' + id + '?project_id=' + encodeURIComponent(pid));
+					form.dataset.webhookMode = 'edit';
+					form.dataset.webhookDetailReady = 'false';
+					setWebhookSubmitState(false, 'Loading Webhook…');
+
 					var card = document.querySelector('[data-webhook-id="' + id + '"]');
-					if (card) {
-						document.getElementById('webhook_name').value = card.getAttribute('data-webhook-name') || '';
-						document.getElementById('webhook_enabled').checked = (card.getAttribute('data-webhook-enabled') || '') === 'true';
-						document.getElementById('webhook_system_instructions').value = card.getAttribute('data-webhook-system') || '';
-						document.getElementById('webhook_default_priority').value = card.getAttribute('data-webhook-default-priority') || '2';
-						document.getElementById('webhook_secret_display').value = card.getAttribute('data-webhook-secret') || '';
-						resetSecretInputVisibility('webhook_secret_display');
-						var token = card.getAttribute('data-webhook-token') || '';
-						document.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Not available)';
-						
-						// Load selected agents from card data
-						var agentIDsCSV = card.getAttribute('data-webhook-agent-ids') || '';
-						selectedWebhookAgentIDs = agentIDsCSV.split(',').map(id => id.trim()).filter(id => id !== '');
-					}
+					document.getElementById('webhook_name').value = card ? (card.getAttribute('data-webhook-name') || '') : '';
+					document.getElementById('webhook_enabled').checked = card ? ((card.getAttribute('data-webhook-enabled') || '') === 'true') : true;
+					document.getElementById('webhook_system_instructions').value = '';
+					document.getElementById('webhook_title_template').value = '';
+					document.getElementById('webhook_prompt_template').value = '';
+					document.getElementById('webhook_default_priority').value = card ? (card.getAttribute('data-webhook-default-priority') || '2') : '2';
+					document.getElementById('webhook_secret_display').value = '';
+					resetSecretInputVisibility('webhook_secret_display');
+					var token = card ? (card.getAttribute('data-webhook-token') || '') : '';
+					document.getElementById('webhook_url_display').textContent = token ? (window.location.origin + '/webhooks/inbound/' + token) : '(Loading...)';
+					selectedWebhookAgentIDs = [];
+
 					var secretRow = document.getElementById('webhook_secret_row');
 					if (secretRow) secretRow.style.display = '';
 					var urlRow = document.getElementById('webhook_url_row');
 					if (urlRow) urlRow.style.display = '';
-					
-					// Initialize webhook agents and render
+
 					initializeWebhookAgents();
 					renderWebhookAgentList();
 					setWebhookSection('config');
-					
 					htmx.process(form);
 					modal.showModal();
+
+					var requestGeneration = ++webhookEditRequestGeneration;
+					fetch('/channels/webhooks/' + encodeURIComponent(id) + '?project_id=' + encodeURIComponent(pid), {
+						headers: { 'Accept': 'application/json' }
+					}).then(function(response) {
+						if (!response.ok) throw new Error('Failed to load webhook');
+						return response.json();
+					}).then(function(detail) {
+						if (requestGeneration !== webhookEditRequestGeneration || !detail || detail.id !== id) return;
+						form.dataset.webhookDetailReady = 'true';
+						setWebhookSubmitState(true, 'Save Webhook');
+						document.getElementById('webhook_name').value = detail.name || '';
+						document.getElementById('webhook_enabled').checked = !!detail.enabled;
+						document.getElementById('webhook_system_instructions').value = detail.system_instructions || '';
+						document.getElementById('webhook_title_template').value = detail.title_template || '';
+						document.getElementById('webhook_prompt_template').value = detail.prompt_template || '';
+						document.getElementById('webhook_default_priority').value = String(detail.default_priority || 2);
+						document.getElementById('webhook_secret_display').value = detail.secret || '';
+						resetSecretInputVisibility('webhook_secret_display');
+						var detailToken = detail.path_token || '';
+						document.getElementById('webhook_url_display').textContent = detailToken ? (window.location.origin + '/webhooks/inbound/' + detailToken) : '(Not available)';
+						selectedWebhookAgentIDs = Array.isArray(detail.agent_ids) ? detail.agent_ids.slice() : [];
+						renderWebhookAgentList();
+					}).catch(function() {
+						if (requestGeneration !== webhookEditRequestGeneration) return;
+						form.dataset.webhookDetailReady = 'false';
+						setWebhookSubmitState(false, 'Load failed');
+						document.getElementById('webhook_url_display').textContent = '(Failed to load)';
+						if (window.showToast) window.showToast('Failed to load webhook details', 'failed');
+					});
 				}
 
 				function writeToClipboardWithFeedback(text, button, successMessage, failureMessage) {
@@ -1657,6 +1719,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				}
 
 				function closeWebhookModal() {
+					webhookEditRequestGeneration++;
 					var modal = document.getElementById('webhook_modal');
 					if (modal) modal.close();
 				}
@@ -2055,8 +2118,10 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				document.body.addEventListener('htmx:configRequest', function(event) {
 					if (!event || !event.detail || !event.detail.path) return;
 					if (event.detail.path.indexOf('/channels/webhooks') !== 0) return;
+					var modal = document.getElementById('webhook_modal');
+					if (!modal || !modal.open) return;
 					var params = event.detail.parameters || {};
-					params.agent_ids = selectedWebhookAgentIDsCSV('webhook_agent_ids');
+					params.agent_ids = selectedWebhookAgentIDs.join(',');
 					event.detail.parameters = params;
 				});
 

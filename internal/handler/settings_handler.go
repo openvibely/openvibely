@@ -274,7 +274,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	// Load webhooks for current project
 	var webhooks []models.WebhookEndpoint
 	if resolvedProjectID != "" && h.webhookRepo != nil {
-		webhooks, _ = h.webhookRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		webhooks, _ = h.webhookRepo.ListCardsByProject(c.Request().Context(), resolvedProjectID)
 	}
 
 	// Load agents for webhook agent selection
@@ -284,15 +284,6 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	}
 
 	webhookAgents := map[string][]models.WebhookEndpointAgent{}
-	if h.webhookRepo != nil {
-		for _, wh := range webhooks {
-			list, err := h.webhookRepo.GetEndpointAgents(c.Request().Context(), wh.ID)
-			if err != nil {
-				continue
-			}
-			webhookAgents[wh.ID] = list
-		}
-	}
 
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.SettingsContent(token, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, resolvedProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubAPIEndpoint, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets))

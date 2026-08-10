@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -344,6 +345,58 @@ func TestWebhookInbound_TaskAgentAssignmentsPersisted(t *testing.T) {
 	}
 	if assignments[1].AgentDefinitionID != agent2.ID {
 		t.Errorf("second assignment = %q, want %q", assignments[1].AgentDefinitionID, agent2.ID)
+	}
+}
+
+func TestWebhookDetail_ReturnsFullEditPayloadAndSelectedAgents(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Detail").Build()
+	otherProject := wtc.CreateProject().WithName("WH Detail Other").Build()
+	agent1 := wtc.createAgent(t, "Agent One")
+	agent2 := wtc.createAgent(t, "Agent Two")
+
+	endpoint := &models.WebhookEndpoint{
+		ProjectID:          project.ID,
+		Name:               "Detailed Hook",
+		Enabled:            true,
+		SystemInstructions: "Full system instructions",
+		TitleTemplate:      "Incident: {{summary}}",
+		PromptTemplate:     "Payload: {{payload}}",
+		DefaultPriority:    4,
+	}
+	if err := wtc.webhookRepo.Create(context.Background(), endpoint); err != nil {
+		t.Fatalf("create webhook endpoint: %v", err)
+	}
+	if err := wtc.webhookRepo.SetEndpointAgents(context.Background(), endpoint.ID, []string{agent2.ID, agent1.ID}); err != nil {
+		t.Fatalf("set endpoint agents: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/channels/webhooks/"+endpoint.ID+"?project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("detail: expected 200, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	var detail webhookDetailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail response: %v", err)
+	}
+	if detail.ID != endpoint.ID || detail.ProjectID != project.ID || detail.Name != endpoint.Name || !detail.Enabled {
+		t.Fatalf("detail returned wrong identity fields: %#v", detail)
+	}
+	if detail.Secret != endpoint.Secret || detail.SystemInstructions != endpoint.SystemInstructions || detail.TitleTemplate != endpoint.TitleTemplate || detail.PromptTemplate != endpoint.PromptTemplate || detail.DefaultPriority != endpoint.DefaultPriority {
+		t.Fatalf("detail missing full edit payload: %#v", detail)
+	}
+	if len(detail.AgentIDs) != 2 || detail.AgentIDs[0] != agent2.ID || detail.AgentIDs[1] != agent1.ID {
+		t.Fatalf("detail agent IDs = %#v, want selected agents in position order", detail.AgentIDs)
+	}
+
+	crossProjectReq := httptest.NewRequest("GET", "/channels/webhooks/"+endpoint.ID+"?project_id="+otherProject.ID, nil)
+	crossProjectRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(crossProjectRec, crossProjectReq)
+	if crossProjectRec.Code != http.StatusNotFound {
+		t.Fatalf("cross-project detail: expected 404, got %d; body=%s", crossProjectRec.Code, crossProjectRec.Body.String())
 	}
 }
 
@@ -818,11 +871,11 @@ func TestChannelsUI_WebhookCardsRender(t *testing.T) {
 		t.Error("did not expect legacy active webhook status row text")
 	}
 
-	if strings.Contains(body, "Title Template") {
-		t.Error("did not expect webhook title template field in webhook modal")
+	if !strings.Contains(body, `id="webhook_title_template"`) {
+		t.Error("expected webhook title template field in webhook modal")
 	}
-	if strings.Contains(body, "Prompt Template") {
-		t.Error("did not expect webhook prompt template field in webhook modal")
+	if !strings.Contains(body, `id="webhook_prompt_template"`) {
+		t.Error("expected webhook prompt template field in webhook modal")
 	}
 	if strings.Contains(body, "Agents (comma-separated IDs)") {
 		t.Error("did not expect legacy webhook comma-separated agents input")

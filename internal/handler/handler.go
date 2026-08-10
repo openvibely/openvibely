@@ -816,6 +816,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Webhooks
 	e.POST("/channels/webhooks", h.HandleWebhookCreate)
+	e.GET("/channels/webhooks/:id", h.HandleWebhookDetail)
 	e.PUT("/channels/webhooks/:id", h.HandleWebhookUpdate)
 	e.DELETE("/channels/webhooks/:id", h.HandleWebhookDelete)
 	e.POST("/channels/webhooks/:id/rotate-secret", h.HandleWebhookRotateSecret)

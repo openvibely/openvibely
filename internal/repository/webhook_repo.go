@@ -47,6 +47,7 @@ func scanWebhookEndpoint(row interface{ Scan(dest ...any) error }) (*models.Webh
 }
 
 const webhookColumns = `id, project_id, name, enabled, path_token, secret, system_instructions, title_template, prompt_template, default_priority, created_at, updated_at`
+const webhookCardColumns = `id, project_id, name, enabled, path_token, default_priority, created_at, updated_at`
 
 func (r *WebhookRepo) Create(ctx context.Context, w *models.WebhookEndpoint) error {
 	if w.PathToken == "" {
@@ -92,6 +93,18 @@ func (r *WebhookRepo) GetByID(ctx context.Context, id string) (*models.WebhookEn
 	return w, nil
 }
 
+func (r *WebhookRepo) GetByIDForProject(ctx context.Context, id, projectID string) (*models.WebhookEndpoint, error) {
+	w, err := scanWebhookEndpoint(r.db.QueryRowContext(ctx,
+		`SELECT `+webhookColumns+` FROM webhook_endpoints WHERE id = ? AND project_id = ?`, id, projectID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting webhook endpoint for project: %w", err)
+	}
+	return w, nil
+}
+
 func (r *WebhookRepo) GetByPathToken(ctx context.Context, pathToken string) (*models.WebhookEndpoint, error) {
 	w, err := scanWebhookEndpoint(r.db.QueryRowContext(ctx,
 		`SELECT `+webhookColumns+` FROM webhook_endpoints WHERE path_token = ?`, pathToken))
@@ -119,6 +132,27 @@ func (r *WebhookRepo) ListByProject(ctx context.Context, projectID string) ([]mo
 			return nil, fmt.Errorf("scanning webhook endpoint: %w", err)
 		}
 		endpoints = append(endpoints, *w)
+	}
+	return endpoints, rows.Err()
+}
+
+func (r *WebhookRepo) ListCardsByProject(ctx context.Context, projectID string) ([]models.WebhookEndpoint, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+webhookCardColumns+` FROM webhook_endpoints WHERE project_id = ? ORDER BY name ASC, id ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing webhook endpoint cards: %w", err)
+	}
+	defer rows.Close()
+
+	var endpoints []models.WebhookEndpoint
+	for rows.Next() {
+		var w models.WebhookEndpoint
+		var enabled int
+		if err := rows.Scan(&w.ID, &w.ProjectID, &w.Name, &enabled, &w.PathToken, &w.DefaultPriority, &w.CreatedAt, &w.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scanning webhook endpoint card: %w", err)
+		}
+		w.Enabled = enabled != 0
+		endpoints = append(endpoints, w)
 	}
 	return endpoints, rows.Err()
 }
