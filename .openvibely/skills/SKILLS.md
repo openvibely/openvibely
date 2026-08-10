@@ -159,7 +159,7 @@ always_use:
 
 ## openvibely_github_pr_publication_workflow
 
-[OpenVibely GitHub PR Publication Workflow](openvibely_github_pr_publication_workflow/SKILL.md) — Implement and investigate idempotent API-backed task branch publication, PR reuse, and guarded history cleanup.
+[OpenVibely GitHub PR Publication Workflow](openvibely_github_pr_publication_workflow/SKILL.md) — Implement, investigate, and audit live GitHub PR branch publication, PR reuse, and guarded history cleanup.
 ## openvibely_managed_memory_maintenance
 
 [OpenVibely Managed Memory Maintenance](openvibely_managed_memory_maintenance/SKILL.md) — Apply narrow, idempotent corrections to authoritative OpenVibely managed-memory topics and verify the saved result.
@@ -200,7 +200,7 @@ always_use:
 
 ## openvibely_lifecycle_managed_artifact_boundary
 
-[OpenVibely Lifecycle-Managed Artifact Boundary](openvibely_lifecycle_managed_artifact_boundary/SKILL.md) — Keep ordinary implementation and audit turns from editing lifecycle-managed skills or memories.
+[OpenVibely Lifecycle-Managed Artifact Boundary](openvibely_lifecycle_managed_artifact_boundary/SKILL.md) — Keep ordinary implementation and audit turns from editing lifecycle-managed skills or memories, and enforce explicit audit scope exclusions.
 
 ## openvibely_task_category_transition_workflow
 

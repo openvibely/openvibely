@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-06
+updated: 2026-08-10
 source: consolidation
-source_id: memory_consolidation_2026_08_03
+source_id: memory_consolidation_2026_08_10
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -51,6 +51,9 @@ Scheduling recurrence:
 - Schedule repeat intervals have a canonical bounded-positive contract of `1..365` for every recurrence unit. The invariant is enforced across browser create/update handlers, repositories, Automation persistence/compilation, web runtime tools, and channel construction paths. `Schedule.ComputeNextRun` rejects invalid, overflowed, legacy, or corrupt persisted intervals, and scheduler processing skips malformed schedules so they cannot block later valid work.
 - Open bug `#116`: direct schedule create/update handlers discard `strconv.Atoi` failures and coerce malformed or overflowing repeat intervals to `1`, silently changing the requested cadence; unsupported recurrence types reach SQLite's `CHECK` constraint and surface as internal repository errors instead of controlled HTTP 400 responses. Regression coverage should prove both endpoints reject malformed, overflowing, and unsupported recurrence values without persisting a schedule.
 - Scheduled `CreateTask` calls the shared `parseScheduleForm` once before task persistence, immediately returns repeat-interval HTTP errors, caches successful normalization for later schedule creation, and still allows invalid dates to produce a task without a schedule. Direct create/update default missing repeat type to `once`; scheduled-task creation defaults it to `daily`.
+- Resolved issue `#388` / PR `#397`: new schedule creation is normalized through `ScheduleActionService.CreateForTask` for direct browser `CreateSchedule`, scheduled-task creation in `CreateTask`, and runtime/channel `schedule_task`. The shared creation path applies `Enabled=true`, repeat-interval defaulting/validation, `ClearContextOnStart` defaulting, and `models.Schedule` construction/persistence while keeping form/tool-specific parsing, rendering, redirects/responses, project scoping, primary-agent assignment, and runtime `schedule_task` task category/status transitions at their existing boundaries.
+- Resolved issue `#390`: creating a one-time schedule for a completed/failed task through browser `CreateSchedule` or runtime/channel `schedule_task` makes the task eligible to run when due instead of saving a schedule the scheduler will skip. The contract resets terminal, non-running statuses to pending at creation time for one-time schedules only; `running` tasks are left untouched, recurring already-scheduled completed/failed tasks preserve their status until scheduler-time reset, and existing update behavior still resets completed/failed tasks after schedule edits. Regression coverage should include browser one-time creation, runtime one-time completed recovery, running preservation, recurring completed/failed preservation, cancellation-marker behavior, and scheduler submission of a due one-time schedule created through the runtime path.
+- Initial `NextRun` for newly created schedules follows the repository lower-level rule `NextRun = RunAt`, including recurring schedules whose `run_at` is already in the past, so the scheduler catches up on the next tick instead of skipping the current occurrence.
 - `CreateSchedule` and `UpdateSchedule` delegate native non-HTMX schedules-tab redirects to one private `redirectToTaskSchedules` helper. It preserves explicit or inferred `project_id` and returns HTTP 303 to `/tasks/{id}?tab=schedules&project_id=...`; HTMX task-detail fragments and `ToggleScheduleEnabled`'s distinct `/tasks/{id}` redirect remain unchanged. Parity coverage exercises create/update with explicit and omitted project scope.
 
 OAuth and hosted deployment facts:

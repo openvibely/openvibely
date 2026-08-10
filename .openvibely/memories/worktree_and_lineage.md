@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-08-08
-source: task
-source_id: fa9b72b6c6b20ecdf64b85b02fa08afe:5f78852317a4a4c3
+updated: 2026-08-10
+source: consolidation
+source_id: memory_consolidation_2026_08_10
 confidence: high
 title: Worktree and Lineage
 ---
@@ -23,7 +23,8 @@ Durable worktree model:
 - Startup sync treats the selected local branch as the source of truth by default; merely having `origin/<branch>` must not cause a fetch, merge, or rebase from that remote-tracking branch. Remote startup sync should only exist behind an explicit user/admin opt-in policy.
 - In repos with local `master` and no local `main`, startup sync should use local `master` when default-branch detection resolves to it. Current caveat: if `origin/HEAD` points to `main` while only local `master` exists, branch-name detection may choose absent `main` and worktree creation/startup merge can fail.
 - Worktree setup fails closed: a repository with a local commit needs no Git remote, but an unborn repository has no commit/tree for `git worktree add`, so task execution and follow-ups must provide initial-commit guidance and never dispatch the coding model in the main checkout. Existing task worktrees or branches remain recoverable if their original base ref was renamed/deleted; operational `rev-parse` failures preserve their real error. Channel-origin and review-submission setup failures promote the next queued follow-up instead of parking it.
-- Task Changes has one explicit review semantic for managed active worktrees: the net reviewable output from the task's merge target to the current worktree state, not only pending changes since worktree `HEAD`. Full Changes, file summaries, lazy file cards, live fragments, periodic streaming snapshots, and follow-up completion persistence must all use this same base.
+- Task Changes has one explicit review semantic for managed active worktrees: the net reviewable output from the task's merge target to the current worktree state, not only pending changes since worktree `HEAD`. Full Changes, file summaries, lazy file cards, live fragments, periodic streaming snapshots, follow-up completion persistence, and the worktree-specific `/tasks/:taskId/changes/worktree` fragment must all use the same handler-level state resolution for live worktree versus preserved execution diff fallback.
+- `#378` consolidation direction: full Changes, lazy file, live refresh, and worktree fragment diff selection should route through a shared handler resolver. Endpoint-equivalence coverage should cover active live worktrees, missing-worktree fallback, and merged-task preserved-diff/action-state equivalence between `/tasks/:taskId/changes` and `/tasks/:taskId/changes/worktree`. Publication state is separate from the local diff-resolution contract and must be verified through authorized GitHub paths when task completion depends on it.
 - Active managed-worktree diffs run `git diff <target>` inside the worktree so committed, staged, and unstaged tracked changes collapse into one per-path result; file summaries derive from `git diff --name-status <target>`. Untracked files are appended from `git ls-files --others --exclude-standard` because Git cannot include them in the target comparison. Do not concatenate committed branch diff blocks with `git diff HEAD`.
 - Open security bug [GitHub #30](https://github.com/openvibely/openvibely/issues/30): untracked-file diff synthesis follows paths returned by Git with `os.Stat`/`os.ReadFile`, so an untracked symlink can expose target contents outside the repository in Task Changes. Diff capture must inspect paths without following symlinks, skip symlinks, and enforce resolved-worktree containment before reading.
 - `git diff HEAD` and stored execution diffs are restricted to non-worktree execution views or fallback when no live managed worktree exists. Managed-worktree live fragment routes resolve content server-side and do not trust a client-supplied diff that could bypass the selected base.
@@ -67,7 +68,7 @@ Merge and metadata direction:
 - Changes-tab and local merge handlers revalidate stale `merge_status` and recover conventional worktree metadata before hiding or rejecting merge actions.
 - A conflict-resolution commit made directly in a task worktree does not itself clear the task's persisted `MergeStatusConflict`; while that status remains, the Changes UI hides local merge actions. The task must be resumed/rerun in its owning project or otherwise pass through explicit merge-status reconciliation before the option reappears. Task controls are project-scoped, so an agent running under another project cannot perform that rerun.
 - Local worktree commits are not automatically remote publication: verify the configured remote and compare its task-branch tip before claiming a fix is available outside the local app/worktree.
-- Live GitHub PR state and head are authoritative. A successful local commit, branch replacement, or local task-record response does not prove the linked PR is open or points at the complete implementation. Automation authorization failures must remain explicit publication blockers and must not be bypassed; the recorded stale-PR reuse incident is canonical in `integrations_and_channels.md`.
+- Live GitHub PR state and head are authoritative. A successful local commit, branch replacement, or local task-record response does not prove the linked PR is open or points at the complete implementation. For task PR publication, durable evidence is the recorded `task_pull_requests.published_head_sha` from a successful publish matched against live GitHub PR `head.sha`; stale open PRs on the same branch are not current publication proof. Automation authorization failures must remain explicit publication blockers and must not be bypassed; the recorded stale-PR reuse incident and fix are canonical in `integrations_and_channels.md`.
 - A task branch is already merged only when the task branch is fully reachable from the target.
 - Direct task-detail renders with `?tab=changes` hit the same Changes-tab recovery path as lazy tab loads.
 - Direct `/tasks/:id/changes/file` lazy-file requests recover stale conventional worktree metadata before resolving diff output, matching the full Changes-tab path.

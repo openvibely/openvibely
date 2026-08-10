@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-08
+updated: 2026-08-10
 source: update_memory
-source_id: d355b4fa61e0fa0e898ab312befa7bc2:b2ba73549092739d
+source_id: bc683d35728f3c6cf834e99bb84fb839:bbe64855f04606b4
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -64,9 +64,12 @@ HTMX navigation, refresh, and scroll contracts:
 - HTMX history cache-miss requests are treated as full-document requests with the application history element and authoritative title; ordinary HTMX requests remain fragments.
 - Reconnect/refocus should be revision-gated: identical revisions cancel swaps before scroll/draft capture, EventSource cleanup, or DOM mutation. Active per-execution stream catch-up should not be disrupted by broad transcript replacement.
 - Completed execution pairs should use stable IDs/HTMX preservation so changed authoritative transcript morphs can retain unchanged completed bubble DOM and expanded tool-output state.
+- Known review navigation gaps: `openvibely/openvibely#365` notes that dedicated execution detail pages exist but Task Thread and Reflection review surfaces do not expose visible links to them, so users cannot easily inspect per-run metadata from normal review flows; `#380` proposes making execution-detail pages clearer audit/review landing pages, especially when users arrive from history or Automation resource links.
 - Forced task-thread fragment refreshes must close tracked per-exec EventSources before replacement, but revision no-op checks must run before cleanup.
 - Older-history pagination captures scroll intent revision and rechecks after hydration. Stale anchor restoration is cancelled if a send or newer user scroll changed intent.
 - Known duplication gaps: task-thread scroll-state helpers (`#38`), terminal UI/composer reconciliation (`#55`), live-event queued row construction (`#59`), task-thread post-swap hydration (`#65`), and schedule repeat-interval controllers (`#47`).
+- Task detail HTMX refresh assembly is centralized as of PR `#403`: `GetTask` fragments, task edit saves, chain-config saves, and schedule create/update/toggle refreshes share one task-detail content loader/renderer with canonical chronological execution ordering; full-page `GetTask` still wraps `TaskDetailPage` and route-specific selected tabs are preserved.
+- Task-board mutation/sort HTMX refresh assembly is centralized in a private handler helper as of PR `#399`: preserve route-specific validation, mutations, logging, non-HTMX redirects, and `CancelTask?composer_stop=1`, while reusing shared sort-cookie handling, board reload, model-config loading, kanban rendering, and reload-error handling for board refreshes.
 
 Responsive and shared UI contracts:
 - Chat/thread/message panes, bubbles, composers, and tool/code output must not create whole-page horizontal scrolling on mobile. Use `min-w-0`, `max-w-full`, wrapping, and inner overflow boundaries.
@@ -80,6 +83,7 @@ Responsive and shared UI contracts:
 - Task Changes/diff surfaces must stay viewport-contained on 320px-class screens; long filenames, branch labels, and Changes dropdowns are recurring containment risks. Changes Actions dropdowns need high stacking context above sticky diff headers.
 - Tasks page uses server-rendered kanban components. Responsive contract: one column on phones, two around tablets, three on desktop, no phantom fourth column, mobile-safe wrapping, independent mobile dropzone scrolling, compact desktop density, and `+ Add Task` colocated with the title.
 - Known board review-state gap `openvibely/openvibely#227`: task cards do not surface worktree/merge state, so reviewers must open Task Detail to triage review state.
+- Known task-card PR visibility gap `openvibely/openvibely#374`: task cards do not surface linked pull request URL/status even though Task Changes can render an existing `TaskPullRequest` as a `View PR` action, so users scanning the board cannot tell which tasks already have external review artifacts without opening each task.
 - Active kanban queued/pending dropzones render only real active pending/queued/blocked work; terminal failed/cancelled rows must not appear as queued work.
 - Tasks page date sorting defaults newest-first: Backlog by creation time, Completed by `completed_at` with `updated_at` fallback. Board/drag category edits update `completed_at` through `TaskService.UpdateCategory`; Task Detail edit-form saves are metadata-only and must not activate completed tasks or rerun stored prompts.
 - Responsive card pages such as Models, Agents, Alerts, Channels, and Personality must keep roots/grids/cards/badges shrink-safe. Long badge values truncate within rows.
@@ -94,11 +98,15 @@ Responsive and shared UI contracts:
 
 Models, Channels, and card-search UI:
 - Models initial render uses compact `agent_configs` card projections excluding secrets/tokens/client secrets/request JSON/custom auth/full mixture JSON. Edit fetches one authorized full record; modal hydration uses request-generation and returned-ID guards.
+- Personality settings initial render uses compact custom-personality card projections and bounded prompt previews; list card/search attributes must not contain full custom prompt bodies. Opening Edit lazy-loads one full custom personality or preset/override detail through the JSON detail endpoint, with request-generation/stale-response guards while preserving card search and HTMX section refresh behavior.
+- Lazy edit modals for compact cards must not allow Save to submit placeholder or blank edit-only fields before detail hydration succeeds. Use loading/disabled/error states with stale-response guards so failed or slow detail fetches cannot overwrite persisted secrets, prompts, templates, instructions, or assignments with defaults.
 - Reused secret modals must reset unsaved edits and revealed secrets before reopening across Models, GitHub, Slack, Telegram, Discord, Email, and inbound webhooks.
 - Project-scoped settings pages preserve active project through `project_id`; Models create/edit, set-default, delete, delete-with-reassign, and OAuth paths derive URLs from the live project selector before fallback to URL query. OAuth pending state persists ProjectID.
 - Models create/edit reuses one modal over `agent_configs`; edit must carry `model_config_id` and update in place rather than inserting duplicates.
 - Card search pages use the shared `data-card-search` helper. Direct fragment replacement paths, including Skills and Agents mutations, must call `window.refreshCardSearches` after swapping card containers.
+- Skills card refreshes keep server-rendered `#skills-container` fragments authoritative while preserving the user's reading position with stable `data-skill-scroll-anchor` cards. Delete-triggered swaps prioritize surviving neighbors of the deleted card, reapply card search before measuring anchors, and avoid HTMX/browser focus scroll jumps from the shared DaisyUI dialog path.
 - Channels create/update/delete/rotate-secret success paths refresh `#channels-container` in place so search filters reapply. Because the Channels inline script may re-execute, top-level webhook modal state must remain redeclarable `var` state.
+- Inbound webhook Settings compact cards keep sensitive/detail-only fields, prompt/templates, secrets, and agent assignments out of card attributes; edit modals lazy-load one authorized full webhook detail and must disable Save until detail hydration succeeds. Webhook HTMX request hooks must not assume non-existent selector helpers or elements; only the open webhook modal form should attach `agent_ids` from current modal state, so create/edit/delete/test/rotate-secret card actions remain independent.
 - Independent HTMX child controls inside Channels modals should return modal-scoped fragments and should not emit broad `channels-refresh` unless a safe sibling/card refresh path exists.
 
 Automation YAML editor current contracts:

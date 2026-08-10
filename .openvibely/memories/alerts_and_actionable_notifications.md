@@ -2,9 +2,9 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-08-09
+updated: 2026-08-10
 source: after_complete
-source_id: a990ccd47db94c6c46e420a05742f403:c0cfa65dced71d96
+source_id: a2f6891a47487b48a94d33e7e1dd4789:3ecce3efc2317584
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -33,6 +33,7 @@ Authorization, concurrency, and runtime facts:
 - Open gap `#352`: `complete_alert_processing` can currently mark an approved notification completed from a merely claimed state without requiring a linked implementation task, making the notification look done even though no implementation task exists; fix should enforce linked-task/valid processing-state preconditions and add regression coverage for unlinked completion attempts.
 - Slack, Telegram, and Discord first-turn channel runtimes are constructed only after the channel Chat task is persisted, so channel lifecycle handlers receive trusted caller identity. Email uses the generic executor with its persisted Chat task.
 - All alert lifecycle mutations publish the existing project-scoped alert invalidation event, including claim, release, explicit linkage, atomic task creation, completion, failure, read, and delete operations.
+- As of PR `#405` for issue `#372`, alert approval, claim, release, implementation-link, implementation-task creation, processing, idempotent creation, and Automation rebind mutations use shared immediate-transaction scaffolding in the alert repository. Mutation-specific SQL, validation, projection helper calls, and error messages remain local to each method. Automation invalidations for decision, claim, release, implementation-link, implementation-task creation, and processing completion are published only after a successful commit and connection release. `CreateImplementationTask` remains idempotent for existing linked tasks and publishes the same resource-linked invalidation for existing and newly-created links.
 - Custom Automation graphs reuse the canonical Alert approval lifecycle, but Automation-specific topology, provenance, mailbox ownership, edit compatibility, and fail-closed authorization contracts are canonical in `automation_graphs.md`.
 
 Product surfaces:
