@@ -11,56 +11,19 @@ import (
 
 func TestSettingsContent_RendersSlackMenuCardAndModal(t *testing.T) {
 	var buf bytes.Buffer
-	err := SettingsContent(
-		"",
-		false,
-		nil,
-		nil,
-		nil,
-		"default",
-		true,
-		true,
-		service.GitHubConnectionStatus{},
-		service.GitHubAuthModePAT,
-		"",
-		"",
-		"",
-		"",
-		"",
-		false,
-		false,
-		service.SlackConnectionStatus{Configured: true, Connected: true, TeamName: "OpenVibely"},
-		"cid",
-		"secret",
-		"xapp-123",
-		"xoxb-123",
-		service.SlackBotTokenSourceManual,
-		true,
-		true,
-		true,
-		true,
-		true,
-		service.DiscordConnectionStatus{},
-		"",
-		true,
-		service.EmailConnectionStatus{},
-		nil,
-		"",
-		true,
-		true,
-		false,
-		"60",
-		false,
-		false,
-		true,
-		false,
-		false,
-		nil,
-		nil,
-		nil,
-		nil,
-		false,
-	).Render(context.Background(), &buf)
+	view := defaultChannelsSettingsView("default")
+	view.SlackStatus = service.SlackConnectionStatus{Configured: true, Connected: true, TeamName: "OpenVibely"}
+	view.SlackClientID = "cid"
+	view.SlackClientSecret = "secret"
+	view.SlackAppToken = "xapp-123"
+	view.SlackBotToken = "xoxb-123"
+	view.SlackBotTokenMode = service.SlackBotTokenSourceManual
+	view.SlackHasClientID = true
+	view.SlackHasClientSecret = true
+	view.SlackHasAppToken = true
+	view.SlackHasBotToken = true
+	view.HasSlackChannel = true
+	err := SettingsContent(view).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -142,56 +105,10 @@ func renderDiscordSettingsContent(t *testing.T, status service.DiscordConnection
 	t.Helper()
 
 	var buf bytes.Buffer
-	err := SettingsContent(
-		"",
-		false,
-		nil,
-		nil,
-		nil,
-		"default",
-		true,
-		true,
-		service.GitHubConnectionStatus{},
-		service.GitHubAuthModePAT,
-		"",
-		"",
-		"",
-		"",
-		"",
-		false,
-		false,
-		service.SlackConnectionStatus{},
-		"",
-		"",
-		"",
-		"",
-		service.SlackBotTokenSourceOAuth,
-		false,
-		false,
-		false,
-		false,
-		false,
-		status,
-		"",
-		true,
-		service.EmailConnectionStatus{},
-		nil,
-		"",
-		true,
-		true,
-		false,
-		"60",
-		false,
-		false,
-		false,
-		true,
-		false,
-		nil,
-		nil,
-		nil,
-		nil,
-		false,
-	).Render(context.Background(), &buf)
+	view := defaultChannelsSettingsView("default")
+	view.DiscordStatus = status
+	view.HasDiscordChannel = true
+	err := SettingsContent(view).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
@@ -200,56 +117,13 @@ func renderDiscordSettingsContent(t *testing.T, status service.DiscordConnection
 
 func TestSettingsContent_RendersSystemLevelInboundAuthorizationCopy(t *testing.T) {
 	var buf bytes.Buffer
-	err := SettingsContent(
-		"telegram-token",
-		false,
-		nil,
-		nil,
-		nil,
-		"project-1",
-		true,
-		true,
-		service.GitHubConnectionStatus{},
-		service.GitHubAuthModePAT,
-		"",
-		"",
-		"",
-		"",
-		"",
-		false,
-		false,
-		service.SlackConnectionStatus{},
-		"",
-		"",
-		"",
-		"",
-		service.SlackBotTokenSourceOAuth,
-		false,
-		false,
-		false,
-		false,
-		true,
-		service.DiscordConnectionStatus{},
-		"",
-		true,
-		service.EmailConnectionStatus{},
-		nil,
-		"",
-		true,
-		true,
-		false,
-		"60",
-		true,
-		false,
-		true,
-		true,
-		true,
-		nil,
-		nil,
-		nil,
-		nil,
-		false,
-	).Render(context.Background(), &buf)
+	view := defaultChannelsSettingsView("project-1")
+	view.TelegramToken = "telegram-token"
+	view.HasTelegramChannel = true
+	view.HasSlackChannel = true
+	view.HasDiscordChannel = true
+	view.HasEmailChannel = true
+	err := SettingsContent(view).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("render failed: %v", err)
 	}

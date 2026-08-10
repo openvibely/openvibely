@@ -146,22 +146,22 @@ func outboundTargetSummary(targets []models.ChannelTarget) string {
 	return strings.Join(parts, " • ")
 }
 
-templ SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubAPIEndpoint string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
-	@layout.Base("Channels", projects, currentProjectID) {
-		@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubAPIEndpoint, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets)
+templ SettingsPage(projects []models.Project, view ChannelsSettingsView) {
+	@layout.Base("Channels", projects, view.CurrentProjectID) {
+		@settingsContent(view)
 	}
 }
 
 // SettingsContent renders just the settings content for HTMX requests
-templ SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubAPIEndpoint string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
-	@settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubAPIEndpoint, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets)
+templ SettingsContent(view ChannelsSettingsView) {
+	@settingsContent(view)
 }
 
-templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubAPIEndpoint string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) {
+templ settingsContent(view ChannelsSettingsView) {
 	<div
 		id="channels-container"
 		data-search-container
-		hx-get={ "/channels?project_id=" + currentProjectID }
+		hx-get={ "/channels?project_id=" + view.CurrentProjectID }
 		hx-trigger="channels-refresh from:body"
 		hx-target="this"
 		hx-swap="outerHTML"
@@ -174,35 +174,35 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					+ Add Channel
 				</label>
 				<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
-					if !hasGitHubChannel {
+					if !view.HasGitHubChannel {
 						<li>
 							<button type="button" onclick="openGitHubChannelFromMenu(event)">
 								GitHub
 							</button>
 						</li>
 					}
-					if !hasSlackChannel {
+					if !view.HasSlackChannel {
 						<li>
 							<button type="button" onclick="openSlackChannelFromMenu(event)">
 								Slack
 							</button>
 						</li>
 					}
-					if !hasTelegramChannel {
+					if !view.HasTelegramChannel {
 						<li>
 							<button type="button" onclick="openTelegramChannelFromMenu(event)">
 								Telegram Bot
 							</button>
 						</li>
 					}
-					if !hasDiscordChannel {
+					if !view.HasDiscordChannel {
 						<li>
 							<button type="button" onclick="openDiscordChannelFromMenu(event)">
 								Discord
 							</button>
 						</li>
 					}
-					if !hasEmailChannel {
+					if !view.HasEmailChannel {
 						<li>
 							<button type="button" onclick="openEmailChannelFromMenu(event)">
 								Email
@@ -214,7 +214,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							Webhook
 						</button>
 					</li>
-					if hasGitHubChannel && hasTelegramChannel && hasSlackChannel && hasDiscordChannel && hasEmailChannel {
+					if view.HasGitHubChannel && view.HasTelegramChannel && view.HasSlackChannel && view.HasDiscordChannel && view.HasEmailChannel {
 						<li class="hidden"></li>
 					}
 				</ul>
@@ -225,15 +225,15 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 
 			<!-- Active Channels -->
 			<div class="grid gap-4 mb-8">
-				@OutboundTargetsCard(currentProjectID, channelTargets, sendMessageExplicitTargets)
+				@OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
 
-				if hasGitHubChannel {
+				if view.HasGitHubChannel {
 				<!-- GitHub Card -->
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="github"
 					data-search-card
-					data-search-text={ "GitHub " + githubConnectionLabel(githubStatus) }
+					data-search-text={ "GitHub " + githubConnectionLabel(view.GitHubStatus) }
 					onclick="editChannelFromData(this)"
 				>
 					<div class="card-body relative">
@@ -264,31 +264,31 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								</svg>
 								GitHub
 							</h3>
-							if githubStatus.AuthMode == service.GitHubAuthModePAT {
-								if githubStatus.Connected {
+							if view.GitHubStatus.AuthMode == service.GitHubAuthModePAT {
+								if view.GitHubStatus.Connected {
 									<p class="text-sm opacity-60">Connected with personal access token.</p>
 								} else {
 									<p class="text-sm opacity-60">Add a personal access token to import repositories and create pull requests.</p>
 								}
 							} else {
-								if githubStatus.Connected {
-									<p class="text-sm opacity-60">Connected using installation `{ githubStatus.InstallationID }`.</p>
+								if view.GitHubStatus.Connected {
+									<p class="text-sm opacity-60">Connected using installation `{ view.GitHubStatus.InstallationID }`.</p>
 								} else {
 									<p class="text-sm opacity-60">Connect your GitHub App installation to import repositories and create pull requests.</p>
 								}
 							}
-							if githubStatus.AccountLogin != "" {
-								<p class="text-sm opacity-60">Account: { githubStatus.AccountLogin }</p>
+							if view.GitHubStatus.AccountLogin != "" {
+								<p class="text-sm opacity-60">Account: { view.GitHubStatus.AccountLogin }</p>
 							}
 							<div class="mt-3 flex items-center gap-2">
-								<span class={ "badge badge-sm", githubConnectionBadgeClass(githubStatus) }>{ githubConnectionLabel(githubStatus) }</span>
+								<span class={ "badge badge-sm", githubConnectionBadgeClass(view.GitHubStatus) }>{ githubConnectionLabel(view.GitHubStatus) }</span>
 							</div>
-							if githubStatus.AuthMode == service.GitHubAuthModeApp {
+							if view.GitHubStatus.AuthMode == service.GitHubAuthModeApp {
 								<div class="mt-3">
 									<div onclick="event.stopPropagation()">
-									if githubStatus.Configured && !githubStatus.Connected {
+									if view.GitHubStatus.Configured && !view.GitHubStatus.Connected {
 										<a class="btn btn-primary btn-sm" href="/channels/github/connect">Connect</a>
-									} else if githubStatus.Connected {
+									} else if view.GitHubStatus.Connected {
 										<form method="post" hx-post="/channels/github/disconnect" hx-swap="none" class="inline">
 											<button type="submit" class="btn btn-ghost btn-sm">Disconnect</button>
 										</form>
@@ -301,13 +301,13 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				</div>
 			}
 
-			if hasSlackChannel {
+			if view.HasSlackChannel {
 				<!-- Slack Card -->
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="slack"
 					data-search-card
-					data-search-text={ "Slack " + slackConnectionLabel(slackStatus) }
+					data-search-text={ "Slack " + slackConnectionLabel(view.SlackStatus) }
 					onclick="editChannelFromData(this)"
 				>
 					<div class="card-body relative">
@@ -348,27 +348,27 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								</svg>
 								Slack
 							</h3>
-							if slackStatus.Connected {
+							if view.SlackStatus.Connected {
 								<p class="text-sm opacity-60">Connected via OAuth.</p>
 							} else {
 								<p class="text-sm opacity-60">Connect Slack to chat with OpenVibely from app mentions and direct messages.</p>
 							}
-							if slackStatus.TeamName != "" {
-								<p class="text-sm opacity-60">Workspace: { slackStatus.TeamName }</p>
+							if view.SlackStatus.TeamName != "" {
+								<p class="text-sm opacity-60">Workspace: { view.SlackStatus.TeamName }</p>
 							}
-							if len(slackAuthorizedUsers) > 0 {
+							if len(view.SlackAuthorizedUsers) > 0 {
 								<div class="mt-2 flex items-center gap-2">
 									<span class="text-sm opacity-60">Authorized users:</span>
 									<span class="badge badge-sm badge-ghost">
-										{ fmt.Sprintf("%d user(s)", len(slackAuthorizedUsers)) }
+										{ fmt.Sprintf("%d user(s)", len(view.SlackAuthorizedUsers)) }
 									</span>
 								</div>
 							}
 							<div class="mt-3 flex items-center gap-2">
-								<span class={ "badge badge-sm", slackConnectionBadgeClass(slackStatus) }>{ slackConnectionLabel(slackStatus) }</span>
+								<span class={ "badge badge-sm", slackConnectionBadgeClass(view.SlackStatus) }>{ slackConnectionLabel(view.SlackStatus) }</span>
 							</div>
 							<div class="mt-3" onclick="event.stopPropagation()">
-								if slackStatus.Configured && !slackStatus.Connected {
+								if view.SlackStatus.Configured && !view.SlackStatus.Connected {
 									<a class="btn btn-primary btn-sm" href="/channels/slack/connect">Connect</a>
 								}
 							</div>
@@ -378,15 +378,15 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				</div>
 			}
 
-			if hasTelegramChannel {
+			if view.HasTelegramChannel {
 				<!-- Telegram Bot Card -->
 				<div
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="telegram"
-					data-channel-token={ telegramToken }
-					data-channel-running={ templ.JSONString(isBotRunning) }
+					data-channel-token={ view.TelegramToken }
+					data-channel-running={ templ.JSONString(view.IsBotRunning) }
 					data-search-card
-					data-search-text={ "Telegram Bot " + telegramChannelStatusText(isBotRunning) }
+					data-search-text={ "Telegram Bot " + telegramChannelStatusText(view.IsBotRunning) }
 					onclick="editChannelFromData(this)"
 				>
 					<div class="card-body relative">
@@ -435,16 +435,16 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							<p class="text-sm opacity-60">
 								Chat with your bot to manage tasks and get insights
 							</p>
-							if len(authorizedUsers) > 0 {
+							if len(view.AuthorizedUsers) > 0 {
 								<div class="mt-2 flex items-center gap-2">
 									<span class="text-sm opacity-60">Authorized users:</span>
 									<span class="badge badge-sm badge-ghost">
-										{ fmt.Sprintf("%d user(s)", len(authorizedUsers)) }
+										{ fmt.Sprintf("%d user(s)", len(view.AuthorizedUsers)) }
 									</span>
 								</div>
 							}
 							<div class="mt-3 flex items-center gap-2">
-								if isBotRunning {
+								if view.IsBotRunning {
 									<span class="badge badge-success badge-sm">Connected</span>
 								} else {
 									<span class="badge badge-warning badge-sm">Not Connected</span>
@@ -456,12 +456,12 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				</div>
 				}
 
-				if hasDiscordChannel {
+				if view.HasDiscordChannel {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="discord"
 						data-search-card
-						data-search-text={ "Discord " + discordConnectionLabel(discordStatus) }
+						data-search-text={ "Discord " + discordConnectionLabel(view.DiscordStatus) }
 						onclick="editChannelFromData(this)"
 					>
 						<div class="card-body relative">
@@ -478,7 +478,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 												type="button"
 												class="text-error"
 												data-channel-delete-name="Discord"
-												data-channel-delete-url={ "/channels/discord/remove?project_id=" + currentProjectID }
+												data-channel-delete-url={ "/channels/discord/remove?project_id=" + view.CurrentProjectID }
 												data-channel-delete-method="POST"
 												onclick="openDeleteChannelConfirmFromButton(this)"
 											>
@@ -496,22 +496,22 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 									Discord
 								</h3>
 								<p class="text-sm opacity-60">Chat with OpenVibely from Discord DMs and mentioned server channels.</p>
-								if len(discordAuthorizedUsers) > 0 {
+								if len(view.DiscordAuthorizedUsers) > 0 {
 									<div class="mt-2 flex items-center gap-2">
 										<span class="text-sm opacity-60">Authorized users:</span>
-										<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d user(s)", len(discordAuthorizedUsers)) }</span>
+										<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d user(s)", len(view.DiscordAuthorizedUsers)) }</span>
 									</div>
 								}
 								<div class="mt-3 flex items-center gap-2">
-									<span class={ "badge badge-sm", discordConnectionBadgeClass(discordStatus) }>{ discordConnectionLabel(discordStatus) }</span>
-									if discordStatus.Running {
+									<span class={ "badge badge-sm", discordConnectionBadgeClass(view.DiscordStatus) }>{ discordConnectionLabel(view.DiscordStatus) }</span>
+									if view.DiscordStatus.Running {
 										<span class="badge badge-sm badge-success">Gateway running</span>
-									} else if discordStatus.Configured {
+									} else if view.DiscordStatus.Configured {
 										<span class="badge badge-sm badge-warning">Gateway offline</span>
 									}
 								</div>
-								if discordStatus.Configured && !discordStatus.Running && discordStatus.LastError != "" {
-									<p class="mt-2 text-xs text-warning">Gateway failed to start: { discordStatus.LastError }</p>
+								if view.DiscordStatus.Configured && !view.DiscordStatus.Running && view.DiscordStatus.LastError != "" {
+									<p class="mt-2 text-xs text-warning">Gateway failed to start: { view.DiscordStatus.LastError }</p>
 								}
 								<div id="test-result-discord" class="mt-2"></div>
 							</div>
@@ -519,12 +519,12 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</div>
 				}
 
-				if hasEmailChannel {
+				if view.HasEmailChannel {
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="email"
 						data-search-card
-						data-search-text={ "Email " + emailStatus.Address }
+						data-search-text={ "Email " + view.EmailStatus.Address }
 						onclick="openEmailConfigModal()"
 					>
 						<div class="card-body relative">
@@ -546,17 +546,17 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 									Email
 								</h3>
 								<p class="text-sm opacity-60">Poll a dedicated IMAP inbox and reply by SMTP.</p>
-								if emailStatus.Address != "" {
-									<p class="text-sm opacity-60">Inbox: { emailStatus.Address }</p>
+								if view.EmailStatus.Address != "" {
+									<p class="text-sm opacity-60">Inbox: { view.EmailStatus.Address }</p>
 								}
 								<div class="mt-2 flex items-center gap-2">
 									<span class="text-sm opacity-60">Authorized senders:</span>
-									<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d sender(s)", len(emailAuthorizedSenders)) }</span>
+									<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d sender(s)", len(view.EmailAuthorizedSenders)) }</span>
 								</div>
 								<div class="mt-3 flex items-center gap-2">
-									if emailStatus.Running {
+									if view.EmailStatus.Running {
 										<span class="badge badge-success badge-sm">Connected</span>
-									} else if emailStatus.Configured {
+									} else if view.EmailStatus.Configured {
 										<span class="badge badge-warning badge-sm">Configured</span>
 									} else {
 										<span class="badge badge-warning badge-sm">Not Connected</span>
@@ -567,7 +567,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						</div>
 					</div>
 				}
-				for _, wh := range webhooks {
+				for _, wh := range view.Webhooks {
 					<!-- Webhook Card -->
 					<div
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
@@ -581,7 +581,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						data-webhook-secret={ wh.Secret }
 						data-webhook-system={ wh.SystemInstructions }
 						data-webhook-default-priority={ fmt.Sprintf("%d", wh.DefaultPriority) }
-						data-webhook-agent-ids={ selectedWebhookAgentIDs(webhooks, webhookAgents, wh.ID) }
+						data-webhook-agent-ids={ selectedWebhookAgentIDs(view.Webhooks, view.WebhookAgents, wh.ID) }
 					onclick={ templ.ComponentScript{Call: fmt.Sprintf("openWebhookEditModal('%s')", wh.ID)} }
 				>
 				<div class="card-body relative">
@@ -649,7 +649,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</div>
 				</div>
 			}
-				if !hasGitHubChannel && !hasTelegramChannel && !hasSlackChannel && !hasDiscordChannel && !hasEmailChannel && len(webhooks) == 0 {
+				if !view.HasGitHubChannel && !view.HasTelegramChannel && !view.HasSlackChannel && !view.HasDiscordChannel && !view.HasEmailChannel && len(view.Webhooks) == 0 {
 					<div class="card bg-base-100 shadow-sm border border-dashed border-base-300" data-search-card data-search-text="No channels added yet">
 						<div class="card-body">
 							<h3 class="font-semibold">No channels added yet</h3>
@@ -658,7 +658,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</div>
 				}		</div>
 
-					@OutboundTargetsModal(currentProjectID, channelTargets, sendMessageExplicitTargets)
+					@OutboundTargetsModal(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets)
 			<dialog id="delete_channel_confirm_modal" class="modal">
 				<div class="modal-box">
 					<button type="button" class="btn btn-circle btn-ghost btn-xs ov-modal-close" onclick="closeDeleteChannelConfirm()" aria-label="Close delete confirmation" title="Close delete confirmation">
@@ -727,7 +727,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</div>
 
 					<!-- Authorized Users Section -->
-					if currentProjectID != "" {
+					if view.CurrentProjectID != "" {
 						<div class="divider"></div>
 						<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -738,7 +738,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						<p class="text-xs opacity-50 mb-3">
 							Authorized Telegram users are system-level for this channel and can use Telegram across projects. If no users are added, the bot is open to everyone. Outbound Message Targets remain project-specific.
 						</p>
-						@components.TelegramAuthorizedUsersList(authorizedUsers, currentProjectID)
+						@components.TelegramAuthorizedUsersList(view.AuthorizedUsers, view.CurrentProjectID)
 					}
 
 					<!-- Notification Settings -->
@@ -754,7 +754,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							<input
 								type="checkbox"
 								class="toggle toggle-primary"
-								if sendResponses {
+								if view.SendResponses {
 									checked
 								}
 								hx-post="/channels/telegram/send-responses"
@@ -778,7 +778,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 								id="channel_telegram_rich_messages_v2"
 								type="checkbox"
 								class="toggle toggle-primary"
-								if richMessagesV2 {
+								if view.RichMessagesV2 {
 									checked
 								}
 								name="telegram_rich_messages_v2"
@@ -814,8 +814,8 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					<div class="form-control mb-4">
 						<label class="label"><span class="label-text">Authentication</span></label>
 						<select id="github_auth_mode" name="github_auth_mode" class="select select-bordered w-full" onchange="toggleGitHubAuthMode(this.value)">
-							<option value={ service.GitHubAuthModePAT } if githubAuthMode == service.GitHubAuthModePAT { selected }>Personal Access Token (Recommended)</option>
-							<option value={ service.GitHubAuthModeApp } if githubAuthMode == service.GitHubAuthModeApp { selected }>GitHub App (Advanced)</option>
+							<option value={ service.GitHubAuthModePAT } if view.GitHubAuthMode == service.GitHubAuthModePAT { selected }>Personal Access Token (Recommended)</option>
+							<option value={ service.GitHubAuthModeApp } if view.GitHubAuthMode == service.GitHubAuthModeApp { selected }>GitHub App (Advanced)</option>
 						</select>
 						<label class="label">
 							<span class="label-text-alt opacity-70">Use PAT for local/self-hosted installs. Use GitHub App for centralized cloud deployments.</span>
@@ -831,9 +831,9 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							@components.SecretInput(components.SecretInputConfig{
 								ID:           "github_pat",
 								Name:         "github_pat",
-								Value:        githubPATValue,
+								Value:        view.GitHubPATValue,
 								Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-								Placeholder:  githubPATPlaceholder(githubHasPAT),
+								Placeholder:  githubPATPlaceholder(view.GitHubHasPAT),
 								AutoComplete: "off",
 								AriaLabel:    "Toggle token visibility",
 							})
@@ -846,11 +846,11 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">GitHub App ID</span></label>
-							<input type="text" name="github_app_id" class="input input-bordered" value={ githubAppID }/>
+							<input type="text" name="github_app_id" class="input input-bordered" value={ view.GitHubAppID }/>
 						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">GitHub App Slug</span></label>
-							<input type="text" name="github_app_slug" class="input input-bordered" value={ githubAppSlug }/>
+							<input type="text" name="github_app_slug" class="input input-bordered" value={ view.GitHubAppSlug }/>
 						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">GitHub App Private Key (PEM)</span></label>
@@ -859,8 +859,8 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 									id="github_app_private_key"
 									name="github_app_private_key"
 									class="textarea textarea-bordered h-40 w-full pr-10 font-mono text-xs secret-textarea-masked"
-									placeholder={ githubPrivateKeyPlaceholder(githubHasPrivateKey) }
-								>{ githubPrivateKeyValue }</textarea>
+									placeholder={ githubPrivateKeyPlaceholder(view.GitHubHasPrivateKey) }
+								>{ view.GitHubPrivateKeyValue }</textarea>
 								<button
 									type="button"
 									class="password-toggle-btn btn btn-ghost btn-sm absolute right-1 top-2 h-8 min-h-0 px-2"
@@ -886,15 +886,15 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							type="url"
 							name="github_api_endpoint"
 							class="input input-bordered"
-							value={ githubAPIEndpoint }
+							value={ view.GitHubAPIEndpoint }
 							placeholder="https://api.github.com"
 						/>
 					</div>
-					if currentProjectID != "" {
+					if view.CurrentProjectID != "" {
 						<div class="divider"></div>
 						<div
 							id="github-runtime-settings"
-							hx-get={ "/channels/github/runtime-settings?project_id=" + currentProjectID }
+							hx-get={ "/channels/github/runtime-settings?project_id=" + view.CurrentProjectID }
 							hx-trigger="load"
 							hx-target="this"
 							hx-swap="outerHTML"
@@ -932,16 +932,16 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</div>
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Client ID</span></label>
-						<input type="text" name="slack_client_id" class="input input-bordered" value={ slackClientID } placeholder={ slackSecretPlaceholder(slackHasClientID, "Client ID") }/>
+						<input type="text" name="slack_client_id" class="input input-bordered" value={ view.SlackClientID } placeholder={ slackSecretPlaceholder(view.SlackHasClientID, "Client ID") }/>
 					</div>
 					<div class="form-control mb-3">
 						<label class="label"><span class="label-text">Client Secret</span></label>
 						@components.SecretInput(components.SecretInputConfig{
 							ID:           "slack_client_secret",
 							Name:         "slack_client_secret",
-							Value:        slackClientSecret,
+							Value:        view.SlackClientSecret,
 							Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-							Placeholder:  slackSecretPlaceholder(slackHasClientSecret, "Client Secret"),
+							Placeholder:  slackSecretPlaceholder(view.SlackHasClientSecret, "Client Secret"),
 							AutoComplete: "off",
 							AriaLabel:    "Toggle client secret visibility",
 						})
@@ -951,9 +951,9 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						@components.SecretInput(components.SecretInputConfig{
 							ID:           "slack_app_token",
 							Name:         "slack_app_token",
-							Value:        slackAppToken,
+							Value:        view.SlackAppToken,
 							Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-							Placeholder:  slackSecretPlaceholder(slackHasAppToken, "App-Level Token"),
+							Placeholder:  slackSecretPlaceholder(view.SlackHasAppToken, "App-Level Token"),
 							AutoComplete: "off",
 							AriaLabel:    "Toggle app token visibility",
 						})
@@ -966,10 +966,10 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							class="select select-bordered w-full"
 							onchange="toggleSlackBotTokenMode(this.value)"
 						>
-							<option value={ service.SlackBotTokenSourceOAuth } if slackBotTokenMode == service.SlackBotTokenSourceOAuth { selected }>
+							<option value={ service.SlackBotTokenSourceOAuth } if view.SlackBotTokenMode == service.SlackBotTokenSourceOAuth { selected }>
 								OAuth Callback Token (Recommended)
 							</option>
-							<option value={ service.SlackBotTokenSourceManual } if slackBotTokenMode == service.SlackBotTokenSourceManual { selected }>
+							<option value={ service.SlackBotTokenSourceManual } if view.SlackBotTokenMode == service.SlackBotTokenSourceManual { selected }>
 								Manual Override Token
 							</option>
 						</select>
@@ -984,14 +984,14 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						@components.SecretInput(components.SecretInputConfig{
 							ID:           "slack_bot_token",
 							Name:         "slack_bot_token",
-							Value:        slackBotToken,
+							Value:        view.SlackBotToken,
 							Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-							Placeholder:  slackSecretPlaceholder(slackHasBotToken, "Bot Token"),
+							Placeholder:  slackSecretPlaceholder(view.SlackHasBotToken, "Bot Token"),
 							AutoComplete: "off",
 							AriaLabel:    "Toggle bot token visibility",
 						})
 					</div>
-					if currentProjectID != "" {
+					if view.CurrentProjectID != "" {
 						<div class="divider"></div>
 						<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1002,7 +1002,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						<p class="text-xs opacity-50 mb-3">
 							Authorized Slack users are system-level for this channel and can use Slack across projects. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.
 						</p>
-						@components.SlackAuthorizedUsersList(slackAuthorizedUsers, currentProjectID)
+						@components.SlackAuthorizedUsersList(view.SlackAuthorizedUsers, view.CurrentProjectID)
 					}
 					<div class="divider"></div>
 					<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">
@@ -1013,7 +1013,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 					</h4>
 					<div class="form-control mb-4">
 						<label class="label cursor-pointer justify-start gap-3">
-							<input type="checkbox" class="checkbox checkbox-primary" name="slack_send_responses" value="true" if slackSendResponses { checked }/>
+							<input type="checkbox" class="checkbox checkbox-primary" name="slack_send_responses" value="true" if view.SlackSendResponses { checked }/>
 							<span class="label-text">Send task completion/failure notifications for Slack-created tasks</span>
 						</label>
 					</div>
@@ -1045,22 +1045,22 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 						@components.SecretInput(components.SecretInputConfig{
 							ID: "discord_bot_token",
 							Name: "discord_bot_token",
-							Value: discordBotToken,
+							Value: view.DiscordBotToken,
 							Class: "input input-bordered w-full pr-10 font-mono text-xs",
 							Placeholder: "Leave blank to keep existing token, or paste a new token to rotate.",
 							AutoComplete: "off",
 							AriaLabel: "Toggle bot token visibility",
 						})
 					</div>
-					if currentProjectID != "" {
+					if view.CurrentProjectID != "" {
 						<div class="divider"></div>
 						<h4 class="font-semibold text-sm mb-2">Authorized Users</h4>
 						<p class="text-xs opacity-50 mb-3">Authorized Discord users are system-level for this channel and can use Discord across projects. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.</p>
-						@components.DiscordAuthorizedUsersList(discordAuthorizedUsers, currentProjectID)
+						@components.DiscordAuthorizedUsersList(view.DiscordAuthorizedUsers, view.CurrentProjectID)
 					}
 					<div class="divider"></div>
 					<label class="label cursor-pointer justify-start gap-3">
-						<input type="checkbox" class="checkbox checkbox-primary" name="discord_send_responses" value="true" if discordSendResponses { checked }/>
+						<input type="checkbox" class="checkbox checkbox-primary" name="discord_send_responses" value="true" if view.DiscordSendResponses { checked }/>
 						<span class="label-text">Send task completion/failure notifications for Discord-created tasks</span>
 					</label>
 					<div class="modal-action">
@@ -1089,61 +1089,61 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 							<label class="label"><span class="label-text">Provider</span></label>
 							<select id="email_provider" name="email_provider" class="select select-bordered w-full" onchange="setEmailProviderPreset(this.value, false)">
 								for _, preset := range service.EmailProviderPresets() {
-									<option value={ preset.Key } data-imap-host={ preset.IMAPHost } data-imap-port={ fmt.Sprintf("%d", preset.IMAPPort) } data-smtp-host={ preset.SMTPHost } data-smtp-port={ fmt.Sprintf("%d", preset.SMTPPort) } data-help={ preset.HelpText } if emailStatus.Provider == preset.Key { selected }>{ preset.Label }</option>
+									<option value={ preset.Key } data-imap-host={ preset.IMAPHost } data-imap-port={ fmt.Sprintf("%d", preset.IMAPPort) } data-smtp-host={ preset.SMTPHost } data-smtp-port={ fmt.Sprintf("%d", preset.SMTPPort) } data-help={ preset.HelpText } if view.EmailStatus.Provider == preset.Key { selected }>{ preset.Label }</option>
 								}
 							</select>
 						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">Email Address</span></label>
-							<input type="email" name="email_address" class="input input-bordered" value={ emailStatus.Address } placeholder="bot@example.com"/>
+							<input type="email" name="email_address" class="input input-bordered" value={ view.EmailStatus.Address } placeholder="bot@example.com"/>
 						</div>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">App Password</span></label>
-							@components.SecretInput(components.SecretInputConfig{ID: "email_password", Name: "email_password", Value: emailPasswordValue, Class: "input input-bordered w-full pr-10 font-mono text-xs", Placeholder: slackSecretPlaceholder(emailPasswordValue != "", "App password"), AutoComplete: "off", AriaLabel: "Toggle email password visibility"})
+							@components.SecretInput(components.SecretInputConfig{ID: "email_password", Name: "email_password", Value: view.EmailPasswordValue, Class: "input input-bordered w-full pr-10 font-mono text-xs", Placeholder: slackSecretPlaceholder(view.EmailPasswordValue != "", "App password"), AutoComplete: "off", AriaLabel: "Toggle email password visibility"})
 						</div>
-						<details id="email_advanced_details" class="collapse collapse-arrow bg-base-200 mb-3" if emailStatus.Provider == service.EmailProviderCustom { open }>
+						<details id="email_advanced_details" class="collapse collapse-arrow bg-base-200 mb-3" if view.EmailStatus.Provider == service.EmailProviderCustom { open }>
 							<summary class="collapse-title text-sm font-medium">Advanced IMAP/SMTP settings</summary>
 							<div class="collapse-content grid grid-cols-1 md:grid-cols-2 gap-3">
 								<div class="form-control">
 									<label class="label"><span class="label-text">IMAP Host</span></label>
-									<input id="email_imap_host" type="text" name="email_imap_host" class="input input-bordered" value={ emailStatus.IMAPHost } oninput="markEmailProviderCustom()"/>
+									<input id="email_imap_host" type="text" name="email_imap_host" class="input input-bordered" value={ view.EmailStatus.IMAPHost } oninput="markEmailProviderCustom()"/>
 								</div>
 								<div class="form-control">
 									<label class="label"><span class="label-text">IMAP Port</span></label>
-									<input id="email_imap_port" type="number" name="email_imap_port" class="input input-bordered" value={ fmt.Sprintf("%d", emailStatus.IMAPPort) } oninput="markEmailProviderCustom()"/>
+									<input id="email_imap_port" type="number" name="email_imap_port" class="input input-bordered" value={ fmt.Sprintf("%d", view.EmailStatus.IMAPPort) } oninput="markEmailProviderCustom()"/>
 								</div>
 								<div class="form-control">
 									<label class="label"><span class="label-text">SMTP Host</span></label>
-									<input id="email_smtp_host" type="text" name="email_smtp_host" class="input input-bordered" value={ emailStatus.SMTPHost } oninput="markEmailProviderCustom()"/>
+									<input id="email_smtp_host" type="text" name="email_smtp_host" class="input input-bordered" value={ view.EmailStatus.SMTPHost } oninput="markEmailProviderCustom()"/>
 								</div>
 								<div class="form-control">
 									<label class="label"><span class="label-text">SMTP Port</span></label>
-									<input id="email_smtp_port" type="number" name="email_smtp_port" class="input input-bordered" value={ fmt.Sprintf("%d", emailStatus.SMTPPort) } oninput="markEmailProviderCustom()"/>
+									<input id="email_smtp_port" type="number" name="email_smtp_port" class="input input-bordered" value={ fmt.Sprintf("%d", view.EmailStatus.SMTPPort) } oninput="markEmailProviderCustom()"/>
 								</div>
 							</div>
 						</details>
 						<div class="form-control mb-3">
 							<label class="label"><span class="label-text">Poll interval seconds</span></label>
-							<input type="number" min="5" name="email_poll_interval_seconds" class="input input-bordered" value={ emailPollIntervalSeconds }/>
+							<input type="number" min="5" name="email_poll_interval_seconds" class="input input-bordered" value={ view.EmailPollIntervalSeconds }/>
 						</div>
-						if currentProjectID != "" {
+						if view.CurrentProjectID != "" {
 							<div class="divider"></div>
 							<h4 class="font-semibold text-sm mb-2 flex items-center gap-2">Authorized Senders</h4>
 							<p class="text-xs opacity-50 mb-3">Authorized email senders are system-level for this channel and can use Email across projects. If no senders are configured, access is denied until authorized senders are added. Outbound Message Targets remain project-specific.</p>
-							@components.EmailAuthorizedSendersList(emailAuthorizedSenders, currentProjectID)
+							@components.EmailAuthorizedSendersList(view.EmailAuthorizedSenders, view.CurrentProjectID)
 						}
 						<div class="divider"></div>
 						<div class="space-y-2 mb-4">
 							<label class="label cursor-pointer justify-start gap-3">
-								<input type="checkbox" class="toggle toggle-primary" name="email_send_responses" value="true" if emailSendResponses { checked }/>
+								<input type="checkbox" class="toggle toggle-primary" name="email_send_responses" value="true" if view.EmailSendResponses { checked }/>
 								<span class="label-text">Send task completion/failure replies by email</span>
 							</label>
 							<label class="label cursor-pointer justify-start gap-3">
-								<input type="checkbox" class="toggle toggle-primary" name="email_skip_attachments" value="true" if emailSkipAttachments { checked }/>
+								<input type="checkbox" class="toggle toggle-primary" name="email_skip_attachments" value="true" if view.EmailSkipAttachments { checked }/>
 								<span class="label-text">Skip incoming attachments</span>
 							</label>
 							<label class="label cursor-pointer justify-start gap-3">
-								<input type="checkbox" class="toggle toggle-primary" name="email_mark_existing_seen_on_start" value="true" if emailMarkExistingSeenOnStart { checked }/>
+								<input type="checkbox" class="toggle toggle-primary" name="email_mark_existing_seen_on_start" value="true" if view.EmailMarkExistingSeenOnStart { checked }/>
 								<span class="label-text">Mark existing unread messages seen on start</span>
 							</label>
 						</div>
@@ -1164,8 +1164,8 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 				<div class="px-6 pt-6 pb-2 pr-14">
 					<h3 id="webhook_modal_title" class="font-bold text-lg">Add Webhook</h3>
 				</div>
-				<form id="webhook_form" hx-post={ "/channels/webhooks?project_id=" + currentProjectID } hx-swap="none" data-project-id={ currentProjectID } class="flex flex-col h-[78vh]">
-					<input type="hidden" name="project_id" value={ currentProjectID }/>
+				<form id="webhook_form" hx-post={ "/channels/webhooks?project_id=" + view.CurrentProjectID } hx-swap="none" data-project-id={ view.CurrentProjectID } class="flex flex-col h-[78vh]">
+					<input type="hidden" name="project_id" value={ view.CurrentProjectID }/>
 					<div class="px-6 pb-3 border-b border-base-300">
 						<div role="tablist" class="tabs tabs-bordered tabs-sm w-full overflow-x-auto flex-nowrap">
 							<button type="button" role="tab" class="tab tab-active" data-webhook-section-tab="config" aria-selected="true" onclick="setWebhookSection('config')">Webhook Config</button>
@@ -1256,7 +1256,7 @@ templ settingsContent(telegramToken string, isBotRunning bool, authorizedUsers [
 	</dialog>
 
 	<!-- Webhook available agents data for JavaScript -->
-	<div id="webhook_agents_data" data-agents={ agentsJSON(agents) } style="display:none"></div>
+	<div id="webhook_agents_data" data-agents={ agentsJSON(view.Agents) } style="display:none"></div>
 
 	<style>
 		.dropdown-content {
