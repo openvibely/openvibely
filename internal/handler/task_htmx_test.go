@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -215,6 +216,92 @@ func TestHandler_ListTasks_HTMXUpdate_DefaultsDateSortsNewestFirstAndPreservesCo
 	assertTaskOrder(t, backlogDropZone(explicitBody), "Zulu Backlog", "Alpha Backlog")
 	assertTaskOrder(t, completedDropZone(explicitBody), "Zulu Completed", "Mike Legacy Completed", "Alpha Completed")
 	assertSortControlActive(t, explicitBody, "sort=title_desc")
+}
+
+func TestHandler_UpdateTaskCategory_HTMXRefreshPreservesSortCookies(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	for _, title := range []string{"Alpha Backlog", "Zulu Backlog"} {
+		if err := h.taskSvc.Create(ctx, &models.Task{
+			ProjectID: "default",
+			Title:     title,
+			Category:  models.CategoryBacklog,
+			Status:    models.StatusPending,
+			Prompt:    "test prompt",
+			Priority:  2,
+		}); err != nil {
+			t.Fatalf("create backlog task %q: %v", title, err)
+		}
+	}
+	movingTask := &models.Task{
+		ProjectID: "default",
+		Title:     "Mike Moving",
+		Category:  models.CategoryActive,
+		Status:    models.StatusPending,
+		Prompt:    "test prompt",
+		Priority:  2,
+	}
+	if err := h.taskSvc.Create(ctx, movingTask); err != nil {
+		t.Fatalf("create moving task: %v", err)
+	}
+
+	form := url.Values{"category": {string(models.CategoryBacklog)}}
+	req := httptest.NewRequest(http.MethodPatch, "/tasks/"+movingTask.ID+"/category", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	req.AddCookie(&http.Cookie{Name: backlogSortCookieName, Value: "title_desc"})
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("update category status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	assertTaskOrder(t, backlogDropZone(body), "Zulu Backlog", "Mike Moving", "Alpha Backlog")
+	assertSortControlActive(t, body, "sort=title_desc")
+}
+
+func TestHandler_SetBacklogSort_HTMXRouteRendersSortedBoard(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	for _, title := range []string{"Zulu Sort Route", "Alpha Sort Route", "Mike Sort Route"} {
+		if err := h.taskSvc.Create(ctx, &models.Task{
+			ProjectID: "default",
+			Title:     title,
+			Category:  models.CategoryBacklog,
+			Status:    models.StatusPending,
+			Prompt:    "test prompt",
+			Priority:  2,
+		}); err != nil {
+			t.Fatalf("create backlog task %q: %v", title, err)
+		}
+	}
+
+	rec := htmxPost(e, "/tasks/backlog/sort?project_id=default&sort=title_asc", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("set backlog sort status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.HasPrefix(strings.TrimSpace(body), "<div id=\"kanban-board\"") {
+		t.Fatalf("expected sorted route response to start with kanban board, body=%s", body)
+	}
+	assertTaskOrder(t, backlogDropZone(body), "Alpha Sort Route", "Mike Sort Route", "Zulu Sort Route")
+	assertSortControlActive(t, body, "sort=title_asc")
+
+	foundSortCookie := false
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == backlogSortCookieName {
+			foundSortCookie = true
+			if cookie.Value != "title_asc" {
+				t.Fatalf("backlog sort cookie = %q, want title_asc", cookie.Value)
+			}
+		}
+	}
+	if !foundSortCookie {
+		t.Fatal("expected backlog sort cookie to be set")
+	}
 }
 
 func assertSortControlActive(t *testing.T, body string, sortQuery string) {
