@@ -185,6 +185,62 @@ func TestCreateSchedule_HTMX_Success(t *testing.T) {
 	assertSchedulesTaskDetailFragment(t, rec.Body.String())
 }
 
+func TestCreateSchedule_HTMX_UsesMainTaskDetailExecutionOrdering(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := tc.CreateTask(project.ID).
+		WithStatus(models.StatusCompleted).
+		WithCategory(models.CategoryCompleted).
+		Build()
+
+	older := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).Build()
+	if err := tc.execRepo.Complete(ctx, older.ID, models.ExecCompleted, "older output", "", 10, 1000); err != nil {
+		t.Fatalf("complete older execution: %v", err)
+	}
+	newer := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).Build()
+	if err := tc.execRepo.Complete(ctx, newer.ID, models.ExecCompleted, "newer output", "", 10, 5000); err != nil {
+		t.Fatalf("complete newer execution: %v", err)
+	}
+	baseStartedAt := time.Now().UTC().Add(-2 * time.Hour)
+	if _, err := tc.db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, baseStartedAt, older.ID); err != nil {
+		t.Fatalf("set older execution start: %v", err)
+	}
+	if _, err := tc.db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, baseStartedAt.Add(time.Hour), newer.ID); err != nil {
+		t.Fatalf("set newer execution start: %v", err)
+	}
+
+	mainRec := tc.HTMX().Get("/tasks/" + task.ID).Execute()
+	if mainRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for HTMX task detail, got %d body=%s", mainRec.Code, mainRec.Body.String())
+	}
+	if !strings.Contains(mainRec.Body.String(), ">5s</span>") {
+		t.Fatalf("expected main task detail to show latest execution duration; body=%s", mainRec.Body.String())
+	}
+	if strings.Contains(mainRec.Body.String(), ">1s</span>") {
+		t.Fatalf("main task detail showed older execution duration; body=%s", mainRec.Body.String())
+	}
+
+	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	scheduleRec := tc.HTMX().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
+		"run_at":          {runAt},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}).Execute()
+	if scheduleRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for HTMX create, got %d body=%s", scheduleRec.Code, scheduleRec.Body.String())
+	}
+	body := scheduleRec.Body.String()
+	assertSchedulesTaskDetailFragment(t, body)
+	if !strings.Contains(body, ">5s</span>") {
+		t.Fatalf("expected schedule HTMX refresh to show latest execution duration like main task detail; body=%s", body)
+	}
+	if strings.Contains(body, ">1s</span>") {
+		t.Fatalf("schedule HTMX refresh used non-chronological execution ordering; body=%s", body)
+	}
+}
+
 func TestCreateSchedule_DefaultRepeatType(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
