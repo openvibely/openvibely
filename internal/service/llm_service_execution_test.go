@@ -4142,10 +4142,14 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 			return nil
 		},
 		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
-			if number != 202 {
+			switch number {
+			case 202:
+				return &GitHubPullRequest{Number: number, URL: "https://github.com/openvibely/openvibely/pull/202", State: "open", HeadRef: "task/existing-runtime-pr", HeadRepoFullName: "openvibely/openvibely"}, nil
+			case 203:
+				return &GitHubPullRequest{Number: number, URL: "https://github.com/openvibely/openvibely/pull/203", State: "open", HeadRef: "task/existing-runtime-pr-url", HeadRepoFullName: "openvibely/openvibely"}, nil
+			default:
 				return nil, fmt.Errorf("unexpected pull request #%d", number)
 			}
-			return &GitHubPullRequest{Number: number, HeadRef: "task/existing-runtime-pr", HeadRepoFullName: "openvibely/openvibely"}, nil
 		},
 		replaceBranchHeadFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubReplaceBranchHeadRequest) error {
 			replacementReq = req

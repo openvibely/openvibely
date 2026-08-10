@@ -920,6 +920,9 @@ func TestGitHubOpenPullRequestRuntimeToolCreatesAndPersistsPR(t *testing.T) {
 		findPRFn: func(_ context.Context, repo *service.GitHubRepoRef, branch string) (*service.GitHubPullRequest, error) {
 			return nil, nil
 		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 123, URL: "https://github.com/openvibely/openvibely/pull/123", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely"}, nil
+		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, req service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
 			createdReq = req
 			return &service.GitHubPullRequest{Number: 123, URL: "https://github.com/openvibely/openvibely/pull/123", State: "open"}, nil

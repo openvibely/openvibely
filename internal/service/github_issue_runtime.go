@@ -20,6 +20,7 @@ type GitHubIssueRuntimeProvider interface {
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error)
 	DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error)
 	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error
+	GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error)
 	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 	EnsureIssueLabels(ctx context.Context, repo *GitHubRepoRef, labels []string) error

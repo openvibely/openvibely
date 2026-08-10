@@ -1988,6 +1988,34 @@ func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, 
 		}
 		return true, fmt.Sprintf("GitHub SDLC implementation linked pull request #%d is %s; rerun after resolving PR publication", pullRequest.PRNumber, state)
 	}
+	if h.githubSvc == nil || h.projectRepo == nil {
+		return true, "GitHub SDLC pull request publication could not be verified because GitHub live-state verification is unavailable"
+	}
+	project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
+	if err != nil {
+		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
+	}
+	if project == nil {
+		return true, "GitHub SDLC pull request publication could not be verified because the project was not found"
+	}
+	repoPathForResolution := ""
+	if strings.TrimSpace(project.RepoURL) == "" {
+		repoPathForResolution = project.RepoPath
+	}
+	repoRef, err := h.githubSvc.ResolveRepo(ctx, project.RepoURL, repoPathForResolution)
+	if err != nil {
+		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
+	}
+	if err := service.ConfigureGitHubRepoEndpoint(repoRef, h.githubSvc.GlobalAPIEndpoint(ctx)); err != nil {
+		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
+	}
+	livePR, err := h.githubSvc.GetPullRequest(ctx, repoRef, pullRequest.PRNumber)
+	if err != nil {
+		return true, fmt.Sprintf("GitHub SDLC pull request publication could not be verified: %v", err)
+	}
+	if err := service.ValidateTaskPullRequestLiveState(project, task, repoRef, livePR); err != nil {
+		return true, fmt.Sprintf("GitHub SDLC implementation linked pull request #%d is not reviewable: %v; rerun after resolving PR publication", pullRequest.PRNumber, err)
+	}
 	return false, ""
 }
 

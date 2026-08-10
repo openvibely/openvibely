@@ -13,6 +13,7 @@ type TaskPullRequestGitHubProvider interface {
 	ResolveRepo(ctx context.Context, repoURL, repoPath string) (*GitHubRepoRef, error)
 	DefaultBranch(ctx context.Context, repo *GitHubRepoRef) (string, error)
 	PublishBranch(ctx context.Context, repo *GitHubRepoRef, publishReq GitHubPublishBranchRequest) error
+	GetPullRequest(ctx context.Context, repo *GitHubRepoRef, number int) (*GitHubPullRequest, error)
 	FindPullRequestByBranch(ctx context.Context, repo *GitHubRepoRef, branch string) (*GitHubPullRequest, error)
 	CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error)
 	GlobalAPIEndpoint(ctx context.Context) string
@@ -52,6 +53,49 @@ func NewTaskPullRequestService(github TaskPullRequestGitHubProvider, repo *repos
 
 func IsOpenPullRequestState(state string) bool {
 	return strings.EqualFold(strings.TrimSpace(state), "open")
+}
+
+func ValidateTaskPullRequestLiveState(project *models.Project, task *models.Task, repoRef *GitHubRepoRef, pr *GitHubPullRequest) error {
+	if pr == nil {
+		return fmt.Errorf("pull request was not found")
+	}
+	if !IsOpenPullRequestState(pr.State) {
+		state := strings.TrimSpace(pr.State)
+		if state == "" {
+			state = "not open"
+		}
+		return fmt.Errorf("pull request #%d is %s", pr.Number, state)
+	}
+	branch := strings.TrimSpace(task.WorktreeBranch)
+	if branch == "" {
+		return fmt.Errorf("task has no worktree branch")
+	}
+	if strings.TrimSpace(pr.HeadRef) != branch {
+		return fmt.Errorf("pull request #%d head branch %q does not match task worktree branch %q", pr.Number, pr.HeadRef, branch)
+	}
+	expectedRepo := expectedTaskPullRequestRepoFullName(project, repoRef)
+	if expectedRepo == "" {
+		return fmt.Errorf("project repository is unavailable for pull request verification")
+	}
+	if !strings.EqualFold(strings.TrimSpace(pr.HeadRepoFullName), expectedRepo) {
+		return fmt.Errorf("pull request #%d head repository %q does not match project repository %q", pr.Number, pr.HeadRepoFullName, expectedRepo)
+	}
+	return nil
+}
+
+func expectedTaskPullRequestRepoFullName(project *models.Project, repoRef *GitHubRepoRef) string {
+	if repoRef != nil {
+		if fullName := strings.TrimSpace(repoRef.FullName); fullName != "" {
+			return fullName
+		}
+		return strings.Trim(strings.TrimSpace(repoRef.Owner)+"/"+strings.TrimSpace(repoRef.Name), "/")
+	}
+	if project != nil && strings.TrimSpace(project.RepoURL) != "" {
+		if parsed, err := ParseGitHubRepoURL(project.RepoURL); err == nil {
+			return strings.TrimSpace(parsed.FullName)
+		}
+	}
+	return ""
 }
 
 func (s *TaskPullRequestService) ReplaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
@@ -201,16 +245,28 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		return nil, fmt.Errorf("publishing branch: %w", err)
 	}
 	if existingPR != nil && IsOpenPullRequestState(existingPR.PRState) {
-		if mergeTaskPullRequestIssueMetadata(existingPR, opts) {
-			if err := s.repo.Upsert(ctx, existingPR); err != nil {
-				return nil, fmt.Errorf("saving pull request issue metadata: %w", err)
-			}
+		livePR, err := s.github.GetPullRequest(ctx, repoRef, existingPR.PRNumber)
+		if err != nil {
+			return nil, fmt.Errorf("verifying existing pull request #%d: %w", existingPR.PRNumber, err)
 		}
-		return &OpenTaskPullRequestResult{
-			PullRequest:          taskPullRequestRecordToGitHubPR(existingPR),
-			Record:               existingPR,
-			ReusedExistingRecord: true,
-		}, nil
+		if err := ValidateTaskPullRequestLiveState(project, task, repoRef, livePR); err == nil {
+			liveURL := strings.TrimSpace(livePR.URL)
+			liveState := strings.TrimSpace(livePR.State)
+			changed := existingPR.PRURL != liveURL || existingPR.PRState != liveState
+			existingPR.PRURL = liveURL
+			existingPR.PRState = liveState
+			changed = mergeTaskPullRequestIssueMetadata(existingPR, opts) || changed
+			if changed {
+				if err := s.repo.Upsert(ctx, existingPR); err != nil {
+					return nil, fmt.Errorf("saving pull request issue metadata: %w", err)
+				}
+			}
+			return &OpenTaskPullRequestResult{
+				PullRequest:          livePR,
+				Record:               existingPR,
+				ReusedExistingRecord: true,
+			}, nil
+		}
 	}
 
 	foundPR, err := s.github.FindPullRequestByBranch(ctx, repoRef, task.WorktreeBranch)

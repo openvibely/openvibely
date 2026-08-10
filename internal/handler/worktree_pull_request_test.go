@@ -246,6 +246,9 @@ func TestCreateTaskPullRequest_ReusesExistingTaskPR(t *testing.T) {
 			publishedReq = publishReq
 			return nil
 		},
+		getPullRequestFn: func(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+			return &service.GitHubPullRequest{Number: 22, URL: "https://github.com/openvibely/openvibely/pull/22", State: "open", HeadRef: "task/existing", HeadRepoFullName: "openvibely/openvibely"}, nil
+		},
 		createPRFn: func(_ context.Context, repo *service.GitHubRepoRef, createReq service.GitHubCreatePullRequestRequest) (*service.GitHubPullRequest, error) {
 			createCalls++
 			return &service.GitHubPullRequest{Number: 1, URL: "https://github.com/x/y/pull/1", State: "open"}, nil

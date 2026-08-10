@@ -2124,6 +2124,9 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	openedOutput, err := handlers["github_open_pull_request"](implementationCtx, json.RawMessage(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
 	require.NoError(t, err)
 	require.Contains(t, openedOutput, `"created":true`)
+	provider.getPullRequestFn = func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+		return &GitHubPullRequest{Number: 7, URL: "https://github.example.com/example/runtime/pull/7", State: "open", HeadRef: implementationTask.WorktreeBranch, HeadRepoFullName: "example/runtime"}, nil
+	}
 	var recordedIssueURL string
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT issue_url FROM task_pull_requests WHERE task_id = ?`, implementationTask.ID).Scan(&recordedIssueURL))
 	require.Equal(t, "https://github.example.com/example/runtime/issues/42", recordedIssueURL)
@@ -2249,6 +2252,9 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.Contains(t, published, `"created":true`)
+	provider.getPullRequestFn = func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
+		return &GitHubPullRequest{Number: 77, URL: "https://github.com/example/runtime/pull/77", State: "open", HeadRef: implementationTask.WorktreeBranch, HeadRepoFullName: "example/runtime"}, nil
+	}
 	reused, handled, isErr, err := publishRuntime.Executor(originCtx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
 	require.NoError(t, err)
 	require.True(t, handled)
