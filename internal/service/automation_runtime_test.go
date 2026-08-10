@@ -2222,6 +2222,9 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 	case <-time.After(time.Second):
 		t.Fatal("approved GitHub issue task was not submitted")
 	}
+	staleTaskContext, err := fixture.repo.ContextForTask(ctx, fixture.project.ID, implementationTask.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, staleTaskContext.Bindings)
 
 	replaced := replaceAutomationGitHubIssueGraph(t, fixture)
 	require.NotEqual(t, fixture.definition.Version.ID, replaced.Version.ID)
@@ -2233,17 +2236,28 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &implementationExecution))
 	originCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, OriginTask: true})
 	originCtx = withAutomationExecution(originCtx, implementationTask.ID, implementationExecution.ID)
+	staleOriginCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, OriginTask: true, Bindings: staleTaskContext.Bindings})
+	staleOriginCtx = withAutomationExecution(staleOriginCtx, implementationTask.ID, implementationExecution.ID)
 	publishSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
 		taskRepo: fixture.taskRepo, taskPullRequestRepo: opts.TaskPullRequestRepo, githubPRFeedbackRepo: repository.NewGitHubPRFeedbackRepo(fixture.repo.DB()),
 		githubAuthRepo: repository.NewGitHubAuthRepo(fixture.repo.DB()), threadInputRepo: repository.NewThreadInputRepo(fixture.repo.DB())}
-	publishRuntime := publishSvc.AutomationGitHubRuntimeTools(originCtx, *implementationTask, gitHubIssueRuntimeToolDefs(true))
+	publishRuntime := publishSvc.AutomationGitHubRuntimeTools(staleOriginCtx, *implementationTask, gitHubIssueRuntimeToolDefs(true))
 	require.NotNil(t, publishRuntime)
 	prBody := "## Summary\n- Implements the accepted issue.\n\n## Validation\n- go test ./internal/service\n\nCloses #42"
-	published, handled, isErr, err := publishRuntime.Executor(originCtx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
+	published, handled, isErr, err := publishRuntime.Executor(staleOriginCtx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
 	require.NoError(t, err)
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.Contains(t, published, `"created":true`)
+	reused, handled, isErr, err := publishRuntime.Executor(originCtx, "github_open_pull_request", []byte(fmt.Sprintf(`{"task_id":"current","issue_number":42,"pr_title":"PR","pr_body":%q}`, prBody)))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.Contains(t, reused, `"reused_existing_record":true`)
+	_, handled, isErr, err = publishRuntime.Executor(staleOriginCtx, "github_replace_pull_request_branch", []byte(fmt.Sprintf(`{"task_id":"current","expected_head_sha":%q,"confirm_history_rewrite":true}`, strings.Repeat("a", 40))))
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.ErrorContains(t, err, "current active Automation graph")
 	record, err := opts.TaskPullRequestRepo.GetByTaskID(ctx, implementationTask.ID)
 	require.NoError(t, err)
 	require.NotNil(t, record)

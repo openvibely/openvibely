@@ -321,7 +321,10 @@ func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task mode
 		runtime.Executor = func(toolCtx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 			toolName := strings.ToLower(strings.TrimSpace(name))
 			if writeTools[toolName] {
-				if automationContext.OriginTask && len(automationContext.Bindings) == 0 && toolName != "github_open_pull_request" {
+				if automationContext.OriginTask && toolName == "github_open_pull_request" {
+					return baseExecutor(toolCtx, name, input)
+				}
+				if automationContext.OriginTask && len(automationContext.Bindings) == 0 {
 					return "", true, true, errors.New("GitHub mutation is not authorized by the caller's Automation graph because its originating graph is no longer current")
 				}
 				for _, binding := range automationContext.Bindings {

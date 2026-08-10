@@ -299,7 +299,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			automationBound, err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req)
+			automationBound, err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req, true)
 			if err != nil {
 				return "", err
 			}
@@ -382,7 +382,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			automationBound, err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req)
+			automationBound, err := applyAutomationPullRequestConfiguration(ctx, opts, task, &req, false)
 			if err != nil {
 				return "", err
 			}
@@ -602,7 +602,7 @@ func automationPullRequestRequiresStructuredBody(ctx context.Context, opts githu
 	if opts.AutomationRepo == nil {
 		return false, errors.New("Automation repository unavailable for pull request body validation")
 	}
-	if automationContext.OriginTask && len(automationContext.Bindings) == 0 {
+	if automationContext.OriginTask {
 		taskID, _, hasExecution := AutomationExecutionFromContext(ctx)
 		if !hasExecution {
 			return false, errors.New("Automation pull request action requires exact causal task provenance")
@@ -689,7 +689,7 @@ type automationPullRequestConfig struct {
 	draft bool
 }
 
-func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task, req *GitHubIssueActionRequest) (bool, error) {
+func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIssueRuntimeOptions, task *models.Task, req *GitHubIssueActionRequest, allowDurableProvenance bool) (bool, error) {
 	automationContext, automationBound := AutomationContextFromContext(ctx)
 	if !automationBound || automationContext.ProjectID != opts.ProjectID {
 		return false, nil
@@ -704,7 +704,7 @@ func applyAutomationPullRequestConfiguration(ctx context.Context, opts githubIss
 	if callerTaskID != task.ID {
 		return false, errors.New("Automation pull request action cannot mutate a different task")
 	}
-	if automationContext.OriginTask && len(automationContext.Bindings) == 0 {
+	if automationContext.OriginTask && allowDurableProvenance {
 		provenance, err := opts.AutomationRepo.GitHubIssueTaskProvenance(ctx, opts.ProjectID, task.ID)
 		if err != nil {
 			return false, err
