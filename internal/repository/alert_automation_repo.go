@@ -465,6 +465,13 @@ func alertAutomationWorkItems(ctx context.Context, exec SQLExecutor, projectID, 
 }
 
 func recordAlertImplementationProjection(ctx context.Context, exec SQLExecutor, projectID, alertID, taskID string) error {
+	existing, err := alertAutomationBindingsForTask(ctx, exec, projectID, alertID, taskID)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
+		return nil
+	}
 	rows, err := exec.QueryContext(ctx, `SELECT DISTINCT wi.automation_id, wi.origin_version_id, wi.id,
 		COALESCE((SELECT p.node_id FROM automation_work_item_positions p WHERE p.work_item_id = wi.id ORDER BY p.entered_at, p.node_id LIMIT 1), '')
 		FROM automation_work_items wi

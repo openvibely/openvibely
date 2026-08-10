@@ -2,10 +2,12 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -474,5 +476,232 @@ func TestAlertRepo_DeleteAll(t *testing.T) {
 	}
 	if len(alerts2) != 2 {
 		t.Fatalf("expected 2 alerts for project2, got %d", len(alerts2))
+	}
+}
+
+type alertAutomationInvalidationFixture struct {
+	automationRepo *AutomationRepo
+	broadcaster    *events.Broadcaster
+	automationID   string
+	versionID      string
+	producerNodeID string
+}
+
+func setupAlertAutomationInvalidationFixture(t *testing.T, db *sql.DB, projectID string) alertAutomationInvalidationFixture {
+	t.Helper()
+	ctx := context.Background()
+	automationID := NewID()
+	versionID := NewID()
+	producerNodeID := NewID()
+	notificationNodeID := NewID()
+	approvalNodeID := NewID()
+	inboxNodeID := NewID()
+	implementationNodeID := NewID()
+	if _, err := db.ExecContext(ctx, `INSERT INTO automations
+		(id, project_id, stable_key, name, lifecycle_state, published_version_id)
+		VALUES (?, ?, ?, 'Alert lifecycle automation', 'active', ?)`, automationID, projectID, automationID, versionID); err != nil {
+		t.Fatalf("creating automation: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO automation_versions
+		(id, project_id, automation_id, version, state, source, adapter_key, published_at)
+		VALUES (?, ?, ?, 1, 'published', 'manual', 'native_sdlc', CURRENT_TIMESTAMP)`, versionID, projectID, automationID); err != nil {
+		t.Fatalf("creating automation version: %v", err)
+	}
+	nodes := []struct {
+		id, key, name, nodeType, role string
+	}{
+		{producerNodeID, "producer", "Producer", "agent_task", "finder"},
+		{notificationNodeID, "notification", "Create notification", "action", "create_notification"},
+		{approvalNodeID, "approval", "Approve notification", "human_gate", "native_approval"},
+		{inboxNodeID, "inbox", "Native inbox", "action", "native_inbox"},
+		{implementationNodeID, "implementation", "Implementation", "agent_task", "implementation"},
+	}
+	for _, node := range nodes {
+		if _, err := db.ExecContext(ctx, `INSERT INTO automation_nodes
+			(id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, node.id, projectID, automationID, versionID, node.key, node.name, node.nodeType, node.role); err != nil {
+			t.Fatalf("creating automation node %s: %v", node.key, err)
+		}
+	}
+	edges := []struct {
+		key, from, to, condition string
+	}{
+		{"producer-notification", producerNodeID, notificationNodeID, `{}`},
+		{"notification-approval", notificationNodeID, approvalNodeID, `{}`},
+		{"approval-inbox", approvalNodeID, inboxNodeID, `{"state":"approved"}`},
+		{"inbox-implementation", inboxNodeID, implementationNodeID, `{}`},
+	}
+	for i, edge := range edges {
+		if _, err := db.ExecContext(ctx, `INSERT INTO automation_edges
+			(project_id, automation_id, version_id, source_node_id, target_node_id, edge_key, condition_json, display_order)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, projectID, automationID, versionID, edge.from, edge.to, edge.key, edge.condition, i); err != nil {
+			t.Fatalf("creating automation edge %s: %v", edge.key, err)
+		}
+	}
+	broadcaster := events.NewBroadcaster()
+	automationRepo := NewAutomationRepo(db)
+	automationRepo.SetBroadcaster(broadcaster)
+	return alertAutomationInvalidationFixture{
+		automationRepo: automationRepo,
+		broadcaster:    broadcaster,
+		automationID:   automationID,
+		versionID:      versionID,
+		producerNodeID: producerNodeID,
+	}
+}
+
+func createAutomationBackedActionableAlert(t *testing.T, repo *AlertRepo, fixture alertAutomationInvalidationFixture, projectID, title string) *models.Alert {
+	t.Helper()
+	a := &models.Alert{
+		ProjectID:       projectID,
+		Scope:           models.AlertScopeProject,
+		Type:            models.AlertType("suggestion"),
+		Severity:        models.SeverityInfo,
+		Title:           title,
+		Message:         "Summary",
+		Body:            "Full body",
+		Source:          "test",
+		DecisionState:   models.AlertDecisionPending,
+		ProcessingState: models.AlertProcessingUnclaimed,
+		Metadata:        map[string]any{},
+		IdempotencyKey:  title,
+		AutomationContext: &models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{{
+			AutomationID: fixture.automationID,
+			VersionID:    fixture.versionID,
+			NodeID:       fixture.producerNodeID,
+		}}},
+	}
+	created, err := repo.CreateIdempotent(context.Background(), a)
+	if err != nil {
+		t.Fatalf("creating automation-backed alert: %v", err)
+	}
+	return created
+}
+
+func expectAutomationInvalidation(t *testing.T, sub events.Subscriber, want events.TaskEventType, fixture alertAutomationInvalidationFixture, projectID string) events.TaskEvent {
+	t.Helper()
+	select {
+	case event := <-sub:
+		if event.Type != want {
+			t.Fatalf("event type = %s, want %s", event.Type, want)
+		}
+		if event.ProjectID != projectID || event.AutomationID != fixture.automationID || event.VersionID != fixture.versionID {
+			t.Fatalf("event binding = project %q automation %q version %q, want project %q automation %q version %q", event.ProjectID, event.AutomationID, event.VersionID, projectID, fixture.automationID, fixture.versionID)
+		}
+		if event.WorkItemID == "" || event.NodeID == "" {
+			t.Fatalf("event missing work item/node binding: %+v", event)
+		}
+		return event
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for %s invalidation", want)
+	}
+	return events.TaskEvent{}
+}
+
+func assertNoAutomationInvalidation(t *testing.T, sub events.Subscriber) {
+	t.Helper()
+	select {
+	case event := <-sub:
+		t.Fatalf("unexpected invalidation after failed transaction: %+v", event)
+	default:
+	}
+}
+
+func TestAlertRepo_AutomationInvalidationsAfterCommittedLifecycleMutations(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := createTestProject(t, NewProjectRepo(db))
+	fixture := setupAlertAutomationInvalidationFixture(t, db, project.ID)
+	repo := NewAlertRepo(db)
+	repo.SetAutomationRepo(fixture.automationRepo)
+	sub, err := fixture.broadcaster.Subscribe()
+	if err != nil {
+		t.Fatalf("subscribing to automation events: %v", err)
+	}
+	defer fixture.broadcaster.Unsubscribe(sub)
+	ctx := context.Background()
+
+	alert := createAutomationBackedActionableAlert(t, repo, fixture, project.ID, "lifecycle-invalidation")
+	expectAutomationInvalidation(t, sub, events.AutomationWorkItemUpdated, fixture, project.ID)
+	if err := repo.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionPending); err == nil {
+		t.Fatal("invalid pending decision unexpectedly succeeded")
+	}
+	assertNoAutomationInvalidation(t, sub)
+	if err := repo.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatalf("approving alert: %v", err)
+	}
+	expectAutomationInvalidation(t, sub, events.AutomationTransitionCreated, fixture, project.ID)
+	if _, err := repo.ClaimApproved(ctx, project.ID, alert.ID, "scanner", time.Hour); err != nil {
+		t.Fatalf("claiming alert: %v", err)
+	}
+	expectAutomationInvalidation(t, sub, events.AutomationWorkItemUpdated, fixture, project.ID)
+	if err := repo.ReleaseClaim(ctx, project.ID, alert.ID, "scanner"); err != nil {
+		t.Fatalf("releasing claim: %v", err)
+	}
+	expectAutomationInvalidation(t, sub, events.AutomationWorkItemUpdated, fixture, project.ID)
+	if _, err := repo.ClaimApproved(ctx, project.ID, alert.ID, "scanner", time.Hour); err != nil {
+		t.Fatalf("reclaiming alert: %v", err)
+	}
+	expectAutomationInvalidation(t, sub, events.AutomationWorkItemUpdated, fixture, project.ID)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Explicit implementation", Category: models.CategoryBacklog, Priority: 2, Status: models.StatusPending, Prompt: "Implement", ChainConfig: "{}", SwarmConfig: "{}"}
+	if err := NewTaskRepo(db, nil).Create(ctx, task); err != nil {
+		t.Fatalf("creating explicit implementation task: %v", err)
+	}
+	if err := repo.LinkImplementationTask(ctx, project.ID, alert.ID, "scanner", task.ID); err != nil {
+		t.Fatalf("linking implementation task: %v", err)
+	}
+	expectAutomationInvalidation(t, sub, events.AutomationResourceLinked, fixture, project.ID)
+	if err := repo.MarkProcessing(ctx, project.ID, alert.ID, "scanner", models.AlertProcessingCompleted, "done"); err != nil {
+		t.Fatalf("marking processing complete: %v", err)
+	}
+	expectAutomationInvalidation(t, sub, events.AutomationTransitionCreated, fixture, project.ID)
+}
+
+func TestAlertRepo_CreateImplementationTaskPublishesResourceLinkedForNewAndExistingLink(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := createTestProject(t, NewProjectRepo(db))
+	fixture := setupAlertAutomationInvalidationFixture(t, db, project.ID)
+	repo := NewAlertRepo(db)
+	repo.SetAutomationRepo(fixture.automationRepo)
+	sub, err := fixture.broadcaster.Subscribe()
+	if err != nil {
+		t.Fatalf("subscribing to automation events: %v", err)
+	}
+	defer fixture.broadcaster.Unsubscribe(sub)
+	ctx := context.Background()
+
+	alert := createAutomationBackedActionableAlert(t, repo, fixture, project.ID, "create-implementation-invalidation")
+	expectAutomationInvalidation(t, sub, events.AutomationWorkItemUpdated, fixture, project.ID)
+	if err := repo.SetDecision(ctx, project.ID, alert.ID, models.AlertDecisionApproved); err != nil {
+		t.Fatalf("approving alert: %v", err)
+	}
+	expectAutomationInvalidation(t, sub, events.AutomationTransitionCreated, fixture, project.ID)
+	if _, err := repo.ClaimApproved(ctx, project.ID, alert.ID, "scanner", time.Hour); err != nil {
+		t.Fatalf("claiming alert: %v", err)
+	}
+	expectAutomationInvalidation(t, sub, events.AutomationWorkItemUpdated, fixture, project.ID)
+	first, err := repo.CreateImplementationTask(ctx, project.ID, alert.ID, "scanner", models.AlertImplementationTaskInput{
+		Title: "Generated implementation", Prompt: "Implement approved work", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("creating implementation task: %v", err)
+	}
+	expectAutomationInvalidation(t, sub, events.AutomationResourceLinked, fixture, project.ID)
+	second, err := repo.CreateImplementationTask(ctx, project.ID, alert.ID, "scanner", models.AlertImplementationTaskInput{
+		Title: "Duplicate implementation", Prompt: "Duplicate should not create", Priority: 2,
+	})
+	if err != nil {
+		t.Fatalf("reusing implementation task: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("idempotent implementation task = %s, want %s", second.ID, first.ID)
+	}
+	expectAutomationInvalidation(t, sub, events.AutomationResourceLinked, fixture, project.ID)
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND title = ?`, project.ID, "Generated implementation").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("implementation tasks created = %d, want 1", count)
 	}
 }
