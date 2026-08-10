@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -438,60 +437,24 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 	}
 
 	ctx := c.Request().Context()
-	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
-	h.recoverTaskWorktreeState(ctx, task, project)
+	state := h.resolveTaskChangesWorktreeState(ctx, task)
 
-	// If task has a worktree branch, show worktree diff instead of execution diff
-	if task.WorktreeBranch != "" {
-		// Detect already-merged branches so the changes-tab dropdown does not
-		// keep offering redundant merge actions.
-		branchAlreadyMerged := h.reconcileAlreadyMergedBranch(ctx, task)
-		rebaseAvailable := h.taskRebaseAvailable(task, project, branchAlreadyMerged)
-		if project != nil && project.RepoPath != "" {
-			targetBranch := task.MergeTargetBranch
-			if targetBranch == "" {
-				targetBranch = service.GetDefaultBranch(project.RepoPath)
-			}
-			diffOutput := service.GetWorktreeDiff(project.RepoPath, task.WorktreeBranch, targetBranch)
-			fileStats := service.GetWorktreeFileStats(project.RepoPath, task.WorktreeBranch, targetBranch)
-			if task.WorktreePath != "" && task.MergeStatus != models.MergeStatusMerged {
-				if _, err := os.Stat(task.WorktreePath); err == nil {
-					diffOutput = service.GetWorktreeDiffWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
-					fileStats = service.GetWorktreeFileStatsWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath)
-				}
-			}
-
-			// If live diff is empty because the branch was already merged, fall
-			// back to the preserved execution diff.
-			if branchAlreadyMerged && strings.TrimSpace(diffOutput) == "" {
-				if preservedDiff, _ := h.execRepo.GetLatestNonEmptyDiffOutput(ctx, taskID); preservedDiff != "" {
-					diffOutput = preservedDiff
-					fileStats = nil
-				}
-			}
-
-			var reviewComments []models.ReviewComment
-			if h.reviewCommentRepo != nil {
-				reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
-			}
-			var taskPR *models.TaskPullRequest
-			if h.taskPullRequestRepo != nil {
-				taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
-			}
-
-			return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-				diffOutput, task, fileStats, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable,
-			))
-		}
-	}
-
-	// Fallback to execution-based diff
-	diffOutput, _ := h.execRepo.GetLatestNonEmptyDiffOutput(c.Request().Context(), taskID)
 	var reviewComments []models.ReviewComment
 	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
+		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
 	}
-	return render(c, http.StatusOK, pages.TaskChangesContent(diffOutput, task.ID, reviewComments))
+
+	if state.UseWorktreeContent {
+		var taskPR *models.TaskPullRequest
+		if h.taskPullRequestRepo != nil {
+			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
+		}
+		return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
+			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.BranchAlreadyMerged, state.RebaseAvailable,
+		))
+	}
+
+	return render(c, http.StatusOK, pages.TaskChangesContent(state.DiffOutput, task.ID, reviewComments))
 }
 
 // UpdateWorktreeSettings updates global worktree settings.
