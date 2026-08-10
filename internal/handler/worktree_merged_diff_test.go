@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -987,6 +988,170 @@ func TestHandler_MergeTaskBranch_RejectsAlreadyMergedBranch(t *testing.T) {
 	}
 	if updated.MergeStatus != models.MergeStatusMerged {
 		t.Fatalf("expected merge_status back-filled to merged after rejection, got %s", updated.MergeStatus)
+	}
+}
+
+func TestHandler_TaskChangesEndpointsShareActiveLiveWorktreeResolution(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := gitCurrentBranch(t, repoDir)
+
+	project := &models.Project{Name: "Active Equivalent Changes Project", RepoPath: repoDir}
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Active equivalent changes",
+		Category:          models.CategoryActive,
+		Status:            models.StatusRunning,
+		MergeTargetBranch: targetBranch,
+		MergeStatus:       models.MergeStatusMerged, // stale from a previous execution
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	worktreeBranch := "task/" + task.ID[:8] + "-active-equivalent"
+	runGit(t, repoDir, "worktree", "add", "-b", worktreeBranch, worktreePath, targetBranch)
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, worktreeBranch); err != nil {
+		t.Fatalf("update worktree info: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "active_live.txt"), []byte("active live equivalent diff\n"), 0644); err != nil {
+		t.Fatalf("write active live file: %v", err)
+	}
+
+	agentID := firstAgentID(t, h)
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agentID, Status: models.ExecRunning, PromptSent: "active equivalent"}
+	if err := h.execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	staleDiff := "diff --git a/stale.txt b/stale.txt\n+stale preserved diff\n"
+	if err := h.execRepo.UpdateDiffOutput(ctx, exec.ID, staleDiff); err != nil {
+		t.Fatalf("update stale diff: %v", err)
+	}
+
+	fullBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID, false)
+	worktreeBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes/worktree", task.ID, true)
+
+	assertBodyContainsAll(t, fullBody, "active_live.txt", "active live equivalent diff")
+	assertBodyContainsAll(t, worktreeBody, "active_live.txt", "active live equivalent diff")
+	assertBodyOmitsAll(t, fullBody, "stale.txt", "stale preserved diff")
+	assertBodyOmitsAll(t, worktreeBody, "stale.txt", "stale preserved diff")
+	if strings.Contains(fullBody, "/worktree/merge") != strings.Contains(worktreeBody, "/worktree/merge") {
+		t.Fatalf("expected equivalent local action visibility full=%t worktree=%t", strings.Contains(fullBody, "/worktree/merge"), strings.Contains(worktreeBody, "/worktree/merge"))
+	}
+}
+
+func TestHandler_TaskChangesEndpointsShareMissingWorktreeFallbackResolution(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := createHandlerTestGitRepo(t)
+	targetBranch := gitCurrentBranch(t, repoDir)
+	taskBranch := "task/missing-worktree-equivalent"
+	runGit(t, repoDir, "checkout", "-b", taskBranch)
+	if err := os.WriteFile(filepath.Join(repoDir, "branch_only.txt"), []byte("branch-only live diff\n"), 0644); err != nil {
+		t.Fatalf("write branch-only file: %v", err)
+	}
+	runGit(t, repoDir, "add", "branch_only.txt")
+	runGit(t, repoDir, "commit", "-m", "branch-only change")
+	runGit(t, repoDir, "checkout", targetBranch)
+
+	project := &models.Project{Name: "Missing Worktree Equivalent Project", RepoPath: repoDir}
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Missing worktree equivalent changes",
+		Category:          models.CategoryCompleted,
+		Status:            models.StatusCompleted,
+		WorktreePath:      filepath.Join(repoDir, ".worktrees", "does-not-exist"),
+		WorktreeBranch:    taskBranch,
+		MergeTargetBranch: targetBranch,
+		MergeStatus:       models.MergeStatusPending,
+	}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	agentID := firstAgentID(t, h)
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agentID, Status: models.ExecCompleted, PromptSent: "missing worktree"}
+	if err := h.execRepo.Create(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	preservedDiff := "diff --git a/preserved_missing.txt b/preserved_missing.txt\n+preserved missing worktree diff\n"
+	if err := h.execRepo.UpdateDiffOutput(ctx, exec.ID, preservedDiff); err != nil {
+		t.Fatalf("update preserved diff: %v", err)
+	}
+
+	fullBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes", task.ID, false)
+	worktreeBody := renderTaskChangesEndpoint(t, h, e, http.MethodGet, "/tasks/"+task.ID+"/changes/worktree", task.ID, true)
+
+	assertBodyContainsAll(t, fullBody, "preserved_missing.txt", "preserved missing worktree diff")
+	assertBodyContainsAll(t, worktreeBody, "preserved_missing.txt", "preserved missing worktree diff")
+	if strings.Contains(fullBody, "branch-only live diff") || strings.Contains(worktreeBody, "branch-only live diff") {
+		t.Fatalf("expected both endpoints to use preserved fallback rather than branch live diff\nfull=%s\nworktree=%s", fullBody, worktreeBody)
+	}
+	if strings.Contains(fullBody, "/worktree/merge") != strings.Contains(worktreeBody, "/worktree/merge") {
+		t.Fatalf("expected equivalent local action visibility full=%t worktree=%t", strings.Contains(fullBody, "/worktree/merge"), strings.Contains(worktreeBody, "/worktree/merge"))
+	}
+}
+
+func renderTaskChangesEndpoint(t *testing.T, h *Handler, e *echo.Echo, method, path, taskID string, worktree bool) string {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(taskID)
+	var err error
+	if worktree {
+		err = h.GetTaskChangesWorktree(c)
+	} else {
+		err = h.GetTaskChanges(c)
+	}
+	if err != nil {
+		t.Fatalf("render %s failed: %v", path, err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for %s, got %d body=%s", path, rec.Code, rec.Body.String())
+	}
+	return rec.Body.String()
+}
+
+func firstAgentID(t *testing.T, h *Handler) string {
+	t.Helper()
+	agents, err := h.llmConfigRepo.List(context.Background())
+	if err != nil || len(agents) == 0 {
+		t.Fatalf("list agents: %v", err)
+	}
+	return agents[0].ID
+}
+
+func assertBodyContainsAll(t *testing.T, body string, values ...string) {
+	t.Helper()
+	for _, value := range values {
+		if !strings.Contains(body, value) {
+			t.Fatalf("expected body to contain %q, body=%s", value, body)
+		}
+	}
+}
+
+func assertBodyOmitsAll(t *testing.T, body string, values ...string) {
+	t.Helper()
+	for _, value := range values {
+		if strings.Contains(body, value) {
+			t.Fatalf("expected body to omit %q, body=%s", value, body)
+		}
 	}
 }
 
