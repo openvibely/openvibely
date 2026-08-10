@@ -44,12 +44,15 @@ func (r *CustomPersonalityRepo) GetByKey(ctx context.Context, key string) (*mode
 	return &p, nil
 }
 
-// List returns all custom personalities ordered by name.
+const customPersonalityPromptPreviewLength = 150
+
+// List returns custom personalities ordered by name using a compact card/list projection.
+// SystemPrompt is intentionally left empty; callers that need the full prompt must use GetByKey.
 func (r *CustomPersonalityRepo) List(ctx context.Context) ([]models.CustomPersonality, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, key, description, system_prompt, created_at, updated_at
+		`SELECT id, name, key, description, SUBSTR(system_prompt, 1, ?) AS system_prompt_preview, created_at, updated_at
 		 FROM custom_personalities
-		 ORDER BY name ASC`)
+		 ORDER BY name ASC`, customPersonalityPromptPreviewLength)
 	if err != nil {
 		return nil, fmt.Errorf("list custom personalities: %w", err)
 	}
@@ -58,7 +61,7 @@ func (r *CustomPersonalityRepo) List(ctx context.Context) ([]models.CustomPerson
 	var personalities []models.CustomPersonality
 	for rows.Next() {
 		var p models.CustomPersonality
-		if err := rows.Scan(&p.ID, &p.Name, &p.Key, &p.Description, &p.SystemPrompt, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Key, &p.Description, &p.SystemPromptPreview, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan custom personality: %w", err)
 		}
 		personalities = append(personalities, p)

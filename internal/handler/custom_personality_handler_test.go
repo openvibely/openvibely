@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -100,6 +101,34 @@ func TestHandler_GetCustomPersonality(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Get Test", resp.Name)
 	assert.Equal(t, "get_test", resp.Key)
+}
+
+func TestHandler_GetCustomPersonality_ReturnsPresetDetailWhenNoOverride(t *testing.T) {
+	h, e, repo, _ := setupCustomPersonalityHandler(t)
+	ctx := context.Background()
+
+	got, err := repo.GetByKey(ctx, "pirate_captain")
+	require.NoError(t, err)
+	require.Nil(t, got)
+
+	req := httptest.NewRequest(http.MethodGet, "/personality/custom/pirate_captain", nil)
+	req.Header.Set(echo.HeaderAccept, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/personality/custom/:key")
+	c.SetParamNames("key")
+	c.SetParamValues("pirate_captain")
+
+	err = h.GetCustomPersonality(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp models.CustomPersonality
+	err = json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, "Pirate Captain", resp.Name)
+	assert.Equal(t, "pirate_captain", resp.Key)
+	assert.Equal(t, service.GetPersonalityPrompt("pirate_captain"), resp.SystemPrompt)
 }
 
 func TestHandler_UpdateCustomPersonality(t *testing.T) {
@@ -333,6 +362,38 @@ func TestHandler_PersonalityPage_CardRendering(t *testing.T) {
 
 	// Set as Default should be in the kebab menus for non-active cards
 	assert.Contains(t, body, "Set as Default")
+}
+
+func TestHandler_PersonalityPage_DoesNotRenderFullPromptBodiesInCardAttributes(t *testing.T) {
+	h, e, repo, _ := setupCustomPersonalityHandler(t)
+	ctx := context.Background()
+
+	promptPrefix := strings.Repeat("VISIBLE_PREVIEW_TEXT_", 10)
+	promptTail := "FULL_CUSTOM_PROMPT_BODY_MUST_NOT_RENDER_IN_CARD_ATTRIBUTES"
+	longPrompt := promptPrefix + strings.Repeat("x", 32*1024-len(promptPrefix)-len(promptTail)) + promptTail
+	for i := 0; i < 100; i++ {
+		require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
+			Name:         "Large Custom Personality " + strconv.Itoa(i),
+			Key:          "large_custom_personality_" + strconv.Itoa(i),
+			Description:  "Large prompt render fixture",
+			SystemPrompt: longPrompt,
+		}))
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/personality", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.handleAppSettings(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	body := rec.Body.String()
+	assert.Contains(t, body, "VISIBLE_PREVIEW_TEXT_")
+	assert.NotContains(t, body, promptTail)
+	assert.NotContains(t, body, "data-personality-prompt=")
+	assert.Less(t, len(body), 512*1024, "personality section should be bounded by card metadata and previews")
+	assert.Contains(t, body, "fetch('/personality/custom/'")
 }
 
 func TestHandler_PersonalityPage_DefaultCardNotClickable(t *testing.T) {

@@ -124,6 +124,16 @@ func (h *Handler) GetCustomPersonality(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load personality")
 	}
 	if p == nil {
+		for _, preset := range service.AllPersonalities() {
+			if preset.Key == key && key != "" {
+				return c.JSON(http.StatusOK, &models.CustomPersonality{
+					Name:         preset.Name,
+					Key:          preset.Key,
+					Description:  preset.Description,
+					SystemPrompt: service.GetPersonalityPrompt(key),
+				})
+			}
+		}
 		return echo.NewHTTPError(http.StatusNotFound, "Custom personality not found")
 	}
 

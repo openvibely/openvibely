@@ -188,11 +188,11 @@ func personalityDescriptionForKey(key string, customPersonalities []models.Custo
 	return ""
 }
 
-func personalityPromptForKey(key string, customPersonalities []models.CustomPersonality) string {
+func personalityPromptPreviewForKey(key string, customPersonalities []models.CustomPersonality) string {
 	if cp, ok := customByKey(customPersonalities, key); ok {
-		return cp.SystemPrompt
+		return cp.SystemPromptPreview
 	}
-	return service.GetPersonalityPrompt(key)
+	return truncatePrompt(service.GetPersonalityPrompt(key), 150)
 }
 
 func boolString(v bool) string {
@@ -262,14 +262,14 @@ func builtInPersonalityCard(p service.PersonalityInfo, personality string, custo
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" data-personality-prompt=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" data-personality-preview=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var9 string
-		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalityPromptForKey(p.Key, customPersonalities))
+		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalityPromptPreviewForKey(p.Key, customPersonalities))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 103, Col: 79}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 103, Col: 87}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 		if templ_7745c5c3_Err != nil {
@@ -293,9 +293,9 @@ func builtInPersonalityCard(p service.PersonalityInfo, personality string, custo
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var11 string
-		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptForKey(p.Key, customPersonalities))
+		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptPreviewForKey(p.Key, customPersonalities))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 107, Col: 195}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 107, Col: 202}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 		if templ_7745c5c3_Err != nil {
@@ -371,9 +371,9 @@ func builtInPersonalityCard(p service.PersonalityInfo, personality string, custo
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var15 string
-		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(truncatePrompt(personalityPromptForKey(p.Key, customPersonalities), 150))
+		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(personalityPromptPreviewForKey(p.Key, customPersonalities))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 147, Col: 126}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 147, Col: 112}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 		if templ_7745c5c3_Err != nil {
@@ -447,14 +447,14 @@ func customPersonalityCard(cp models.CustomPersonality, personality string) temp
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" data-personality-prompt=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "\" data-personality-preview=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var20 string
-		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.SystemPrompt)
+		templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.SystemPromptPreview)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 159, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 159, Col: 51}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 		if templ_7745c5c3_Err != nil {
@@ -465,9 +465,9 @@ func customPersonalityCard(cp models.CustomPersonality, personality string) temp
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var21 string
-		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Name + " " + cp.Description + " " + cp.SystemPrompt)
+		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Name + " " + cp.Description + " " + cp.SystemPromptPreview)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 163, Col: 75}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 163, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
@@ -560,9 +560,9 @@ func customPersonalityCard(cp models.CustomPersonality, personality string) temp
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var26 string
-		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(truncatePrompt(cp.SystemPrompt, 150))
+		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(cp.SystemPromptPreview)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 214, Col: 90}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 214, Col: 76}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
@@ -641,7 +641,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<!-- Base (No Personality) card — non-clickable --><div class=\"card bg-base-100 shadow-sm border border-base-300\" data-personality-key=\"\" data-personality-name=\"Base\" data-personality-description=\"\" data-personality-prompt=\"\" data-personality-is-preset=\"true\" data-personality-has-custom=\"false\" data-personality-is-default-card=\"true\" data-search-card data-search-text=\"Base No personality prompt applied\"><div class=\"card-body relative\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<!-- Base (No Personality) card — non-clickable --><div class=\"card bg-base-100 shadow-sm border border-base-300\" data-personality-key=\"\" data-personality-name=\"Base\" data-personality-description=\"\" data-personality-is-preset=\"true\" data-personality-has-custom=\"false\" data-personality-is-default-card=\"true\" data-search-card data-search-text=\"Base No personality prompt applied\"><div class=\"card-body relative\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -674,7 +674,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var29 string
 				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue(p.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 297, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 294, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 				if templ_7745c5c3_Err != nil {
@@ -687,7 +687,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var30 string
 				templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalityNameForKey(p.Key, customPersonalities))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 298, Col: 79}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 295, Col: 79}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 				if templ_7745c5c3_Err != nil {
@@ -700,20 +700,20 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var31 string
 				templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalityDescriptionForKey(p.Key, customPersonalities))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 299, Col: 93}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 296, Col: 93}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" data-personality-prompt=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "\" data-personality-preview=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var32 string
-				templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalityPromptForKey(p.Key, customPersonalities))
+				templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalityPromptPreviewForKey(p.Key, customPersonalities))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 300, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 297, Col: 91}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 				if templ_7745c5c3_Err != nil {
@@ -726,7 +726,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var33 string
 				templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(boolString(personalityHasCustomEntry(p.Key, customPersonalities)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 302, Col: 101}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 299, Col: 101}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 				if templ_7745c5c3_Err != nil {
@@ -737,9 +737,9 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var34 string
-				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptForKey(p.Key, customPersonalities))
+				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptPreviewForKey(p.Key, customPersonalities))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 304, Col: 199}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 301, Col: 206}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 				if templ_7745c5c3_Err != nil {
@@ -757,7 +757,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 					var templ_7745c5c3_Var35 string
 					templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.ResolveAttributeValue("/personality/save?personality=" + p.Key)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 322, Col: 63}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 319, Col: 63}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 					if templ_7745c5c3_Err != nil {
@@ -775,7 +775,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var36 string
 				templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(personalityNameForKey(p.Key, customPersonalities))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 335, Col: 60}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 332, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 				if templ_7745c5c3_Err != nil {
@@ -804,7 +804,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var37 string
 				templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(personalityDescriptionForKey(p.Key, customPersonalities))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 343, Col: 101}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 340, Col: 101}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 				if templ_7745c5c3_Err != nil {
@@ -815,9 +815,9 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var38 string
-				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(truncatePrompt(personalityPromptForKey(p.Key, customPersonalities), 150))
+				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(personalityPromptPreviewForKey(p.Key, customPersonalities))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 344, Col: 130}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 341, Col: 116}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 				if templ_7745c5c3_Err != nil {
@@ -842,7 +842,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var39 string
 				templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 356, Col: 34}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 352, Col: 35}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var39)
 				if templ_7745c5c3_Err != nil {
@@ -855,7 +855,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var40 string
 				templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 357, Col: 36}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 353, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var40)
 				if templ_7745c5c3_Err != nil {
@@ -868,20 +868,20 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var41 string
 				templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Description)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 358, Col: 50}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 354, Col: 51}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var41)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "\" data-personality-prompt=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "\" data-personality-preview=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var42 string
-				templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.SystemPrompt)
+				templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.SystemPromptPreview)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 359, Col: 46}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 355, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 				if templ_7745c5c3_Err != nil {
@@ -892,9 +892,9 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var43 string
-				templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Name + " " + cp.Description + " " + cp.SystemPrompt)
+				templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(cp.Name + " " + cp.Description + " " + cp.SystemPromptPreview)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 363, Col: 78}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 359, Col: 86}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 				if templ_7745c5c3_Err != nil {
@@ -912,7 +912,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 					var templ_7745c5c3_Var44 string
 					templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue("/personality/save?personality=" + cp.Key)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 381, Col: 63}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 377, Col: 64}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 					if templ_7745c5c3_Err != nil {
@@ -930,7 +930,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var45 string
 				templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue("/personality/custom/" + cp.Key)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 392, Col: 54}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 388, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 				if templ_7745c5c3_Err != nil {
@@ -943,7 +943,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				var templ_7745c5c3_Var46 string
 				templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(cp.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 405, Col: 17}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 401, Col: 18}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 				if templ_7745c5c3_Err != nil {
@@ -971,7 +971,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 					var templ_7745c5c3_Var47 string
 					templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(cp.Description)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 412, Col: 59}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 408, Col: 60}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 					if templ_7745c5c3_Err != nil {
@@ -987,9 +987,9 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var48 string
-				templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(truncatePrompt(cp.SystemPrompt, 150))
+				templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs(cp.SystemPromptPreview)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 414, Col: 93}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/app_settings.templ`, Line: 410, Col: 80}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
 				if templ_7745c5c3_Err != nil {
@@ -1001,7 +1001,7 @@ func PersonalitySection(personality string, customPersonalities []models.CustomP
 				}
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</div><!-- Create/Edit Personality Modal --><dialog id=\"personality_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closePersonalityModal()\" aria-label=\"Close personality dialog\" title=\"Close personality dialog\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 id=\"personality_modal_title\" class=\"font-bold text-lg mb-4 pr-10\">New Custom Personality</h3><form id=\"personality_form\" method=\"post\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name *</span></label> <input type=\"text\" id=\"personality_name\" name=\"name\" class=\"input input-bordered\" required placeholder=\"My Custom Personality\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <input type=\"text\" id=\"personality_description\" name=\"description\" class=\"input input-bordered\" placeholder=\"Short description of this personality\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">System Prompt * (min 20 chars)</span></label> <textarea id=\"personality_prompt\" name=\"system_prompt\" class=\"textarea textarea-bordered w-full h-32\" required minlength=\"20\" placeholder=\"Describe how the AI should behave...\"></textarea></div><div class=\"modal-action\"><div class=\"flex gap-2 w-full justify-between\"><div id=\"personality_modal_extra_actions\" class=\"flex gap-2\"></div><div class=\"flex gap-2\"><button type=\"button\" class=\"btn\" onclick=\"closePersonalityModal()\">Cancel</button> <button type=\"submit\" id=\"personality_submit_btn\" class=\"btn btn-primary\">Create</button></div></div></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><script type=\"text/javascript\">\n\t\t\tfunction openNewPersonalityModal() {\n\t\t\t\tvar form = document.getElementById('personality_form');\n\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'New Custom Personality';\n\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\tform.setAttribute('hx-post', '/personality/custom');\n\t\t\t\tform.setAttribute('hx-target', '#personality-section');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\tif (window.htmx) htmx.process(form);\n\t\t\t\tdocument.getElementById('personality_name').value = '';\n\t\t\t\tdocument.getElementById('personality_description').value = '';\n\t\t\t\tdocument.getElementById('personality_prompt').value = '';\n\t\t\t\tdocument.getElementById('personality_submit_btn').textContent = 'Create';\n\t\t\t\tdocument.getElementById('personality_modal_extra_actions').innerHTML = '';\n\t\t\t\tpersonality_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction editPersonalityFromData(card) {\n\t\t\t\tif (!card) return;\n\t\t\t\tvar key = card.dataset.personalityKey || '';\n\t\t\t\tvar name = card.dataset.personalityName || '';\n\t\t\t\tvar description = card.dataset.personalityDescription || '';\n\t\t\t\tvar prompt = card.dataset.personalityPrompt || '';\n\t\t\t\tvar isPreset = card.dataset.personalityIsPreset === 'true';\n\t\t\t\tvar hasCustom = card.dataset.personalityHasCustom === 'true';\n\n\t\t\t\tvar form = document.getElementById('personality_form');\n\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'Edit: ' + name;\n\t\t\t\tform.removeAttribute('hx-post');\n\t\t\t\tform.setAttribute('hx-put', '/personality/custom/' + encodeURIComponent(key));\n\t\t\t\tform.setAttribute('hx-target', '#personality-section');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\tif (window.htmx) htmx.process(form);\n\n\t\t\t\tdocument.getElementById('personality_name').value = name;\n\t\t\t\tdocument.getElementById('personality_description').value = description;\n\t\t\t\tdocument.getElementById('personality_prompt').value = prompt;\n\n\t\t\t\tif (isPreset && hasCustom) {\n\t\t\t\t\tdocument.getElementById('personality_submit_btn').textContent = 'Save Changes';\n\t\t\t\t} else if (isPreset && !hasCustom) {\n\t\t\t\t\tdocument.getElementById('personality_submit_btn').textContent = 'Save Override';\n\t\t\t\t} else {\n\t\t\t\t\tdocument.getElementById('personality_submit_btn').textContent = 'Save Changes';\n\t\t\t\t}\n\n\t\t\t\t// Extra actions: Reset to Default (for preset overrides) or Delete (for custom)\n\t\t\t\tvar extras = document.getElementById('personality_modal_extra_actions');\n\t\t\t\textras.innerHTML = '';\n\n\t\t\t\tif (isPreset && hasCustom) {\n\t\t\t\t\tvar resetBtn = document.createElement('button');\n\t\t\t\t\tresetBtn.type = 'button';\n\t\t\t\t\tresetBtn.className = 'btn btn-outline btn-warning btn-sm';\n\t\t\t\t\tresetBtn.textContent = 'Reset to Default';\n\t\t\t\t\tresetBtn.setAttribute('hx-delete', '/personality/custom/' + encodeURIComponent(key));\n\t\t\t\t\tresetBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tresetBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tresetBtn.setAttribute('hx-confirm', 'Reset this personality to its built-in default?');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(resetBtn);\n\t\t\t\t\t\thtmx.process(resetBtn);\n\t\t\t\t\t}\n\t\t\t\t} else if (!isPreset) {\n\t\t\t\t\tvar delBtn = document.createElement('button');\n\t\t\t\t\tdelBtn.type = 'button';\n\t\t\t\t\tdelBtn.className = 'btn btn-outline btn-error btn-sm';\n\t\t\t\t\tdelBtn.textContent = 'Delete';\n\t\t\t\t\tdelBtn.setAttribute('hx-delete', '/personality/custom/' + encodeURIComponent(key));\n\t\t\t\t\tdelBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tdelBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tdelBtn.setAttribute('hx-confirm', 'Delete this custom personality?');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(delBtn);\n\t\t\t\t\t\thtmx.process(delBtn);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t// Add \"Set as Default\" button when editing a non-default personality\n\t\t\t\tvar section = document.getElementById('personality-section');\n\t\t\t\tvar selectedPersonality = section ? (section.dataset.selectedPersonality || '') : '';\n\t\t\t\tif (key !== selectedPersonality) {\n\t\t\t\t\tvar setDefaultBtn = document.createElement('button');\n\t\t\t\t\tsetDefaultBtn.type = 'button';\n\t\t\t\t\tsetDefaultBtn.className = 'btn btn-outline btn-primary btn-sm';\n\t\t\t\t\tsetDefaultBtn.textContent = 'Set as Default';\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-post', '/personality/save?personality=' + encodeURIComponent(key));\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(setDefaultBtn);\n\t\t\t\t\t\thtmx.process(setDefaultBtn);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tpersonality_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction closePersonalityModal() {\n\t\t\t\tpersonality_modal.close();\n\t\t\t}\n\n\t\t\t// Close modal after successful HTMX swap\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tif (event.detail.target && event.detail.target.id === 'personality-section') {\n\t\t\t\t\tvar modal = document.getElementById('personality_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t});\n\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 78, "</div><!-- Create/Edit Personality Modal --><dialog id=\"personality_modal\" class=\"modal\" onclose=\"if (typeof syncToastContainerHost === 'function') syncToastContainerHost()\"><div class=\"modal-box\"><button type=\"button\" class=\"btn btn-circle btn-ghost btn-xs ov-modal-close\" onclick=\"closePersonalityModal()\" aria-label=\"Close personality dialog\" title=\"Close personality dialog\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\" aria-hidden=\"true\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M6 18L18 6M6 6l12 12\"></path></svg></button><h3 id=\"personality_modal_title\" class=\"font-bold text-lg mb-4 pr-10\">New Custom Personality</h3><form id=\"personality_form\" method=\"post\"><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Name *</span></label> <input type=\"text\" id=\"personality_name\" name=\"name\" class=\"input input-bordered\" required placeholder=\"My Custom Personality\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">Description</span></label> <input type=\"text\" id=\"personality_description\" name=\"description\" class=\"input input-bordered\" placeholder=\"Short description of this personality\"></div><div class=\"form-control mb-3\"><label class=\"label\"><span class=\"label-text\">System Prompt * (min 20 chars)</span></label> <textarea id=\"personality_prompt\" name=\"system_prompt\" class=\"textarea textarea-bordered w-full h-32\" required minlength=\"20\" placeholder=\"Describe how the AI should behave...\"></textarea></div><div class=\"modal-action\"><div class=\"flex gap-2 w-full justify-between\"><div id=\"personality_modal_extra_actions\" class=\"flex gap-2\"></div><div class=\"flex gap-2\"><button type=\"button\" class=\"btn\" onclick=\"closePersonalityModal()\">Cancel</button> <button type=\"submit\" id=\"personality_submit_btn\" class=\"btn btn-primary\">Create</button></div></div></div></form></div><form method=\"dialog\" class=\"modal-backdrop\"><button>close</button></form></dialog><script type=\"text/javascript\">\n\t\t\twindow.openVibelyPersonalityEditGeneration = window.openVibelyPersonalityEditGeneration || 0;\n\n\t\t\tfunction openNewPersonalityModal() {\n\t\t\t\twindow.openVibelyPersonalityEditGeneration++;\n\t\t\t\tvar form = document.getElementById('personality_form');\n\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'New Custom Personality';\n\t\t\t\tform.removeAttribute('hx-put');\n\t\t\t\tform.setAttribute('hx-post', '/personality/custom');\n\t\t\t\tform.setAttribute('hx-target', '#personality-section');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\tif (window.htmx) htmx.process(form);\n\t\t\t\tdocument.getElementById('personality_name').value = '';\n\t\t\t\tdocument.getElementById('personality_description').value = '';\n\t\t\t\tdocument.getElementById('personality_prompt').value = '';\n\t\t\t\tdocument.getElementById('personality_submit_btn').textContent = 'Create';\n\t\t\t\tdocument.getElementById('personality_submit_btn').disabled = false;\n\t\t\t\tdocument.getElementById('personality_modal_extra_actions').innerHTML = '';\n\t\t\t\tpersonality_modal.showModal();\n\t\t\t}\n\n\t\t\tfunction editPersonalityFromData(card) {\n\t\t\t\tif (!card) return;\n\t\t\t\tvar key = card.dataset.personalityKey || '';\n\t\t\t\tvar name = card.dataset.personalityName || '';\n\t\t\t\tvar description = card.dataset.personalityDescription || '';\n\t\t\t\tvar isPreset = card.dataset.personalityIsPreset === 'true';\n\t\t\t\tvar hasCustom = card.dataset.personalityHasCustom === 'true';\n\t\t\t\tvar requestGeneration = ++window.openVibelyPersonalityEditGeneration;\n\n\t\t\t\tvar form = document.getElementById('personality_form');\n\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'Edit: ' + name;\n\t\t\t\tform.removeAttribute('hx-post');\n\t\t\t\tform.setAttribute('hx-put', '/personality/custom/' + encodeURIComponent(key));\n\t\t\t\tform.setAttribute('hx-target', '#personality-section');\n\t\t\t\tform.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\tif (window.htmx) htmx.process(form);\n\n\t\t\t\tdocument.getElementById('personality_name').value = name;\n\t\t\t\tdocument.getElementById('personality_description').value = description;\n\t\t\t\tdocument.getElementById('personality_prompt').value = '';\n\t\t\t\tdocument.getElementById('personality_prompt').placeholder = 'Loading full prompt...';\n\n\t\t\t\tvar submitBtn = document.getElementById('personality_submit_btn');\n\t\t\t\tif (isPreset && hasCustom) {\n\t\t\t\t\tsubmitBtn.textContent = 'Save Changes';\n\t\t\t\t} else if (isPreset && !hasCustom) {\n\t\t\t\t\tsubmitBtn.textContent = 'Save Override';\n\t\t\t\t} else {\n\t\t\t\t\tsubmitBtn.textContent = 'Save Changes';\n\t\t\t\t}\n\t\t\t\tsubmitBtn.disabled = true;\n\n\t\t\t\t// Extra actions: Reset to Default (for preset overrides) or Delete (for custom)\n\t\t\t\tvar extras = document.getElementById('personality_modal_extra_actions');\n\t\t\t\textras.innerHTML = '';\n\n\t\t\t\tif (isPreset && hasCustom) {\n\t\t\t\t\tvar resetBtn = document.createElement('button');\n\t\t\t\t\tresetBtn.type = 'button';\n\t\t\t\t\tresetBtn.className = 'btn btn-outline btn-warning btn-sm';\n\t\t\t\t\tresetBtn.textContent = 'Reset to Default';\n\t\t\t\t\tresetBtn.setAttribute('hx-delete', '/personality/custom/' + encodeURIComponent(key));\n\t\t\t\t\tresetBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tresetBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tresetBtn.setAttribute('hx-confirm', 'Reset this personality to its built-in default?');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(resetBtn);\n\t\t\t\t\t\thtmx.process(resetBtn);\n\t\t\t\t\t}\n\t\t\t\t} else if (!isPreset) {\n\t\t\t\t\tvar delBtn = document.createElement('button');\n\t\t\t\t\tdelBtn.type = 'button';\n\t\t\t\t\tdelBtn.className = 'btn btn-outline btn-error btn-sm';\n\t\t\t\t\tdelBtn.textContent = 'Delete';\n\t\t\t\t\tdelBtn.setAttribute('hx-delete', '/personality/custom/' + encodeURIComponent(key));\n\t\t\t\t\tdelBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tdelBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tdelBtn.setAttribute('hx-confirm', 'Delete this custom personality?');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(delBtn);\n\t\t\t\t\t\thtmx.process(delBtn);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\t// Add \"Set as Default\" button when editing a non-default personality\n\t\t\t\tvar section = document.getElementById('personality-section');\n\t\t\t\tvar selectedPersonality = section ? (section.dataset.selectedPersonality || '') : '';\n\t\t\t\tif (key !== selectedPersonality) {\n\t\t\t\t\tvar setDefaultBtn = document.createElement('button');\n\t\t\t\t\tsetDefaultBtn.type = 'button';\n\t\t\t\t\tsetDefaultBtn.className = 'btn btn-outline btn-primary btn-sm';\n\t\t\t\t\tsetDefaultBtn.textContent = 'Set as Default';\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-post', '/personality/save?personality=' + encodeURIComponent(key));\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-target', '#personality-section');\n\t\t\t\t\tsetDefaultBtn.setAttribute('hx-swap', 'outerHTML');\n\t\t\t\t\tif (window.htmx) {\n\t\t\t\t\t\textras.appendChild(setDefaultBtn);\n\t\t\t\t\t\thtmx.process(setDefaultBtn);\n\t\t\t\t\t}\n\t\t\t\t}\n\n\t\t\t\tpersonality_modal.showModal();\n\n\t\t\t\tfetch('/personality/custom/' + encodeURIComponent(key), { headers: { 'Accept': 'application/json' } })\n\t\t\t\t\t.then(function(response) {\n\t\t\t\t\t\tif (!response.ok) throw new Error('Failed to load personality');\n\t\t\t\t\t\treturn response.json();\n\t\t\t\t\t})\n\t\t\t\t\t.then(function(detail) {\n\t\t\t\t\t\tif (requestGeneration !== window.openVibelyPersonalityEditGeneration) return;\n\t\t\t\t\t\tdocument.getElementById('personality_modal_title').textContent = 'Edit: ' + (detail.name || name);\n\t\t\t\t\t\tdocument.getElementById('personality_name').value = detail.name || name;\n\t\t\t\t\t\tdocument.getElementById('personality_description').value = detail.description || '';\n\t\t\t\t\t\tdocument.getElementById('personality_prompt').value = detail.system_prompt || '';\n\t\t\t\t\t\tdocument.getElementById('personality_prompt').placeholder = 'Describe how the AI should behave...';\n\t\t\t\t\t\tsubmitBtn.disabled = false;\n\t\t\t\t\t})\n\t\t\t\t\t.catch(function() {\n\t\t\t\t\t\tif (requestGeneration !== window.openVibelyPersonalityEditGeneration) return;\n\t\t\t\t\t\tdocument.getElementById('personality_prompt').placeholder = 'Unable to load prompt. Close and try again.';\n\t\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction closePersonalityModal() {\n\t\t\t\tpersonality_modal.close();\n\t\t\t}\n\n\t\t\t// Close modal after successful HTMX swap\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tif (event.detail.target && event.detail.target.id === 'personality-section') {\n\t\t\t\t\tvar modal = document.getElementById('personality_modal');\n\t\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\t\tmodal.close();\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t});\n\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
