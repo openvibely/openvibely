@@ -235,11 +235,8 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		}
 		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
 			applog.Infof("[handler] APIChatMessage error creating queued input: %v", err)
-			if attachmentSessionID != "" {
-				pendingDir := filepath.Join(uploadsDir, "chat", "pending", attachmentSessionID)
-				if cleanupErr := os.RemoveAll(pendingDir); cleanupErr != nil {
-					applog.Infof("[handler] APIChatMessage error removing unpublished queued attachment session %s: %v", attachmentSessionID, cleanupErr)
-				}
+			if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), attachmentSessionID); cleanupErr != nil {
+				applog.Infof("[handler] APIChatMessage error cleaning unpublished queued attachment session %s: %v", attachmentSessionID, cleanupErr)
 			}
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to queue chat message"})
 		}
