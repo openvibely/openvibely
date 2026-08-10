@@ -14,6 +14,16 @@ type ScheduleRepo struct {
 	db *sql.DB
 }
 
+const (
+	scheduleDiscoverySelectColumns = `s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start,
+			 s.next_run, s.last_run, s.created_at, s.updated_at, t.title`
+	scheduleDiscoveryOrderBy = `ORDER BY (s.next_run IS NULL), s.next_run ASC, s.created_at DESC, s.id ASC`
+	// Matches the runtime list_schedules page cap. Larger, filtered, empty, or
+	// single-page result sets keep the existing project/task-indexed join shape
+	// because selective predicates can be cheaper than scanning the global order index.
+	scheduleDiscoveryOrderedScanMaxLimit = 50
+)
+
 func NewScheduleRepo(db *sql.DB) *ScheduleRepo {
 	return &ScheduleRepo{db: db}
 }
@@ -121,18 +131,22 @@ type ScheduleDiscoveryRow struct {
 func (r *ScheduleRepo) ListSchedulesForDiscovery(ctx context.Context, projectID string, filter ScheduleDiscoveryFilter) ([]ScheduleDiscoveryRow, int, error) {
 	where := `t.project_id = ?`
 	args := []any{projectID}
+	hasFilters := false
 
 	if taskID := strings.TrimSpace(filter.TaskID); taskID != "" {
 		where += ` AND s.task_id = ?`
 		args = append(args, taskID)
+		hasFilters = true
 	}
 	if title := strings.TrimSpace(filter.Title); title != "" {
 		where += ` AND t.title LIKE ?`
 		args = append(args, "%"+title+"%")
+		hasFilters = true
 	}
 	if filter.Enabled != nil {
 		where += ` AND s.enabled = ?`
 		args = append(args, *filter.Enabled)
+		hasFilters = true
 	}
 
 	var total int
@@ -150,16 +164,18 @@ func (r *ScheduleRepo) ListSchedulesForDiscovery(ctx context.Context, projectID 
 	if offset < 0 {
 		offset = 0
 	}
-	selectArgs := append([]any{}, args...)
-	selectArgs = append(selectArgs, limit, offset)
+	if total == 0 {
+		return nil, 0, nil
+	}
+	useOrderedScan := !hasFilters && offset == 0 && limit <= scheduleDiscoveryOrderedScanMaxLimit && total > limit
 
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT s.id, s.task_id, s.run_at, s.repeat_type, s.repeat_interval, s.enabled, s.clear_context_on_start,
-		 s.next_run, s.last_run, s.created_at, s.updated_at, t.title
-		 FROM schedules s JOIN tasks t ON t.id = s.task_id
-		 WHERE `+where+`
-		 ORDER BY (s.next_run IS NULL), s.next_run ASC, s.created_at DESC, s.id ASC
-		 LIMIT ? OFFSET ?`, selectArgs...)
+	selectArgs := append([]any{}, args...)
+	selectArgs = append(selectArgs, limit)
+	if !useOrderedScan {
+		selectArgs = append(selectArgs, offset)
+	}
+
+	rows, err := r.db.QueryContext(ctx, scheduleDiscoverySelectSQL(where, useOrderedScan), selectArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("listing schedules for discovery: %w", err)
 	}
@@ -176,6 +192,20 @@ func (r *ScheduleRepo) ListSchedulesForDiscovery(ctx context.Context, projectID 
 		out = append(out, row)
 	}
 	return out, total, rows.Err()
+}
+
+func scheduleDiscoverySelectSQL(where string, orderedScan bool) string {
+	scheduleSource := `schedules s`
+	limitClause := `LIMIT ? OFFSET ?`
+	if orderedScan {
+		scheduleSource = `schedules s INDEXED BY idx_schedules_discovery_order`
+		limitClause = `LIMIT ?`
+	}
+	return `SELECT ` + scheduleDiscoverySelectColumns + `
+			 FROM ` + scheduleSource + ` JOIN tasks t ON t.id = s.task_id
+			 WHERE ` + where + `
+			 ` + scheduleDiscoveryOrderBy + `
+			 ` + limitClause
 }
 
 func (r *ScheduleRepo) GetByID(ctx context.Context, id string) (*models.Schedule, error) {

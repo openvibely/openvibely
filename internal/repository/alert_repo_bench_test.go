@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -337,4 +338,105 @@ func BenchmarkAlertInsertThroughput(b *testing.B) {
 			}
 		})
 	}
+}
+
+func seedAlertRuntimeProjectionBenchFixture(tb testing.TB, db *sql.DB) {
+	tb.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		tb.Fatalf("begin runtime projection fixture: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES (?, 'Runtime Projection', '', '')`, alertRuntimeProjectionProjectID); err != nil {
+		tb.Fatalf("insert runtime projection project: %v", err)
+	}
+	body := strings.Repeat("body payload ", 3500)              // roughly 42 KiB
+	metadataValue := strings.Repeat("metadata payload ", 2300) // roughly 37 KiB once encoded
+	metadataJSON, err := json.Marshal(map[string]any{"component": "alerts", "payload": metadataValue})
+	if err != nil {
+		tb.Fatalf("marshal metadata fixture: %v", err)
+	}
+	for i := 0; i < alertRuntimeProjectionRows; i++ {
+		if _, err := tx.Exec(`INSERT INTO alerts
+			(project_id, type, severity, title, message, body, source, metadata_json, decision_state, processing_state, is_read, created_at, updated_at)
+			VALUES (?, 'runtime_bench', 'warning', ?, ?, ?, 'benchmark', ?, 'pending', 'unclaimed', ?, datetime('2026-01-01 00:00:00', '+' || ? || ' seconds'), datetime('2026-01-01 00:00:00', '+' || ? || ' seconds'))`,
+			alertRuntimeProjectionProjectID, fmt.Sprintf("Runtime alert %03d", i), "Short triage message", body, string(metadataJSON), i%2 == 0, i, i); err != nil {
+			tb.Fatalf("insert runtime projection alert %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		tb.Fatalf("commit runtime projection fixture: %v", err)
+	}
+}
+
+const (
+	alertRuntimeProjectionProjectID = "runtime-alert-projection-project"
+	alertRuntimeProjectionRows      = 500
+	alertRuntimeProjectionLimit     = 50
+)
+
+// BenchmarkAlertRuntimeListProjectionResponse measures the production-shaped
+// runtime list payload path over alerts with large body and metadata fields. The
+// full-row sub-benchmark represents the previous runtime list shape; the compact
+// summaries sub-benchmark is the bounded projection used by list_alerts.
+func BenchmarkAlertRuntimeListProjectionResponse(b *testing.B) {
+	db := newAlertBenchDB(b)
+	seedAlertRuntimeProjectionBenchFixture(b, db)
+	repo := NewAlertRepo(db)
+	ctx := context.Background()
+	filter := models.AlertListFilter{Limit: alertRuntimeProjectionLimit, Offset: 0}
+
+	b.Run("full_rows_response", func(b *testing.B) {
+		warm, err := repo.ListFiltered(ctx, alertRuntimeProjectionProjectID, filter)
+		if err != nil {
+			b.Fatalf("warm full list: %v", err)
+		}
+		payload, err := json.Marshal(map[string]any{"notifications": warm, "project_id": alertRuntimeProjectionProjectID, "offset": 0, "next_offset": alertRuntimeProjectionLimit})
+		if err != nil {
+			b.Fatalf("marshal warm full payload: %v", err)
+		}
+		b.ReportMetric(float64(len(payload)), "response_B")
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			alerts, err := repo.ListFiltered(ctx, alertRuntimeProjectionProjectID, filter)
+			if err != nil {
+				b.Fatalf("list full alerts: %v", err)
+			}
+			payload, err := json.Marshal(map[string]any{"notifications": alerts, "project_id": alertRuntimeProjectionProjectID, "offset": 0, "next_offset": alertRuntimeProjectionLimit})
+			if err != nil {
+				b.Fatalf("marshal full payload: %v", err)
+			}
+			if len(payload) == 0 {
+				b.Fatal("empty full payload")
+			}
+		}
+	})
+
+	b.Run("compact_summaries_response", func(b *testing.B) {
+		warm, err := repo.ListFilteredSummaries(ctx, alertRuntimeProjectionProjectID, filter)
+		if err != nil {
+			b.Fatalf("warm summary list: %v", err)
+		}
+		payload, err := json.Marshal(map[string]any{"notifications": warm, "project_id": alertRuntimeProjectionProjectID, "offset": 0, "next_offset": alertRuntimeProjectionLimit})
+		if err != nil {
+			b.Fatalf("marshal warm summary payload: %v", err)
+		}
+		b.ReportMetric(float64(len(payload)), "response_B")
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			summaries, err := repo.ListFilteredSummaries(ctx, alertRuntimeProjectionProjectID, filter)
+			if err != nil {
+				b.Fatalf("list alert summaries: %v", err)
+			}
+			payload, err := json.Marshal(map[string]any{"notifications": summaries, "project_id": alertRuntimeProjectionProjectID, "offset": 0, "next_offset": alertRuntimeProjectionLimit})
+			if err != nil {
+				b.Fatalf("marshal summary payload: %v", err)
+			}
+			if len(payload) == 0 {
+				b.Fatal("empty summary payload")
+			}
+		}
+	})
 }

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -703,5 +704,71 @@ func TestAlertRepo_CreateImplementationTaskPublishesResourceLinkedForNewAndExist
 	}
 	if count != 1 {
 		t.Fatalf("implementation tasks created = %d, want 1", count)
+	}
+}
+
+func TestAlertRepoListFilteredSummariesOmitFullDetailColumnsAndGetHydrates(t *testing.T) {
+	if strings.Contains(alertSummarySelectColumns, "body") {
+		t.Fatalf("summary projection must not select body: %s", alertSummarySelectColumns)
+	}
+	if strings.Contains(alertSummarySelectColumns, "metadata_json") {
+		t.Fatalf("summary projection must not select metadata_json: %s", alertSummarySelectColumns)
+	}
+
+	db := testutil.NewTestDB(t)
+	repo := NewAlertRepo(db)
+	project := createTestProject(t, NewProjectRepo(db))
+	ctx := context.Background()
+	task := &models.Task{ProjectID: project.ID, Title: "Summary source task", Prompt: "run", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	if err := NewTaskRepo(db, nil).Create(ctx, task); err != nil {
+		t.Fatalf("creating source task: %v", err)
+	}
+	alert := &models.Alert{
+		ProjectID:       project.ID,
+		TaskID:          &task.ID,
+		Type:            models.AlertType("runtime_summary"),
+		Severity:        models.SeverityWarning,
+		Title:           "Runtime summary projection",
+		Message:         "Short triage message",
+		Body:            strings.Repeat("full body ", 2048),
+		Source:          "runtime-test",
+		Metadata:        map[string]any{"component": "alerts", "payload": strings.Repeat("metadata ", 1024)},
+		DecisionState:   models.AlertDecisionPending,
+		ProcessingState: models.AlertProcessingUnclaimed,
+	}
+	if err := repo.Create(ctx, alert); err != nil {
+		t.Fatalf("creating alert: %v", err)
+	}
+
+	summaries, err := repo.ListFilteredSummaries(ctx, project.ID, models.AlertListFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("listing summaries: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("summary count = %d, want 1", len(summaries))
+	}
+	summary := summaries[0]
+	if summary.ID != alert.ID || summary.ProjectID != project.ID || summary.Type != alert.Type || summary.Severity != alert.Severity || summary.Title != alert.Title || summary.Message != alert.Message || summary.Source != alert.Source {
+		t.Fatalf("summary did not preserve triage fields: %#v", summary)
+	}
+	if summary.TaskID == nil || *summary.TaskID != task.ID {
+		t.Fatalf("summary task link = %#v, want %s", summary.TaskID, task.ID)
+	}
+	if summary.DecisionState != models.AlertDecisionPending || summary.ProcessingState != models.AlertProcessingUnclaimed {
+		t.Fatalf("summary lifecycle states = %s/%s", summary.DecisionState, summary.ProcessingState)
+	}
+	if summary.CreatedAt.IsZero() || summary.UpdatedAt.IsZero() {
+		t.Fatalf("summary timestamps must be populated: created=%v updated=%v", summary.CreatedAt, summary.UpdatedAt)
+	}
+
+	detail, err := repo.GetByIDForProject(ctx, project.ID, alert.ID)
+	if err != nil {
+		t.Fatalf("getting alert detail: %v", err)
+	}
+	if detail.Body != alert.Body {
+		t.Fatalf("detail body was not hydrated")
+	}
+	if detail.Metadata["component"] != "alerts" {
+		t.Fatalf("detail metadata was not hydrated: %#v", detail.Metadata)
 	}
 }
