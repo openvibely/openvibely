@@ -166,6 +166,15 @@ func (r *TaskGoalRepo) RecordBlockedReport(ctx context.Context, taskID string, g
 		RETURNING `+taskGoalSelectColumns, blockerKey, blockerKey, reason, reason, blockerKey, taskID, goalID)
 }
 
+func (r *TaskGoalRepo) ClearBlockedReport(ctx context.Context, taskID string, blockerKey string, reason string) (*models.TaskGoal, error) {
+	return r.updateReturning(ctx, `
+		UPDATE task_goals
+		SET status = 'active', reason = ?, blocker_key = '', blocker_count = 0, blocker_reason = '', blocker_last_seen_at = NULL,
+			last_checked_at = datetime('now'), achieved_at = NULL, updated_at = datetime('now')
+		WHERE task_id = ? AND blocker_key = ? AND status IN ('active', 'blocked')
+		RETURNING `+taskGoalSelectColumns, reason, taskID, blockerKey)
+}
+
 func (r *TaskGoalRepo) Clear(ctx context.Context, taskID string, reason string) error {
 	_, err := r.db.ExecContext(ctx, `
 		UPDATE task_goals
