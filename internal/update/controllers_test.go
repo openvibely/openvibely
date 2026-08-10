@@ -1313,6 +1313,42 @@ func TestHostedRestartWithoutAssignmentStateAutonomouslyExpiresDrain(t *testing.
 	}
 }
 
+func TestHostedRestoreWithoutAssignmentStateReleasesOwnedDrain(t *testing.T) {
+	root := t.TempDir()
+	drainPath := filepath.Join(root, "drain.json")
+	oldDrain := NewDrainManager(nil, nil, 0, time.Now)
+	if err := oldDrain.SetPersistence(drainPath); err != nil {
+		t.Fatal(err)
+	}
+	status, err := oldDrain.BeginDrain(DrainRequest{Lease: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !oldDrain.TakeOwnership(status.Generation) {
+		t.Fatal("take orphan drain ownership")
+	}
+
+	restartedDrain := NewDrainManager(nil, nil, 0, time.Now)
+	if err := restartedDrain.SetPersistence(drainPath); err != nil {
+		t.Fatal(err)
+	}
+	controller := NewHostedController(nil, restartedDrain, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, filepath.Join(root, "missing-hosted.json"))
+	if err := controller.Restore(); err != nil {
+		t.Fatal(err)
+	}
+	if !restartedDrain.Admit() {
+		t.Fatal("owned orphan Hosted drain was not released")
+	}
+
+	persisted := NewDrainManager(nil, nil, 0, time.Now)
+	if err := persisted.SetPersistence(drainPath); err != nil {
+		t.Fatal(err)
+	}
+	if !persisted.Admit() {
+		t.Fatal("owned orphan Hosted drain release was not durable")
+	}
+}
+
 func TestHostedReadyClaimReplaysDurableIdempotencyAfterAcceptedResponseCrash(t *testing.T) {
 	var readyKeys []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

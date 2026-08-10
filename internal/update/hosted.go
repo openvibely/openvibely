@@ -104,6 +104,10 @@ func (c *HostedController) Restore() error {
 	state := c.state
 	c.mu.Unlock()
 	if state.UpdateID == "" {
+		status := c.drain.Status()
+		if status.State != DrainStateIdle && !c.drain.Release(status.Generation) {
+			return errors.New("failed to release orphaned Hosted drain")
+		}
 		return nil
 	}
 	status := c.drain.Status()
