@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-08
+updated: 2026-08-09
 source: update_memory
-source_id: 3926c85f9eecbf034bd787200334470d:0995055c6f28c7e3
+source_id: a990ccd47db94c6c46e420a05742f403:2bfabb191a31c1d0
 confidence: high
 title: Provider Architecture
 ---
@@ -114,3 +114,4 @@ Provider-native tools and runtime tools:
 - Memory tool exposure is a request/tool-profile decision, not a global provider-adapter default. Route-phase Memory Curator recall stays sanitized/no-tools, while update/consolidation hooks may receive scoped memory file tools.
 - Anthropic has a provider-side name-combination collision when the exact wire names `skill_view`, `skills_list`, and `skill_manage` are sent together, which can surface a false “out of extra usage” error. The Anthropic adapter therefore aliases canonical internal `skills_list` to wire name `skill_list` and translates incoming calls back before filtering/execution; keep this workaround adapter-local.
 - `read_file` runtime executors in the OpenAI, Anthropic, and scoped-files paths emit `decimalLineNumber\t<unchanged source bytes>` rather than fixed-width numeric prefixes. In native agentic loops, that raw executor string is forwarded to provider tool-result payloads (OpenAI `function_call_output`, Anthropic `tool_result`, and OpenAI-compatible Chat Completions tool messages), then serialized/stored/streamed and rendered by the frontend as opaque raw text; the UI does not add line-number alignment padding. Keep this compact format so source indentation after the tab is preserved and avoid frontend-only reformatting that would diverge rendered/copied and model-facing content. Historical replay removes serialized tool blocks through `CleanChatOutput`, so persisted prior tool output is not normally reintroduced into model history.
+- GitHub issue #382 (filed 2026-08-09) tracks a scoped-file runtime-tools bug where explicit scope routing only matches the first path segment. Nested configured scopes such as `configs/secrets` cannot be selected correctly, so file operations can land in the wrong in-repo location or duplicate paths under the scope itself; existing scoped-files tests did not cover multi-scope nested-directory selection.
