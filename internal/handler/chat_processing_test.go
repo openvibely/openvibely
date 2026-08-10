@@ -1434,6 +1434,12 @@ func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancell
 		tk.AgentID = &agent.ID
 		tk.Prompt = "Continue task"
 	})
+	destination := createTask(t, h, project.ID, "Deadline Lifecycle Destination Task", func(tk *models.Task) {
+		tk.Category = models.CategoryActive
+		tk.Status = models.StatusPending
+		tk.AgentID = &agent.ID
+		tk.Prompt = "Destination has not started"
+	})
 	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
 		ex.Status = models.ExecRunning
 		ex.PromptSent = "followup that times out"
@@ -1453,7 +1459,8 @@ func TestProcessStreamingResponse_DeadlineFailureRunsAfterCompleteDespiteCancell
 			if rt := llmcontracts.RuntimeToolsFromContext(ctx); rt != nil {
 				executionError, _ := in.Extras[lifecycle.ExecutionErrorKey].(string)
 				hookCtx := lifecycle.WithHookAgent(ctx, lifecycle.HookAgent{AgentID: "deadline-hook", Tools: []string{"send_to_task"}, TaskID: in.TaskID, TaskRunID: in.TaskRunID, ExecutionError: executionError})
-				output, handled, isError, err := rt.Executor(hookCtx, "send_to_task", json.RawMessage(`{"task_id":"current","message":"continue failure evaluation after timeout"}`))
+				payload := json.RawMessage(`{"task_id":"` + destination.ID + `","message":"continue failure evaluation after timeout"}`)
+				output, handled, isError, err := rt.Executor(hookCtx, "send_to_task", payload)
 				toolResult <- deadlineToolResult{output: output, handled: handled, isError: isError, err: err}
 			}
 			afterInput <- in
