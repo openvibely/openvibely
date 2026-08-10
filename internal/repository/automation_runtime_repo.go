@@ -790,7 +790,7 @@ func (r *AutomationRepo) GetDispatchEnvelope(ctx context.Context, dispatchID str
 		return nil, errors.New("automation dispatch task project mismatch")
 	}
 	envelope.Task = *task
-	envelope.Context = models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}
+	envelope.Context = models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}, OriginTask: IsAutomationTaskCreatedVia(task.CreatedVia)}
 	return &envelope, nil
 }
 
@@ -1958,6 +1958,70 @@ func (r *AutomationRepo) IsCurrentActiveBinding(ctx context.Context, projectID s
 		WHERE a.project_id = ? AND a.id = ? AND a.published_version_id = ? AND a.lifecycle_state = 'active'`,
 		binding.NodeID, projectID, binding.AutomationID, binding.VersionID).Scan(&current)
 	return current == 1, err
+}
+
+func (r *AutomationRepo) CurrentActiveBindingForLaunchNode(ctx context.Context, projectID string, binding models.AutomationBinding, targetRole string) (models.AutomationBinding, bool, error) {
+	if r == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(binding.AutomationID) == "" ||
+		strings.TrimSpace(binding.VersionID) == "" || strings.TrimSpace(binding.NodeID) == "" || strings.TrimSpace(binding.InvocationID) == "" || strings.TrimSpace(targetRole) == "" {
+		return models.AutomationBinding{}, false, errors.New("complete launched automation binding is required")
+	}
+	var launched int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_invocations
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND id = ?`,
+		projectID, binding.AutomationID, binding.VersionID, binding.InvocationID).Scan(&launched); err != nil {
+		return models.AutomationBinding{}, false, err
+	}
+	if launched != 1 {
+		return models.AutomationBinding{}, false, nil
+	}
+	var sourceKey, sourceRole string
+	if err := r.db.QueryRowContext(ctx, `SELECT node_key, role FROM automation_nodes
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND id = ?`,
+		projectID, binding.AutomationID, binding.VersionID, binding.NodeID).Scan(&sourceKey, &sourceRole); errors.Is(err, sql.ErrNoRows) {
+		return models.AutomationBinding{}, false, nil
+	} else if err != nil {
+		return models.AutomationBinding{}, false, err
+	}
+	var currentVersionID, currentNodeID string
+	err := r.db.QueryRowContext(ctx, `SELECT a.published_version_id, n.id
+		FROM automations a JOIN automation_nodes n ON n.project_id = a.project_id AND n.automation_id = a.id
+			AND n.version_id = a.published_version_id AND n.node_key = ? AND n.role = ?
+		WHERE a.project_id = ? AND a.id = ? AND a.lifecycle_state = 'active'`,
+		sourceKey, sourceRole, projectID, binding.AutomationID).Scan(&currentVersionID, &currentNodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.AutomationBinding{}, false, nil
+	}
+	if err != nil {
+		return models.AutomationBinding{}, false, err
+	}
+	connected, err := r.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, currentVersionID, currentNodeID, strings.TrimSpace(targetRole), true)
+	if err != nil || connected == nil {
+		return models.AutomationBinding{}, false, err
+	}
+	return models.AutomationBinding{AutomationID: binding.AutomationID, VersionID: currentVersionID, InvocationID: binding.InvocationID, NodeID: currentNodeID, WorkItemID: binding.WorkItemID}, true, nil
+}
+
+func (r *AutomationRepo) CurrentActiveBindingForNodeKey(ctx context.Context, projectID, automationID, nodeKey, targetRole string) (models.AutomationBinding, bool, error) {
+	if r == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(automationID) == "" || strings.TrimSpace(nodeKey) == "" || strings.TrimSpace(targetRole) == "" {
+		return models.AutomationBinding{}, false, errors.New("complete automation node key binding is required")
+	}
+	var currentVersionID, currentNodeID string
+	err := r.db.QueryRowContext(ctx, `SELECT a.published_version_id, n.id
+		FROM automations a JOIN automation_nodes n ON n.project_id = a.project_id AND n.automation_id = a.id
+			AND n.version_id = a.published_version_id AND n.node_key = ?
+		WHERE a.project_id = ? AND a.id = ? AND a.lifecycle_state = 'active'`,
+		strings.TrimSpace(nodeKey), projectID, automationID).Scan(&currentVersionID, &currentNodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.AutomationBinding{}, false, nil
+	}
+	if err != nil {
+		return models.AutomationBinding{}, false, err
+	}
+	connected, err := r.GetConnectedNodeByRole(ctx, projectID, automationID, currentVersionID, currentNodeID, strings.TrimSpace(targetRole), true)
+	if err != nil || connected == nil {
+		return models.AutomationBinding{}, false, err
+	}
+	return models.AutomationBinding{AutomationID: automationID, VersionID: currentVersionID, NodeID: currentNodeID}, true, nil
 }
 
 func (r *AutomationRepo) GetConnectedNodeByRole(ctx context.Context, projectID, automationID, versionID, nodeID, role string, outgoing bool) (*models.AutomationNode, error) {

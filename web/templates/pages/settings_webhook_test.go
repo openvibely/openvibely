@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/service"
 )
 
 func TestSettingsContent_WebhookCardsOmitEditOnlyPayloads(t *testing.T) {
@@ -152,15 +151,9 @@ func renderSettingsContentForWebhookTest(t *testing.T, webhooks []models.Webhook
 func settingsContentForWebhookTest(webhooks []models.WebhookEndpoint) interface {
 	Render(context.Context, io.Writer) error
 } {
-	return SettingsContent(
-		"", false, nil, nil, nil, "project-1", true, true,
-		service.GitHubConnectionStatus{}, service.GitHubAuthModePAT, "", "", "", "", "", false, false,
-		service.SlackConnectionStatus{}, "", "", "", "", service.SlackBotTokenSourceOAuth, false, false, false, false, true,
-		service.DiscordConnectionStatus{}, "", true,
-		service.EmailConnectionStatus{}, nil, "", true, true, false, "60",
-		false, false, false, false, false,
-		webhooks, nil, nil, nil, false,
-	)
+	view := defaultChannelsSettingsView("project-1")
+	view.Webhooks = webhooks
+	return SettingsContent(view)
 }
 
 func min(a, b int) int {

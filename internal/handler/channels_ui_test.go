@@ -412,6 +412,55 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	}
 }
 
+func TestChannelsPageExplicitTargetsSettingMatchesFullPageAndHTMX(t *testing.T) {
+	tc := NewTestContext(t)
+	if err := tc.settingsRepo.Set(context.Background(), service.SendMessageAllowExplicitTargetsSetting+":default", "true"); err != nil {
+		t.Fatalf("failed to seed explicit target policy: %v", err)
+	}
+
+	full := tc.HTTP().Get("/channels?project_id=default").Execute()
+	if full.Code != http.StatusOK {
+		t.Fatalf("expected full-page status 200, got %d", full.Code)
+	}
+	htmx := tc.HTMX().Get("/channels?project_id=default").Execute()
+	if htmx.Code != http.StatusOK {
+		t.Fatalf("expected HTMX status 200, got %d", htmx.Code)
+	}
+
+	fullBody := full.Body.String()
+	htmxBody := htmx.Body.String()
+	if !strings.Contains(fullBody, "Explicit targets allowed") || !strings.Contains(htmxBody, "Explicit targets allowed") {
+		t.Fatalf("expected full-page and HTMX responses to render explicit-targets badge; full=%t htmx=%t", strings.Contains(fullBody, "Explicit targets allowed"), strings.Contains(htmxBody, "Explicit targets allowed"))
+	}
+
+	fullPolicy := outboundTargetsPolicyControlMarkup(t, fullBody)
+	htmxPolicy := outboundTargetsPolicyControlMarkup(t, htmxBody)
+	if fullPolicy != htmxPolicy {
+		t.Fatalf("explicit-targets policy control differed between full-page and HTMX responses\nfull: %s\nhtmx: %s", fullPolicy, htmxPolicy)
+	}
+	if !strings.Contains(fullPolicy, "checked") {
+		t.Fatalf("expected explicit-targets policy control to render checked, got %s", fullPolicy)
+	}
+}
+
+func outboundTargetsPolicyControlMarkup(t *testing.T, body string) string {
+	t.Helper()
+	marker := "Allow explicit unsaved targets"
+	markerIdx := strings.Index(body, marker)
+	if markerIdx == -1 {
+		t.Fatalf("missing explicit-targets policy marker %q", marker)
+	}
+	labelStart := strings.LastIndex(body[:markerIdx], "<label")
+	if labelStart == -1 {
+		t.Fatalf("missing explicit-targets policy label before %q", marker)
+	}
+	labelEnd := strings.Index(body[markerIdx:], "</label>")
+	if labelEnd == -1 {
+		t.Fatalf("missing explicit-targets policy closing label after %q", marker)
+	}
+	return body[labelStart : markerIdx+labelEnd+len("</label>")]
+}
+
 func TestChannelsPageOutboundTargetTestButtonIncludesSelectedProjectID(t *testing.T) {
 	tc := NewTestContext(t)
 	firstProject := tc.CreateProject().WithName("First Project").Build()

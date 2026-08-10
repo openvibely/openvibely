@@ -23,57 +23,12 @@ func TestSettingsContent_RendersGitHubStatusVariants(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			hasGitHubChannel := tt.status.Configured || tt.status.Connected
-			err := SettingsContent(
-				"",
-				false,
-				nil,
-				nil,
-				nil,
-				"default",
-				true,
-				true,
-				tt.status,
-				service.GitHubAuthModePAT,
-				"",
-				"",
-				"private-key-value",
-				"pat-value",
-				"",
-				false,
-				false,
-				service.SlackConnectionStatus{},
-				"",
-				"",
-				"",
-				"",
-				service.SlackBotTokenSourceOAuth,
-				false,
-				false,
-				false,
-				false,
-				true,
-				service.DiscordConnectionStatus{},
-				"",
-				true,
-				service.EmailConnectionStatus{},
-				nil,
-				"",
-				true,
-				true,
-				false,
-				"60",
-				false,
-				hasGitHubChannel,
-				false,
-				false,
-				false,
-				nil,
-				nil,
-				nil,
-				nil,
-				false,
-			).Render(context.Background(), &buf)
+			view := defaultChannelsSettingsView("default")
+			view.GitHubStatus = tt.status
+			view.GitHubPrivateKeyValue = "private-key-value"
+			view.GitHubPATValue = "pat-value"
+			view.HasGitHubChannel = tt.status.Configured || tt.status.Connected
+			err := SettingsContent(view).Render(context.Background(), &buf)
 			if err != nil {
 				t.Fatalf("render failed: %v", err)
 			}

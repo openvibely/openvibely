@@ -154,7 +154,7 @@ func outboundTargetSummary(targets []models.ChannelTarget) string {
 	return strings.Join(parts, " • ")
 }
 
-func SettingsPage(telegramToken string, isBotRunning bool, projects []models.Project, currentProjectID string, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubAPIEndpoint string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) templ.Component {
+func SettingsPage(projects []models.Project, view ChannelsSettingsView) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -187,13 +187,13 @@ func SettingsPage(telegramToken string, isBotRunning bool, projects []models.Pro
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubAPIEndpoint, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = settingsContent(view).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = layout.Base("Channels", projects, currentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = layout.Base("Channels", projects, view.CurrentProjectID).Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -202,7 +202,7 @@ func SettingsPage(telegramToken string, isBotRunning bool, projects []models.Pro
 }
 
 // SettingsContent renders just the settings content for HTMX requests
-func SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubAPIEndpoint string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) templ.Component {
+func SettingsContent(view ChannelsSettingsView) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -223,7 +223,7 @@ func SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			templ_7745c5c3_Var3 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = settingsContent(telegramToken, isBotRunning, authorizedUsers, slackAuthorizedUsers, discordAuthorizedUsers, currentProjectID, sendResponses, richMessagesV2, githubStatus, githubAuthMode, githubAppID, githubAppSlug, githubPrivateKeyValue, githubPATValue, githubAPIEndpoint, githubHasPrivateKey, githubHasPAT, slackStatus, slackClientID, slackClientSecret, slackAppToken, slackBotToken, slackBotTokenMode, slackHasClientID, slackHasClientSecret, slackHasAppToken, slackHasBotToken, slackSendResponses, discordStatus, discordBotToken, discordSendResponses, emailStatus, emailAuthorizedSenders, emailPasswordValue, emailSendResponses, emailSkipAttachments, emailMarkExistingSeenOnStart, emailPollIntervalSeconds, hasTelegramChannel, hasGitHubChannel, hasSlackChannel, hasDiscordChannel, hasEmailChannel, webhooks, agents, webhookAgents, channelTargets, sendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = settingsContent(view).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -231,7 +231,7 @@ func SettingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 	})
 }
 
-func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []models.TelegramAuthorizedUser, slackAuthorizedUsers []models.SlackAuthorizedUser, discordAuthorizedUsers []models.DiscordAuthorizedUser, currentProjectID string, sendResponses bool, richMessagesV2 bool, githubStatus service.GitHubConnectionStatus, githubAuthMode string, githubAppID string, githubAppSlug string, githubPrivateKeyValue string, githubPATValue string, githubAPIEndpoint string, githubHasPrivateKey bool, githubHasPAT bool, slackStatus service.SlackConnectionStatus, slackClientID string, slackClientSecret string, slackAppToken string, slackBotToken string, slackBotTokenMode string, slackHasClientID bool, slackHasClientSecret bool, slackHasAppToken bool, slackHasBotToken bool, slackSendResponses bool, discordStatus service.DiscordConnectionStatus, discordBotToken string, discordSendResponses bool, emailStatus service.EmailConnectionStatus, emailAuthorizedSenders []models.EmailAuthorizedSender, emailPasswordValue string, emailSendResponses bool, emailSkipAttachments bool, emailMarkExistingSeenOnStart bool, emailPollIntervalSeconds string, hasTelegramChannel bool, hasGitHubChannel bool, hasSlackChannel bool, hasDiscordChannel bool, hasEmailChannel bool, webhooks []models.WebhookEndpoint, agents []models.Agent, webhookAgents map[string][]models.WebhookEndpointAgent, channelTargets []models.ChannelTarget, sendMessageExplicitTargets bool) templ.Component {
+func settingsContent(view ChannelsSettingsView) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -257,9 +257,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
-		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels?project_id=" + currentProjectID)
+		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels?project_id=" + view.CurrentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 164, Col: 53}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 164, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var5)
 		if templ_7745c5c3_Err != nil {
@@ -277,31 +277,31 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if !hasGitHubChannel {
+		if !view.HasGitHubChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<li><button type=\"button\" onclick=\"openGitHubChannelFromMenu(event)\">GitHub</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		if !hasSlackChannel {
+		if !view.HasSlackChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<li><button type=\"button\" onclick=\"openSlackChannelFromMenu(event)\">Slack</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		if !hasTelegramChannel {
+		if !view.HasTelegramChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<li><button type=\"button\" onclick=\"openTelegramChannelFromMenu(event)\">Telegram Bot</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		if !hasDiscordChannel {
+		if !view.HasDiscordChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<li><button type=\"button\" onclick=\"openDiscordChannelFromMenu(event)\">Discord</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		if !hasEmailChannel {
+		if !view.HasEmailChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<li><button type=\"button\" onclick=\"openEmailChannelFromMenu(event)\">Email</button></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -311,7 +311,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if hasGitHubChannel && hasTelegramChannel && hasSlackChannel && hasDiscordChannel && hasEmailChannel {
+		if view.HasGitHubChannel && view.HasTelegramChannel && view.HasSlackChannel && view.HasDiscordChannel && view.HasEmailChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<li class=\"hidden\"></li>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -329,19 +329,19 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = OutboundTargetsCard(currentProjectID, channelTargets, sendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = OutboundTargetsCard(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if hasGitHubChannel {
+		if view.HasGitHubChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<!-- GitHub Card --> <div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-channel-type=\"github\" data-search-card data-search-text=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var6 string
-			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue("GitHub " + githubConnectionLabel(githubStatus))
+			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue("GitHub " + githubConnectionLabel(view.GitHubStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 236, Col: 71}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 236, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -351,8 +351,8 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if githubStatus.AuthMode == service.GitHubAuthModePAT {
-				if githubStatus.Connected {
+			if view.GitHubStatus.AuthMode == service.GitHubAuthModePAT {
+				if view.GitHubStatus.Connected {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<p class=\"text-sm opacity-60\">Connected with personal access token.</p>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
@@ -364,15 +364,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 					}
 				}
 			} else {
-				if githubStatus.Connected {
+				if view.GitHubStatus.Connected {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<p class=\"text-sm opacity-60\">Connected using installation `")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var7 string
-					templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(githubStatus.InstallationID)
+					templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(view.GitHubStatus.InstallationID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 275, Col: 98}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 275, Col: 103}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 					if templ_7745c5c3_Err != nil {
@@ -389,15 +389,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 					}
 				}
 			}
-			if githubStatus.AccountLogin != "" {
+			if view.GitHubStatus.AccountLogin != "" {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<p class=\"text-sm opacity-60\">Account: ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var8 string
-				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(githubStatus.AccountLogin)
+				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(view.GitHubStatus.AccountLogin)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 281, Col: 74}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 281, Col: 79}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -412,7 +412,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var9 = []any{"badge badge-sm", githubConnectionBadgeClass(githubStatus)}
+			var templ_7745c5c3_Var9 = []any{"badge badge-sm", githubConnectionBadgeClass(view.GitHubStatus)}
 			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var9...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -435,9 +435,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var11 string
-			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(githubConnectionLabel(githubStatus))
+			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(githubConnectionLabel(view.GitHubStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 284, Col: 120}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 284, Col: 130}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 			if templ_7745c5c3_Err != nil {
@@ -447,17 +447,17 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if githubStatus.AuthMode == service.GitHubAuthModeApp {
+			if view.GitHubStatus.AuthMode == service.GitHubAuthModeApp {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<div class=\"mt-3\"><div onclick=\"event.stopPropagation()\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if githubStatus.Configured && !githubStatus.Connected {
+				if view.GitHubStatus.Configured && !view.GitHubStatus.Connected {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<a class=\"btn btn-primary btn-sm\" href=\"/channels/github/connect\">Connect</a>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-				} else if githubStatus.Connected {
+				} else if view.GitHubStatus.Connected {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<form method=\"post\" hx-post=\"/channels/github/disconnect\" hx-swap=\"none\" class=\"inline\"><button type=\"submit\" class=\"btn btn-ghost btn-sm\">Disconnect</button></form>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
@@ -473,15 +473,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		if hasSlackChannel {
+		if view.HasSlackChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<!-- Slack Card --> <div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-channel-type=\"slack\" data-search-card data-search-text=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var12 string
-			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue("Slack " + slackConnectionLabel(slackStatus))
+			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue("Slack " + slackConnectionLabel(view.SlackStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 310, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 310, Col: 73}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 			if templ_7745c5c3_Err != nil {
@@ -491,7 +491,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if slackStatus.Connected {
+			if view.SlackStatus.Connected {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<p class=\"text-sm opacity-60\">Connected via OAuth.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -502,15 +502,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 					return templ_7745c5c3_Err
 				}
 			}
-			if slackStatus.TeamName != "" {
+			if view.SlackStatus.TeamName != "" {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<p class=\"text-sm opacity-60\">Workspace: ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var13 string
-				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(slackStatus.TeamName)
+				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(view.SlackStatus.TeamName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 357, Col: 71}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 357, Col: 76}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
@@ -521,15 +521,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 					return templ_7745c5c3_Err
 				}
 			}
-			if len(slackAuthorizedUsers) > 0 {
+			if len(view.SlackAuthorizedUsers) > 0 {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<div class=\"mt-2 flex items-center gap-2\"><span class=\"text-sm opacity-60\">Authorized users:</span> <span class=\"badge badge-sm badge-ghost\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var14 string
-				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d user(s)", len(slackAuthorizedUsers)))
+				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d user(s)", len(view.SlackAuthorizedUsers)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 363, Col: 64}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 363, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {
@@ -544,7 +544,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var15 = []any{"badge badge-sm", slackConnectionBadgeClass(slackStatus)}
+			var templ_7745c5c3_Var15 = []any{"badge badge-sm", slackConnectionBadgeClass(view.SlackStatus)}
 			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var15...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -567,9 +567,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var17 string
-			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(slackConnectionLabel(slackStatus))
+			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(slackConnectionLabel(view.SlackStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 368, Col: 116}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 368, Col: 126}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 			if templ_7745c5c3_Err != nil {
@@ -579,7 +579,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if slackStatus.Configured && !slackStatus.Connected {
+			if view.SlackStatus.Configured && !view.SlackStatus.Connected {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<a class=\"btn btn-primary btn-sm\" href=\"/channels/slack/connect\">Connect</a>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -590,15 +590,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		if hasTelegramChannel {
+		if view.HasTelegramChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<!-- Telegram Bot Card --> <div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-channel-type=\"telegram\" data-channel-token=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var18 string
-			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(telegramToken)
+			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.TelegramToken)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 386, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 386, Col: 44}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 			if templ_7745c5c3_Err != nil {
@@ -609,9 +609,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var19 string
-			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.JSONString(isBotRunning))
+			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.ResolveAttributeValue(templ.JSONString(view.IsBotRunning))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 387, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 387, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var19)
 			if templ_7745c5c3_Err != nil {
@@ -622,9 +622,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var20 string
-			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue("Telegram Bot " + telegramChannelStatusText(isBotRunning))
+			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.ResolveAttributeValue("Telegram Bot " + telegramChannelStatusText(view.IsBotRunning))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 389, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 389, Col: 86}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var20)
 			if templ_7745c5c3_Err != nil {
@@ -634,15 +634,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if len(authorizedUsers) > 0 {
+			if len(view.AuthorizedUsers) > 0 {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<div class=\"mt-2 flex items-center gap-2\"><span class=\"text-sm opacity-60\">Authorized users:</span> <span class=\"badge badge-sm badge-ghost\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var21 string
-				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d user(s)", len(authorizedUsers)))
+				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d user(s)", len(view.AuthorizedUsers)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 442, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 442, Col: 64}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 				if templ_7745c5c3_Err != nil {
@@ -657,7 +657,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if isBotRunning {
+			if view.IsBotRunning {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<span class=\"badge badge-success badge-sm\">Connected</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -673,15 +673,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		if hasDiscordChannel {
+		if view.HasDiscordChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-channel-type=\"discord\" data-search-card data-search-text=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var22 string
-			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue("Discord " + discordConnectionLabel(discordStatus))
+			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue("Discord " + discordConnectionLabel(view.DiscordStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 464, Col: 75}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 464, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 			if templ_7745c5c3_Err != nil {
@@ -692,9 +692,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var23 string
-			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/discord/remove?project_id=" + currentProjectID)
+			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/discord/remove?project_id=" + view.CurrentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 481, Col: 95}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 481, Col: 100}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 			if templ_7745c5c3_Err != nil {
@@ -704,15 +704,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if len(discordAuthorizedUsers) > 0 {
+			if len(view.DiscordAuthorizedUsers) > 0 {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<div class=\"mt-2 flex items-center gap-2\"><span class=\"text-sm opacity-60\">Authorized users:</span> <span class=\"badge badge-sm badge-ghost\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var24 string
-				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d user(s)", len(discordAuthorizedUsers)))
+				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d user(s)", len(view.DiscordAuthorizedUsers)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 502, Col: 107}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 502, Col: 112}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 				if templ_7745c5c3_Err != nil {
@@ -727,7 +727,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var25 = []any{"badge badge-sm", discordConnectionBadgeClass(discordStatus)}
+			var templ_7745c5c3_Var25 = []any{"badge badge-sm", discordConnectionBadgeClass(view.DiscordStatus)}
 			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var25...)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -750,9 +750,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var27 string
-			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(discordConnectionLabel(discordStatus))
+			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(discordConnectionLabel(view.DiscordStatus))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 506, Col: 125}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 506, Col: 135}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 			if templ_7745c5c3_Err != nil {
@@ -762,12 +762,12 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if discordStatus.Running {
+			if view.DiscordStatus.Running {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "<span class=\"badge badge-sm badge-success\">Gateway running</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-			} else if discordStatus.Configured {
+			} else if view.DiscordStatus.Configured {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<span class=\"badge badge-sm badge-warning\">Gateway offline</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -777,15 +777,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if discordStatus.Configured && !discordStatus.Running && discordStatus.LastError != "" {
+			if view.DiscordStatus.Configured && !view.DiscordStatus.Running && view.DiscordStatus.LastError != "" {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "<p class=\"mt-2 text-xs text-warning\">Gateway failed to start: ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var28 string
-				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(discordStatus.LastError)
+				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(view.DiscordStatus.LastError)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 514, Col: 96}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 514, Col: 101}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 				if templ_7745c5c3_Err != nil {
@@ -801,15 +801,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		if hasEmailChannel {
+		if view.HasEmailChannel {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<div class=\"card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all\" data-channel-type=\"email\" data-search-card data-search-text=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var29 string
-			templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue("Email " + emailStatus.Address)
+			templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.ResolveAttributeValue("Email " + view.EmailStatus.Address)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 527, Col: 55}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 527, Col: 60}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var29)
 			if templ_7745c5c3_Err != nil {
@@ -819,15 +819,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if emailStatus.Address != "" {
+			if view.EmailStatus.Address != "" {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<p class=\"text-sm opacity-60\">Inbox: ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var30 string
-				templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(emailStatus.Address)
+				templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(view.EmailStatus.Address)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 550, Col: 67}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 550, Col: 72}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 				if templ_7745c5c3_Err != nil {
@@ -843,9 +843,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var31 string
-			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d sender(s)", len(emailAuthorizedSenders)))
+			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d sender(s)", len(view.EmailAuthorizedSenders)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 554, Col: 108}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 554, Col: 113}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 			if templ_7745c5c3_Err != nil {
@@ -855,12 +855,12 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if emailStatus.Running {
+			if view.EmailStatus.Running {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 76, "<span class=\"badge badge-success badge-sm\">Connected</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-			} else if emailStatus.Configured {
+			} else if view.EmailStatus.Configured {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "<span class=\"badge badge-warning badge-sm\">Configured</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -876,7 +876,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		for _, wh := range webhooks {
+		for _, wh := range view.Webhooks {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "<!-- Webhook Card --> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -957,7 +957,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", wh.DefaultPriority))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 581, Col: 75}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 581, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 			if templ_7745c5c3_Err != nil {
@@ -1117,7 +1117,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 				return templ_7745c5c3_Err
 			}
 		}
-		if !hasGitHubChannel && !hasTelegramChannel && !hasSlackChannel && !hasDiscordChannel && !hasEmailChannel && len(webhooks) == 0 {
+		if !view.HasGitHubChannel && !view.HasTelegramChannel && !view.HasSlackChannel && !view.HasDiscordChannel && !view.HasEmailChannel && len(view.Webhooks) == 0 {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 103, "<div class=\"card bg-base-100 shadow-sm border border-dashed border-base-300\" data-search-card data-search-text=\"No channels added yet\"><div class=\"card-body\"><h3 class=\"font-semibold\">No channels added yet</h3><p class=\"text-sm opacity-70\">Use `Add Channel` to configure GitHub, Slack, Discord, Telegram Bot, Email, or Webhooks.</p></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1127,7 +1127,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = OutboundTargetsModal(currentProjectID, channelTargets, sendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = OutboundTargetsModal(view.CurrentProjectID, view.ChannelTargets, view.SendMessageExplicitTargets).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1151,12 +1151,12 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if currentProjectID != "" {
+		if view.CurrentProjectID != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 107, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Authorized Telegram users are system-level for this channel and can use Telegram across projects. If no users are added, the bot is open to everyone. Outbound Message Targets remain project-specific.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = components.TelegramAuthorizedUsersList(authorizedUsers, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = components.TelegramAuthorizedUsersList(view.AuthorizedUsers, view.CurrentProjectID).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1165,7 +1165,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if sendResponses {
+		if view.SendResponses {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 109, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1175,7 +1175,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if richMessagesV2 {
+		if view.RichMessagesV2 {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 111, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1198,7 +1198,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if githubAuthMode == service.GitHubAuthModePAT {
+		if view.GitHubAuthMode == service.GitHubAuthModePAT {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 114, " selected")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1221,7 +1221,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if githubAuthMode == service.GitHubAuthModeApp {
+		if view.GitHubAuthMode == service.GitHubAuthModeApp {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 117, " selected")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1234,9 +1234,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		templ_7745c5c3_Err = components.SecretInput(components.SecretInputConfig{
 			ID:           "github_pat",
 			Name:         "github_pat",
-			Value:        githubPATValue,
+			Value:        view.GitHubPATValue,
 			Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-			Placeholder:  githubPATPlaceholder(githubHasPAT),
+			Placeholder:  githubPATPlaceholder(view.GitHubHasPAT),
 			AutoComplete: "off",
 			AriaLabel:    "Toggle token visibility",
 		}).Render(ctx, templ_7745c5c3_Buffer)
@@ -1248,9 +1248,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var50 string
-		templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAppID)
+		templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.GitHubAppID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 846, Col: 95}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 846, Col: 100}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var50)
 		if templ_7745c5c3_Err != nil {
@@ -1261,9 +1261,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var51 string
-		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAppSlug)
+		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.GitHubAppSlug)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 850, Col: 99}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 850, Col: 104}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var51)
 		if templ_7745c5c3_Err != nil {
@@ -1274,9 +1274,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var52 string
-		templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPrivateKeyPlaceholder(githubHasPrivateKey))
+		templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubPrivateKeyPlaceholder(view.GitHubHasPrivateKey))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 859, Col: 71}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 859, Col: 76}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var52)
 		if templ_7745c5c3_Err != nil {
@@ -1287,9 +1287,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var53 string
-		templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(githubPrivateKeyValue)
+		templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(view.GitHubPrivateKeyValue)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 860, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 860, Col: 37}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 		if templ_7745c5c3_Err != nil {
@@ -1300,9 +1300,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var54 string
-		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(githubAPIEndpoint)
+		templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.GitHubAPIEndpoint)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 886, Col: 32}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 886, Col: 37}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var54)
 		if templ_7745c5c3_Err != nil {
@@ -1312,15 +1312,15 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if currentProjectID != "" {
+		if view.CurrentProjectID != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 125, "<div class=\"divider\"></div><div id=\"github-runtime-settings\" hx-get=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var55 string
-			templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/github/runtime-settings?project_id=" + currentProjectID)
+			templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/github/runtime-settings?project_id=" + view.CurrentProjectID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 894, Col: 82}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 894, Col: 87}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var55)
 			if templ_7745c5c3_Err != nil {
@@ -1336,9 +1336,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var56 string
-		templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackClientID)
+		templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.SlackClientID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 932, Col: 98}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 932, Col: 103}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var56)
 		if templ_7745c5c3_Err != nil {
@@ -1349,9 +1349,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var57 string
-		templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(slackHasClientID, "Client ID"))
+		templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.ResolveAttributeValue(slackSecretPlaceholder(view.SlackHasClientID, "Client ID"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 932, Col: 168}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 932, Col: 178}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var57)
 		if templ_7745c5c3_Err != nil {
@@ -1364,9 +1364,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		templ_7745c5c3_Err = components.SecretInput(components.SecretInputConfig{
 			ID:           "slack_client_secret",
 			Name:         "slack_client_secret",
-			Value:        slackClientSecret,
+			Value:        view.SlackClientSecret,
 			Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-			Placeholder:  slackSecretPlaceholder(slackHasClientSecret, "Client Secret"),
+			Placeholder:  slackSecretPlaceholder(view.SlackHasClientSecret, "Client Secret"),
 			AutoComplete: "off",
 			AriaLabel:    "Toggle client secret visibility",
 		}).Render(ctx, templ_7745c5c3_Buffer)
@@ -1380,9 +1380,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		templ_7745c5c3_Err = components.SecretInput(components.SecretInputConfig{
 			ID:           "slack_app_token",
 			Name:         "slack_app_token",
-			Value:        slackAppToken,
+			Value:        view.SlackAppToken,
 			Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-			Placeholder:  slackSecretPlaceholder(slackHasAppToken, "App-Level Token"),
+			Placeholder:  slackSecretPlaceholder(view.SlackHasAppToken, "App-Level Token"),
 			AutoComplete: "off",
 			AriaLabel:    "Toggle app token visibility",
 		}).Render(ctx, templ_7745c5c3_Buffer)
@@ -1406,7 +1406,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if slackBotTokenMode == service.SlackBotTokenSourceOAuth {
+		if view.SlackBotTokenMode == service.SlackBotTokenSourceOAuth {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 133, " selected")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1429,7 +1429,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if slackBotTokenMode == service.SlackBotTokenSourceManual {
+		if view.SlackBotTokenMode == service.SlackBotTokenSourceManual {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 136, " selected")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1442,9 +1442,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		templ_7745c5c3_Err = components.SecretInput(components.SecretInputConfig{
 			ID:           "slack_bot_token",
 			Name:         "slack_bot_token",
-			Value:        slackBotToken,
+			Value:        view.SlackBotToken,
 			Class:        "input input-bordered w-full pr-10 font-mono text-xs",
-			Placeholder:  slackSecretPlaceholder(slackHasBotToken, "Bot Token"),
+			Placeholder:  slackSecretPlaceholder(view.SlackHasBotToken, "Bot Token"),
 			AutoComplete: "off",
 			AriaLabel:    "Toggle bot token visibility",
 		}).Render(ctx, templ_7745c5c3_Buffer)
@@ -1455,12 +1455,12 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if currentProjectID != "" {
+		if view.CurrentProjectID != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 139, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z\"></path></svg> Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Authorized Slack users are system-level for this channel and can use Slack across projects. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = components.SlackAuthorizedUsersList(slackAuthorizedUsers, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = components.SlackAuthorizedUsersList(view.SlackAuthorizedUsers, view.CurrentProjectID).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1469,7 +1469,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if slackSendResponses {
+		if view.SlackSendResponses {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 141, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1482,7 +1482,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		templ_7745c5c3_Err = components.SecretInput(components.SecretInputConfig{
 			ID:           "discord_bot_token",
 			Name:         "discord_bot_token",
-			Value:        discordBotToken,
+			Value:        view.DiscordBotToken,
 			Class:        "input input-bordered w-full pr-10 font-mono text-xs",
 			Placeholder:  "Leave blank to keep existing token, or paste a new token to rotate.",
 			AutoComplete: "off",
@@ -1495,12 +1495,12 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if currentProjectID != "" {
+		if view.CurrentProjectID != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 144, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2\">Authorized Users</h4><p class=\"text-xs opacity-50 mb-3\">Authorized Discord users are system-level for this channel and can use Discord across projects. If no users are configured, access is denied until authorized users are added. Outbound Message Targets remain project-specific.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = components.DiscordAuthorizedUsersList(discordAuthorizedUsers, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = components.DiscordAuthorizedUsersList(view.DiscordAuthorizedUsers, view.CurrentProjectID).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1509,7 +1509,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if discordSendResponses {
+		if view.DiscordSendResponses {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 146, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1602,7 +1602,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if emailStatus.Provider == preset.Key {
+			if view.EmailStatus.Provider == preset.Key {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 155, " selected")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
@@ -1615,7 +1615,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			var templ_7745c5c3_Var66 string
 			templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.JoinStringErrs(preset.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1089, Col: 311}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1089, Col: 316}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var66))
 			if templ_7745c5c3_Err != nil {
@@ -1631,9 +1631,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var67 string
-		templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.Address)
+		templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.EmailStatus.Address)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1095, Col: 104}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1095, Col: 109}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var67)
 		if templ_7745c5c3_Err != nil {
@@ -1643,7 +1643,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = components.SecretInput(components.SecretInputConfig{ID: "email_password", Name: "email_password", Value: emailPasswordValue, Class: "input input-bordered w-full pr-10 font-mono text-xs", Placeholder: slackSecretPlaceholder(emailPasswordValue != "", "App password"), AutoComplete: "off", AriaLabel: "Toggle email password visibility"}).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = components.SecretInput(components.SecretInputConfig{ID: "email_password", Name: "email_password", Value: view.EmailPasswordValue, Class: "input input-bordered w-full pr-10 font-mono text-xs", Placeholder: slackSecretPlaceholder(view.EmailPasswordValue != "", "App password"), AutoComplete: "off", AriaLabel: "Toggle email password visibility"}).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1651,7 +1651,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if emailStatus.Provider == service.EmailProviderCustom {
+		if view.EmailStatus.Provider == service.EmailProviderCustom {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 161, " open")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1662,9 +1662,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var68 string
-		templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.IMAPHost)
+		templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.EmailStatus.IMAPHost)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1106, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1106, Col: 134}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var68)
 		if templ_7745c5c3_Err != nil {
@@ -1675,9 +1675,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var69 string
-		templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", emailStatus.IMAPPort))
+		templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", view.EmailStatus.IMAPPort))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1110, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1110, Col: 155}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var69)
 		if templ_7745c5c3_Err != nil {
@@ -1688,9 +1688,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var70 string
-		templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailStatus.SMTPHost)
+		templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.EmailStatus.SMTPHost)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1114, Col: 129}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1114, Col: 134}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var70)
 		if templ_7745c5c3_Err != nil {
@@ -1701,9 +1701,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var71 string
-		templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", emailStatus.SMTPPort))
+		templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", view.EmailStatus.SMTPPort))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1118, Col: 150}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1118, Col: 155}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var71)
 		if templ_7745c5c3_Err != nil {
@@ -1714,9 +1714,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var72 string
-		templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.ResolveAttributeValue(emailPollIntervalSeconds)
+		templ_7745c5c3_Var72, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.EmailPollIntervalSeconds)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1124, Col: 132}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1124, Col: 137}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var72)
 		if templ_7745c5c3_Err != nil {
@@ -1726,12 +1726,12 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if currentProjectID != "" {
+		if view.CurrentProjectID != "" {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "<div class=\"divider\"></div><h4 class=\"font-semibold text-sm mb-2 flex items-center gap-2\">Authorized Senders</h4><p class=\"text-xs opacity-50 mb-3\">Authorized email senders are system-level for this channel and can use Email across projects. If no senders are configured, access is denied until authorized senders are added. Outbound Message Targets remain project-specific.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = components.EmailAuthorizedSendersList(emailAuthorizedSenders, currentProjectID).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = components.EmailAuthorizedSendersList(view.EmailAuthorizedSenders, view.CurrentProjectID).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1740,7 +1740,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if emailSendResponses {
+		if view.EmailSendResponses {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 170, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1750,7 +1750,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if emailSkipAttachments {
+		if view.EmailSkipAttachments {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 172, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1760,7 +1760,7 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if emailMarkExistingSeenOnStart {
+		if view.EmailMarkExistingSeenOnStart {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 174, " checked")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1771,9 +1771,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var73 string
-		templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks?project_id=" + currentProjectID)
+		templ_7745c5c3_Var73, templ_7745c5c3_Err = templ.ResolveAttributeValue("/channels/webhooks?project_id=" + view.CurrentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1164, Col: 89}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1164, Col: 95}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var73)
 		if templ_7745c5c3_Err != nil {
@@ -1784,9 +1784,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var74 string
-		templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+		templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.CurrentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1164, Col: 141}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1164, Col: 152}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var74)
 		if templ_7745c5c3_Err != nil {
@@ -1797,9 +1797,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var75 string
-		templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
+		templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.ResolveAttributeValue(view.CurrentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1165, Col: 68}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1165, Col: 74}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var75)
 		if templ_7745c5c3_Err != nil {
@@ -1825,9 +1825,9 @@ func settingsContent(telegramToken string, isBotRunning bool, authorizedUsers []
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var76 string
-		templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(agentsJSON(agents))
+		templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.ResolveAttributeValue(agentsJSON(view.Agents))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1264, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/settings.templ`, Line: 1264, Col: 68}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var76)
 		if templ_7745c5c3_Err != nil {
