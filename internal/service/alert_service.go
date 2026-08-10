@@ -93,14 +93,18 @@ func (s *AlertService) ListByProject(ctx context.Context, projectID string, limi
 	return s.alertRepo.ListByProject(ctx, projectID, limit)
 }
 
+func (s *AlertService) ListSummariesByProject(ctx context.Context, projectID string, limit int) ([]models.AlertSummary, error) {
+	return s.alertRepo.ListSummariesByProject(ctx, projectID, limit)
+}
+
 func (s *AlertService) ListFiltered(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.Alert, error) {
 	return s.alertRepo.ListFiltered(ctx, projectID, filter)
 }
 
-func (s *AlertService) ListFilteredForRuntime(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.Alert, error) {
+func (s *AlertService) ListFilteredSummariesForRuntime(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
 	automationContext, automationBound := AutomationContextFromContext(ctx)
 	if !automationBound {
-		return s.alertRepo.ListFiltered(ctx, projectID, filter)
+		return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
 	}
 	if automationContext.ProjectID != projectID {
 		return nil, fmt.Errorf("alert Automation project mismatch")
@@ -110,10 +114,10 @@ func (s *AlertService) ListFilteredForRuntime(ctx context.Context, projectID str
 		return nil, err
 	}
 	if len(bindings) == 0 {
-		return s.alertRepo.ListFiltered(ctx, projectID, filter)
+		return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
 	}
 	filter.AutomationInboxBindings = bindings
-	return s.alertRepo.ListFiltered(ctx, projectID, filter)
+	return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
 }
 
 func (s *AlertService) RequireAutomationInboxOwnership(ctx context.Context, projectID, alertID string) error {

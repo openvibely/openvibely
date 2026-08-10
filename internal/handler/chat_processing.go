@@ -3392,7 +3392,7 @@ func (h *Handler) executeListAlerts(ctx context.Context, projectID string) strin
 		return "Alert Results:\n- Alert service not available"
 	}
 
-	alerts, err := h.alertSvc.ListByProject(ctx, projectID, 50)
+	alerts, err := h.alertSvc.ListSummariesByProject(ctx, projectID, 50)
 	if err != nil {
 		return "Alert Results:\n- Error retrieving alerts: " + err.Error()
 	}

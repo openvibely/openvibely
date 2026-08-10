@@ -29,6 +29,11 @@ const alertSelectColumns = `id, project_id, scope, task_id, execution_id, source
 	processing_state, COALESCE(claimant, ''), claimed_at, claim_expires_at, implementation_task_id,
 	processing_error, is_read, created_at, updated_at`
 
+const alertSummarySelectColumns = `id, project_id, scope, task_id, execution_id, source_task_id, type, severity,
+	title, message, source, COALESCE(idempotency_key, ''), decision_state, decided_at,
+	processing_state, COALESCE(claimant, ''), claimed_at, claim_expires_at, implementation_task_id,
+	processing_error, is_read, created_at, updated_at`
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -47,6 +52,17 @@ func scanAlert(row rowScanner) (*models.Alert, error) {
 		if err := json.Unmarshal([]byte(metadata), &a.Metadata); err != nil {
 			return nil, fmt.Errorf("decoding alert metadata: %w", err)
 		}
+	}
+	return &a, nil
+}
+
+func scanAlertSummary(row rowScanner) (*models.AlertSummary, error) {
+	var a models.AlertSummary
+	if err := row.Scan(&a.ID, &a.ProjectID, &a.Scope, &a.TaskID, &a.ExecutionID, &a.SourceTaskID,
+		&a.Type, &a.Severity, &a.Title, &a.Message, &a.Source, &a.IdempotencyKey,
+		&a.DecisionState, &a.DecidedAt, &a.ProcessingState, &a.Claimant, &a.ClaimedAt, &a.ClaimExpiresAt,
+		&a.ImplementationTaskID, &a.ProcessingError, &a.IsRead, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		return nil, err
 	}
 	return &a, nil
 }
@@ -195,6 +211,10 @@ func (r *AlertRepo) ListByProject(ctx context.Context, projectID string, limit i
 	return r.ListFiltered(ctx, projectID, models.AlertListFilter{Limit: limit})
 }
 
+func (r *AlertRepo) ListSummariesByProject(ctx context.Context, projectID string, limit int) ([]models.AlertSummary, error) {
+	return r.ListFilteredSummaries(ctx, projectID, models.AlertListFilter{Limit: limit})
+}
+
 func (r *AlertRepo) NativeInboxBindings(ctx context.Context, automationContext models.AutomationContext) ([]models.AutomationBinding, error) {
 	bindings := make([]models.AutomationBinding, 0, len(automationContext.Bindings))
 	for _, binding := range automationContext.Bindings {
@@ -242,6 +262,44 @@ func (r *AlertRepo) RebindAlertToAutomationInbox(ctx context.Context, projectID,
 }
 
 func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.Alert, error) {
+	filter = normalizeAlertListFilter(filter)
+	query, args := buildAlertListQuery(alertSelectColumns, projectID, filter)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing alerts: %w", err)
+	}
+	defer rows.Close()
+	alerts := []models.Alert{}
+	for rows.Next() {
+		a, err := scanAlert(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning alert: %w", err)
+		}
+		alerts = append(alerts, *a)
+	}
+	return alerts, rows.Err()
+}
+
+func (r *AlertRepo) ListFilteredSummaries(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
+	filter = normalizeAlertListFilter(filter)
+	query, args := buildAlertListQuery(alertSummarySelectColumns, projectID, filter)
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing alert summaries: %w", err)
+	}
+	defer rows.Close()
+	summaries := []models.AlertSummary{}
+	for rows.Next() {
+		a, err := scanAlertSummary(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning alert summary: %w", err)
+		}
+		summaries = append(summaries, *a)
+	}
+	return summaries, rows.Err()
+}
+
+func normalizeAlertListFilter(filter models.AlertListFilter) models.AlertListFilter {
 	if filter.Limit <= 0 {
 		filter.Limit = 50
 	}
@@ -251,7 +309,11 @@ func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter m
 	if filter.Offset < 0 {
 		filter.Offset = 0
 	}
-	query := `SELECT ` + alertSelectColumns + ` FROM alerts WHERE project_id = ?`
+	return filter
+}
+
+func buildAlertListQuery(columns, projectID string, filter models.AlertListFilter) (string, []any) {
+	query := `SELECT ` + columns + ` FROM alerts WHERE project_id = ?`
 	args := []any{projectID}
 	if filter.DecisionState != "" {
 		query += ` AND decision_state = ?`
@@ -287,30 +349,17 @@ func (r *AlertRepo) ListFiltered(ctx context.Context, projectID string, filter m
 				query += ` OR `
 			}
 			query += `EXISTS (
-						SELECT 1
-						FROM automation_artifact_mailbox_owners owner
-						WHERE owner.project_id = alerts.project_id AND owner.automation_id = ?
-							AND owner.artifact_type = 'alert' AND owner.artifact_id = alerts.id)`
+							SELECT 1
+							FROM automation_artifact_mailbox_owners owner
+							WHERE owner.project_id = alerts.project_id AND owner.automation_id = ?
+								AND owner.artifact_type = 'alert' AND owner.artifact_id = alerts.id)`
 			args = append(args, binding.AutomationID)
 		}
 		query += `)`
 	}
 	query += ` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
 	args = append(args, filter.Limit, filter.Offset)
-	rows, err := r.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("listing alerts: %w", err)
-	}
-	defer rows.Close()
-	alerts := []models.Alert{}
-	for rows.Next() {
-		a, err := scanAlert(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scanning alert: %w", err)
-		}
-		alerts = append(alerts, *a)
-	}
-	return alerts, rows.Err()
+	return query, args
 }
 
 func (r *AlertRepo) CountUnread(ctx context.Context, projectID string) (int, error) {
