@@ -9,7 +9,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -137,21 +136,29 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 		return err
 	}
 
-	clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
+	s := &models.Schedule{
+		TaskID:              taskID,
+		RunAt:               formValues.runAt,
+		RepeatType:          formValues.repeatType,
+		RepeatInterval:      formValues.repeatInterval,
+		Enabled:             true,
+		ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
+	}
 
 	agentAssignmentPresent, agentDefinitionID, err := h.scheduleAgentAssignmentFromForm(c, taskID)
 	if err != nil {
 		return err
 	}
 
-	s, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
-		TaskID:              taskID,
-		RunAt:               formValues.runAt,
-		RepeatType:          formValues.repeatType,
-		RepeatInterval:      formValues.repeatInterval,
-		ClearContextOnStart: &clearContextOnStart,
-	})
-	if err != nil {
+	// For recurring schedules with a past RunAt, keep NextRun = RunAt so the
+	// scheduler picks it up immediately on its next tick (within 5 seconds).
+	// The scheduler will execute the task once for the missed occurrence and
+	// then advance NextRun to the next future occurrence via ComputeNextRun.
+	// Previously this pre-computed the next future occurrence, which skipped
+	// the current day's execution (e.g., creating a daily 1:33 AM schedule
+	// at 1:34 AM would skip today and not run until tomorrow).
+
+	if err := h.scheduleRepo.Create(c.Request().Context(), s); err != nil {
 		applog.Infof("[handler] CreateSchedule error: %v", err)
 		return err
 	}

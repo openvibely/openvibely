@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
@@ -369,15 +370,21 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		if scheduledFormErr != nil {
 			applog.Infof("[handler] CreateTask schedule parse error: %v", scheduledFormErr)
 		} else {
-			clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
-			sched, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
-				TaskID:              t.ID,
+			sched := &models.Schedule{TaskID: t.ID,
 				RunAt:               scheduledFormValues.runAt,
 				RepeatType:          scheduledFormValues.repeatType,
 				RepeatInterval:      scheduledFormValues.repeatInterval,
-				ClearContextOnStart: &clearContextOnStart,
-			})
-			if err != nil {
+				Enabled:             true,
+				ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
+			}
+			// For recurring schedules with a past RunAt, compute the next future occurrence immediately
+			if sched.RepeatType != models.RepeatOnce && !scheduledFormValues.runAt.After(time.Now().UTC()) {
+				nextRun := sched.ComputeNextRun(time.Now().UTC())
+				if nextRun != nil {
+					sched.NextRun = nextRun
+				}
+			}
+			if err := h.scheduleRepo.Create(c.Request().Context(), sched); err != nil {
 				applog.Infof("[handler] CreateTask schedule create error: %v", err)
 			} else {
 				applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)

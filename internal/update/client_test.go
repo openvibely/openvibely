@@ -2,6 +2,10 @@ package update
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -67,5 +71,108 @@ func TestClientRejectsUnsupportedSchema(t *testing.T) {
 	_, _, err := client.CheckIfDue(context.Background(), CurrentBuild{Build: buildinfo.Build{Version: "1.0.0", Commit: "a", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionBinary})
 	if err == nil {
 		t.Fatal("unsupported schema accepted")
+	}
+}
+
+func TestCheckIfDueRetriesAfterReleaseVerificationFailureWithoutSuccessThrottle(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1700000000, 0).UTC()
+	requests := 0
+	metadata := ReleaseMetadata{
+		SchemaVersion:         1,
+		Version:               "0.6.0",
+		Commit:                "def",
+		Channel:               "stable",
+		PublishedAt:           now.Add(-time.Hour),
+		ExpiresAt:             now.Add(24 * time.Hour),
+		ReleaseNotesURL:       "https://openvibely.ai/releases/0.6.0",
+		MinimumUpdaterVersion: "0.1.0",
+		Targets: []Target{{
+			ID:       "binary-linux-amd64",
+			Kind:     "executable",
+			OS:       "linux",
+			Arch:     "amd64",
+			URL:      "https://downloads.openvibely.ai/openvibely",
+			Filename: "openvibely",
+			Filetype: "binary",
+			Size:     3,
+			SHA256:   hex.EncodeToString(make([]byte, 32)),
+		}},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		response := signedCheckResponse(t, private, metadata)
+		if requests == 1 {
+			response.Release.Signatures[0].Value = base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize))
+		}
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			t.Fatal(err)
+		}
+	}))
+	defer srv.Close()
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	client := NewClient(ClientConfig{
+		ServiceURL: srv.URL,
+		Channel:    "stable",
+		StatePath:  statePath,
+		HTTPClient: srv.Client(),
+		PublicKeys: map[string]ed25519.PublicKey{"release": public},
+		Now:        func() time.Time { return now },
+		Random:     func(time.Duration) time.Duration { return 0 },
+	})
+	current := CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", Commit: "abc", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionBinary}
+
+	if release, checked, err := client.CheckIfDue(context.Background(), current); err == nil || !checked || release != nil {
+		t.Fatalf("first release=%#v checked=%v err=%v, want verification failure", release, checked, err)
+	}
+	state, err := client.loadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.LastSuccessfulCheck.IsZero() {
+		t.Fatalf("verification failure persisted successful check %v", state.LastSuccessfulCheck)
+	}
+	if state.Failures != 1 || !state.NextAttempt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("failure state failures=%d next_attempt=%v", state.Failures, state.NextAttempt)
+	}
+	if requests != 1 {
+		t.Fatalf("requests=%d, want 1", requests)
+	}
+
+	now = state.NextAttempt.Add(-time.Nanosecond)
+	if release, checked, err := client.CheckIfDue(context.Background(), current); err != nil || checked || release != nil {
+		t.Fatalf("before retry release=%#v checked=%v err=%v, want retry gate", release, checked, err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests before retry=%d, want 1", requests)
+	}
+
+	now = state.NextAttempt
+	release, checked, err := client.CheckIfDue(context.Background(), current)
+	if err != nil || !checked || release == nil {
+		t.Fatalf("retry release=%#v checked=%v err=%v, want verified release", release, checked, err)
+	}
+	if release.Metadata.Version != "0.6.0" {
+		t.Fatalf("release version=%q", release.Metadata.Version)
+	}
+	if requests != 2 {
+		t.Fatalf("requests after retry=%d, want 2", requests)
+	}
+	state, err = client.loadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.LastSuccessfulCheck.Equal(now) || state.Failures != 0 || !state.NextAttempt.Equal(now.Add(24*time.Hour)) || state.Cached == nil {
+		t.Fatalf("successful retry state=%#v", state)
+	}
+
+	if cached, checked, err := client.CheckIfDue(context.Background(), current); err != nil || checked || cached == nil || cached.Metadata.Version != "0.6.0" {
+		t.Fatalf("cached release=%#v checked=%v err=%v, want success throttle", cached, checked, err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests after success throttle=%d, want 2", requests)
 	}
 }
