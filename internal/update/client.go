@@ -287,8 +287,8 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 		c.recordFailure(&state, now)
 		return state.Cached, true, fmt.Errorf("unsupported update schema_version %d", response.SchemaVersion)
 	}
-	state.LastSuccessfulCheck, state.Failures, state.NextAttempt = now, 0, now.Add(24*time.Hour+c.cfg.Random(time.Hour))
 	if current.Distribution == buildinfo.DistributionSource {
+		state.LastSuccessfulCheck, state.Failures, state.NextAttempt = now, 0, now.Add(24*time.Hour+c.cfg.Random(time.Hour))
 		state.Cached = nil
 		saveErr := c.saveState(state)
 		if installIDPersistenceFailed {
@@ -307,6 +307,7 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 	} else {
 		state.Cached = nil
 	}
+	state.LastSuccessfulCheck, state.Failures, state.NextAttempt = now, 0, now.Add(24*time.Hour+c.cfg.Random(time.Hour))
 	saveErr := c.saveState(state)
 	if installIDPersistenceFailed {
 		saveErr = nil
