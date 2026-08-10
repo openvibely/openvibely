@@ -1542,27 +1542,14 @@ func (s *SlackService) checkAuthorizationResult(ctx context.Context, projectID, 
 		return true, nil
 	}
 
-	if strings.TrimSpace(projectID) == "" {
-		authorized, err := s.slackAuthRepo.IsAuthorizedAnywhere(ctx, slackUserID)
-		if err != nil {
+	authorized, err := s.slackAuthRepo.IsAuthorizedAnywhere(ctx, slackUserID)
+	if err != nil {
+		if strings.TrimSpace(projectID) == "" {
 			return false, fmt.Errorf("check Slack authorization anywhere: %w", err)
 		}
-		return authorized, nil
-	}
-
-	authorized, err := s.slackAuthRepo.IsAuthorized(ctx, projectID, slackUserID)
-	if err != nil {
 		return false, fmt.Errorf("check Slack authorization for project: %w", err)
 	}
-	if authorized {
-		return true, nil
-	}
-
-	authorizedAnywhere, err := s.slackAuthRepo.IsAuthorizedAnywhere(ctx, slackUserID)
-	if err != nil {
-		return false, fmt.Errorf("check Slack fallback authorization: %w", err)
-	}
-	return authorizedAnywhere, nil
+	return authorized, nil
 }
 
 func sanitizeSlackText(text string) string {

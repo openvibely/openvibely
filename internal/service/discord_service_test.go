@@ -36,6 +36,84 @@ func newDiscordServiceForTest(t *testing.T) (*DiscordService, *sql.DB, *reposito
 	return svc, db, settingsRepo, projectRepo, taskRepo, discordAuthRepo, discordTaskContextRepo
 }
 
+func TestDiscordService_CheckAuthorizationPreservesAnyProjectBehavior(t *testing.T) {
+	svc, _, _, projectRepo, _, discordAuthRepo, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	projectA := &models.Project{Name: "Discord Project A"}
+	projectB := &models.Project{Name: "Discord Project B"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatal(err)
+	}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatal(err)
+	}
+	if err := discordAuthRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: projectA.ID, DiscordUserID: "1518288288572641398", DisplayName: "Allowed", AddedBy: "test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !svc.checkAuthorization(ctx, projectB.ID, "1518288288572641398") {
+		t.Fatal("expected authorized Discord user from another project to remain allowed")
+	}
+	if svc.checkAuthorization(ctx, projectB.ID, "999999999999999999") {
+		t.Fatal("expected unauthorized Discord user to remain rejected")
+	}
+	if !svc.checkAuthorization(ctx, "", "1518288288572641398") {
+		t.Fatal("expected empty-project Discord authorization to use anywhere lookup")
+	}
+}
+
+func TestDiscordService_CheckAuthorizationRejectedActiveProjectUsesSingleLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	discordAuthRepo := repository.NewDiscordAuthRepo(db)
+	project := &models.Project{Name: "Discord Single Auth Lookup"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	seedChannelAuthorizedUsers(t, db, "discord_authorized_users", "discord_user_id", project.ID, "151828828857", 1000)
+	svc := NewDiscordService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, discordAuthRepo, nil)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	authorized := svc.checkAuthorization(ctx, project.ID, "999999999999999999")
+	counter.SetEnabled(false)
+
+	if authorized {
+		t.Fatal("expected rejected Discord user to remain unauthorized")
+	}
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("rejected active-project authorization statements = %q, want one", statements)
+	}
+	if got := countChannelAuthTableStatements(statements, "discord_authorized_users"); got != 1 {
+		t.Fatalf("discord auth table lookup statements = %d, want one; statements: %q", got, statements)
+	}
+}
+
+func BenchmarkDiscordRejectedAuthorizationSingleLookupLargeAllowlist(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	discordAuthRepo := repository.NewDiscordAuthRepo(db)
+	project := &models.Project{Name: "Discord Rejected Auth Benchmark"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		b.Fatal(err)
+	}
+	seedChannelAuthorizedUsers(b, db, "discord_authorized_users", "discord_user_id", project.ID, "151828828857", 100000)
+	svc := NewDiscordService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, discordAuthRepo, nil)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if svc.checkAuthorization(ctx, project.ID, "999999999999999999") {
+			b.Fatal("unexpected authorized rejected Discord user")
+		}
+	}
+}
+
 func TestDiscordService_NotificationLifecycleRuntimeUsesPersistedChannelTask(t *testing.T) {
 	svc, db, _, projectRepo, taskRepo, _, _ := newDiscordServiceForTest(t)
 	ctx := context.Background()
