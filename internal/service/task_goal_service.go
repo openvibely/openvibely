@@ -13,6 +13,8 @@ import (
 
 const MaxTaskGoalLength = 2000
 
+const GitHubPRPublicationBlockerKey = "github_pr_publication_automation_authorization"
+
 var (
 	ErrTaskGoalEmpty       = errors.New("task goal cannot be empty")
 	ErrTaskGoalTooLong     = errors.New("task goal is too long")
@@ -203,6 +205,19 @@ func (s *TaskGoalService) RecordBlockedReport(ctx context.Context, taskID string
 	}
 	if goal == nil {
 		return nil, ErrTaskGoalStaleUpdate
+	}
+	s.publishGoalEvent(events.TaskGoalEvaluated, goal)
+	return goal, nil
+}
+
+func (s *TaskGoalService) ClearBlockedReport(ctx context.Context, taskID string, blockerKey string, reason string) (*models.TaskGoal, error) {
+	blockerKey = strings.TrimSpace(blockerKey)
+	if blockerKey == "" {
+		return nil, errors.New("blocker_key is required")
+	}
+	goal, err := s.repo.ClearBlockedReport(ctx, taskID, blockerKey, strings.TrimSpace(reason))
+	if err != nil || goal == nil {
+		return goal, err
 	}
 	s.publishGoalEvent(events.TaskGoalEvaluated, goal)
 	return goal, nil

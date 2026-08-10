@@ -2226,6 +2226,14 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 	staleTaskContext, err := fixture.repo.ContextForTask(ctx, fixture.project.ID, implementationTask.ID)
 	require.NoError(t, err)
 	require.NotEmpty(t, staleTaskContext.Bindings)
+	require.NoError(t, fixture.taskRepo.UpdateCategory(ctx, implementationTask.ID, models.CategoryActive))
+	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, implementationTask.ID, models.StatusPending))
+	dispatchClaim, claimed, err := fixture.taskRepo.ClaimTaskForDispatch(ctx, implementationTask.ID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.True(t, dispatchClaim.AutomationContext.OriginTask)
+	require.NotEmpty(t, dispatchClaim.AutomationContext.Bindings)
+	require.NoError(t, fixture.taskRepo.UpdateStatus(ctx, implementationTask.ID, models.StatusRunning))
 
 	replaced := replaceAutomationGitHubIssueGraph(t, fixture)
 	require.NotEqual(t, fixture.definition.Version.ID, replaced.Version.ID)
@@ -2239,9 +2247,16 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 	originCtx = withAutomationExecution(originCtx, implementationTask.ID, implementationExecution.ID)
 	staleOriginCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, OriginTask: true, Bindings: staleTaskContext.Bindings})
 	staleOriginCtx = withAutomationExecution(staleOriginCtx, implementationTask.ID, implementationExecution.ID)
+	taskGoalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(fixture.repo.DB()), fixture.taskRepo, nil)
+	goal, err := taskGoalSvc.SetGoal(ctx, implementationTask.ID, "Publish a reviewable PR", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+	for i := 0; i < 3; i++ {
+		_, err := taskGoalSvc.RecordBlockedReport(ctx, implementationTask.ID, goal.GoalID, GitHubPRPublicationBlockerKey, "PR publication failed")
+		require.NoError(t, err)
+	}
 	publishSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: projectRepo,
 		taskRepo: fixture.taskRepo, taskPullRequestRepo: opts.TaskPullRequestRepo, githubPRFeedbackRepo: repository.NewGitHubPRFeedbackRepo(fixture.repo.DB()),
-		githubAuthRepo: repository.NewGitHubAuthRepo(fixture.repo.DB()), threadInputRepo: repository.NewThreadInputRepo(fixture.repo.DB())}
+		githubAuthRepo: repository.NewGitHubAuthRepo(fixture.repo.DB()), threadInputRepo: repository.NewThreadInputRepo(fixture.repo.DB()), taskGoalSvc: taskGoalSvc}
 	publishRuntime := publishSvc.AutomationGitHubRuntimeTools(staleOriginCtx, *implementationTask, gitHubIssueRuntimeToolDefs(true))
 	require.NotNil(t, publishRuntime)
 	prBody := "## Summary\n- Implements the accepted issue.\n\n## Validation\n- go test ./internal/service\n\nCloses #42"
@@ -2250,6 +2265,13 @@ func TestAutomationGitHubPRPublicationUsesDurableTaskProvenanceAfterGraphReplace
 	require.True(t, handled)
 	require.False(t, isErr)
 	require.Contains(t, published, `"created":true`)
+	clearedGoal, err := taskGoalSvc.GetGoal(ctx, implementationTask.ID)
+	require.NoError(t, err)
+	require.NotNil(t, clearedGoal)
+	require.Equal(t, models.TaskGoalStatusActive, clearedGoal.Status)
+	require.Empty(t, clearedGoal.BlockerKey)
+	require.Zero(t, clearedGoal.BlockerCount)
+	require.Equal(t, "GitHub PR publication succeeded with PR #77", clearedGoal.Reason)
 	provider.getPullRequestFn = func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error) {
 		return &GitHubPullRequest{Number: 77, URL: "https://github.com/example/runtime/pull/77", State: "open", HeadRef: implementationTask.WorktreeBranch, HeadRepoFullName: "example/runtime", HeadSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, nil
 	}
@@ -2515,7 +2537,7 @@ func TestAutomationGitHubIssueProjectionRepairRejectsDeletedSourceGraph(t *testi
 		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider}
 	_, repairErr := repairAutomationGitHubIssueProjection(opts, &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, title,
 		repository.AutomationGitHubIssueDedupClaim{IssueNumber: issueNumber, OwnerToken: ownerToken, Source: source})
-	require.ErrorContains(t, repairErr, "expected GitHub issue projection")
+	require.ErrorContains(t, repairErr, "current active Automation graph")
 }
 
 func TestAutomationGitHubIssueCreationFailsClosedAfterAmbiguousProviderOutcome(t *testing.T) {
@@ -2758,6 +2780,42 @@ func TestAutomationGitHubIssueCreationRepairsPartialMultiBindingProjection(t *te
 	assertAutomationGitHubIssueProjectionForDefinition(t, fixture, fixture.definition, 96, activityKey)
 	assertAutomationGitHubIssueProjectionForDefinition(t, fixture, secondDefinition, 96, activityKey)
 	require.Equal(t, int32(1), createCalls.Load(), "partial multi-binding repair must not mutate GitHub again")
+}
+
+func TestAutomationGitHubIssueCreationUsesLaunchAuthorizationAfterGraphReplacement(t *testing.T) {
+	var gotCreateLabels []string
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+		},
+		ensureIssueLabelsFn: func(_ context.Context, _ *GitHubRepoRef, labels []string) error {
+			require.Equal(t, []string{"bug"}, labels)
+			return nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			gotCreateLabels = append([]string(nil), req.Labels...)
+			return &GitHubIssue{Number: 212, URL: "https://github.com/example/runtime/issues/212", Title: req.Title, State: "open", Labels: req.Labels}, nil
+		},
+	}
+	fixture, newCausalContext, _ := newAutomationGitHubIssueDedupHarness(t, provider)
+	ctx := newCausalContext("launch-safe-after-save")
+	replaced := replaceAutomationGitHubIssueGraph(t, fixture)
+	fixture.task.CreatedVia = repository.AutomationCompilerTaskCreatedVia(fixture.definition.Automation.ID, "bug_finder")
+	_, err := fixture.repo.DB().ExecContext(context.Background(), `UPDATE tasks SET created_via = ? WHERE id = ?`, fixture.task.CreatedVia, fixture.task.ID)
+	require.NoError(t, err)
+	activityKey := githubIssueCreationActivityKey(ctx, &GitHubRepoRef{FullName: "example/runtime"}, githubCreateIssueRuntimeInput{
+		Title: "Launch-safe bug", Body: "## Summary\nA user-visible bug.", Labels: []string{"bug"},
+	})
+	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: repository.NewProjectRepo(fixture.repo.DB()), taskRepo: fixture.taskRepo}
+	runtime := llmSvc.AutomationGitHubRuntimeTools(ctx, fixture.task, gitHubIssueRuntimeToolDefs(true))
+	require.NotNil(t, runtime)
+	output, handled, isErr, err := runtime.Executor(ctx, "github_create_issue", json.RawMessage(`{"title":"Launch-safe bug","body":"## Summary\nA user-visible bug."}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.Contains(t, output, `"Number":212`)
+	require.Equal(t, []string{"bug"}, gotCreateLabels)
+	assertAutomationGitHubIssueProjectionForDefinition(t, fixture, replaced, 212, activityKey)
 }
 
 func TestMaintainedGitHubSDLCAppliesFinderCategoryLabels(t *testing.T) {

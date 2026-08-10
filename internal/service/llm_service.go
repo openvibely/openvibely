@@ -295,6 +295,8 @@ func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task mode
 		AutomationRepo:           s.automationRepo,
 		GitHub:                   s.githubIssueRuntime,
 		AfterPRFeedbackForwarded: s.promoteQueuedTaskThreadAfterCompletion,
+		AfterPullRequestOpened:   s.clearGitHubPublicationGoalBlocker,
+		TaskCreatedVia:           task.CreatedVia,
 		SuppressIssueComments:    true,
 	})
 	if runtime == nil {
@@ -322,6 +324,9 @@ func (s *LLMService) AutomationGitHubRuntimeTools(ctx context.Context, task mode
 			toolName := strings.ToLower(strings.TrimSpace(name))
 			if writeTools[toolName] {
 				if automationContext.OriginTask && toolName == "github_open_pull_request" {
+					return baseExecutor(toolCtx, name, input)
+				}
+				if toolName == "github_create_issue" {
 					return baseExecutor(toolCtx, name, input)
 				}
 				if automationContext.OriginTask && len(automationContext.Bindings) == 0 {
@@ -880,6 +885,19 @@ func (s *LLMService) recordAutomationTasksCreated(ctx context.Context, projectID
 		}
 	}
 	return nil
+}
+
+func (s *LLMService) clearGitHubPublicationGoalBlocker(taskID string, result *OpenTaskPullRequestResult) {
+	if s == nil || s.taskGoalSvc == nil || strings.TrimSpace(taskID) == "" {
+		return
+	}
+	reason := "GitHub PR publication succeeded"
+	if result != nil && result.PullRequest != nil && result.PullRequest.Number > 0 {
+		reason = fmt.Sprintf("GitHub PR publication succeeded with PR #%d", result.PullRequest.Number)
+	}
+	if _, err := s.taskGoalSvc.ClearBlockedReport(context.Background(), taskID, GitHubPRPublicationBlockerKey, reason); err != nil {
+		applog.Infof("[agent-svc] clearing GitHub publication goal blocker failed task=%s: %v", taskID, err)
+	}
 }
 
 func (s *LLMService) promoteQueuedTaskThreadAfterCompletion(taskID string) {

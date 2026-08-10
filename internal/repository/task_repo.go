@@ -643,8 +643,9 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 	if err != nil {
 		return nil, false, fmt.Errorf("loading task Automation context for dispatch claim: %w", err)
 	}
-	if len(automationContext.Bindings) == 0 && IsAutomationTaskCreatedVia(task.CreatedVia) {
-		automationContext = models.AutomationContext{ProjectID: task.ProjectID, OriginTask: true}
+	if IsAutomationTaskCreatedVia(task.CreatedVia) {
+		automationContext.ProjectID = task.ProjectID
+		automationContext.OriginTask = true
 	}
 	checkedBindings := map[string]bool{}
 	for _, binding := range automationContext.Bindings {
