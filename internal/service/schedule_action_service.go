@@ -139,14 +139,17 @@ func (s *ScheduleActionService) Create(ctx context.Context, projectID string, re
 		return result, actionError(ScheduleActionPersistError, "", err)
 	}
 	result.Schedule = schedule
+	categoryChanged := false
 	if task.Category != models.CategoryScheduled {
 		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
 			result.Warnings = append(result.Warnings, err)
 		} else {
 			task.Category = models.CategoryScheduled
+			categoryChanged = true
 		}
 	}
-	if task.Status != models.StatusPending {
+	shouldResetStatus := task.Status != models.StatusPending && task.Status != models.StatusRunning && (repeatType == models.RepeatOnce || categoryChanged)
+	if shouldResetStatus {
 		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
 			result.Warnings = append(result.Warnings, err)
 		} else {

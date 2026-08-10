@@ -72,6 +72,86 @@ func TestScheduleActionServiceCreateClearsCancellationRequestForScheduledRun(t *
 	require.Equal(t, models.StatusPending, updated.Status)
 }
 
+func TestScheduleActionServiceCreateOneTimeResetsCompletedAlreadyScheduledTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Runtime one-time completed scheduled task"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Completed scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	result, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "once"})
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule)
+	require.Equal(t, models.RepeatOnce, result.Schedule.RepeatType)
+	require.NotNil(t, result.Schedule.NextRun)
+	require.Equal(t, models.CategoryScheduled, result.Task.Category)
+	require.Equal(t, models.StatusPending, result.Task.Status)
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+	require.Equal(t, models.StatusPending, updated.Status)
+	schedules, err := scheduleRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, schedules, 1)
+}
+
+func TestScheduleActionServiceCreateDoesNotResetRunningAlreadyScheduledTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Runtime running scheduled task"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Running scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusRunning, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	result, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "once"})
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule)
+	require.Equal(t, models.StatusRunning, result.Task.Status)
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+	require.Equal(t, models.StatusRunning, updated.Status)
+}
+
+func TestScheduleActionServiceCreateRecurringPreservesTerminalAlreadyScheduledTask(t *testing.T) {
+	for _, status := range []models.TaskStatus{models.StatusCompleted, models.StatusFailed} {
+		t.Run(string(status), func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			ctx := context.Background()
+			projectRepo := repository.NewProjectRepo(db)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			scheduleRepo := repository.NewScheduleRepo(db)
+			project := &models.Project{Name: "Runtime recurring scheduled task"}
+			require.NoError(t, projectRepo.Create(ctx, project))
+			task := &models.Task{ProjectID: project.ID, Title: "Terminal scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: status, Priority: 2}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+			result, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "daily"})
+			require.NoError(t, err)
+			require.NotNil(t, result.Schedule)
+			require.Equal(t, models.RepeatDaily, result.Schedule.RepeatType)
+			require.Equal(t, status, result.Task.Status)
+
+			updated, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.CategoryScheduled, updated.Category)
+			require.Equal(t, status, updated.Status)
+		})
+	}
+}
+
 func TestScheduleActionServiceModifyRejectsMalformedInputsWithoutMutation(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

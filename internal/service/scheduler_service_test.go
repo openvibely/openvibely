@@ -108,6 +108,47 @@ func TestSchedulerService_CheckDueTasksClearsCancellationRequestBeforeSubmit(t *
 	require.False(t, workerSvc.IsCancellationRequested(task.ID), "due scheduled submission should clear stale cancellation marker")
 }
 
+func TestSchedulerService_CheckDueTasksSubmitsOneTimeScheduleCreatedForCompletedScheduledTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Completed scheduled task",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusCompleted,
+		Prompt:    "test",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	actionSvc := NewScheduleActionService(taskRepo, scheduleRepo)
+	result, err := actionSvc.Create(ctx, "default", ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "once"})
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, result.Task.Status)
+
+	dueAt := time.Now().UTC().Add(-time.Minute)
+	result.Schedule.RunAt = dueAt
+	result.Schedule.NextRun = &dueAt
+	require.NoError(t, scheduleRepo.Update(ctx, result.Schedule))
+
+	svc.checkDueTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, task.ID, submitted.ID)
+		require.Equal(t, models.StatusPending, submitted.Status)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected due one-time schedule to be submitted")
+	}
+	updatedSchedule, err := scheduleRepo.GetByID(ctx, result.Schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updatedSchedule.LastRun)
+	require.Nil(t, updatedSchedule.NextRun)
+}
+
 func TestSchedulerService_MalformedScheduleDoesNotBlockLaterValidSchedule(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)
