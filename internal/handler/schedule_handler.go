@@ -9,7 +9,6 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
-	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -78,8 +77,7 @@ func (h *Handler) scheduleAgentAssignmentFromForm(c echo.Context, taskID string)
 }
 
 func (h *Handler) renderScheduleTaskDetail(c echo.Context, taskID, taskLookupErrorLog string, taskLookupErrorsAsNotFound bool) error {
-	ctx := c.Request().Context()
-	task, err := h.taskSvc.GetByID(ctx, taskID)
+	err := h.renderTaskDetailContent(c, taskID, "schedules")
 	if err != nil {
 		if taskLookupErrorLog != "" {
 			applog.Infof("[handler] %s: %v", taskLookupErrorLog, err)
@@ -87,23 +85,8 @@ func (h *Handler) renderScheduleTaskDetail(c echo.Context, taskID, taskLookupErr
 		if taskLookupErrorsAsNotFound {
 			return echo.NewHTTPError(http.StatusNotFound, "task not found")
 		}
-		return err
 	}
-	if task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	executions, _ := h.execRepo.ListByTask(ctx, taskID)
-	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
-	agents, _ := h.llmConfigRepo.List(ctx)
-	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
-	adefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
-	}
-
-	return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(ctx, taskID), executions, schedules, agents, adefs, attachments, "schedules", reviewComments))
+	return err
 }
 
 func (h *Handler) redirectToTaskSchedules(c echo.Context, taskID string) error {
@@ -137,21 +120,29 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 		return err
 	}
 
-	clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
+	s := &models.Schedule{
+		TaskID:              taskID,
+		RunAt:               formValues.runAt,
+		RepeatType:          formValues.repeatType,
+		RepeatInterval:      formValues.repeatInterval,
+		Enabled:             true,
+		ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
+	}
 
 	agentAssignmentPresent, agentDefinitionID, err := h.scheduleAgentAssignmentFromForm(c, taskID)
 	if err != nil {
 		return err
 	}
 
-	s, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
-		TaskID:              taskID,
-		RunAt:               formValues.runAt,
-		RepeatType:          formValues.repeatType,
-		RepeatInterval:      formValues.repeatInterval,
-		ClearContextOnStart: &clearContextOnStart,
-	})
-	if err != nil {
+	// For recurring schedules with a past RunAt, keep NextRun = RunAt so the
+	// scheduler picks it up immediately on its next tick (within 5 seconds).
+	// The scheduler will execute the task once for the missed occurrence and
+	// then advance NextRun to the next future occurrence via ComputeNextRun.
+	// Previously this pre-computed the next future occurrence, which skipped
+	// the current day's execution (e.g., creating a daily 1:33 AM schedule
+	// at 1:34 AM would skip today and not run until tomorrow).
+
+	if err := h.scheduleRepo.Create(c.Request().Context(), s); err != nil {
 		applog.Infof("[handler] CreateSchedule error: %v", err)
 		return err
 	}

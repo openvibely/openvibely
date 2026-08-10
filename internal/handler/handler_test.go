@@ -4290,47 +4290,6 @@ func TestHandler_StartQueuedTaskThreadInput_AppliesSwarmChildFollowupOnPromotion
 	assert.Equal(t, execs[0].ID, applied.RunExecutionID)
 }
 
-func TestHandler_ApplySwarmChildFollowupStartClearsCancellationRequests(t *testing.T) {
-	h, _, llmConfigRepo := setupTestHandler(t)
-	ctx := context.Background()
-	agent := createAgent(t, llmConfigRepo)
-	project := createProject(t, h, "Direct Swarm Child Followup Clears Stop Marker Project")
-	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{
-		ProjectID:       project.ID,
-		Title:           "Swarm parent",
-		Prompt:          "Build the swarm result",
-		Category:        models.CategoryActive,
-		Priority:        2,
-		AgentID:         &agent.ID,
-		MaxWorkers:      1,
-		WorkerIsolation: "worktree",
-	})
-	require.NoError(t, err)
-	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
-	require.NoError(t, err)
-	require.NotNil(t, planner)
-	require.NoError(t, h.swarmSvc.ApplyPlannerOutput(ctx, planner.ID, service.PlannerOutput{
-		Workers: []service.PlannerWorker{{Title: "API worker", Prompt: "Update API", WorkerKind: "backend", Ownership: []string{"internal/handler"}, Isolation: "worktree", WriteScope: []string{"internal/handler"}, Required: true}},
-	}))
-	worker, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRoleWorker)
-	require.NoError(t, err)
-	require.NotNil(t, worker)
-	h.workerSvc.MarkCancellationRequested(parent.ID)
-	h.workerSvc.MarkCancellationRequested(worker.ID)
-
-	require.NoError(t, h.applySwarmChildFollowupStart(ctx, worker, "legitimate follow-up after swarm restart"))
-
-	require.False(t, h.workerSvc.IsCancellationRequested(parent.ID), "swarm child follow-up should clear stale parent cancellation request")
-	require.False(t, h.workerSvc.IsCancellationRequested(worker.ID), "swarm child follow-up should clear stale child cancellation request")
-	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.StatusRunning, updatedParent.Status)
-	require.Equal(t, models.CategoryActive, updatedParent.Category)
-	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
-	require.NoError(t, err)
-	require.Equal(t, "followup_pending", updatedWorker.SwarmStatus)
-}
-
 func TestHandler_CompleteWithSuccess_NotifiesSwarmChildFollowupCompletion(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	h.workerSvc = nil

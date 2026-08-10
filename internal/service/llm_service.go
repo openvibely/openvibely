@@ -486,7 +486,6 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		CallerTaskID:          task.ID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
-		WorkerSvc:             workerFromTaskService(s.taskSvc),
 		LLMConfigRepo:         s.llmConfigRepo,
 		AgentRepo:             s.agentRepo,
 		SettingsRepo:          nil,
@@ -1392,40 +1391,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	textOnlyOutput := result.TextOnlyOutput
 	tokensUsed := result.Usage.TotalTokens
 	durationMs := time.Since(start).Milliseconds()
-	taskCancelled := func() bool {
-		current, getErr := s.taskRepo.GetByID(context.Background(), task.ID)
-		if getErr != nil {
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent error checking cancelled task state: %v", getErr)
-			return false
-		}
-		return current != nil && current.Status == models.StatusCancelled
-	}
-	completeCancelled := func() (*models.Execution, llmcontracts.ChatContext, error) {
-		bgCtx := context.Background()
-		reason := "task cancelled by user"
-		s.requeuePendingTaskSteeringForExecution(bgCtx, exec.ID)
-		applog.Infof("[agent-svc] ExecuteTaskWithAgent CANCELLED task=%s duration=%dms", task.ID, durationMs)
-		if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecCancelled, output, reason, tokensUsed, durationMs); completeErr != nil {
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing cancelled execution: %v", completeErr)
-		} else {
-			s.publishExecutionTerminal(exec.ID, models.ExecCancelled, reason)
-		}
-		RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCancelled), ErrorMessage: reason, LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
-		if statusErr := s.taskRepo.UpdateStatus(bgCtx, task.ID, models.StatusCancelled); statusErr != nil {
-			applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to cancelled: %v", statusErr)
-		}
-		if task.Category == models.CategoryActive {
-			if categoryErr := s.taskRepo.UpdateCategory(bgCtx, task.ID, models.CategoryBacklog); categoryErr != nil {
-				applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving cancelled task to backlog: %v", categoryErr)
-			} else {
-				applog.Infof("[agent-svc] ExecuteTaskWithAgent moved cancelled task=%s to backlog", task.ID)
-			}
-		}
-		exec.Status = models.ExecCancelled
-		exec.ErrorMessage = reason
-		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
-		return exec, result.ChatContext, fmt.Errorf("task cancelled")
-	}
 
 	// Stop diff snapshot broadcaster
 	if stopDiffBroadcast != nil {
@@ -1438,7 +1403,25 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		// Use background context for DB updates since the task context may be cancelled.
 		bgCtx := context.Background()
 		if ctx.Err() == context.Canceled {
-			return completeCancelled()
+			s.requeuePendingTaskSteeringForExecution(bgCtx, exec.ID)
+			applog.Infof("[agent-svc] ExecuteTaskWithAgent CANCELLED task=%s duration=%dms",
+				task.ID, durationMs)
+			// Pass output (may contain partial streamed content) so Complete preserves it
+			if completeErr := s.execRepo.Complete(bgCtx, exec.ID, models.ExecCancelled, output, "task cancelled by user", tokensUsed, durationMs); completeErr != nil {
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing cancelled execution: %v", completeErr)
+			} else {
+				s.publishExecutionTerminal(exec.ID, models.ExecCancelled, "task cancelled by user")
+			}
+			RecordUsageFromResult(bgCtx, s.usageRepo, UsageCapture{ProjectID: task.ProjectID, TaskID: task.ID, ExecutionID: exec.ID, TurnID: exec.ID, Operation: string(llmcontracts.OperationTask), Status: string(models.ExecCancelled), ErrorMessage: "task cancelled by user", LatencyMs: durationMs, OccurredAt: time.Now().UTC()}, agent, result)
+			// Task status is already set to cancelled by CancelTask, but set it again
+			// in case the cancellation came from a different path (e.g., server shutdown).
+			if statusErr := s.taskRepo.UpdateStatus(bgCtx, task.ID, models.StatusCancelled); statusErr != nil {
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status to cancelled: %v", statusErr)
+			}
+			exec.Status = models.ExecCancelled
+			exec.ErrorMessage = "task cancelled by user"
+			s.promoteQueuedTaskThreadAfterCompletion(task.ID)
+			return exec, result.ChatContext, fmt.Errorf("task cancelled")
 		}
 
 		s.requeuePendingTaskSteeringForExecution(bgCtx, exec.ID)
@@ -1489,9 +1472,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 		}
 		s.promoteQueuedTaskThreadAfterCompletion(task.ID)
 		return exec, result.ChatContext, fmt.Errorf("calling LLM: %w", err)
-	}
-	if ctx.Err() == context.Canceled && taskCancelled() {
-		return completeCancelled()
 	}
 
 	if err := s.commitPreparedTaskSteering(ctx, exec.ID, preparedSteering); err != nil {

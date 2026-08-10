@@ -140,7 +140,6 @@ type channelUtilityActionHandlerOptions struct {
 	CallerTaskID              string
 	TaskRepo                  *repository.TaskRepo
 	ScheduleRepo              *repository.ScheduleRepo
-	WorkerSvc                 *WorkerService
 	LLMConfigRepo             *repository.LLMConfigRepo
 	AgentRepo                 *repository.AgentRepo
 	SettingsRepo              *repository.SettingsRepo
@@ -149,13 +148,6 @@ type channelUtilityActionHandlerOptions struct {
 	AlertSvc                  *AlertService
 	PrepareImplementationTask func(context.Context, *models.AlertImplementationTaskInput) error
 	UnavailableAgentsText     string
-}
-
-func workerFromTaskService(taskSvc *TaskService) *WorkerService {
-	if taskSvc == nil {
-		return nil
-	}
-	return taskSvc.workerSvc
 }
 
 func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
@@ -549,7 +541,7 @@ func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandle
 	if opts.ScheduleRepo == nil {
 		return "Error scheduling task: schedule repository not available."
 	}
-	result, err := NewScheduleActionService(opts.TaskRepo, opts.ScheduleRepo, opts.WorkerSvc).Create(ctx, opts.ProjectID, req)
+	result, err := NewScheduleActionService(opts.TaskRepo, opts.ScheduleRepo).Create(ctx, opts.ProjectID, req)
 	if err != nil {
 		actionErr, _ := err.(*ScheduleActionError)
 		switch {
@@ -585,7 +577,7 @@ func runChannelDeleteSchedule(ctx context.Context, opts channelUtilityActionHand
 	if opts.ScheduleRepo == nil {
 		return "Error deleting schedule: schedule repository not available."
 	}
-	result, err := NewScheduleActionService(opts.TaskRepo, opts.ScheduleRepo, opts.WorkerSvc).Delete(ctx, opts.ProjectID, req)
+	result, err := NewScheduleActionService(opts.TaskRepo, opts.ScheduleRepo).Delete(ctx, opts.ProjectID, req)
 	if err != nil {
 		actionErr, _ := err.(*ScheduleActionError)
 		if actionErr != nil && actionErr.Kind == ScheduleActionReferenceError {
@@ -611,7 +603,7 @@ func runChannelModifySchedule(ctx context.Context, opts channelUtilityActionHand
 	if opts.ScheduleRepo == nil {
 		return "Error modifying schedule: schedule repository not available."
 	}
-	result, err := NewScheduleActionService(opts.TaskRepo, opts.ScheduleRepo, opts.WorkerSvc).Modify(ctx, opts.ProjectID, req)
+	result, err := NewScheduleActionService(opts.TaskRepo, opts.ScheduleRepo).Modify(ctx, opts.ProjectID, req)
 	if err != nil {
 		actionErr, _ := err.(*ScheduleActionError)
 		title := req.Title

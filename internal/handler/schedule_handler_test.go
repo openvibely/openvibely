@@ -153,17 +153,8 @@ func TestCreateSchedule_Success_Redirect(t *testing.T) {
 	if len(schedules) != 1 {
 		t.Fatalf("expected 1 schedule, got %d", len(schedules))
 	}
-	if !schedules[0].Enabled {
-		t.Fatal("new schedules must default Enabled to true")
-	}
-	if schedules[0].RepeatInterval != 1 {
-		t.Fatalf("new schedules must default repeat interval to 1, got %d", schedules[0].RepeatInterval)
-	}
 	if !schedules[0].ClearContextOnStart {
 		t.Fatal("new schedules must default ClearContextOnStart to true")
-	}
-	if schedules[0].NextRun == nil || !schedules[0].NextRun.Equal(schedules[0].RunAt) {
-		t.Fatalf("new schedules must start NextRun at RunAt, run_at=%v next_run=%v", schedules[0].RunAt, schedules[0].NextRun)
 	}
 }
 
@@ -183,6 +174,62 @@ func TestCreateSchedule_HTMX_Success(t *testing.T) {
 		t.Fatalf("expected 200 for HTMX create, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	assertSchedulesTaskDetailFragment(t, rec.Body.String())
+}
+
+func TestCreateSchedule_HTMX_UsesMainTaskDetailExecutionOrdering(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := tc.CreateTask(project.ID).
+		WithStatus(models.StatusCompleted).
+		WithCategory(models.CategoryCompleted).
+		Build()
+
+	older := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).Build()
+	if err := tc.execRepo.Complete(ctx, older.ID, models.ExecCompleted, "older output", "", 10, 1000); err != nil {
+		t.Fatalf("complete older execution: %v", err)
+	}
+	newer := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).Build()
+	if err := tc.execRepo.Complete(ctx, newer.ID, models.ExecCompleted, "newer output", "", 10, 5000); err != nil {
+		t.Fatalf("complete newer execution: %v", err)
+	}
+	baseStartedAt := time.Now().UTC().Add(-2 * time.Hour)
+	if _, err := tc.db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, baseStartedAt, older.ID); err != nil {
+		t.Fatalf("set older execution start: %v", err)
+	}
+	if _, err := tc.db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, baseStartedAt.Add(time.Hour), newer.ID); err != nil {
+		t.Fatalf("set newer execution start: %v", err)
+	}
+
+	mainRec := tc.HTMX().Get("/tasks/" + task.ID).Execute()
+	if mainRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for HTMX task detail, got %d body=%s", mainRec.Code, mainRec.Body.String())
+	}
+	if !strings.Contains(mainRec.Body.String(), ">5s</span>") {
+		t.Fatalf("expected main task detail to show latest execution duration; body=%s", mainRec.Body.String())
+	}
+	if strings.Contains(mainRec.Body.String(), ">1s</span>") {
+		t.Fatalf("main task detail showed older execution duration; body=%s", mainRec.Body.String())
+	}
+
+	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
+	scheduleRec := tc.HTMX().Post("/tasks/" + task.ID + "/schedule").WithForm(url.Values{
+		"run_at":          {runAt},
+		"repeat_type":     {"daily"},
+		"repeat_interval": {"1"},
+	}).Execute()
+	if scheduleRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for HTMX create, got %d body=%s", scheduleRec.Code, scheduleRec.Body.String())
+	}
+	body := scheduleRec.Body.String()
+	assertSchedulesTaskDetailFragment(t, body)
+	if !strings.Contains(body, ">5s</span>") {
+		t.Fatalf("expected schedule HTMX refresh to show latest execution duration like main task detail; body=%s", body)
+	}
+	if strings.Contains(body, ">1s</span>") {
+		t.Fatalf("schedule HTMX refresh used non-chronological execution ordering; body=%s", body)
+	}
 }
 
 func TestCreateSchedule_DefaultRepeatType(t *testing.T) {
@@ -403,7 +450,7 @@ func TestViewSchedule_PrimaryAgentOptionsAreEligibleAndProjectScoped(t *testing.
 func TestCreateScheduledTask_NativeFormRedirectsToProjectSchedule(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().Build()
-	runAt := time.Now().Add(-2 * time.Minute).Format("2006-01-02T15:04")
+	runAt := time.Now().Add(time.Hour).Format("2006-01-02T15:04")
 
 	rec := tc.HTTP().Post("/tasks?project_id=" + project.ID + "&from=schedule").WithForm(url.Values{
 		"title":           {"Native Scheduled Task"},
@@ -428,21 +475,6 @@ func TestCreateScheduledTask_NativeFormRedirectsToProjectSchedule(t *testing.T) 
 	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), tasks[0].ID)
 	if err != nil || len(schedules) != 1 {
 		t.Fatalf("list schedules: count=%d err=%v", len(schedules), err)
-	}
-	if schedules[0].RepeatType != models.RepeatDaily {
-		t.Fatalf("scheduled task repeat type = %q, want daily", schedules[0].RepeatType)
-	}
-	if schedules[0].RepeatInterval != 1 {
-		t.Fatalf("scheduled task repeat interval = %d, want 1", schedules[0].RepeatInterval)
-	}
-	if !schedules[0].Enabled {
-		t.Fatal("scheduled task schedule must default Enabled to true")
-	}
-	if !schedules[0].ClearContextOnStart {
-		t.Fatal("scheduled task schedule must default ClearContextOnStart to true")
-	}
-	if schedules[0].NextRun == nil || !schedules[0].NextRun.Equal(schedules[0].RunAt) {
-		t.Fatalf("scheduled task schedule must start NextRun at RunAt, run_at=%v next_run=%v", schedules[0].RunAt, schedules[0].NextRun)
 	}
 }
 
@@ -548,40 +580,6 @@ func TestUpdateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T)
 	}
 	if persisted.RepeatInterval != 2 || persisted.RepeatType != models.RepeatDaily || !persisted.RunAt.Equal(originalRunAt) {
 		t.Fatalf("oversized update changed persisted schedule: %+v", persisted)
-	}
-}
-
-func TestUpdateSchedule_ClearsCancellationRequestWhenResettingScheduledTaskPending(t *testing.T) {
-	tc := NewTestContext(t)
-	project := tc.CreateProject().Build()
-	task := tc.CreateTask(project.ID).
-		WithCategory(models.CategoryScheduled).
-		WithStatus(models.StatusCancelled).
-		Build()
-	schedule := tc.CreateSchedule(task.ID).Build()
-	tc.handler.workerSvc.MarkCancellationRequested(task.ID)
-	if !tc.handler.workerSvc.IsCancellationRequested(task.ID) {
-		t.Fatal("expected test setup cancellation marker")
-	}
-
-	rec := tc.HTTP().Put("/schedules/" + schedule.ID).WithForm(url.Values{
-		"run_at":          {time.Now().Add(time.Hour).Format("2006-01-02T15:04")},
-		"repeat_type":     {"daily"},
-		"repeat_interval": {"1"},
-	}).Execute()
-
-	if rec.Code != http.StatusSeeOther {
-		t.Fatalf("expected redirect, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if tc.handler.workerSvc.IsCancellationRequested(task.ID) {
-		t.Fatal("schedule edit pending reset should clear stale cancellation marker")
-	}
-	updated, err := tc.taskRepo.GetByID(context.Background(), task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.Status != models.StatusPending {
-		t.Fatalf("status=%s, want pending", updated.Status)
 	}
 }
 

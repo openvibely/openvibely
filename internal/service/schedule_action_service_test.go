@@ -48,30 +48,6 @@ func TestScheduleActionServiceCreateRejectsMalformedInputsWithoutPersistence(t *
 	}
 }
 
-func TestScheduleActionServiceCreateClearsCancellationRequestForScheduledRun(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	workerSvc := newTestWorkerService(t)
-	project := &models.Project{Name: "Schedule clears cancellation marker"}
-	require.NoError(t, projectRepo.Create(ctx, project))
-	task := &models.Task{ProjectID: project.ID, Title: "Stopped target", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusCancelled, Priority: 2}
-	require.NoError(t, taskRepo.Create(ctx, task))
-	workerSvc.MarkCancellationRequested(task.ID)
-	require.True(t, workerSvc.IsCancellationRequested(task.ID))
-	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
-
-	_, err := svc.Create(ctx, project.ID, ScheduleTaskRequest{TaskID: task.ID, Time: "09:30", Repeat: "daily"})
-	require.NoError(t, err)
-	require.False(t, workerSvc.IsCancellationRequested(task.ID), "schedule activation should clear stale cancellation marker")
-	updated, err := taskRepo.GetByID(ctx, task.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.CategoryScheduled, updated.Category)
-	require.Equal(t, models.StatusPending, updated.Status)
-}
-
 func TestScheduleActionServiceModifyRejectsMalformedInputsWithoutMutation(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

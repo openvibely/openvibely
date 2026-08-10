@@ -68,9 +68,6 @@ func (s *TaskService) resumeGoalStoppedByUser(ctx context.Context, taskID string
 }
 
 func (s *TaskService) submitActivatedTask(ctx context.Context, task models.Task, actor string) error {
-	if s.workerSvc != nil {
-		s.workerSvc.ClearCancellationRequested(task.ID)
-	}
 	s.resumeGoalStoppedByUser(ctx, task.ID, actor)
 	if task.SwarmRole == models.SwarmRoleParent {
 		if s.swarmSvc == nil {
@@ -284,9 +281,6 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	isCancellableActiveWork := task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && models.IsSwarmChildRole(task.SwarmRole))
 	if category != models.CategoryActive && isCancellableActiveWork {
 		applog.Infof("[task-svc] UpdateCategory cancelling active task id=%s status=%s (moved to %s)", id, task.Status, category)
-		if s.workerSvc != nil {
-			s.workerSvc.MarkCancellationRequested(id)
-		}
 		if s.goalSvc != nil {
 			if err := s.goalSvc.PauseActiveGoalStoppedByUser(ctx, id); err != nil && !errors.Is(err, ErrTaskGoalNotFound) {
 				applog.Infof("[task-svc] UpdateCategory error pausing active goal after user stop id=%s: %v", id, err)
@@ -319,9 +313,6 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return rollbackActivation(err)
 			}
 			if handled {
-				if s.workerSvc != nil {
-					s.workerSvc.ClearCancellationRequested(id)
-				}
 				applog.Infof("[task-svc] UpdateCategory promoted queued task-thread follow-up id=%s", id)
 				return nil
 			}
@@ -333,9 +324,6 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 				return rollbackActivation(err)
 			}
 			if handled {
-				if s.workerSvc != nil {
-					s.workerSvc.ClearCancellationRequested(id)
-				}
 				applog.Infof("[task-svc] UpdateCategory retried failed task-thread follow-up id=%s", id)
 				return nil
 			}
@@ -364,9 +352,6 @@ func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models
 		if err != nil {
 			applog.Infof("[task-svc] UpdateStatus error fetching task: %v", err)
 			return err
-		}
-		if task != nil && (task.Category == models.CategoryActive || task.Category == models.CategoryScheduled) && s.workerSvc != nil {
-			s.workerSvc.ClearCancellationRequested(id)
 		}
 		if task != nil && task.Category == models.CategoryActive {
 			if status == models.StatusPending {
@@ -470,9 +455,6 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			return err
 		}
 		if handled {
-			if s.workerSvc != nil {
-				s.workerSvc.ClearCancellationRequested(id)
-			}
 			applog.Infof("[task-svc] RunTask promoted queued task-thread follow-up id=%s", id)
 			return nil
 		}
@@ -484,9 +466,6 @@ func (s *TaskService) RunTask(ctx context.Context, id string) error {
 			return err
 		}
 		if handled {
-			if s.workerSvc != nil {
-				s.workerSvc.ClearCancellationRequested(id)
-			}
 			applog.Infof("[task-svc] RunTask retried failed task-thread follow-up id=%s", id)
 			return nil
 		}
@@ -531,10 +510,6 @@ func (s *TaskService) CancelTask(ctx context.Context, id string) error {
 	if task.Status != models.StatusRunning && task.Status != models.StatusQueued && !(task.Status == models.StatusPending && task.Category == models.CategoryActive) {
 		applog.Infof("[task-svc] CancelTask task not cancellable id=%s status=%s category=%s", id, task.Status, task.Category)
 		return fmt.Errorf("task is not running, queued, or active pending")
-	}
-
-	if s.workerSvc != nil {
-		s.workerSvc.MarkCancellationRequested(id)
 	}
 
 	if s.goalSvc != nil {

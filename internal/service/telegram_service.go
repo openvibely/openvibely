@@ -1357,7 +1357,6 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
-		WorkerSvc:             s.workerSvc,
 		LLMConfigRepo:         s.llmConfigRepo,
 		AgentRepo:             s.agentRepo,
 		SettingsRepo:          s.settingsRepo,

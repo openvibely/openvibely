@@ -43,9 +43,8 @@ type WorkerService struct {
 	cancel     context.CancelFunc
 	wg         sync.WaitGroup
 
-	cancelMu              sync.Mutex
-	cancelFuncs           map[string]context.CancelFunc // taskID -> cancel func for running tasks
-	cancellationRequested map[string]bool               // taskID -> user stop/cancel requested before durable status is visible
+	cancelMu    sync.Mutex
+	cancelFuncs map[string]context.CancelFunc // taskID -> cancel func for running tasks
 
 	// Per-project concurrency tracking
 	projectRunning sync.Map // projectID -> *int32 (atomic counter)
@@ -157,14 +156,13 @@ func hasGlobalWorkerCapacity(maxWorkers, running int) bool {
 
 func NewWorkerService(llmSvc *LLMService, numWorkers int, projectRepo *repository.ProjectRepo) *WorkerService {
 	return &WorkerService{
-		llmSvc:                llmSvc,
-		projectRepo:           projectRepo,
-		numWorkers:            numWorkers,
-		pending:               make(map[string]bool),
-		prepared:              make(map[string]preparedAutomationDispatch),
-		cancelFuncs:           make(map[string]context.CancelFunc),
-		cancellationRequested: make(map[string]bool),
-		submitted:             make(chan models.Task, 100),
+		llmSvc:      llmSvc,
+		projectRepo: projectRepo,
+		numWorkers:  numWorkers,
+		pending:     make(map[string]bool),
+		prepared:    make(map[string]preparedAutomationDispatch),
+		cancelFuncs: make(map[string]context.CancelFunc),
+		submitted:   make(chan models.Task, 100),
 	}
 }
 
@@ -606,11 +604,7 @@ func (w *WorkerService) executeTask(task models.Task, agentConfigID string, prep
 	var chatContext llmcontracts.ChatContext
 	_, chatContext, executionErr = w.llmSvc.executeTaskWithChatContext(taskCtx, task)
 
-	afterCompleteErr := executionErr
-	if taskCtx.Err() != nil {
-		afterCompleteErr = taskCtx.Err()
-	}
-	turn.AfterComplete(afterCompleteErr, chatContext)
+	turn.AfterComplete(executionErr, chatContext)
 }
 
 func (w *WorkerService) failRunningExecutionsAfterPanic(ctx context.Context, taskID string, panicErr error) {
@@ -842,44 +836,6 @@ func (w *WorkerService) ProjectRunning(projectID string) int {
 		return int(atomic.LoadInt32(counter))
 	}
 	return 0
-}
-
-// MarkCancellationRequested records an in-process user stop/cancel intent before
-// the durable task status may be visible. Lifecycle-origin continuation tools use
-// this to reject stale work during the narrow cancellation transition window.
-func (w *WorkerService) MarkCancellationRequested(taskID string) {
-	if w == nil || taskID == "" {
-		return
-	}
-	w.cancelMu.Lock()
-	if w.cancellationRequested == nil {
-		w.cancellationRequested = make(map[string]bool)
-	}
-	w.cancellationRequested[taskID] = true
-	w.cancelMu.Unlock()
-}
-
-// ClearCancellationRequested clears stale stop intent when a task is deliberately
-// activated for a new run.
-func (w *WorkerService) ClearCancellationRequested(taskID string) {
-	if w == nil || taskID == "" {
-		return
-	}
-	w.cancelMu.Lock()
-	delete(w.cancellationRequested, taskID)
-	w.cancelMu.Unlock()
-}
-
-// IsCancellationRequested reports whether a user stop/cancel intent has been
-// observed before durable task status catches up.
-func (w *WorkerService) IsCancellationRequested(taskID string) bool {
-	if w == nil || taskID == "" {
-		return false
-	}
-	w.cancelMu.Lock()
-	requested := w.cancellationRequested[taskID]
-	w.cancelMu.Unlock()
-	return requested
 }
 
 // RegisterCancel stores a cancel function for a running task so it can be

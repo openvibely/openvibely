@@ -8,7 +8,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSchedulerService_CheckDueTasks(t *testing.T) {
@@ -72,40 +71,6 @@ func TestSchedulerService_CheckDueTasks(t *testing.T) {
 	if updated.LastRun == nil {
 		t.Error("expected LastRun to be set after checkDueTasks")
 	}
-}
-
-func TestSchedulerService_CheckDueTasksClearsCancellationRequestBeforeSubmit(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	scheduleRepo := repository.NewScheduleRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	workerSvc := newTestWorkerService(t)
-	ctx := context.Background()
-	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
-
-	task := &models.Task{
-		ProjectID: "default",
-		Title:     "Due task after stop",
-		Category:  models.CategoryScheduled,
-		Status:    models.StatusPending,
-		Prompt:    "test",
-	}
-	require.NoError(t, taskRepo.Create(ctx, task))
-	workerSvc.MarkCancellationRequested(task.ID)
-	require.True(t, workerSvc.IsCancellationRequested(task.ID))
-
-	now := time.Now().UTC()
-	sched := &models.Schedule{TaskID: task.ID, RunAt: now.Add(-time.Minute), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
-	require.NoError(t, scheduleRepo.Create(ctx, sched))
-
-	svc.checkDueTasks(ctx)
-
-	select {
-	case submitted := <-workerSvc.Submitted():
-		require.Equal(t, task.ID, submitted.ID)
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("expected due task to be submitted")
-	}
-	require.False(t, workerSvc.IsCancellationRequested(task.ID), "due scheduled submission should clear stale cancellation marker")
 }
 
 func TestSchedulerService_MalformedScheduleDoesNotBlockLaterValidSchedule(t *testing.T) {

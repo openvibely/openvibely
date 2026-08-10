@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
@@ -38,6 +39,17 @@ const (
 type taskSortPreferences struct {
 	Backlog   string
 	Completed string
+}
+
+type taskDetailContentData struct {
+	task           *models.Task
+	taskGoal       *models.TaskGoal
+	executions     []models.Execution
+	schedules      []models.Schedule
+	agents         []models.LLMConfig
+	agentDefs      []models.Agent
+	attachments    []models.Attachment
+	reviewComments []models.ReviewComment
 }
 
 func getSortPreference(c echo.Context, cookieName string) string {
@@ -369,15 +381,21 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		if scheduledFormErr != nil {
 			applog.Infof("[handler] CreateTask schedule parse error: %v", scheduledFormErr)
 		} else {
-			clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
-			sched, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
-				TaskID:              t.ID,
+			sched := &models.Schedule{TaskID: t.ID,
 				RunAt:               scheduledFormValues.runAt,
 				RepeatType:          scheduledFormValues.repeatType,
 				RepeatInterval:      scheduledFormValues.repeatInterval,
-				ClearContextOnStart: &clearContextOnStart,
-			})
-			if err != nil {
+				Enabled:             true,
+				ClearContextOnStart: formBoolEnabled(c, "clear_context_on_start", true),
+			}
+			// For recurring schedules with a past RunAt, compute the next future occurrence immediately
+			if sched.RepeatType != models.RepeatOnce && !scheduledFormValues.runAt.After(time.Now().UTC()) {
+				nextRun := sched.ComputeNextRun(time.Now().UTC())
+				if nextRun != nil {
+					sched.NextRun = nextRun
+				}
+			}
+			if err := h.scheduleRepo.Create(c.Request().Context(), sched); err != nil {
 				applog.Infof("[handler] CreateTask schedule create error: %v", err)
 			} else {
 				applog.Infof("[handler] CreateTask schedule created id=%s next_run=%v", sched.ID, sched.NextRun)
@@ -489,36 +507,70 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 }
 
+func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) (*taskDetailContentData, error) {
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if task.SwarmRole == models.SwarmRoleParent {
+		if children, childErr := h.taskRepo.ListSwarmChildren(ctx, task.ID); childErr == nil {
+			task.SwarmChildren = children
+		}
+	}
+
+	executions, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
+	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
+	agents, _ := h.llmConfigRepo.List(ctx)
+	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
+	agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
+	var reviewComments []models.ReviewComment
+	if h.reviewCommentRepo != nil {
+		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
+	}
+
+	return &taskDetailContentData{
+		task:           task,
+		taskGoal:       h.loadTaskGoal(ctx, taskID),
+		executions:     executions,
+		schedules:      schedules,
+		agents:         agents,
+		agentDefs:      agentDefs,
+		attachments:    attachments,
+		reviewComments: reviewComments,
+	}, nil
+}
+
+func (h *Handler) renderTaskDetailContent(c echo.Context, taskID, selectedTab string) error {
+	data, err := h.loadTaskDetailContentData(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	return h.renderTaskDetailContentData(c, data, selectedTab)
+}
+
+func (h *Handler) renderTaskDetailContentData(c echo.Context, data *taskDetailContentData, selectedTab string) error {
+	return render(c, http.StatusOK, pages.TaskDetailContent(data.task, data.taskGoal, data.executions, data.schedules, data.agents, data.agentDefs, data.attachments, selectedTab, data.reviewComments))
+}
+
 func (h *Handler) GetTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	isHTMX := isHTMX(c)
 	applog.Infof("[handler] GetTask id=%s htmx=%v", taskID, isHTMX)
 
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	data, err := h.loadTaskDetailContentData(c.Request().Context(), taskID)
 	if err != nil {
-		applog.Infof("[handler] GetTask error: %v", err)
+		if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusNotFound {
+			applog.Infof("[handler] GetTask not found id=%s", taskID)
+		} else {
+			applog.Infof("[handler] GetTask error: %v", err)
+		}
 		return err
 	}
-	if task == nil {
-		applog.Infof("[handler] GetTask not found id=%s", taskID)
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-	if task.SwarmRole == models.SwarmRoleParent {
-		if children, childErr := h.taskRepo.ListSwarmChildren(c.Request().Context(), task.ID); childErr == nil {
-			task.SwarmChildren = children
-		}
-	}
-
-	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
-	schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
-	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-	}
-	applog.Infof("[handler] GetTask id=%s executions=%d schedules=%d attachments=%d", taskID, len(executions), len(schedules), len(attachments))
+	task := data.task
+	applog.Infof("[handler] GetTask id=%s executions=%d schedules=%d attachments=%d", taskID, len(data.executions), len(data.schedules), len(data.attachments))
 
 	// Determine default tab
 	defaultTab := c.QueryParam("tab")
@@ -540,12 +592,12 @@ func (h *Handler) GetTask(c echo.Context) error {
 
 	// HTMX request: return just the task detail content partial
 	if isHTMX {
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
+		return h.renderTaskDetailContentData(c, data, defaultTab)
 	}
 
 	// Full page load: wrap in layout
 	projects, _ := h.projectSvc.List(c.Request().Context())
-	return render(c, http.StatusOK, pages.TaskDetailPage(projects, task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
+	return render(c, http.StatusOK, pages.TaskDetailPage(projects, data.task, data.taskGoal, data.executions, data.schedules, data.agents, data.agentDefs, data.attachments, defaultTab, data.reviewComments))
 }
 
 // GetTaskExecutions returns just the execution history for a task (used for polling updates)
@@ -1246,17 +1298,7 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 
 	// Re-fetch updated task data for rendering
 	if isHTMX(c) {
-		task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-		executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
-		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-		var rc []models.ReviewComment
-		if h.reviewCommentRepo != nil {
-			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-		}
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "details", rc))
+		return h.renderTaskDetailContent(c, taskID, "details")
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+task.ID)
@@ -1432,9 +1474,6 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	projectID := task.ProjectID
 
 	composerStop := c.QueryParam("composer_stop") == "1"
-	if h.workerSvc != nil && (task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) {
-		h.workerSvc.MarkCancellationRequested(taskID)
-	}
 	if !composerStop && h.threadInputRepo != nil {
 		if err := h.threadInputRepo.CancelPendingForTask(c.Request().Context(), taskID); err != nil {
 			applog.Infof("[handler] CancelTask error cancelling pending thread inputs task=%s: %v", taskID, err)
@@ -1896,16 +1935,7 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 
 	// Return updated task detail content
 	if isHTMX(c) {
-		executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
-		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-		var rc []models.ReviewComment
-		if h.reviewCommentRepo != nil {
-			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-		}
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "chaining", rc))
+		return h.renderTaskDetailContent(c, taskID, "chaining")
 	}
 
 	return c.NoContent(http.StatusOK)

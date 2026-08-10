@@ -983,9 +983,6 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 	if err := h.rejectStaleLifecycleSendToTask(ctx); err != nil {
 		return "", err
 	}
-	if err := h.rejectCancelledLifecycleSendToTask(ctx, taskID); err != nil {
-		return "", err
-	}
 	if origin == models.TaskOriginSystemAgent && originAgent == models.AgentSystemKindGoal && h.taskGoalSvc != nil {
 		goal, goalErr := h.taskGoalSvc.GetEvaluableGoal(ctx, taskID)
 		if goalErr != nil {
@@ -1006,49 +1003,6 @@ func (h *Handler) executeSendToTaskTool(ctx context.Context, params streamingRes
 func isGoalLifecycleHookAgent(ctx context.Context) bool {
 	agent, ok := lifecycle.HookAgentFromContext(ctx)
 	return ok && agent.SystemKind == models.AgentSystemKindGoal
-}
-
-func (h *Handler) rejectCancelledLifecycleSendToTask(ctx context.Context, destinationTaskID string) error {
-	agent, ok := lifecycle.HookAgentFromContext(ctx)
-	if !ok || h.taskRepo == nil {
-		return nil
-	}
-	for _, taskID := range []string{strings.TrimSpace(agent.TaskID), strings.TrimSpace(destinationTaskID)} {
-		if taskID == "" {
-			continue
-		}
-		if h.workerSvc != nil && h.workerSvc.IsCancellationRequested(taskID) {
-			return fmt.Errorf("cancelled lifecycle task %s cannot enqueue continuation", taskID)
-		}
-		task, err := h.taskRepo.GetByID(ctx, taskID)
-		if err != nil {
-			return err
-		}
-		if task != nil && task.Status == models.StatusCancelled && !lifecycleHookMayContinueFromCancelledSource(agent, taskID) {
-			return fmt.Errorf("cancelled lifecycle task %s cannot enqueue continuation", taskID)
-		}
-	}
-	return nil
-}
-
-func lifecycleHookMayContinueFromCancelledSource(agent lifecycle.HookAgent, taskID string) bool {
-	if strings.TrimSpace(agent.TaskID) == "" || strings.TrimSpace(agent.TaskID) != strings.TrimSpace(taskID) {
-		return false
-	}
-	return lifecycleHookHasNonCancellationExecutionError(agent.ExecutionError)
-}
-
-func lifecycleHookHasNonCancellationExecutionError(executionError string) bool {
-	msg := strings.ToLower(strings.TrimSpace(executionError))
-	if msg == "" {
-		return false
-	}
-	switch msg {
-	case "task cancelled", "task canceled", "task cancelled by user", "task canceled by user", "context canceled", "context cancelled":
-		return false
-	default:
-		return true
-	}
 }
 
 func (h *Handler) rejectStaleLifecycleSendToTask(ctx context.Context) error {

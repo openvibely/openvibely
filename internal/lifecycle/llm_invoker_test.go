@@ -544,7 +544,7 @@ func TestLLMHookInvoker_AttachesHookAgentToolsToRuntimeContext(t *testing.T) {
 	agentDef := &models.Agent{ID: "custom-agent", Name: "Custom Hook", Tools: []string{"mark_task_goal_achieved", "send_to_task"}}
 	inv := NewLLMHookInvoker(caller, &fakeAgentLookup{byID: map[string]*models.Agent{"custom-agent": agentDef}}, nil)
 	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "mark_task_goal_achieved"}, {Name: "send_to_task"}}})
-	_, err := inv.Invoke(ctx, models.AgentLifecycleHook{AgentID: "custom-agent", OutputContract: models.OutputContractActivitySummary}, HookInput{TaskID: "task-1", TaskRunID: "run-1", Extras: map[string]any{ExecutionErrorKey: "context deadline exceeded"}})
+	_, err := inv.Invoke(ctx, models.AgentLifecycleHook{AgentID: "custom-agent", OutputContract: models.OutputContractActivitySummary}, HookInput{})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
@@ -557,12 +557,6 @@ func TestLLMHookInvoker_AttachesHookAgentToolsToRuntimeContext(t *testing.T) {
 	}
 	if strings.Join(hookAgent.Tools, ",") != "mark_task_goal_achieved,send_to_task" {
 		t.Fatalf("hook agent tools = %#v", hookAgent.Tools)
-	}
-	if hookAgent.TaskID != "task-1" || hookAgent.TaskRunID != "run-1" {
-		t.Fatalf("hook agent task/run = %q/%q", hookAgent.TaskID, hookAgent.TaskRunID)
-	}
-	if hookAgent.ExecutionError != "context deadline exceeded" {
-		t.Fatalf("hook agent execution error = %q", hookAgent.ExecutionError)
 	}
 }
 

@@ -105,8 +105,7 @@ func (i *LLMHookInvoker) Invoke(ctx context.Context, hook models.AgentLifecycleH
 	}
 	callCtx := contextWithHookRuntimeTools(ctx, hook, agentDef)
 	callCtx = llmcontracts.WithLifecycleHookCall(callCtx)
-	executionError, _ := input.Extras[ExecutionErrorKey].(string)
-	callCtx = WithHookAgent(callCtx, HookAgent{AgentID: hook.AgentID, SystemKind: systemKindForHookAgent(agentDef), Tools: hookAgentTools(agentDef), TaskID: input.TaskID, TaskRunID: input.TaskRunID, ExecutionError: executionError})
+	callCtx = WithHookAgent(callCtx, HookAgent{AgentID: hook.AgentID, SystemKind: systemKindForHookAgent(agentDef), Tools: hookAgentTools(agentDef), TaskID: input.TaskID, TaskRunID: input.TaskRunID})
 	if err := validateRequiredLifecycleRuntimeTools(hook, agentDef, llmcontracts.RuntimeToolsFromContext(callCtx)); err != nil {
 		RecordTraceEvent(callCtx, "available_tools_missing", map[string]any{"error": err.Error(), "tools": runtimeToolNamesForTrace(callCtx)})
 		return nil, err
@@ -220,12 +219,11 @@ func sanitizedHookInputForPrompt(input HookInput) HookInput {
 }
 
 type HookAgent struct {
-	AgentID        string
-	SystemKind     string
-	Tools          []string
-	TaskID         string
-	TaskRunID      string
-	ExecutionError string
+	AgentID    string
+	SystemKind string
+	Tools      []string
+	TaskID     string
+	TaskRunID  string
 }
 
 type hookAgentCtxKey struct{}

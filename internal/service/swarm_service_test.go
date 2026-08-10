@@ -24,66 +24,6 @@ func requireFullSwarmTestTask(t testing.TB, repo *repository.TaskRepo, id string
 	return task
 }
 
-func TestCancelSwarmMarksRunningChildCancellationBeforeRuntimeCancel(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-	repo := repository.NewTaskRepo(db, nil)
-	workerSvc := newTestWorkerService(t)
-	taskSvc := NewTaskService(repo, nil, workerSvc)
-	svc := NewSwarmService(taskSvc, repo, nil, workerSvc)
-	parent := &models.Task{ProjectID: "default", Title: "Cancel parent", Prompt: "parent", Category: models.CategoryActive, Status: models.StatusRunning, SwarmRole: models.SwarmRoleParent, Priority: 2}
-	require.NoError(t, repo.Create(ctx, parent))
-	parentID := parent.ID
-	child := &models.Task{ProjectID: "default", Title: "Cancel running child", Prompt: "child", Category: models.CategoryActive, Status: models.StatusRunning, ParentTaskID: &parentID, SwarmRole: models.SwarmRoleWorker, Priority: 2}
-	require.NoError(t, repo.Create(ctx, child))
-
-	callbackRan := false
-	workerSvc.RegisterCancel(child.ID, func() {
-		callbackRan = true
-		if !workerSvc.IsCancellationRequested(child.ID) {
-			t.Errorf("running child cancellation request was not marked before runtime cancel")
-		}
-	})
-	require.NoError(t, svc.CancelSwarm(ctx, parent.ID))
-	require.True(t, callbackRan, "expected running child runtime cancel callback")
-	updatedChild, err := repo.GetByID(ctx, child.ID)
-	require.NoError(t, err)
-	require.Equal(t, models.StatusCancelled, updatedChild.Status)
-}
-
-func TestStartPlannerClearsCancellationRequestsForRestartedParentAndPlanner(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-	repo := repository.NewTaskRepo(db, nil)
-	workerSvc := newTestWorkerService(t)
-	taskSvc := NewTaskService(repo, nil, workerSvc)
-	svc := NewSwarmService(taskSvc, repo, nil, workerSvc)
-	parent := &models.Task{ProjectID: "default", Title: "Restart parent", Prompt: "parent", Category: models.CategoryBacklog, Status: models.StatusCancelled, SwarmRole: models.SwarmRoleParent, Priority: 2}
-	require.NoError(t, repo.Create(ctx, parent))
-	parentID := parent.ID
-	planner := &models.Task{ProjectID: "default", Title: "Restart parent · Planner", Prompt: "planner", Category: models.CategoryBacklog, Status: models.StatusCancelled, ParentTaskID: &parentID, SwarmRole: models.SwarmRolePlanner, Priority: 2}
-	require.NoError(t, repo.Create(ctx, planner))
-	workerSvc.MarkCancellationRequested(parent.ID)
-	workerSvc.MarkCancellationRequested(planner.ID)
-
-	require.NoError(t, svc.StartPlanner(ctx, parent.ID))
-
-	require.False(t, workerSvc.IsCancellationRequested(parent.ID), "swarm parent restart should clear stale cancellation request")
-	require.False(t, workerSvc.IsCancellationRequested(planner.ID), "resubmitted existing planner should clear stale cancellation request")
-	select {
-	case submitted := <-workerSvc.submitted:
-		require.Equal(t, planner.ID, submitted.ID)
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for planner submission")
-	}
-	updatedParent := requireFullSwarmTestTask(t, repo, parent.ID)
-	require.Equal(t, models.CategoryActive, updatedParent.Category)
-	require.Equal(t, models.StatusBlocked, updatedParent.Status)
-	updatedPlanner := requireFullSwarmTestTask(t, repo, planner.ID)
-	require.Equal(t, models.CategoryActive, updatedPlanner.Category)
-	require.Equal(t, models.StatusPending, updatedPlanner.Status)
-}
-
 func TestAttachSwarmChildrenPreservesPreviouslyAttachedChildren(t *testing.T) {
 	parent := models.Task{ID: "parent", SwarmRole: models.SwarmRoleParent}
 	child := models.Task{ID: "child", SwarmRole: models.SwarmRoleWorker, Status: models.StatusRunning, SwarmSequence: 1}
