@@ -40,6 +40,17 @@ type taskSortPreferences struct {
 	Completed string
 }
 
+type taskDetailContentData struct {
+	task           *models.Task
+	taskGoal       *models.TaskGoal
+	executions     []models.Execution
+	schedules      []models.Schedule
+	agents         []models.LLMConfig
+	agentDefs      []models.Agent
+	attachments    []models.Attachment
+	reviewComments []models.ReviewComment
+}
+
 func getSortPreference(c echo.Context, cookieName string) string {
 	if cookie, err := c.Cookie(cookieName); err == nil {
 		return cookie.Value
@@ -225,6 +236,25 @@ func (h *Handler) renderKanbanBoard(c echo.Context, tasks []models.Task, project
 	tasks = service.AttachSwarmChildren(tasks)
 	agentDefs := h.listAgentDefinitions(c.Request().Context())
 	return render(c, http.StatusOK, components.KanbanBoard(tasks, projectID, sortPrefs.Backlog, sortPrefs.Completed, llmModels, agentDefs))
+}
+
+func (h *Handler) renderTaskBoardRefresh(c echo.Context, projectID string, adjustSort func(*taskSortPreferences)) error {
+	sortPrefs := getSortPreferences(c)
+	if adjustSort != nil {
+		adjustSort(&sortPrefs)
+	}
+
+	tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
+	if err != nil {
+		applog.Infof("[handler] renderTaskBoardRefresh error listing tasks project=%s: %v", projectID, err)
+		return err
+	}
+	agents, err := h.llmConfigRepo.List(c.Request().Context())
+	if err != nil {
+		applog.Infof("[handler] renderTaskBoardRefresh error listing LLM configs project=%s: %v", projectID, err)
+		return err
+	}
+	return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 }
 
 func (h *Handler) ListTasks(c echo.Context) error {
@@ -483,10 +513,55 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	}
 
 	// Return the full kanban board
-	sortPrefs := getSortPreferences(c)
-	tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
-	return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+	return h.renderTaskBoardRefresh(c, projectID, nil)
+}
+
+func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) (*taskDetailContentData, error) {
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if task.SwarmRole == models.SwarmRoleParent {
+		if children, childErr := h.taskRepo.ListSwarmChildren(ctx, task.ID); childErr == nil {
+			task.SwarmChildren = children
+		}
+	}
+
+	executions, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
+	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
+	agents, _ := h.llmConfigRepo.List(ctx)
+	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
+	agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
+	var reviewComments []models.ReviewComment
+	if h.reviewCommentRepo != nil {
+		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
+	}
+
+	return &taskDetailContentData{
+		task:           task,
+		taskGoal:       h.loadTaskGoal(ctx, taskID),
+		executions:     executions,
+		schedules:      schedules,
+		agents:         agents,
+		agentDefs:      agentDefs,
+		attachments:    attachments,
+		reviewComments: reviewComments,
+	}, nil
+}
+
+func (h *Handler) renderTaskDetailContent(c echo.Context, taskID, selectedTab string) error {
+	data, err := h.loadTaskDetailContentData(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	return h.renderTaskDetailContentData(c, data, selectedTab)
+}
+
+func (h *Handler) renderTaskDetailContentData(c echo.Context, data *taskDetailContentData, selectedTab string) error {
+	return render(c, http.StatusOK, pages.TaskDetailContent(data.task, data.taskGoal, data.executions, data.schedules, data.agents, data.agentDefs, data.attachments, selectedTab, data.reviewComments))
 }
 
 func (h *Handler) GetTask(c echo.Context) error {
@@ -494,31 +569,17 @@ func (h *Handler) GetTask(c echo.Context) error {
 	isHTMX := isHTMX(c)
 	applog.Infof("[handler] GetTask id=%s htmx=%v", taskID, isHTMX)
 
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	data, err := h.loadTaskDetailContentData(c.Request().Context(), taskID)
 	if err != nil {
-		applog.Infof("[handler] GetTask error: %v", err)
+		if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusNotFound {
+			applog.Infof("[handler] GetTask not found id=%s", taskID)
+		} else {
+			applog.Infof("[handler] GetTask error: %v", err)
+		}
 		return err
 	}
-	if task == nil {
-		applog.Infof("[handler] GetTask not found id=%s", taskID)
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-	if task.SwarmRole == models.SwarmRoleParent {
-		if children, childErr := h.taskRepo.ListSwarmChildren(c.Request().Context(), task.ID); childErr == nil {
-			task.SwarmChildren = children
-		}
-	}
-
-	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
-	schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
-	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-	}
-	applog.Infof("[handler] GetTask id=%s executions=%d schedules=%d attachments=%d", taskID, len(executions), len(schedules), len(attachments))
+	task := data.task
+	applog.Infof("[handler] GetTask id=%s executions=%d schedules=%d attachments=%d", taskID, len(data.executions), len(data.schedules), len(data.attachments))
 
 	// Determine default tab
 	defaultTab := c.QueryParam("tab")
@@ -540,12 +601,12 @@ func (h *Handler) GetTask(c echo.Context) error {
 
 	// HTMX request: return just the task detail content partial
 	if isHTMX {
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
+		return h.renderTaskDetailContentData(c, data, defaultTab)
 	}
 
 	// Full page load: wrap in layout
 	projects, _ := h.projectSvc.List(c.Request().Context())
-	return render(c, http.StatusOK, pages.TaskDetailPage(projects, task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
+	return render(c, http.StatusOK, pages.TaskDetailPage(projects, data.task, data.taskGoal, data.executions, data.schedules, data.agents, data.agentDefs, data.attachments, defaultTab, data.reviewComments))
 }
 
 // GetTaskExecutions returns just the execution history for a task (used for polling updates)
@@ -1246,17 +1307,7 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 
 	// Re-fetch updated task data for rendering
 	if isHTMX(c) {
-		task, _ = h.taskSvc.GetByID(c.Request().Context(), taskID)
-		executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
-		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-		var rc []models.ReviewComment
-		if h.reviewCommentRepo != nil {
-			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-		}
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "details", rc))
+		return h.renderTaskDetailContent(c, taskID, "details")
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+task.ID)
@@ -1358,14 +1409,7 @@ func (h *Handler) DeleteTask(c echo.Context) error {
 
 	// Return the full kanban board for HTMX requests (consistent with other task operations)
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		if err != nil {
-			applog.Infof("[handler] DeleteTask error listing tasks: %v", err)
-			return err
-		}
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
 }
@@ -1456,17 +1500,10 @@ func (h *Handler) CancelTask(c echo.Context) error {
 
 	// Return the full kanban board for HTMX requests
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		if err != nil {
-			applog.Infof("[handler] CancelTask error listing tasks: %v", err)
-			return err
-		}
 		if composerStop {
 			return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false, ""))
 		}
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
 }
@@ -1514,10 +1551,7 @@ func (h *Handler) UpdateTaskCategory(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, task.ProjectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
@@ -1535,10 +1569,7 @@ func (h *Handler) MoveCompletedActiveToCompleted(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1563,10 +1594,7 @@ func (h *Handler) UpdateTaskStatus(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, task.ProjectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
@@ -1620,10 +1648,7 @@ func (h *Handler) BatchUpdateTaskCategory(c echo.Context) error {
 	applog.Infof("[handler] BatchUpdateTaskCategory success")
 
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
@@ -1641,10 +1666,7 @@ func (h *Handler) DeleteAllCompletedTasks(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1663,10 +1685,7 @@ func (h *Handler) DeleteAllBacklogTasks(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1685,10 +1704,7 @@ func (h *Handler) ActivateAllBacklogTasks(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1717,10 +1733,7 @@ func (h *Handler) ReorderTask(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		tasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), task.ProjectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, task.ProjectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, task.ProjectID, nil)
 	}
 	return c.NoContent(http.StatusOK)
 }
@@ -1747,10 +1760,7 @@ func (h *Handler) ExecuteBacklogTasks(c echo.Context) error {
 
 	// Return the full kanban board
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		allTasks, _ := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, allTasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, nil)
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1784,15 +1794,9 @@ func (h *Handler) SetBacklogSort(c echo.Context) error {
 
 	// Return the full kanban board with the new sort order
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		sortPrefs.Backlog = sortBy
-		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		if err != nil {
-			applog.Infof("[handler] SetBacklogSort error: %v", err)
-			return err
-		}
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, func(sortPrefs *taskSortPreferences) {
+			sortPrefs.Backlog = sortBy
+		})
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1812,15 +1816,9 @@ func (h *Handler) SetCompletedSort(c echo.Context) error {
 	applog.Infof("[handler] SetCompletedSort cookie set: %s", sortBy)
 
 	if isHTMX(c) {
-		sortPrefs := getSortPreferences(c)
-		sortPrefs.Completed = sortBy
-		tasks, err := h.taskSvc.ListBoardByProjectWithCategorySorts(c.Request().Context(), projectID, "", sortPrefs.Backlog, sortPrefs.Completed)
-		if err != nil {
-			applog.Infof("[handler] SetCompletedSort error: %v", err)
-			return err
-		}
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
+		return h.renderTaskBoardRefresh(c, projectID, func(sortPrefs *taskSortPreferences) {
+			sortPrefs.Completed = sortBy
+		})
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks?project_id="+projectID)
@@ -1896,16 +1894,7 @@ func (h *Handler) UpdateTaskChainConfig(c echo.Context) error {
 
 	// Return updated task detail content
 	if isHTMX(c) {
-		executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
-		schedules, _ := h.scheduleRepo.ListByTask(c.Request().Context(), taskID)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
-		attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-		adefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
-		var rc []models.ReviewComment
-		if h.reviewCommentRepo != nil {
-			rc, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
-		}
-		return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(c.Request().Context(), taskID), executions, schedules, agents, adefs, attachments, "chaining", rc))
+		return h.renderTaskDetailContent(c, taskID, "chaining")
 	}
 
 	return c.NoContent(http.StatusOK)

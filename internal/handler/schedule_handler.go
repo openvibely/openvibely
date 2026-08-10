@@ -78,8 +78,7 @@ func (h *Handler) scheduleAgentAssignmentFromForm(c echo.Context, taskID string)
 }
 
 func (h *Handler) renderScheduleTaskDetail(c echo.Context, taskID, taskLookupErrorLog string, taskLookupErrorsAsNotFound bool) error {
-	ctx := c.Request().Context()
-	task, err := h.taskSvc.GetByID(ctx, taskID)
+	err := h.renderTaskDetailContent(c, taskID, "schedules")
 	if err != nil {
 		if taskLookupErrorLog != "" {
 			applog.Infof("[handler] %s: %v", taskLookupErrorLog, err)
@@ -87,23 +86,8 @@ func (h *Handler) renderScheduleTaskDetail(c echo.Context, taskID, taskLookupErr
 		if taskLookupErrorsAsNotFound {
 			return echo.NewHTTPError(http.StatusNotFound, "task not found")
 		}
-		return err
 	}
-	if task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-
-	executions, _ := h.execRepo.ListByTask(ctx, taskID)
-	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
-	agents, _ := h.llmConfigRepo.List(ctx)
-	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
-	adefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
-	var reviewComments []models.ReviewComment
-	if h.reviewCommentRepo != nil {
-		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
-	}
-
-	return render(c, http.StatusOK, pages.TaskDetailContent(task, h.loadTaskGoal(ctx, taskID), executions, schedules, agents, adefs, attachments, "schedules", reviewComments))
+	return err
 }
 
 func (h *Handler) redirectToTaskSchedules(c echo.Context, taskID string) error {
