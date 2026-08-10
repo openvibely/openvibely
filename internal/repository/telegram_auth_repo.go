@@ -10,8 +10,11 @@ import (
 )
 
 const telegramAuthorizedUsersListQuery = `SELECT id, project_id, telegram_user_id, telegram_username, display_name, added_at, added_by
-			 FROM telegram_authorized_users
-			 ORDER BY added_at ASC`
+				 FROM telegram_authorized_users
+				 ORDER BY added_at ASC`
+
+const telegramIsAuthorizedAnywhereQuery = `SELECT COUNT(*) FROM telegram_authorized_users
+				 WHERE telegram_user_id = ? OR (telegram_user_id = 0 AND telegram_username != '' AND LOWER(telegram_username) = LOWER(?))`
 
 // TelegramAuthRepo handles database operations for Telegram authorized users.
 type TelegramAuthRepo struct {
@@ -56,7 +59,7 @@ func (r *TelegramAuthRepo) IsAuthorized(ctx context.Context, projectID string, t
 func (r *TelegramAuthRepo) BackfillUserID(ctx context.Context, projectID string, username string, userID int64) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE telegram_authorized_users SET telegram_user_id = ?
-		 WHERE telegram_user_id = 0 AND LOWER(telegram_username) = LOWER(?)`,
+		 WHERE telegram_user_id = 0 AND telegram_username != '' AND LOWER(telegram_username) = LOWER(?)`,
 		userID, username)
 	if err != nil {
 		return fmt.Errorf("backfill telegram user id: %w", err)
@@ -74,10 +77,7 @@ func (r *TelegramAuthRepo) HasAnyAuthorizedUsers(ctx context.Context, projectID 
 // Used when no project is selected yet (e.g., before /start or /project).
 func (r *TelegramAuthRepo) IsAuthorizedAnywhere(ctx context.Context, telegramUserID int64, username string) (bool, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM telegram_authorized_users
-		 WHERE telegram_user_id = ? OR (telegram_user_id = 0 AND telegram_username != '' AND LOWER(telegram_username) = LOWER(?))`,
-		telegramUserID, username).Scan(&count)
+	err := r.db.QueryRowContext(ctx, telegramIsAuthorizedAnywhereQuery, telegramUserID, username).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("check telegram auth anywhere: %w", err)
 	}
