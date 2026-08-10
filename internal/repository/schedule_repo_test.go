@@ -2,6 +2,9 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -658,4 +661,292 @@ func TestScheduleRepo_ListSchedulesForDiscovery(t *testing.T) {
 		}
 		seen[r.Schedule.ID] = true
 	}
+
+	// Schedules without a next_run sort after pending schedules, even when their
+	// created_at value would otherwise sort first.
+	if _, err := db.ExecContext(ctx, `UPDATE schedules SET next_run = NULL, created_at = ? WHERE id = ?`, now.Add(24*time.Hour), alphaDisabled.ID); err != nil {
+		t.Fatalf("clear next_run: %v", err)
+	}
+	nilRows, nilTotal, err := repo.ListSchedulesForDiscovery(ctx, "default", ScheduleDiscoveryFilter{})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery nil next_run: %v", err)
+	}
+	if nilTotal != 3 || len(nilRows) != 3 {
+		t.Fatalf("expected 3 rows after nil next_run update, got total=%d len=%d", nilTotal, len(nilRows))
+	}
+	if nilRows[0].Schedule.ID != alphaEnabled.ID || nilRows[1].Schedule.ID != betaEnabled.ID || nilRows[2].Schedule.ID != alphaDisabled.ID {
+		t.Fatalf("expected nil next_run last, got %s,%s,%s", nilRows[0].Schedule.ID, nilRows[1].Schedule.ID, nilRows[2].Schedule.ID)
+	}
+}
+
+func TestScheduleRepo_ListSchedulesForDiscoveryFirstPageUsesOrderedIndex(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	seedScheduleDiscoveryFixture(t, db, 4, 30)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	query := scheduleDiscoverySelectSQL(`t.project_id = ?`, true)
+	plan := explainScheduleDiscoveryQueryPlan(t, db, query, scheduleDiscoveryTargetProjectID, 50)
+	if !strings.Contains(plan, "idx_schedules_discovery_order") {
+		t.Fatalf("first-page plan = %s, want ordered schedule discovery index", plan)
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("first-page plan = %s, want no temporary ORDER BY sort", plan)
+	}
+
+	rows, total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Limit: 50, Offset: 0})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery first page: %v", err)
+	}
+	if total != 150 || len(rows) != 50 {
+		t.Fatalf("first page total/len = %d/%d, want 150/50", total, len(rows))
+	}
+	assertScheduleDiscoveryRowsOrdered(t, rows)
+	for _, row := range rows {
+		if !strings.Contains(row.TaskTitle, scheduleDiscoveryTargetProjectID) {
+			t.Fatalf("cross-project schedule leaked through optimized path: task title %q", row.TaskTitle)
+		}
+	}
+}
+
+func TestScheduleRepo_ListSchedulesForDiscoveryFilteredAndOffsetPathsRemainCorrect(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	seedScheduleDiscoveryFixture(t, db, 3, 12)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	// Filtered and nonzero-offset paths intentionally retain the project/task-indexed
+	// join plus temp-sort strategy instead of forcing the global order index; selective
+	// task, title, and enabled predicates can be cheaper than scanning ordered rows
+	// across every project.
+	filteredQuery := scheduleDiscoverySelectSQL(`t.project_id = ? AND t.title LIKE ?`, false)
+	filteredPlan := explainScheduleDiscoveryQueryPlan(t, db, filteredQuery, scheduleDiscoveryTargetProjectID, "%task-00001%", 20, 0)
+	if strings.Contains(filteredPlan, "idx_schedules_discovery_order") {
+		t.Fatalf("filtered plan = %s, should not force global order index", filteredPlan)
+	}
+
+	rows, total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Title: "task-00001", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery title filter: %v", err)
+	}
+	if total != 5 || len(rows) != 5 {
+		t.Fatalf("title filter total/len = %d/%d, want 5/5", total, len(rows))
+	}
+	assertScheduleDiscoveryRowsOrdered(t, rows)
+
+	disabled := false
+	disabledRows, disabledTotal, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Enabled: &disabled, Limit: 50})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery enabled=false filter: %v", err)
+	}
+	if disabledTotal == 0 || len(disabledRows) == 0 {
+		t.Fatal("expected disabled schedules in filtered fixture")
+	}
+	for _, row := range disabledRows {
+		if row.Schedule.Enabled {
+			t.Fatalf("enabled schedule leaked into disabled filter: %s", row.Schedule.ID)
+		}
+	}
+	assertScheduleDiscoveryRowsOrdered(t, disabledRows)
+
+	page1, page1Total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Limit: 10, Offset: 0})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery page1: %v", err)
+	}
+	page2, page2Total, err := repo.ListSchedulesForDiscovery(ctx, scheduleDiscoveryTargetProjectID, ScheduleDiscoveryFilter{Limit: 10, Offset: 10})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery page2: %v", err)
+	}
+	if page1Total != page2Total || page1Total != 60 {
+		t.Fatalf("page totals = %d/%d, want 60", page1Total, page2Total)
+	}
+	seen := map[string]bool{}
+	for _, row := range page1 {
+		seen[row.Schedule.ID] = true
+	}
+	for _, row := range page2 {
+		if seen[row.Schedule.ID] {
+			t.Fatalf("offset page repeated schedule %s", row.Schedule.ID)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects (id, name, description, repo_path) VALUES ('empty-schedule-project', 'Empty schedules', '', '')`); err != nil {
+		t.Fatalf("insert empty project: %v", err)
+	}
+	emptyRows, emptyTotal, err := repo.ListSchedulesForDiscovery(ctx, "empty-schedule-project", ScheduleDiscoveryFilter{Limit: 50})
+	if err != nil {
+		t.Fatalf("ListSchedulesForDiscovery empty project: %v", err)
+	}
+	if emptyTotal != 0 || len(emptyRows) != 0 {
+		t.Fatalf("empty project total/len = %d/%d, want 0/0", emptyTotal, len(emptyRows))
+	}
+}
+
+func BenchmarkScheduleDiscoverySelect25kProject(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	seedScheduleDiscoveryFixture(b, db, 5, 5000)
+
+	legacyQuery := scheduleDiscoverySelectSQL(`t.project_id = ?`, false)
+	optimizedQuery := scheduleDiscoverySelectSQL(`t.project_id = ?`, true)
+
+	legacyPlan := explainScheduleDiscoveryQueryPlan(b, db, legacyQuery, scheduleDiscoveryTargetProjectID, 50, 0)
+	if !strings.Contains(legacyPlan, "USE TEMP B-TREE FOR ORDER BY") {
+		b.Fatalf("legacy plan = %s, want temporary ORDER BY sort", legacyPlan)
+	}
+	optimizedPlan := explainScheduleDiscoveryQueryPlan(b, db, optimizedQuery, scheduleDiscoveryTargetProjectID, 50)
+	if strings.Contains(optimizedPlan, "USE TEMP B-TREE FOR ORDER BY") {
+		b.Fatalf("optimized plan = %s, want no temporary ORDER BY sort", optimizedPlan)
+	}
+	if !strings.Contains(optimizedPlan, "idx_schedules_discovery_order") {
+		b.Fatalf("optimized plan = %s, want ordered schedule discovery index", optimizedPlan)
+	}
+
+	b.Run("legacy_join_sort", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			rows, err := db.QueryContext(context.Background(), legacyQuery, scheduleDiscoveryTargetProjectID, 50, 0)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if got := drainScheduleDiscoveryRows(b, rows); got != 50 {
+				b.Fatalf("rows = %d, want 50", got)
+			}
+		}
+	})
+	b.Run("ordered_index_first_page", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			rows, err := db.QueryContext(context.Background(), optimizedQuery, scheduleDiscoveryTargetProjectID, 50)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if got := drainScheduleDiscoveryRows(b, rows); got != 50 {
+				b.Fatalf("rows = %d, want 50", got)
+			}
+		}
+	})
+}
+
+const scheduleDiscoveryTargetProjectID = "schedule-discovery-target"
+
+func seedScheduleDiscoveryFixture(tb testing.TB, db *sql.DB, projectCount, tasksPerProject int) {
+	tb.Helper()
+	if projectCount < 2 {
+		tb.Fatalf("projectCount = %d, want at least 2", projectCount)
+	}
+	if tasksPerProject <= 0 {
+		tb.Fatalf("tasksPerProject = %d, want positive", tasksPerProject)
+	}
+	ctx := context.Background()
+	for p := 0; p < projectCount; p++ {
+		projectID := fmt.Sprintf("schedule-discovery-project-%02d", p)
+		if p == projectCount/2 {
+			projectID = scheduleDiscoveryTargetProjectID
+		}
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO projects (id, name, description, repo_path) VALUES (?, ?, '', '')`,
+			projectID, "Schedule Discovery "+projectID); err != nil {
+			tb.Fatalf("insert project %s: %v", projectID, err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			WITH RECURSIVE seq(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seq WHERE n < ? - 1)
+			INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, created_at, updated_at)
+			SELECT
+				'schedule-discovery-task-' || ? || '-' || printf('%05d', n),
+				?,
+				'schedule discovery ' || ? || ' task-' || printf('%05d', n),
+				'scheduled',
+				2,
+				'pending',
+				'p',
+				datetime('2024-01-01', '+' || n || ' seconds'),
+				datetime('2024-01-01', '+' || n || ' seconds')
+			FROM seq`, tasksPerProject, projectID, projectID, projectID); err != nil {
+			tb.Fatalf("insert tasks for %s: %v", projectID, err)
+		}
+		if _, err := db.ExecContext(ctx, `
+			WITH RECURSIVE seq(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM seq WHERE n < ? - 1),
+			slots(slot) AS (VALUES (0), (1), (2), (3), (4))
+			INSERT INTO schedules
+				(id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run, created_at, updated_at)
+			SELECT
+				'schedule-discovery-schedule-' || ? || '-' || printf('%05d', n) || '-' || slot,
+				'schedule-discovery-task-' || ? || '-' || printf('%05d', n),
+				datetime('2024-02-01', '+' || ((n * 5 + slot) * ? + ?) || ' seconds'),
+				CASE WHEN slot = 0 THEN 'once' WHEN slot = 1 THEN 'daily' WHEN slot = 2 THEN 'weekly' WHEN slot = 3 THEN 'monthly' ELSE 'hours' END,
+				1,
+				CASE WHEN (n + slot) % 7 = 0 THEN 0 ELSE 1 END,
+				CASE WHEN slot % 2 = 0 THEN 1 ELSE 0 END,
+				CASE WHEN slot = 4 AND n % 10 = 0 THEN NULL ELSE datetime('2024-03-01', '+' || ((n * 5 + slot) * ? + ?) || ' seconds') END,
+				datetime('2024-01-15', '+' || ((n * 5 + slot) * ? + ?) || ' seconds'),
+				datetime('2024-01-16', '+' || ((n * 5 + slot) * ? + ?) || ' seconds')
+			FROM seq CROSS JOIN slots`, tasksPerProject, projectID, projectID, projectCount, p, projectCount, p, projectCount, p, projectCount, p); err != nil {
+			tb.Fatalf("insert schedules for %s: %v", projectID, err)
+		}
+	}
+}
+
+func explainScheduleDiscoveryQueryPlan(tb testing.TB, db *sql.DB, query string, args ...any) string {
+	tb.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		tb.Fatalf("explain query plan: %v", err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			tb.Fatalf("scan explain row: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		tb.Fatalf("explain rows: %v", err)
+	}
+	return strings.Join(details, " | ")
+}
+
+func assertScheduleDiscoveryRowsOrdered(t *testing.T, rows []ScheduleDiscoveryRow) {
+	t.Helper()
+	for i := 1; i < len(rows); i++ {
+		prev := rows[i-1].Schedule
+		cur := rows[i].Schedule
+		if scheduleDiscoveryRowLess(cur, prev) {
+			t.Fatalf("row %d out of order: previous=%s current=%s", i, prev.ID, cur.ID)
+		}
+	}
+}
+
+func scheduleDiscoveryRowLess(a, b models.Schedule) bool {
+	aNil := a.NextRun == nil
+	bNil := b.NextRun == nil
+	if aNil != bNil {
+		return !aNil
+	}
+	if !aNil && !a.NextRun.Equal(*b.NextRun) {
+		return a.NextRun.Before(*b.NextRun)
+	}
+	if !a.CreatedAt.Equal(b.CreatedAt) {
+		return a.CreatedAt.After(b.CreatedAt)
+	}
+	return a.ID < b.ID
+}
+
+func drainScheduleDiscoveryRows(tb testing.TB, rows *sql.Rows) int {
+	tb.Helper()
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var row ScheduleDiscoveryRow
+		s := &row.Schedule
+		if err := rows.Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval,
+			&s.Enabled, &s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt, &row.TaskTitle); err != nil {
+			tb.Fatalf("scan schedule discovery row: %v", err)
+		}
+		count++
+	}
+	if err := rows.Err(); err != nil {
+		tb.Fatalf("schedule discovery rows: %v", err)
+	}
+	return count
 }
