@@ -700,7 +700,7 @@ func TestCallDirectLifecycleHookSendsAgentPromptWithoutCodingFraming(t *testing.
 	adapter := New(nil, nil, nil)
 	_, _, err := adapter.CallDirect(context.Background(), "HOOK PROMPT", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
-	}, ".", "SENTINEL_AGENT_PROMPT", true, true)
+	}, ".", "SENTINEL_AGENT_PROMPT", true, false, true)
 	if err != nil {
 		t.Fatalf("CallDirect: %v", err)
 	}
@@ -735,7 +735,7 @@ func TestCallDirectNonLifecycleKeepsCodingFraming(t *testing.T) {
 	adapter := New(nil, nil, nil)
 	_, _, err := adapter.CallDirect(context.Background(), "DO WORK", nil, models.LLMConfig{
 		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
-	}, ".", "SENTINEL_AGENT_PROMPT", true, false)
+	}, ".", "SENTINEL_AGENT_PROMPT", true, false, false)
 	if err != nil {
 		t.Fatalf("CallDirect: %v", err)
 	}
@@ -746,5 +746,41 @@ func TestCallDirectNonLifecycleKeepsCodingFraming(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Fatalf("ordinary direct call missing %q: %s", want, body)
 		}
+	}
+}
+
+func TestCallDirectRawPromptOmitsInteractiveAgentFraming(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"resp-1","status":"completed","model":"gpt-test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Centralize channel mutation responses"}]}]}`))
+	}))
+	defer srv.Close()
+
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	adapter := New(nil, nil, nil)
+	_, _, err := adapter.CallDirect(context.Background(), "COMMIT SUMMARY PROMPT", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, ".", "SENTINEL_PROJECT_INSTRUCTIONS", true, true, false)
+	if err != nil {
+		t.Fatalf("CallDirect: %v", err)
+	}
+
+	payload, _ := json.Marshal(gotBody)
+	body := string(payload)
+	for _, unwanted := range []string{"expert software engineer", "SENTINEL_PROJECT_INSTRUCTIONS", "Working with the user", "Intermediary updates"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("raw direct request contains interactive framing %q: %s", unwanted, body)
+		}
+	}
+	if !strings.Contains(body, "COMMIT SUMMARY PROMPT") {
+		t.Fatalf("raw direct request lost caller prompt: %s", body)
 	}
 }

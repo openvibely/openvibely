@@ -1808,17 +1808,55 @@ func (s *LLMService) SummarizeWorktreeCommitDiff(ctx context.Context, worktreePa
 	prompt := buildWorktreeCommitSummaryPrompt(diffContext, commitCtx)
 	summaryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	output, _, err := s.CallAgentDirectNoTools(summaryCtx, prompt, nil, agent, worktreePath)
+	output, _, err := s.CallAgentRawDirectNoTools(summaryCtx, prompt, nil, agent, worktreePath)
 	if err != nil {
 		applog.Infof("[agent-svc] commit diff summary failed worktree=%s: %v", worktreePath, err)
 		return ""
 	}
-	for _, summary := range summarizeCommitIntentLines(output) {
-		if summary != "" {
-			return summary
+	return parseWorktreeCommitSummaryOutput(output)
+}
+
+func parseWorktreeCommitSummaryOutput(output string) string {
+	match := ""
+	for offset, char := range output {
+		if char != '{' {
+			continue
 		}
+		candidate := parseWorktreeCommitSummaryObject(output[offset:])
+		if candidate == "" {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = candidate
 	}
-	return ""
+	return match
+}
+
+func parseWorktreeCommitSummaryObject(output string) string {
+	var fields map[string]json.RawMessage
+	decoder := json.NewDecoder(strings.NewReader(output))
+	if err := decoder.Decode(&fields); err != nil || len(fields) != 1 {
+		return ""
+	}
+	rawSubject, ok := fields["subject"]
+	if !ok {
+		return ""
+	}
+	var subject string
+	if err := json.Unmarshal(rawSubject, &subject); err != nil {
+		return ""
+	}
+	subject = strings.TrimSpace(subject)
+	if subject == "" || strings.ContainsAny(subject, "\r\n") {
+		return ""
+	}
+	subject = cleanCommitSubject(subject)
+	if subject == "" || len(subject) > 72 {
+		return ""
+	}
+	return subject
 }
 
 func buildWorktreeCommitSummaryPrompt(diffContext string, commitCtx WorktreeCommitMessageContext) string {
@@ -1829,8 +1867,11 @@ func buildWorktreeCommitSummaryPrompt(diffContext string, commitCtx WorktreeComm
 	b.WriteString("- Use an imperative, capitalized subject, for example: Add analytics chart.\n")
 	b.WriteString("- Use plain language with no conventional prefix such as feat:, fix:, chore:, docs:, or test:.\n")
 	b.WriteString("- Do not mention tasks, task turns, follow-ups, lifecycle phases, worktrees, or file lists unless that is literally the product code being changed.\n")
-	b.WriteString("- Return only the subject line, max 72 characters.\n")
+	b.WriteString("- The subject must be at most 72 characters.\n")
 	b.WriteString("- If supporting context conflicts with the diff, ignore the supporting context.\n\n")
+	b.WriteString("Return exactly one JSON object with no markdown or other text:\n")
+	b.WriteString(`{"subject":"Add concise description"}`)
+	b.WriteString("\n\n")
 	if context := buildWorktreeCommitSupportingContext(commitCtx); context != "" {
 		b.WriteString("Supporting context, only if it agrees with the diff:\n")
 		b.WriteString(context)
@@ -2021,6 +2062,13 @@ func (s *LLMService) CallAgentDirectWithDefinitionNoTools(ctx context.Context, m
 	return s.callAgentDirectWithDefinition(ctx, message, attachments, agent, workDir, agentDef, true)
 }
 
+// CallAgentRawDirectNoTools calls the agent with an already-composed utility
+// prompt, without coding-agent framing or tools.
+func (s *LLMService) CallAgentRawDirectNoTools(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string) (string, int, error) {
+	ctx = llmcontracts.WithoutRuntimeTools(ctx)
+	return s.callAgentDirectWithDefinitionMode(ctx, message, attachments, agent, workDir, nil, true, true)
+}
+
 type directUsageProjectContextKey struct{}
 
 func WithDirectUsageProject(ctx context.Context, projectID string) context.Context {
@@ -2046,6 +2094,10 @@ func (s *LLMService) callAgentDirect(ctx context.Context, message string, attach
 }
 
 func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent, disableTools bool) (string, int, error) {
+	return s.callAgentDirectWithDefinitionMode(ctx, message, attachments, agent, workDir, agentDef, disableTools, false)
+}
+
+func (s *LLMService) callAgentDirectWithDefinitionMode(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, workDir string, agentDef *models.Agent, disableTools bool, rawDirectPrompt bool) (string, int, error) {
 	if s.updateTracker != nil {
 		done, err := s.updateTracker.Start(update.WorkChat)
 		if err != nil {
@@ -2081,6 +2133,7 @@ func (s *LLMService) callAgentDirectWithDefinition(ctx context.Context, message 
 		Agent:             agent,
 		WorkDir:           workDir,
 		DisableTools:      disableTools,
+		RawDirectPrompt:   rawDirectPrompt,
 		AgentDefinition:   agentDef,
 		LifecycleHookCall: llmcontracts.LifecycleHookCallFromContext(ctx),
 	})

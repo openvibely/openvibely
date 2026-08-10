@@ -95,6 +95,34 @@ func TestLLMService_CallAgentDirectNoTools_PropagatesDisableToolsFlag(t *testing
 	}
 }
 
+func TestLLMService_CallAgentRawDirectNoToolsIsolatesUtilityRequest(t *testing.T) {
+	svc := &LLMService{}
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{
+		models.ProviderTest: capture,
+	}
+	svc.routing = newAgentRoutingStrategy(svc)
+
+	runtimeTools := &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "write_file"}},
+	}
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), runtimeTools)
+	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model"}
+	if _, _, err := svc.CallAgentRawDirectNoTools(ctx, "commit summary", nil, agent, ""); err != nil {
+		t.Fatalf("CallAgentRawDirectNoTools error: %v", err)
+	}
+
+	if !capture.lastReq.DisableTools || !capture.lastReq.RawDirectPrompt {
+		t.Fatalf("expected raw no-tools request, got disable=%v raw=%v", capture.lastReq.DisableTools, capture.lastReq.RawDirectPrompt)
+	}
+	if tools := llmcontracts.RuntimeToolsFromContext(capture.lastReq.Ctx); tools != nil {
+		t.Fatalf("expected inherited runtime tools to be removed, got %#v", tools)
+	}
+	if capture.lastReq.AgentDefinition != nil || capture.lastReq.ProjectInstructions != "" || capture.lastReq.ChatSystemContext != "" {
+		t.Fatalf("expected no interactive agent framing, got %#v", capture.lastReq)
+	}
+}
+
 func TestAnthropicProviderAdapter_DirectDisableToolsRejectsCLITransport(t *testing.T) {
 	adapter := &anthropicProviderAdapter{svc: &LLMService{}}
 	_, err := adapter.Call(llmcontracts.AgentRequest{

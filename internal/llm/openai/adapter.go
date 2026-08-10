@@ -337,7 +337,7 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 // definition into it); lifecycleHookCall marks a request made on behalf of a
 // lifecycle hook, which keeps that agent prompt but drops the shared
 // coding-agent framing it has no use for.
-func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, disableTools bool, lifecycleHookCall bool) (string, llmcontracts.Usage, error) {
+func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, workDir string, projectInstructions string, disableTools bool, rawDirectPrompt bool, lifecycleHookCall bool) (string, llmcontracts.Usage, error) {
 	applog.Infof("[openai-adapter] CallDirect model=%s output_budget=%d attachments=%d auth_method=%s disable_tools=%v lifecycle_hook=%v", agent.Model, openAIDirectOutputBudget, len(attachments), agent.AuthMethod, disableTools, lifecycleHookCall)
 
 	client, releaseTransport, err := a.getClient(ctx, agent, "")
@@ -365,11 +365,18 @@ func (a *Adapter) CallDirect(ctx context.Context, prompt string, attachments []m
 	}
 	// A lifecycle hook keeps its agent's own prompt but skips the shared
 	// coding-agent system prompt; every other direct call gets both.
-	systemPrompt := projectInstructions
-	if !lifecycleHookCall {
+	systemPrompt := ""
+	if rawDirectPrompt {
+		// The caller supplied a complete utility prompt. Do not add coding-agent
+		// or interactive commentary instructions to structured generation calls.
+	} else if lifecycleHookCall {
+		systemPrompt = projectInstructions
+	} else {
 		systemPrompt = llmprompt.BuildAgentSystemPrompt(projectInstructions, effectiveWorkDir)
 	}
-	systemPrompt = applyOpenAIOAuthSystemPrompt(systemPrompt, agent)
+	if !rawDirectPrompt {
+		systemPrompt = applyOpenAIOAuthSystemPrompt(systemPrompt, agent)
+	}
 
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	if rt != nil && len(rt.Definitions) > 0 && !disableTools {

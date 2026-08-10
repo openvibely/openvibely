@@ -1177,7 +1177,7 @@ func TestSummarizeWorktreeCommitDiff_UsesActualDiffHunks(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	svc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
-	mock := &testutil.MockLLMCaller{Response: "docs: document serve command usage"}
+	mock := &testutil.MockLLMCaller{Response: `{"subject":"docs: document serve command usage"}`}
 	svc.SetLLMCaller(mock)
 	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model", Name: "Test Agent"}
 
@@ -1193,13 +1193,61 @@ func TestSummarizeWorktreeCommitDiff_UsesActualDiffHunks(t *testing.T) {
 		t.Fatalf("expected one LLM call, got %d", mock.CallCount())
 	}
 	prompt := mock.LastCall().Prompt
-	for _, want := range []string{"Use an imperative, capitalized subject", "Actual diff facts and hunks:", "README.md", "+## Usage", "+Run `openvibely serve`.", "Supporting context, only if it agrees with the diff:"} {
+	for _, want := range []string{"Use an imperative, capitalized subject", `{"subject":"Add concise description"}`, "Actual diff facts and hunks:", "README.md", "+## Usage", "+Run `openvibely serve`.", "Supporting context, only if it agrees with the diff:"} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("expected prompt to contain %q, got:\n%s", want, prompt)
 		}
 	}
 	if strings.Contains(summary, "docs:") || strings.Contains(summary, "worker") || strings.Contains(summary, "\n") {
 		t.Fatalf("summary should be plain one-line diff summary, got %q", summary)
+	}
+}
+
+func TestParseWorktreeCommitSummaryOutputRequiresExactJSONShape(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   string
+	}{
+		{name: "valid", output: `{"subject":"Centralize channel mutation responses"}`, want: "Centralize channel mutation responses"},
+		{name: "cleans conventional prefix", output: `{"subject":"fix: preserve skills viewport"}`, want: "Preserve skills viewport"},
+		{name: "plain narration", output: "I'll inspect the worktree diff first.", want: ""},
+		{name: "narration before JSON", output: "I'll inspect the worktree diff first.\n{\"subject\":\"Preserve skills viewport\"}", want: "Preserve skills viewport"},
+		{name: "markdown fence", output: "```json\n{\"subject\":\"Preserve skills viewport\"}\n```", want: "Preserve skills viewport"},
+		{name: "extra field", output: `{"subject":"Preserve skills viewport","notes":"done"}`, want: ""},
+		{name: "ambiguous objects", output: `{"subject":"Preserve skills viewport"} {"subject":"Change another thing"}`, want: ""},
+		{name: "missing field", output: `{"message":"Preserve skills viewport"}`, want: ""},
+		{name: "non-string subject", output: `{"subject":42}`, want: ""},
+		{name: "multiline subject", output: `{"subject":"Preserve skills viewport\nChanged files"}`, want: ""},
+		{name: "too long", output: `{"subject":"This commit subject is deliberately longer than seventy two characters and must be rejected"}`, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseWorktreeCommitSummaryOutput(tt.output); got != tt.want {
+				t.Fatalf("parseWorktreeCommitSummaryOutput() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSummarizeWorktreeCommitDiffRejectsUnstructuredModelOutput(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "app.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	db := testutil.NewTestDB(t)
+	svc := NewLLMService(repository.NewLLMConfigRepo(db), nil, nil, nil, nil, nil)
+	svc.SetLLMCaller(&testutil.MockLLMCaller{Response: "I'll inspect the worktree diff first."})
+	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model", Name: "Test Agent"}
+
+	summary := svc.SummarizeWorktreeCommitDiff(context.Background(), repoDir, agent, WorktreeCommitMessageContext{})
+	if summary != "" {
+		t.Fatalf("expected unstructured output to be rejected, got %q", summary)
+	}
+	if message := BuildWorktreeCommitMessage(repoDir, WorktreeCommitMessageContext{DiffSummary: summary}); message != "Add app" {
+		t.Fatalf("expected deterministic fallback, got %q", message)
 	}
 }
 
@@ -1217,7 +1265,7 @@ func TestSummarizeWorktreeCommitDiff_DoesNotReadUntrackedSymlinkTargets(t *testi
 	db := testutil.NewTestDB(t)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	svc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
-	mock := &testutil.MockLLMCaller{Response: "Add safe symlink placeholder"}
+	mock := &testutil.MockLLMCaller{Response: `{"subject":"Add safe symlink placeholder"}`}
 	svc.SetLLMCaller(mock)
 	agent := models.LLMConfig{Provider: models.ProviderTest, Model: "test-model", Name: "Test Agent"}
 

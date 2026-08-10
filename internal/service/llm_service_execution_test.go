@@ -67,7 +67,7 @@ type completionPathWritingLLMCaller struct {
 
 func (c *completionPathWritingLLMCaller) CallModel(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
 	if strings.HasPrefix(prompt, "Write one concise git commit subject") {
-		return "Update stale fixture", "Update stale fixture", 1, nil
+		return `{"subject":"Update stale fixture"}`, `{"subject":"Update stale fixture"}`, 1, nil
 	}
 	c.workDir = workDir
 	if err := os.WriteFile(filepath.Join(workDir, c.fileName), []byte(c.content), 0644); err != nil {
