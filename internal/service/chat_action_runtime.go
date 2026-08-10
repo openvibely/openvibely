@@ -1024,7 +1024,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if req.ProcessingState != "" && req.ProcessingState != string(models.AlertProcessingNotApplicable) && req.ProcessingState != string(models.AlertProcessingUnclaimed) && req.ProcessingState != string(models.AlertProcessingClaimed) && req.ProcessingState != string(models.AlertProcessingImplementationTaskLinked) && req.ProcessingState != string(models.AlertProcessingCompleted) && req.ProcessingState != string(models.AlertProcessingFailed) {
 				return "", fmt.Errorf("invalid processing_state %q", req.ProcessingState)
 			}
-			alerts, err := opts.AlertSvc.ListFilteredForRuntime(ctx, opts.ProjectID, models.AlertListFilter{
+			alerts, err := opts.AlertSvc.ListFilteredSummariesForRuntime(ctx, opts.ProjectID, models.AlertListFilter{
 				DecisionState: models.AlertDecisionState(req.DecisionState), ProcessingState: models.AlertProcessingState(req.ProcessingState),
 				Type: models.AlertType(req.Type), Source: req.Source, Read: req.Read,
 				ImplementationTaskLinked: req.ImplementationTaskLinked, Limit: req.Limit, Offset: req.Offset,
@@ -1226,7 +1226,7 @@ func channelListAlertsResult(ctx context.Context, alertSvc *AlertService, projec
 	if alertSvc == nil {
 		return "Alert service not available."
 	}
-	alerts, err := alertSvc.ListByProject(ctx, projectID, 50)
+	alerts, err := alertSvc.ListSummariesByProject(ctx, projectID, 50)
 	if err != nil {
 		return "Error retrieving alerts: " + err.Error()
 	}

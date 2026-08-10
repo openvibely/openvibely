@@ -232,9 +232,21 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, listJSON, created.Notification.ID)
 	require.Contains(t, listJSON, `"next_offset":1`)
+	require.NotContains(t, listJSON, `"body"`)
+	require.NotContains(t, listJSON, `"metadata"`)
+	var listed struct {
+		Notifications []map[string]any `json:"notifications"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(listJSON), &listed))
+	require.Len(t, listed.Notifications, 1)
+	for _, key := range []string{"id", "project_id", "type", "severity", "title", "message", "is_read", "decision_state", "processing_state", "source", "created_at", "updated_at"} {
+		require.Contains(t, listed.Notifications[0], key)
+	}
 	detailJSON, err := handlers["get_alert"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`"}`))
 	require.NoError(t, err)
 	require.Contains(t, detailJSON, "Detailed implementation context")
+	require.Contains(t, detailJSON, `"body"`)
+	require.Contains(t, detailJSON, `"metadata"`)
 
 	require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
 	approvedJSON, err := handlers["list_alerts"](ctx, json.RawMessage(`{"decision_state":"approved","processing_state":"unclaimed"}`))
