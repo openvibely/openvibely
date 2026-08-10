@@ -7837,3 +7837,42 @@ func BenchmarkTaskFollowupHardenedGitHubRuntime50Dispatches(b *testing.B) {
 		})
 	})
 }
+
+func TestExecuteListAgentsUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents: %v", err)
+	}
+
+	agents := []*models.Agent{
+		{Name: "Alpha Agent", Description: "alpha description", Model: "inherit", Skills: []models.SkillConfig{{Name: "one"}, {Name: "two"}}, MCPServers: []models.MCPServerConfig{{Name: "browser"}}, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Bravo Agent", Description: "bravo description", Model: "gpt-5", MCPServers: []models.MCPServerConfig{{Name: "one"}, {Name: "two"}}, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Archived Agent", Description: "hidden", Model: "gpt-5", Skills: []models.SkillConfig{{Name: "hidden"}}, GeneratedStatus: models.AgentStatusArchived, Enabled: true, SelectableAsPrimary: true},
+	}
+	for _, agent := range agents {
+		if err := agentRepo.Create(ctx, agent); err != nil {
+			t.Fatalf("create agent %q: %v", agent.Name, err)
+		}
+	}
+
+	out := strings.TrimSpace(h.executeListAgents(ctx))
+	alphaLine := "- **Alpha Agent** — alpha description, 2 skills, 1 MCP servers"
+	bravoLine := "- **Bravo Agent** — bravo description, model: gpt-5, 0 skills, 2 MCP servers"
+	require.Contains(t, out, "Configured Agents:")
+	require.Contains(t, out, alphaLine)
+	require.Contains(t, out, bravoLine)
+	require.NotContains(t, out, "Archived Agent")
+	require.Less(t, strings.Index(out, alphaLine), strings.Index(out, bravoLine), "agents should remain ordered by name ASC")
+
+	h.SetAgentRepo(nil)
+	require.Equal(t, "Configured Agents:\nAgent definitions not available.", strings.TrimSpace(h.executeListAgents(ctx)))
+
+	h.SetAgentRepo(agentRepo)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents for empty result: %v", err)
+	}
+	require.Contains(t, h.executeListAgents(ctx), "No agents configured.")
+}

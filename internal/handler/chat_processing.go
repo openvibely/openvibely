@@ -3207,7 +3207,7 @@ func (h *Handler) executeListAgents(ctx context.Context) string {
 		return "Configured Agents:\nAgent definitions not available.\n"
 	}
 
-	agents, err := h.agentRepo.List(ctx)
+	agents, err := h.agentRepo.ListRuntimeSummaries(ctx)
 	if err != nil {
 		return "Configured Agents:\n- Error: " + err.Error()
 	}
@@ -3223,7 +3223,7 @@ func (h *Handler) executeListAgents(ctx context.Context) string {
 				modelStr = fmt.Sprintf(", model: %s", a.Model)
 			}
 			sb.WriteString(fmt.Sprintf("- **%s** — %s%s, %d skills, %d MCP servers\n",
-				a.Name, a.Description, modelStr, len(a.Skills), len(a.MCPServers)))
+				a.Name, a.Description, modelStr, a.SkillCount, a.MCPServerCount))
 		}
 	}
 	return sb.String()

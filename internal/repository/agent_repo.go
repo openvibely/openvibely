@@ -27,6 +27,15 @@ const agentColumns = `id, name, description, system_prompt, model, tools, tool_c
 	`COALESCE(source_refs_json, '[]'), archived_at, ` +
 	`created_at, updated_at`
 
+// AgentRuntimeSummary is the compact projection needed by runtime list_agents.
+type AgentRuntimeSummary struct {
+	Name           string
+	Description    string
+	Model          string
+	SkillCount     int
+	MCPServerCount int
+}
+
 func scanAgent(row interface{ Scan(dest ...any) error }) (*models.Agent, error) {
 	var a models.Agent
 	var (
@@ -142,6 +151,30 @@ func normalizeAgentToolConfig(a *models.Agent) {
 
 func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
 	return r.list(ctx, `SELECT `+agentColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
+}
+
+func (r *AgentRepo) ListRuntimeSummaries(ctx context.Context) ([]AgentRuntimeSummary, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT name, description, model,
+		       COALESCE(json_array_length(skills), 0) AS skill_count,
+		       COALESCE(json_array_length(mcp_servers), 0) AS mcp_server_count
+		FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing runtime agent summaries: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []AgentRuntimeSummary
+	for rows.Next() {
+		var summary AgentRuntimeSummary
+		if err := rows.Scan(&summary.Name, &summary.Description, &summary.Model, &summary.SkillCount, &summary.MCPServerCount); err != nil {
+			return nil, fmt.Errorf("scanning runtime agent summary: %w", err)
+		}
+		summaries = append(summaries, summary)
+	}
+	return summaries, rows.Err()
 }
 
 func (r *AgentRepo) ListSelectableForProject(ctx context.Context, projectID string, limit int) ([]models.Agent, error) {
