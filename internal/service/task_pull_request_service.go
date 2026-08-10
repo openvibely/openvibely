@@ -50,6 +50,10 @@ func NewTaskPullRequestService(github TaskPullRequestGitHubProvider, repo *repos
 	return &TaskPullRequestService{github: github, repo: repo}
 }
 
+func IsOpenPullRequestState(state string) bool {
+	return strings.EqualFold(strings.TrimSpace(state), "open")
+}
+
 func (s *TaskPullRequestService) ReplaceBranchHeadForTask(ctx context.Context, project *models.Project, task *models.Task, expectedHead string) (*models.TaskPullRequest, error) {
 	return s.replaceBranchHeadForTask(ctx, project, task, expectedHead)
 }
@@ -196,7 +200,7 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	}); err != nil {
 		return nil, fmt.Errorf("publishing branch: %w", err)
 	}
-	if existingPR != nil {
+	if existingPR != nil && IsOpenPullRequestState(existingPR.PRState) {
 		if mergeTaskPullRequestIssueMetadata(existingPR, opts) {
 			if err := s.repo.Upsert(ctx, existingPR); err != nil {
 				return nil, fmt.Errorf("saving pull request issue metadata: %w", err)
@@ -215,6 +219,9 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	}
 
 	pr := foundPR
+	if pr != nil && !IsOpenPullRequestState(pr.State) {
+		pr = nil
+	}
 	created := false
 	if pr == nil {
 		pr, err = s.github.CreatePullRequest(ctx, repoRef, createReq)
@@ -235,6 +242,9 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	}
 	if pr == nil {
 		return nil, fmt.Errorf("pull request was not created or found")
+	}
+	if !IsOpenPullRequestState(pr.State) {
+		return nil, fmt.Errorf("pull request #%d is %s", pr.Number, strings.TrimSpace(pr.State))
 	}
 
 	record := &models.TaskPullRequest{

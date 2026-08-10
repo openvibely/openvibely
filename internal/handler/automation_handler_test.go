@@ -2161,6 +2161,12 @@ func TestReplacedAutomationOriginTaskGitHubMutationsRemainFailClosed(t *testing.
 	require.NotNil(t, params.AutomationContext)
 	require.True(t, params.AutomationContext.OriginTask)
 	require.Empty(t, params.AutomationContext.Bindings)
+	stalePrepared := streamingResponseParams{ProjectID: project.ID, TaskID: originalTask.ID, ExecID: "replacement-stale-bindings", IsTaskFollowup: true, Task: originalTask,
+		AutomationContext: &models.AutomationContext{ProjectID: project.ID, Bindings: []models.AutomationBinding{oldBinding}}}
+	require.NoError(t, tc.handler.prepareAutomationTaskFollowup(ctx, &stalePrepared))
+	require.NotNil(t, stalePrepared.AutomationContext)
+	require.True(t, stalePrepared.AutomationContext.OriginTask)
+	require.NotEmpty(t, stalePrepared.AutomationContext.Bindings)
 	tc.handler.automationGraphSvc = nil
 	withoutLookup := streamingResponseParams{ProjectID: project.ID, TaskID: originalTask.ID, ExecID: "replacement-without-lookup", IsTaskFollowup: true, Task: originalTask}
 	require.NoError(t, tc.handler.prepareAutomationTaskFollowup(ctx, &withoutLookup))

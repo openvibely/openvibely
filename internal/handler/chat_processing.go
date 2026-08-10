@@ -161,6 +161,9 @@ func (h *Handler) prepareAutomationTaskFollowup(ctx context.Context, params *str
 		params.Task = task
 	}
 	if params.AutomationContext != nil {
+		if repository.IsAutomationTaskCreatedVia(params.Task.CreatedVia) {
+			params.AutomationContext.OriginTask = true
+		}
 		return nil
 	}
 	var automationContext models.AutomationContext
@@ -177,8 +180,9 @@ func (h *Handler) prepareAutomationTaskFollowup(ctx context.Context, params *str
 			return fmt.Errorf("loading task-thread Automation task context: %w", err)
 		}
 	}
-	if len(automationContext.Bindings) == 0 && repository.IsAutomationTaskCreatedVia(params.Task.CreatedVia) {
-		automationContext = models.AutomationContext{ProjectID: params.Task.ProjectID, OriginTask: true}
+	if repository.IsAutomationTaskCreatedVia(params.Task.CreatedVia) {
+		automationContext.ProjectID = params.Task.ProjectID
+		automationContext.OriginTask = true
 	}
 	if len(automationContext.Bindings) > 0 || automationContext.OriginTask {
 		params.AutomationContext = &automationContext
@@ -1976,6 +1980,13 @@ func (h *Handler) blockGitHubSDLCSuccessWithoutPullRequest(ctx context.Context, 
 	}
 	if pullRequest == nil {
 		return true, "GitHub SDLC implementation completed without publishing a pull request; rerun after resolving PR publication"
+	}
+	if !service.IsOpenPullRequestState(pullRequest.PRState) {
+		state := strings.TrimSpace(pullRequest.PRState)
+		if state == "" {
+			state = "not open"
+		}
+		return true, fmt.Sprintf("GitHub SDLC implementation linked pull request #%d is %s; rerun after resolving PR publication", pullRequest.PRNumber, state)
 	}
 	return false, ""
 }

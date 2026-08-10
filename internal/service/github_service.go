@@ -1298,7 +1298,14 @@ func (s *GitHubService) FindPullRequestByBranch(ctx context.Context, repo *GitHu
 	if len(prs) == 0 {
 		return nil, nil
 	}
-	return &GitHubPullRequest{Number: prs[0].Number, URL: prs[0].URL, State: prs[0].State}, nil
+	selected := prs[0]
+	for _, pr := range prs {
+		if IsOpenPullRequestState(pr.State) {
+			selected = pr
+			break
+		}
+	}
+	return &GitHubPullRequest{Number: selected.Number, URL: selected.URL, State: selected.State}, nil
 }
 
 func (s *GitHubService) CreatePullRequest(ctx context.Context, repo *GitHubRepoRef, createReq GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {

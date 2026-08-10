@@ -348,6 +348,63 @@ func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 	}
 }
 
+func TestTaskPullRequestServiceOpenForTaskReplacesClosedRecordWithOpenPR(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	project := &models.Project{Name: "Closed PR Project", RepoPath: t.TempDir(), RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Closed PR", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreeBranch: "task/closed"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 22, PRURL: "https://github.com/openvibely/openvibely/pull/22", PRState: "closed"}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	publishCalls := 0
+	findCalls := 0
+	createCalls := 0
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) error {
+			publishCalls++
+			if req.Branch != task.WorktreeBranch {
+				t.Fatalf("unexpected publish request: %#v", req)
+			}
+			return nil
+		},
+		findPRFn: func(_ context.Context, _ *GitHubRepoRef, branch string) (*GitHubPullRequest, error) {
+			findCalls++
+			if branch != task.WorktreeBranch {
+				t.Fatalf("unexpected branch lookup: %s", branch)
+			}
+			return &GitHubPullRequest{Number: 22, URL: "https://github.com/openvibely/openvibely/pull/22", State: "closed"}, nil
+		},
+		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			createCalls++
+			return &GitHubPullRequest{Number: 33, URL: "https://github.com/openvibely/openvibely/pull/33", State: "open"}, nil
+		},
+	}, prRepo)
+
+	result, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{})
+	if err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	if result.ReusedExistingRecord || !result.Created || result.PullRequest.Number != 33 || publishCalls != 1 || findCalls != 1 || createCalls != 1 {
+		t.Fatalf("expected closed record replacement, result=%#v publishCalls=%d findCalls=%d createCalls=%d", result, publishCalls, findCalls, createCalls)
+	}
+	record, err := prRepo.GetByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByTaskID: %v", err)
+	}
+	if record == nil || record.PRNumber != 33 || record.PRState != "open" {
+		t.Fatalf("expected open replacement PR record, got %#v", record)
+	}
+}
+
 func TestTaskPullRequestServiceOpenForTaskReusesExistingRecordAndPersistsIssueMetadata(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
