@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 )
 
 // deleteByID deletes a single row identified by id from table and returns a
@@ -71,65 +70,6 @@ func deleteUserProject(ctx context.Context, db *sql.DB, table, keyCol, keyVal, e
 		return fmt.Errorf("delete %s: %w", errLabel, err)
 	}
 	return nil
-}
-
-type taskContextScanner interface {
-	Scan(dest ...any) error
-}
-
-type taskContextLifecycle[T any] struct {
-	table           string
-	errLabel        string
-	metadataColumns []string
-	selectColumns   string
-	values          func(T) (string, []any)
-	scan            func(taskContextScanner) (T, error)
-}
-
-func (h taskContextLifecycle[T]) Upsert(ctx context.Context, exec SQLExecutor, contextValue T) error {
-	taskID, metadataValues := h.values(contextValue)
-	if len(h.metadataColumns) != len(metadataValues) {
-		return fmt.Errorf("upsert %s: metadata column/value mismatch", h.errLabel)
-	}
-
-	insertColumns := append([]string{"task_id"}, h.metadataColumns...)
-	placeholders := make([]string, len(insertColumns))
-	for i := range placeholders {
-		placeholders[i] = "?"
-	}
-	updates := make([]string, len(h.metadataColumns))
-	for i, col := range h.metadataColumns {
-		updates[i] = fmt.Sprintf("%s = excluded.%s", col, col)
-	}
-	updates = append(updates, "updated_at = datetime('now')")
-
-	query := fmt.Sprintf(
-		`INSERT INTO %s (%s, updated_at)
-		 VALUES (%s, datetime('now'))
-		 ON CONFLICT(task_id) DO UPDATE SET
-		 %s`,
-		h.table,
-		strings.Join(insertColumns, ", "),
-		strings.Join(placeholders, ", "),
-		strings.Join(updates, ",\n\t\t "),
-	)
-	args := append([]any{taskID}, metadataValues...)
-	if _, err := exec.ExecContext(ctx, query, args...); err != nil {
-		return fmt.Errorf("upsert %s: %w", h.errLabel, err)
-	}
-	return nil
-}
-
-func (h taskContextLifecycle[T]) GetByTaskID(ctx context.Context, db *sql.DB, taskID string) (*T, error) {
-	query := fmt.Sprintf(`SELECT %s FROM %s WHERE task_id = ?`, h.selectColumns, h.table)
-	v, err := h.scan(db.QueryRowContext(ctx, query, taskID))
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get %s: %w", h.errLabel, err)
-	}
-	return &v, nil
 }
 
 // deleteByTaskID removes a task-context row keyed by task_id from table.

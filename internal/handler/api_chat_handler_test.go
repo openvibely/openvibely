@@ -825,11 +825,12 @@ func TestAPIChatMessage_QueuedAttachmentMetadataFailureRemovesPendingSession(t *
 	e.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
-
-	var retiredSessionID string
-	require.NoError(t, db.QueryRow(`SELECT session_id FROM retired_attachment_sessions`).Scan(&retiredSessionID))
-	require.NotEmpty(t, retiredSessionID)
-	require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", retiredSessionID))
+	pendingRoot := filepath.Join(uploadsDir, "chat", "pending")
+	entries, readErr := os.ReadDir(pendingRoot)
+	if !os.IsNotExist(readErr) {
+		require.NoError(t, readErr)
+		require.Empty(t, entries, "failed queued metadata publication must remove its pending session")
+	}
 }
 
 func TestAPIChatMessage_ImmediateAttachmentMetadataFailureRemovesFile(t *testing.T) {

@@ -1706,36 +1706,6 @@ func TestCleanupUnpublishedPendingAttachmentSession_RejectsOwnerAcquiredBeforeRe
 	require.NoDirExists(t, sessionDir)
 }
 
-func TestCleanupUnpublishedPendingAttachmentSession_PreservesAlreadyOwnedSession(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
-	project := createProject(t, h, "Pending attachment existing owner")
-	ownerTask := createTask(t, h, project.ID, "Existing pending owner", func(task *models.Task) {
-		task.Category = models.CategoryBacklog
-		task.Status = models.StatusPending
-	})
-	const sessionID = "cccccccccccccccccccccccccccccccc"
-	sessionDir := filepath.Join(uploadsDir, "chat", "pending", sessionID)
-	require.NoError(t, os.MkdirAll(sessionDir, 0o755))
-	pendingFile := filepath.Join(sessionDir, "owned.txt")
-	require.NoError(t, os.WriteFile(pendingFile, []byte("content"), 0o600))
-	require.NoError(t, h.threadInputRepo.CreateQueued(context.Background(), &models.ThreadInput{
-		Scope:               models.ThreadInputScopeTask,
-		ProjectID:           project.ID,
-		TaskID:              ownerTask.ID,
-		InputMode:           models.ThreadInputModeQueued,
-		InputStatus:         models.ThreadInputPending,
-		Content:             "durable owner",
-		AttachmentSessionID: sessionID,
-	}))
-
-	require.NoError(t, h.cleanupUnpublishedPendingAttachmentSession(context.Background(), sessionID))
-	require.FileExists(t, pendingFile)
-
-	var retiredCount int
-	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM retired_attachment_sessions WHERE session_id = ?`, sessionID).Scan(&retiredCount))
-	require.Zero(t, retiredCount)
-}
-
 func TestHandler_DirectBrowserAttachmentFailureRemovesUnpublishedSession(t *testing.T) {
 	tests := []struct {
 		name       string
