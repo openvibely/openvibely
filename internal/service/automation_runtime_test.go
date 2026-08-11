@@ -3193,6 +3193,47 @@ func TestAutomationLiveTaskRetryReplacesEarlierFailedDispatchState(t *testing.T)
 	require.Equal(t, 1, cards[0].Counts.CompletedRecently)
 }
 
+func TestAutomationLiveWorkItemSuccessReplacesEarlierFailedActivityState(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	implementation := automationNodeByKey(t, fixture.definition, "implementation")
+	workItemID := "feedfacefeedfacefeedfacefeedface"
+	failedActivityID := "feedfacefeedfacefeedfacefeedfac1"
+	completedActivityID := "feedfacefeedfacefeedfacefeedfac2"
+	completedAt := time.Now().UTC().Format("2006-01-02 15:04:05")
+	_, err := fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_work_items
+		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status)
+		VALUES (?, ?, ?, ?, 'github:example/repo:issue:99', 'github_issue', 'Issue 99', 'completed')`, workItemID,
+		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_activities
+		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status, started_at, completed_at, error_message)
+		VALUES (?, ?, ?, ?, ?, ?, 'issue:99:failed', 'task_execution', 'failed', ?, ?, 'oauth expired')`, failedActivityID,
+		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, implementation.ID, workItemID, completedAt, completedAt)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_activities
+		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, 'issue:99:completed', 'implementation_task', 'completed', ?, ?)`, completedActivityID,
+		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, implementation.ID, workItemID, completedAt, completedAt)
+	require.NoError(t, err)
+
+	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
+	require.NoError(t, err)
+	for _, node := range graph.Nodes {
+		if node.ID != implementation.ID {
+			continue
+		}
+		require.Zero(t, node.Counts.Failed, "a later successful work-item activity must replace the earlier failed activity for the same node")
+		require.Equal(t, 1, node.Counts.CompletedRecently)
+		require.Equal(t, "recently_completed", node.DisplayState)
+	}
+	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
+	require.NoError(t, err)
+	require.Len(t, cards, 1)
+	require.Zero(t, cards[0].Counts.Failed, "portfolio counters must use the latest work-item activity state")
+	require.Equal(t, 1, cards[0].Counts.CompletedRecently)
+}
+
 func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()

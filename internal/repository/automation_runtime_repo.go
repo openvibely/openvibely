@@ -1751,24 +1751,25 @@ func appendAutomationTransition(ctx context.Context, exec SQLExecutor, in Automa
 
 func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automationID, versionID string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, int, int, error) {
 	rows, err := r.db.QueryContext(ctx, `WITH ranked_activities AS (
-		SELECT a.node_id, a.work_item_id, a.id, a.invocation_id, a.status, a.completed_at, task_resource.resource_id AS task_id,
-			ROW_NUMBER() OVER (PARTITION BY a.node_id, CASE
-				WHEN a.work_item_id IS NULL AND task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
-				ELSE 'activity:' || a.id END
-				ORDER BY a.rowid DESC) AS activity_rank
-		FROM automation_activities a
-		LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
-			AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
-		WHERE a.project_id = ? AND a.automation_id = ? AND a.version_id = ?
-	), operational_state AS (
-		SELECT node_id, CASE status
-			WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
-			WHEN 'failed' THEN 'failed' WHEN 'completed' THEN 'recent' END AS state,
-			CASE WHEN work_item_id IS NOT NULL THEN 'work:' || work_item_id
-				WHEN task_id IS NOT NULL THEN 'task:' || task_id ELSE 'activity:' || id END AS state_key
-		FROM ranked_activities
-		WHERE (work_item_id IS NOT NULL OR task_id IS NULL OR activity_rank = 1)
-			AND (status IN ('pending','running','waiting','failed') OR (status = 'completed' AND completed_at >= ?))
+			SELECT a.node_id, a.work_item_id, a.id, a.invocation_id, a.status, a.completed_at, task_resource.resource_id AS task_id,
+				ROW_NUMBER() OVER (PARTITION BY a.node_id, CASE
+					WHEN a.work_item_id IS NOT NULL THEN 'work:' || a.work_item_id
+					WHEN task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
+					ELSE 'activity:' || a.id END
+					ORDER BY a.rowid DESC) AS activity_rank
+			FROM automation_activities a
+			LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
+				AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
+			WHERE a.project_id = ? AND a.automation_id = ? AND a.version_id = ?
+		), operational_state AS (
+			SELECT node_id, CASE status
+				WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
+				WHEN 'failed' THEN 'failed' WHEN 'completed' THEN 'recent' END AS state,
+				CASE WHEN work_item_id IS NOT NULL THEN 'work:' || work_item_id
+					WHEN task_id IS NOT NULL THEN 'task:' || task_id ELSE 'activity:' || id END AS state_key
+			FROM ranked_activities
+			WHERE activity_rank = 1
+				AND (status IN ('pending','running','waiting','failed') OR (status = 'completed' AND completed_at >= ?))
 		UNION
 		SELECT i.trigger_node_id, 'running', 'invocation:' || i.id
 		FROM automation_invocations i
@@ -1844,24 +1845,25 @@ func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automati
 
 func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, projectID string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, error) {
 	rows, err := r.db.QueryContext(ctx, `WITH ranked_activities AS (
-		SELECT a.automation_id, a.work_item_id, a.id, a.status, a.completed_at, task_resource.resource_id AS task_id,
-			ROW_NUMBER() OVER (PARTITION BY a.automation_id, CASE
-				WHEN a.work_item_id IS NULL AND task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
-				ELSE 'activity:' || a.id END
-				ORDER BY a.rowid DESC) AS activity_rank
-		FROM automation_activities a
-		LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
-			AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
-		WHERE a.project_id = ?
-	), operational_state AS (
-		SELECT automation_id, CASE status
-			WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
-			WHEN 'failed' THEN 'failed' WHEN 'completed' THEN 'recent' END AS state,
-			CASE WHEN work_item_id IS NOT NULL THEN 'work:' || work_item_id
-				WHEN task_id IS NOT NULL THEN 'task:' || task_id ELSE 'activity:' || id END AS state_key
-		FROM ranked_activities
-		WHERE (work_item_id IS NOT NULL OR task_id IS NULL OR activity_rank = 1)
-			AND (status IN ('pending','running','waiting','failed') OR (status = 'completed' AND completed_at >= ?))
+			SELECT a.automation_id, a.work_item_id, a.id, a.status, a.completed_at, task_resource.resource_id AS task_id,
+				ROW_NUMBER() OVER (PARTITION BY a.automation_id, CASE
+					WHEN a.work_item_id IS NOT NULL THEN 'work:' || a.work_item_id
+					WHEN task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
+					ELSE 'activity:' || a.id END
+					ORDER BY a.rowid DESC) AS activity_rank
+			FROM automation_activities a
+			LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
+				AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
+			WHERE a.project_id = ?
+		), operational_state AS (
+			SELECT automation_id, CASE status
+				WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
+				WHEN 'failed' THEN 'failed' WHEN 'completed' THEN 'recent' END AS state,
+				CASE WHEN work_item_id IS NOT NULL THEN 'work:' || work_item_id
+					WHEN task_id IS NOT NULL THEN 'task:' || task_id ELSE 'activity:' || id END AS state_key
+			FROM ranked_activities
+			WHERE activity_rank = 1
+				AND (status IN ('pending','running','waiting','failed') OR (status = 'completed' AND completed_at >= ?))
 		UNION
 		SELECT binding.automation_id, 'running', CASE WHEN binding.work_item_id IS NOT NULL
 			THEN 'work:' || binding.work_item_id ELSE 'input:' || binding.thread_input_id END
