@@ -833,6 +833,36 @@ func TestDeleteSchedule_Redirect(t *testing.T) {
 	}
 }
 
+func TestDeleteSchedule_BrowserDeletePreservesScheduledTaskCategory(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).
+		WithCategory(models.CategoryScheduled).
+		WithStatus(models.StatusPending).
+		Build()
+	schedule := tc.CreateSchedule(task.ID).Build()
+
+	rec := tc.HTTP().Delete("/schedules/" + schedule.ID).Execute()
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 for non-HTMX delete, got %d", rec.Code)
+	}
+	stored, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Category != models.CategoryScheduled {
+		t.Fatalf("browser delete changed category to %s, want %s", stored.Category, models.CategoryScheduled)
+	}
+	schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(schedules) != 0 {
+		t.Fatalf("expected browser delete to remove schedule row, got %d", len(schedules))
+	}
+}
+
 // ---- RescheduleTask ----
 
 func TestRescheduleTask_InvalidDate(t *testing.T) {

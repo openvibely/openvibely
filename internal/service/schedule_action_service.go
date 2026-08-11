@@ -44,21 +44,54 @@ type ScheduleActionResult struct {
 	Warnings []error
 }
 
-// ScheduleActionService owns schedule runtime-tool mutation semantics.
+// ScheduleActionService owns schedule mutation semantics shared by runtime
+// tools and browser forms. Transports parse and render their own shapes; this
+// service persists schedules and applies linked task lifecycle side effects.
 type ScheduleActionService struct {
 	taskRepo     *repository.TaskRepo
 	scheduleRepo *repository.ScheduleRepo
 	workerSvc    *WorkerService
 }
 
-// CreateScheduleForTaskRequest is the normalized schedule creation contract used
-// after each surface has parsed its own input format.
+// CreateScheduleForTaskRequest is the normalized low-level schedule creation
+// contract used after each surface has parsed its own input format. It persists
+// only the schedule row; higher-level create methods apply linked task effects.
 type CreateScheduleForTaskRequest struct {
 	TaskID              string
 	RunAt               time.Time
 	RepeatType          models.RepeatType
 	RepeatInterval      int
 	ClearContextOnStart *bool
+}
+
+// CreateAbsoluteScheduleForTaskRequest is the browser-form creation contract:
+// the form has already parsed an absolute local datetime into RunAt.
+type CreateAbsoluteScheduleForTaskRequest struct {
+	TaskID                 string
+	RunAt                  time.Time
+	RepeatType             models.RepeatType
+	RepeatInterval         int
+	ClearContextOnStart    *bool
+	AgentDefinitionPresent bool
+	AgentDefinitionID      *string
+}
+
+// ModifyAbsoluteScheduleRequest is the browser-form update contract: the form
+// replaces the schedule timing with an absolute RunAt value rather than the
+// runtime-tool HH:MM grammar.
+type ModifyAbsoluteScheduleRequest struct {
+	ScheduleID             string
+	RunAt                  time.Time
+	RepeatType             models.RepeatType
+	RepeatInterval         int
+	ClearContextOnStart    *bool
+	AgentDefinitionPresent bool
+	AgentDefinitionID      *string
+}
+
+type scheduleTaskLifecycleOptions struct {
+	PromoteToScheduled bool
+	ResetTerminal      bool
 }
 
 func NewScheduleActionService(taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, workerSvc ...*WorkerService) *ScheduleActionService {
@@ -100,6 +133,61 @@ func (s *ScheduleActionService) CreateForTask(ctx context.Context, req CreateSch
 	return schedule, nil
 }
 
+func (s *ScheduleActionService) CreateAbsoluteForTask(ctx context.Context, req CreateAbsoluteScheduleForTaskRequest) (*ScheduleActionResult, error) {
+	task, err := s.resolveTask(ctx, "", req.TaskID, "")
+	if err != nil {
+		return nil, actionError(ScheduleActionReferenceError, "", err)
+	}
+	result := &ScheduleActionResult{Task: task}
+	schedule, err := s.CreateForTask(ctx, CreateScheduleForTaskRequest{
+		TaskID:              task.ID,
+		RunAt:               req.RunAt,
+		RepeatType:          req.RepeatType,
+		RepeatInterval:      req.RepeatInterval,
+		ClearContextOnStart: req.ClearContextOnStart,
+	})
+	if err != nil {
+		return result, actionError(ScheduleActionPersistError, "", err)
+	}
+	result.Schedule = schedule
+	if err := s.applyPrimaryAgentAssignment(ctx, task, req.AgentDefinitionPresent, req.AgentDefinitionID); err != nil {
+		return result, actionError(ScheduleActionPersistError, "", err)
+	}
+	s.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{
+		ResetTerminal: schedule.RepeatType == models.RepeatOnce && schedule.NextRun != nil,
+	})
+	return result, nil
+}
+
+func (s *ScheduleActionService) ModifyAbsolute(ctx context.Context, req ModifyAbsoluteScheduleRequest) (*ScheduleActionResult, error) {
+	schedule, task, err := s.resolveSchedule(ctx, "", req.ScheduleID, "", "")
+	if err != nil {
+		return nil, actionError(ScheduleActionReferenceError, "", err)
+	}
+	result := &ScheduleActionResult{Task: task, Schedule: schedule}
+	if err := models.ValidateScheduleRepeatInterval(req.RepeatInterval); err != nil {
+		return result, actionError(ScheduleActionIntervalError, fmt.Sprintf("%d", req.RepeatInterval), err)
+	}
+	schedule.RunAt = req.RunAt
+	schedule.RepeatType = req.RepeatType
+	schedule.RepeatInterval = req.RepeatInterval
+	if req.ClearContextOnStart != nil {
+		schedule.ClearContextOnStart = *req.ClearContextOnStart
+	}
+	schedule.NextRun = &req.RunAt
+	result.Changes = []string{"absolute_form"}
+	if err := s.scheduleRepo.Update(ctx, schedule); err != nil {
+		return result, actionError(ScheduleActionPersistError, "", err)
+	}
+	if err := s.applyPrimaryAgentAssignment(ctx, task, req.AgentDefinitionPresent, req.AgentDefinitionID); err != nil {
+		return result, actionError(ScheduleActionPersistError, "", err)
+	}
+	s.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{
+		ResetTerminal: schedule.NextRun != nil,
+	})
+	return result, nil
+}
+
 func (s *ScheduleActionService) Create(ctx context.Context, projectID string, req ScheduleTaskRequest) (*ScheduleActionResult, error) {
 	task, err := s.resolveTask(ctx, projectID, req.TaskID, req.Title)
 	if err != nil {
@@ -139,25 +227,9 @@ func (s *ScheduleActionService) Create(ctx context.Context, projectID string, re
 		return result, actionError(ScheduleActionPersistError, "", err)
 	}
 	result.Schedule = schedule
-	categoryChanged := false
-	if task.Category != models.CategoryScheduled {
-		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
-			result.Warnings = append(result.Warnings, err)
-		} else {
-			task.Category = models.CategoryScheduled
-			categoryChanged = true
-		}
-	}
-	shouldResetStatus := task.Status != models.StatusPending && task.Status != models.StatusRunning && (repeatType == models.RepeatOnce || categoryChanged)
-	if shouldResetStatus {
-		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
-			result.Warnings = append(result.Warnings, err)
-		} else {
-			task.Status = models.StatusPending
-		}
-	}
-	if task.Category == models.CategoryScheduled && task.Status == models.StatusPending && s.workerSvc != nil {
-		s.workerSvc.ClearCancellationRequested(task.ID)
+	categoryChanged := s.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{PromoteToScheduled: true})
+	if repeatType == models.RepeatOnce && !categoryChanged {
+		s.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{ResetTerminal: true})
 	}
 	return result, nil
 }
@@ -243,6 +315,9 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 	if err := s.scheduleRepo.Update(ctx, schedule); err != nil {
 		return result, actionError(ScheduleActionPersistError, "", err)
 	}
+	if schedule.NextRun != nil && (timeChanged || (req.Enabled != nil && *req.Enabled)) {
+		s.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{ResetTerminal: true})
+	}
 	return result, nil
 }
 
@@ -268,6 +343,48 @@ func (s *ScheduleActionService) Delete(ctx context.Context, projectID string, re
 	return result, nil
 }
 
+func (s *ScheduleActionService) applyPrimaryAgentAssignment(ctx context.Context, task *models.Task, present bool, agentDefinitionID *string) error {
+	if !present {
+		return nil
+	}
+	if s.taskRepo == nil {
+		return fmt.Errorf("task repository not configured")
+	}
+	if err := s.taskRepo.UpdateAgentDefinition(ctx, task.ID, agentDefinitionID); err != nil {
+		return err
+	}
+	task.AgentDefinitionID = agentDefinitionID
+	return nil
+}
+
+func (s *ScheduleActionService) applyScheduleTaskLifecycle(ctx context.Context, result *ScheduleActionResult, opts scheduleTaskLifecycleOptions) bool {
+	if result == nil || result.Task == nil || s.taskRepo == nil {
+		return false
+	}
+	task := result.Task
+	categoryChanged := false
+	if opts.PromoteToScheduled && task.Category != models.CategoryScheduled {
+		if err := s.taskRepo.UpdateCategory(ctx, task.ID, models.CategoryScheduled); err != nil {
+			result.Warnings = append(result.Warnings, err)
+		} else {
+			task.Category = models.CategoryScheduled
+			categoryChanged = true
+		}
+	}
+	shouldResetStatus := task.Status != models.StatusPending && task.Status != models.StatusRunning && (opts.ResetTerminal || categoryChanged)
+	if shouldResetStatus {
+		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
+			result.Warnings = append(result.Warnings, err)
+		} else {
+			task.Status = models.StatusPending
+		}
+	}
+	if task.Category == models.CategoryScheduled && task.Status == models.StatusPending && s.workerSvc != nil {
+		s.workerSvc.ClearCancellationRequested(task.ID)
+	}
+	return categoryChanged
+}
+
 func (s *ScheduleActionService) resolveTask(ctx context.Context, projectID, taskID, title string) (*models.Task, error) {
 	if s.taskRepo == nil {
 		return nil, fmt.Errorf("task repository not configured")
@@ -280,7 +397,7 @@ func (s *ScheduleActionService) resolveTask(ctx context.Context, projectID, task
 		if task == nil {
 			return nil, fmt.Errorf("task %s not found", taskID)
 		}
-		if task.ProjectID != projectID {
+		if projectID != "" && task.ProjectID != projectID {
 			return nil, fmt.Errorf("task %s belongs to a different project", taskID)
 		}
 		return task, nil
@@ -317,7 +434,7 @@ func (s *ScheduleActionService) resolveSchedule(ctx context.Context, projectID, 
 		if err != nil || task == nil {
 			return nil, nil, fmt.Errorf("task for schedule %s not found", scheduleID)
 		}
-		if task.ProjectID != projectID {
+		if projectID != "" && task.ProjectID != projectID {
 			return nil, nil, fmt.Errorf("schedule %s belongs to a different project", scheduleID)
 		}
 		return schedule, task, nil
