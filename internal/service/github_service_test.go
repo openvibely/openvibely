@@ -896,6 +896,29 @@ func TestListPullRequestFeedbackTraversesAllPagesAndSortsMergedSources(t *testin
 	}
 }
 
+func TestGitHubAssignedIssueTaskCreationCompletenessRequiresExplicitMarker(t *testing.T) {
+	issue := GitHubIssue{
+		Number:    42,
+		URL:       "https://github.com/openvibely/openvibely/issues/42",
+		Title:     "Complete-looking issue",
+		Body:      "Acceptance notes",
+		State:     "open",
+		Assignees: []string{"dev-bot"},
+		Labels:    []string{"performance"},
+	}
+	if githubAssignedIssueHasTaskCreationFields(issue) {
+		t.Fatal("issue list entries without an explicit completeness marker must be hydrated before task creation")
+	}
+	issue.TaskCreationCompletenessKnown = true
+	if githubAssignedIssueHasTaskCreationFields(issue) {
+		t.Fatal("known-incomplete issue list entries must be hydrated before task creation")
+	}
+	issue.CompleteForTaskCreation = true
+	if !githubAssignedIssueHasTaskCreationFields(issue) {
+		t.Fatal("known-complete issue list entries should be used without detail hydration")
+	}
+}
+
 func TestDevInboxAssignedIssueScanSkipsDetailFetchesForCompleteListEntries(t *testing.T) {
 	ctx := context.Background()
 	var listRequests, detailRequests atomic.Int32

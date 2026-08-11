@@ -420,6 +420,7 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.Contains(t, githubSDLCDevInboxPrompt, "category=active")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Use the issue details returned by `github_list_assigned_issues` and `github_list_my_assigned_issues` directly")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not call `github_get_issue` for every listed issue as a default step")
+	require.Contains(t, githubSDLCDevInboxPrompt, "after repository/issue deduplication, call it only for an explicit issue read or for the specific listed issue that is missing fields")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "For each returned issue, inspect it with `github_get_issue`")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Include the GitHub issue number, URL, title, body or acceptance notes, relevant labels, and assignment context")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not call `execute_tasks` for a newly created Active task")
