@@ -145,6 +145,41 @@ func TestHandler_IntegratedNotificationApprovalToImplementationTask(t *testing.T
 	require.Equal(t, models.CategoryBacklog, implementation.Category)
 }
 
+func TestHandler_RuntimeClaimAlertRejectsInvalidLeaseWithoutMutation(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := createProject(t, h, "Runtime Claim Lease Integration Project")
+	caller := &models.Task{ProjectID: project.ID, Title: "Scheduled scanner", Prompt: "scan approved notifications", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	runtime := service.BuildAlertRuntimeActionHandlers(service.AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: h.alertSvc})
+
+	createdJSON, err := runtime["create_notification"](ctx, json.RawMessage(`{"type":"product_suggestion","title":"Invalid lease integration","body":"Review invalid lease behavior"}`))
+	require.NoError(t, err)
+	var created struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+
+	approveReq := httptest.NewRequest(http.MethodPost, "/alerts/"+created.Notification.ID+"/approve?project_id="+project.ID, nil)
+	approveReq.Header.Set("HX-Request", "true")
+	approveRec := httptest.NewRecorder()
+	approveCtx := e.NewContext(approveReq, approveRec)
+	approveCtx.SetParamNames("id")
+	approveCtx.SetParamValues(created.Notification.ID)
+	require.NoError(t, h.ApproveAlert(approveCtx))
+
+	_, err = runtime["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+created.Notification.ID+`","lease_seconds":90000}`))
+	require.ErrorContains(t, err, "lease_seconds must be between 1 and 86400")
+
+	stored, err := h.alertSvc.GetByID(ctx, project.ID, created.Notification.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertProcessingUnclaimed, stored.ProcessingState)
+	require.Empty(t, stored.Claimant)
+	require.Nil(t, stored.ClaimedAt)
+	require.Nil(t, stored.ClaimExpiresAt)
+}
+
 func TestHandler_ListAlerts(t *testing.T) {
 	t.Run("lists alerts for current project", func(t *testing.T) {
 		h, e, _ := setupTestHandler(t)
