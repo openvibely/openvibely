@@ -285,6 +285,68 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	require.Equal(t, linked.ImplementationTaskID, *final.ImplementationTaskID)
 }
 
+func TestAlertRuntimeClaimAlertValidatesLeaseSeconds(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Runtime Claim Lease Validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	caller := &models.Task{ProjectID: project.ID, Title: "Scheduled notification inbox", Prompt: "scan", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	alertRepo := repository.NewAlertRepo(db)
+	alertSvc := NewAlertService(alertRepo, nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
+
+	createApproved := func(t *testing.T, title string) models.Alert {
+		t.Helper()
+		createdJSON, err := handlers["create_notification"](ctx, json.RawMessage(`{"type":"bug_suggestion","title":"`+title+`"}`))
+		require.NoError(t, err)
+		var created struct {
+			Notification models.Alert `json:"notification"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(createdJSON), &created))
+		require.NoError(t, alertSvc.SetDecision(ctx, project.ID, created.Notification.ID, models.AlertDecisionApproved))
+		return created.Notification
+	}
+
+	for _, leaseSeconds := range []int{-1, 0, 90000} {
+		t.Run(fmt.Sprintf("rejects explicit %d", leaseSeconds), func(t *testing.T) {
+			alert := createApproved(t, fmt.Sprintf("Invalid lease %d", leaseSeconds))
+			_, err := handlers["claim_alert"](ctx, json.RawMessage(fmt.Sprintf(`{"alert_id":"%s","lease_seconds":%d}`, alert.ID, leaseSeconds)))
+			require.ErrorContains(t, err, "lease_seconds must be between 1 and 86400")
+
+			unclaimed, err := alertSvc.GetByID(ctx, project.ID, alert.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.AlertProcessingUnclaimed, unclaimed.ProcessingState)
+			require.Empty(t, unclaimed.Claimant)
+			require.Nil(t, unclaimed.ClaimedAt)
+			require.Nil(t, unclaimed.ClaimExpiresAt)
+		})
+	}
+
+	claimAndAssertDuration := func(t *testing.T, alertID string, input json.RawMessage, expected time.Duration) {
+		t.Helper()
+		_, err := handlers["claim_alert"](ctx, input)
+		require.NoError(t, err)
+		claimed, err := alertSvc.GetByID(ctx, project.ID, alertID)
+		require.NoError(t, err)
+		require.Equal(t, models.AlertProcessingClaimed, claimed.ProcessingState)
+		require.NotNil(t, claimed.ClaimedAt)
+		require.NotNil(t, claimed.ClaimExpiresAt)
+		require.WithinDuration(t, claimed.ClaimedAt.Add(expected), *claimed.ClaimExpiresAt, time.Second)
+	}
+
+	omitted := createApproved(t, "Omitted lease uses default")
+	claimAndAssertDuration(t, omitted.ID, json.RawMessage(`{"alert_id":"`+omitted.ID+`"}`), 30*time.Minute)
+
+	oneSecond := createApproved(t, "One second lease")
+	claimAndAssertDuration(t, oneSecond.ID, json.RawMessage(`{"alert_id":"`+oneSecond.ID+`","lease_seconds":1}`), time.Second)
+
+	oneDay := createApproved(t, "One day lease")
+	claimAndAssertDuration(t, oneDay.ID, json.RawMessage(`{"alert_id":"`+oneDay.ID+`","lease_seconds":86400}`), 24*time.Hour)
+}
+
 func TestNativeInboxCollectsAllPagesBeforeShrinkingEligibleSet(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
