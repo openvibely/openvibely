@@ -1063,6 +1063,21 @@ func (c *Coordinator) Cancel() error {
 		if err != nil {
 			return err
 		}
+	} else if c.drain != nil && c.drain.Owns(generation) {
+		message := "update replacement can no longer be cancelled"
+		err := c.completeGeneration(generation, StateFailed, message)
+		if err != nil {
+			c.mu.RLock()
+			cleanupActive := c.cleanupGeneration == generation
+			c.mu.RUnlock()
+			if !cleanupActive {
+				c.startCompletionSupervisor(generation, StateFailed, message)
+			}
+		}
+		if err != nil {
+			return err
+		}
+		return errors.New(message)
 	}
 	err := c.completeGeneration(generation, StateIdle, "")
 	if err != nil {
