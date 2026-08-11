@@ -664,6 +664,130 @@ func keysOfStringSet(values map[string]struct{}) []string {
 	return keys
 }
 
+type modelFormMode int
+
+const (
+	modelFormCreate modelFormMode = iota
+	modelFormUpdate
+)
+
+type modelFormOptions struct {
+	mode                         modelFormMode
+	beforeProviderSpecificFields func()
+}
+
+func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context, agent *models.LLMConfig, opts modelFormOptions) error {
+	provider, authMethod := resolveProviderAndAuth(
+		c.FormValue("provider"),
+		c.FormValue("anthropic_auth_type"),
+		c.FormValue("openai_auth_type"),
+		c.FormValue("auth_method"),
+	)
+	if provider == models.ProviderOpenAICompatible && c.FormValue("custom_auth_method") == string(models.AuthMethodOAuth) {
+		authMethod = models.AuthMethodOAuth
+	}
+
+	agent.Name = c.FormValue("name")
+	agent.Provider = provider
+	agent.AuthMethod = authMethod
+
+	agent.Model = c.FormValue("model")
+	if agent.Provider == models.ProviderOpenAI {
+		agent.Model = normalizeOpenAIModel(agent.Model)
+	}
+	agent.ReasoningEffort = normalizeProviderReasoningEffort(agent.Provider, agent.Model, c.FormValue("reasoning_effort"))
+	if agent.Provider == models.ProviderOpenAICompatible {
+		agent.Model = strings.TrimSpace(agent.Model)
+	}
+	if temp, err := strconv.ParseFloat(c.FormValue("temperature"), 64); err == nil {
+		agent.Temperature = temp
+	}
+	agent.IsDefault = c.FormValue("is_default") == "on"
+	agent.AutoStartTasks = c.FormValue("auto_start_tasks") == "on"
+	if mw, err := strconv.Atoi(c.FormValue("model_max_workers")); err == nil {
+		if mw < 0 {
+			mw = 0
+		}
+		if mw > 10 {
+			mw = 10
+		}
+		agent.MaxWorkers = mw
+	}
+	if wt, err := strconv.Atoi(c.FormValue("worker_timeout")); err == nil {
+		if wt < 0 {
+			wt = 0
+		}
+		agent.WorkerTimeout = wt
+	}
+
+	if opts.beforeProviderSpecificFields != nil {
+		opts.beforeProviderSpecificFields()
+	} else if opts.mode == modelFormCreate {
+		agent.APIKey = c.FormValue("api_key")
+	}
+
+	applyModelOAuthForm(c, agent, opts.mode)
+
+	if agent.Provider == models.ProviderOllama {
+		agent.OllamaBaseURL = strings.TrimSpace(c.FormValue("ollama_base_url"))
+		if customModel := strings.TrimSpace(c.FormValue("ollama_custom_model")); customModel != "" {
+			agent.Model = customModel
+		}
+	} else {
+		agent.OllamaBaseURL = ""
+	}
+	if agent.Provider == models.ProviderOpenAICompatible {
+		if err := applyOpenAICompatibleForm(c, agent); err != nil {
+			return err
+		}
+	} else {
+		clearOpenAICompatibleFields(agent)
+	}
+	if agent.Provider == models.ProviderMixture {
+		agent.OllamaBaseURL = ""
+		if err := h.applyAndValidateMixtureForm(ctx, c, agent); err != nil {
+			return err
+		}
+	} else {
+		agent.MixtureConfigJSON = ""
+	}
+	if opts.mode == modelFormCreate && agent.Provider == "" {
+		agent.Provider = models.ProviderAnthropic
+	}
+	return nil
+}
+
+func applyModelOAuthForm(c echo.Context, agent *models.LLMConfig, mode modelFormMode) {
+	if (agent.Provider != models.ProviderOpenAI && agent.Provider != models.ProviderOpenAICompatible) || agent.AuthMethod != models.AuthMethodOAuth {
+		return
+	}
+	if mode == modelFormCreate {
+		agent.OAuthClientID = c.FormValue("oauth_client_id")
+		agent.OAuthClientSecret = c.FormValue("oauth_client_secret")
+		agent.OAuthAuthorizeURL = c.FormValue("oauth_authorize_url")
+		agent.OAuthTokenURL = c.FormValue("oauth_token_url")
+		agent.OAuthScopes = c.FormValue("oauth_scopes")
+		return
+	}
+	if v, ok := formValueIfPresent(c, "oauth_client_id"); ok {
+		agent.OAuthClientID = v
+	}
+	if v, ok := formValueIfPresent(c, "oauth_client_secret"); ok {
+		agent.OAuthClientSecret = v
+	} else if c.FormValue("clear_oauth_client_secret") == "on" {
+		agent.OAuthClientSecret = ""
+	}
+	if v, ok := formValueIfPresent(c, "oauth_authorize_url"); ok {
+		agent.OAuthAuthorizeURL = v
+	}
+	if v, ok := formValueIfPresent(c, "oauth_token_url"); ok {
+		agent.OAuthTokenURL = v
+	}
+	if v, ok := formValueIfPresent(c, "oauth_scopes"); ok {
+		agent.OAuthScopes = v
+	}
+}
+
 func (h *Handler) mixturesUsingModel(ctx context.Context, modelID string) ([]string, error) {
 	agents, err := h.llmConfigRepo.List(ctx)
 	if err != nil {
@@ -698,80 +822,9 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		return h.updateModelByID(c, id)
 	}
 
-	temp, _ := strconv.ParseFloat(c.FormValue("temperature"), 64)
-	isDefault := c.FormValue("is_default") == "on"
-	reasoningEffort := c.FormValue("reasoning_effort")
-
-	provider, authMethod := resolveProviderAndAuth(
-		c.FormValue("provider"),
-		c.FormValue("anthropic_auth_type"),
-		c.FormValue("openai_auth_type"),
-		c.FormValue("auth_method"),
-	)
-	if provider == models.ProviderOpenAICompatible && c.FormValue("custom_auth_method") == string(models.AuthMethodOAuth) {
-		authMethod = models.AuthMethodOAuth
-	}
-
-	modelMaxWorkers, _ := strconv.Atoi(c.FormValue("model_max_workers"))
-	if modelMaxWorkers < 0 {
-		modelMaxWorkers = 0
-	}
-	if modelMaxWorkers > 10 {
-		modelMaxWorkers = 10
-	}
-	workerTimeout, _ := strconv.Atoi(c.FormValue("worker_timeout"))
-	if workerTimeout < 0 {
-		workerTimeout = 0
-	}
-
-	model := c.FormValue("model")
-	if provider == models.ProviderOpenAI {
-		model = normalizeOpenAIModel(model)
-	}
-	a := &models.LLMConfig{
-		Name:            c.FormValue("name"),
-		Provider:        provider,
-		Model:           model,
-		ReasoningEffort: normalizeProviderReasoningEffort(provider, model, reasoningEffort),
-		APIKey:          c.FormValue("api_key"),
-		Temperature:     temp,
-		IsDefault:       isDefault,
-		AuthMethod:      authMethod,
-		MaxWorkers:      modelMaxWorkers,
-		WorkerTimeout:   workerTimeout,
-		AutoStartTasks:  c.FormValue("auto_start_tasks") == "on",
-	}
-	// Store OpenAI OAuth config fields
-	if (a.Provider == models.ProviderOpenAI || a.Provider == models.ProviderOpenAICompatible) && a.AuthMethod == models.AuthMethodOAuth {
-		a.OAuthClientID = c.FormValue("oauth_client_id")
-		a.OAuthClientSecret = c.FormValue("oauth_client_secret")
-		a.OAuthAuthorizeURL = c.FormValue("oauth_authorize_url")
-		a.OAuthTokenURL = c.FormValue("oauth_token_url")
-		a.OAuthScopes = c.FormValue("oauth_scopes")
-	}
-	// Store Ollama-specific fields
-	if a.Provider == models.ProviderOllama {
-		a.OllamaBaseURL = strings.TrimSpace(c.FormValue("ollama_base_url"))
-		// Allow custom model names for Ollama
-		if customModel := strings.TrimSpace(c.FormValue("ollama_custom_model")); customModel != "" {
-			a.Model = customModel
-		}
-	}
-	if a.Provider == models.ProviderOpenAICompatible {
-		a.Model = strings.TrimSpace(a.Model)
-		if err := applyOpenAICompatibleForm(c, a); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-	}
-	if a.Provider == models.ProviderMixture {
-		if err := h.applyAndValidateMixtureForm(c.Request().Context(), c, a); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-	} else {
-		a.MixtureConfigJSON = ""
-	}
-	if a.Provider == "" {
-		a.Provider = models.ProviderAnthropic
+	a := &models.LLMConfig{}
+	if err := h.normalizeBrowserModelForm(c.Request().Context(), c, a, modelFormOptions{mode: modelFormCreate}); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	applog.Infof("[handler] CreateModel name=%q provider=%s model=%s auth_method=%s temp=%.1f default=%v",
 		a.Name, a.Provider, a.Model, a.AuthMethod, a.Temperature, a.IsDefault)
@@ -811,112 +864,33 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	}
 	previous := *agent
 
-	agent.Name = c.FormValue("name")
+	if err := h.normalizeBrowserModelForm(c.Request().Context(), c, agent, modelFormOptions{
+		mode: modelFormUpdate,
+		beforeProviderSpecificFields: func() {
+			providerOrAuthChanged := previous.Provider != agent.Provider || previous.AuthMethod != agent.AuthMethod
+			if agent.Provider == models.ProviderOpenAICompatible && agent.AuthMethod == models.AuthMethodOAuth {
+				agent.APIKey = ""
+			} else if apiKey, ok := formValueIfPresent(c, "api_key"); ok && apiKey != "" {
+				agent.APIKey = apiKey
+			} else if providerOrAuthChanged {
+				agent.APIKey = ""
+			}
 
-	provider, authMethod := resolveProviderAndAuth(
-		c.FormValue("provider"),
-		c.FormValue("anthropic_auth_type"),
-		c.FormValue("openai_auth_type"),
-		c.FormValue("auth_method"),
-	)
-	if provider == models.ProviderOpenAICompatible && c.FormValue("custom_auth_method") == string(models.AuthMethodOAuth) {
-		authMethod = models.AuthMethodOAuth
-	}
-	previousProvider := agent.Provider
-	previousAuthMethod := agent.AuthMethod
-	agent.Provider = provider
-	agent.AuthMethod = authMethod
-
-	agent.Model = c.FormValue("model")
-	if agent.Provider == models.ProviderOpenAI {
-		agent.Model = normalizeOpenAIModel(agent.Model)
-	}
-	agent.ReasoningEffort = normalizeProviderReasoningEffort(provider, agent.Model, c.FormValue("reasoning_effort"))
-	if agent.Provider == models.ProviderOpenAICompatible {
-		agent.Model = strings.TrimSpace(agent.Model)
-	}
-	if agent.Provider == models.ProviderOpenAICompatible && agent.AuthMethod == models.AuthMethodOAuth {
-		agent.APIKey = ""
-	} else if apiKey, ok := formValueIfPresent(c, "api_key"); ok && apiKey != "" {
-		agent.APIKey = apiKey
-	} else if previousProvider != agent.Provider || previousAuthMethod != agent.AuthMethod {
-		agent.APIKey = ""
-	}
-	if temp, err := strconv.ParseFloat(c.FormValue("temperature"), 64); err == nil {
-		agent.Temperature = temp
-	}
-	agent.IsDefault = c.FormValue("is_default") == "on"
-	agent.AutoStartTasks = c.FormValue("auto_start_tasks") == "on"
-	// Provider/auth changes require reauthorization. Preserve OAuth state only for
-	// same-provider OAuth edits such as model settings updates.
-	if previousProvider != agent.Provider || previousAuthMethod != agent.AuthMethod {
-		if previousProvider == models.ProviderOpenAICompatible && previousAuthMethod == models.AuthMethodOAuth {
-			agent.CustomAuthConfigJSON = ""
-		}
-		clearOAuthState(agent)
-	}
-	// Store OpenAI OAuth config fields
-	if (agent.Provider == models.ProviderOpenAI || agent.Provider == models.ProviderOpenAICompatible) && agent.AuthMethod == models.AuthMethodOAuth {
-		if v, ok := formValueIfPresent(c, "oauth_client_id"); ok {
-			agent.OAuthClientID = v
-		}
-		if v, ok := formValueIfPresent(c, "oauth_client_secret"); ok {
-			agent.OAuthClientSecret = v
-		} else if c.FormValue("clear_oauth_client_secret") == "on" {
-			agent.OAuthClientSecret = ""
-		}
-		if v, ok := formValueIfPresent(c, "oauth_authorize_url"); ok {
-			agent.OAuthAuthorizeURL = v
-		}
-		if v, ok := formValueIfPresent(c, "oauth_token_url"); ok {
-			agent.OAuthTokenURL = v
-		}
-		if v, ok := formValueIfPresent(c, "oauth_scopes"); ok {
-			agent.OAuthScopes = v
-		}
-	}
-	// Store Ollama-specific fields
-	if agent.Provider == models.ProviderOllama {
-		agent.OllamaBaseURL = strings.TrimSpace(c.FormValue("ollama_base_url"))
-		if customModel := strings.TrimSpace(c.FormValue("ollama_custom_model")); customModel != "" {
-			agent.Model = customModel
-		}
-	} else {
-		agent.OllamaBaseURL = ""
-	}
-	if agent.Provider == models.ProviderOpenAICompatible {
-		if err := applyOpenAICompatibleForm(c, agent); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-	} else {
-		clearOpenAICompatibleFields(agent)
-	}
-	if agent.Provider == models.ProviderMixture {
-		agent.OllamaBaseURL = ""
-		if err := h.applyAndValidateMixtureForm(c.Request().Context(), c, agent); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-	} else {
-		agent.MixtureConfigJSON = ""
+			// Provider/auth changes require reauthorization. Preserve OAuth state only for
+			// same-provider OAuth edits such as model settings updates.
+			if providerOrAuthChanged {
+				if previous.Provider == models.ProviderOpenAICompatible && previous.AuthMethod == models.AuthMethodOAuth {
+					agent.CustomAuthConfigJSON = ""
+				}
+				clearOAuthState(agent)
+			}
+		},
+	}); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	if previous.Provider == agent.Provider && previous.AuthMethod == models.AuthMethodOAuth &&
 		agent.AuthMethod == models.AuthMethodOAuth && oauthSecurityConfigChanged(previous, *agent) {
 		clearOAuthCredentials(agent)
-	}
-	if mw, err := strconv.Atoi(c.FormValue("model_max_workers")); err == nil {
-		if mw < 0 {
-			mw = 0
-		}
-		if mw > 10 {
-			mw = 10
-		}
-		agent.MaxWorkers = mw
-	}
-	if wt, err := strconv.Atoi(c.FormValue("worker_timeout")); err == nil {
-		if wt < 0 {
-			wt = 0
-		}
-		agent.WorkerTimeout = wt
 	}
 
 	applog.Infof("[handler] UpdateModel id=%s name=%q model=%s auth_method=%s max_workers=%d", id, agent.Name, agent.Model, agent.AuthMethod, agent.MaxWorkers)
