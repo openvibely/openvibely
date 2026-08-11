@@ -10,9 +10,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -2001,6 +2003,317 @@ func TestHandler_CreateAgent_RejectsInvalidScopedFilesDirectory(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHandler_AgentDialogFormParsing_CreateAndUpdatePersistSharedFields(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   func(agentID, projectID string) string
+	}{
+		{
+			name:   "create",
+			method: http.MethodPost,
+			path: func(agentID, projectID string) string {
+				return "/agents?project_id=" + projectID
+			},
+		},
+		{
+			name:   "update",
+			method: http.MethodPut,
+			path: func(agentID, projectID string) string {
+				return "/agents/" + agentID + "?project_id=" + projectID
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+			agentRepo := repository.NewAgentRepo(db)
+			h.SetAgentRepo(agentRepo)
+
+			model := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+				a.Name = "Configured Dialog Model"
+				a.Model = "dialog-configured-model"
+				a.IsDefault = false
+			})
+			project := &models.Project{Name: "Dialog Project", RepoPath: t.TempDir()}
+			if err := h.projectSvc.Create(t.Context(), project); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+
+			origDiscover := discoverPluginStateFn
+			defer func() { discoverPluginStateFn = origDiscover }()
+			discoverPluginStateFn = func(ctx context.Context) (models.PluginState, error) {
+				return models.PluginState{Installed: []models.InstalledPlugin{{ID: "playwright@claude-plugins-official", Enabled: true}}}, nil
+			}
+
+			var existingID string
+			if tc.method == http.MethodPut {
+				existing := &models.Agent{
+					Name:                "Before Dialog Agent",
+					Key:                 "before_dialog_agent",
+					Description:         "before",
+					SystemPrompt:        "before prompt",
+					Model:               "inherit",
+					Tools:               []string{"Read"},
+					SelectableAsPrimary: true,
+					Enabled:             true,
+				}
+				if err := agentRepo.Create(t.Context(), existing); err != nil {
+					t.Fatalf("create existing agent: %v", err)
+				}
+				existingID = existing.ID
+			}
+
+			form := url.Values{}
+			form.Set("name", "Dialog Agent "+tc.name)
+			form.Set("description", "shared dialog payload")
+			form.Set("system_prompt", "Use the shared parser")
+			form.Set("model", model.Model)
+			form.Set("tools_json", `["read","ScopedFiles","send_message","unknown-tool"]`)
+			form.Set("tool_config_json", `{"scoped_files":[{"directory":"configs/secrets","permissions":["read","write"]}],"skip_default_tools":true,"disable_runtime_worktree":true}`)
+			form.Set("plugins_json", `["playwright@claude-plugins-official"]`)
+			form.Set("skills_json", `[{"name":"Generated Skill","description":"from dialog","tools":"Read,Grep","content":"Follow the dialog workflow."}]`)
+			form.Set("mcp_servers_json", `[{"name":"local-docs","command":["npx","docs-mcp"],"env":{"TOKEN":"test"}}]`)
+			form.Set("key", "dialog_agent_"+tc.name)
+			form.Set("scope", "project")
+			form.Set("selectable_as_primary", "false")
+			form.Set("enabled", "false")
+			form.Set("permission_defaults_json", `{"read_agents":true,"write_skills":true,"use_shell_or_tools":true}`)
+			form.Set("source_refs_json", `["https://example.test/source"]`)
+
+			rec := performAgentDialogRequest(t, e, tc.method, tc.path(existingID, project.ID), form)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+
+			stored, err := agentRepo.GetByKey(t.Context(), "dialog_agent_"+tc.name)
+			if err != nil {
+				t.Fatalf("load saved agent: %v", err)
+			}
+			if stored == nil {
+				t.Fatal("saved agent not found")
+			}
+			if stored.Model != model.Model {
+				t.Fatalf("configured model not persisted: got %q want %q", stored.Model, model.Model)
+			}
+			if !agentToolsInclude(stored.Tools, "Read") || !agentToolsInclude(stored.Tools, models.AgentToolScopedFiles) || !agentToolsInclude(stored.Tools, "send_message") || agentToolsInclude(stored.Tools, "unknown-tool") {
+				t.Fatalf("tools not normalized as expected: %+v", stored.Tools)
+			}
+			wantToolConfig := models.AgentToolConfig{
+				ScopedFiles:            []models.ScopedFilesConfig{{Directory: "configs/secrets", Permissions: []string{"read", "write"}}},
+				SkipDefaultTools:       true,
+				DisableRuntimeWorktree: true,
+			}
+			if !reflect.DeepEqual(stored.ToolConfig, wantToolConfig) {
+				t.Fatalf("tool config mismatch: got %+v want %+v", stored.ToolConfig, wantToolConfig)
+			}
+			if !reflect.DeepEqual(stored.Plugins, []string{"playwright@claude-plugins-official"}) {
+				t.Fatalf("plugins not normalized/persisted: %+v", stored.Plugins)
+			}
+			if len(stored.Skills) != 1 || stored.Skills[0].Name != "Generated Skill" || stored.Skills[0].Content != "Follow the dialog workflow." {
+				t.Fatalf("skills not persisted: %+v", stored.Skills)
+			}
+			if len(stored.MCPServers) != 1 || stored.MCPServers[0].Name != "local-docs" || !reflect.DeepEqual(stored.MCPServers[0].Command, []string{"npx", "docs-mcp"}) || stored.MCPServers[0].Env["TOKEN"] != "test" {
+				t.Fatalf("MCP servers not persisted: %+v", stored.MCPServers)
+			}
+			if stored.Scope != models.AgentScopeProject || stored.ProjectID != project.ID || stored.Enabled || stored.SelectableAsPrimary {
+				t.Fatalf("scope/enabled/project fallback fields mismatch: %+v", stored)
+			}
+			if !stored.PermissionDefaults.ReadAgents || !stored.PermissionDefaults.WriteSkills || !stored.PermissionDefaults.UseShellOrTools {
+				t.Fatalf("permission defaults not persisted: %+v", stored.PermissionDefaults)
+			}
+			if !reflect.DeepEqual(stored.SourceRefs, []string{"https://example.test/source"}) {
+				t.Fatalf("source refs not persisted: %+v", stored.SourceRefs)
+			}
+		})
+	}
+}
+
+func TestHandler_UpdateAgent_OmittedOptionalJSONFieldsPreserveExistingValues(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	model := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Model = "omitted-json-model"
+		a.IsDefault = false
+	})
+
+	origDiscover := discoverPluginStateFn
+	defer func() { discoverPluginStateFn = origDiscover }()
+	discoverPluginStateFn = func(ctx context.Context) (models.PluginState, error) {
+		return models.PluginState{Installed: []models.InstalledPlugin{{ID: "playwright@claude-plugins-official", Enabled: true}}}, nil
+	}
+
+	agent := &models.Agent{
+		Name:         "Omitted JSON Agent",
+		Key:          "omitted_json_agent",
+		Description:  "before",
+		SystemPrompt: "before prompt",
+		Model:        "inherit",
+		Tools:        []string{models.AgentToolScopedFiles, "Read"},
+		ToolConfig: models.AgentToolConfig{
+			ScopedFiles:            []models.ScopedFilesConfig{{Directory: "configs/secrets", Permissions: []string{"read"}}},
+			SkipDefaultTools:       true,
+			DisableRuntimeWorktree: true,
+		},
+		Plugins: []string{"playwright@claude-plugins-official"},
+		Skills:  []models.SkillConfig{{Name: "Keep Skill", Description: "existing", Content: "Do not replace."}},
+		MCPServers: []models.MCPServerConfig{{
+			Name:    "keep-mcp",
+			Command: []string{"node", "server.js"},
+			Env:     map[string]string{"KEEP": "1"},
+		}},
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create existing agent: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Omitted JSON Agent Updated")
+	form.Set("description", "after")
+	form.Set("system_prompt", "after prompt")
+	form.Set("model", model.Model)
+	form.Set("key", "omitted_json_agent")
+	form.Set("scope", "global")
+	form.Set("enabled", "true")
+	form.Set("selectable_as_primary", "true")
+
+	rec := performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+agent.ID, form)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload agent: %v", err)
+	}
+	if stored.Model != model.Model || stored.Name != "Omitted JSON Agent Updated" {
+		t.Fatalf("basic fields not updated: %+v", stored)
+	}
+	if !reflect.DeepEqual(stored.Tools, []string{models.AgentToolScopedFiles, "Read"}) {
+		t.Fatalf("tools changed when tools_json omitted: %+v", stored.Tools)
+	}
+	if !reflect.DeepEqual(stored.ToolConfig, agent.ToolConfig) {
+		t.Fatalf("tool config changed when tool_config_json omitted: %+v", stored.ToolConfig)
+	}
+	if !reflect.DeepEqual(stored.Plugins, agent.Plugins) {
+		t.Fatalf("plugins changed when plugins_json omitted: %+v", stored.Plugins)
+	}
+	if !reflect.DeepEqual(stored.Skills, agent.Skills) {
+		t.Fatalf("skills changed when skills_json omitted: %+v", stored.Skills)
+	}
+	if !reflect.DeepEqual(stored.MCPServers, agent.MCPServers) {
+		t.Fatalf("MCP servers changed when mcp_servers_json omitted: %+v", stored.MCPServers)
+	}
+}
+
+func TestHandler_AgentDialogFormParsing_RejectsInvalidToolConfigForCreateAndUpdate(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   func(agentID string) string
+	}{
+		{name: "create", method: http.MethodPost, path: func(agentID string) string { return "/agents" }},
+		{name: "update", method: http.MethodPut, path: func(agentID string) string { return "/agents/" + agentID }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, _, db := setupTestHandlerWithDB(t)
+			agentRepo := repository.NewAgentRepo(db)
+			h.SetAgentRepo(agentRepo)
+			var agentID string
+			if tc.method == http.MethodPut {
+				agent := &models.Agent{Name: "Invalid Tool Config", Key: "invalid_tool_config", Model: "inherit", Tools: []string{"Read"}, Enabled: true}
+				if err := agentRepo.Create(t.Context(), agent); err != nil {
+					t.Fatalf("create agent: %v", err)
+				}
+				agentID = agent.ID
+			}
+
+			form := url.Values{}
+			form.Set("name", "Invalid Tool Config")
+			form.Set("description", "bad config")
+			form.Set("system_prompt", "work")
+			form.Set("model", "inherit")
+			form.Set("tools_json", `["ScopedFiles"]`)
+			form.Set("tool_config_json", `{"scoped_files":`)
+			form.Set("plugins_json", `[]`)
+			form.Set("skills_json", `[]`)
+			form.Set("mcp_servers_json", `[]`)
+
+			rec := performAgentDialogRequest(t, e, tc.method, tc.path(agentID), form)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(strings.ToLower(rec.Body.String()), "invalid tool configuration") {
+				t.Fatalf("expected invalid tool configuration error, got %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandler_AgentDialogFormParsing_RejectsInvalidPluginIDsForCreateAndUpdate(t *testing.T) {
+	cases := []struct {
+		name   string
+		method string
+		path   func(agentID string) string
+	}{
+		{name: "create", method: http.MethodPost, path: func(agentID string) string { return "/agents" }},
+		{name: "update", method: http.MethodPut, path: func(agentID string) string { return "/agents/" + agentID }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, _, db := setupTestHandlerWithDB(t)
+			agentRepo := repository.NewAgentRepo(db)
+			h.SetAgentRepo(agentRepo)
+			origDiscover := discoverPluginStateFn
+			defer func() { discoverPluginStateFn = origDiscover }()
+			discoverPluginStateFn = func(ctx context.Context) (models.PluginState, error) {
+				return models.PluginState{Installed: []models.InstalledPlugin{}}, nil
+			}
+
+			var agentID string
+			if tc.method == http.MethodPut {
+				agent := &models.Agent{Name: "Invalid Plugin", Key: "invalid_plugin", Model: "inherit", Tools: []string{"Read"}, Enabled: true}
+				if err := agentRepo.Create(t.Context(), agent); err != nil {
+					t.Fatalf("create agent: %v", err)
+				}
+				agentID = agent.ID
+			}
+
+			form := url.Values{}
+			form.Set("name", "Invalid Plugin")
+			form.Set("description", "bad plugin")
+			form.Set("system_prompt", "work")
+			form.Set("model", "inherit")
+			form.Set("tools_json", `[]`)
+			form.Set("plugins_json", `["playwright@claude-plugins-official"]`)
+			form.Set("skills_json", `[]`)
+			form.Set("mcp_servers_json", `[]`)
+
+			rec := performAgentDialogRequest(t, e, tc.method, tc.path(agentID), form)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(strings.ToLower(rec.Body.String()), "not installed") {
+				t.Fatalf("expected plugin validation error, got %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func performAgentDialogRequest(t *testing.T, e *echo.Echo, method, target string, form url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, target, strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	return rec
 }
 
 func TestHandler_AgentsPage_AdvancedTabsAreReachableAndSubmitted(t *testing.T) {
