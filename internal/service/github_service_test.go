@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
@@ -892,6 +894,154 @@ func TestListPullRequestFeedbackTraversesAllPagesAndSortsMergedSources(t *testin
 			t.Fatalf("expected one request for both pages of %s, got %#v", path, requests)
 		}
 	}
+}
+
+func TestDevInboxAssignedIssueScanSkipsDetailFetchesForCompleteListEntries(t *testing.T) {
+	ctx := context.Background()
+	var listRequests, detailRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/repos/openvibely/openvibely/issues":
+			listRequests.Add(1)
+			if got := r.URL.Query().Get("assignee"); got != "dev-bot" {
+				t.Fatalf("expected assignee dev-bot, got %q", got)
+			}
+			issues := make([]string, 0, 100)
+			for i := 1; i <= 100; i++ {
+				issues = append(issues, fmt.Sprintf(`{"number":%d,"html_url":"https://github.com/openvibely/openvibely/issues/%d","title":"Issue %d","body":"Acceptance notes for issue %d","state":"open","user":{"login":"reporter"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"performance"}]}`, i, i, i, i))
+			}
+			_, _ = w.Write([]byte("[" + strings.Join(issues, ",") + "]"))
+		case strings.HasPrefix(r.URL.Path, "/repos/openvibely/openvibely/issues/"):
+			detailRequests.Add(1)
+			_, _ = w.Write([]byte(`{"number":42,"html_url":"https://github.com/openvibely/openvibely/issues/42","title":"Explicit read","body":"Explicit body","state":"open"}`))
+		default:
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	handlers := newDevInboxGitHubRuntimeHandlers(t, server.URL)
+	out, err := handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"dev-bot","repo_url":"https://github.com/openvibely/openvibely"}`))
+	if err != nil {
+		t.Fatalf("github_list_assigned_issues: %v", err)
+	}
+	if got := listRequests.Load(); got != 1 {
+		t.Fatalf("assigned issue list requests = %d, want 1", got)
+	}
+	if got := detailRequests.Load(); got != 0 {
+		t.Fatalf("issue detail requests during default list scan = %d, want 0", got)
+	}
+	if !strings.Contains(out, `"Number":100`) || !strings.Contains(out, `"Body":"Acceptance notes for issue 100"`) || !strings.Contains(out, `"Labels":["performance"]`) || !strings.Contains(out, `"Assignees":["dev-bot"]`) {
+		t.Fatalf("assigned issue output lost task-creation fields: %s", out)
+	}
+
+	_, err = handlers["github_get_issue"](ctx, json.RawMessage(`{"issue_number":42,"repo_url":"https://github.com/openvibely/openvibely"}`))
+	if err != nil {
+		t.Fatalf("explicit github_get_issue: %v", err)
+	}
+	if got := detailRequests.Load(); got != 1 {
+		t.Fatalf("explicit github_get_issue detail requests = %d, want 1", got)
+	}
+}
+
+func TestDevInboxAssignedIssueScanFetchesOnlyIncompleteListEntries(t *testing.T) {
+	ctx := context.Background()
+	var listRequests, detailRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/user":
+			_, _ = w.Write([]byte(`{"login":"pat-owner"}`))
+		case "/repos/openvibely/openvibely/issues":
+			listRequests.Add(1)
+			switch r.URL.Query().Get("assignee") {
+			case "dev-bot":
+				_, _ = w.Write([]byte(`[
+					{"number":1,"html_url":"https://github.com/openvibely/openvibely/issues/1","title":"Complete one","body":"Body one","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"}]},
+					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","body":"Partial body","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"performance"}]},
+					{"number":3,"html_url":"https://github.com/openvibely/openvibely/issues/3","title":"Complete three","body":"Body three","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"feature"}]}
+				]`))
+			case "other-bot":
+				_, _ = w.Write([]byte(`[
+					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","body":"Partial body again","state":"open","assignees":[{"login":"other-bot"}],"labels":[{"name":"performance"}]},
+					{"number":4,"html_url":"https://github.com/openvibely/openvibely/issues/4","title":"Complete four","body":"Body four","state":"open","assignees":[{"login":"other-bot"}],"labels":[{"name":"bug"}]}
+				]`))
+			case "pat-owner":
+				_, _ = w.Write([]byte(`[
+					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","body":"Partial body from PAT scan","state":"open","assignees":[{"login":"pat-owner"}],"labels":[{"name":"performance"}]},
+					{"number":5,"html_url":"https://github.com/openvibely/openvibely/issues/5","title":"Complete five","body":"Body five","state":"open","assignees":[{"login":"pat-owner"}],"labels":[{"name":"feature"}]}
+				]`))
+			default:
+				t.Fatalf("unexpected assignee query: %q", r.URL.Query().Get("assignee"))
+			}
+		case "/repos/openvibely/openvibely/issues/2":
+			detailRequests.Add(1)
+			_, _ = w.Write([]byte(`{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","title":"Hydrated two","body":"Hydrated acceptance notes","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"performance"}]}`))
+		default:
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	handlers := newDevInboxGitHubRuntimeHandlers(t, server.URL)
+	out, err := handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"dev-bot","repo_url":"https://github.com/openvibely/openvibely"}`))
+	if err != nil {
+		t.Fatalf("github_list_assigned_issues: %v", err)
+	}
+	if got := listRequests.Load(); got != 1 {
+		t.Fatalf("assigned issue list requests = %d, want 1", got)
+	}
+	if got := detailRequests.Load(); got != 1 {
+		t.Fatalf("issue detail requests = %d, want 1", got)
+	}
+	if !strings.Contains(out, `"Title":"Hydrated two"`) || !strings.Contains(out, `"Body":"Hydrated acceptance notes"`) || !strings.Contains(out, `"Title":"Complete three"`) {
+		t.Fatalf("assigned issue output did not retain hydrated and complete entries: %s", out)
+	}
+
+	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"other-bot","repo_url":"https://github.com/openvibely/openvibely"}`))
+	if err != nil {
+		t.Fatalf("github_list_assigned_issues for second assignee: %v", err)
+	}
+	if !strings.Contains(out, `"Title":"Hydrated two"`) || !strings.Contains(out, `"Title":"Complete four"`) {
+		t.Fatalf("second assignee output did not use hydrated cache and complete entry: %s", out)
+	}
+	out, err = handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(`{"repo_url":"https://github.com/openvibely/openvibely"}`))
+	if err != nil {
+		t.Fatalf("github_list_my_assigned_issues: %v", err)
+	}
+	if !strings.Contains(out, `"Title":"Hydrated two"`) || !strings.Contains(out, `"Title":"Complete five"`) || !strings.Contains(out, `"login":"pat-owner"`) {
+		t.Fatalf("PAT-owner output did not use hydrated cache and complete entry: %s", out)
+	}
+	if got := listRequests.Load(); got != 3 {
+		t.Fatalf("assigned issue list requests after multiple scans = %d, want 3", got)
+	}
+	if got := detailRequests.Load(); got != 1 {
+		t.Fatalf("issue detail requests after overlapping incomplete scans = %d, want 1", got)
+	}
+}
+
+func newDevInboxGitHubRuntimeHandlers(t *testing.T, apiBaseURL string) map[string]chatcontrol.RuntimeActionHandler {
+	t.Helper()
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Dev Inbox GitHub Runtime", RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+	for _, login := range []string{"dev-bot", "other-bot"} {
+		if err := githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: login}); err != nil {
+			t.Fatalf("authorize github actor %s: %v", login, err)
+		}
+	}
+	return buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{
+		ProjectID:      project.ID,
+		ProjectRepo:    projectRepo,
+		GitHubAuthRepo: githubAuthRepo,
+		GitHub:         newPATGitHubService(t, apiBaseURL),
+	})
 }
 
 func TestListAssignedIssuesTraversesAllPagesAndFiltersPullRequests(t *testing.T) {
