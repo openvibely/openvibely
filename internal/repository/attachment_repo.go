@@ -147,43 +147,68 @@ func (r *AttachmentRepo) GetAllFilePaths(ctx context.Context) ([]string, error) 
 
 // CleanupOrphanedFiles removes attachment files from disk that no longer have database records
 func (r *AttachmentRepo) CleanupOrphanedFiles(ctx context.Context, uploadsDir string) (int, error) {
-	normalizedUploadsDir := normalizeAttachmentPath(uploadsDir)
-
-	// Get all file paths from database
 	dbPaths, err := r.GetAllFilePaths(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("getting file paths: %w", err)
 	}
 
-	// Build a map for O(1) lookup
+	return cleanupOrphanedAttachmentFiles(uploadsDir, dbPaths, orphanedAttachmentCleanupOptions{
+		walkError: "walking uploads directory",
+		scope: func(uploadsDir string) orphanedAttachmentCleanupScope {
+			chatUploadsDir := filepath.Join(uploadsDir, "chat")
+			return orphanedAttachmentCleanupScope{
+				walkDir:  uploadsDir,
+				pruneDir: uploadsDir,
+				skipWalkDir: func(path string) bool {
+					// Chat attachments are cleaned separately by ChatAttachmentRepo.
+					return filepath.Clean(path) == chatUploadsDir
+				},
+				skipPruneDir: func(name string) bool {
+					return name == "chat"
+				},
+			}
+		},
+	})
+}
+
+type orphanedAttachmentCleanupScope struct {
+	walkDir      string
+	pruneDir     string
+	skipWalkDir  func(path string) bool
+	skipPruneDir func(name string) bool
+}
+
+type orphanedAttachmentCleanupOptions struct {
+	walkError string
+	scope     func(uploadsDir string) orphanedAttachmentCleanupScope
+}
+
+func cleanupOrphanedAttachmentFiles(uploadsDir string, dbPaths []string, opts orphanedAttachmentCleanupOptions) (int, error) {
+	normalizedUploadsDir := normalizeAttachmentPath(uploadsDir)
+
 	dbPathSet := make(map[string]bool)
 	for _, path := range dbPaths {
 		dbPathSet[normalizeAttachmentPath(path)] = true
 	}
 
-	// Check if uploads directory exists
-	if _, err := os.Stat(normalizedUploadsDir); os.IsNotExist(err) {
+	scope := opts.scope(normalizedUploadsDir)
+	if _, err := os.Stat(scope.walkDir); os.IsNotExist(err) {
 		return 0, nil // Nothing to clean up
 	}
 
 	deletedCount := 0
-	chatUploadsDir := filepath.Join(normalizedUploadsDir, "chat")
-
-	// Walk the uploads directory
-	err = filepath.Walk(normalizedUploadsDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(scope.walkDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		if info.IsDir() {
-			// Chat attachments are cleaned separately by ChatAttachmentRepo.
-			if filepath.Clean(path) == chatUploadsDir {
+			if scope.skipWalkDir != nil && scope.skipWalkDir(path) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
 
-		// Check if file is in database
 		if !dbPathSet[normalizeAttachmentPath(path)] {
 			if err := os.Remove(path); err != nil {
 				return fmt.Errorf("removing orphaned file %s: %w", path, err)
@@ -193,22 +218,19 @@ func (r *AttachmentRepo) CleanupOrphanedFiles(ctx context.Context, uploadsDir st
 
 		return nil
 	})
-
 	if err != nil {
-		return deletedCount, fmt.Errorf("walking uploads directory: %w", err)
+		return deletedCount, fmt.Errorf("%s: %w", opts.walkError, err)
 	}
 
-	// Clean up empty task directories
-	if err := r.cleanupEmptyDirs(normalizedUploadsDir); err != nil {
+	if err := cleanupEmptyAttachmentDirs(scope.pruneDir, scope.skipPruneDir); err != nil {
 		return deletedCount, fmt.Errorf("cleaning up empty directories: %w", err)
 	}
 
 	return deletedCount, nil
 }
 
-// cleanupEmptyDirs removes empty subdirectories in the uploads directory
-func (r *AttachmentRepo) cleanupEmptyDirs(uploadsDir string) error {
-	entries, err := os.ReadDir(uploadsDir)
+func cleanupEmptyAttachmentDirs(rootDir string, skipDir func(name string) bool) error {
+	entries, err := os.ReadDir(rootDir)
 	if err != nil {
 		return err
 	}
@@ -217,17 +239,16 @@ func (r *AttachmentRepo) cleanupEmptyDirs(uploadsDir string) error {
 		if !entry.IsDir() {
 			continue
 		}
-		if entry.Name() == "chat" {
+		if skipDir != nil && skipDir(entry.Name()) {
 			continue
 		}
 
-		dirPath := filepath.Join(uploadsDir, entry.Name())
+		dirPath := filepath.Join(rootDir, entry.Name())
 		subEntries, err := os.ReadDir(dirPath)
 		if err != nil {
 			continue
 		}
 
-		// Remove directory if empty
 		if len(subEntries) == 0 {
 			if err := os.Remove(dirPath); err != nil {
 				return fmt.Errorf("removing empty directory %s: %w", dirPath, err)
