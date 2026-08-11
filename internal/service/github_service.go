@@ -80,14 +80,16 @@ type GitHubPullRequest struct {
 }
 
 type GitHubIssue struct {
-	Number    int
-	URL       string
-	Title     string
-	Body      string
-	State     string
-	UserLogin string
-	Assignees []string
-	Labels    []string
+	Number                        int
+	URL                           string
+	Title                         string
+	Body                          string
+	State                         string
+	UserLogin                     string
+	Assignees                     []string
+	Labels                        []string
+	CompleteForTaskCreation       bool `json:"complete_for_task_creation,omitempty"`
+	TaskCreationCompletenessKnown bool `json:"-"`
 }
 
 type GitHubIssueWithPullRequest struct {
@@ -1998,11 +2000,11 @@ func (c githubPullRequestReviewCommentAPI) toFeedback() GitHubPullRequestFeedbac
 }
 
 type githubIssueAPI struct {
-	Number int    `json:"number"`
-	URL    string `json:"html_url"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	State  string `json:"state"`
+	Number int     `json:"number"`
+	URL    string  `json:"html_url"`
+	Title  string  `json:"title"`
+	Body   *string `json:"body"`
+	State  string  `json:"state"`
 	User   struct {
 		Login string `json:"login"`
 	} `json:"user"`
@@ -2013,18 +2015,50 @@ type githubIssueAPI struct {
 		Name string `json:"name"`
 	} `json:"labels"`
 	PullRequest *struct{} `json:"pull_request"`
+
+	completeForTaskCreation bool
+}
+
+func (i *githubIssueAPI) UnmarshalJSON(data []byte) error {
+	type githubIssueAlias githubIssueAPI
+	var parsed githubIssueAlias
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*i = githubIssueAPI(parsed)
+	i.completeForTaskCreation = i.Number > 0 && hasGitHubIssueJSONFields(fields, "html_url", "title", "body", "state", "assignees", "labels")
+	return nil
+}
+
+func hasGitHubIssueJSONFields(fields map[string]json.RawMessage, names ...string) bool {
+	for _, name := range names {
+		if _, ok := fields[name]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (i githubIssueAPI) toIssue() GitHubIssue {
+	body := ""
+	if i.Body != nil {
+		body = *i.Body
+	}
 	issue := GitHubIssue{
-		Number:    i.Number,
-		URL:       strings.TrimSpace(i.URL),
-		Title:     strings.TrimSpace(i.Title),
-		Body:      i.Body,
-		State:     strings.TrimSpace(i.State),
-		UserLogin: strings.TrimSpace(i.User.Login),
-		Assignees: make([]string, 0, len(i.Assignees)),
-		Labels:    make([]string, 0, len(i.Labels)),
+		Number:                        i.Number,
+		URL:                           strings.TrimSpace(i.URL),
+		Title:                         strings.TrimSpace(i.Title),
+		Body:                          body,
+		State:                         strings.TrimSpace(i.State),
+		UserLogin:                     strings.TrimSpace(i.User.Login),
+		Assignees:                     make([]string, 0, len(i.Assignees)),
+		Labels:                        make([]string, 0, len(i.Labels)),
+		CompleteForTaskCreation:       i.completeForTaskCreation,
+		TaskCreationCompletenessKnown: true,
 	}
 	for _, assignee := range i.Assignees {
 		if login := strings.TrimSpace(assignee.Login); login != "" {
