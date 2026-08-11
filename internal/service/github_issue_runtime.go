@@ -1150,7 +1150,7 @@ func githubAssignedIssueHasTaskCreationFields(issue GitHubIssue) bool {
 	if issue.TaskCreationCompletenessKnown {
 		return issue.CompleteForTaskCreation
 	}
-	return issue.Number > 0 && strings.TrimSpace(issue.URL) != "" && strings.TrimSpace(issue.Title) != "" && strings.TrimSpace(issue.State) != ""
+	return false
 }
 
 func githubAssignedIssueDetailCacheKey(repo *GitHubRepoRef, issueNumber int) string {
