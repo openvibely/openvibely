@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -76,66 +77,9 @@ func (h *Handler) HandleWebhookInbound(c echo.Context) error {
 	eventType := extractStringField(payload, "event_type", "type", "action", "event")
 	summary := extractStringField(payload, "summary", "description", "message", "text", "title")
 
-	// Build task title
-	title := buildWebhookTaskTitle(endpoint, eventType, summary)
-
-	// Build task prompt with embedded payload
-	prompt := buildWebhookTaskPrompt(endpoint, eventType, summary, string(body))
-
-	// Get assigned agents
-	agentIDs := []string{}
-	agents, err := h.webhookRepo.GetEndpointAgents(c.Request().Context(), endpoint.ID)
-	if err == nil {
-		for _, a := range agents {
-			agentIDs = append(agentIDs, a.AgentDefinitionID)
-		}
-	}
-
-	// Create exactly one task
-	task := &models.Task{
-		ProjectID:  endpoint.ProjectID,
-		Title:      title,
-		Category:   models.CategoryActive,
-		Priority:   webhookTaskPriority(endpoint.DefaultPriority),
-		Status:     models.StatusPending,
-		Prompt:     prompt,
-		CreatedVia: models.TaskOriginWebhook,
-	}
-
-	// Set primary agent (first selected agent)
-	if len(agentIDs) > 0 {
-		task.AgentDefinitionID = &agentIDs[0]
-	}
-
-	if err := h.taskRepo.Create(c.Request().Context(), task); err != nil {
-		if errors.Is(err, repository.ErrDuplicateTask) {
-			baseTitle := task.Title
-			for i := 2; i <= 100; i++ {
-				task.Title = fmt.Sprintf("%s (%d)", baseTitle, i)
-				if retryErr := h.taskRepo.Create(c.Request().Context(), task); retryErr == nil {
-					err = nil
-					break
-				} else if !errors.Is(retryErr, repository.ErrDuplicateTask) {
-					err = retryErr
-					break
-				}
-			}
-			if err != nil {
-				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create task"})
-			}
-		} else {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create task"})
-		}
-	}
-
-	// Persist full agent assignment list for future multi-agent support
-	if len(agentIDs) > 0 {
-		_ = h.webhookRepo.SetTaskAgentAssignments(c.Request().Context(), task.ID, agentIDs)
-	}
-
-	// Submit task to worker for execution
-	if h.workerSvc != nil {
-		h.workerSvc.Submit(*task)
+	task, err := h.createWebhookTaskFromEndpoint(c.Request().Context(), endpoint, eventType, summary, string(body))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create task"})
 	}
 
 	return c.JSON(http.StatusAccepted, map[string]interface{}{
@@ -161,6 +105,66 @@ func webhookTaskPriority(defaultPriority int) int {
 		return 2
 	}
 	return defaultPriority
+}
+
+func (h *Handler) createWebhookTaskFromEndpoint(ctx context.Context, endpoint *models.WebhookEndpoint, eventType, summary, rawJSON string) (*models.Task, error) {
+	if h.taskRepo == nil {
+		return nil, fmt.Errorf("task repository not configured")
+	}
+	if h.webhookRepo == nil {
+		return nil, fmt.Errorf("webhook repository not configured")
+	}
+
+	task := &models.Task{
+		ProjectID:  endpoint.ProjectID,
+		Title:      buildWebhookTaskTitle(endpoint, eventType, summary),
+		Category:   models.CategoryActive,
+		Priority:   webhookTaskPriority(endpoint.DefaultPriority),
+		Status:     models.StatusPending,
+		Prompt:     buildWebhookTaskPrompt(endpoint, eventType, summary, rawJSON),
+		CreatedVia: models.TaskOriginWebhook,
+	}
+
+	agentIDs := []string{}
+	agents, err := h.webhookRepo.GetEndpointAgents(ctx, endpoint.ID)
+	if err == nil {
+		for _, a := range agents {
+			agentIDs = append(agentIDs, a.AgentDefinitionID)
+		}
+	}
+	if len(agentIDs) > 0 {
+		task.AgentDefinitionID = &agentIDs[0]
+	}
+
+	if err := h.createWebhookTaskWithUniqueTitle(ctx, task); err != nil {
+		return nil, err
+	}
+	if len(agentIDs) > 0 {
+		_ = h.webhookRepo.SetTaskAgentAssignments(ctx, task.ID, agentIDs)
+	}
+	if h.workerSvc != nil {
+		h.workerSvc.Submit(*task)
+	}
+	return task, nil
+}
+
+func (h *Handler) createWebhookTaskWithUniqueTitle(ctx context.Context, task *models.Task) error {
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		if !errors.Is(err, repository.ErrDuplicateTask) {
+			return err
+		}
+		baseTitle := task.Title
+		for i := 2; i <= 100; i++ {
+			task.Title = fmt.Sprintf("%s (%d)", baseTitle, i)
+			if retryErr := h.taskRepo.Create(ctx, task); retryErr == nil {
+				return nil
+			} else if !errors.Is(retryErr, repository.ErrDuplicateTask) {
+				return retryErr
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func verifyWebhookAuth(req *http.Request, secret string, body []byte) bool {
@@ -473,41 +477,9 @@ func (h *Handler) HandleWebhookTest(c echo.Context) error {
 
 	// Create a synthetic test task
 	testPayload := `{"event_type":"test","summary":"Test webhook event","source":"openvibely_test"}`
-	var payload map[string]interface{}
-	_ = json.Unmarshal([]byte(testPayload), &payload)
-
-	title := buildWebhookTaskTitle(endpoint, "test", "Test webhook event")
-	prompt := buildWebhookTaskPrompt(endpoint, "test", "Test webhook event", testPayload)
-
-	agentIDs := []string{}
-	agents, _ := h.webhookRepo.GetEndpointAgents(c.Request().Context(), endpoint.ID)
-	for _, a := range agents {
-		agentIDs = append(agentIDs, a.AgentDefinitionID)
-	}
-
-	task := &models.Task{
-		ProjectID:  endpoint.ProjectID,
-		Title:      title,
-		Category:   models.CategoryActive,
-		Priority:   webhookTaskPriority(endpoint.DefaultPriority),
-		Status:     models.StatusPending,
-		Prompt:     prompt,
-		CreatedVia: models.TaskOriginWebhook,
-	}
-	if len(agentIDs) > 0 {
-		task.AgentDefinitionID = &agentIDs[0]
-	}
-
-	if err := h.taskRepo.Create(c.Request().Context(), task); err != nil {
+	task, err := h.createWebhookTaskFromEndpoint(c.Request().Context(), endpoint, "test", "Test webhook event", testPayload)
+	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create test task: "+err.Error())
-	}
-
-	if len(agentIDs) > 0 {
-		_ = h.webhookRepo.SetTaskAgentAssignments(c.Request().Context(), task.ID, agentIDs)
-	}
-
-	if h.workerSvc != nil {
-		h.workerSvc.Submit(*task)
 	}
 
 	if isHTMX(c) {
