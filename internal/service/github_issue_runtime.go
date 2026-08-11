@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -110,15 +111,20 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 		func(ctx context.Context, repoURL string) (*GitHubRepoRef, error) {
 			return resolveGitHubRepoForRuntimeToolURL(ctx, opts, repoURL)
 		})
+	assignedIssueDetails := newGitHubAssignedIssueDetailHydrator(opts.GitHub)
 	postprocessAssigned := func(ctx context.Context, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
 		filtered, err := filterGitHubAssignedIssuesForAutomationInbox(ctx, opts, repo, issues)
 		if err != nil {
 			return nil, err
 		}
-		if err := recordGitHubAssignedIssues(ctx, opts, repo, filtered); err != nil {
+		hydrated, err := assignedIssueDetails.hydrate(ctx, repo, filtered)
+		if err != nil {
 			return nil, err
 		}
-		return filtered, nil
+		if err := recordGitHubAssignedIssues(ctx, opts, repo, hydrated); err != nil {
+			return nil, err
+		}
+		return hydrated, nil
 	}
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"github_create_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
@@ -1096,6 +1102,63 @@ func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOption
 
 func filterGitHubAssignedIssuesForAutomationInbox(_ context.Context, _ githubIssueRuntimeOptions, _ *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
 	return issues, nil
+}
+
+type githubAssignedIssueDetailHydrator struct {
+	provider GitHubIssueRuntimeProvider
+	mu       sync.Mutex
+	cache    map[string]GitHubIssue
+}
+
+func newGitHubAssignedIssueDetailHydrator(provider GitHubIssueRuntimeProvider) *githubAssignedIssueDetailHydrator {
+	return &githubAssignedIssueDetailHydrator{provider: provider, cache: make(map[string]GitHubIssue)}
+}
+
+func (h *githubAssignedIssueDetailHydrator) hydrate(ctx context.Context, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
+	if h == nil || h.provider == nil || len(issues) == 0 {
+		return issues, nil
+	}
+	out := append([]GitHubIssue(nil), issues...)
+	for i, issue := range out {
+		if githubAssignedIssueHasTaskCreationFields(issue) || issue.Number <= 0 {
+			continue
+		}
+		key := githubAssignedIssueDetailCacheKey(repo, issue.Number)
+		h.mu.Lock()
+		cached, ok := h.cache[key]
+		h.mu.Unlock()
+		if ok {
+			out[i] = cached
+			continue
+		}
+		detail, err := h.provider.GetIssue(ctx, repo, issue.Number)
+		if err != nil {
+			return nil, fmt.Errorf("hydrating assigned GitHub issue #%d: %w", issue.Number, err)
+		}
+		if detail == nil || detail.Number != issue.Number {
+			return nil, fmt.Errorf("hydrating assigned GitHub issue #%d returned mismatched issue", issue.Number)
+		}
+		h.mu.Lock()
+		h.cache[key] = *detail
+		h.mu.Unlock()
+		out[i] = *detail
+	}
+	return out, nil
+}
+
+func githubAssignedIssueHasTaskCreationFields(issue GitHubIssue) bool {
+	return issue.Number > 0 && strings.TrimSpace(issue.URL) != "" && strings.TrimSpace(issue.Title) != "" && strings.TrimSpace(issue.State) != ""
+}
+
+func githubAssignedIssueDetailCacheKey(repo *GitHubRepoRef, issueNumber int) string {
+	repoKey := ""
+	if repo != nil {
+		repoKey = strings.ToLower(strings.TrimSpace(repo.FullName))
+		if repoKey == "" && strings.TrimSpace(repo.Owner) != "" && strings.TrimSpace(repo.Name) != "" {
+			repoKey = strings.ToLower(strings.TrimSpace(repo.Owner)) + "/" + strings.ToLower(strings.TrimSpace(repo.Name))
+		}
+	}
+	return fmt.Sprintf("%s#%d", repoKey, issueNumber)
 }
 
 func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, issues []GitHubIssue) error {

@@ -331,6 +331,7 @@ func TestGitHubSDLCRegistrationHydratesInitialSnapshotAcrossPause(t *testing.T) 
 	require.Contains(t, maintainedPrompt, "Always call `github_get_project_inbox`")
 	require.Contains(t, maintainedPrompt, "call `github_list_assigned_issues` for every returned Authorized User")
 	require.Contains(t, maintainedPrompt, "also call `github_list_my_assigned_issues`")
+	require.Contains(t, maintainedPrompt, "Do not call `github_get_issue` for every listed issue as a default step")
 	require.Contains(t, maintainedPrompt, "Deduplicate issues by repository plus issue number")
 	task := models.Task{ProjectID: project.ID, Title: "GitHub Dev Inbox", Category: models.CategoryScheduled, Priority: 3, Status: models.StatusPending, Prompt: maintainedPrompt}
 	require.NoError(t, taskRepo.Create(ctx, &task))
