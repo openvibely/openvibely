@@ -115,6 +115,7 @@ Tool calls (`read_file`, `edit_file`, `write_file`, `bash`) resolve **relative p
 ## Diagnostics
 
 - When a follow-up appears to undo already-merged work, verify the real target/default branch and task branch ancestry instead of trusting a linked worktree's local `main` ref.
+- When a user asks whether task changes are already in `main`, verify committed and uncommitted worktree state against both the local target and remote-tracking target before answering. Do not rely on `git branch --contains HEAD` or branch reachability alone, because the task branch `HEAD` can be reachable from `main` while the actual implementation remains as uncommitted modifications in the isolated worktree. Use path-scoped `git status --short --branch`, `git diff --name-status main -- <paths>`, and when relevant `git diff --name-status origin/main -- <paths>`; report local-main, origin-main, uncommitted, and publication/authorization evidence separately.
 - When a user worries a commit merged into `main` is missing from a task worktree, use explicit reachability/range checks:
 
 ```bash

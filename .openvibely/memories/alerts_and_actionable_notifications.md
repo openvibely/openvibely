@@ -3,8 +3,8 @@ name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
 updated: 2026-08-10
-source: after_complete
-source_id: a2f6891a47487b48a94d33e7e1dd4789:3ecce3efc2317584
+source: update_memory
+source_id: 78acfa3527327f3b8e1f24c2050005a3:56b4e48b9908d888
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -43,5 +43,6 @@ Product surfaces:
 - The bundled `openvibely_native_autonomous_sdlc_bootstrap` skill provides an OpenVibely-native alternative to the GitHub-backed workflow. Suggestion producers use `create_notification`; scheduled inbox tasks inspect approved notifications regardless of read state, claim them, atomically create/link one implementation task, and start that exact task.
 - Notification bodies should start with a short nontechnical `## Summary` section followed by technical evidence and implementation detail, matching Automation content standards and reviewable-autonomy scanability goals.
 - Alerts/notification UI should make pending approval summaries easy to scan without requiring users to expand technical detail first; body/detail expansion remains useful for full evidence, metadata, and copy actions.
+- Current `#396` compact runtime alert listing summaries state (verified 2026-08-10): live PR `#439` at `https://github.com/openvibely/openvibely/pull/439` is cleaned and audit-cleared for issue scope. Its live head is `c07e627c012240ea3dd0cfd46838a4e39835297c` on branch `task/78acfa35-implement-github-issue-396-compact-runtime-alert-l`, targeting `main`, with exactly eight alert-runtime implementation/test files changed. The implementation adds compact `AlertSummary` list projections for runtime/text/channel `list_alerts`, excludes `body` and `metadata_json` from the summary SQL projection, keeps `get_alert` on full detail hydration, preserves filters/project isolation/Automation inbox scoping/ordering/limit-offset/`next_offset`, and includes regression coverage plus a production-shaped benchmark. Treat `#396` implementation/publication as audit-cleared in PR `#439`, pending normal PR merge/issue closure.
 - Maintained Automation prompts are point-in-time snapshots. Existing saved Native/GitHub inbox Automations must be explicitly Edit/Saved or recreated after deploying corrected defaults; already-created Backlog tasks are not retroactively started and require manual execution.
 - The model, migration, authorization boundaries, tool contracts, lease recovery, and schedule configuration are documented in `docs/openvibely-native-autonomous-sdlc-user-guide.md`.

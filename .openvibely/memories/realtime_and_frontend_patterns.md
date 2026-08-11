@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-10
+updated: 2026-08-11
 source: update_memory
-source_id: bc683d35728f3c6cf834e99bb84fb839:bbe64855f04606b4
+source_id: 5d753df4f063eafb090e28c4db2369c6:252c1f4efd54e0e9
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -21,6 +21,7 @@ Realtime and diff contracts:
 - Per-execution SSE accepts optional untrusted `offset` in UTF-8 bytes. The handler clamps to UTF-8 boundaries, subscribes before DB catch-up, skips duplicate/partial overlaps, and uses targeted DB catch-up for dropped deltas or terminal fallback.
 - Fresh, resume, and live-created Chat/task-thread streams track offsets from raw UTF-8 byte lengths, not rendered DOM text, normalized display content, message counts, or scroll/window state.
 - Terminal execution-stream events should publish only after durable terminal writes. `completed` and `cancelled` map to SSE `done`; failures map to SSE `error`. Terminal handlers must replay missing durable output before terminalizing subscribers.
+- Resolved `#440` / PR `#452`: execution stream terminal-event mapping was consolidated in `ExecutionStreamHub.CloseTerminal`, which maps `ExecCompleted` and `ExecCancelled` to `ExecutionStreamDone` with status strings and `ExecFailed` to `ExecutionStreamError` with the supplied error, while non-terminal statuses no-op. Handler cancellation and LLM execution paths now delegate through thin wrappers, and channel-chat completion calls the shared events helper directly; durable-write ordering and path-specific completion/cancellation logic remain outside the helper. Implementation head `efe7bcc83911028800d71d41be92c31f40c343c9` was published to open PR `#452` with `Closes #440` after passing focused execution-stream tests, `go build ./cmd/server && go test ./internal/... -count=1 -timeout 120s`, `git diff --check`, and `go build ./...` (non-fatal macOS desktop linker warnings only). A later read-only audit reported no material implementation or publication issues after verifying the local implementation tree matched the live PR tree `c5670066babf0b11f6c74fbfe1900cacc926266a` and the PR compare contained only the seven issue-related files.
 - Real-time file changes are invalidation/snapshot signals. `diff_snapshot` events are metadata-only; full diff payloads stay in DB/routes. Browser code refreshes authoritative Changes fragments rather than appending diff DOM directly.
 - Task detail lazily loads Changes content unless `tab=changes` is active; direct `?tab=changes` renders must match lazy route behavior.
 - Diff viewer uses GitHub-style load envelopes and oversized-file placeholders, deletion summaries, constrained rename/copy headers, and viewport-safe overflow boundaries. Worktree diff semantics live in `worktree_and_lineage.md`.
