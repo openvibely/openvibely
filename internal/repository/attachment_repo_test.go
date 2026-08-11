@@ -578,6 +578,11 @@ func TestAttachmentRepo_CleanupOrphanedFiles_RelativeRootSkipsChatAndPreservesTr
 		t.Fatalf("failed to create tracked chat attachment: %v", err)
 	}
 
+	untrackedChatFile := filepath.Join(chatDir, "untracked-chat.png")
+	if err := os.WriteFile(untrackedChatFile, []byte("orphaned chat"), 0644); err != nil {
+		t.Fatalf("failed to create untracked chat file: %v", err)
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get cwd: %v", err)
@@ -603,5 +608,8 @@ func TestAttachmentRepo_CleanupOrphanedFiles_RelativeRootSkipsChatAndPreservesTr
 	}
 	if _, err := os.Stat(trackedChatFile); os.IsNotExist(err) {
 		t.Fatal("chat attachment should not be touched by task attachment cleanup")
+	}
+	if _, err := os.Stat(untrackedChatFile); os.IsNotExist(err) {
+		t.Fatal("untracked chat file should not be touched by task attachment cleanup")
 	}
 }

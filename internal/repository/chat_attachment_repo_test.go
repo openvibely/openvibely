@@ -166,6 +166,11 @@ func TestChatAttachmentRepo_CleanupOrphanedFiles_RelativeRootPreservesTrackedFil
 		t.Fatalf("Create tracked task attachment: %v", err)
 	}
 
+	untrackedTaskFile := filepath.Join(taskDir, "untracked-task.txt")
+	if err := os.WriteFile(untrackedTaskFile, []byte("orphaned task"), 0644); err != nil {
+		t.Fatalf("write untracked task file: %v", err)
+	}
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -191,5 +196,8 @@ func TestChatAttachmentRepo_CleanupOrphanedFiles_RelativeRootPreservesTrackedFil
 	}
 	if _, err := os.Stat(trackedTaskFile); os.IsNotExist(err) {
 		t.Fatal("task attachment should not be touched by chat cleanup")
+	}
+	if _, err := os.Stat(untrackedTaskFile); os.IsNotExist(err) {
+		t.Fatal("untracked task file should not be touched by chat cleanup")
 	}
 }
