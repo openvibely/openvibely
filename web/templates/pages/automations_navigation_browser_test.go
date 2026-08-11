@@ -1369,6 +1369,14 @@ window.addEventListener('DOMContentLoaded', function() {
     var restoredColor = window.getComputedStyle(nestedRail).backgroundColor;
     if (restoredColor !== inactiveColor) fail('leaving a YAML group must unhighlight its vertical indentation rail: expected=' + inactiveColor + ' got=' + restoredColor);
     await new Promise(function(resolve) { requestAnimationFrame(resolve); });
+    var yamlNameValueClassBeforeDrag = '';
+    function yamlValueClassForLineContaining(text) {
+      var line = Array.from(highlight.querySelectorAll('[data-automation-yaml-highlight-line]')).find(function(row) { return row.textContent.indexOf(text) >= 0; });
+      if (!line) fail('missing YAML highlight line containing ' + text);
+      var spans = Array.from(line.querySelectorAll('span')).filter(function(span) { return !span.hasAttribute('data-automation-yaml-key') && !span.hasAttribute('data-automation-yaml-indent-guides') && !span.hasAttribute('data-automation-yaml-indent-guide') && !span.hasAttribute('data-automation-yaml-indent-dot'); });
+      if (!spans.length) fail('missing YAML highlighted value span for line containing ' + text + ': ' + line.innerHTML);
+      return spans[spans.length - 1].className;
+    }
     click('[data-automation-view-graph]', 'Graph view button');
     if (!isVisible(graph) || isVisible(yaml)) fail('Graph switch did not restore the canvas');
 
@@ -1392,6 +1400,10 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!/config:\n\s+prompt:/.test(addNodeSubmittedYAML)) fail('Add node dialog submission did not render node config as block-style YAML: ' + addNodeSubmittedYAML);
     document.getElementById('automation-node-dialog').close();
 
+    editor.value = editor.value.replace('name: "Browser YAML"', 'name: Browser YAML');
+    editor.dispatchEvent(new Event('input', {bubbles: true}));
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    yamlNameValueClassBeforeDrag = yamlValueClassForLineContaining('Browser YAML');
     var first = document.querySelector('[data-node-key="first"]');
     if (!first) fail('missing first node');
     var originalTransform = first.getAttribute('transform');
@@ -1413,6 +1425,8 @@ window.addEventListener('DOMContentLoaded', function() {
     if (first.getAttribute('transform') === originalTransform) fail('dragging a canvas node did not move it');
     if (editor.value.includes('position: {"x":0,"y":0}')) fail('node drag did not update YAML position: ' + editor.value);
     contains(editor, 'YAML-only configuration', 'node drag discarded YAML-only configuration');
+    var yamlNameValueClassAfterDrag = yamlValueClassForLineContaining('Browser YAML');
+    if (yamlNameValueClassAfterDrag !== yamlNameValueClassBeforeDrag) fail('dragging a graph node must not change YAML string value color class: before=' + yamlNameValueClassBeforeDrag + ' after=' + yamlNameValueClassAfterDrag);
     submittedYAML(editor);
 
     connect('second', 'third', 2);
