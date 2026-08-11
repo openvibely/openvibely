@@ -244,6 +244,18 @@ func discoverLocalMCPServers(workDir string) []models.MCPServerConfig {
 	return normalizeMCPServers(combined)
 }
 
+func buildAllowedAgentModels(configs []models.LLMConfig) map[string]struct{} {
+	allowed := make(map[string]struct{}, len(configs))
+	for _, cfg := range configs {
+		modelID := strings.TrimSpace(cfg.Model)
+		if modelID == "" {
+			continue
+		}
+		allowed[modelID] = struct{}{}
+	}
+	return allowed
+}
+
 func normalizeAgentModel(model string, allowed map[string]struct{}) string {
 	normalized := strings.TrimSpace(model)
 	if normalized == "" {
@@ -680,6 +692,92 @@ func (h *Handler) normalizeAndValidateSelectedPlugins(ctx context.Context, selec
 		return nil, err
 	}
 	return normalized, nil
+}
+
+type agentDialogFormOptions struct {
+	operation                 string
+	defaultMissingCollections bool
+}
+
+func (h *Handler) applyAgentDialogFormFields(c echo.Context, agent *models.Agent, opts agentDialogFormOptions) error {
+	if agent == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "agent is required")
+	}
+	operation := strings.TrimSpace(opts.operation)
+	if operation == "" {
+		operation = "Agent"
+	}
+
+	agent.Name = c.FormValue("name")
+	agent.Description = c.FormValue("description")
+	agent.SystemPrompt = c.FormValue("system_prompt")
+	agent.Model = c.FormValue("model")
+
+	modelConfigs, err := h.llmConfigRepo.List(c.Request().Context())
+	if err != nil {
+		applog.Infof("[handler] %s listing model configs failed: %v", operation, err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	agent.Model = normalizeAgentModel(agent.Model, buildAllowedAgentModels(modelConfigs))
+
+	if toolsJSON := c.FormValue("tools_json"); toolsJSON != "" {
+		if err := json.Unmarshal([]byte(toolsJSON), &agent.Tools); err != nil {
+			applog.Infof("[handler] %s error parsing tools: %v", operation, err)
+		}
+	}
+	if opts.defaultMissingCollections && agent.Tools == nil {
+		agent.Tools = []string{}
+	}
+	agent.Tools = normalizeAgentTools(agent.Tools)
+
+	if toolConfigJSON := c.FormValue("tool_config_json"); toolConfigJSON != "" {
+		if err := json.Unmarshal([]byte(toolConfigJSON), &agent.ToolConfig); err != nil {
+			applog.Infof("[handler] %s error parsing tool_config: %v", operation, err)
+			return echo.NewHTTPError(http.StatusBadRequest, "Invalid tool configuration")
+		}
+	}
+	if err := normalizeAndValidateAgentToolConfig(agent); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+
+	if pluginsJSON := c.FormValue("plugins_json"); pluginsJSON != "" {
+		if err := json.Unmarshal([]byte(pluginsJSON), &agent.Plugins); err != nil {
+			applog.Infof("[handler] %s error parsing plugins: %v", operation, err)
+		}
+	}
+	validatedPlugins, err := h.normalizeAndValidateSelectedPlugins(c.Request().Context(), agent.Plugins)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	agent.Plugins = validatedPlugins
+
+	if skillsJSON := c.FormValue("skills_json"); skillsJSON != "" {
+		if err := json.Unmarshal([]byte(skillsJSON), &agent.Skills); err != nil {
+			applog.Infof("[handler] %s error parsing skills: %v", operation, err)
+		}
+	}
+	if opts.defaultMissingCollections && agent.Skills == nil {
+		agent.Skills = []models.SkillConfig{}
+	}
+
+	if mcpJSON := c.FormValue("mcp_servers_json"); mcpJSON != "" {
+		if err := json.Unmarshal([]byte(mcpJSON), &agent.MCPServers); err != nil {
+			applog.Infof("[handler] %s error parsing mcp_servers: %v", operation, err)
+		}
+	}
+	if opts.defaultMissingCollections && agent.MCPServers == nil {
+		agent.MCPServers = []models.MCPServerConfig{}
+	}
+
+	if err := applyLifecycleAgentFormFields(c, agent); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) == "" {
+		if pid, _ := h.getCurrentProjectID(c); pid != "" {
+			agent.ProjectID = pid
+		}
+	}
+	return nil
 }
 
 const (
@@ -1478,89 +1576,9 @@ func (h *Handler) ListAgents(c echo.Context) error {
 }
 
 func (h *Handler) CreateAgent(c echo.Context) error {
-	agent := models.Agent{
-		Name:         c.FormValue("name"),
-		Description:  c.FormValue("description"),
-		SystemPrompt: c.FormValue("system_prompt"),
-		Model:        c.FormValue("model"),
-	}
-
-	allowedModels := map[string]struct{}{}
-	modelConfigs, err := h.llmConfigRepo.List(c.Request().Context())
-	if err != nil {
-		applog.Infof("[handler] CreateAgent listing model configs failed: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	for _, cfg := range modelConfigs {
-		modelID := strings.TrimSpace(cfg.Model)
-		if modelID == "" {
-			continue
-		}
-		allowedModels[modelID] = struct{}{}
-	}
-	agent.Model = normalizeAgentModel(agent.Model, allowedModels)
-
-	// Parse tools from JSON hidden field
-	if toolsJSON := c.FormValue("tools_json"); toolsJSON != "" {
-		if err := json.Unmarshal([]byte(toolsJSON), &agent.Tools); err != nil {
-			applog.Infof("[handler] CreateAgent error parsing tools: %v", err)
-		}
-	}
-	if agent.Tools == nil {
-		agent.Tools = []string{}
-	}
-	agent.Tools = normalizeAgentTools(agent.Tools)
-	if toolConfigJSON := c.FormValue("tool_config_json"); toolConfigJSON != "" {
-		if err := json.Unmarshal([]byte(toolConfigJSON), &agent.ToolConfig); err != nil {
-			applog.Infof("[handler] CreateAgent error parsing tool_config: %v", err)
-			return echo.NewHTTPError(http.StatusBadRequest, "Invalid tool configuration")
-		}
-	}
-	if err := normalizeAndValidateAgentToolConfig(&agent); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
-	// Parse selected plugins from JSON hidden field
-	if pluginsJSON := c.FormValue("plugins_json"); pluginsJSON != "" {
-		if err := json.Unmarshal([]byte(pluginsJSON), &agent.Plugins); err != nil {
-			applog.Infof("[handler] CreateAgent error parsing plugins: %v", err)
-		}
-	}
-	validatedPlugins, err := h.normalizeAndValidateSelectedPlugins(c.Request().Context(), agent.Plugins)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	agent.Plugins = validatedPlugins
-
-	// Parse skills from JSON hidden field
-	if skillsJSON := c.FormValue("skills_json"); skillsJSON != "" {
-		if err := json.Unmarshal([]byte(skillsJSON), &agent.Skills); err != nil {
-			applog.Infof("[handler] CreateAgent error parsing skills: %v", err)
-		}
-	}
-	if agent.Skills == nil {
-		agent.Skills = []models.SkillConfig{}
-	}
-
-	// Parse MCP servers from JSON hidden field
-	if mcpJSON := c.FormValue("mcp_servers_json"); mcpJSON != "" {
-		if err := json.Unmarshal([]byte(mcpJSON), &agent.MCPServers); err != nil {
-			applog.Infof("[handler] CreateAgent error parsing mcp_servers: %v", err)
-		}
-	}
-	if agent.MCPServers == nil {
-		agent.MCPServers = []models.MCPServerConfig{}
-	}
-
-	if err := applyLifecycleAgentFormFields(c, &agent); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	// Ensure project-scoped new agents carry a ProjectID so disk operations
-	// target the correct project directory from the start.
-	if agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) == "" {
-		if pid, _ := h.getCurrentProjectID(c); pid != "" {
-			agent.ProjectID = pid
-		}
+	agent := models.Agent{}
+	if err := h.applyAgentDialogFormFields(c, &agent, agentDialogFormOptions{operation: "CreateAgent", defaultMissingCollections: true}); err != nil {
+		return err
 	}
 
 	applog.Infof("[handler] CreateAgent name=%q model=%s tools=%d skills=%d mcp=%d",
@@ -1593,72 +1611,8 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusForbidden, "protected system agents are read-only in the dialog")
 	}
 
-	existing.Name = c.FormValue("name")
-	existing.Description = c.FormValue("description")
-	existing.SystemPrompt = c.FormValue("system_prompt")
-	existing.Model = c.FormValue("model")
-
-	allowedModels := map[string]struct{}{}
-	modelConfigs, err := h.llmConfigRepo.List(c.Request().Context())
-	if err != nil {
-		applog.Infof("[handler] UpdateAgent listing model configs failed: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	for _, cfg := range modelConfigs {
-		modelID := strings.TrimSpace(cfg.Model)
-		if modelID == "" {
-			continue
-		}
-		allowedModels[modelID] = struct{}{}
-	}
-	existing.Model = normalizeAgentModel(existing.Model, allowedModels)
-
-	if toolsJSON := c.FormValue("tools_json"); toolsJSON != "" {
-		if err := json.Unmarshal([]byte(toolsJSON), &existing.Tools); err != nil {
-			applog.Infof("[handler] UpdateAgent error parsing tools: %v", err)
-		}
-	}
-	existing.Tools = normalizeAgentTools(existing.Tools)
-	if toolConfigJSON := c.FormValue("tool_config_json"); toolConfigJSON != "" {
-		if err := json.Unmarshal([]byte(toolConfigJSON), &existing.ToolConfig); err != nil {
-			applog.Infof("[handler] UpdateAgent error parsing tool_config: %v", err)
-			return echo.NewHTTPError(http.StatusBadRequest, "Invalid tool configuration")
-		}
-	}
-	if err := normalizeAndValidateAgentToolConfig(existing); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	if pluginsJSON := c.FormValue("plugins_json"); pluginsJSON != "" {
-		if err := json.Unmarshal([]byte(pluginsJSON), &existing.Plugins); err != nil {
-			applog.Infof("[handler] UpdateAgent error parsing plugins: %v", err)
-		}
-	}
-	validatedPlugins, err := h.normalizeAndValidateSelectedPlugins(c.Request().Context(), existing.Plugins)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	existing.Plugins = validatedPlugins
-	if skillsJSON := c.FormValue("skills_json"); skillsJSON != "" {
-		if err := json.Unmarshal([]byte(skillsJSON), &existing.Skills); err != nil {
-			applog.Infof("[handler] UpdateAgent error parsing skills: %v", err)
-		}
-	}
-	if mcpJSON := c.FormValue("mcp_servers_json"); mcpJSON != "" {
-		if err := json.Unmarshal([]byte(mcpJSON), &existing.MCPServers); err != nil {
-			applog.Infof("[handler] UpdateAgent error parsing mcp_servers: %v", err)
-		}
-	}
-
-	if err := applyLifecycleAgentFormFields(c, existing); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	// Ensure project-scoped agents always carry a ProjectID so subsequent disk
-	// and delete operations target the correct project directory even when the
-	// request lacks a query-string project_id.
-	if existing.Scope == models.AgentScopeProject && strings.TrimSpace(existing.ProjectID) == "" {
-		if pid, _ := h.getCurrentProjectID(c); pid != "" {
-			existing.ProjectID = pid
-		}
+	if err := h.applyAgentDialogFormFields(c, existing, agentDialogFormOptions{operation: "UpdateAgent"}); err != nil {
+		return err
 	}
 
 	applog.Infof("[handler] UpdateAgent id=%s name=%q", id, existing.Name)
