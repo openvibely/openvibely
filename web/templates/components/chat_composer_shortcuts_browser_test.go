@@ -459,6 +459,9 @@ func TestChatComposerStaleSteerConflictFallsBackToNormalSendInChrome(t *testing.
   input.value = 'late steer should queue';
   session.value = 'late-session';
   key(input, modifier);
+  // A repeated shortcut while the guarded request is unresolved must not create
+  // a duplicate steering instruction or a second conflict fallback.
+  key(input, modifier);
   await wait(450);
   if (input.value !== '') fail('accepted fallback queue did not clear the draft');
   if (session.value !== '') fail('accepted fallback queue did not clear the attachment session');

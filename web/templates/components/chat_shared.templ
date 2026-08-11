@@ -1840,6 +1840,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 							var usesAppleShortcuts = chatComposerUsesAppleShortcuts();
 							var shortcutModifierHeld = false;
+							var steerRequestInFlight = false;
 							function shortcutModifierPressed(event) {
 							return usesAppleShortcuts ? event.metaKey : event.ctrlKey;
 						}
@@ -1893,13 +1894,16 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 							function submitComposer(endpoint, intent, payload) {
 								if (!endpoint) return;
+								if (intent === 'steer' && typeof htmx !== 'undefined' && steerRequestInFlight) return;
 								if (payload) {
 									if (messageInput && typeof payload.message === 'string') messageInput.value = payload.message;
 									if (sessionInput && typeof payload.attachmentSessionID === 'string') sessionInput.value = payload.attachmentSessionID;
 								}
 								form.setAttribute('data-submit-intent', intent || 'normal');
 								form._chatNextSubmissionPayload = payload || null;
-								if (intent === 'steer' && typeof htmx !== 'undefined') {								var options = {
+								if (intent === 'steer' && typeof htmx !== 'undefined') {
+									steerRequestInFlight = true;
+									var options = {
 									source: form,
 									target: '#pending-thread-inputs',
 									swap: form.getAttribute('hx-swap') || 'beforeend'
@@ -1910,7 +1914,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
 												attachment_session_id: payload.attachmentSessionID,
 												expected_turn_id: payload.expectedTurnID
 											};
-										}								htmx.ajax('POST', endpoint, options);
+										}
+									try {
+										htmx.ajax('POST', endpoint, options);
+									} catch (error) {
+										steerRequestInFlight = false;
+										throw error;
+									}
 								return;
 							}
 							form.setAttribute('hx-post', endpoint);
@@ -2773,6 +2783,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						if (!event.detail || event.detail.elt !== form) return;
 						var request = event.detail.xhr || {};
 						var completedIntent = request._chatSubmittedIntent || 'normal';
+						if (completedIntent === 'steer') steerRequestInFlight = false;
 						var submittedMessage = request._chatSubmittedMessage || '';
 						var submittedAttachmentSession = request._chatSubmittedAttachmentSession || '';
 						var accepted = false;
