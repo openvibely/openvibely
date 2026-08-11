@@ -474,20 +474,17 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 }
 
 func buildChannelProjectListResult(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {
-	if projectRepo == nil {
-		return "Error retrieving projects: project repository not configured"
-	}
-	projects, err := projectRepo.List(ctx)
+	selection, err := selectChannelProject(ctx, projectRepo, projectID, "", nil)
 	if err != nil {
 		return "Error retrieving projects: " + err.Error()
 	}
 	var sb strings.Builder
 	sb.WriteString("Available Projects:\n")
-	if len(projects) == 0 {
+	if len(selection.Projects) == 0 {
 		sb.WriteString("No projects found.")
 		return sb.String()
 	}
-	for _, p := range projects {
+	for _, p := range selection.Projects {
 		marker := ""
 		if p.ID == projectID {
 			marker = " <- current"
@@ -502,37 +499,69 @@ func buildChannelProjectListResult(ctx context.Context, projectRepo *repository.
 	return strings.TrimSpace(sb.String())
 }
 
+type channelProjectSelection struct {
+	Projects       []models.Project
+	Current        *models.Project
+	Target         *models.Project
+	TargetName     string
+	AvailableNames []string
+}
+
+func selectChannelProject(ctx context.Context, projectRepo *repository.ProjectRepo, currentProjectID, targetProject string, switchProject func(context.Context, *models.Project) error) (channelProjectSelection, error) {
+	var selection channelProjectSelection
+	if projectRepo == nil {
+		return selection, fmt.Errorf("project repository not configured")
+	}
+	projects, err := projectRepo.List(ctx)
+	if err != nil {
+		return selection, err
+	}
+	selection.Projects = projects
+	selection.TargetName = strings.TrimSpace(targetProject)
+	selection.AvailableNames = channelProjectAvailableNames(projects)
+	for i := range projects {
+		if projects[i].ID == currentProjectID {
+			selection.Current = &projects[i]
+		}
+		if selection.TargetName != "" && matchesChannelProjectTarget(projects[i], selection.TargetName) {
+			selection.Target = &projects[i]
+		}
+	}
+	if selection.Target != nil && switchProject != nil {
+		if err := switchProject(ctx, selection.Target); err != nil {
+			return selection, err
+		}
+	}
+	return selection, nil
+}
+
+func matchesChannelProjectTarget(project models.Project, target string) bool {
+	return strings.EqualFold(project.Name, target) || project.ID == target
+}
+
+func channelProjectAvailableNames(projects []models.Project) []string {
+	names := make([]string, 0, len(projects))
+	for _, p := range projects {
+		names = append(names, p.Name)
+	}
+	return names
+}
+
 func switchChannelProjectResult(ctx context.Context, projectRepo *repository.ProjectRepo, targetProject string, switchProject func(context.Context, *models.Project) error) (string, error) {
 	if targetProject == "" {
 		return "Project switch requires a project name or ID.", nil
 	}
-	if projectRepo == nil {
-		return "Error loading projects: project repository not configured", nil
-	}
-	projects, err := projectRepo.List(ctx)
+	selection, err := selectChannelProject(ctx, projectRepo, "", targetProject, switchProject)
 	if err != nil {
-		return "Error loading projects: " + err.Error(), nil
-	}
-	var target *models.Project
-	for i := range projects {
-		if strings.EqualFold(projects[i].Name, targetProject) || projects[i].ID == targetProject {
-			target = &projects[i]
-			break
-		}
-	}
-	if target == nil {
-		names := make([]string, 0, len(projects))
-		for _, p := range projects {
-			names = append(names, p.Name)
-		}
-		return fmt.Sprintf("Project not found: %q. Available projects: %s", targetProject, strings.Join(names, ", ")), nil
-	}
-	if switchProject != nil {
-		if err := switchProject(ctx, target); err != nil {
+		if selection.Target != nil {
 			return "", fmt.Errorf("failed to switch project: %w", err)
 		}
+		return "Error loading projects: " + err.Error(), nil
 	}
-	return fmt.Sprintf("Switched to project: %s. Future messages from this channel identity will use that project.", target.Name), nil
+	if selection.Target == nil {
+		return fmt.Sprintf("Project not found: %q. Available projects: %s", selection.TargetName, strings.Join(selection.AvailableNames, ", ")), nil
+	}
+	return fmt.Sprintf("Switched to project: %s. Future messages from this channel identity will use that project.", selection.Target.Name), nil
 }
 
 func runChannelScheduleTask(ctx context.Context, opts channelUtilityActionHandlerOptions, input json.RawMessage) string {

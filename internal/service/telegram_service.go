@@ -533,29 +533,38 @@ func (s *TelegramService) handleStart(userID int64) string {
 // handleProject shows the current project or switches to a new one
 func (s *TelegramService) handleProject(userID int64, args string) string {
 	ctx := context.Background()
-	projects, err := s.projectRepo.List(ctx)
+	targetName := strings.TrimSpace(args)
+	currentProjectID := ""
+	if targetName == "" {
+		currentProjectID = s.getActiveProject(userID)
+	}
+	selection, err := selectChannelProject(ctx, s.projectRepo, currentProjectID, targetName, func(ctx context.Context, project *models.Project) error {
+		// Persist before publishing the switch to the active-project cache. A failed
+		// write must leave both the durable selection and live routing unchanged.
+		return s.setTelegramActiveProject(ctx, userID, project.ID)
+	})
 	if err != nil {
+		if selection.Target != nil {
+			applog.Infof("[telegram] failed to switch project for user %d: %v", userID, err)
+			return fmt.Sprintf("❌ Error switching project: %v", err)
+		}
 		return fmt.Sprintf("❌ Error loading projects: %v", err)
 	}
-	if len(projects) == 0 {
+	if len(selection.Projects) == 0 {
 		return "No projects found. Please create a project first using the web interface."
 	}
 
 	// If no args, show current project and list available projects
-	if strings.TrimSpace(args) == "" {
-		currentProjectID := s.getActiveProject(userID)
+	if selection.TargetName == "" {
 		var currentProjectName string
-		for _, p := range projects {
-			if p.ID == currentProjectID {
-				currentProjectName = p.Name
-				break
-			}
+		if selection.Current != nil {
+			currentProjectName = selection.Current.Name
 		}
 
 		var projectList strings.Builder
 		projectList.WriteString(fmt.Sprintf("📂 *Current project:* %s\n\n", currentProjectName))
 		projectList.WriteString("*Available projects:*\n")
-		for _, p := range projects {
+		for _, p := range selection.Projects {
 			marker := ""
 			if p.ID == currentProjectID {
 				marker = " ← _current_"
@@ -566,32 +575,12 @@ func (s *TelegramService) handleProject(userID int64, args string) string {
 		return projectList.String()
 	}
 
-	// Switch to the specified project (by name or ID)
-	targetName := strings.TrimSpace(args)
-	var targetProject *models.Project
-	for i := range projects {
-		if strings.EqualFold(projects[i].Name, targetName) || projects[i].ID == targetName {
-			targetProject = &projects[i]
-			break
-		}
-	}
-
-	if targetProject == nil {
-		var availableNames []string
-		for _, p := range projects {
-			availableNames = append(availableNames, p.Name)
-		}
+	if selection.Target == nil {
 		return fmt.Sprintf("❌ Project not found: %q\n\nAvailable projects: %s",
-			targetName, strings.Join(availableNames, ", "))
+			selection.TargetName, strings.Join(selection.AvailableNames, ", "))
 	}
 
-	// Persist before publishing the switch to the active-project cache. A failed
-	// write must leave both the durable selection and live routing unchanged.
-	if err := s.setTelegramActiveProject(ctx, userID, targetProject.ID); err != nil {
-		applog.Infof("[telegram] failed to switch project for user %d: %v", userID, err)
-		return fmt.Sprintf("❌ Error switching project: %v", err)
-	}
-	return fmt.Sprintf("✅ Switched to project: *%s*", targetProject.Name)
+	return fmt.Sprintf("✅ Switched to project: *%s*", selection.Target.Name)
 }
 
 // handleChatMessage forwards a Telegram message to the chat orchestrator.
