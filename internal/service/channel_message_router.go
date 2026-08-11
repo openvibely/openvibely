@@ -201,43 +201,22 @@ func (r *ChannelMessageRouter) SendDirectTarget(ctx context.Context, projectID s
 	if strings.TrimSpace(req.Message) == "" {
 		return r.auditAndReturn(ctx, projectID, "", "", "", "", req.Message, sendMessageError("send_message requires message"))
 	}
-	platform := strings.ToLower(strings.TrimSpace(target.Platform))
-	targetID := strings.TrimSpace(target.TargetID)
-	threadID := strings.TrimSpace(target.ThreadID)
-	targetKind := strings.ToLower(strings.TrimSpace(target.TargetKind))
-	if platform != "slack" && platform != "telegram" && platform != "email" && platform != "discord" {
-		return r.auditAndReturn(ctx, projectID, "", "", "", "", req.Message, sendMessageError("Unsupported platform"))
+	normalized, err := NormalizeOutboundChannelTarget(models.ChannelTarget{
+		ProjectID:      target.ProjectID,
+		Platform:       target.Platform,
+		TargetKind:     target.TargetKind,
+		Name:           target.Name,
+		TargetID:       target.TargetID,
+		ThreadID:       target.ThreadID,
+		Home:           target.Home,
+		DefaultSubject: target.DefaultSubject,
+	})
+	if err != nil {
+		platform := strings.ToLower(strings.TrimSpace(target.Platform))
+		targetKind := strings.ToLower(strings.TrimSpace(target.TargetKind))
+		return r.auditAndReturn(ctx, projectID, platform, targetKind, strings.TrimSpace(target.TargetID), strings.TrimSpace(target.ThreadID), req.Message, sendMessageError(err.Error()))
 	}
-	if targetID == "" {
-		return r.auditAndReturn(ctx, projectID, platform, "", "", "", req.Message, sendMessageError("Target ID is required"))
-	}
-	directUser := targetKind == "user" && (platform == "slack" || platform == "discord")
-	if directUser {
-		// For user DM draft tests, validate the user ID format.
-		if platform == "slack" && !slackUserTargetPattern.MatchString(targetID) {
-			return r.auditAndReturn(ctx, projectID, platform, targetKind, targetID, threadID, req.Message, sendMessageError(fmt.Sprintf("Invalid Slack user ID %q; expected format U...", targetID)))
-		}
-		if platform == "discord" && !discordUserTargetPattern.MatchString(targetID) {
-			return r.auditAndReturn(ctx, projectID, platform, targetKind, targetID, threadID, req.Message, sendMessageError(fmt.Sprintf("Invalid Discord user ID %q; expected a numeric snowflake", targetID)))
-		}
-	} else {
-		if platform == "email" {
-			normalized, err := NormalizeOutboundEmailForTarget(targetID)
-			if err != nil {
-				return r.auditAndReturn(ctx, projectID, platform, targetKind, targetID, threadID, req.Message, sendMessageError(err.Error()))
-			}
-			targetID = normalized
-		}
-		if !isNativeTarget(platform, targetID) {
-			return r.auditAndReturn(ctx, projectID, platform, targetKind, targetID, threadID, req.Message, sendMessageError(fmt.Sprintf("Invalid %s target %q", platform, targetID)))
-		}
-		if platform == "telegram" && threadID != "" {
-			if _, err := strconv.Atoi(threadID); err != nil {
-				return r.auditAndReturn(ctx, projectID, platform, targetKind, targetID, threadID, req.Message, sendMessageError("telegram thread id must be an integer"))
-			}
-		}
-	}
-	resolved := resolvedMessageTarget{Platform: platform, TargetKind: targetKind, TargetID: targetID, ThreadID: threadID, DefaultSubject: strings.TrimSpace(target.DefaultSubject), DirectUser: directUser}
+	resolved := fromStoredTarget(normalized)
 	result := r.dispatch(ctx, req, resolved)
 	return r.auditAndReturn(ctx, projectID, resolved.Platform, resolved.TargetKind, resolved.TargetID, resolved.ThreadID, req.Message, result)
 }
@@ -302,12 +281,8 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 		if userID == "" {
 			return resolvedMessageTarget{}, fmt.Errorf("%s user DM target requires %s:user:<user_id>", platform, platform)
 		}
-		// Validate user ID format.
-		if platform == "slack" && !slackUserTargetPattern.MatchString(userID) {
-			return resolvedMessageTarget{}, fmt.Errorf("invalid Slack user ID %q; expected format U...", userID)
-		}
-		if platform == "discord" && !discordUserTargetPattern.MatchString(userID) {
-			return resolvedMessageTarget{}, fmt.Errorf("invalid Discord user ID %q; expected a numeric snowflake", userID)
+		if err := validateOutboundUserDMTarget(platform, userID); err != nil {
+			return resolvedMessageTarget{}, err
 		}
 		// Prefer a saved user-kind target, then allow system-authorized direct users
 		// before falling through to the explicit-target policy.
@@ -351,10 +326,8 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 		}
 		return resolvedMessageTarget{}, fmt.Errorf("Invalid %s target %q; call send_message with action=list", platform, ref)
 	}
-	if platform == "telegram" && threadID != "" {
-		if _, err := strconv.Atoi(threadID); err != nil {
-			return resolvedMessageTarget{}, fmt.Errorf("telegram thread id must be an integer")
-		}
+	if err := validateOutboundTelegramThreadID(platform, threadID); err != nil {
+		return resolvedMessageTarget{}, err
 	}
 	if platform == "discord" && ref == "channel" {
 		channelID := strings.TrimSpace(threadID)
@@ -409,7 +382,7 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 	if !r.allowExplicitTargets(ctx, projectID) {
 		return resolvedMessageTarget{}, fmt.Errorf("Explicit %s target is not saved for this project; call send_message with action=list", platform)
 	}
-	return resolvedMessageTarget{Platform: platform, TargetKind: defaultResolvedTargetKind(platform), TargetID: ref, ThreadID: threadID}, nil
+	return resolvedMessageTarget{Platform: platform, TargetKind: models.DefaultChannelTargetKind(platform), TargetID: ref, ThreadID: threadID}, nil
 }
 func (r *ChannelMessageRouter) dispatch(ctx context.Context, req SendMessageRequest, target resolvedMessageTarget) SendMessageResult {
 	switch target.Platform {
@@ -568,6 +541,84 @@ func isOutboundDirectUserTarget(platform, ref string) bool {
 	}
 }
 
+// NormalizeOutboundChannelTarget returns the canonical saved/draft outbound target representation.
+func NormalizeOutboundChannelTarget(target models.ChannelTarget) (models.ChannelTarget, error) {
+	target.ID = strings.TrimSpace(target.ID)
+	target.ProjectID = strings.TrimSpace(target.ProjectID)
+	target.Platform = strings.ToLower(strings.TrimSpace(target.Platform))
+	target.TargetKind = strings.ToLower(strings.TrimSpace(target.TargetKind))
+	target.Name = strings.Trim(strings.ToLower(strings.TrimSpace(target.Name)), "#")
+	target.TargetID = strings.TrimSpace(target.TargetID)
+	target.ThreadID = strings.TrimSpace(target.ThreadID)
+	target.DefaultSubject = strings.TrimSpace(target.DefaultSubject)
+
+	if target.Platform != "slack" && target.Platform != "telegram" && target.Platform != "email" && target.Platform != "discord" {
+		return target, fmt.Errorf("Unsupported platform")
+	}
+	if target.TargetKind == "" {
+		target.TargetKind = models.DefaultChannelTargetKind(target.Platform)
+	}
+	switch target.Platform {
+	case "slack", "discord":
+		if target.TargetKind != "channel" && target.TargetKind != "user" {
+			return target, fmt.Errorf("Invalid target type for %s; expected channel or user", target.Platform)
+		}
+	case "telegram":
+		target.TargetKind = "chat"
+	case "email":
+		target.TargetKind = "email"
+	}
+	if target.TargetID == "" {
+		return target, fmt.Errorf("Target ID is required")
+	}
+	if target.TargetKind == "user" {
+		if err := validateOutboundUserDMTarget(target.Platform, target.TargetID); err != nil {
+			return target, err
+		}
+		return target, nil
+	}
+	if target.Platform == "email" {
+		normalized, err := NormalizeOutboundEmailForTarget(target.TargetID)
+		if err != nil {
+			return target, err
+		}
+		target.TargetID = normalized
+	}
+	if !isNativeTarget(target.Platform, target.TargetID) {
+		return target, fmt.Errorf("Invalid %s target %q", target.Platform, target.TargetID)
+	}
+	if err := validateOutboundTelegramThreadID(target.Platform, target.ThreadID); err != nil {
+		return target, err
+	}
+	return target, nil
+}
+
+func validateOutboundUserDMTarget(platform, targetID string) error {
+	switch platform {
+	case "slack":
+		if !slackUserTargetPattern.MatchString(strings.TrimSpace(targetID)) {
+			return fmt.Errorf("Invalid Slack user ID %q; expected format U...", strings.TrimSpace(targetID))
+		}
+	case "discord":
+		if !discordUserTargetPattern.MatchString(strings.TrimSpace(targetID)) {
+			return fmt.Errorf("Invalid Discord user ID %q; expected a numeric snowflake", strings.TrimSpace(targetID))
+		}
+	default:
+		return fmt.Errorf("Invalid target type for %s; expected channel or user", platform)
+	}
+	return nil
+}
+
+func validateOutboundTelegramThreadID(platform, threadID string) error {
+	if platform != "telegram" || strings.TrimSpace(threadID) == "" {
+		return nil
+	}
+	if _, err := strconv.Atoi(strings.TrimSpace(threadID)); err != nil {
+		return fmt.Errorf("telegram thread id must be an integer")
+	}
+	return nil
+}
+
 func (r *ChannelMessageRouter) resolveAuthorizedDirectUserTarget(ctx context.Context, projectID, platform, userID string) (resolvedMessageTarget, error) {
 	userID = strings.TrimSpace(userID)
 	store := r.authorizedUserStore(platform)
@@ -649,17 +700,6 @@ func NormalizeOutboundEmailForTarget(email string) (string, error) {
 		return "", fmt.Errorf("invalid email recipient")
 	}
 	return repository.NormalizeEmailAddress(addr.Address), nil
-}
-
-func defaultResolvedTargetKind(platform string) string {
-	switch strings.ToLower(strings.TrimSpace(platform)) {
-	case "telegram":
-		return "chat"
-	case "email":
-		return "email"
-	default:
-		return "channel"
-	}
 }
 
 func (r *ChannelMessageRouter) allowExplicitTargets(ctx context.Context, projectID string) bool {
