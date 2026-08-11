@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -366,6 +367,63 @@ func TestNormalizeRepoSource(t *testing.T) {
 		if got != c.want {
 			t.Errorf("normalizeRepoSource(%q, %q) = %q, want %q", c.source, c.repoURL, got, c.want)
 		}
+	}
+}
+
+func TestParseProjectFormSettings_NormalizesCommonFieldsAndSourceValidation(t *testing.T) {
+	tc := NewTestContext(t)
+	form := url.Values{}
+	form.Set("name", "Shared Project")
+	form.Set("description", "shared settings")
+	form.Set("repo_source", "unknown")
+	form.Set("repo_path", "  /tmp/shared-local  ")
+	form.Set("repo_url", "  https://github.com/openvibely/openvibely  ")
+	form.Set("default_agent_config_id", "agent-123")
+	form.Set("max_workers", "3")
+
+	req := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	settings, err := parseProjectFormSettings(tc.echo.NewContext(req, httptest.NewRecorder()), true, false)
+	if err != nil {
+		t.Fatalf("parseProjectFormSettings returned error: %v", err)
+	}
+	if settings.Name != "Shared Project" || settings.Description != "shared settings" {
+		t.Fatalf("unexpected common fields: %+v", settings)
+	}
+	if settings.RepoSource != "github" {
+		t.Fatalf("expected repo source github from repo_url fallback, got %q", settings.RepoSource)
+	}
+	if settings.RepoPath != "/tmp/shared-local" {
+		t.Fatalf("expected normalized repo path, got %q", settings.RepoPath)
+	}
+	if settings.RepoURL != "https://github.com/openvibely/openvibely" {
+		t.Fatalf("expected trimmed repo URL, got %q", settings.RepoURL)
+	}
+	if settings.DefaultAgentConfigID == nil || *settings.DefaultAgentConfigID != "agent-123" {
+		t.Fatalf("expected default agent ID to be parsed, got %v", settings.DefaultAgentConfigID)
+	}
+	if settings.MaxWorkers == nil || *settings.MaxWorkers != 3 {
+		t.Fatalf("expected max workers 3, got %v", settings.MaxWorkers)
+	}
+	if err := settings.validateGitHubSource(&fakeGitHubService{}); err != nil {
+		t.Fatalf("expected github settings to validate with configured service: %v", err)
+	}
+
+	localForm := url.Values{}
+	localForm.Set("name", "Local Disabled")
+	localForm.Set("repo_source", "local")
+	localReq := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(localForm.Encode()))
+	localReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	_, err = parseProjectFormSettings(tc.echo.NewContext(localReq, httptest.NewRecorder()), false, false)
+	if err == nil || !strings.Contains(err.Error(), "Local repository paths are disabled") {
+		t.Fatalf("expected local-disabled validation error, got %v", err)
+	}
+	settings, err = parseProjectFormSettings(tc.echo.NewContext(localReq, httptest.NewRecorder()), false, true)
+	if err != nil {
+		t.Fatalf("expected legacy local allowance to pass, got %v", err)
+	}
+	if settings.RepoSource != "local" {
+		t.Fatalf("expected local source with legacy allowance, got %q", settings.RepoSource)
 	}
 }
 
