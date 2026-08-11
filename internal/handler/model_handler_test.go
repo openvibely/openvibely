@@ -1633,6 +1633,50 @@ func assertRefreshedModelsResponse(t *testing.T, rec *httptest.ResponseRecorder,
 	}
 }
 
+func TestNormalizeBrowserModelFormCommonWorkerAndCheckboxSettings(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+
+	createForm := url.Values{
+		"name":                {"Worker Create"},
+		"provider":            {"anthropic"},
+		"anthropic_auth_type": {"api_key"},
+		"model":               {"claude-sonnet-4-5-20250929"},
+		"temperature":         {"0.2"},
+		"model_max_workers":   {"99"},
+		"worker_timeout":      {"-5"},
+		"is_default":          {"on"},
+		"auto_start_tasks":    {"on"},
+	}
+	createReq := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	created := &models.LLMConfig{}
+	if err := h.normalizeBrowserModelForm(context.Background(), e.NewContext(createReq, httptest.NewRecorder()), created, modelFormOptions{mode: modelFormCreate}); err != nil {
+		t.Fatal(err)
+	}
+	if created.MaxWorkers != 10 || created.WorkerTimeout != 0 || !created.IsDefault || !created.AutoStartTasks || created.Temperature != 0.2 {
+		t.Fatalf("create normalization mismatch: %#v", created)
+	}
+
+	updateForm := url.Values{
+		"name":                {"Worker Update"},
+		"provider":            {"anthropic"},
+		"anthropic_auth_type": {"api_key"},
+		"model":               {"claude-sonnet-4-5-20250929"},
+		"temperature":         {"not-a-number"},
+		"model_max_workers":   {"not-a-number"},
+		"worker_timeout":      {"25"},
+	}
+	updateReq := httptest.NewRequest(http.MethodPost, "/models/id", strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updated := &models.LLMConfig{Temperature: 0.7, MaxWorkers: 4, WorkerTimeout: 12, IsDefault: true, AutoStartTasks: true}
+	if err := h.normalizeBrowserModelForm(context.Background(), e.NewContext(updateReq, httptest.NewRecorder()), updated, modelFormOptions{mode: modelFormUpdate}); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Temperature != 0.7 || updated.MaxWorkers != 4 || updated.WorkerTimeout != 25 || updated.IsDefault || updated.AutoStartTasks {
+		t.Fatalf("update normalization mismatch: %#v", updated)
+	}
+}
+
 func TestCreateModel_SubscriptionCLI(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
