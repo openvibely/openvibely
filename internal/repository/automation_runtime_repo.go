@@ -30,6 +30,21 @@ var (
 
 const AutomationExternalStaleAfter = 15 * time.Minute
 
+const listAutomationsWithStaleExternalPullRequestsSQL = `SELECT DISTINCT a.project_id, a.automation_id
+			FROM task_pull_requests pr INDEXED BY idx_task_pull_requests_updated_at_task_id
+			CROSS JOIN automation_activity_resources task_resource INDEXED BY idx_automation_activity_resources_type_resource_activity
+			CROSS JOIN automation_activities a
+			WHERE pr.updated_at < ?
+				AND task_resource.resource_type = 'task'
+				AND task_resource.resource_id = pr.task_id
+				AND a.id = task_resource.activity_id
+				AND EXISTS (
+					SELECT 1 FROM automation_activity_resources pull_resource INDEXED BY idx_automation_activity_resources_activity_type
+					WHERE pull_resource.activity_id = a.id AND pull_resource.resource_type = 'pull_request'
+				)
+			ORDER BY a.project_id, a.automation_id
+			LIMIT ?`
+
 type AutomationGitHubIssueDedupSource struct {
 	Context     models.AutomationContext `json:"context"`
 	TaskID      string                   `json:"task_id"`
@@ -2440,17 +2455,7 @@ func (r *AutomationRepo) ListAutomationsWithStaleExternalPullRequests(ctx contex
 	if limit <= 0 || limit > 200 {
 		limit = 200
 	}
-	rows, err := r.db.QueryContext(ctx, `SELECT a.project_id, a.automation_id
-		FROM automation_activities a
-		JOIN automation_activity_resources pull_resource ON pull_resource.activity_id = a.id
-			AND pull_resource.resource_type = 'pull_request'
-		JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
-			AND task_resource.resource_type = 'task'
-		JOIN task_pull_requests pr ON pr.task_id = task_resource.resource_id
-		GROUP BY a.project_id, a.automation_id
-		HAVING MIN(pr.updated_at) < ?
-		ORDER BY a.project_id, a.automation_id
-		LIMIT ?`, staleBefore.UTC().Format("2006-01-02 15:04:05"), limit)
+	rows, err := r.db.QueryContext(ctx, listAutomationsWithStaleExternalPullRequestsSQL, staleBefore.UTC().Format("2006-01-02 15:04:05"), limit)
 	if err != nil {
 		return nil, err
 	}

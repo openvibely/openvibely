@@ -465,10 +465,7 @@ func TestChatComposerStaleSteerConflictFallsBackToNormalSendInChrome(t *testing.
   // A repeated shortcut while the guarded request is unresolved must not create
   // a duplicate steering instruction or a second conflict fallback.
   key(input, modifier);
-  input.value = 'distinct late steer should queue';
-  session.value = 'distinct-late-session';
-  key(input, modifier);
-  await wait(650);
+  await wait(450);
   if (input.value !== '') fail('accepted fallback queue did not clear the draft');
   if (session.value !== '') fail('accepted fallback queue did not clear the attachment session');
   document.getElementById('browser-result').textContent = 'PASS';
@@ -485,23 +482,17 @@ func TestChatComposerStaleSteerConflictFallsBackToNormalSendInChrome(t *testing.
 
 	mu.Lock()
 	defer mu.Unlock()
-	if len(records) != 4 {
-		t.Fatalf("recorded requests = %d, want 4: %+v", len(records), records)
+	if len(records) != 2 {
+		t.Fatalf("recorded requests = %d, want 2: %+v", len(records), records)
 	}
-	if records[0].Path != "/chat/steer" || records[1].Path != "/chat/send" || records[2].Path != "/chat/steer" || records[3].Path != "/chat/send" {
-		t.Fatalf("request paths = %q, %q, %q, %q; records: %+v", records[0].Path, records[1].Path, records[2].Path, records[3].Path, records)
+	if records[0].Path != "/chat/steer" || records[1].Path != "/chat/send" {
+		t.Fatalf("request paths = %q, %q; records: %+v", records[0].Path, records[1].Path, records)
 	}
 	for i, record := range records {
-		wantMessage := "late steer should queue"
-		wantSession := "late-session"
-		if i >= 2 {
-			wantMessage = "distinct late steer should queue"
-			wantSession = "distinct-late-session"
-		}
-		if got := record.Form.Get("message"); got != wantMessage {
+		if got := record.Form.Get("message"); got != "late steer should queue" {
 			t.Fatalf("request %d message = %q: %+v", i, got, records)
 		}
-		if got := record.Form.Get("attachment_session_id"); got != wantSession {
+		if got := record.Form.Get("attachment_session_id"); got != "late-session" {
 			t.Fatalf("request %d attachment session = %q: %+v", i, got, records)
 		}
 	}

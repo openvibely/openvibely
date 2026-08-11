@@ -1841,9 +1841,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							var usesAppleShortcuts = chatComposerUsesAppleShortcuts();
 							var shortcutModifierHeld = false;
 							var steerRequestInFlight = false;
-							var steerRequestSignature = '';
-							var steerFallbackPending = false;
-							var queuedSteerSubmissions = [];
 							function shortcutModifierPressed(event) {
 							return usesAppleShortcuts ? event.metaKey : event.ctrlKey;
 						}
@@ -1897,25 +1894,8 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						}
 							function submitComposer(endpoint, intent, payload) {
 								if (!endpoint) return;
-								if (intent === 'steer' && typeof htmx !== 'undefined') {
-									var expectedTurnInput = form.querySelector('input[name="expected_turn_id"]');
-									payload = payload || {
-										message: messageInput ? messageInput.value : '',
-										attachmentSessionID: sessionInput ? sessionInput.value : '',
-										expectedTurnID: expectedTurnInput ? expectedTurnInput.value : ''
-									};
-									var signature = JSON.stringify([payload.message, payload.attachmentSessionID, payload.expectedTurnID]);
-									if (steerRequestInFlight) {
-										if (signature === steerRequestSignature || queuedSteerSubmissions.some(function(submission) { return submission.signature === signature; })) return;
-										queuedSteerSubmissions.push({signature: signature, payload: payload});
-										return;
-									}
-									steerRequestSignature = signature;
-								}
-								var visibleMessageBeforePayload = messageInput ? messageInput.value : '';
-								var visibleSessionBeforePayload = sessionInput ? sessionInput.value : '';
-								var restorePayloadValues = !!payload;
-								if (restorePayloadValues) {
+								if (intent === 'steer' && typeof htmx !== 'undefined' && steerRequestInFlight) return;
+								if (payload) {
 									if (messageInput && typeof payload.message === 'string') messageInput.value = payload.message;
 									if (sessionInput && typeof payload.attachmentSessionID === 'string') sessionInput.value = payload.attachmentSessionID;
 								}
@@ -1923,7 +1903,6 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								form._chatNextSubmissionPayload = payload || null;
 								if (intent === 'steer' && typeof htmx !== 'undefined') {
 									steerRequestInFlight = true;
-									steerFallbackPending = false;
 									var options = {
 									source: form,
 									target: '#pending-thread-inputs',
@@ -1939,37 +1918,21 @@ templ ChatInputForm(config ChatInputFormConfig) {
 									try {
 										var steerRequest = htmx.ajax('POST', endpoint, options);
 										if (steerRequest && typeof steerRequest.then === 'function') {
-											steerRequest.then(finishSteerRequest, finishSteerRequest);
+											steerRequest.then(function() {
+												steerRequestInFlight = false;
+											}, function() {
+												steerRequestInFlight = false;
+											});
 										}
 									} catch (error) {
-										finishSteerRequest();
+										steerRequestInFlight = false;
 										throw error;
-									} finally {
-										if (restorePayloadValues) {
-											if (messageInput) messageInput.value = visibleMessageBeforePayload;
-											if (sessionInput) sessionInput.value = visibleSessionBeforePayload;
-										}
 									}
 								return;
 							}
 							form.setAttribute('hx-post', endpoint);
-							try {
-								safeSubmit();
-							} finally {
-								if (restorePayloadValues) {
-									if (messageInput) messageInput.value = visibleMessageBeforePayload;
-									if (sessionInput) sessionInput.value = visibleSessionBeforePayload;
-								}
-							}
-							}
-							function finishSteerRequest() {
-								if (steerFallbackPending) return;
-								steerRequestInFlight = false;
-								steerRequestSignature = '';
-								if (!queuedSteerSubmissions.length) return;
-								var nextSubmission = queuedSteerSubmissions.shift();
-								submitComposer(steerEndpoint, 'steer', nextSubmission.payload);
-							}
+							safeSubmit();
+						}
 						function composerHasActiveTurn() {
 							var action = document.getElementById(formId + '-primary-action');
 							return !!action && action.getAttribute('data-composer-running') === 'true';
@@ -2827,6 +2790,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 						if (!event.detail || event.detail.elt !== form) return;
 						var request = event.detail.xhr || {};
 						var completedIntent = request._chatSubmittedIntent || 'normal';
+						if (completedIntent === 'steer') steerRequestInFlight = false;
 						var submittedMessage = request._chatSubmittedMessage || '';
 						var submittedAttachmentSession = request._chatSubmittedAttachmentSession || '';
 						var accepted = false;
@@ -2845,17 +2809,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							}
 						} else if (completedIntent === 'steer' && !request._chatSubmittedFallbackFromSteer && submittedMessage.trim() !== '' && request.status === 409) {
 							replayAsNormal = true;
-							steerFallbackPending = true;
 						}
 						if (completedIntent === 'normal') normalRequestInFlight = Math.max(0, normalRequestInFlight - 1);
 						if (completedIntent === 'normal' && !accepted) deferredSteer = null;
 						form.setAttribute('hx-post', normalPostEndpoint);
 						form.removeAttribute('data-submit-intent');
 						if (accepted && deferredSteer) setTimeout(flushDeferredSteer, 0);
-						if (completedIntent === 'normal' && request._chatSubmittedFallbackFromSteer) {
-							steerFallbackPending = false;
-							setTimeout(finishSteerRequest, 0);
-						}
 						if (replayAsNormal) {
 							setTimeout(function() {
 								submitComposer(normalPostEndpoint, 'normal', {

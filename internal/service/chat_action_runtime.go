@@ -1097,16 +1097,13 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			var req struct {
 				ProjectID    string `json:"project_id"`
 				AlertID      string `json:"alert_id"`
-				LeaseSeconds *int   `json:"lease_seconds"`
+				LeaseSeconds int    `json:"lease_seconds"`
 			}
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
 			if err := assertProject(req.ProjectID); err != nil {
 				return "", err
-			}
-			if req.LeaseSeconds != nil && (*req.LeaseSeconds < 1 || *req.LeaseSeconds > 86400) {
-				return "", fmt.Errorf("lease_seconds must be between 1 and 86400")
 			}
 			if err := requireCaller(); err != nil {
 				return "", err
@@ -1117,10 +1114,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
 				return "", err
 			}
-			var lease time.Duration
-			if req.LeaseSeconds != nil {
-				lease = time.Duration(*req.LeaseSeconds) * time.Second
-			}
+			lease := time.Duration(req.LeaseSeconds) * time.Second
 			a, err := opts.AlertSvc.ClaimApproved(ctx, opts.ProjectID, req.AlertID, opts.CallerTaskID, lease)
 			if err != nil {
 				return "", err
