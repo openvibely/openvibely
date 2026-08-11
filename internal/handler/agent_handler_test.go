@@ -2088,6 +2088,10 @@ func TestHandler_AgentDialogFormParsing_CreateAndUpdatePersistSharedFields(t *te
 			if rec.Code != http.StatusOK {
 				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 			}
+			body := rec.Body.String()
+			if !strings.Contains(body, `id="agents-container"`) || !strings.Contains(body, `data-agent-name="Dialog Agent `+tc.name+`"`) {
+				t.Fatalf("expected agent list fragment containing saved agent, got %s", body)
+			}
 
 			stored, err := agentRepo.GetByKey(t.Context(), "dialog_agent_"+tc.name)
 			if err != nil {
