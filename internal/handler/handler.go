@@ -351,24 +351,10 @@ func (h *Handler) cancelRunningExecutionsAndPublish(ctx context.Context, taskID,
 }
 
 func (h *Handler) publishExecutionTerminal(execID string, status models.ExecutionStatus, errMsg string) {
-	if h == nil || h.executionStreamHub == nil || execID == "" {
+	if h == nil {
 		return
 	}
-	event := events.ExecutionStreamEvent{ExecID: execID}
-	switch status {
-	case models.ExecCompleted:
-		event.Type = events.ExecutionStreamDone
-		event.Status = "completed"
-	case models.ExecCancelled:
-		event.Type = events.ExecutionStreamDone
-		event.Status = "cancelled"
-	case models.ExecFailed:
-		event.Type = events.ExecutionStreamError
-		event.Error = errMsg
-	default:
-		return
-	}
-	h.executionStreamHub.Close(execID, event)
+	h.executionStreamHub.CloseTerminal(execID, status, errMsg)
 }
 
 // SetTelegramAuthRepo sets the Telegram authorization repo for managing authorized users.

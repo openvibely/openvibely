@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 type ExecutionStreamEventType string
@@ -169,6 +170,27 @@ func (h *ExecutionStreamHub) Publish(event ExecutionStreamEvent) {
 		}
 		e.guard.mu.Unlock()
 	}
+}
+
+func (h *ExecutionStreamHub) CloseTerminal(execID string, status models.ExecutionStatus, errMsg string) {
+	if h == nil || execID == "" {
+		return
+	}
+	event := ExecutionStreamEvent{ExecID: execID}
+	switch status {
+	case models.ExecCompleted:
+		event.Type = ExecutionStreamDone
+		event.Status = string(models.ExecCompleted)
+	case models.ExecCancelled:
+		event.Type = ExecutionStreamDone
+		event.Status = string(models.ExecCancelled)
+	case models.ExecFailed:
+		event.Type = ExecutionStreamError
+		event.Error = errMsg
+	default:
+		return
+	}
+	h.Close(execID, event)
 }
 
 func (h *ExecutionStreamHub) Close(execID string, event ExecutionStreamEvent) {

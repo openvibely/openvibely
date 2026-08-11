@@ -174,24 +174,10 @@ func (s *LLMService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 }
 
 func (s *LLMService) publishExecutionTerminal(execID string, status models.ExecutionStatus, errMsg string) {
-	if s == nil || s.executionStreamHub == nil || execID == "" {
+	if s == nil {
 		return
 	}
-	event := events.ExecutionStreamEvent{ExecID: execID}
-	switch status {
-	case models.ExecCompleted:
-		event.Type = events.ExecutionStreamDone
-		event.Status = "completed"
-	case models.ExecCancelled:
-		event.Type = events.ExecutionStreamDone
-		event.Status = "cancelled"
-	case models.ExecFailed:
-		event.Type = events.ExecutionStreamError
-		event.Error = errMsg
-	default:
-		return
-	}
-	s.executionStreamHub.Close(execID, event)
+	s.executionStreamHub.CloseTerminal(execID, status, errMsg)
 }
 
 func (s *LLMService) SetQueuedTaskThreadPromoter(promoter func(taskID string)) {

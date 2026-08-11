@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 func receiveExecutionStreamEvent(t *testing.T, ch <-chan ExecutionStreamEvent) ExecutionStreamEvent {
@@ -84,6 +86,76 @@ func TestExecutionStreamHubFansOutAndClosesTerminal(t *testing.T) {
 	}
 	if hub.SubscriberCount() != 0 {
 		t.Fatalf("expected subscribers cleaned up after close, got %d", hub.SubscriberCount())
+	}
+}
+
+func TestExecutionStreamHubCloseTerminalMapsExecutionStatuses(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     models.ExecutionStatus
+		errMsg     string
+		wantType   ExecutionStreamEventType
+		wantStatus string
+		wantError  string
+	}{
+		{
+			name:       "completed",
+			status:     models.ExecCompleted,
+			wantType:   ExecutionStreamDone,
+			wantStatus: string(models.ExecCompleted),
+		},
+		{
+			name:       "cancelled",
+			status:     models.ExecCancelled,
+			wantType:   ExecutionStreamDone,
+			wantStatus: string(models.ExecCancelled),
+		},
+		{
+			name:      "failed",
+			status:    models.ExecFailed,
+			errMsg:    "provider failed",
+			wantType:  ExecutionStreamError,
+			wantError: "provider failed",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			hub := NewExecutionStreamHub()
+			sub, _, err := hub.Subscribe("exec")
+			if err != nil {
+				t.Fatalf("subscribe: %v", err)
+			}
+
+			hub.CloseTerminal("exec", test.status, test.errMsg)
+
+			event := receiveExecutionStreamEvent(t, sub)
+			if event.ExecID != "exec" || event.Type != test.wantType || event.Status != test.wantStatus || event.Error != test.wantError {
+				t.Fatalf("unexpected terminal event: %+v", event)
+			}
+			if _, ok := <-sub; ok {
+				t.Fatal("subscriber remained open after terminal close")
+			}
+			if got := hub.SubscriberCount(); got != 0 {
+				t.Fatalf("subscriber count after terminal close = %d", got)
+			}
+		})
+	}
+}
+
+func TestExecutionStreamHubCloseTerminalIgnoresNonTerminalStatuses(t *testing.T) {
+	hub := NewExecutionStreamHub()
+	sub, unsubscribe, err := hub.Subscribe("exec")
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer unsubscribe()
+
+	hub.CloseTerminal("exec", models.ExecRunning, "")
+
+	assertNoExecutionStreamEvent(t, sub)
+	if got := hub.SubscriberCount(); got != 1 {
+		t.Fatalf("subscriber count after non-terminal status = %d", got)
 	}
 }
 
