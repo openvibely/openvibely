@@ -176,16 +176,23 @@ func normalizeRepoSource(repoSource string, repoURL string) string {
 }
 
 type projectFormSettings struct {
-	Name                 string
-	Description          string
-	RepoSource           string
-	RepoPath             string
-	RepoURL              string
-	DefaultAgentConfigID *string
-	MaxWorkers           *int
+	Name                       string
+	Description                string
+	RepoSource                 string
+	RepoPath                   string
+	RepoURL                    string
+	DefaultAgentConfigID       *string
+	MaxWorkers                 *int
+	PreserveLegacyLocalProject bool
 }
 
-func parseProjectFormSettings(c echo.Context, localRepoPathEnabled bool, allowDisabledLocalSource bool) (projectFormSettings, error) {
+type projectFormSettingsOptions struct {
+	LocalRepoPathEnabled bool
+	GitHubSvc            GitHubServiceProvider
+	CurrentProject       *models.Project
+}
+
+func parseProjectFormSettings(c echo.Context, opts projectFormSettingsOptions) (projectFormSettings, error) {
 	settings := projectFormSettings{
 		Name:        c.FormValue("name"),
 		Description: c.FormValue("description"),
@@ -193,8 +200,17 @@ func parseProjectFormSettings(c echo.Context, localRepoPathEnabled bool, allowDi
 		RepoPath:    normalizeRepoPathInput(c.FormValue("repo_path")),
 		RepoURL:     strings.TrimSpace(c.FormValue("repo_url")),
 	}
-	if settings.RepoSource == "local" && !localRepoPathEnabled && !allowDisabledLocalSource {
+	settings.PreserveLegacyLocalProject = !opts.LocalRepoPathEnabled && settings.RepoSource == "local" && opts.CurrentProject != nil && opts.CurrentProject.RepoURL == ""
+	if settings.RepoSource == "local" && !opts.LocalRepoPathEnabled && !settings.PreserveLegacyLocalProject {
 		return settings, errors.New("Local repository paths are disabled in this environment")
+	}
+	if settings.RepoSource == "github" {
+		if settings.RepoURL == "" {
+			return settings, errors.New("GitHub URL is required")
+		}
+		if opts.GitHubSvc == nil {
+			return settings, errors.New("GitHub integration is not configured")
+		}
 	}
 	if agentID := c.FormValue("default_agent_config_id"); agentID != "" {
 		settings.DefaultAgentConfigID = &agentID
@@ -205,19 +221,6 @@ func parseProjectFormSettings(c echo.Context, localRepoPathEnabled bool, allowDi
 		}
 	}
 	return settings, nil
-}
-
-func (s projectFormSettings) validateGitHubSource(githubSvc GitHubServiceProvider) error {
-	if s.RepoSource != "github" {
-		return nil
-	}
-	if s.RepoURL == "" {
-		return errors.New("GitHub URL is required")
-	}
-	if githubSvc == nil {
-		return errors.New("GitHub integration is not configured")
-	}
-	return nil
 }
 
 func (h *Handler) isLocalRepoPathEnabled() bool {
@@ -364,7 +367,10 @@ func (h *Handler) PickProjectFolder(c echo.Context) error {
 
 func (h *Handler) CreateProject(c echo.Context) error {
 	localRepoPathEnabled := h.isLocalRepoPathEnabled()
-	settings, err := parseProjectFormSettings(c, localRepoPathEnabled, false)
+	settings, err := parseProjectFormSettings(c, projectFormSettingsOptions{
+		LocalRepoPathEnabled: localRepoPathEnabled,
+		GitHubSvc:            h.githubSvc,
+	})
 	if err != nil {
 		return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
@@ -391,11 +397,6 @@ func (h *Handler) CreateProject(c echo.Context) error {
 	}
 
 	if settings.RepoSource == "github" {
-		if err := settings.validateGitHubSource(h.githubSvc); err != nil {
-			_ = h.projectSvc.Delete(c.Request().Context(), p.ID)
-			return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
-		}
-
 		var clonedPath, normalizedURL string
 		clonedPath, normalizedURL, err := h.githubSvc.CloneProjectRepo(c.Request().Context(), p.ID, p.RepoURL)
 		if err != nil {
@@ -474,10 +475,11 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 
 	localRepoPathEnabled := h.isLocalRepoPathEnabled()
 	currentRepoPath := p.RepoPath
-	currentRepoURL := p.RepoURL
-	preliminarySource := normalizeRepoSource(c.FormValue("repo_source"), c.FormValue("repo_url"))
-	legacyLocalProject := !localRepoPathEnabled && preliminarySource == "local" && currentRepoURL == ""
-	settings, err := parseProjectFormSettings(c, localRepoPathEnabled, legacyLocalProject)
+	settings, err := parseProjectFormSettings(c, projectFormSettingsOptions{
+		LocalRepoPathEnabled: localRepoPathEnabled,
+		GitHubSvc:            h.githubSvc,
+		CurrentProject:       p,
+	})
 	if err != nil {
 		return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
@@ -488,16 +490,13 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 	p.MaxWorkers = settings.MaxWorkers
 	if settings.RepoSource == "github" {
 		p.RepoURL = settings.RepoURL
-		if err := settings.validateGitHubSource(h.githubSvc); err != nil {
-			return h.projectErrorResponse(c, http.StatusBadRequest, err.Error())
-		}
 		reclonedPath, normalizedURL, err := h.githubSvc.RecloneProjectRepo(c.Request().Context(), p.ID, currentRepoPath, p.RepoURL)
 		if err != nil {
 			return h.projectGitHubCloneErrorResponse(c, http.StatusBadRequest, err)
 		}
 		p.RepoPath = reclonedPath
 		p.RepoURL = normalizedURL
-	} else if legacyLocalProject {
+	} else if settings.PreserveLegacyLocalProject {
 		// Preserve existing local-path configuration for legacy projects when local paths
 		// are disabled in this environment.
 		p.RepoPath = currentRepoPath
@@ -506,7 +505,7 @@ func (h *Handler) UpdateProject(c echo.Context) error {
 		p.RepoPath = settings.RepoPath
 		p.RepoURL = ""
 	}
-	applog.Infof("[handler] UpdateProject id=%s name=%q repo_source=%q repo_path=%q repo_url=%q default_agent=%v max_workers=%v local_repo_path_enabled=%v legacy_local_project=%v", projectID, p.Name, settings.RepoSource, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, localRepoPathEnabled, legacyLocalProject)
+	applog.Infof("[handler] UpdateProject id=%s name=%q repo_source=%q repo_path=%q repo_url=%q default_agent=%v max_workers=%v local_repo_path_enabled=%v legacy_local_project=%v", projectID, p.Name, settings.RepoSource, p.RepoPath, p.RepoURL, p.DefaultAgentConfigID, p.MaxWorkers, localRepoPathEnabled, settings.PreserveLegacyLocalProject)
 
 	if err := h.projectSvc.Update(c.Request().Context(), p); err != nil {
 		applog.Infof("[handler] UpdateProject error: %v", err)

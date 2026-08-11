@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 // ---- Home ----
@@ -383,7 +385,10 @@ func TestParseProjectFormSettings_NormalizesCommonFieldsAndSourceValidation(t *t
 
 	req := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	settings, err := parseProjectFormSettings(tc.echo.NewContext(req, httptest.NewRecorder()), true, false)
+	settings, err := parseProjectFormSettings(tc.echo.NewContext(req, httptest.NewRecorder()), projectFormSettingsOptions{
+		LocalRepoPathEnabled: true,
+		GitHubSvc:            &fakeGitHubService{},
+	})
 	if err != nil {
 		t.Fatalf("parseProjectFormSettings returned error: %v", err)
 	}
@@ -405,8 +410,23 @@ func TestParseProjectFormSettings_NormalizesCommonFieldsAndSourceValidation(t *t
 	if settings.MaxWorkers == nil || *settings.MaxWorkers != 3 {
 		t.Fatalf("expected max workers 3, got %v", settings.MaxWorkers)
 	}
-	if err := settings.validateGitHubSource(&fakeGitHubService{}); err != nil {
-		t.Fatalf("expected github settings to validate with configured service: %v", err)
+
+	_, err = parseProjectFormSettings(tc.echo.NewContext(req, httptest.NewRecorder()), projectFormSettingsOptions{LocalRepoPathEnabled: true})
+	if err == nil || !strings.Contains(err.Error(), "GitHub integration is not configured") {
+		t.Fatalf("expected github integration validation error, got %v", err)
+	}
+
+	missingURLForm := url.Values{}
+	missingURLForm.Set("name", "Missing URL")
+	missingURLForm.Set("repo_source", "github")
+	missingURLReq := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(missingURLForm.Encode()))
+	missingURLReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	_, err = parseProjectFormSettings(tc.echo.NewContext(missingURLReq, httptest.NewRecorder()), projectFormSettingsOptions{
+		LocalRepoPathEnabled: true,
+		GitHubSvc:            &fakeGitHubService{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "GitHub URL is required") {
+		t.Fatalf("expected github URL validation error, got %v", err)
 	}
 
 	localForm := url.Values{}
@@ -414,16 +434,22 @@ func TestParseProjectFormSettings_NormalizesCommonFieldsAndSourceValidation(t *t
 	localForm.Set("repo_source", "local")
 	localReq := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(localForm.Encode()))
 	localReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	_, err = parseProjectFormSettings(tc.echo.NewContext(localReq, httptest.NewRecorder()), false, false)
+	_, err = parseProjectFormSettings(tc.echo.NewContext(localReq, httptest.NewRecorder()), projectFormSettingsOptions{LocalRepoPathEnabled: false})
 	if err == nil || !strings.Contains(err.Error(), "Local repository paths are disabled") {
 		t.Fatalf("expected local-disabled validation error, got %v", err)
 	}
-	settings, err = parseProjectFormSettings(tc.echo.NewContext(localReq, httptest.NewRecorder()), false, true)
+	settings, err = parseProjectFormSettings(tc.echo.NewContext(localReq, httptest.NewRecorder()), projectFormSettingsOptions{
+		LocalRepoPathEnabled: false,
+		CurrentProject:       &models.Project{RepoPath: "/tmp/legacy", RepoURL: ""},
+	})
 	if err != nil {
-		t.Fatalf("expected legacy local allowance to pass, got %v", err)
+		t.Fatalf("expected legacy local preservation to pass, got %v", err)
 	}
 	if settings.RepoSource != "local" {
 		t.Fatalf("expected local source with legacy allowance, got %q", settings.RepoSource)
+	}
+	if !settings.PreserveLegacyLocalProject {
+		t.Fatal("expected legacy local preservation marker")
 	}
 }
 
