@@ -128,36 +128,22 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 		return err
 	}
 
-	s, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo).CreateForTask(c.Request().Context(), service.CreateScheduleForTaskRequest{
-		TaskID:              taskID,
-		RunAt:               formValues.runAt,
-		RepeatType:          formValues.repeatType,
-		RepeatInterval:      formValues.repeatInterval,
-		ClearContextOnStart: &clearContextOnStart,
+	result, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).CreateAbsoluteForTask(c.Request().Context(), service.CreateAbsoluteScheduleForTaskRequest{
+		TaskID:                 taskID,
+		RunAt:                  formValues.runAt,
+		RepeatType:             formValues.repeatType,
+		RepeatInterval:         formValues.repeatInterval,
+		ClearContextOnStart:    &clearContextOnStart,
+		AgentDefinitionPresent: agentAssignmentPresent,
+		AgentDefinitionID:      agentDefinitionID,
 	})
 	if err != nil {
 		applog.Infof("[handler] CreateSchedule error: %v", err)
 		return err
 	}
-	if agentAssignmentPresent {
-		if err := h.taskRepo.UpdateAgentDefinition(c.Request().Context(), taskID, agentDefinitionID); err != nil {
-			applog.Infof("[handler] CreateSchedule primary agent update error: %v", err)
-			return err
-		}
-	}
-	applog.Infof("[handler] CreateSchedule success id=%s next_run=%v", s.ID, s.NextRun)
-
-	// Reset terminal task status to pending so a newly-created one-time schedule
-	// is eligible when due instead of being skipped forever by the scheduler.
-	if h.taskSvc != nil && s.RepeatType == models.RepeatOnce && s.NextRun != nil {
-		task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-		if err == nil && task != nil && task.Status != models.StatusPending && task.Status != models.StatusRunning {
-			if err := h.taskSvc.UpdateStatus(c.Request().Context(), task.ID, models.StatusPending); err != nil {
-				applog.Infof("[handler] CreateSchedule error resetting task status to pending: %v", err)
-			} else {
-				applog.Infof("[handler] CreateSchedule reset task=%s status to pending (was %s)", task.ID, task.Status)
-			}
-		}
+	applog.Infof("[handler] CreateSchedule success id=%s next_run=%v", result.Schedule.ID, result.Schedule.NextRun)
+	for _, warning := range result.Warnings {
+		applog.Infof("[handler] CreateSchedule warning: %v", warning)
 	}
 
 	// For HTMX requests, return the updated task detail content
@@ -201,44 +187,29 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 		return err
 	}
 
-	// Update schedule fields
-	schedule.RunAt = formValues.runAt
-	schedule.RepeatType = formValues.repeatType
-	schedule.RepeatInterval = formValues.repeatInterval
+	var clearContextOnStart *bool
 	if _, present := c.Request().PostForm["clear_context_on_start"]; present {
-		schedule.ClearContextOnStart = formBoolEnabled(c, "clear_context_on_start", schedule.ClearContextOnStart)
+		clearContext := formBoolEnabled(c, "clear_context_on_start", schedule.ClearContextOnStart)
+		clearContextOnStart = &clearContext
 	}
 
-	// Set NextRun to RunAt. For recurring schedules with a past RunAt, the
-	// scheduler will pick it up on its next tick, execute the task once for
-	// the missed occurrence, and advance NextRun to the next future time.
-	// Previously this pre-computed the next future occurrence for past RunAt,
-	// which skipped the current day's execution.
-	schedule.NextRun = &formValues.runAt
-
-	if err := h.scheduleRepo.Update(c.Request().Context(), schedule); err != nil {
+	result, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).ModifyAbsolute(c.Request().Context(), service.ModifyAbsoluteScheduleRequest{
+		ScheduleID:             schedule.ID,
+		RunAt:                  formValues.runAt,
+		RepeatType:             formValues.repeatType,
+		RepeatInterval:         formValues.repeatInterval,
+		ClearContextOnStart:    clearContextOnStart,
+		AgentDefinitionPresent: agentAssignmentPresent,
+		AgentDefinitionID:      agentDefinitionID,
+	})
+	if err != nil {
 		applog.Infof("[handler] UpdateSchedule error: %v", err)
 		return err
 	}
-	if agentAssignmentPresent {
-		if err := h.taskRepo.UpdateAgentDefinition(c.Request().Context(), schedule.TaskID, agentDefinitionID); err != nil {
-			applog.Infof("[handler] UpdateSchedule primary agent update error: %v", err)
-			return err
-		}
-	}
+	schedule = result.Schedule
 	applog.Infof("[handler] UpdateSchedule success id=%s next_run=%v", schedule.ID, schedule.NextRun)
-
-	// Reset task status to pending so the scheduler can pick it up.
-	// This allows completed/failed tasks to run again after schedule changes.
-	if h.taskSvc != nil && schedule.NextRun != nil {
-		task, err := h.taskSvc.GetByID(c.Request().Context(), schedule.TaskID)
-		if err == nil && task != nil && task.Status != models.StatusPending && task.Status != models.StatusRunning {
-			if err := h.taskSvc.UpdateStatus(c.Request().Context(), task.ID, models.StatusPending); err != nil {
-				applog.Infof("[handler] UpdateSchedule error resetting task status to pending: %v", err)
-			} else {
-				applog.Infof("[handler] UpdateSchedule reset task=%s status to pending (was %s)", task.ID, task.Status)
-			}
-		}
+	for _, warning := range result.Warnings {
+		applog.Infof("[handler] UpdateSchedule warning: %v", warning)
 	}
 
 	// For HTMX requests, return the updated task detail content
@@ -360,6 +331,11 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 	id := c.Param("id")
 	applog.Infof("[handler] DeleteSchedule id=%s", id)
 
+	// Browser delete intentionally removes only the schedule row. Runtime
+	// delete_schedule uses ScheduleActionService.Delete, which moves a scheduled
+	// task back to Backlog when the last schedule is removed. The browser route
+	// preserves its historical category behavior because callers remain on the
+	// current page and may manage the task category separately.
 	if err := h.scheduleRepo.Delete(c.Request().Context(), id); err != nil {
 		applog.Infof("[handler] DeleteSchedule error: %v", err)
 		return err
