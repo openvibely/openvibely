@@ -456,6 +456,9 @@ func TestChatComposerStaleSteerConflictFallsBackToNormalSendInChrome(t *testing.
   var session = document.querySelector('#chat-form input[name="attachment_session_id"]');
   var apple = input.placeholder.includes('⌘+⏎ steers');
   var modifier = apple ? {metaKey:true} : {ctrlKey:true};
+  input.value = '';
+  key(input, modifier);
+  await wait(50);
   input.value = 'late steer should queue';
   session.value = 'late-session';
   key(input, modifier);

@@ -1916,7 +1916,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 											};
 										}
 									try {
-										htmx.ajax('POST', endpoint, options);
+										var steerRequest = htmx.ajax('POST', endpoint, options);
+										if (steerRequest && typeof steerRequest.then === 'function') {
+											steerRequest.then(function() {
+												steerRequestInFlight = false;
+											}, function() {
+												steerRequestInFlight = false;
+											});
+										}
 									} catch (error) {
 										steerRequestInFlight = false;
 										throw error;
