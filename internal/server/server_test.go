@@ -31,6 +31,20 @@ type updateStarterProbe struct {
 func (p *updateStarterProbe) StartRecovery(context.Context) { p.recovery++ }
 func (p *updateStarterProbe) StartChecks(context.Context)   { p.checks++ }
 
+func mockUpdateServiceURL(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/updates/check" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"schema_version":1,"update_available":false}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
 func TestStartUpdateCoordinatorAlwaysRunsRecoveryAndChecks(t *testing.T) {
 	probe := &updateStarterProbe{}
 	startUpdateCoordinator(context.Background(), probe)
@@ -159,6 +173,7 @@ func TestStart_RejectsDirectHostedSSOAuthModeInDesktop(t *testing.T) {
 		AppDataDir:               filepath.Join(tmpDir, "appdata"),
 		Environment:              "production",
 		EnvironmentExplicitlySet: true,
+		UpdateServiceURL:         mockUpdateServiceURL(t),
 		AuthMode:                 auth.AuthModeHostedSSO,
 		HostedSSOControlURL:      "https://openvibely.ai",
 		HostedSSOInstanceID:      "instance-1",
@@ -197,6 +212,7 @@ func TestStart_HostedSSOWiringRedirectsDirectNavigation(t *testing.T) {
 		AppDataDir:               filepath.Join(tmpDir, "appdata"),
 		Environment:              "production",
 		EnvironmentExplicitlySet: true,
+		UpdateServiceURL:         mockUpdateServiceURL(t),
 		AuthMode:                 auth.AuthModeHostedSSO,
 		HostedSSOEnabled:         true,
 		HostedSSOControlURL:      provider.URL,
@@ -309,12 +325,13 @@ func TestStart_BootstrapAndShutdown(t *testing.T) {
 	tmpDir := t.TempDir()
 	appDataDir := filepath.Join(tmpDir, "appdata")
 	cfg := &config.Config{
-		Mode:            config.ModeDesktop,
-		Port:            "0", // ephemeral port
-		DatabasePath:    tmpDir + "/test.db",
-		ProjectRepoRoot: tmpDir + "/repos",
-		AppDataDir:      appDataDir,
-		Environment:     "test",
+		Mode:             config.ModeDesktop,
+		Port:             "0", // ephemeral port
+		DatabasePath:     tmpDir + "/test.db",
+		ProjectRepoRoot:  tmpDir + "/repos",
+		AppDataDir:       appDataDir,
+		Environment:      "test",
+		UpdateServiceURL: mockUpdateServiceURL(t),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -373,10 +390,11 @@ func TestStart_BootstrapAndShutdown(t *testing.T) {
 func TestStart_SeedsBuiltInSystemAgentsAndMaintenanceSchedulesOnFreshDB(t *testing.T) {
 	appDataDir := filepath.Join(t.TempDir(), "fresh-appdata")
 	cfg := &config.Config{
-		Mode:        config.ModeServer,
-		Port:        "0",
-		AppDataDir:  appDataDir,
-		Environment: "test",
+		Mode:             config.ModeServer,
+		Port:             "0",
+		AppDataDir:       appDataDir,
+		Environment:      "test",
+		UpdateServiceURL: mockUpdateServiceURL(t),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -474,10 +492,11 @@ func TestStart_NormalizesAppStorageDefaults(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			appDataDir := filepath.Join(t.TempDir(), "appdata")
 			cfg := &config.Config{
-				Mode:        mode,
-				Port:        "0",
-				AppDataDir:  appDataDir,
-				Environment: "test",
+				Mode:             mode,
+				Port:             "0",
+				AppDataDir:       appDataDir,
+				Environment:      "test",
+				UpdateServiceURL: mockUpdateServiceURL(t),
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())
@@ -851,11 +870,12 @@ func TestStart_ServerModeDefaults(t *testing.T) {
 	// Verify existing server mode still works with explicit port.
 	tmpDir := t.TempDir()
 	cfg := &config.Config{
-		Mode:            config.ModeServer,
-		Port:            "0",
-		DatabasePath:    tmpDir + "/test.db",
-		ProjectRepoRoot: tmpDir + "/repos",
-		Environment:     "test",
+		Mode:             config.ModeServer,
+		Port:             "0",
+		DatabasePath:     tmpDir + "/test.db",
+		ProjectRepoRoot:  tmpDir + "/repos",
+		Environment:      "test",
+		UpdateServiceURL: mockUpdateServiceURL(t),
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

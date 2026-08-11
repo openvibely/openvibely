@@ -17,6 +17,20 @@ import (
 	"github.com/openvibely/openvibely/internal/buildinfo"
 )
 
+func mockCheckServiceURL(t *testing.T) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/updates/check" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"schema_version":1,"update_available":false}`))
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
+}
+
 func TestCoordinatorDesktopRestartRequiresJournaledHealthOutcome(t *testing.T) {
 	root := t.TempDir()
 	drainPath := filepath.Join(root, "drain.json")
@@ -345,7 +359,7 @@ func TestCoordinatorDoesNotRecoverLiveAuthorizedBinaryHelper(t *testing.T) {
 
 func TestCoordinatorCheckDoesNotOverwriteActiveTransition(t *testing.T) {
 	now := time.Unix(1000, 0).UTC()
-	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json"), Now: func() time.Time { return now }})
+	client := NewClient(ClientConfig{ServiceURL: mockCheckServiceURL(t), Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json"), Now: func() time.Time { return now }})
 	if err := client.saveState(persistedClientState{LastSuccessfulCheck: now, Cached: &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}}}); err != nil {
 		t.Fatal(err)
 	}
