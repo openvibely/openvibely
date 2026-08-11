@@ -1,6 +1,21 @@
 package models
 
-import "time"
+import (
+	"strings"
+	"time"
+)
+
+// DefaultChannelTargetKind returns the canonical outbound target kind for a platform.
+func DefaultChannelTargetKind(platform string) string {
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "telegram":
+		return "chat"
+	case "email":
+		return "email"
+	default:
+		return "channel"
+	}
+}
 
 // ChannelTarget is a saved outbound destination an agent may use with send_message.
 type ChannelTarget struct {

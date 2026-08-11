@@ -196,60 +196,34 @@ func (h *Handler) saveOutboundTargetsDraft(c echo.Context, projectID string) err
 	seenNames := make(map[string]struct{})
 	seenDestinations := make(map[string]struct{})
 	for i := 0; i < rowCount; i++ {
-		platform := strings.ToLower(strings.TrimSpace(platforms[i]))
-		targetKind := strings.ToLower(strings.TrimSpace(targetKinds[i]))
-		name := strings.Trim(strings.ToLower(strings.TrimSpace(names[i])), "#")
+		platform := strings.TrimSpace(platforms[i])
 		targetID := strings.TrimSpace(targetIDs[i])
-		threadID := strings.TrimSpace(threadIDs[i])
-		defaultSubject := strings.TrimSpace(defaultSubjects[i])
 		if platform == "" && targetID == "" {
 			continue
 		}
-		if platform != "slack" && platform != "telegram" && platform != "email" && platform != "discord" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Unsupported platform")
+		target, err := service.NormalizeOutboundChannelTarget(models.ChannelTarget{
+			ProjectID:      projectID,
+			Platform:       platform,
+			TargetKind:     targetKinds[i],
+			Name:           names[i],
+			TargetID:       targetID,
+			ThreadID:       threadIDs[i],
+			Home:           strings.EqualFold(strings.TrimSpace(homes[i]), "true"),
+			DefaultSubject: defaultSubjects[i],
+		})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		// Assign default target_kind when not provided.
-		if targetKind == "" {
-			switch platform {
-			case "telegram":
-				targetKind = "chat"
-			case "email":
-				targetKind = "email"
-			default:
-				targetKind = "channel"
-			}
-		}
-		// Validate target_kind for each platform.
-		switch platform {
-		case "slack", "discord":
-			if targetKind != "channel" && targetKind != "user" {
-				return echo.NewHTTPError(http.StatusBadRequest, "Invalid target type for "+platform+"; expected channel or user")
-			}
-		case "telegram":
-			targetKind = "chat"
-		case "email":
-			targetKind = "email"
-		}
-		if targetID == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Target ID is required")
-		}
-		if platform == "email" {
-			normalized, err := service.NormalizeOutboundEmailForTarget(targetID)
-			if err != nil {
-				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-			}
-			targetID = normalized
-		}
-		if name != "" {
-			nameKey := platform + "\x00" + name
+		if target.Name != "" {
+			nameKey := target.Platform + "\x00" + target.Name
 			if _, exists := seenNames[nameKey]; exists {
-				return echo.NewHTTPError(http.StatusBadRequest, "Duplicate outbound target name for "+platform)
+				return echo.NewHTTPError(http.StatusBadRequest, "Duplicate outbound target name for "+target.Platform)
 			}
 			seenNames[nameKey] = struct{}{}
 		}
 		// Include target_kind in the destination uniqueness key so the same ID can
 		// be saved as both a channel target and a user DM target.
-		destinationKey := platform + "\x00" + targetKind + "\x00" + targetID + "\x00" + threadID
+		destinationKey := target.Platform + "\x00" + target.TargetKind + "\x00" + target.TargetID + "\x00" + target.ThreadID
 		if _, exists := seenDestinations[destinationKey]; exists {
 			return echo.NewHTTPError(http.StatusBadRequest, "Duplicate outbound target destination")
 		}
@@ -266,7 +240,9 @@ func (h *Handler) saveOutboundTargetsDraft(c echo.Context, projectID string) err
 				return echo.NewHTTPError(http.StatusNotFound, "Outbound target not found")
 			}
 		}
-		targets = append(targets, models.ChannelTarget{ID: id, ProjectID: projectID, Platform: platform, TargetKind: targetKind, Name: name, TargetID: targetID, ThreadID: threadID, Home: strings.EqualFold(strings.TrimSpace(homes[i]), "true"), DefaultSubject: defaultSubject})
+		target.ID = id
+		target.ProjectID = projectID
+		targets = append(targets, target)
 	}
 	if err := h.channelTargetRepo.ReplaceProjectTargets(c.Request().Context(), projectID, targets); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save outbound targets")

@@ -191,8 +191,52 @@ func TestChannelMessageRouter_SendDirectTargetDoesNotRequireSavedOrExplicitPolic
 	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, sends, 2)
-	require.True(t, sends[0].Success)
-	require.True(t, sends[1].Success)
+	var sawEmail, sawDiscord bool
+	for _, send := range sends {
+		require.True(t, send.Success)
+		switch send.TargetID {
+		case "draft@example.com":
+			sawEmail = true
+			require.Equal(t, "email", send.TargetKind)
+		case "CDRAFT":
+			sawDiscord = true
+			require.Equal(t, "channel", send.TargetKind)
+		}
+	}
+	require.True(t, sawEmail)
+	require.True(t, sawDiscord)
+}
+
+func TestNormalizeOutboundChannelTargetDefaultsAndSharedValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		target     models.ChannelTarget
+		wantKind   string
+		wantID     string
+		wantThread string
+		wantErr    string
+	}{
+		{name: "slack channel default", target: models.ChannelTarget{Platform: " Slack ", TargetID: "C123"}, wantKind: "channel", wantID: "C123"},
+		{name: "telegram chat default", target: models.ChannelTarget{Platform: "telegram", TargetID: "-100123", ThreadID: "42"}, wantKind: "chat", wantID: "-100123", wantThread: "42"},
+		{name: "email default normalizes address", target: models.ChannelTarget{Platform: "email", TargetID: "Recipient <MAILBOX@Example.com>"}, wantKind: "email", wantID: "mailbox@example.com"},
+		{name: "discord channel default", target: models.ChannelTarget{Platform: "discord", TargetID: "123456789"}, wantKind: "channel", wantID: "123456789"},
+		{name: "invalid telegram thread", target: models.ChannelTarget{Platform: "telegram", TargetID: "-100123", ThreadID: "topic"}, wantErr: "telegram thread id must be an integer"},
+		{name: "invalid slack user", target: models.ChannelTarget{Platform: "slack", TargetKind: "user", TargetID: "C123"}, wantErr: "Invalid Slack user ID"},
+		{name: "invalid discord user", target: models.ChannelTarget{Platform: "discord", TargetKind: "user", TargetID: "not-a-snowflake"}, wantErr: "Invalid Discord user ID"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NormalizeOutboundChannelTarget(tt.target)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantKind, got.TargetKind)
+			require.Equal(t, tt.wantID, got.TargetID)
+			require.Equal(t, tt.wantThread, got.ThreadID)
+		})
+	}
 }
 
 func TestChannelMessageRouter_ExplicitTargetsRequireSetting(t *testing.T) {
