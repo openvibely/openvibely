@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -1632,11 +1633,9 @@ func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Tas
 	return nil
 }
 
-// GetWorktreeDiff returns the current tree diff between the target branch and
-// worktree branch. Use a direct two-dot/tree comparison rather than a
-// merge-base comparison so the Changes UI reflects the branch's net difference
-// from the current target branch after target advances, rebases, or squash
-// merges.
+// GetWorktreeDiff returns the changes introduced on the worktree branch since
+// it diverged from the target branch. This matches Git's three-dot/PR diff
+// semantics, so target-only commits do not appear as reverse changes.
 func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) string {
 	if branchName == "" || targetBranch == "" || !isGitRepoDir(repoDir) {
 		return ""
@@ -1644,7 +1643,7 @@ func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) str
 	if !gitRefExists(repoDir, branchName) || !gitRefExists(repoDir, targetBranch) {
 		return ""
 	}
-	cmd := exec.Command("git", "diff", targetBranch, branchName)
+	cmd := exec.Command("git", "diff", targetBranch+"..."+branchName)
 	cmd.Dir = repoDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1654,8 +1653,8 @@ func GetWorktreeDiff(repoDir string, branchName string, targetBranch string) str
 	return string(out)
 }
 
-// GetWorktreeDiffWithUncommitted returns the current net diff between the target
-// branch and the worktree working tree. This includes committed branch changes,
+// GetWorktreeDiffWithUncommitted returns the diff between the target/task merge
+// base and the worktree working tree. This includes committed branch changes,
 // staged changes, unstaged tracked changes, and synthetic diffs for untracked
 // files without rendering the same tracked path once for the committed branch
 // state and again for the uncommitted follow-up state.
@@ -1679,14 +1678,22 @@ func GetWorktreeDiffWithUncommitted(repoDir string, branchName string, targetBra
 	return GetWorktreeDiff(repoDir, branchName, targetBranch)
 }
 
-// captureWorktreeDiffAgainstTarget captures the net tracked-file diff between a
-// target branch and a worktree's current working tree, including staged and
-// unstaged tracked changes.
+// captureWorktreeDiffAgainstTarget captures tracked changes between the
+// target/HEAD merge base and the worktree's current working tree, including
+// staged and unstaged changes.
 func captureWorktreeDiffAgainstTarget(worktreePath, targetBranch string) (string, bool) {
 	if worktreePath == "" || targetBranch == "" || !isGitWorktreeDir(worktreePath) || !gitRefExists(worktreePath, targetBranch) {
 		return "", false
 	}
-	cmd := exec.Command("git", "diff", targetBranch)
+	mergeBaseOut, err := gitOutput(worktreePath, "merge-base", targetBranch, "HEAD")
+	if err != nil {
+		return "", false
+	}
+	mergeBase := strings.TrimSpace(string(mergeBaseOut))
+	if mergeBase == "" {
+		return "", false
+	}
+	cmd := exec.Command("git", "diff", mergeBase)
 	cmd.Dir = worktreePath
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -1807,7 +1814,7 @@ func GetWorktreeFileStats(repoDir string, branchName string, targetBranch string
 	if branchName == "" || targetBranch == "" {
 		return nil
 	}
-	cmd := exec.Command("git", "diff", "--name-status", targetBranch, branchName)
+	cmd := exec.Command("git", "diff", "--name-status", targetBranch+"..."+branchName)
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
@@ -1817,7 +1824,7 @@ func GetWorktreeFileStats(repoDir string, branchName string, targetBranch string
 }
 
 // GetWorktreeFileStatsWithUncommitted returns the file list for the same
-// reviewable net task output as GetWorktreeDiffWithUncommitted: target branch to
+// reviewable task output as GetWorktreeDiffWithUncommitted: merge base to the
 // current worktree state. It intentionally does not merge branch-vs-target stats
 // with git status (whose base is HEAD), because a post-commit revert to the
 // target would then appear in the list even though it is absent from the diff.
@@ -1826,7 +1833,16 @@ func GetWorktreeFileStatsWithUncommitted(repoDir string, branchName string, targ
 		return GetWorktreeFileStats(repoDir, branchName, targetBranch)
 	}
 
-	trackedCmd := exec.Command("git", "diff", "--name-status", targetBranch)
+	mergeBaseOut, err := gitOutput(worktreePath, "merge-base", targetBranch, "HEAD")
+	if err != nil {
+		return GetWorktreeFileStats(repoDir, branchName, targetBranch)
+	}
+	mergeBase := strings.TrimSpace(string(mergeBaseOut))
+	if mergeBase == "" {
+		return GetWorktreeFileStats(repoDir, branchName, targetBranch)
+	}
+
+	trackedCmd := exec.Command("git", "diff", "--name-status", mergeBase)
 	trackedCmd.Dir = worktreePath
 	trackedOut, err := trackedCmd.Output()
 	if err != nil {
@@ -2034,6 +2050,33 @@ func IsBranchBehindTarget(repoDir string, branchName string, targetBranch string
 
 	cmd := exec.Command("git", "-C", repoDir, "merge-base", "--is-ancestor", targetBranch, branchName)
 	return cmd.Run() != nil
+}
+
+// IsBranchDivergedFromTarget reports whether both the target and task branch
+// contain commits the other does not. Rebasing is useful in this state because
+// there are target commits to incorporate and task commits to replay.
+func IsBranchDivergedFromTarget(repoDir string, branchName string, targetBranch string) bool {
+	if branchName == "" || targetBranch == "" || !IsGitRepo(repoDir) {
+		return false
+	}
+	cmd := exec.Command("git", "-C", repoDir, "rev-list", "--left-right", "--count", targetBranch+"..."+branchName)
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	counts := strings.Fields(string(out))
+	if len(counts) != 2 {
+		return false
+	}
+	targetOnly, err := strconv.Atoi(counts[0])
+	if err != nil {
+		return false
+	}
+	branchOnly, err := strconv.Atoi(counts[1])
+	if err != nil {
+		return false
+	}
+	return targetOnly > 0 && branchOnly > 0
 }
 
 // HandlePostExecution handles worktree operations after task execution completes.

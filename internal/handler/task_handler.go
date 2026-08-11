@@ -847,7 +847,7 @@ func (h *Handler) taskRebaseAvailable(task *models.Task, project *models.Project
 	if targetBranch == "" {
 		return false
 	}
-	return service.IsBranchBehindTarget(project.RepoPath, task.WorktreeBranch, targetBranch)
+	return service.IsBranchDivergedFromTarget(project.RepoPath, task.WorktreeBranch, targetBranch)
 }
 
 func (h *Handler) reconcileAlreadyMergedBranch(ctx context.Context, task *models.Task) bool {

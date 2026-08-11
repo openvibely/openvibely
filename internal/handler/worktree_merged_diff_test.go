@@ -548,6 +548,12 @@ func TestHandler_GetTaskChanges_StaleMergedDivergedBranchShowsLocalActions(t *te
 	if !strings.Contains(body, "task branch change") {
 		t.Fatalf("expected live worktree diff for diverged branch, body=%s", body)
 	}
+	if strings.Contains(body, "target branch moved") {
+		t.Fatalf("did not expect target-only changes to appear reversed in task diff, body=%s", body)
+	}
+	if !strings.Contains(body, "/tasks/"+task.ID+"/worktree/rebase") {
+		t.Fatalf("expected rebase action for branches with unique commits on both sides, body=%s", body)
+	}
 
 	updated, err := taskRepo.GetByID(ctx, task.ID)
 	if err != nil {

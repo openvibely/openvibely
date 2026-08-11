@@ -2023,6 +2023,9 @@ func TestRebaseBranch_RebasesOntoTarget(t *testing.T) {
 	if !IsBranchBehindTarget(repoDir, branchName, defaultBranch) {
 		t.Fatal("expected task branch to be behind target before rebase")
 	}
+	if !IsBranchDivergedFromTarget(repoDir, branchName, defaultBranch) {
+		t.Fatal("expected task and target branches to be diverged before rebase")
+	}
 	result, err := ws.RebaseBranch(ctx, task, repoDir)
 	if err != nil {
 		t.Fatalf("RebaseBranch: %v", err)
@@ -2032,6 +2035,9 @@ func TestRebaseBranch_RebasesOntoTarget(t *testing.T) {
 	}
 	if IsBranchBehindTarget(repoDir, branchName, defaultBranch) {
 		t.Fatal("expected task branch to include target after rebase")
+	}
+	if IsBranchDivergedFromTarget(repoDir, branchName, defaultBranch) {
+		t.Fatal("expected task and target branches not to be diverged after rebase")
 	}
 	if out := runGitTest(t, wtPath, "log", "--oneline", defaultBranch+"..HEAD"); !strings.Contains(out, "task commit") {
 		t.Fatalf("expected rebased task commit above target, got %q", out)
@@ -3760,6 +3766,20 @@ func TestGetWorktreeDiffWithUncommitted(t *testing.T) {
 		t.Error("expected committed changes to appear in diff")
 	}
 
+	// Target-only commits must not appear as reverse changes in the task diff.
+	if err := os.WriteFile(filepath.Join(repoDir, "target-only.txt"), []byte("target only\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "target-only.txt")
+	runGitTest(t, repoDir, "commit", "-m", "advance target")
+	diff = GetWorktreeDiffWithUncommitted(repoDir, branchName, mainBranch, wtPath)
+	if strings.Contains(diff, "target-only.txt") || strings.Contains(diff, "target only") {
+		t.Fatalf("target-only change appeared reversed in task diff:\n%s", diff)
+	}
+	if !strings.Contains(diff, "committed.txt") {
+		t.Fatalf("expected task change after target advanced, got:\n%s", diff)
+	}
+
 	// Test 3: Uncommitted changes should also appear
 	if err := os.WriteFile(filepath.Join(wtPath, "uncommitted.txt"), []byte("uncommitted content\n"), 0644); err != nil {
 		t.Fatal(err)
@@ -3874,7 +3894,7 @@ func TestGetWorktreeFileStatsWithUncommittedMatchesNetTargetDiff(t *testing.T) {
 	}
 }
 
-func TestGetWorktreeDiffUsesCurrentTargetTreeNotStaleMergeBase(t *testing.T) {
+func TestGetWorktreeDiffUsesMergeBaseToShowTaskChanges(t *testing.T) {
 	repoDir := createTestGitRepo(t)
 	runGit := func(args ...string) {
 		t.Helper()
@@ -3906,9 +3926,9 @@ func TestGetWorktreeDiffUsesCurrentTargetTreeNotStaleMergeBase(t *testing.T) {
 	runGit("add", "large-feature.txt")
 	runGit("commit", "-m", "squash large task change")
 
-	// The task branch adds only a small follow-up after the target already has
-	// the old large change. A merge-base diff would still show large-feature.txt;
-	// the Changes UI should show only the current net difference.
+	// The task branch adds a follow-up after the target independently receives
+	// equivalent content. The Changes UI should still show both changes authored
+	// on the task branch, without reversing target-only changes.
 	runGit("checkout", "task/stale-base")
 	if err := os.WriteFile(filepath.Join(repoDir, "followup.txt"), []byte("small followup\n"), 0644); err != nil {
 		t.Fatalf("write followup: %v", err)
@@ -3917,18 +3937,51 @@ func TestGetWorktreeDiffUsesCurrentTargetTreeNotStaleMergeBase(t *testing.T) {
 	runGit("commit", "-m", "small followup")
 
 	diff := GetWorktreeDiff(repoDir, "task/stale-base", defaultBranch)
-	if strings.Contains(diff, "large-feature.txt") {
-		t.Fatalf("expected stale historical change to be omitted from current target-tree diff, got:\n%s", diff)
+	if !strings.Contains(diff, "large-feature.txt") || !strings.Contains(diff, "large feature") {
+		t.Fatalf("expected task-authored feature in merge-base diff, got:\n%s", diff)
 	}
 	if !strings.Contains(diff, "followup.txt") || !strings.Contains(diff, "small followup") {
 		t.Fatalf("expected follow-up change in diff, got:\n%s", diff)
 	}
 
 	stats := GetWorktreeFileStats(repoDir, "task/stale-base", defaultBranch)
-	if len(stats) != 1 {
-		t.Fatalf("expected one current file stat, got %#v", stats)
+	if len(stats) != 2 {
+		t.Fatalf("expected both task-authored file stats, got %#v", stats)
 	}
-	if stats[0].Path != "followup.txt" {
-		t.Fatalf("expected file stats to omit stale historical change, got %#v", stats)
+	paths := map[string]bool{}
+	for _, stat := range stats {
+		paths[stat.Path] = true
+	}
+	if !paths["large-feature.txt"] || !paths["followup.txt"] {
+		t.Fatalf("expected file stats for both task-authored changes, got %#v", stats)
+	}
+}
+
+func TestIsBranchDivergedFromTargetRequiresUniqueCommitsOnBothSides(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	targetBranch := GetCurrentBranch(repoDir)
+	branchName := "task/rebase-eligibility"
+	runGitTest(t, repoDir, "branch", branchName, targetBranch)
+
+	if err := os.WriteFile(filepath.Join(repoDir, "target-only.txt"), []byte("target\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "target-only.txt")
+	runGitTest(t, repoDir, "commit", "-m", "target-only commit")
+	if IsBranchDivergedFromTarget(repoDir, branchName, targetBranch) {
+		t.Fatal("expected a branch with no unique task commits not to offer rebase")
+	}
+
+	runGitTest(t, repoDir, "checkout", branchName)
+	if err := os.WriteFile(filepath.Join(repoDir, "task-only.txt"), []byte("task\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", "task-only.txt")
+	runGitTest(t, repoDir, "commit", "-m", "task-only commit")
+	if !IsBranchDivergedFromTarget(repoDir, branchName, targetBranch) {
+		t.Fatal("expected branches with unique commits on both sides to offer rebase")
+	}
+	if IsBranchDivergedFromTarget(repoDir, "missing-branch", targetBranch) {
+		t.Fatal("expected missing branch not to offer rebase")
 	}
 }
