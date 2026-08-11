@@ -3189,8 +3189,7 @@ func TestAutomationLiveTaskRetryReplacesEarlierFailedDispatchState(t *testing.T)
 	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
-	require.Zero(t, cards[0].Counts.Failed, "portfolio state must use the latest dispatch for the same task")
-	require.Equal(t, 1, cards[0].Counts.CompletedRecently)
+	require.Zero(t, cards[0].Counts, "portfolio cards must not load hidden operational counts; Live remains the counts surface")
 }
 
 func TestAutomationLiveWorkItemSuccessReplacesEarlierFailedActivityState(t *testing.T) {
@@ -3230,8 +3229,7 @@ func TestAutomationLiveWorkItemSuccessReplacesEarlierFailedActivityState(t *test
 	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
-	require.Zero(t, cards[0].Counts.Failed, "portfolio counters must use the latest work-item activity state")
-	require.Equal(t, 1, cards[0].Counts.CompletedRecently)
+	require.Zero(t, cards[0].Counts, "portfolio cards must not load hidden operational counts; Live remains the counts surface")
 }
 
 func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T) {
@@ -3284,11 +3282,7 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 	cards, err := NewAutomationGraphService(fixture.repo).List(ctx, fixture.project.ID)
 	require.NoError(t, err)
 	require.Len(t, cards, 1)
-	require.Equal(t, 2, cards[0].Counts.Running)
-	require.Equal(t, 1, cards[0].Counts.Waiting)
-	require.Equal(t, 1, cards[0].Counts.Blocked)
-	require.Equal(t, 2, cards[0].Counts.Failed, "portfolio failures must retain Live provenance deduplication")
-	require.Equal(t, 1, cards[0].Counts.CompletedRecently, "portfolio counters must choose one state per work-item identity")
+	require.Zero(t, cards[0].Counts, "portfolio cards must not load hidden operational counts; Live remains the counts surface")
 }
 
 func TestAutomationLiveDisplayStateShowsRunningWhenMixedWithWaiting(t *testing.T) {

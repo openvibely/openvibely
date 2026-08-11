@@ -254,50 +254,14 @@ func NewAutomationGraphService(repo *repository.AutomationRepo) *AutomationGraph
 }
 
 func (s *AutomationGraphService) List(ctx context.Context, projectID string) ([]models.AutomationCard, error) {
-	automations, err := s.repo.ListSavedByProject(ctx, projectID)
+	cards, err := s.repo.ListPortfolioCards(ctx, projectID)
 	if err != nil {
 		return nil, err
 	}
-	cards := make([]models.AutomationCard, 0, len(automations))
-	portfolioCounts, err := s.repo.PortfolioOperationalCounts(ctx, projectID, time.Now().UTC().Add(-24*time.Hour))
-	if err != nil {
-		return nil, err
-	}
-	for _, automation := range automations {
-		definition, err := s.repo.GetDefinition(ctx, projectID, automation.ID)
-		if err != nil {
-			return nil, err
-		}
-		if definition == nil || definition.Version.ID == "" || definition.Version.State != models.AutomationVersionPublished {
-			continue
-		}
-		card := models.AutomationCard{Automation: definition.Automation, Version: definition.Version, Counts: portfolioCounts[automation.ID]}
-		currentTemplateRevision := CurrentAutomationTemplateRevision(definition.Version.AdapterKey)
-		card.TemplateUpdateAvailable = currentTemplateRevision > 0 &&
-			(definition.Automation.TemplateRevision == nil || *definition.Automation.TemplateRevision < currentTemplateRevision)
-		if definition.Version.ID != "" {
-			card.Resources, err = s.repo.ListResourceSummaries(ctx, projectID, automation.ID, definition.Version.ID, 12)
-			if err != nil {
-				return nil, err
-			}
-			for _, resource := range definition.Resources {
-				if resource.ResourceType != "schedule" {
-					continue
-				}
-				var nextRun, lastRun sql.NullTime
-				if err := s.repo.DB().QueryRowContext(ctx, `SELECT next_run, last_run FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE s.id = ? AND t.project_id = ?`, resource.ResourceID, projectID).Scan(&nextRun, &lastRun); err == nil {
-					if nextRun.Valid && (card.NextRun == nil || nextRun.Time.Before(*card.NextRun)) {
-						t := nextRun.Time
-						card.NextRun = &t
-					}
-					if lastRun.Valid && (card.LastRun == nil || lastRun.Time.After(*card.LastRun)) {
-						t := lastRun.Time
-						card.LastRun = &t
-					}
-				}
-			}
-		}
-		cards = append(cards, card)
+	for i := range cards {
+		currentTemplateRevision := CurrentAutomationTemplateRevision(cards[i].Version.AdapterKey)
+		cards[i].TemplateUpdateAvailable = currentTemplateRevision > 0 &&
+			(cards[i].Automation.TemplateRevision == nil || *cards[i].Automation.TemplateRevision < currentTemplateRevision)
 	}
 	return cards, nil
 }
