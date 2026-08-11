@@ -1306,6 +1306,27 @@ func TestTelegramService_HandleProject_CaseInsensitiveSwitch(t *testing.T) {
 	assert.Equal(t, project.ID, svc.userProjects[userID])
 }
 
+func TestTelegramService_HandleProject_SwitchByExactID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+
+	ctx := context.Background()
+	project1 := &models.Project{Name: "Project A", RepoPath: "/tmp/a", IsDefault: true}
+	require.NoError(t, projectRepo.Create(ctx, project1))
+	project2 := &models.Project{Name: "Project B", RepoPath: "/tmp/b"}
+	require.NoError(t, projectRepo.Create(ctx, project2))
+
+	svc := &TelegramService{
+		projectRepo:  projectRepo,
+		userProjects: map[int64]string{321: project1.ID},
+	}
+
+	response := svc.handleProject(321, project2.ID)
+
+	assert.Contains(t, response, "Switched to project: *Project B*")
+	assert.Equal(t, project2.ID, svc.userProjects[321])
+}
+
 func TestTelegramService_ExtractTelegramAttachment_Photo(t *testing.T) {
 	msg := &tgbotapi.Message{
 		Photo: []tgbotapi.PhotoSize{
@@ -3102,6 +3123,12 @@ func TestBuildChannelProjectActionHandlersSwitchProjectCallback(t *testing.T) {
 		},
 	})
 	result, err := handlers["switch_project"](ctx, json.RawMessage(`{"project":"Beta"}`))
+	require.NoError(t, err)
+	assert.Contains(t, result, "Switched to project: Beta")
+	assert.Equal(t, project2.ID, switchedProjectID)
+
+	switchedProjectID = ""
+	result, err = handlers["switch_project"](ctx, json.RawMessage(fmt.Sprintf(`{"project":%q}`, project2.ID)))
 	require.NoError(t, err)
 	assert.Contains(t, result, "Switched to project: Beta")
 	assert.Equal(t, project2.ID, switchedProjectID)
