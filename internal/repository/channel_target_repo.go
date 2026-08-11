@@ -75,35 +75,7 @@ func (r *ChannelTargetRepo) FindByTargetAndKind(ctx context.Context, projectID, 
 }
 
 func (r *ChannelTargetRepo) Upsert(ctx context.Context, target models.ChannelTarget) error {
-	if strings.TrimSpace(target.ID) == "" {
-		return fmt.Errorf("channel target id is required")
-	}
-	platform := normalizeChannelTargetField(target.Platform)
-	name := normalizeChannelTargetField(target.Name)
-	targetKind := defaultChannelTargetKind(target.TargetKind, platform)
-	if target.Home {
-		if _, err := r.db.ExecContext(ctx, `UPDATE channel_targets SET is_home = 0, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND platform = ?`, target.ProjectID, platform); err != nil {
-			return fmt.Errorf("clear channel home target: %w", err)
-		}
-	}
-	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-		ON CONFLICT(id) DO UPDATE SET
-			project_id = excluded.project_id,
-			platform = excluded.platform,
-			target_kind = excluded.target_kind,
-			name = excluded.name,
-			target_id = excluded.target_id,
-			thread_id = excluded.thread_id,
-			is_home = excluded.is_home,
-			default_subject = excluded.default_subject,
-			updated_at = CURRENT_TIMESTAMP`,
-		target.ID, target.ProjectID, platform, targetKind, name, strings.TrimSpace(target.TargetID), strings.TrimSpace(target.ThreadID), target.Home, strings.TrimSpace(target.DefaultSubject))
-	if err != nil {
-		return fmt.Errorf("upsert channel target: %w", err)
-	}
-	return nil
+	return upsertChannelTarget(ctx, r.db, target)
 }
 
 func (r *ChannelTargetRepo) Delete(ctx context.Context, id string) error {
@@ -183,29 +155,8 @@ func (r *ChannelTargetRepo) ReplaceProjectTargets(ctx context.Context, projectID
 
 	for _, target := range targets {
 		target.ProjectID = projectID
-		platform := normalizeChannelTargetField(target.Platform)
-		name := normalizeChannelTargetField(target.Name)
-		targetKind := defaultChannelTargetKind(target.TargetKind, platform)
-		if target.Home {
-			if _, err := tx.ExecContext(ctx, `UPDATE channel_targets SET is_home = 0, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND platform = ?`, projectID, platform); err != nil {
-				return fmt.Errorf("clear channel home target: %w", err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-			ON CONFLICT(id) DO UPDATE SET
-				project_id = excluded.project_id,
-				platform = excluded.platform,
-				target_kind = excluded.target_kind,
-				name = excluded.name,
-				target_id = excluded.target_id,
-				thread_id = excluded.thread_id,
-				is_home = excluded.is_home,
-				default_subject = excluded.default_subject,
-				updated_at = CURRENT_TIMESTAMP`,
-			target.ID, projectID, platform, targetKind, name, strings.TrimSpace(target.TargetID), strings.TrimSpace(target.ThreadID), target.Home, strings.TrimSpace(target.DefaultSubject)); err != nil {
-			return fmt.Errorf("upsert channel target: %w", err)
+		if err := upsertChannelTarget(ctx, tx, target); err != nil {
+			return err
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -280,19 +231,37 @@ func normalizeChannelTargetField(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-// defaultChannelTargetKind returns a sensible default target_kind when none is set.
-// Telegram targets use 'chat', email targets use 'email', and everything else defaults to 'channel'.
-func defaultChannelTargetKind(kind, platform string) string {
-	kind = strings.TrimSpace(kind)
-	if kind != "" {
-		return strings.ToLower(kind)
+func upsertChannelTarget(ctx context.Context, exec SQLExecutor, target models.ChannelTarget) error {
+	if strings.TrimSpace(target.ID) == "" {
+		return fmt.Errorf("channel target id is required")
 	}
-	switch strings.ToLower(strings.TrimSpace(platform)) {
-	case "telegram":
-		return "chat"
-	case "email":
-		return "email"
-	default:
-		return "channel"
+	platform := normalizeChannelTargetField(target.Platform)
+	name := normalizeChannelTargetField(target.Name)
+	targetKind := normalizeChannelTargetField(target.TargetKind)
+	if targetKind == "" {
+		targetKind = models.DefaultChannelTargetKind(platform)
 	}
+	if target.Home {
+		if _, err := exec.ExecContext(ctx, `UPDATE channel_targets SET is_home = 0, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND platform = ?`, target.ProjectID, platform); err != nil {
+			return fmt.Errorf("clear channel home target: %w", err)
+		}
+	}
+	_, err := exec.ExecContext(ctx, `
+		INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(id) DO UPDATE SET
+			project_id = excluded.project_id,
+			platform = excluded.platform,
+			target_kind = excluded.target_kind,
+			name = excluded.name,
+			target_id = excluded.target_id,
+			thread_id = excluded.thread_id,
+			is_home = excluded.is_home,
+			default_subject = excluded.default_subject,
+			updated_at = CURRENT_TIMESTAMP`,
+		strings.TrimSpace(target.ID), strings.TrimSpace(target.ProjectID), platform, targetKind, name, strings.TrimSpace(target.TargetID), strings.TrimSpace(target.ThreadID), target.Home, strings.TrimSpace(target.DefaultSubject))
+	if err != nil {
+		return fmt.Errorf("upsert channel target: %w", err)
+	}
+	return nil
 }

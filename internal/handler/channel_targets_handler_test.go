@@ -297,6 +297,48 @@ func TestOutboundTargetDraftTestSendsWithoutPersisting(t *testing.T) {
 	}
 }
 
+func TestOutboundTargetSaveAndDraftTestShareCanonicalValidation(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Outbound Shared Validation Project").Build()
+	targetRepo := repository.NewChannelTargetRepo(tc.db)
+	slack := &outboundTargetTestSlack{}
+	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
+	router.SetSlackService(slack)
+	tc.handler.SetChannelTargetRepo(targetRepo)
+	tc.handler.SetChannelMessageRouter(router)
+
+	saveForm := url.Values{}
+	saveForm.Set("project_id", project.ID)
+	saveForm.Add("target_row_id", "")
+	saveForm.Add("target_platform", "telegram")
+	saveForm.Add("target_name", "topic")
+	saveForm.Add("target_target_id", "-100123")
+	saveForm.Add("target_thread_id", "not-a-topic-id")
+	saveForm.Add("target_is_home", "false")
+	saveForm.Add("target_default_subject", "")
+	saveRec := tc.HTMX().Post("/channels/send-message-explicit-targets").WithForm(saveForm).Execute()
+	if saveRec.Code != http.StatusOK || saveRec.Header().Get("HX-Trigger") != "outbound-targets-save-error" || !strings.Contains(saveRec.Body.String(), "telegram thread id must be an integer") {
+		t.Fatalf("expected saved-target form to reject invalid Telegram thread through shared validation, status=%d trigger=%q body=%s", saveRec.Code, saveRec.Header().Get("HX-Trigger"), saveRec.Body.String())
+	}
+	targets, err := targetRepo.ListByProject(context.Background(), project.ID)
+	if err != nil || len(targets) != 0 {
+		t.Fatalf("invalid save must not persist targets, targets=%+v err=%v", targets, err)
+	}
+
+	draftForm := url.Values{}
+	draftForm.Set("project_id", project.ID)
+	draftForm.Set("target_platform", "slack")
+	draftForm.Set("target_kind", "user")
+	draftForm.Set("target_target_id", "CNOTAUSER")
+	draftRec := tc.HTMX().Post("/channels/outbound-targets/test-draft").WithForm(draftForm).Execute()
+	if draftRec.Code != http.StatusOK || !strings.Contains(draftRec.Body.String(), "Failed") || !strings.Contains(draftRec.Body.String(), "Invalid Slack user ID") {
+		t.Fatalf("expected draft test to reject invalid Slack user through shared validation, status=%d body=%s", draftRec.Code, draftRec.Body.String())
+	}
+	if slack.userID != "" || slack.channelID != "" || slack.text != "" {
+		t.Fatalf("invalid draft target must not dispatch, userID=%q channelID=%q text=%q", slack.userID, slack.channelID, slack.text)
+	}
+}
+
 func TestOutboundTargetDraftTestRendersCleanFailure(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Outbound Draft Failure Project").Build()
