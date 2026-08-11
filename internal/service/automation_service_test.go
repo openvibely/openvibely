@@ -266,6 +266,118 @@ func TestRegisteredMaintainedAutomationCanBeReopenedAndSaved(t *testing.T) {
 	require.Equal(t, "github_assignment", automationDraftNodeByKey(t, githubReopened.Candidate, "assignment").Config["approval_method"])
 }
 
+func TestAutomationPortfolioListUsesCompactPublishedCardProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Compact Automation portfolio")
+	other := automationTestProject(t, repository.NewProjectRepo(db), "Other Compact Automation portfolio")
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+
+	largeConfig := strings.Repeat(`{"prompt":"large hidden graph config"}`, 200)
+	for i := 0; i < 4; i++ {
+		automationID := fmt.Sprintf("compact-saved-%03d", i)
+		versionID := fmt.Sprintf("compact-version-%03d", i)
+		state := models.AutomationActive
+		health := models.AutomationHealthHealthy
+		revision := CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC)
+		if i == 0 {
+			state = models.AutomationPaused
+			health = models.AutomationHealthDegraded
+			revision = 0
+		}
+		_, err := db.ExecContext(ctx, `INSERT INTO automations
+			(id, project_id, stable_key, name, description, automation_type, lifecycle_state, health_state, health_reason, template_revision, updated_at)
+			VALUES (?, ?, ?, ?, ?, 'custom', ?, ?, 'visible health reason', ?, datetime('now', ?))`,
+			automationID, project.ID, "compact/"+automationID, fmt.Sprintf("Compact Automation %03d", i), "visible searchable description",
+			state, health, revision, fmt.Sprintf("+%d seconds", i))
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+			(id, project_id, automation_id, version, state, source, adapter_key, schema_version, published_at)
+			VALUES (?, ?, ?, 1, 'published', 'template', ?, 1, CURRENT_TIMESTAMP)`, versionID, project.ID, automationID, AutomationAdapterNativeSDLC)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = ? WHERE id = ? AND project_id = ?`, versionID, automationID, project.ID)
+		require.NoError(t, err)
+
+		nodeA := repository.NewID()
+		nodeB := repository.NewID()
+		_, err = db.ExecContext(ctx, `INSERT INTO automation_nodes
+			(id, project_id, automation_id, version_id, node_key, name, node_type, role, config_json, position_x, position_y)
+			VALUES (?, ?, ?, ?, 'trigger', 'Trigger', 'trigger', 'schedule', ?, 10, 20),
+				(?, ?, ?, ?, 'task', 'Task', 'agent_task', 'task', ?, 30, 40)`,
+			nodeA, project.ID, automationID, versionID, largeConfig, nodeB, project.ID, automationID, versionID, largeConfig)
+		require.NoError(t, err)
+		_, err = db.ExecContext(ctx, `INSERT INTO automation_edges
+			(project_id, automation_id, version_id, source_node_id, target_node_id, edge_key, label, condition_json)
+			VALUES (?, ?, ?, ?, ?, ?, 'hidden edge', ?)`, project.ID, automationID, versionID, nodeA, nodeB, fmt.Sprintf("edge-%03d", i), largeConfig)
+		require.NoError(t, err)
+		task, schedule := automationTestTaskAndSchedule(t, taskRepo, scheduleRepo, project.ID, "Compact schedule "+automationID)
+		_, err = db.ExecContext(ctx, `INSERT INTO automation_definition_resources
+			(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+			VALUES (?, ?, ?, ?, 'task', ?, 'owned'), (?, ?, ?, ?, 'schedule', ?, 'owned')`,
+			project.ID, automationID, versionID, nodeB, task.ID, project.ID, automationID, versionID, nodeA, schedule.ID)
+		require.NoError(t, err)
+	}
+
+	_, err := db.ExecContext(ctx, `INSERT INTO automations
+		(id, project_id, stable_key, name, description, automation_type, lifecycle_state, updated_at)
+		VALUES ('compact-draft-published-version', ?, 'compact/draft-version', 'Draft Version Automation', '', 'custom', 'active', CURRENT_TIMESTAMP)`, project.ID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+		(id, project_id, automation_id, version, state, source, adapter_key)
+		VALUES ('compact-draft-version', ?, 'compact-draft-published-version', 1, 'draft', 'manual', 'custom')`, project.ID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = 'compact-draft-version' WHERE id = 'compact-draft-published-version'`)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO automations
+		(id, project_id, stable_key, name, description, automation_type, lifecycle_state)
+		VALUES ('compact-foreign', ?, 'compact/foreign', 'Foreign Compact Automation', '', 'custom', 'active')`, other.ID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `INSERT INTO automation_versions
+		(id, project_id, automation_id, version, state, source, adapter_key, published_at)
+		VALUES ('compact-foreign-version', ?, 'compact-foreign', 1, 'published', 'manual', 'custom', CURRENT_TIMESTAMP)`, other.ID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `UPDATE automations SET published_version_id = 'compact-foreign-version' WHERE id = 'compact-foreign'`)
+	require.NoError(t, err)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	cards, err := NewAutomationGraphService(repository.NewAutomationRepo(db)).List(ctx, project.ID)
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Len(t, cards, 4)
+	require.Len(t, counter.Statements(), 1, "portfolio card rendering should be one compact statement, not 2 + 5N + S enrichment statements")
+	statements := strings.ToLower(strings.Join(counter.Statements(), "\n"))
+	for _, hidden := range []string{"portfoliooperationalcounts", "automation_nodes", "automation_edges", "automation_definition_resources", "schedules", "automation_activities", "automation_work_items", "config_json", "condition_json"} {
+		require.NotContains(t, statements, hidden)
+	}
+
+	first := cards[0]
+	require.Equal(t, "compact-saved-003", first.Automation.ID)
+	require.Equal(t, models.AutomationVersionPublished, first.Version.State)
+	require.Equal(t, "template", first.Version.Source)
+	require.Equal(t, AutomationAdapterNativeSDLC, first.Version.AdapterKey)
+	require.Empty(t, first.Resources)
+	require.Nil(t, first.NextRun)
+	require.Nil(t, first.LastRun)
+	require.Zero(t, first.Counts)
+
+	var paused *models.AutomationCard
+	for i := range cards {
+		if cards[i].Automation.ID == "compact-saved-000" {
+			paused = &cards[i]
+		}
+	}
+	require.NotNil(t, paused)
+	require.Equal(t, models.AutomationPaused, paused.Automation.LifecycleState)
+	require.Equal(t, models.AutomationHealthDegraded, paused.Automation.HealthState)
+	require.True(t, paused.TemplateUpdateAvailable)
+	for _, card := range cards {
+		require.NotEqual(t, "compact-draft-published-version", card.Automation.ID)
+		require.NotEqual(t, "compact-foreign", card.Automation.ID)
+	}
+}
+
 func TestAutomationPortfolioListsEverySavedAutomationBeyondOneHundred(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

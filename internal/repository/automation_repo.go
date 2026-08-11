@@ -68,6 +68,35 @@ func (r *AutomationRepo) ListSavedByProject(ctx context.Context, projectID strin
 	return out, rows.Err()
 }
 
+func (r *AutomationRepo) ListPortfolioCards(ctx context.Context, projectID string) ([]models.AutomationCard, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT
+		a.id, a.project_id, a.stable_key, a.name, a.description, a.automation_type,
+		a.lifecycle_state, a.health_state, a.health_reason, a.health_evaluated_at, a.published_version_id, a.template_revision,
+		a.created_via, a.created_at, a.updated_at, a.archived_at,
+		v.id, v.project_id, v.automation_id, v.version, v.state, v.source, v.adapter_key, v.schema_version, v.created_at, v.published_at
+		FROM automations a
+		JOIN automation_versions v ON v.id = a.published_version_id AND v.automation_id = a.id AND v.project_id = a.project_id
+		WHERE a.project_id = ? AND v.state = 'published'
+		ORDER BY a.updated_at DESC, a.id`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing automation portfolio cards: %w", err)
+	}
+	defer rows.Close()
+	var out []models.AutomationCard
+	for rows.Next() {
+		var card models.AutomationCard
+		if err := rows.Scan(&card.Automation.ID, &card.Automation.ProjectID, &card.Automation.StableKey, &card.Automation.Name, &card.Automation.Description, &card.Automation.AutomationType,
+			&card.Automation.LifecycleState, &card.Automation.HealthState, &card.Automation.HealthReason, &card.Automation.HealthEvaluatedAt, &card.Automation.PublishedVersionID, &card.Automation.TemplateRevision,
+			&card.Automation.CreatedVia, &card.Automation.CreatedAt, &card.Automation.UpdatedAt, &card.Automation.ArchivedAt,
+			&card.Version.ID, &card.Version.ProjectID, &card.Version.AutomationID, &card.Version.Version, &card.Version.State, &card.Version.Source,
+			&card.Version.AdapterKey, &card.Version.SchemaVersion, &card.Version.CreatedAt, &card.Version.PublishedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, card)
+	}
+	return out, rows.Err()
+}
+
 func (r *AutomationRepo) GetByStableKey(ctx context.Context, projectID, stableKey string) (*models.Automation, error) {
 	var a models.Automation
 	err := scanAutomation(r.db.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
