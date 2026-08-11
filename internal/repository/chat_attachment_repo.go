@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -194,87 +193,19 @@ func (r *ChatAttachmentRepo) GetAllFilePaths(ctx context.Context) ([]string, err
 
 // CleanupOrphanedFiles removes chat attachment files from disk that no longer have database records
 func (r *ChatAttachmentRepo) CleanupOrphanedFiles(ctx context.Context, uploadsDir string) (int, error) {
-	normalizedUploadsDir := normalizeAttachmentPath(uploadsDir)
-
-	// Get all file paths from database
 	dbPaths, err := r.GetAllFilePaths(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("getting file paths: %w", err)
 	}
 
-	// Build a map for O(1) lookup
-	dbPathSet := make(map[string]bool)
-	for _, path := range dbPaths {
-		dbPathSet[normalizeAttachmentPath(path)] = true
-	}
-
-	// Check if uploads directory exists
-	chatUploadsDir := filepath.Join(normalizedUploadsDir, "chat")
-	if _, err := os.Stat(chatUploadsDir); os.IsNotExist(err) {
-		return 0, nil // Nothing to clean up
-	}
-
-	deletedCount := 0
-
-	// Walk the chat uploads directory
-	err = filepath.Walk(chatUploadsDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		// Skip directories
-		if info.IsDir() {
-			return nil
-		}
-
-		// Check if file is in database
-		if !dbPathSet[normalizeAttachmentPath(path)] {
-			if err := os.Remove(path); err != nil {
-				return fmt.Errorf("removing orphaned file %s: %w", path, err)
+	return cleanupOrphanedAttachmentFiles(uploadsDir, dbPaths, orphanedAttachmentCleanupOptions{
+		walkError: "walking chat uploads directory",
+		scope: func(uploadsDir string) orphanedAttachmentCleanupScope {
+			chatUploadsDir := filepath.Join(uploadsDir, "chat")
+			return orphanedAttachmentCleanupScope{
+				walkDir:  chatUploadsDir,
+				pruneDir: chatUploadsDir,
 			}
-			deletedCount++
-		}
-
-		return nil
+		},
 	})
-
-	if err != nil {
-		return deletedCount, fmt.Errorf("walking chat uploads directory: %w", err)
-	}
-
-	// Clean up empty directories
-	if err := r.cleanupEmptyDirs(chatUploadsDir); err != nil {
-		return deletedCount, fmt.Errorf("cleaning up empty directories: %w", err)
-	}
-
-	return deletedCount, nil
-}
-
-// cleanupEmptyDirs removes empty subdirectories in the chat uploads directory
-func (r *ChatAttachmentRepo) cleanupEmptyDirs(chatUploadsDir string) error {
-	entries, err := os.ReadDir(chatUploadsDir)
-	if err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		dirPath := filepath.Join(chatUploadsDir, entry.Name())
-		subEntries, err := os.ReadDir(dirPath)
-		if err != nil {
-			continue
-		}
-
-		// Remove directory if empty
-		if len(subEntries) == 0 {
-			if err := os.Remove(dirPath); err != nil {
-				return fmt.Errorf("removing empty directory %s: %w", dirPath, err)
-			}
-		}
-	}
-
-	return nil
 }
