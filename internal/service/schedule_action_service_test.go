@@ -279,3 +279,118 @@ func TestScheduleActionServiceAcceptsTimeBoundariesAndSupportedWeekdays(t *testi
 		require.Equal(t, tt.time, result.Schedule.RunAt.Local().Format("15:04"))
 	}
 }
+
+func TestScheduleActionServiceCreateAbsoluteAppliesBrowserFormDefaultsAndLifecycle(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Absolute create lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Completed scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	workerSvc.MarkCancellationRequested(task.ID)
+	clearContext := false
+	runAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+
+	result, err := svc.CreateAbsoluteForTask(ctx, CreateAbsoluteScheduleForTaskRequest{
+		TaskID:              task.ID,
+		RunAt:               runAt,
+		RepeatType:          models.RepeatOnce,
+		RepeatInterval:      0,
+		ClearContextOnStart: &clearContext,
+	})
+	require.NoError(t, err)
+	require.Empty(t, result.Warnings)
+	require.NotNil(t, result.Schedule)
+	require.Equal(t, models.RepeatOnce, result.Schedule.RepeatType)
+	require.Equal(t, 1, result.Schedule.RepeatInterval)
+	require.True(t, result.Schedule.Enabled)
+	require.False(t, result.Schedule.ClearContextOnStart)
+	require.NotNil(t, result.Schedule.NextRun)
+	require.True(t, result.Schedule.NextRun.Equal(runAt), "next_run=%v run_at=%v", result.Schedule.NextRun, runAt)
+	require.False(t, workerSvc.IsCancellationRequested(task.ID))
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+	require.Equal(t, models.StatusPending, updated.Status)
+}
+
+func TestScheduleActionServiceModifyAbsoluteAppliesBrowserNextRunAndLifecycle(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Absolute update lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Cancelled scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCancelled, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	oldRunAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: oldRunAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: false}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+	newRunAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	clearContext := true
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+
+	result, err := svc.ModifyAbsolute(ctx, ModifyAbsoluteScheduleRequest{
+		ScheduleID:          schedule.ID,
+		RunAt:               newRunAt,
+		RepeatType:          models.RepeatHours,
+		RepeatInterval:      2,
+		ClearContextOnStart: &clearContext,
+	})
+	require.NoError(t, err)
+	require.Empty(t, result.Warnings)
+	require.False(t, workerSvc.IsCancellationRequested(task.ID))
+
+	storedSchedule, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RepeatHours, storedSchedule.RepeatType)
+	require.Equal(t, 2, storedSchedule.RepeatInterval)
+	require.True(t, storedSchedule.ClearContextOnStart)
+	require.True(t, storedSchedule.RunAt.Equal(newRunAt), "run_at=%v want=%v", storedSchedule.RunAt, newRunAt)
+	require.NotNil(t, storedSchedule.NextRun)
+	require.True(t, storedSchedule.NextRun.Equal(newRunAt), "next_run=%v want=%v", storedSchedule.NextRun, newRunAt)
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, updatedTask.Status)
+}
+
+func TestScheduleActionServiceModifyRuntimeTimingAppliesLifecycleButDisableDoesNot(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Runtime modify lifecycle"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Runtime cancelled scheduled target", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCancelled, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+	disabled := false
+
+	_, err := svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Enabled: &disabled})
+	require.NoError(t, err)
+	require.True(t, workerSvc.IsCancellationRequested(task.ID), "pure disable should not reactivate a terminal scheduled task")
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updated.Status)
+
+	_, err = svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Time: "10:15"})
+	require.NoError(t, err)
+	require.False(t, workerSvc.IsCancellationRequested(task.ID), "timing updates should clear stale cancellation markers")
+	updated, err = taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, updated.Status)
+}

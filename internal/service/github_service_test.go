@@ -959,17 +959,17 @@ func TestDevInboxAssignedIssueScanFetchesOnlyIncompleteListEntries(t *testing.T)
 			case "dev-bot":
 				_, _ = w.Write([]byte(`[
 					{"number":1,"html_url":"https://github.com/openvibely/openvibely/issues/1","title":"Complete one","body":"Body one","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"}]},
-					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","body":"Partial body","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"performance"}]},
+					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","title":"Partial two","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"performance"}]},
 					{"number":3,"html_url":"https://github.com/openvibely/openvibely/issues/3","title":"Complete three","body":"Body three","state":"open","assignees":[{"login":"dev-bot"}],"labels":[{"name":"feature"}]}
 				]`))
 			case "other-bot":
 				_, _ = w.Write([]byte(`[
-					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","body":"Partial body again","state":"open","assignees":[{"login":"other-bot"}],"labels":[{"name":"performance"}]},
+					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","title":"Partial two again","state":"open","assignees":[{"login":"other-bot"}],"labels":[{"name":"performance"}]},
 					{"number":4,"html_url":"https://github.com/openvibely/openvibely/issues/4","title":"Complete four","body":"Body four","state":"open","assignees":[{"login":"other-bot"}],"labels":[{"name":"bug"}]}
 				]`))
 			case "pat-owner":
 				_, _ = w.Write([]byte(`[
-					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","body":"Partial body from PAT scan","state":"open","assignees":[{"login":"pat-owner"}],"labels":[{"name":"performance"}]},
+					{"number":2,"html_url":"https://github.com/openvibely/openvibely/issues/2","title":"Partial two from PAT scan","state":"open","assignees":[{"login":"pat-owner"}],"labels":[{"name":"performance"}]},
 					{"number":5,"html_url":"https://github.com/openvibely/openvibely/issues/5","title":"Complete five","body":"Body five","state":"open","assignees":[{"login":"pat-owner"}],"labels":[{"name":"feature"}]}
 				]`))
 			default:

@@ -27,11 +27,11 @@ func TestUpdateSchedule_CompletedTaskToFuture(t *testing.T) {
 
 	// Create a task with completed status (simulating a task that already ran)
 	task := &models.Task{
-		Title:      "Completed Task",
-		ProjectID:  "default",
-		Category:   models.CategoryScheduled,
-		Status:     models.StatusCompleted,
-		Prompt:     "test prompt",
+		Title:     "Completed Task",
+		ProjectID: "default",
+		Category:  models.CategoryScheduled,
+		Status:    models.StatusCompleted,
+		Prompt:    "test prompt",
 	}
 	if err := taskRepo.Create(context.Background(), task); err != nil {
 		t.Fatalf("failed to create task: %v", err)
@@ -86,6 +86,7 @@ func TestUpdateSchedule_CompletedTaskToFuture(t *testing.T) {
 
 	// Set up the handler with taskSvc (needed for resetting task status)
 	h := &Handler{
+		taskRepo:     taskRepo,
 		scheduleRepo: scheduleRepo,
 		taskSvc:      service.NewTaskService(taskRepo, nil, nil),
 	}

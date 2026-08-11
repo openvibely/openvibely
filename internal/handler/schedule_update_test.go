@@ -68,6 +68,7 @@ func TestUpdateSchedule_RecurringAfterRun(t *testing.T) {
 	// Now simulate user updating the schedule (changing interval to 2)
 	// Set up the handler
 	h := &Handler{
+		taskRepo:     taskRepo,
 		scheduleRepo: scheduleRepo,
 		taskSvc:      nil, // Not needed for this test
 	}

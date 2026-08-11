@@ -1147,6 +1147,9 @@ func (h *githubAssignedIssueDetailHydrator) hydrate(ctx context.Context, repo *G
 }
 
 func githubAssignedIssueHasTaskCreationFields(issue GitHubIssue) bool {
+	if issue.TaskCreationCompletenessKnown {
+		return issue.CompleteForTaskCreation
+	}
 	return issue.Number > 0 && strings.TrimSpace(issue.URL) != "" && strings.TrimSpace(issue.Title) != "" && strings.TrimSpace(issue.State) != ""
 }
 
