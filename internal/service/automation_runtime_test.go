@@ -3291,6 +3291,38 @@ func TestAutomationLiveDisplayStatePrecedencePreservesMixedCounters(t *testing.T
 	require.Equal(t, 1, cards[0].Counts.CompletedRecently, "portfolio counters must choose one state per work-item identity")
 }
 
+func TestAutomationLiveDisplayStateShowsRunningWhenMixedWithWaiting(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	ctx := context.Background()
+	approval := automationNodeByKey(t, fixture.definition, "approval")
+	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: approval.ID}
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "mixed-display:waiting", ActivityKey: "mixed-display:waiting", ActivityType: "test", ActivityStatus: models.AutomationActivityRunning,
+		EventKey: "mixed-display:waiting", ToNodeID: approval.ID, Transition: models.AutomationTransitionWaiting,
+	})
+	require.NoError(t, err)
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "mixed-display:running", ActivityKey: "mixed-display:running", ActivityType: "test", ActivityStatus: models.AutomationActivityRunning,
+		EventKey: "mixed-display:running", ToNodeID: approval.ID, Transition: models.AutomationTransitionEntered,
+	})
+	require.NoError(t, err)
+
+	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
+	require.NoError(t, err)
+	for _, node := range graph.Nodes {
+		if node.ID != approval.ID {
+			continue
+		}
+		require.Equal(t, 1, node.Counts.Running)
+		require.Equal(t, 1, node.Counts.Waiting)
+		require.Equal(t, "running", node.DisplayState)
+		return
+	}
+	t.Fatalf("approval node not found")
+}
+
 type fakeAutomationPullRequestProvider struct {
 	calls        int
 	resolveCalls int

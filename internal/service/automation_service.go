@@ -344,10 +344,10 @@ func (s *AutomationGraphService) GetLive(ctx context.Context, projectID, automat
 			display = "failed"
 		case nodeCounts.Blocked > 0:
 			display = "blocked"
-		case nodeCounts.Waiting > 0:
-			display = "waiting_human"
 		case nodeCounts.Running > 0:
 			display = "running"
+		case nodeCounts.Waiting > 0:
+			display = "waiting_human"
 		case nodeCounts.CompletedRecently > 0:
 			display = "recently_completed"
 		}
