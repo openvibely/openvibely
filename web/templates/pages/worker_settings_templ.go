@@ -135,7 +135,7 @@ func workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int,
 			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"worker-settings-content\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div id=\"worker-settings-content\" class=\"w-full min-w-0 max-w-full flex-none pb-6\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -143,7 +143,7 @@ func workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int,
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<h2 class=\"text-2xl font-bold mb-6\">Workers</h2><div class=\"card bg-base-100 shadow-sm border border-base-300 mb-6\"><div class=\"card-body\"><h3 class=\"card-title text-lg\">Worker Capacity &amp; Utilization</h3><p class=\"text-sm opacity-60 mb-4\">Global and per-project worker limits shown together. Click a limit value to edit it.</p><div class=\"overflow-x-auto\"><table class=\"table table-sm\"><thead><tr><th>Scope</th><th>Name</th><th>Running</th><th>Queue</th><th>Limit</th><th>Status</th></tr></thead>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "<h2 class=\"text-2xl font-bold mb-6\">Workers</h2><div class=\"card bg-base-100 shadow-sm border border-base-300 mb-6 w-full min-w-0 max-w-full flex-none h-auto\"><div class=\"card-body min-w-0\"><h3 class=\"card-title text-lg\">Worker Capacity &amp; Utilization</h3><p class=\"text-sm opacity-60 mb-4\">Global and per-project worker limits shown together. Click a limit value to edit it.</p><div class=\"worker-table-scroll w-full min-w-0 max-w-full overflow-x-auto\"><table class=\"table table-sm worker-stats-table w-full min-w-max h-auto\"><thead><tr><th>Scope</th><th>Name</th><th>Running</th><th>Queue</th><th>Limit</th><th>Status</th></tr></thead>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -156,7 +156,7 @@ func workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int,
 			return templ_7745c5c3_Err
 		}
 		if len(modelStats) > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"card bg-base-100 shadow-sm border border-base-300\"><div class=\"card-body\"><h3 class=\"card-title text-lg\">Per-Model Worker Pools</h3><p class=\"text-sm opacity-60 mb-4\">Models with dedicated worker pools. Configure limits on the Models page.</p><div class=\"overflow-x-auto\"><table class=\"table table-sm\"><thead><tr><th>Model</th><th>Running</th><th>Limit</th><th>Status</th></tr></thead>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "<div class=\"card bg-base-100 shadow-sm border border-base-300 w-full min-w-0 max-w-full flex-none h-auto\"><div class=\"card-body min-w-0\"><h3 class=\"card-title text-lg\">Per-Model Worker Pools</h3><p class=\"text-sm opacity-60 mb-4\">Models with dedicated worker pools. Configure limits on the Models page.</p><div class=\"worker-table-scroll w-full min-w-0 max-w-full overflow-x-auto\"><table class=\"table table-sm worker-stats-table w-full min-w-max h-auto\"><thead><tr><th>Model</th><th>Running</th><th>Limit</th><th>Status</th></tr></thead>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -169,7 +169,7 @@ func workerSettingsContent(maxWorkers int, runningWorkers int, totalRunning int,
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<style>\n\t\t\t\t\t\t/* Keep worker-limit inputs visually stable on mouse/spinner focus, while preserving keyboard focus indication. */\n\t\t\t\t\t\t#worker-settings-content .worker-limit-input:focus {\n\t\t\t\t\t\t\toutline: none;\n\t\t\t\t\t\t\tbox-shadow: none;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t#worker-settings-content .worker-limit-input:focus-visible {\n\t\t\t\t\t\t\toutline: 2px solid hsl(var(--p));\n\t\t\t\t\t\t\toutline-offset: 1px;\n\t\t\t\t\t\t}\n\t\t\t\t\t</style><script>\n\t\t\t\tif (!window._workerSettingsHandlersBound) {\n\t\t\t\t\twindow._workerSettingsHandlersBound = true;\n\t\t\t\t\twindow._workerLimitSuppressDirtyRestoreUntil = 0;\n\n\t\t\t\t\tfunction markWorkerInputDirty(input) {\n\t\t\t\t\t\tinput.setAttribute('data-dirty', 'true');\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction markWorkerInputClean(input) {\n\t\t\t\t\t\tinput.removeAttribute('data-dirty');\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction suppressDirtyRestore(ms) {\n\t\t\t\t\t\twindow._workerLimitSuppressDirtyRestoreUntil = Date.now() + ms;\n\t\t\t\t\t}\n\n\t\t\t\t\t// Track dirty state when user edits input fields\n\t\t\t\t\tdocument.body.addEventListener('input', function(evt) {\n\t\t\t\t\t\tif (evt.target.classList.contains('worker-limit-input')) {\n\t\t\t\t\t\t\tmarkWorkerInputDirty(evt.target);\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t// Clear dirty state when form is submitted\n\t\t\t\t\tdocument.body.addEventListener('submit', function(evt) {\n\t\t\t\t\t\tif (!evt.target.classList.contains('worker-limit-form')) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst input = evt.target.querySelector('.worker-limit-input');\n\t\t\t\t\t\tif (input) {\n\t\t\t\t\t\t\tmarkWorkerInputClean(input);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsuppressDirtyRestore(2000);\n\t\t\t\t\t});\n\n\t\t\t\t\t// Also clear state when HTMX request starts for worker limit forms.\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', function(evt) {\n\t\t\t\t\t\tif (!evt.detail || !evt.detail.elt || !evt.detail.elt.closest) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst form = evt.detail.elt.closest('.worker-limit-form');\n\t\t\t\t\t\tif (!form) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst input = form.querySelector('.worker-limit-input');\n\t\t\t\t\t\tif (input) {\n\t\t\t\t\t\t\tmarkWorkerInputClean(input);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsuppressDirtyRestore(2000);\n\t\t\t\t\t});\n\n\t\t\t\t\t// Ensure successful updates never keep warning styling.\n\t\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(evt) {\n\t\t\t\t\t\tif (!evt.detail || !evt.detail.successful || !evt.detail.elt || !evt.detail.elt.closest) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst form = evt.detail.elt.closest('.worker-limit-form');\n\t\t\t\t\t\tif (!form) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsuppressDirtyRestore(2000);\n\t\t\t\t\t\tconst projectId = form.getAttribute('data-project-id');\n\t\t\t\t\t\tif (!projectId) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst input = document.getElementById('limit-input-' + projectId);\n\t\t\t\t\t\tif (input) {\n\t\t\t\t\t\t\tmarkWorkerInputClean(input);\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t// Preserve dirty input fields during auto-refresh.\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(evt) {\n\t\t\t\t\t\tif (!evt.detail || !evt.detail.target || evt.detail.target.id !== 'project-stats-tbody') {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (Date.now() < window._workerLimitSuppressDirtyRestoreUntil) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tconst dirtyInputs = evt.detail.target.querySelectorAll('input[data-dirty=\"true\"]');\n\t\t\t\t\t\tconst dirtyValues = new Map();\n\t\t\t\t\t\tdirtyInputs.forEach(function(input) {\n\t\t\t\t\t\t\tconst projectId = input.getAttribute('data-project-id');\n\t\t\t\t\t\t\tif (projectId) {\n\t\t\t\t\t\t\t\tdirtyValues.set(projectId, input.value);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\n\t\t\t\t\t\tif (dirtyValues.size > 0) {\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\tif (Date.now() < window._workerLimitSuppressDirtyRestoreUntil) {\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tdirtyValues.forEach(function(value, projectId) {\n\t\t\t\t\t\t\t\t\tconst input = document.getElementById('limit-input-' + projectId);\n\t\t\t\t\t\t\t\t\tif (input) {\n\t\t\t\t\t\t\t\t\t\tinput.value = value;\n\t\t\t\t\t\t\t\t\t\tmarkWorkerInputDirty(input);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t// Pause polling when page is not visible to save resources.\n\t\t\t\t\tdocument.addEventListener('visibilitychange', function() {\n\t\t\t\t\t\tif (document.hidden) {\n\t\t\t\t\t\t\thtmx.findAll('[hx-trigger*=\"every\"]').forEach(function(el) {\n\t\t\t\t\t\t\t\thtmx.trigger(el, 'htmx:abort');\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\thtmx.findAll('[hx-trigger*=\"every\"]').forEach(function(el) {\n\t\t\t\t\t\t\t\thtmx.trigger(el, 'htmx:load');\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t</script></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<style>\n\t\t\t\t\t\t/* Keep worker-limit inputs visually stable on mouse/spinner focus, while preserving keyboard focus indication. */\n\t\t\t\t\t\t#worker-settings-content .worker-limit-input:focus {\n\t\t\t\t\t\t\toutline: none;\n\t\t\t\t\t\t\tbox-shadow: none;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t#worker-settings-content .worker-limit-input:focus-visible {\n\t\t\t\t\t\t\toutline: 2px solid oklch(var(--p));\n\t\t\t\t\t\t\toutline-offset: 1px;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t#worker-settings-content .worker-table-scroll {\n\t\t\t\t\t\t\tflex: 0 0 auto;\n\t\t\t\t\t\t\tmax-height: none;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t#worker-settings-content .worker-stats-table {\n\t\t\t\t\t\t\ttable-layout: auto;\n\t\t\t\t\t\t\theight: auto;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t#worker-settings-content .worker-stats-table :where(th, td) {\n\t\t\t\t\t\t\tpadding-top: 0.625rem;\n\t\t\t\t\t\t\tpadding-bottom: 0.625rem;\n\t\t\t\t\t\t\tvertical-align: middle;\n\t\t\t\t\t\t\twhite-space: nowrap;\n\t\t\t\t\t\t}\n\t\t\t\t\t\t#worker-settings-content .worker-stats-table tr {\n\t\t\t\t\t\t\theight: auto;\n\t\t\t\t\t\t\tmin-height: 2.75rem;\n\t\t\t\t\t\t}\n\t\t\t\t\t</style><script>\n\t\t\t\tif (!window._workerSettingsHandlersBound) {\n\t\t\t\t\twindow._workerSettingsHandlersBound = true;\n\t\t\t\t\twindow._workerLimitSuppressDirtyRestoreUntil = 0;\n\n\t\t\t\t\tfunction markWorkerInputDirty(input) {\n\t\t\t\t\t\tinput.setAttribute('data-dirty', 'true');\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction markWorkerInputClean(input) {\n\t\t\t\t\t\tinput.removeAttribute('data-dirty');\n\t\t\t\t\t}\n\n\t\t\t\t\tfunction suppressDirtyRestore(ms) {\n\t\t\t\t\t\twindow._workerLimitSuppressDirtyRestoreUntil = Date.now() + ms;\n\t\t\t\t\t}\n\n\t\t\t\t\t// Track dirty state when user edits input fields\n\t\t\t\t\tdocument.body.addEventListener('input', function(evt) {\n\t\t\t\t\t\tif (evt.target.classList.contains('worker-limit-input')) {\n\t\t\t\t\t\t\tmarkWorkerInputDirty(evt.target);\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t// Clear dirty state when form is submitted\n\t\t\t\t\tdocument.body.addEventListener('submit', function(evt) {\n\t\t\t\t\t\tif (!evt.target.classList.contains('worker-limit-form')) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst input = evt.target.querySelector('.worker-limit-input');\n\t\t\t\t\t\tif (input) {\n\t\t\t\t\t\t\tmarkWorkerInputClean(input);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsuppressDirtyRestore(2000);\n\t\t\t\t\t});\n\n\t\t\t\t\t// Also clear state when HTMX request starts for worker limit forms.\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeRequest', function(evt) {\n\t\t\t\t\t\tif (!evt.detail || !evt.detail.elt || !evt.detail.elt.closest) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst form = evt.detail.elt.closest('.worker-limit-form');\n\t\t\t\t\t\tif (!form) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst input = form.querySelector('.worker-limit-input');\n\t\t\t\t\t\tif (input) {\n\t\t\t\t\t\t\tmarkWorkerInputClean(input);\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsuppressDirtyRestore(2000);\n\t\t\t\t\t});\n\n\t\t\t\t\t// Ensure successful updates never keep warning styling.\n\t\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(evt) {\n\t\t\t\t\t\tif (!evt.detail || !evt.detail.successful || !evt.detail.elt || !evt.detail.elt.closest) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst form = evt.detail.elt.closest('.worker-limit-form');\n\t\t\t\t\t\tif (!form) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tsuppressDirtyRestore(2000);\n\t\t\t\t\t\tconst projectId = form.getAttribute('data-project-id');\n\t\t\t\t\t\tif (!projectId) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tconst input = document.getElementById('limit-input-' + projectId);\n\t\t\t\t\t\tif (input) {\n\t\t\t\t\t\t\tmarkWorkerInputClean(input);\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t// Preserve dirty input fields during auto-refresh.\n\t\t\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(evt) {\n\t\t\t\t\t\tif (!evt.detail || !evt.detail.target || evt.detail.target.id !== 'project-stats-tbody') {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tif (Date.now() < window._workerLimitSuppressDirtyRestoreUntil) {\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\n\t\t\t\t\t\tconst dirtyInputs = evt.detail.target.querySelectorAll('input[data-dirty=\"true\"]');\n\t\t\t\t\t\tconst dirtyValues = new Map();\n\t\t\t\t\t\tdirtyInputs.forEach(function(input) {\n\t\t\t\t\t\t\tconst projectId = input.getAttribute('data-project-id');\n\t\t\t\t\t\t\tif (projectId) {\n\t\t\t\t\t\t\t\tdirtyValues.set(projectId, input.value);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t});\n\n\t\t\t\t\t\tif (dirtyValues.size > 0) {\n\t\t\t\t\t\t\trequestAnimationFrame(function() {\n\t\t\t\t\t\t\t\tif (Date.now() < window._workerLimitSuppressDirtyRestoreUntil) {\n\t\t\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\tdirtyValues.forEach(function(value, projectId) {\n\t\t\t\t\t\t\t\t\tconst input = document.getElementById('limit-input-' + projectId);\n\t\t\t\t\t\t\t\t\tif (input) {\n\t\t\t\t\t\t\t\t\t\tinput.value = value;\n\t\t\t\t\t\t\t\t\t\tmarkWorkerInputDirty(input);\n\t\t\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\n\t\t\t\t\t// Pause polling when page is not visible to save resources.\n\t\t\t\t\tdocument.addEventListener('visibilitychange', function() {\n\t\t\t\t\t\tif (document.hidden) {\n\t\t\t\t\t\t\thtmx.findAll('[hx-trigger*=\"every\"]').forEach(function(el) {\n\t\t\t\t\t\t\t\thtmx.trigger(el, 'htmx:abort');\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t} else {\n\t\t\t\t\t\t\thtmx.findAll('[hx-trigger*=\"every\"]').forEach(function(el) {\n\t\t\t\t\t\t\t\thtmx.trigger(el, 'htmx:load');\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t}\n\t\t\t\t\t});\n\t\t\t\t}\n\t\t\t</script></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -235,7 +235,7 @@ func globalWorkerStats(maxWorkers int, totalRunning int, queueSize int) templ.Co
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(workerLimitLabel(maxWorkers))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 242, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 260, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
@@ -270,7 +270,7 @@ func globalWorkerStats(maxWorkers int, totalRunning int, queueSize int) templ.Co
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %s", totalRunning, workerLimitLabel(maxWorkers)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 247, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 265, Col: 72}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
@@ -305,7 +305,7 @@ func globalWorkerStats(maxWorkers int, totalRunning int, queueSize int) templ.Co
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", queueSize))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 253, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 271, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 		if templ_7745c5c3_Err != nil {
@@ -399,7 +399,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 		var templ_7745c5c3_Var18 string
 		templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %s", totalRunning, workerLimitLabel(maxWorkers)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 278, Col: 73}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 296, Col: 73}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 		if templ_7745c5c3_Err != nil {
@@ -434,20 +434,20 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", queueSize))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 283, Col: 35}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 301, Col: 35}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</span></td><td id=\"limit-cell-global\"><form method=\"post\" action=\"/workers\" hx-post=\"/workers\" hx-target=\"#worker-settings-content\" hx-swap=\"outerHTML\" class=\"flex items-center gap-2 worker-limit-form\" data-project-id=\"global\"><input type=\"number\" name=\"max_workers\" id=\"limit-input-global\" value=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</span></td><td id=\"limit-cell-global\"><form method=\"post\" action=\"/workers\" hx-post=\"/workers\" hx-target=\"#worker-settings-content\" hx-swap=\"outerHTML\" class=\"flex flex-nowrap items-center gap-2 worker-limit-form\" data-project-id=\"global\"><input type=\"number\" name=\"max_workers\" id=\"limit-input-global\" value=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", maxWorkers))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 300, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 318, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -495,7 +495,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("project-row-%s", ps.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 324, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 342, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 			if templ_7745c5c3_Err != nil {
@@ -508,7 +508,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var24 string
 			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(ps.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 328, Col: 37}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 346, Col: 37}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
@@ -526,7 +526,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 				var templ_7745c5c3_Var25 string
 				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %d", ps.Running, *ps.MaxWorkers))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 331, Col: 101}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 349, Col: 101}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 				if templ_7745c5c3_Err != nil {
@@ -550,7 +550,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 					}
 				}()))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 334, Col: 129}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 352, Col: 129}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 				if templ_7745c5c3_Err != nil {
@@ -574,7 +574,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 					}
 				}()))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 338, Col: 116}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 356, Col: 116}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 				if templ_7745c5c3_Err != nil {
@@ -614,7 +614,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var30 string
 			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", ps.QueueSize))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 344, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 362, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 			if templ_7745c5c3_Err != nil {
@@ -627,7 +627,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var31 string
 			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("limit-cell-%s", ps.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 347, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 365, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 			if templ_7745c5c3_Err != nil {
@@ -640,20 +640,20 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/workers/projects/%s/limit", ps.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 350, Col: 64}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 368, Col: 64}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var32)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" hx-target=\"#worker-settings-content\" hx-swap=\"outerHTML\" class=\"flex items-center gap-2 worker-limit-form\" data-project-id=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" hx-target=\"#worker-settings-content\" hx-swap=\"outerHTML\" class=\"flex flex-nowrap items-center gap-2 worker-limit-form\" data-project-id=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.ResolveAttributeValue(ps.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 354, Col: 29}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 372, Col: 29}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var33)
 			if templ_7745c5c3_Err != nil {
@@ -666,7 +666,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("limit-input-%s", ps.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 359, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 377, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var34)
 			if templ_7745c5c3_Err != nil {
@@ -685,7 +685,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 				}
 			}()))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 360, Col: 118}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 378, Col: 118}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var35)
 			if templ_7745c5c3_Err != nil {
@@ -698,7 +698,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(ps.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 366, Col: 30}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 384, Col: 30}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 			if templ_7745c5c3_Err != nil {
@@ -731,7 +731,7 @@ func projectStatsTableBody(maxWorkers int, runningWorkers int, totalRunning int,
 				var templ_7745c5c3_Var37 string
 				templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("Project is using all %d allowed workers", *ps.MaxWorkers))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 378, Col: 127}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 396, Col: 127}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var37)
 				if templ_7745c5c3_Err != nil {
@@ -828,7 +828,7 @@ func modelStatsTableBody(modelStats []ModelWorkerStats) templ.Component {
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(ms.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 405, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 423, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
@@ -841,7 +841,7 @@ func modelStatsTableBody(modelStats []ModelWorkerStats) templ.Component {
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(ms.Model)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 406, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 424, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
@@ -876,7 +876,7 @@ func modelStatsTableBody(modelStats []ModelWorkerStats) templ.Component {
 			var templ_7745c5c3_Var44 string
 			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d / %d", ms.Running, ms.MaxWorkers))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 410, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 428, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 			if templ_7745c5c3_Err != nil {
@@ -889,7 +889,7 @@ func modelStatsTableBody(modelStats []ModelWorkerStats) templ.Component {
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", ms.MaxWorkers))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 414, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/worker_settings.templ`, Line: 432, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 			if templ_7745c5c3_Err != nil {
