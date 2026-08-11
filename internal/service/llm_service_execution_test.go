@@ -191,6 +191,86 @@ func TestLLMService_ExecuteTaskWithAgent_PublishesInitialThreadExecutionStarted(
 	}
 }
 
+func TestLLMService_ExecuteTaskWithAgent_PublishesCompletedTerminalEvent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	project := &models.Project{Name: "Completed terminal stream project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Completed terminal stream", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "initial prompt", AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	hub := events.NewExecutionStreamHub()
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetExecutionStreamHub(hub)
+	called := make(chan string, 1)
+	release := make(chan struct{})
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "worker complete"
+	mock.TextOnly = "worker complete"
+	mock.OnCall = func(ctx context.Context, call testutil.MockLLMCall) {
+		called <- call.ExecID
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	svc.SetLLMCaller(mock)
+	type executeResult struct {
+		exec *models.Execution
+		err  error
+	}
+	resultCh := make(chan executeResult, 1)
+	go func() {
+		exec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+		resultCh <- executeResult{exec: exec, err: err}
+	}()
+
+	var execID string
+	select {
+	case execID = <-called:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for mock LLM call")
+	}
+	sub, _, err := hub.Subscribe(execID)
+	if err != nil {
+		t.Fatalf("subscribe execution stream: %v", err)
+	}
+	close(release)
+
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("ExecuteTaskWithAgent: %v", result.err)
+		}
+		if result.exec == nil || result.exec.ID != execID || result.exec.Status != models.ExecCompleted {
+			t.Fatalf("unexpected execution result: %+v", result.exec)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ExecuteTaskWithAgent")
+	}
+	select {
+	case event, ok := <-sub:
+		if !ok || event.ExecID != execID || event.Type != events.ExecutionStreamDone || event.Status != string(models.ExecCompleted) {
+			t.Fatalf("terminal event = %+v, open=%v", event, ok)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for completed terminal event")
+	}
+	if _, ok := <-sub; ok {
+		t.Fatal("subscriber remained open after completed terminal event")
+	}
+}
+
 func TestLLMService_ExecuteTaskWithAgent_PromotesQueuedTaskThreadInputAfterCompletion(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
