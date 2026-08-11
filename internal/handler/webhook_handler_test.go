@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -60,6 +61,30 @@ func (wtc *webhookTestContext) createAgent(t *testing.T, name string) *models.Ag
 		t.Fatalf("create agent: %v", err)
 	}
 	return a
+}
+
+func (wtc *webhookTestContext) expectSubmittedTasks(t *testing.T, count int) []models.Task {
+	t.Helper()
+	if wtc.handler.workerSvc == nil {
+		t.Fatal("worker service is not configured")
+	}
+
+	submitted := make([]models.Task, 0, count)
+	deadline := time.After(2 * time.Second)
+	for len(submitted) < count {
+		select {
+		case task := <-wtc.handler.workerSvc.Submitted():
+			submitted = append(submitted, task)
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d worker submissions, got %d", count, len(submitted))
+		}
+	}
+	select {
+	case task := <-wtc.handler.workerSvc.Submitted():
+		t.Fatalf("unexpected extra worker submission for task %s", task.ID)
+	default:
+	}
+	return submitted
 }
 
 // jsonRequest makes a JSON request to the echo server with custom headers.
@@ -216,6 +241,11 @@ func TestWebhookInbound_DuplicatePayloadCreatesSecondTask(t *testing.T) {
 		map[string]string{"X-Webhook-Secret": endpoint.Secret})
 	if rec2.Code != http.StatusAccepted {
 		t.Fatalf("second webhook: expected 202, got %d; body=%s", rec2.Code, rec2.Body.String())
+	}
+
+	submitted := wtc.expectSubmittedTasks(t, 2)
+	if submitted[0].ID == submitted[1].ID {
+		t.Fatalf("expected two distinct worker submissions, both used task %s", submitted[0].ID)
 	}
 
 	tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
@@ -754,26 +784,62 @@ func TestWebhookCRUD_RotateSecret(t *testing.T) {
 	}
 }
 
-func TestWebhookCRUD_Test(t *testing.T) {
+func TestWebhookCRUD_TestRepeatedClicksCreateUniqueTasksWithAgentsAndWorkerSubmissions(t *testing.T) {
 	wtc := newWebhookTestContext(t)
 	project := wtc.CreateProject().WithName("WH Test").Build()
+	agent1 := wtc.createAgent(t, "Primary Test Agent")
+	agent2 := wtc.createAgent(t, "Secondary Test Agent")
 	endpoint := wtc.createEndpoint(t, project.ID, "TestEndpoint", true)
-
-	req := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/test", nil)
-	rec := httptest.NewRecorder()
-	wtc.echo.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d; body=%s", rec.Code, rec.Body.String())
+	if err := wtc.webhookRepo.SetEndpointAgents(context.Background(), endpoint.ID, []string{agent1.ID, agent2.ID}); err != nil {
+		t.Fatalf("SetEndpointAgents: %v", err)
 	}
 
-	// Should have created exactly one task
-	tasks, _ := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 task from test, got %d", len(tasks))
+	for i := 1; i <= 2; i++ {
+		req := httptest.NewRequest("POST", "/channels/webhooks/"+endpoint.ID+"/test", nil)
+		rec := httptest.NewRecorder()
+		wtc.echo.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusAccepted {
+			t.Fatalf("test click %d: expected 202, got %d; body=%s", i, rec.Code, rec.Body.String())
+		}
+		var body map[string]string
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("test click %d: decode response: %v", i, err)
+		}
+		if body["task_id"] == "" {
+			t.Fatalf("test click %d: expected task_id response, got %s", i, rec.Body.String())
+		}
 	}
-	if tasks[0].CreatedVia != models.TaskOriginWebhook {
-		t.Errorf("expected created_via=webhook, got %q", tasks[0].CreatedVia)
+
+	submitted := wtc.expectSubmittedTasks(t, 2)
+	if submitted[0].ID == submitted[1].ID {
+		t.Fatalf("expected two distinct worker submissions, both used task %s", submitted[0].ID)
+	}
+
+	tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks from repeated tests, got %d", len(tasks))
+	}
+	if tasks[0].Title == tasks[1].Title {
+		t.Fatalf("expected unique task titles, both were %q", tasks[0].Title)
+	}
+	for _, task := range tasks {
+		if task.CreatedVia != models.TaskOriginWebhook {
+			t.Errorf("expected created_via=webhook, got %q", task.CreatedVia)
+		}
+		if task.AgentDefinitionID == nil || *task.AgentDefinitionID != agent1.ID {
+			t.Fatalf("task %s primary agent = %v, want %s", task.ID, task.AgentDefinitionID, agent1.ID)
+		}
+		assignments, err := wtc.webhookRepo.GetTaskAgentAssignments(context.Background(), task.ID)
+		if err != nil {
+			t.Fatalf("GetTaskAgentAssignments(%s): %v", task.ID, err)
+		}
+		if len(assignments) != 2 || assignments[0].AgentDefinitionID != agent1.ID || assignments[1].AgentDefinitionID != agent2.ID {
+			t.Fatalf("task %s assignments = %#v, want [%s %s] in order", task.ID, assignments, agent1.ID, agent2.ID)
+		}
 	}
 }
 
