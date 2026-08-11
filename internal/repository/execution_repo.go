@@ -723,12 +723,7 @@ func (r *ExecutionRepo) HasActiveTaskExecution(ctx context.Context, taskID, excl
 }
 
 func (r *ExecutionRepo) FindLatestActiveChatExecution(ctx context.Context, projectID string) (*models.Execution, error) {
-	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
-		`SELECT `+executionSelectColumnsAliasLight+`
-		 FROM executions e
-		 JOIN tasks t ON t.id = e.task_id
-		 WHERE t.project_id = ? AND t.category = 'chat' AND e.status = 'running'
-		 ORDER BY e.started_at DESC, e.rowid DESC LIMIT 1`, projectID))
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx, latestActiveChatExecutionSQL(), projectID))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -788,18 +783,7 @@ func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, befo
 	if limit <= 0 {
 		return []models.Execution{}, nil
 	}
-	query := `SELECT ` + executionSelectColumnsAliasLight + `
-		 FROM executions e
-		 JOIN tasks t ON t.id = e.task_id
-		 WHERE t.project_id = ? AND t.category = 'chat'`
-	args := []interface{}{projectID}
-	if beforeExecID != "" {
-		query += ` AND (e.started_at < (SELECT started_at FROM executions WHERE id = ?)
-			OR (e.started_at = (SELECT started_at FROM executions WHERE id = ?) AND e.rowid < (SELECT rowid FROM executions WHERE id = ?)))`
-		args = append(args, beforeExecID, beforeExecID, beforeExecID)
-	}
-	query += ` ORDER BY e.started_at DESC, e.rowid DESC LIMIT ?`
-	args = append(args, limit)
+	query, args := chatHistoryPageSQL(projectID, beforeExecID, limit)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -808,6 +792,28 @@ func (r *ExecutionRepo) listChatHistoryPage(ctx context.Context, projectID, befo
 	defer rows.Close()
 
 	return scanExecutionsNewestFirstAsChronological(rows)
+}
+
+func latestActiveChatExecutionSQL() string {
+	return `SELECT ` + executionSelectColumnsAliasLight + `
+		 FROM executions e
+		 WHERE e.task_project_id = ? AND e.task_category = 'chat' AND e.status = 'running'
+		 ORDER BY e.started_at DESC, e.history_order DESC LIMIT 1`
+}
+
+func chatHistoryPageSQL(projectID, beforeExecID string, limit int) (string, []interface{}) {
+	query := `SELECT ` + executionSelectColumnsAliasLight + `
+		 FROM executions e
+		 WHERE e.task_project_id = ? AND e.task_category = 'chat'`
+	args := []interface{}{projectID}
+	if beforeExecID != "" {
+		query += ` AND (e.started_at < (SELECT started_at FROM executions WHERE id = ?)
+			OR (e.started_at = (SELECT started_at FROM executions WHERE id = ?) AND e.history_order < (SELECT history_order FROM executions WHERE id = ?)))`
+		args = append(args, beforeExecID, beforeExecID, beforeExecID)
+	}
+	query += ` ORDER BY e.started_at DESC, e.history_order DESC LIMIT ?`
+	args = append(args, limit)
+	return query, args
 }
 
 // ListByTaskChronological returns all executions for a task ordered chronologically (oldest first).
