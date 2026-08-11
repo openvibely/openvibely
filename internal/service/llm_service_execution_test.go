@@ -3960,7 +3960,17 @@ func (f *fakeGitHubIssueRuntimeProvider) GetIssue(ctx context.Context, repo *Git
 	f.issueMu.Lock()
 	issue, ok := f.issues[issueNumber]
 	if !ok {
-		issue = GitHubIssue{Number: issueNumber, URL: fmt.Sprintf("https://github.com/openvibely/openvibely/issues/%d", issueNumber), Title: "Issue"}
+		baseURL := ""
+		if repo != nil {
+			baseURL = strings.TrimRight(strings.TrimSpace(repo.HTMLURL), "/")
+			if baseURL == "" && strings.TrimSpace(repo.FullName) != "" {
+				baseURL = "https://github.com/" + strings.Trim(strings.TrimSpace(repo.FullName), "/")
+			}
+		}
+		if baseURL == "" {
+			baseURL = "https://github.com/openvibely/openvibely"
+		}
+		issue = GitHubIssue{Number: issueNumber, URL: fmt.Sprintf("%s/issues/%d", baseURL, issueNumber), Title: "Issue", State: "open"}
 		if f.issues == nil {
 			f.issues = make(map[int]GitHubIssue)
 		}

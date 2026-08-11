@@ -1628,7 +1628,7 @@ func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t 
 	fixture.project.RepoURL = "https://github.com/example/runtime.git"
 	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
 	repoRef := &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}
-	issue := GitHubIssue{Number: 288, URL: "https://github.com/example/runtime/issues/288", Title: "Stale assigned issue", State: "open", Assignees: []string{"dubee"}}
+	issue := GitHubIssue{Number: 288, URL: "https://github.com/example/runtime/issues/288", Title: "Stale assigned issue", Body: "Stale issue body", State: "open", Assignees: []string{"dubee"}, Labels: []string{"bug"}, CompleteForTaskCreation: true, TaskCreationCompletenessKnown: true}
 	resourceID := githubIssueResourceID(repoRef, issue.Number)
 
 	_, err := fixture.repo.DB().ExecContext(ctx, `PRAGMA foreign_keys = OFF`)
