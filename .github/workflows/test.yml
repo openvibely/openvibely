@@ -186,58 +186,28 @@ jobs:
         run: go test ./internal/update -count=1 -timeout 120s
 
   packaged-update-e2e:
-    name: Packaged update E2E (${{ matrix.os }}, ${{ matrix.arch }}, ${{ matrix.distribution }})
+    name: Packaged update E2E (${{ matrix.os }}, ${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
             arch: amd64
-            distribution: binary
-            experimental: false
-          - os: ubuntu-latest
-            arch: amd64
-            distribution: desktop
             experimental: false
           - os: ubuntu-24.04-arm
             arch: arm64
-            distribution: binary
-            experimental: false
-          - os: ubuntu-24.04-arm
-            arch: arm64
-            distribution: desktop
             experimental: false
           - os: macos-15-intel
             arch: amd64
-            distribution: binary
-            experimental: false
-          - os: macos-15-intel
-            arch: amd64
-            distribution: desktop
             experimental: false
           - os: macos-latest
             arch: arm64
-            distribution: binary
-            experimental: false
-          - os: macos-latest
-            arch: arm64
-            distribution: desktop
             experimental: false
           - os: windows-latest
             arch: amd64
-            distribution: binary
-            experimental: false
-          - os: windows-latest
-            arch: amd64
-            distribution: desktop
             experimental: false
           - os: windows-11-arm
             arch: arm64
-            distribution: binary
-            experimental: true
-          - os: windows-11-arm
-            arch: arm64
-            distribution: desktop
             experimental: true
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}
@@ -251,9 +221,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run packaged update E2E
+      - name: Run binary packaged update E2E
         shell: bash
         env:
           OPENVIBELY_UPDATE_E2E: "1"
-          OPENVIBELY_UPDATE_E2E_DISTRIBUTION: ${{ matrix.distribution }}
+          OPENVIBELY_UPDATE_E2E_DISTRIBUTION: binary
+        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 180s
+
+      - name: Run desktop packaged update E2E
+        shell: bash
+        env:
+          OPENVIBELY_UPDATE_E2E: "1"
+          OPENVIBELY_UPDATE_E2E_DISTRIBUTION: desktop
         run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 180s
