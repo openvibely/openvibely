@@ -2,6 +2,7 @@ package pages
 
 import (
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -51,7 +52,7 @@ type ChannelsSettingsView struct {
 	HasDiscordChannel            bool
 	HasEmailChannel              bool
 	Webhooks                     []models.WebhookEndpoint
-	Agents                       []models.Agent
+	AgentPickerOptions           []repository.AgentPickerOption
 	WebhookAgents                map[string][]models.WebhookEndpointAgent
 	ChannelTargets               []models.ChannelTarget
 	SendMessageExplicitTargets   bool

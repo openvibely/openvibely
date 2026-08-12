@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"github.com/openvibely/openvibely/internal/service"
-	"github.com/openvibely/openvibely/web/templates/layout"
-	"github.com/openvibely/openvibely/web/templates/components"
+
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func githubConnectionBadgeClass(status service.GitHubConnectionStatus) string {
@@ -110,7 +112,7 @@ func selectedWebhookAgentIDs(webhooks []models.WebhookEndpoint, webhookAgents ma
 	return strings.Join(ids, ",")
 }
 
-func agentsJSON(agents []models.Agent) string {
+func agentsJSON(agents []repository.AgentPickerOption) string {
 	type agentData struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -1261,7 +1263,7 @@ templ settingsContent(view ChannelsSettingsView) {
 	</dialog>
 
 	<!-- Webhook available agents data for JavaScript -->
-	<div id="webhook_agents_data" data-agents={ agentsJSON(view.Agents) } style="display:none"></div>
+	<div id="webhook_agents_data" data-agents={ agentsJSON(view.AgentPickerOptions) } style="display:none"></div>
 
 	<style>
 		.dropdown-content {
