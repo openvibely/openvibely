@@ -3432,21 +3432,32 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					try {
 						var response = await fetch('/api/system/update', { headers: { 'Accept': 'application/json' } });
 						if (response.status === 204) {
-							setSystemUpdateIndicators(false);
-							dismissSystemUpdateNotice('');
+							handleGlobalSystemUpdateSnapshot(null);
 							return;
 						}
 						if (!response.ok) return;
 						var data = await response.json();
-						var actionable = systemUpdateIsActionable(data);
-						setSystemUpdateIndicators(actionable);
-						if (actionable) showSystemUpdateNotice(data);
-						else {
-							dismissSystemUpdateNotice('');
-							showSystemUpdateSucceededToast(data);
-						}
+						handleGlobalSystemUpdateSnapshot(data);
 					} catch (_) {}
 				}
+
+				function handleGlobalSystemUpdateSnapshot(data) {
+					if (!data) {
+						setSystemUpdateIndicators(false);
+						dismissSystemUpdateNotice('');
+						return;
+					}
+					var actionable = systemUpdateIsActionable(data);
+					setSystemUpdateIndicators(actionable);
+					if (actionable) showSystemUpdateNotice(data);
+					else {
+						dismissSystemUpdateNotice('');
+						showSystemUpdateSucceededToast(data);
+					}
+				}
+
+				window.refreshGlobalSystemUpdateIndicators = refreshGlobalSystemUpdateIndicators;
+				window.openVibelyHandleSystemUpdateSnapshot = handleGlobalSystemUpdateSnapshot;
 
 				if (!window._openVibelySystemUpdateIndicatorsRegistered) {
 					window._openVibelySystemUpdateIndicatorsRegistered = true;

@@ -16,7 +16,7 @@ func TestAlertsContent_SystemUpdateShowsExactDockerDigestAndLiveProgress(t *test
 		t.Fatal(err)
 	}
 	html := buf.String()
-	for _, required := range []string{"system-update-digest", "image_ref", "setInterval(refreshSystemUpdateCard, 1000)", "data.current_version === available", "data.distribution === 'hosted' || (data.state !== 'waiting_for_idle'"} {
+	for _, required := range []string{"system-update-digest", "image_ref", "setInterval(refreshSystemUpdateCard, 1000)", "data.current_version === available", "data.distribution === 'hosted' || (data.state !== 'waiting_for_idle'", "window.openVibelyHandleSystemUpdateSnapshot(data)", "window.openVibelyHandleSystemUpdateSnapshot(null)"} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("system update UI missing %q", required)
 		}

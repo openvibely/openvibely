@@ -118,9 +118,14 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 				if (!card) return;
 				try {
 					var response = await fetch('/api/system/update', {headers: {'Accept': 'application/json'}});
-					if (response.status === 204) { card.classList.add('hidden'); return; }
+					if (response.status === 204) {
+						card.classList.add('hidden');
+						if (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(null);
+						return;
+					}
 					if (!response.ok) return;
 					var data = await response.json();
+					if (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(data);
 					var available = data.release && data.release.metadata ? data.release.metadata.version : '';
 					if (data.state === 'succeeded' || (available && data.current_version === available)) { card.classList.add('hidden'); return; }
 					card.classList.remove('hidden');
