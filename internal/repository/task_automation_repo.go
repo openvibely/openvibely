@@ -320,10 +320,13 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 	}
 	for _, resource := range []struct{ kind, id string }{{"task", taskID}, {"execution", executionID}} {
 		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
-			VALUES (?, ?, ?, 'subject') ON CONFLICT(activity_id, resource_type, resource_id, relation) DO NOTHING`,
+				VALUES (?, ?, ?, 'subject') ON CONFLICT(activity_id, resource_type, resource_id, relation) DO NOTHING`,
 			activityID, resource.kind, resource.id); err != nil {
 			return nil, err
 		}
+	}
+	if err := syncAutomationLiveActivityState(ctx, conn, activityID); err != nil {
+		return nil, err
 	}
 	if queued && claimedTask != nil {
 		task, err := getTaskWithExecutor(ctx, conn, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, taskID)
