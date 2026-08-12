@@ -414,12 +414,31 @@ func TestBase_SystemUpdateNoticeIsStickyAndActionable(t *testing.T) {
 		`/api/system/update/apply`,
 		`window.openVibelyNavigate('/alerts')`,
 		`systemUpdateIsActionable`,
+		`systemUpdateNoticeKey`,
+		`metadata.published_at`,
+		`target.sha256`,
+		`navigateSystemUpdateToAlerts`,
+		`applySystemUpdateFromToast`,
+		`showSystemUpdateSucceededToast`,
+		`openvibely-system-update-success-toast`,
+		`OpenVibely updated to `,
+		`background-color: #646fe4`,
+		`[data-theme="light"] .system-update-toast`,
+		`background-color: #7480ff`,
+		`system-update-toast`,
 		`options.sticky`,
 		`system-update-nav-badge`,
 	} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("global system update notice missing snippet: %s", required)
 		}
+	}
+
+	if strings.Contains(html, `.toast-notification:hover`) && strings.Contains(html, `scale(1.02)`) {
+		t.Fatalf("toast notifications should not resize on hover")
+	}
+	if strings.Contains(html, `data-system-update-apply`) || strings.Contains(html, `system-update-toast-action`) {
+		t.Fatalf("system update toast should use the whole notification as the update action")
 	}
 }
 

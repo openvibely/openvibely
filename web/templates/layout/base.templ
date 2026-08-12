@@ -370,13 +370,27 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					outline: 2px solid currentColor;
 					outline-offset: 2px;
 				}
-				.toast-notification:hover {
-					transform: scale(1.02);
-				}
 				.toast-notification.toast-dismiss {
 					animation: toast-slide-out 0.3s ease-in forwards;
 					transition: none;
 					pointer-events: none;
+				}
+				.system-update-toast {
+					background-color: #646fe4 !important;
+					border-color: #7480ff !important;
+					color: #090b23 !important;
+				}
+				.system-update-toast .toast-close {
+					color: #090b23 !important;
+				}
+				.system-update-toast .toast-close:hover,
+				.system-update-toast .toast-close:focus-visible {
+					background-color: rgba(9, 11, 35, 0.12) !important;
+				}
+				[data-theme="light"] .system-update-toast {
+					background-color: #7480ff !important;
+					border-color: #8b93ff !important;
+					color: #090b23 !important;
 				}
 				@keyframes toast-slide-in {
 					from {
@@ -661,6 +675,19 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					pointer-events: none;
 					width: 0;
 					display: none;
+				}
+				.sidebar-alert-indicators {
+					margin-left: auto;
+					display: inline-flex;
+					align-items: center;
+					justify-content: flex-end;
+					gap: 0.375rem;
+					min-width: 0;
+					flex-shrink: 0;
+				}
+				.sidebar-update-badge {
+					padding: 0 0.5rem;
+					flex-shrink: 0;
 				}
 				.sidebar-aside.sidebar-collapsed .sidebar-hide-collapsed {
 					display: none !important;
@@ -3301,66 +3328,101 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (badge) badge.classList.toggle('hidden', !visible);
 				}
 
-				function dismissSystemUpdateNotice(version) {
+				function systemUpdateNoticeKey(data) {
+					var release = data && data.release ? data.release : {};
+					var metadata = release.metadata || {};
+					var target = release.target || {};
+					return [
+						data && data.current_version ? data.current_version : '',
+						metadata.version || '',
+						metadata.commit || '',
+						metadata.published_at || '',
+						target.sha256 || target.url || ''
+					].join('|');
+				}
+
+				function navigateSystemUpdateToAlerts() {
+					closeOpenModalsForToastNavigation();
+					if (window.openVibelyNavigate) {
+						window.openVibelyNavigate('/alerts').catch(function(err) {
+							console.error('[system-update] failed to navigate to alerts:', err);
+						});
+					} else {
+						window.location.href = '/alerts';
+					}
+				}
+
+				function applySystemUpdateFromToast(toast) {
+					if (!toast || toast.dataset.systemUpdateApplying === 'true') return;
+					toast.dataset.systemUpdateApplying = 'true';
+					fetch('/api/system/update/apply', { method: 'POST', headers: { 'Accept': 'application/json' } })
+						.catch(function(err) { console.error('[system-update] apply failed:', err); })
+						.finally(function() {
+							navigateSystemUpdateToAlerts();
+							dismissToast(toast);
+						});
+				}
+
+				function showSystemUpdateSucceededToast(data) {
+					if (!data || data.state !== 'succeeded') return;
+					var version = data.release && data.release.metadata ? data.release.metadata.version || '' : data.current_version || '';
+					if (!version) return;
+					var noticeKey = systemUpdateNoticeKey(data);
+					var successKey = 'succeeded|' + noticeKey;
+					try {
+						if (localStorage.getItem('openvibely-system-update-success-toast') === successKey) return;
+						localStorage.setItem('openvibely-system-update-success-toast', successKey);
+					} catch (_) {}
+					if (window.showToast) {
+						window.showToast('OpenVibely updated to ' + version, 'completed');
+					}
+				}
+
+				function dismissSystemUpdateNotice(noticeKey) {
 					var toast = document.querySelector('[data-system-update-toast]');
 					if (toast) dismissToast(toast);
-					if (version) {
-						try { localStorage.setItem('openvibely-system-update-dismissed-version', version); } catch (_) {}
+					if (noticeKey) {
+						try { localStorage.setItem('openvibely-system-update-dismissed-version', noticeKey); } catch (_) {}
 					}
 				}
 
 				function showSystemUpdateNotice(data) {
 					var version = data && data.release && data.release.metadata ? data.release.metadata.version || '' : '';
 					if (!version) return;
+					var noticeKey = systemUpdateNoticeKey(data);
 					try {
-						if (localStorage.getItem('openvibely-system-update-dismissed-version') === version) return;
+						if (localStorage.getItem('openvibely-system-update-dismissed-version') === noticeKey) return;
 					} catch (_) {}
 					var existing = document.querySelector('[data-system-update-toast]');
-					if (existing) return;
+					if (existing) {
+						if (existing.getAttribute('data-system-update-toast') === noticeKey) return;
+						dismissToast(existing);
+					}
 					var container = getToastContainer();
 					if (!container) return;
 					var toast = document.createElement('div');
-					toast.className = 'toast-notification alert alert-info shadow-lg';
+					toast.className = 'toast-notification alert system-update-toast shadow-lg';
 					toast.setAttribute('role', 'alert');
-					toast.setAttribute('data-system-update-toast', version);
+					toast.setAttribute('data-system-update-toast', noticeKey);
 					toast.innerHTML =
 						'<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>' +
 						'<div class="toast-message-container flex flex-col gap-1 min-w-0 flex-1 overflow-hidden">' +
 							'<span class="font-semibold text-xs uppercase tracking-wider opacity-80">Update available</span>' +
 							'<span class="text-sm break-words">OpenVibely ' + escapeToastHtml(version) + ' is ready to install.</span>' +
-							'<button type="button" class="btn btn-primary btn-sm mt-2 self-start" data-system-update-apply>Update</button>' +
 						'</div>' +
 						'<button type="button" class="toast-close btn btn-ghost btn-circle" aria-label="Dismiss update notification" data-system-update-dismiss>' +
 							'<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>' +
 						'</button>';
-					var applyButton = toast.querySelector('[data-system-update-apply]');
-					if (applyButton) {
-						applyButton.addEventListener('click', function(event) {
-							event.preventDefault();
-							event.stopPropagation();
-							applyButton.disabled = true;
-							applyButton.textContent = 'Updating...';
-							fetch('/api/system/update/apply', { method: 'POST', headers: { 'Accept': 'application/json' } })
-								.catch(function(err) { console.error('[system-update] apply failed:', err); })
-								.finally(function() {
-									closeOpenModalsForToastNavigation();
-									if (window.openVibelyNavigate) {
-										window.openVibelyNavigate('/alerts').catch(function(err) {
-											console.error('[system-update] failed to navigate to alerts:', err);
-										});
-									} else {
-										window.location.href = '/alerts';
-									}
-									dismissToast(toast);
-								});
-						});
-					}
+					toast.addEventListener('click', function(event) {
+						if (event.target && event.target.closest && event.target.closest('button')) return;
+						applySystemUpdateFromToast(toast);
+					});
 					var dismissButton = toast.querySelector('[data-system-update-dismiss]');
 					if (dismissButton) {
 						dismissButton.addEventListener('click', function(event) {
 							event.preventDefault();
 							event.stopPropagation();
-							dismissSystemUpdateNotice(version);
+							dismissSystemUpdateNotice(noticeKey);
 						});
 					}
 					container.appendChild(toast);
@@ -3379,7 +3441,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						var actionable = systemUpdateIsActionable(data);
 						setSystemUpdateIndicators(actionable);
 						if (actionable) showSystemUpdateNotice(data);
-						else dismissSystemUpdateNotice('');
+						else {
+							dismissSystemUpdateNotice('');
+							showSystemUpdateSucceededToast(data);
+						}
 					} catch (_) {}
 				}
 

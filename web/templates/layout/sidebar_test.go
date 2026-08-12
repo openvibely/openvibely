@@ -113,7 +113,10 @@ func TestSidebar_AlertsKeepsUnreadCountSeparateFromSystemUpdateBadge(t *testing.
 	for _, required := range []string{
 		`id="alert-badge"`,
 		`hx-get="/alerts/unread-count?project_id=project-1"`,
+		`sidebar-alert-indicators`,
 		`id="system-update-nav-badge"`,
+		`badge badge-sm badge-primary badge-outline inline-flex items-center sidebar-update-badge hidden`,
+		`sidebar-update-badge`,
 		`System update available`,
 		`>Update</span>`,
 	} {
