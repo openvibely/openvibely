@@ -963,7 +963,7 @@ func channelConnectionTestAutoDismissHTML(success bool, options channelConnectio
 	if delay <= 0 {
 		delay = 3000
 	}
-	return `<script>setTimeout(function(){var el=document.getElementById('` + templateEscape(elementID) + `');if(el){el.style.transition='opacity 0.5s';el.style.opacity='0';setTimeout(function(){el.remove();},500);}},` + strconv.Itoa(delay) + `);</script>`
+	return `<script>setTimeout(function(){var el=document.getElementById(` + strconv.Quote(elementID) + `);if(el){el.style.transition='opacity 0.5s';el.style.opacity='0';setTimeout(function(){el.remove();},500);}},` + strconv.Itoa(delay) + `);</script>`
 }
 
 func (h *Handler) buildAbsoluteURL(c echo.Context, path string) string {

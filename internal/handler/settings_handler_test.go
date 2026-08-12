@@ -55,7 +55,7 @@ func TestHandleTelegramTest_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, body, `<div class="flex items-center gap-2 text-success" id="telegram-test-feedback"><span>Connection successful!</span></div>`)
 	assert.Contains(t, body, "setTimeout")
-	assert.Contains(t, body, "document.getElementById('telegram-test-feedback')")
+	assert.Contains(t, body, `document.getElementById("telegram-test-feedback")`)
 }
 
 func TestRenderStandardChannelConnectionTestFeedbackPreservesDefaultFragmentsAndEscaping(t *testing.T) {
@@ -138,7 +138,7 @@ func TestRenderStandardChannelConnectionTestFeedbackSupportsTelegramOptions(t *t
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, body, `<div class="flex items-center gap-2 text-success" id="telegram-test-feedback"><span>Connection successful!</span></div>`)
 		assert.Contains(t, body, "setTimeout")
-		assert.Contains(t, body, "document.getElementById('telegram-test-feedback')")
+		assert.Contains(t, body, `document.getElementById("telegram-test-feedback")`)
 	})
 }
 
