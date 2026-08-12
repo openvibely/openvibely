@@ -289,6 +289,43 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	if err := lifecycleRepo.CreateExecution(t.Context(), recallExec); err != nil {
 		t.Fatalf("create recall exec: %v", err)
 	}
+	beforeRecallExec := &models.LifecycleExecution{
+		TaskID:         task.ID,
+		AgentID:        agent.ID,
+		When:           models.LifecycleBeforeRun,
+		SkillKey:       "recall_memory",
+		OutputContract: models.OutputContractContextBlock,
+		Status:         models.LifecycleExecCompleted,
+		OutputJSON:     `{"content":"full memory body hidden from response","selected_memories":[{"file":"runbook.md","topic":"Runbook","summary":"Use the runbook.","snippet":"Follow the ordered steps."}],"sources":["extra_source.md"],"confidence":0.9}`,
+	}
+	if err := lifecycleRepo.CreateExecution(t.Context(), beforeRecallExec); err != nil {
+		t.Fatalf("create before-run recall exec: %v", err)
+	}
+	modeExec := &models.LifecycleExecution{
+		TaskID:         task.ID,
+		AgentID:        agent.ID,
+		When:           models.LifecycleTaskMode,
+		SkillKey:       "select_mode",
+		OutputContract: models.OutputContractSelectedMode,
+		Status:         models.LifecycleExecCompleted,
+		OutputJSON:     `{"mode":"coding"}`,
+	}
+	if err := lifecycleRepo.CreateExecution(t.Context(), modeExec); err != nil {
+		t.Fatalf("create mode exec: %v", err)
+	}
+	failedExec := &models.LifecycleExecution{
+		TaskID:         task.ID,
+		AgentID:        agent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "observe_task_for_learning",
+		OutputContract: models.OutputContractLearningSummary,
+		Status:         models.LifecycleExecFailed,
+		Error:          "hook failed safely",
+		OutputJSON:     `{"summary":"not used after failure"}`,
+	}
+	if err := lifecycleRepo.CreateExecution(t.Context(), failedExec); err != nil {
+		t.Fatalf("create failed exec: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+task.ID+"/lifecycle-executions", nil)
 	rec := httptest.NewRecorder()
@@ -301,19 +338,26 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("expected 3 views, got %d", len(got))
+	if len(got) != 6 {
+		t.Fatalf("expected 6 views, got %d", len(got))
 	}
 	summaries := map[string]string{}
+	byKey := map[string]viewmodels.LifecycleExecutionView{}
 	var route viewmodels.LifecycleExecutionView
 	var recall viewmodels.LifecycleExecutionView
+	var beforeRecall viewmodels.LifecycleExecutionView
 	for _, row := range got {
-		summaries[row.When+"/"+row.SkillKey] = row.Summary
+		key := row.When + "/" + row.SkillKey
+		summaries[key] = row.Summary
+		byKey[key] = row
 		if row.When == "route_task" && row.SkillKey == "route_task" {
 			route = row
 		}
 		if row.When == "route_task" && row.SkillKey == "recall_memory" {
 			recall = row
+		}
+		if row.When == "before_run" && row.SkillKey == "recall_memory" {
+			beforeRecall = row
 		}
 	}
 	if summaries["after_complete/summarize_activity"] != "Recorded user preference" {
@@ -325,6 +369,12 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	if summaries["route_task/recall_memory"] != "" {
 		t.Fatalf("expected selected memory route summary to stay badge-only, got %+v", summaries)
 	}
+	if summaries["task_mode/select_mode"] != "coding" {
+		t.Fatalf("expected selected mode summary, got %+v", summaries)
+	}
+	if byKey["after_complete/observe_task_for_learning"].Status != "failed" || byKey["after_complete/observe_task_for_learning"].Error != "hook failed safely" {
+		t.Fatalf("expected failed lifecycle status and error, got %+v", byKey["after_complete/observe_task_for_learning"])
+	}
 	if len(route.SelectedSkills) != 2 || route.SelectedSkills[0] != "openvibely_agent_skill_architecture" || route.SelectedSkills[1] != "debug_go_tests" {
 		t.Fatalf("expected selected skills exposed as badge identifiers, got %+v", route.SelectedSkills)
 	}
@@ -334,9 +384,15 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	if recall.SelectedMemories[0].File != "provider_architecture.md" || recall.SelectedMemories[0].Summary != "Use mode-driven provider routing." || recall.SelectedMemories[0].Snippet == "" {
 		t.Fatalf("expected compact selected memory metadata, got %+v", recall.SelectedMemories)
 	}
+	if len(beforeRecall.SelectedMemories) != 2 {
+		t.Fatalf("expected before-run recall memories from selected metadata and sources, got %+v", beforeRecall.SelectedMemories)
+	}
+	if beforeRecall.SelectedMemories[0].File != "runbook.md" || beforeRecall.SelectedMemories[0].Summary != "Use the runbook." || beforeRecall.SelectedMemories[1].File != "extra_source.md" {
+		t.Fatalf("expected compact before-run selected memory metadata, got %+v", beforeRecall.SelectedMemories)
+	}
 	// Prompt-safe view must not leak the raw OutputJSON or any internal fields
 	// that the dialog should never display.
-	for _, forbidden := range [][]byte{[]byte("skipped"), []byte("private full injected memory context"), []byte("/tmp/secret.md"), []byte("../escape.md"), []byte("must not expose")} {
+	for _, forbidden := range [][]byte{[]byte("skipped"), []byte("private full injected memory context"), []byte("full memory body hidden from response"), []byte("/tmp/secret.md"), []byte("../escape.md"), []byte("must not expose")} {
 		if bytes.Contains(rec.Body.Bytes(), forbidden) {
 			t.Fatalf("raw or unsafe lifecycle output leaked through prompt-safe view: %s", forbidden)
 		}
