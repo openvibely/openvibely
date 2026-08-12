@@ -161,6 +161,10 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 	if err := writeBinaryHelperOutcome(staged, binaryOutcomeAuthorized); err != nil {
 		t.Fatalf("write helper authorization: %v", err)
 	}
+	helperPath := packagedUpdateHelperPath(staged.InstallPath)
+	if err := copyFile(installedExecutable, helperPath, 0o755); err != nil {
+		t.Fatalf("publish desktop helper fixture: %v", err)
+	}
 
 	port := freeTCPPort(t)
 	helperArgs := []string{
@@ -182,7 +186,7 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(installedExecutable, helperArgs...)
+	cmd := exec.Command(helperPath, helperArgs...)
 	cmd.Stdin = bytes.NewReader(metadata)
 	cmd.Env = append(os.Environ(),
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=2000",
