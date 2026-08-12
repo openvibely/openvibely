@@ -136,15 +136,21 @@ jobs:
       - name: Run all tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./... -count=1 -timeout 240s -coverprofile=coverage.out
+        run: go test ./... -count=1 -timeout 240s -coverprofile=coverage.txt
 
       - name: Run browser performance regression
         run: go test ./web/templates/components -run '^TestLargeToolOutputHydrationIsLazyAndStatefulInChrome$' -count=1 -timeout 60s
 
       - name: Show coverage summary (excluding generated templ code)
         run: |
-          grep -v "_templ.go" coverage.out > coverage.filtered.out
+          grep -v "_templ.go" coverage.txt > coverage.filtered.out
           go tool cover -func=coverage.filtered.out | tail -1
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.txt
 
   packaged-update:
     name: Packaged update (${{ matrix.os }}, ${{ matrix.arch }})
