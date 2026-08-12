@@ -145,8 +145,8 @@ jobs:
           grep -v "_templ.go" coverage.out > coverage.filtered.out
           go tool cover -func=coverage.filtered.out | tail -1
 
-  packaged-update-native:
-    name: Packaged update native (${{ matrix.os }}, ${{ matrix.arch }})
+  packaged-update:
+    name: Packaged update (${{ matrix.os }}, ${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -184,42 +184,6 @@ jobs:
       - name: Run native packaged-update tests
         shell: bash
         run: go test ./internal/update -count=1 -timeout 120s
-
-  packaged-update-e2e:
-    name: Packaged update E2E (${{ matrix.os }}, ${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            arch: amd64
-            experimental: false
-          - os: ubuntu-24.04-arm
-            arch: arm64
-            experimental: false
-          - os: macos-15-intel
-            arch: amd64
-            experimental: false
-          - os: macos-latest
-            arch: arm64
-            experimental: false
-          - os: windows-latest
-            arch: amd64
-            experimental: false
-          - os: windows-11-arm
-            arch: arm64
-            experimental: true
-    runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.experimental }}
-    steps:
-      - name: Check out repo
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-
-      - name: Set up Go
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
-        with:
-          go-version-file: go.mod
-          cache: true
 
       - name: Run binary packaged update E2E
         shell: bash
