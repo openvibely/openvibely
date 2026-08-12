@@ -200,9 +200,10 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 	}
 
 	port := freeTCPPort(t)
+	parentPID := exitedFixtureParentPID(t, installedExecutable)
 	helperArgs := []string{
 		"desktop-update-helper",
-		"--parent-pid", "99999999",
+		"--parent-pid", strconv.Itoa(parentPID),
 		"--current", staged.InstallPath,
 		"--staged", staged.ArtifactPath,
 		"--backup", staged.BackupPath,
@@ -226,22 +227,54 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
 		"OPENVIBELY_UPDATE_INTEGRATION_EXIT_AFTER_HEALTH=1",
 	)
-	output, err := cmd.CombinedOutput()
-	if err != nil && wantOutcome != binaryOutcomeRolledBack {
-		t.Fatalf("desktop helper failed: %v\n%s", err, output)
+	output, helperErr := cmd.CombinedOutput()
+	if helperErr != nil && wantOutcome != binaryOutcomeRolledBack {
+		t.Fatalf("desktop helper failed: %v\n%s", helperErr, output)
 	}
 	outcome, err := readBinaryHelperOutcome(staged)
 	if err != nil {
-		t.Fatalf("read desktop helper outcome: %v", err)
+		t.Fatalf("read desktop helper outcome: %v\nhelper err: %v\n%s", err, helperErr, output)
 	}
 	if outcome.State != wantOutcome {
-		t.Fatalf("desktop outcome = %q, want %q", outcome.State, wantOutcome)
+		t.Fatalf("desktop outcome = %q, want %q\nhelper err: %v\n%s", outcome.State, wantOutcome, helperErr, output)
 	}
 	if wantOutcome == binaryOutcomeSucceeded {
 		assertInstalledFixtureVersion(t, installedExecutable, replacementVersion)
 	} else {
 		assertInstalledFixtureVersion(t, installedExecutable, "0.5.0")
 	}
+}
+
+func exitedFixtureParentPID(t *testing.T, executable string) int {
+	t.Helper()
+	port := freeTCPPort(t)
+	cmd := exec.Command(executable, "serve", "--listen", "127.0.0.1:"+port)
+	cmd.Env = append(os.Environ(), "OPENVIBELY_UPDATE_INTEGRATION_EXIT_AFTER_HEALTH=1")
+	cmd.Stdout = io.Discard
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start exited parent fixture: %v", err)
+	}
+	pid := cmd.Process.Pid
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get("http://127.0.0.1:" + port + "/health")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				if waitErr := cmd.Wait(); waitErr != nil {
+					t.Fatalf("wait exited parent fixture: %v\n%s", waitErr, stderr.String())
+				}
+				return pid
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = cmd.Process.Kill()
+	_, _ = cmd.Process.Wait()
+	t.Fatalf("exited parent fixture did not start: %s", stderr.String())
+	return 0
 }
 
 func buildGoCommand(t *testing.T, pkg, output string, values map[string]string) {
