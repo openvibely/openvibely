@@ -2066,6 +2066,9 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		go h.PromoteQueuedTaskThreadInput(taskID)
 		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != "", taskID))
 	}
+	if h.workerSvc != nil {
+		h.workerSvc.ClearCancellationRequested(taskID)
+	}
 	if err := h.applySwarmChildFollowupStart(c.Request().Context(), task, message); err != nil {
 		applog.Infof("[handler] TaskThreadSend swarm child follow-up routing failed task=%s: %v", taskID, err)
 		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, err.Error(), 0)

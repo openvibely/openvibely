@@ -47,6 +47,9 @@ func (h *Handler) StartChannelTaskRun(ctx context.Context, req service.ChannelTa
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, msg, 0, req.ReplyContext)
 		return
 	}
+	if h.workerSvc != nil {
+		h.workerSvc.ClearCancellationRequested(req.TaskID)
+	}
 	if err := h.applySwarmChildFollowupStart(ctx, task, req.Message); err != nil {
 		h.completeWithFailure(context.Background(), req.ExecID, req.TaskID, err.Error(), 0, req.ReplyContext)
 		return

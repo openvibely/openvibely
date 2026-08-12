@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/lifecycle"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -3846,6 +3847,64 @@ func TestHandler_TaskThreadSend(t *testing.T) {
 	if updatedTask.Category != models.CategoryActive {
 		t.Errorf("expected category active, got %s", updatedTask.Category)
 	}
+}
+
+func TestHandler_TaskThreadSend_ClearsStaleCancellationMarkerSoGoalAfterCompleteRuns(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	goalRepo := repository.NewTaskGoalRepo(db)
+	goalSvc := service.NewTaskGoalService(goalRepo, h.taskRepo, nil)
+	h.SetTaskGoalService(goalSvc)
+	h.taskSvc.SetTaskGoalService(goalSvc)
+	h.workerSvc.SetTaskGoalService(goalSvc)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.workerSvc.SetLifecycleAgentRepo(agentRepo)
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Direct Followup Clears Stop Marker Project")
+	task := createTask(t, h, project.ID, "Direct Followup Clears Stop Marker Task", func(tk *models.Task) {
+		tk.Category = models.CategoryCompleted
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+		tk.Prompt = "initial task prompt"
+	})
+	_, err := goalSvc.SetGoal(ctx, task.ID, "Keep evaluating after every legitimate follow-up", service.GoalOptions{})
+	require.NoError(t, err)
+	goalAgent := &models.Agent{Key: models.AgentSystemKindGoal, Name: "System: Goal Agent", Model: "inherit", Tools: []string{"get_task_goal", "send_to_task", "mark_task_goal_achieved", "report_task_goal_blocked"}, SystemKind: models.AgentSystemKindGoal, GeneratedStatus: models.AgentStatusProtected, CreatedBy: models.AgentCreatedBySystem, Enabled: true}
+	require.NoError(t, agentRepo.Create(ctx, goalAgent))
+	store := &chatMemoryHookStore{hooks: []models.AgentLifecycleHook{{ID: "goal-hook-direct", AgentID: goalAgent.ID, When: models.LifecycleAfterComplete, SkillKey: "evaluate_task_goal", OutputContract: models.OutputContractActivitySummary, Blocking: true, Enabled: true}}}
+	invoker := &chatMemoryHookInvoker{}
+	h.workerSvc.SetLifecycleRunner(lifecycle.NewRunner(store, invoker, nil))
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "direct follow-up complete"
+	mock.TextOnly = "direct follow-up complete"
+	h.llmSvc.SetLLMCaller(mock)
+
+	h.workerSvc.MarkCancellationRequested(task.ID)
+	require.True(t, h.workerSvc.IsCancellationRequested(task.ID))
+
+	for _, message := range []string{"first legitimate follow-up after stop", "second legitimate follow-up after stop"} {
+		form := url.Values{}
+		form.Set("message", message)
+		rec := htmxPost(e, "/tasks/"+task.ID+"/thread", form)
+		assertCode(t, rec, http.StatusOK)
+		require.Eventually(t, func() bool {
+			execs, _ := h.execRepo.ListByTaskChronological(ctx, task.ID)
+			return len(execs) > 0 && execs[len(execs)-1].Status == models.ExecCompleted
+		}, 2*time.Second, 10*time.Millisecond)
+	}
+
+	require.False(t, h.workerSvc.IsCancellationRequested(task.ID), "direct follow-up start should clear stale stop intent")
+	require.Eventually(t, func() bool {
+		n := 0
+		for _, seen := range invoker.Seen() {
+			if seen == "after_complete/evaluate_task_goal" {
+				n++
+			}
+		}
+		return n == 2
+	}, 2*time.Second, 10*time.Millisecond, "expected Goal Agent after_complete for both direct follow-up turns, seen=%#v", invoker.Seen())
 }
 
 func TestHandler_TaskThreadSend_SwarmParentRoutesWithoutNormalExecution(t *testing.T) {

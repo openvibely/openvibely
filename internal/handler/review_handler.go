@@ -226,6 +226,9 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 		c.Response().Header().Set("HX-Redirect", fmt.Sprintf("/tasks/%s?tab=chat", taskID))
 		return c.NoContent(http.StatusOK)
 	}
+	if h.workerSvc != nil {
+		h.workerSvc.ClearCancellationRequested(taskID)
+	}
 	if err := h.applySwarmChildFollowupStart(c.Request().Context(), task, reviewMessage); err != nil {
 		applog.Infof("[handler] SubmitReview swarm child follow-up routing failed task=%s: %v", taskID, err)
 		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, err.Error(), 0)

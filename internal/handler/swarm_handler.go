@@ -157,6 +157,9 @@ func (h *Handler) acceptSwarmChildFollowup(c echo.Context, task *models.Task, me
 		go h.PromoteQueuedTaskThreadInput(task.ID)
 		return c.JSON(http.StatusOK, map[string]string{"status": "queued", "queued_input_id": queued.ID})
 	}
+	if h.workerSvc != nil {
+		h.workerSvc.ClearCancellationRequested(task.ID)
+	}
 	if err := h.applySwarmChildFollowupStart(ctx, task, message); err != nil {
 		h.completeWithFailure(ctx, exec.ID, task.ID, err.Error(), 0)
 		return err
