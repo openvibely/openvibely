@@ -209,6 +209,55 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["priority"]], models.AutomationNodeCounts{Failed: 1})
 }
 
+func TestAutomationRepoLiveNodeCountsIgnoresFailedActivityForCompletedWorkItem(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"approval": "native_approval", "done": "completed"})
+	repo := NewAutomationRepo(db)
+	ctx := context.Background()
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
+
+	workItem, _, err := repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+		Context:        models.AutomationContext{ProjectID: fixture.ProjectID},
+		Binding:        models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["approval"]},
+		WorkItemKey:    "approved-completed-work",
+		ActivityKey:    "approved-completed-human-decision",
+		ActivityType:   "human_decision",
+		ActivityStatus: models.AutomationActivityCompleted,
+		EventKey:       "approved-completed-work-done",
+		ToNodeID:       fixture.Nodes["done"],
+		Transition:     models.AutomationTransitionCompleted,
+	})
+	if err != nil {
+		t.Fatalf("record completed approval work item: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE automation_work_items SET status = 'completed' WHERE id = ?`, workItem.ID); err != nil {
+		t.Fatalf("complete work item: %v", err)
+	}
+	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+		Context:        models.AutomationContext{ProjectID: fixture.ProjectID},
+		Binding:        models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["approval"], WorkItemID: workItem.ID},
+		ActivityKey:    "approved-completed-late-failure",
+		ActivityType:   "task_execution",
+		ActivityStatus: models.AutomationActivityFailed,
+	})
+	if err != nil {
+		t.Fatalf("record stale failed activity: %v", err)
+	}
+
+	counts, _, _, err := repo.LiveNodeCounts(ctx, fixture.ProjectID, fixture.AutomationID, fixture.VersionID, cutoff)
+	if err != nil {
+		t.Fatalf("LiveNodeCounts: %v", err)
+	}
+	assertAutomationNodeCounts(t, counts[fixture.Nodes["approval"]], models.AutomationNodeCounts{})
+	assertAutomationNodeCounts(t, counts[fixture.Nodes["done"]], models.AutomationNodeCounts{CompletedRecently: 1})
+
+	portfolio, err := repo.PortfolioOperationalCounts(ctx, fixture.ProjectID, cutoff)
+	if err != nil {
+		t.Fatalf("PortfolioOperationalCounts: %v", err)
+	}
+	assertAutomationNodeCounts(t, portfolio[fixture.AutomationID], models.AutomationNodeCounts{CompletedRecently: 1})
+}
+
 func TestAutomationRepoLiveNodeCountsQueryPlanAvoidsFullActivityHistoryRanking(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"node": "agent_task", "trigger": "trigger"})

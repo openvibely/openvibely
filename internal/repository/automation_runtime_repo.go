@@ -46,13 +46,16 @@ const listAutomationsWithStaleExternalPullRequestsSQL = `SELECT DISTINCT a.proje
 				LIMIT ?`
 
 const liveNodeCountsSQL = `WITH operational_state AS (
-				SELECT node_id, CASE activity_status
+				SELECT state.node_id, CASE state.activity_status
 					WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
 					WHEN 'failed' THEN 'failed' END AS state,
-					state_key
-				FROM automation_live_activity_states
-				WHERE project_id = ? AND automation_id = ? AND version_id = ?
-					AND activity_status IN ('pending','running','waiting','failed')
+					state.state_key
+				FROM automation_live_activity_states state
+				LEFT JOIN automation_work_items work_item ON work_item.id = state.work_item_id
+					AND work_item.project_id = state.project_id AND work_item.automation_id = state.automation_id
+				WHERE state.project_id = ? AND state.automation_id = ? AND state.version_id = ?
+					AND state.activity_status IN ('pending','running','waiting','failed')
+					AND NOT (state.work_item_id IS NOT NULL AND work_item.status = 'completed')
 			UNION ALL
 			SELECT node_id, 'recent', state_key
 			FROM automation_live_activity_states
@@ -1951,14 +1954,17 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 				AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
 			WHERE a.project_id = ?
 		), operational_state AS (
-			SELECT automation_id, CASE status
+			SELECT ranked.automation_id, CASE ranked.status
 				WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
 				WHEN 'failed' THEN 'failed' WHEN 'completed' THEN 'recent' END AS state,
-				CASE WHEN work_item_id IS NOT NULL THEN 'work:' || work_item_id
-					WHEN task_id IS NOT NULL THEN 'task:' || task_id ELSE 'activity:' || id END AS state_key
-			FROM ranked_activities
+				CASE WHEN ranked.work_item_id IS NOT NULL THEN 'work:' || ranked.work_item_id
+					WHEN ranked.task_id IS NOT NULL THEN 'task:' || ranked.task_id ELSE 'activity:' || ranked.id END AS state_key
+			FROM ranked_activities ranked
+			LEFT JOIN automation_work_items work_item ON work_item.id = ranked.work_item_id
+				AND work_item.project_id = ? AND work_item.automation_id = ranked.automation_id
 			WHERE activity_rank = 1
-				AND (status IN ('pending','running','waiting','failed') OR (status = 'completed' AND completed_at >= ?))
+				AND (ranked.status IN ('pending','running','waiting','failed') OR (ranked.status = 'completed' AND ranked.completed_at >= ?))
+				AND NOT (ranked.work_item_id IS NOT NULL AND work_item.status = 'completed' AND ranked.status IN ('pending','running','waiting','failed'))
 		UNION
 		SELECT binding.automation_id, 'running', CASE WHEN binding.work_item_id IS NOT NULL
 			THEN 'work:' || binding.work_item_id ELSE 'input:' || binding.thread_input_id END
@@ -1991,7 +1997,7 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 			SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
 			SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
-		FROM identity_state GROUP BY automation_id`, projectID, recentCutoff.UTC(), projectID, projectID, projectID, recentCutoff.UTC())
+			FROM identity_state GROUP BY automation_id`, projectID, projectID, recentCutoff.UTC(), projectID, projectID, projectID, recentCutoff.UTC())
 	if err != nil {
 		return nil, err
 	}
