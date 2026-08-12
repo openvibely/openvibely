@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,11 +16,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestHandleTelegramTest_NotRunning tests the error feedback HTML
 func TestHandleTelegramTest_NotRunning(t *testing.T) {
 	e := echo.New()
 	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
-	// telegramService is nil by default (not running)
 
 	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/test", nil)
 	rec := httptest.NewRecorder()
@@ -28,20 +27,119 @@ func TestHandleTelegramTest_NotRunning(t *testing.T) {
 	err := h.handleTelegramTest(c)
 	require.NoError(t, err)
 
-	// Verify handler returns 200 OK with error HTML
 	assert.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
+	assert.Equal(t, `<div class="flex items-center gap-2 text-error" id="telegram-test-feedback"><span>Connection failed: Bot is not running</span></div>`, body)
+	assert.NotContains(t, body, "setTimeout")
+}
 
-	// Verify error feedback HTML contains:
-	// - Error styling (text-error class)
-	// - Error icon (X SVG path)
-	// - Error message
-	// - No auto-dismiss script (errors should persist)
-	assert.Contains(t, body, "text-error")
-	assert.Contains(t, body, "Connection failed")
-	assert.Contains(t, body, "Bot is not running")
-	assert.Contains(t, body, "M6 18L18 6M6 6l12 12") // X SVG path
-	assert.NotContains(t, body, "setTimeout")        // should NOT auto-dismiss
+func TestHandleTelegramTest_Success(t *testing.T) {
+	e := echo.New()
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h.telegramService = &service.TelegramService{}
+
+	origIsTelegramServiceRunning := isTelegramServiceRunning
+	t.Cleanup(func() { isTelegramServiceRunning = origIsTelegramServiceRunning })
+	isTelegramServiceRunning = func(svc *service.TelegramService) bool {
+		return svc == h.telegramService
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/test", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.handleTelegramTest(c)
+	require.NoError(t, err)
+
+	body := rec.Body.String()
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, body, `<div class="flex items-center gap-2 text-success" id="telegram-test-feedback"><span>Connection successful!</span></div>`)
+	assert.Contains(t, body, "setTimeout")
+	assert.Contains(t, body, "document.getElementById('telegram-test-feedback')")
+}
+
+func TestRenderStandardChannelConnectionTestFeedbackPreservesDefaultFragmentsAndEscaping(t *testing.T) {
+	tests := []struct {
+		name              string
+		channelName       string
+		serviceConfigured bool
+		testErr           error
+		want              string
+	}{
+		{
+			name:              "slack missing service",
+			channelName:       "Slack",
+			serviceConfigured: false,
+			want:              `<div class="flex items-center gap-2 text-error"><span>Slack service not configured</span></div>`,
+		},
+		{
+			name:              "discord failure escapes service error",
+			channelName:       "Discord",
+			serviceConfigured: true,
+			testErr:           errors.New(`bad <token> & "quoted"`),
+			want:              `<div class="flex items-center gap-2 text-error"><span>Connection failed: bad &lt;token&gt; &amp; &quot;quoted&quot;</span></div>`,
+		},
+		{
+			name:              "email success",
+			channelName:       "Email",
+			serviceConfigured: true,
+			want:              `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodPost, "/channels/test", nil)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			err := renderStandardChannelConnectionTestFeedback(c, tc.channelName, tc.serviceConfigured, tc.testErr)
+			require.NoError(t, err)
+
+			assert.Equal(t, http.StatusOK, rec.Code)
+			assert.Equal(t, tc.want, rec.Body.String())
+		})
+	}
+}
+
+func TestRenderStandardChannelConnectionTestFeedbackSupportsTelegramOptions(t *testing.T) {
+	options := channelConnectionTestFeedbackOptions{
+		ElementID:              "telegram-test-feedback",
+		MissingServiceMessage:  "Connection failed: Bot is not running",
+		AutoDismissOnSuccess:   true,
+		AutoDismissElementID:   "telegram-test-feedback",
+		AutoDismissDelayMillis: 3000,
+	}
+
+	t.Run("missing service keeps Telegram copy and id", func(t *testing.T) {
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/channels/telegram/test", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+
+		err := renderStandardChannelConnectionTestFeedbackWithOptions(c, "Telegram", false, nil, options)
+		require.NoError(t, err)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, `<div class="flex items-center gap-2 text-error" id="telegram-test-feedback"><span>Connection failed: Bot is not running</span></div>`, rec.Body.String())
+	})
+
+	t.Run("success keeps Telegram id and auto dismiss", func(t *testing.T) {
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodPost, "/channels/telegram/test", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+
+		err := renderStandardChannelConnectionTestFeedbackWithOptions(c, "Telegram", true, nil, options)
+		require.NoError(t, err)
+
+		body := rec.Body.String()
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, body, `<div class="flex items-center gap-2 text-success" id="telegram-test-feedback"><span>Connection successful!</span></div>`)
+		assert.Contains(t, body, "setTimeout")
+		assert.Contains(t, body, "document.getElementById('telegram-test-feedback')")
+	})
 }
 
 func assertChannelsRefreshTrigger(t *testing.T, rec *httptest.ResponseRecorder) {
