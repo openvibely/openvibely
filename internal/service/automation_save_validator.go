@@ -15,30 +15,54 @@ type automationGitHubConnectionProvider interface {
 	GetConnectionStatus(context.Context) (GitHubConnectionStatus, error)
 }
 
-type automationGitHubRepositoryResolver interface {
+// GitHubToolRepositoryResolver resolves repository identity and exposes the
+// project-scoped GitHub API endpoint used by runtime GitHub tools.
+type GitHubToolRepositoryResolver interface {
 	ResolveRepo(context.Context, string, string) (*GitHubRepoRef, error)
 	GlobalAPIEndpoint(context.Context) string
+}
+
+// ResolveGitHubToolRepository resolves the repository and API endpoint for GitHub
+// runtime tools. Explicit repo_url inputs are honored outside the selected
+// project's Automation context; Automation-bound calls are pinned to the project
+// repository and only fall back to RepoPath when RepoURL is empty.
+func ResolveGitHubToolRepository(ctx context.Context, provider GitHubToolRepositoryResolver, projectID, repoURL string, project *models.Project) (*GitHubRepoRef, error) {
+	if project == nil {
+		return nil, errors.New("project not found")
+	}
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if strings.TrimSpace(repoURL) != "" && (!automationBound || automationContext.ProjectID != projectID) {
+		repo, err := provider.ResolveRepo(ctx, repoURL, "")
+		if err != nil {
+			return nil, err
+		}
+		if err := ConfigureGitHubRepoEndpointForProject(repo, repoURL, project.RepoURL, provider.GlobalAPIEndpoint(ctx)); err != nil {
+			return nil, err
+		}
+		return repo, nil
+	}
+	repoPath := strings.TrimSpace(project.RepoPath)
+	if automationBound && automationContext.ProjectID == projectID && strings.TrimSpace(project.RepoURL) != "" {
+		repoPath = ""
+	}
+	repo, err := provider.ResolveRepo(ctx, project.RepoURL, repoPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := ConfigureGitHubRepoEndpoint(repo, provider.GlobalAPIEndpoint(ctx)); err != nil {
+		return nil, err
+	}
+	return repo, nil
 }
 
 func resolveAutomationProjectGitHubRepository(ctx context.Context, provider any, project *models.Project) (*GitHubRepoRef, error) {
 	if project == nil {
 		return nil, errors.New("project not found")
 	}
+	if resolver, ok := provider.(GitHubToolRepositoryResolver); ok {
+		return ResolveGitHubToolRepository(ctx, resolver, project.ID, "", project)
+	}
 	repoURL := strings.TrimSpace(project.RepoURL)
-	repoPath := ""
-	if repoURL == "" {
-		repoPath = strings.TrimSpace(project.RepoPath)
-	}
-	if resolver, ok := provider.(automationGitHubRepositoryResolver); ok {
-		repo, err := resolver.ResolveRepo(ctx, repoURL, repoPath)
-		if err != nil {
-			return nil, err
-		}
-		if err := ConfigureGitHubRepoEndpoint(repo, resolver.GlobalAPIEndpoint(ctx)); err != nil {
-			return nil, err
-		}
-		return repo, nil
-	}
 	if repoURL != "" {
 		repo, err := ParseGitHubRepoURL(repoURL)
 		if err != nil {
