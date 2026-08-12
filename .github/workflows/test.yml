@@ -151,6 +151,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage.filtered.out
+          disable_search: true
 
   packaged-update:
     name: Packaged update (${{ matrix.os }}, ${{ matrix.arch }})
