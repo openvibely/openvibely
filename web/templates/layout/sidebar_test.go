@@ -101,6 +101,28 @@ func TestSidebar_NavigationHeadingHiddenAndLinksPreserved(t *testing.T) {
 	}
 }
 
+func TestSidebar_AlertsKeepsUnreadCountSeparateFromSystemUpdateBadge(t *testing.T) {
+	projects := []models.Project{{ID: "project-1", Name: "Default"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "project-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+
+	html := buf.String()
+	for _, required := range []string{
+		`id="alert-badge"`,
+		`hx-get="/alerts/unread-count?project_id=project-1"`,
+		`id="system-update-nav-badge"`,
+		`System update available`,
+		`>Update</span>`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("alerts nav missing separate update marker snippet: %s", required)
+		}
+	}
+}
+
 func TestSidebar_AutomationsUsesRecognizableOutlineLightningBolt(t *testing.T) {
 	projects := []models.Project{{ID: "project-1", Name: "Default"}}
 

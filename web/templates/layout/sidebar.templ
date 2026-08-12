@@ -559,6 +559,11 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							hx-target="this"
 							hx-push-url="false"
 						></span>
+						<span
+							id="system-update-nav-badge"
+							class="badge badge-primary badge-xs sidebar-text hidden"
+							aria-label="System update available"
+						>Update</span>
 					</a>
 				</li>
 				<li>

@@ -3238,10 +3238,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					container.appendChild(toast);
 
 					// Auto-dismiss after 5 seconds
-					const autoDismiss = setTimeout(function() {
-						dismissToast(toast);
-					}, 5000);
-					toast._autoDismiss = autoDismiss;
+					if (!options.sticky) {
+						const autoDismiss = setTimeout(function() {
+							dismissToast(toast);
+						}, 5000);
+						toast._autoDismiss = autoDismiss;
+					}
 
 					// Limit to 5 visible toasts
 					const toasts = container.querySelectorAll('.toast-notification:not(.toast-dismiss)');
@@ -3284,6 +3286,109 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						if (toast.parentNode) toast.remove();
 					}, 400);
 				};
+
+				function systemUpdateIsActionable(data) {
+					if (!data || !data.release || !data.release.metadata) return false;
+					var available = data.release.metadata.version || '';
+					if (!available || data.current_version === available || data.state === 'succeeded') return false;
+					if (data.release.apply_supported === false || data.distribution === 'hosted') return false;
+					var readyForLocalApply = data.distribution === 'docker' || data.manual || data.staged;
+					return readyForLocalApply && (data.state === 'available' || data.state === 'failed');
+				}
+
+				function setSystemUpdateIndicators(visible) {
+					var badge = document.getElementById('system-update-nav-badge');
+					if (badge) badge.classList.toggle('hidden', !visible);
+				}
+
+				function dismissSystemUpdateNotice(version) {
+					var toast = document.querySelector('[data-system-update-toast]');
+					if (toast) dismissToast(toast);
+					if (version) {
+						try { localStorage.setItem('openvibely-system-update-dismissed-version', version); } catch (_) {}
+					}
+				}
+
+				function showSystemUpdateNotice(data) {
+					var version = data && data.release && data.release.metadata ? data.release.metadata.version || '' : '';
+					if (!version) return;
+					try {
+						if (localStorage.getItem('openvibely-system-update-dismissed-version') === version) return;
+					} catch (_) {}
+					var existing = document.querySelector('[data-system-update-toast]');
+					if (existing) return;
+					var container = getToastContainer();
+					if (!container) return;
+					var toast = document.createElement('div');
+					toast.className = 'toast-notification alert alert-info shadow-lg';
+					toast.setAttribute('role', 'alert');
+					toast.setAttribute('data-system-update-toast', version);
+					toast.innerHTML =
+						'<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>' +
+						'<div class="toast-message-container flex flex-col gap-1 min-w-0 flex-1 overflow-hidden">' +
+							'<span class="font-semibold text-xs uppercase tracking-wider opacity-80">Update available</span>' +
+							'<span class="text-sm break-words">OpenVibely ' + escapeToastHtml(version) + ' is ready to install.</span>' +
+							'<button type="button" class="btn btn-primary btn-sm mt-2 self-start" data-system-update-apply>Update</button>' +
+						'</div>' +
+						'<button type="button" class="toast-close btn btn-ghost btn-circle" aria-label="Dismiss update notification" data-system-update-dismiss>' +
+							'<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>' +
+						'</button>';
+					var applyButton = toast.querySelector('[data-system-update-apply]');
+					if (applyButton) {
+						applyButton.addEventListener('click', function(event) {
+							event.preventDefault();
+							event.stopPropagation();
+							applyButton.disabled = true;
+							applyButton.textContent = 'Updating...';
+							fetch('/api/system/update/apply', { method: 'POST', headers: { 'Accept': 'application/json' } })
+								.catch(function(err) { console.error('[system-update] apply failed:', err); })
+								.finally(function() {
+									closeOpenModalsForToastNavigation();
+									if (window.openVibelyNavigate) {
+										window.openVibelyNavigate('/alerts').catch(function(err) {
+											console.error('[system-update] failed to navigate to alerts:', err);
+										});
+									} else {
+										window.location.href = '/alerts';
+									}
+									dismissToast(toast);
+								});
+						});
+					}
+					var dismissButton = toast.querySelector('[data-system-update-dismiss]');
+					if (dismissButton) {
+						dismissButton.addEventListener('click', function(event) {
+							event.preventDefault();
+							event.stopPropagation();
+							dismissSystemUpdateNotice(version);
+						});
+					}
+					container.appendChild(toast);
+				}
+
+				async function refreshGlobalSystemUpdateIndicators() {
+					try {
+						var response = await fetch('/api/system/update', { headers: { 'Accept': 'application/json' } });
+						if (response.status === 204) {
+							setSystemUpdateIndicators(false);
+							dismissSystemUpdateNotice('');
+							return;
+						}
+						if (!response.ok) return;
+						var data = await response.json();
+						var actionable = systemUpdateIsActionable(data);
+						setSystemUpdateIndicators(actionable);
+						if (actionable) showSystemUpdateNotice(data);
+						else dismissSystemUpdateNotice('');
+					} catch (_) {}
+				}
+
+				if (!window._openVibelySystemUpdateIndicatorsRegistered) {
+					window._openVibelySystemUpdateIndicatorsRegistered = true;
+					refreshGlobalSystemUpdateIndicators();
+					window.openVibelySystemUpdateIndicatorPoll = setInterval(refreshGlobalSystemUpdateIndicators, 30000);
+					document.body.addEventListener('alertUpdate', refreshGlobalSystemUpdateIndicators);
+				}
 			</script>
 
 			<!-- Card Search Helper -->

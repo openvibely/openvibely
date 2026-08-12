@@ -400,6 +400,29 @@ func TestToastCloseButtonIsAccessibleAndTopRightAligned(t *testing.T) {
 	}
 }
 
+func TestBase_SystemUpdateNoticeIsStickyAndActionable(t *testing.T) {
+	var buf bytes.Buffer
+	comp := Base("Test", []models.Project{}, "")
+	if err := comp.Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, required := range []string{
+		`data-system-update-toast`,
+		`openvibely-system-update-dismissed-version`,
+		`/api/system/update/apply`,
+		`window.openVibelyNavigate('/alerts')`,
+		`systemUpdateIsActionable`,
+		`options.sticky`,
+		`system-update-nav-badge`,
+	} {
+		if !strings.Contains(html, required) {
+			t.Fatalf("global system update notice missing snippet: %s", required)
+		}
+	}
+}
+
 // TestToastDismissalCleanup verifies the toast notification system properly
 // cleans up DOM elements after dismissal to prevent page unresponsiveness.
 func TestToastDismissalCleanup(t *testing.T) {
