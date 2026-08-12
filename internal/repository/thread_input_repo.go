@@ -806,11 +806,15 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 			}
 			for _, resource := range []struct{ kind, id string }{{"task", exec.TaskID}, {"execution", exec.ID}} {
 				if _, err := dbexec.ExecContext(ctx, `INSERT INTO automation_activity_resources
-						(activity_id, resource_type, resource_id, relation) VALUES (?, ?, ?, 'subject')
-						ON CONFLICT(activity_id, resource_type, resource_id, relation) DO NOTHING`, activityID, resource.kind, resource.id); err != nil {
+							(activity_id, resource_type, resource_id, relation) VALUES (?, ?, ?, 'subject')
+							ON CONFLICT(activity_id, resource_type, resource_id, relation) DO NOTHING`, activityID, resource.kind, resource.id); err != nil {
 					_ = bindingRows.Close()
 					return err
 				}
+			}
+			if err := syncAutomationLiveActivityState(ctx, dbexec, activityID); err != nil {
+				_ = bindingRows.Close()
+				return err
 			}
 		}
 		if err := bindingRows.Close(); err != nil {

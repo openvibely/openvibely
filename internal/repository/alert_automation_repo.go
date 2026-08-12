@@ -352,10 +352,14 @@ func recordAlertClaimProjection(ctx context.Context, exec SQLExecutor, projectID
 		return err
 	}
 	for _, value := range targets {
-		if _, err := exec.ExecContext(ctx, `UPDATE automation_activities SET status = 'cancelled',
+		rows, err := exec.QueryContext(ctx, `UPDATE automation_activities SET status = 'cancelled',
 			completed_at = CURRENT_TIMESTAMP WHERE project_id = ? AND automation_id = ? AND version_id = ?
-			AND work_item_id = ? AND activity_type = 'claim_notification' AND status = 'running'`,
-			projectID, value.automationID, value.versionID, value.workItemID); err != nil {
+			AND work_item_id = ? AND activity_type = 'claim_notification' AND status = 'running' RETURNING id`,
+			projectID, value.automationID, value.versionID, value.workItemID)
+		if err != nil {
+			return err
+		}
+		if err := syncAutomationLiveActivityStateRows(ctx, exec, rows); err != nil {
 			return err
 		}
 		inboxNode, err := automationWorkItemNodeIDByRole(ctx, exec, projectID, value.automationID, value.versionID, value.workItemID, "native_inbox")
@@ -380,10 +384,14 @@ func recordAlertClaimReleasedProjection(ctx context.Context, exec SQLExecutor, p
 		return err
 	}
 	for _, value := range targets {
-		if _, err := exec.ExecContext(ctx, `UPDATE automation_activities SET status = 'cancelled',
+		rows, err := exec.QueryContext(ctx, `UPDATE automation_activities SET status = 'cancelled',
 			completed_at = CURRENT_TIMESTAMP WHERE project_id = ? AND automation_id = ? AND version_id = ?
-			AND work_item_id = ? AND activity_type = 'claim_notification' AND activity_key = ? AND status = 'running'`,
-			projectID, value.automationID, value.versionID, value.workItemID, "alert:"+alertID+":claim:"+claimant); err != nil {
+			AND work_item_id = ? AND activity_type = 'claim_notification' AND activity_key = ? AND status = 'running' RETURNING id`,
+			projectID, value.automationID, value.versionID, value.workItemID, "alert:"+alertID+":claim:"+claimant)
+		if err != nil {
+			return err
+		}
+		if err := syncAutomationLiveActivityStateRows(ctx, exec, rows); err != nil {
 			return err
 		}
 	}
@@ -400,11 +408,15 @@ func recordAlertProcessingProjection(ctx context.Context, exec SQLExecutor, proj
 		if state == models.AlertProcessingFailed {
 			claimStatus = models.AutomationActivityFailed
 		}
-		if _, err := exec.ExecContext(ctx, `UPDATE automation_activities SET status = ?, completed_at = CURRENT_TIMESTAMP,
+		rows, err := exec.QueryContext(ctx, `UPDATE automation_activities SET status = ?, completed_at = CURRENT_TIMESTAMP,
 			error_message = CASE WHEN ? = 'failed' THEN ? ELSE error_message END
 			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND work_item_id = ?
-			AND activity_type = 'claim_notification' AND status = 'running'`, claimStatus, claimStatus, message,
-			projectID, value.automationID, value.versionID, value.workItemID); err != nil {
+			AND activity_type = 'claim_notification' AND status = 'running' RETURNING id`, claimStatus, claimStatus, message,
+			projectID, value.automationID, value.versionID, value.workItemID)
+		if err != nil {
+			return err
+		}
+		if err := syncAutomationLiveActivityStateRows(ctx, exec, rows); err != nil {
 			return err
 		}
 		fromNode := value.fromNodeID

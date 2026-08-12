@@ -31,19 +31,74 @@ var (
 const AutomationExternalStaleAfter = 15 * time.Minute
 
 const listAutomationsWithStaleExternalPullRequestsSQL = `SELECT DISTINCT a.project_id, a.automation_id
-			FROM task_pull_requests pr INDEXED BY idx_task_pull_requests_updated_at_task_id
-			CROSS JOIN automation_activity_resources task_resource INDEXED BY idx_automation_activity_resources_type_resource_activity
-			CROSS JOIN automation_activities a
-			WHERE pr.updated_at < ?
-				AND task_resource.resource_type = 'task'
-				AND task_resource.resource_id = pr.task_id
-				AND a.id = task_resource.activity_id
-				AND EXISTS (
-					SELECT 1 FROM automation_activity_resources pull_resource INDEXED BY idx_automation_activity_resources_activity_type
-					WHERE pull_resource.activity_id = a.id AND pull_resource.resource_type = 'pull_request'
-				)
-			ORDER BY a.project_id, a.automation_id
-			LIMIT ?`
+				FROM task_pull_requests pr INDEXED BY idx_task_pull_requests_updated_at_task_id
+				CROSS JOIN automation_activity_resources task_resource INDEXED BY idx_automation_activity_resources_type_resource_activity
+				CROSS JOIN automation_activities a
+				WHERE pr.updated_at < ?
+					AND task_resource.resource_type = 'task'
+					AND task_resource.resource_id = pr.task_id
+					AND a.id = task_resource.activity_id
+					AND EXISTS (
+						SELECT 1 FROM automation_activity_resources pull_resource INDEXED BY idx_automation_activity_resources_activity_type
+						WHERE pull_resource.activity_id = a.id AND pull_resource.resource_type = 'pull_request'
+					)
+				ORDER BY a.project_id, a.automation_id
+				LIMIT ?`
+
+const liveNodeCountsSQL = `WITH operational_state AS (
+				SELECT node_id, CASE activity_status
+					WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
+					WHEN 'failed' THEN 'failed' END AS state,
+					state_key
+				FROM automation_live_activity_states
+				WHERE project_id = ? AND automation_id = ? AND version_id = ?
+					AND activity_status IN ('pending','running','waiting','failed')
+			UNION ALL
+			SELECT node_id, 'recent', state_key
+			FROM automation_live_activity_states
+			WHERE project_id = ? AND automation_id = ? AND version_id = ?
+				AND activity_status = 'completed' AND completed_at >= ?
+			UNION ALL
+			SELECT i.trigger_node_id, 'running', 'invocation:' || i.id
+			FROM automation_invocations i
+			WHERE i.project_id = ? AND i.automation_id = ? AND i.version_id = ?
+				AND i.status IN ('claimed','dispatched','running')
+				AND NOT EXISTS (SELECT 1 FROM automation_activities a INDEXED BY idx_automation_activities_invocation WHERE a.invocation_id = i.id)
+			UNION ALL
+			SELECT binding.node_id, 'running', CASE WHEN binding.work_item_id IS NOT NULL
+				THEN 'work:' || binding.work_item_id ELSE 'input:' || binding.thread_input_id END
+			FROM automation_thread_input_bindings binding
+			JOIN thread_inputs input ON input.id = binding.thread_input_id
+			WHERE binding.project_id = ? AND binding.automation_id = ? AND binding.version_id = ?
+				AND input.input_status = 'pending'
+			UNION ALL
+			SELECT position.node_id,
+				CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
+					WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
+				'work:' || position.work_item_id
+			FROM automation_work_item_positions position
+			JOIN automation_nodes node ON node.id = position.node_id AND node.version_id = position.version_id
+				AND node.automation_id = position.automation_id AND node.project_id = position.project_id
+			WHERE position.project_id = ? AND position.automation_id = ? AND position.version_id = ?
+				AND position.state IN ('active','waiting','blocked','failed')
+				AND NOT (position.state = 'active' AND node.role = 'github_inbox')
+			UNION ALL
+			SELECT to_node_id, 'recent', 'work:' || work_item_id
+			FROM automation_transitions
+			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state = 'completed' AND occurred_at >= ?
+			), identity_state AS (
+				SELECT node_id, state_key, MAX(CASE state
+					WHEN 'failed' THEN 5 WHEN 'blocked' THEN 4 WHEN 'waiting' THEN 3
+					WHEN 'running' THEN 2 WHEN 'recent' THEN 1 ELSE 0 END) AS state_priority
+				FROM operational_state GROUP BY node_id, state_key
+			)
+			SELECT node_id,
+				SUM(CASE WHEN state_priority = 2 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 3 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
+				SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
+			FROM identity_state GROUP BY node_id`
 
 type AutomationGitHubIssueDedupSource struct {
 	Context     models.AutomationContext `json:"context"`
@@ -877,6 +932,9 @@ func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, execu
 		error_message = ? WHERE invocation_id = ? AND activity_key = ? RETURNING id`, activityStatus, strings.TrimSpace(message), invocationID, "dispatch:"+dispatchID+":execute").Scan(&activityID); err != nil {
 		return err
 	}
+	if err := syncAutomationLiveActivityState(ctx, conn, activityID); err != nil {
+		return err
+	}
 	if status == models.ExecCompleted {
 		var nonterminal, failed int
 		if err := conn.QueryRowContext(ctx, `SELECT
@@ -1547,10 +1605,91 @@ func upsertAutomationActivity(ctx context.Context, exec SQLExecutor, in Automati
 			return nil, fmt.Errorf("linking automation activity resource: %w", err)
 		}
 	}
+	if err := syncAutomationLiveActivityState(ctx, exec, activity.ID); err != nil {
+		return nil, err
+	}
 	if err := recordAutomationArtifactMailboxOwners(ctx, exec, in, binding); err != nil {
 		return nil, err
 	}
 	return activity, nil
+}
+
+func syncAutomationLiveActivityState(ctx context.Context, exec SQLExecutor, activityID string) error {
+	if strings.TrimSpace(activityID) == "" {
+		return nil
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM automation_live_activity_states WHERE activity_id = ?`, activityID); err != nil {
+		return fmt.Errorf("clearing automation live activity state: %w", err)
+	}
+	rows, err := exec.QueryContext(ctx, `SELECT a.rowid, a.id, a.project_id, a.automation_id, a.version_id, a.node_id,
+		COALESCE(a.invocation_id, ''), COALESCE(a.work_item_id, ''), a.status, a.completed_at,
+		CASE WHEN a.work_item_id IS NOT NULL THEN 'work:' || a.work_item_id
+			WHEN task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
+			ELSE 'activity:' || a.id END AS state_key
+		FROM automation_activities a
+		LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
+			AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
+		WHERE a.id = ?`, activityID)
+	if err != nil {
+		return fmt.Errorf("loading automation live activity state: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rowID int64
+		var id, projectID, automationID, versionID, nodeID, invocationID, workItemID, status, stateKey string
+		var completedAt sql.NullTime
+		if err := rows.Scan(&rowID, &id, &projectID, &automationID, &versionID, &nodeID, &invocationID, &workItemID, &status, &completedAt, &stateKey); err != nil {
+			return err
+		}
+		var completed any
+		if completedAt.Valid {
+			completed = completedAt.Time
+		}
+		if _, err := exec.ExecContext(ctx, `INSERT INTO automation_live_activity_states
+			(project_id, automation_id, version_id, node_id, state_key, activity_id, invocation_id, work_item_id, activity_status, completed_at, activity_rowid)
+			VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)
+			ON CONFLICT(project_id, automation_id, version_id, node_id, state_key) DO UPDATE SET
+				activity_id = excluded.activity_id,
+				invocation_id = excluded.invocation_id,
+				work_item_id = excluded.work_item_id,
+				activity_status = excluded.activity_status,
+				completed_at = excluded.completed_at,
+				activity_rowid = excluded.activity_rowid,
+				updated_at = CURRENT_TIMESTAMP
+			WHERE excluded.activity_rowid >= automation_live_activity_states.activity_rowid`,
+			projectID, automationID, versionID, nodeID, stateKey, id, invocationID, workItemID, status, completed, rowID); err != nil {
+			return fmt.Errorf("upserting automation live activity state: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func syncAutomationLiveActivityStateRows(ctx context.Context, exec SQLExecutor, rows *sql.Rows) error {
+	var activityIDs []string
+	for rows.Next() {
+		var activityID string
+		if err := rows.Scan(&activityID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		activityIDs = append(activityIDs, activityID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, activityID := range activityIDs {
+		if err := syncAutomationLiveActivityState(ctx, exec, activityID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func recordAutomationArtifactMailboxOwners(ctx context.Context, exec SQLExecutor, in AutomationProjectionEvent, binding models.AutomationBinding) error {
@@ -1765,67 +1904,8 @@ func appendAutomationTransition(ctx context.Context, exec SQLExecutor, in Automa
 }
 
 func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automationID, versionID string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, int, int, error) {
-	rows, err := r.db.QueryContext(ctx, `WITH ranked_activities AS (
-			SELECT a.node_id, a.work_item_id, a.id, a.invocation_id, a.status, a.completed_at, task_resource.resource_id AS task_id,
-				ROW_NUMBER() OVER (PARTITION BY a.node_id, CASE
-					WHEN a.work_item_id IS NOT NULL THEN 'work:' || a.work_item_id
-					WHEN task_resource.resource_id IS NOT NULL THEN 'task:' || task_resource.resource_id
-					ELSE 'activity:' || a.id END
-					ORDER BY a.rowid DESC) AS activity_rank
-			FROM automation_activities a
-			LEFT JOIN automation_activity_resources task_resource ON task_resource.activity_id = a.id
-				AND task_resource.resource_type = 'task' AND task_resource.relation = 'subject'
-			WHERE a.project_id = ? AND a.automation_id = ? AND a.version_id = ?
-		), operational_state AS (
-			SELECT node_id, CASE status
-				WHEN 'pending' THEN 'running' WHEN 'running' THEN 'running' WHEN 'waiting' THEN 'waiting'
-				WHEN 'failed' THEN 'failed' WHEN 'completed' THEN 'recent' END AS state,
-				CASE WHEN work_item_id IS NOT NULL THEN 'work:' || work_item_id
-					WHEN task_id IS NOT NULL THEN 'task:' || task_id ELSE 'activity:' || id END AS state_key
-			FROM ranked_activities
-			WHERE activity_rank = 1
-				AND (status IN ('pending','running','waiting','failed') OR (status = 'completed' AND completed_at >= ?))
-		UNION
-		SELECT i.trigger_node_id, 'running', 'invocation:' || i.id
-		FROM automation_invocations i
-		WHERE i.project_id = ? AND i.automation_id = ? AND i.version_id = ?
-			AND i.status IN ('claimed','dispatched','running')
-			AND NOT EXISTS (SELECT 1 FROM ranked_activities a WHERE a.invocation_id = i.id)
-		UNION
-		SELECT binding.node_id, 'running', CASE WHEN binding.work_item_id IS NOT NULL
-			THEN 'work:' || binding.work_item_id ELSE 'input:' || binding.thread_input_id END
-		FROM automation_thread_input_bindings binding
-		JOIN thread_inputs input ON input.id = binding.thread_input_id
-		WHERE binding.project_id = ? AND binding.automation_id = ? AND binding.version_id = ?
-			AND input.input_status = 'pending'
-		UNION
-		SELECT position.node_id,
-			CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
-				WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
-			'work:' || position.work_item_id
-		FROM automation_work_item_positions position
-		JOIN automation_nodes node ON node.id = position.node_id AND node.version_id = position.version_id
-			AND node.automation_id = position.automation_id AND node.project_id = position.project_id
-		WHERE position.project_id = ? AND position.automation_id = ? AND position.version_id = ?
-			AND position.state IN ('active','waiting','blocked','failed')
-			AND NOT (position.state = 'active' AND node.role = 'github_inbox')
-		UNION
-		SELECT to_node_id, 'recent', 'work:' || work_item_id
-		FROM automation_transitions
-		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND state = 'completed' AND occurred_at >= ?
-		), identity_state AS (
-			SELECT node_id, state_key, MAX(CASE state
-				WHEN 'failed' THEN 5 WHEN 'blocked' THEN 4 WHEN 'waiting' THEN 3
-				WHEN 'running' THEN 2 WHEN 'recent' THEN 1 ELSE 0 END) AS state_priority
-			FROM operational_state GROUP BY node_id, state_key
-		)
-		SELECT node_id,
-			SUM(CASE WHEN state_priority = 2 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 3 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 4 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 5 THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state_priority = 1 THEN 1 ELSE 0 END)
-		FROM identity_state GROUP BY node_id`, projectID, automationID, versionID, recentCutoff.UTC(),
+	rows, err := r.db.QueryContext(ctx, liveNodeCountsSQL, projectID, automationID, versionID,
+		projectID, automationID, versionID, recentCutoff.UTC(),
 		projectID, automationID, versionID,
 		projectID, automationID, versionID,
 		projectID, automationID, versionID,
@@ -2346,6 +2426,9 @@ func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID 
 			return "", err
 		}
 	}
+	if err := syncAutomationLiveActivityState(ctx, conn, activityID); err != nil {
+		return "", err
+	}
 	var resourceID string
 	err = conn.QueryRowContext(ctx, `SELECT resource_id FROM automation_activity_resources
 		WHERE activity_id = ? AND resource_type = ? ORDER BY id LIMIT 1`, activityID, resourceType).Scan(&resourceID)
@@ -2600,12 +2683,25 @@ func (r *AutomationRepo) RepairExecutionProjection(ctx context.Context, repair A
 	case models.ExecCancelled:
 		activityStatus = models.AutomationActivityCancelled
 	}
-	if _, err := r.db.ExecContext(ctx, `UPDATE automation_activities SET status = ?,
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	rows, err := conn.QueryContext(ctx, `UPDATE automation_activities SET status = ?,
 		completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE NULL END,
 		error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
 		AND id IN (SELECT activity_id FROM automation_activity_resources
-		WHERE resource_type = 'execution' AND resource_id = ?)`, activityStatus, activityStatus,
-		strings.TrimSpace(repair.Error), repair.ExecutionID); err != nil {
+		WHERE resource_type = 'execution' AND resource_id = ?) RETURNING id`, activityStatus, activityStatus,
+		strings.TrimSpace(repair.Error), repair.ExecutionID)
+	if err != nil {
+		_ = conn.Close()
+		return err
+	}
+	if err := syncAutomationLiveActivityStateRows(ctx, conn, rows); err != nil {
+		_ = conn.Close()
+		return err
+	}
+	if err := conn.Close(); err != nil {
 		return err
 	}
 	return r.FinalizeExecutionProjection(ctx, repair.ProjectID, repair.ExecutionID, repair.Status)

@@ -3174,6 +3174,11 @@ func TestAutomationLiveTaskRetryReplacesEarlierFailedDispatchState(t *testing.T)
 	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_activity_resources
 		(activity_id, resource_type, resource_id, relation) VALUES (?, 'task', ?, 'subject')`, completedActivityID, fixture.task.ID)
 	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_live_activity_states
+		(project_id, automation_id, version_id, node_id, state_key, activity_id, invocation_id, activity_status, completed_at, activity_rowid)
+		SELECT project_id, automation_id, version_id, node_id, 'task:' || ?, id, invocation_id, status, completed_at, rowid
+		FROM automation_activities WHERE id = ?`, fixture.task.ID, completedActivityID)
+	require.NoError(t, err)
 
 	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())
 	require.NoError(t, err)
@@ -3215,6 +3220,11 @@ func TestAutomationLiveWorkItemSuccessReplacesEarlierFailedActivityState(t *test
 		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status, started_at, completed_at)
 		VALUES (?, ?, ?, ?, ?, ?, 'issue:99:completed', 'implementation_task', 'completed', ?, ?)`, completedActivityID,
 		fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, implementation.ID, workItemID, completedAt, completedAt)
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().ExecContext(ctx, `INSERT INTO automation_live_activity_states
+		(project_id, automation_id, version_id, node_id, state_key, activity_id, work_item_id, activity_status, completed_at, activity_rowid)
+		SELECT project_id, automation_id, version_id, node_id, 'work:' || work_item_id, id, work_item_id, status, completed_at, rowid
+		FROM automation_activities WHERE id = ?`, completedActivityID)
 	require.NoError(t, err)
 
 	graph, err := NewAutomationGraphService(fixture.repo).GetLive(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now())

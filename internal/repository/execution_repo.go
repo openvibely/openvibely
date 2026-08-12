@@ -460,13 +460,21 @@ func (r *ExecutionRepo) syncAutomationActivitiesForExecution(ctx context.Context
 	} else if status == models.ExecRunning {
 		activityStatus = models.AutomationActivityRunning
 	}
-	_, err := r.db.ExecContext(ctx, `UPDATE automation_activities SET status = ?,
+	conn, err := r.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	rows, err := conn.QueryContext(ctx, `UPDATE automation_activities SET status = ?,
 		completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN CURRENT_TIMESTAMP ELSE NULL END,
 		error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
 		AND id IN (SELECT activity_id FROM automation_activity_resources
-		WHERE resource_type = 'execution' AND resource_id = ?)`, activityStatus, activityStatus, strings.TrimSpace(message), executionID)
+		WHERE resource_type = 'execution' AND resource_id = ?) RETURNING id`, activityStatus, activityStatus, strings.TrimSpace(message), executionID)
 	if err != nil {
 		return fmt.Errorf("updating automation execution activities: %w", err)
+	}
+	if err := syncAutomationLiveActivityStateRows(ctx, conn, rows); err != nil {
+		return fmt.Errorf("syncing automation execution activity state: %w", err)
 	}
 	return nil
 }
