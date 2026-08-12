@@ -476,7 +476,6 @@ func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, re
 	if h.githubSvc == nil {
 		return nil, fmt.Errorf("github service unavailable")
 	}
-	automationContext, automationBound := service.AutomationContextFromContext(ctx)
 	if h.projectRepo == nil {
 		return nil, fmt.Errorf("project repository unavailable")
 	}
@@ -487,33 +486,7 @@ func (h *Handler) resolveGitHubRepoForToolURL(ctx context.Context, projectID, re
 	if project == nil {
 		return nil, fmt.Errorf("current project not found")
 	}
-	if strings.TrimSpace(repoURL) != "" && (!automationBound || automationContext.ProjectID != projectID) {
-		repo, err := h.githubSvc.ResolveRepo(ctx, repoURL, "")
-		if err != nil {
-			return nil, err
-		}
-		if err := service.ConfigureGitHubRepoEndpointForProject(repo, repoURL, project.RepoURL, h.githubSvc.GlobalAPIEndpoint(ctx)); err != nil {
-			return nil, err
-		}
-		return repo, nil
-	}
-	var repo *service.GitHubRepoRef
-	if automationBound && automationContext.ProjectID == projectID {
-		repoPath := ""
-		if strings.TrimSpace(project.RepoURL) == "" {
-			repoPath = project.RepoPath
-		}
-		repo, err = h.githubSvc.ResolveRepo(ctx, project.RepoURL, repoPath)
-	} else {
-		repo, err = h.githubSvc.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := service.ConfigureGitHubRepoEndpoint(repo, h.githubSvc.GlobalAPIEndpoint(ctx)); err != nil {
-		return nil, err
-	}
-	return repo, nil
+	return service.ResolveGitHubToolRepository(ctx, h.githubSvc, projectID, repoURL, project)
 }
 
 func requireAutomationGitHubRepo(ctx context.Context, projectID string, project *models.Project) error {

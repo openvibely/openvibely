@@ -892,32 +892,11 @@ func resolveGitHubRepoForRuntimeTool(ctx context.Context, opts githubIssueRuntim
 }
 
 func resolveGitHubRepoForRuntimeToolURL(ctx context.Context, opts githubIssueRuntimeOptions, repoURL string) (*GitHubRepoRef, error) {
-	automationContext, automationBound := AutomationContextFromContext(ctx)
 	project, err := resolveGitHubRuntimeProject(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(repoURL) != "" && (!automationBound || automationContext.ProjectID != opts.ProjectID) {
-		repo, err := opts.GitHub.ResolveRepo(ctx, repoURL, "")
-		if err != nil {
-			return nil, err
-		}
-		if err := ConfigureGitHubRepoEndpointForProject(repo, repoURL, project.RepoURL, opts.GitHub.GlobalAPIEndpoint(ctx)); err != nil {
-			return nil, err
-		}
-		return repo, nil
-	}
-	if automationBound && automationContext.ProjectID == opts.ProjectID {
-		return resolveAutomationProjectGitHubRepository(ctx, opts.GitHub, project)
-	}
-	repo, err := opts.GitHub.ResolveRepo(ctx, project.RepoURL, project.RepoPath)
-	if err != nil {
-		return nil, err
-	}
-	if err := ConfigureGitHubRepoEndpoint(repo, opts.GitHub.GlobalAPIEndpoint(ctx)); err != nil {
-		return nil, err
-	}
-	return repo, nil
+	return ResolveGitHubToolRepository(ctx, opts.GitHub, opts.ProjectID, repoURL, project)
 }
 
 func resolveGitHubRuntimeTask(ctx context.Context, taskRepo *repository.TaskRepo, projectID, taskID, title string) (*models.Task, error) {
