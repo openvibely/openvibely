@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
@@ -676,7 +677,11 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 }
 
 func render(c echo.Context, status int, component templ.Component) error {
+	ctx := c.Request().Context()
+	if h, ok := c.Get("handler").(*Handler); ok && h.desktopMode {
+		ctx = layout.WithDesktopMode(ctx, true)
+	}
 	c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 	c.Response().WriteHeader(status)
-	return component.Render(c.Request().Context(), c.Response().Writer)
+	return component.Render(ctx, c.Response().Writer)
 }

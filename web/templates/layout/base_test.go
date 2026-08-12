@@ -13,6 +13,36 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestBaseRuntimeModeAndChatLinkPolicyHooks(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Runtime", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render web Base: %v", err)
+	}
+	html := buf.String()
+	for _, want := range []string{
+		`data-openvibely-runtime="web"`,
+		"window.chatLinkOpensOutsideApp = function(href)",
+		"window.sanitizeChatHTMLElement = function(element)",
+		"element.setAttribute('target', '_blank')",
+		"element.setAttribute('rel', 'noopener noreferrer')",
+		"element.removeAttribute('target')",
+		"element.removeAttribute('rel')",
+		"window.sanitizeChatHTMLElement(element)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("base layout missing chat link/runtime policy hook %q", want)
+		}
+	}
+
+	buf.Reset()
+	if err := Base("Runtime", []models.Project{}, "").Render(WithDesktopMode(context.Background(), true), &buf); err != nil {
+		t.Fatalf("render desktop Base: %v", err)
+	}
+	if !strings.Contains(buf.String(), `data-openvibely-runtime="desktop"`) {
+		t.Fatal("base layout must render authoritative desktop runtime marker")
+	}
+}
+
 func TestBaseProvidesCentralClientSidePageTitleAndHistorySynchronization(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Initial", []models.Project{}, "").Render(context.Background(), &buf); err != nil {

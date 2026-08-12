@@ -536,6 +536,13 @@ func parseIntClamped(value string, min, max int) int {
 }
 
 func (h *Handler) RegisterRoutes(e *echo.Echo) {
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set("handler", h)
+			return next(c)
+		}
+	})
+
 	// Machine-readable readiness and immutable build identity.
 	e.GET("/api/system/health", h.SystemHealth)
 

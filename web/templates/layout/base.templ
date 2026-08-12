@@ -1,6 +1,23 @@
 package layout
 
-import "github.com/openvibely/openvibely/internal/models"
+import (
+	"context"
+
+	"github.com/openvibely/openvibely/internal/models"
+)
+
+type desktopModeContextKey struct{}
+
+func WithDesktopMode(ctx context.Context, desktop bool) context.Context {
+	return context.WithValue(ctx, desktopModeContextKey{}, desktop)
+}
+
+func serverRuntimeMode(ctx context.Context) string {
+	if desktop, _ := ctx.Value(desktopModeContextKey{}).(bool); desktop {
+		return "desktop"
+	}
+	return "web"
+}
 
 func documentTitle(title string) string {
 	if title == "" {
@@ -15,8 +32,8 @@ templ PageTitle(title string) {
 
 templ Base(title string, projects []models.Project, currentProjectID string) {
 	<!DOCTYPE html>
-	<html lang="en" data-theme="dark">
-		<head>
+		<html lang="en" data-theme="dark" data-openvibely-runtime={ serverRuntimeMode(ctx) } data-runtime={ serverRuntimeMode(ctx) }>
+			<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ documentTitle(title) }</title>
@@ -33,6 +50,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					function detectDesktopRuntime() {
 						try {
 							if (typeof window === 'undefined') return false;
+							var serverRuntime = document.documentElement.getAttribute('data-openvibely-runtime');
+							if (serverRuntime === 'desktop') return true;
 							if (window.location && window.location.protocol === 'wails:') return true;
 							if (typeof window.runtime !== 'undefined') return true;
 							if (typeof window.go !== 'undefined') return true;
@@ -2080,18 +2099,19 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					return escaped;
 				};
-				// Defense in depth for HTML emitted by Marked/highlight.js. Browser HTML
-				// parsing normalizes quoted, unquoted, and malformed attributes before
-				// this allow/deny pass, avoiding regex-only sanitizer gaps.
-				window.sanitizeChatHTMLTemplate = function(html) {
-					if (!html || typeof document === 'undefined' || !document.createElement) return null;
-					var template = document.createElement('template');
-					if (!template.content || !template.content.querySelectorAll) return null;
-					template.innerHTML = html;
-					template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base, form, svg, math').forEach(function(element) {
-						element.remove();
-					});
-					template.content.querySelectorAll('*').forEach(function(element) {
+					window.chatLinkOpensOutsideApp = function(href) {
+						if (!href) return false;
+						try {
+							var parsed = new URL(href, window.location && window.location.href ? window.location.href : 'http://openvibely.local/');
+							if (parsed.protocol === 'mailto:') return true;
+							if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+							if (window.location && window.location.origin && parsed.origin === window.location.origin) return false;
+							return true;
+						} catch (_) {
+							return false;
+						}
+					};
+					window.sanitizeChatHTMLElement = function(element) {
 						Array.prototype.slice.call(element.attributes || []).forEach(function(attr) {
 							var name = attr.name.toLowerCase();
 							if (/^on/i.test(attr.name) || name === 'srcdoc' || name === 'srcset' || name === 'style') {
@@ -2103,9 +2123,32 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								if (/^(?:javascript:|vbscript:|data:)/.test(normalized)) element.removeAttribute(attr.name);
 							}
 						});
-					});
-					return template;
-				};
+						if (element.tagName === 'A') {
+							if (element.hasAttribute('href') && window.chatLinkOpensOutsideApp(element.getAttribute('href'))) {
+								element.setAttribute('target', '_blank');
+								element.setAttribute('rel', 'noopener noreferrer');
+							} else {
+								element.removeAttribute('target');
+								element.removeAttribute('rel');
+							}
+						}
+					};
+					// Defense in depth for HTML emitted by Marked/highlight.js. Browser HTML
+					// parsing normalizes quoted, unquoted, and malformed attributes before
+					// this allow/deny pass, avoiding regex-only sanitizer gaps.
+					window.sanitizeChatHTMLTemplate = function(html) {
+						if (!html || typeof document === 'undefined' || !document.createElement) return null;
+						var template = document.createElement('template');
+						if (!template.content || !template.content.querySelectorAll) return null;
+						template.innerHTML = html;
+						template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base, form, svg, math').forEach(function(element) {
+							element.remove();
+						});
+						template.content.querySelectorAll('*').forEach(function(element) {
+							window.sanitizeChatHTMLElement(element);
+						});
+						return template;
+					};
 				window.sanitizeChatHTML = function(html) {
 					if (!html) return html;
 					var template = window.sanitizeChatHTMLTemplate(html);
@@ -2170,17 +2213,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								if (/^(?:SCRIPT|STYLE|IFRAME|OBJECT|EMBED|LINK|META|BASE|FORM|SVG|MATH)$/.test(element.tagName || '')) {
 									element.remove();
 								} else {
-									Array.prototype.slice.call(element.attributes || []).forEach(function(attr) {
-										var name = attr.name.toLowerCase();
-										if (/^on/i.test(attr.name) || name === 'srcdoc' || name === 'srcset' || name === 'style') {
-											element.removeAttribute(attr.name);
-											return;
-										}
-										if (name === 'href' || name === 'src' || name === 'xlink:href' || name === 'action' || name === 'formaction') {
-											var normalized = String(attr.value || '').replace(/[\u0000-\u0020\u007f-\u009f]/g, '').toLowerCase();
-											if (/^(?:javascript:|vbscript:|data:)/.test(normalized)) element.removeAttribute(attr.name);
-										}
-									});
+									window.sanitizeChatHTMLElement(element);
 								}
 								if (processed >= 256 || ((window.performance && performance.now ? performance.now() : Date.now()) - startedAt) >= 8) {
 									setTimeout(sanitizeBatch, 0);
@@ -3353,20 +3386,22 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					// so they open in the user's real system browser. In web/server
 					// mode this helper is inert, preserving normal anchor behavior.
 				(function() {
-					function isDesktopRuntime() {
-						try {
-							if (typeof window === 'undefined') return false;
-							if (window.location && window.location.protocol === 'wails:') return true;
-							if (typeof window.wails !== 'undefined') return true;
-							if (typeof window._wails !== 'undefined') return true;
-							if (typeof window.runtime !== 'undefined') return true;
-							if (typeof window.__WAILS__ !== 'undefined') return true;
-							return false;
-						} catch (_) {
-							return false;
+						function isDesktopRuntime() {
+							try {
+								if (typeof window === 'undefined') return false;
+								var serverRuntime = document.documentElement.getAttribute('data-openvibely-runtime');
+								if (serverRuntime === 'desktop') return true;
+								if (window.location && window.location.protocol === 'wails:') return true;
+								if (typeof window.wails !== 'undefined') return true;
+								if (typeof window._wails !== 'undefined') return true;
+								if (typeof window.runtime !== 'undefined') return true;
+								if (typeof window.__WAILS__ !== 'undefined') return true;
+								return false;
+							} catch (_) {
+								return false;
+							}
 						}
-					}
-					function isExternalHref(href) {
+						function isExternalHref(href) {
 						if (!href) return false;
 						var lower = String(href).toLowerCase();
 						return lower.indexOf('http://') === 0 || lower.indexOf('https://') === 0 || lower.indexOf('mailto:') === 0;
