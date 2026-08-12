@@ -150,7 +150,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage.txt
+          files: coverage.filtered.out
 
   packaged-update:
     name: Packaged update (${{ matrix.os }}, ${{ matrix.arch }})
