@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -59,6 +60,7 @@ func main() {
 		if err == nil {
 			err = update.LoadBinaryHelperRelaunch(os.Stdin, &cfg)
 		}
+		applyUpdateIntegrationTimeouts(&cfg)
 		if err == nil {
 			err = update.RunBinaryHelper(context.Background(), cfg)
 		}
@@ -94,6 +96,26 @@ func main() {
 	waitForShutdown(sigCh, inst.ShutdownRequested)
 
 	inst.Shutdown()
+}
+
+func applyUpdateIntegrationTimeouts(cfg *update.BinaryHelperConfig) {
+	if cfg == nil {
+		return
+	}
+	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
+		milliseconds, err := strconv.Atoi(value)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cfg.WaitTimeout = time.Duration(milliseconds) * time.Millisecond
+	}
+	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS"); value != "" {
+		milliseconds, err := strconv.Atoi(value)
+		if err != nil {
+			log.Fatal(err)
+		}
+		cfg.ValidationTimeout = time.Duration(milliseconds) * time.Millisecond
+	}
 }
 
 func waitForShutdown(signals <-chan os.Signal, requested <-chan struct{}) {

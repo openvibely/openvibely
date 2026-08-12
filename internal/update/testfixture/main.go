@@ -22,11 +22,16 @@ func main() {
 		runUpdateHelper()
 		return
 	}
+	if len(os.Args) > 1 && os.Args[1] == "desktop-update-helper" {
+		runDesktopUpdateHelper()
+		return
+	}
 	if len(os.Args) != 4 || os.Args[1] != "serve" || os.Args[2] != "--listen" {
 		fatal(fmt.Errorf("usage: %s serve --listen host:port", os.Args[0]))
 	}
 	server := &http.Server{Addr: os.Args[3]}
 	mux := http.NewServeMux()
+	healthChecksRemaining := exitAfterHealthChecks()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		reportedVersion := version
 		if override := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_HEALTH_VERSION"); override != "" {
@@ -34,6 +39,12 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ready": true, "version": reportedVersion, "actual_version": version})
+		if healthChecksRemaining != nil {
+			*healthChecksRemaining = *healthChecksRemaining - 1
+			if *healthChecksRemaining <= 0 {
+				go func() { _ = server.Shutdown(context.Background()) }()
+			}
+		}
 	})
 	mux.HandleFunc("/apply", func(w http.ResponseWriter, r *http.Request) {
 		staged := update.LocalStagedUpdate{
@@ -76,6 +87,21 @@ func main() {
 	}
 }
 
+func exitAfterHealthChecks() *int {
+	value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_EXIT_AFTER_HEALTH")
+	if value == "" {
+		return nil
+	}
+	count, err := strconv.Atoi(value)
+	if err != nil {
+		fatal(err)
+	}
+	if count <= 0 {
+		count = 1
+	}
+	return &count
+}
+
 func runUpdateHelper() {
 	cfg, err := update.ParseBinaryHelperArgs(os.Args[2:])
 	if err == nil {
@@ -97,6 +123,33 @@ func runUpdateHelper() {
 	}
 	if err == nil {
 		err = update.RunBinaryHelper(context.Background(), cfg)
+	}
+	if err != nil {
+		fatal(err)
+	}
+}
+
+func runDesktopUpdateHelper() {
+	cfg, err := update.ParseDesktopHelperArgs(os.Args[2:])
+	if err == nil {
+		err = update.LoadDesktopHelperRelaunch(os.Stdin, &cfg)
+	}
+	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
+		milliseconds, parseErr := strconv.Atoi(value)
+		if parseErr != nil {
+			fatal(parseErr)
+		}
+		cfg.WaitTimeout = time.Duration(milliseconds) * time.Millisecond
+	}
+	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS"); value != "" {
+		milliseconds, parseErr := strconv.Atoi(value)
+		if parseErr != nil {
+			fatal(parseErr)
+		}
+		cfg.ValidationTimeout = time.Duration(milliseconds) * time.Millisecond
+	}
+	if err == nil {
+		err = update.RunDesktopHelper(context.Background(), cfg)
 	}
 	if err != nil {
 		fatal(err)
