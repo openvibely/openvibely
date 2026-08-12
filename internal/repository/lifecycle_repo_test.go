@@ -2,7 +2,10 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,7 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
-func createLifecycleTestAgent(t *testing.T, agentRepo *AgentRepo) *models.Agent {
+func createLifecycleTestAgent(t testing.TB, agentRepo *AgentRepo) *models.Agent {
 	t.Helper()
 	a := &models.Agent{
 		Name:         "Lifecycle Test Agent",
@@ -249,11 +252,16 @@ func TestLifecycleRepo_ExecutionLifecycle(t *testing.T) {
 	if got.OutputJSON != `{"content":"context"}` {
 		t.Fatalf("expected stored output, got %s", got.OutputJSON)
 	}
-	if got.LifecycleHookID == nil || *got.LifecycleHookID != hook.ID {
-		t.Fatalf("expected hook id link, got %+v", got.LifecycleHookID)
+	if got.InputJSON != "" {
+		t.Fatalf("expected compact list projection to omit input_json, got %q", got.InputJSON)
 	}
-	if got.TaskRunID != "run-1" {
-		t.Fatalf("expected task_run_id round-trip, got %q", got.TaskRunID)
+	if got.TaskRunID != "" || got.LifecycleHookID != nil || got.ParentExecID != nil || got.AttemptCount != 0 || got.Priority != 0 || got.NextRetryAt != nil || got.IdempotencyKey != "" {
+		t.Fatalf("expected compact list projection to omit non-rendered metadata, got %+v", got)
+	}
+	for _, forbidden := range []string{"input_json", "task_run_id", "lifecycle_hook_id", "parent_execution_id", "attempt_count", "priority", "next_retry_at", "idempotency_key"} {
+		if strings.Contains(listExecutionsForTaskSQL, forbidden) {
+			t.Fatalf("lifecycle list SQL must not select %s: %s", forbidden, listExecutionsForTaskSQL)
+		}
 	}
 }
 
@@ -443,6 +451,85 @@ func TestLifecycleRepo_ListExecutionsForTask_NewestFirst(t *testing.T) {
 	}
 }
 
+func TestLifecycleRepo_ListExecutionsForTaskQueryPlanUsesTaskStartedIndex(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	plan := explainLifecycleRepoQueryPlan(t, db, listExecutionsForTaskSQL, "task-plan")
+	if !strings.Contains(plan, "idx_lifecycle_executions_task_started") {
+		t.Fatalf("lifecycle list plan = %q, want task started index", plan)
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("lifecycle list plan = %q, want no temporary sort", plan)
+	}
+}
+
+func explainLifecycleRepoQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(details, "; ")
+}
+
+func TestLifecycleRepo_ListExecutionsForTask_DeterministicIDTieBreak(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Tie Order Test", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	ids := []string{"tie-a", "tie-c", "tie-b"}
+	for _, id := range ids {
+		e := &models.LifecycleExecution{
+			TaskID:         task.ID,
+			AgentID:        agent.ID,
+			When:           models.LifecycleAfterComplete,
+			SkillKey:       id,
+			OutputContract: models.OutputContractActivitySummary,
+			Status:         models.LifecycleExecCompleted,
+		}
+		if err := repo.CreateExecution(ctx, e); err != nil {
+			t.Fatalf("create exec %s: %v", id, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, id, "2000-01-01 12:00:00", e.ID); err != nil {
+			t.Fatalf("set deterministic id %s: %v", id, err)
+		}
+	}
+
+	list, err := repo.ListExecutionsForTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("expected 3 executions, got %d", len(list))
+	}
+	want := []string{"tie-c", "tie-b", "tie-a"}
+	for i, wantID := range want {
+		if list[i].ID != wantID {
+			t.Fatalf("list[%d].ID = %s, want %s; list=%+v", i, list[i].ID, wantID, list)
+		}
+	}
+}
+
 func TestLifecycleRepo_IdempotencyAllowsRetryAfterFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	agentRepo := NewAgentRepo(db)
@@ -528,6 +615,126 @@ func TestLifecycleRepo_HasNewerTaskRunUsesCreationOrderForSameSecondRuns(t *test
 	if hasNewer {
 		t.Fatalf("did not expect run-new to have newer run")
 	}
+}
+
+func BenchmarkLifecycleRepo_ListExecutionsForTaskCompactProjection(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(b, agentRepo)
+	target := &models.Task{ProjectID: "default", Title: "Lifecycle Benchmark Target", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"}
+	if err := taskRepo.Create(ctx, target); err != nil {
+		b.Fatalf("create target task: %v", err)
+	}
+	other := &models.Task{ProjectID: "default", Title: "Lifecycle Benchmark Other", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"}
+	if err := taskRepo.Create(ctx, other); err != nil {
+		b.Fatalf("create other task: %v", err)
+	}
+
+	const rowsPerTask = 2500
+	largeInput := `{"prompt":"` + strings.Repeat("x", 32*1024) + `"}`
+	outputJSON := `{"summary":"` + strings.Repeat("y", 1024) + `"}`
+	seedLifecycleExecutionBenchmarkRows(b, db, target.ID, agent.ID, "target", rowsPerTask, largeInput, outputJSON)
+	seedLifecycleExecutionBenchmarkRows(b, db, other.ID, agent.ID, "other", rowsPerTask, largeInput, outputJSON)
+
+	b.Run("old_full_row_baseline", func(b *testing.B) {
+		b.ReportAllocs()
+		var totalStringBytes int64
+		for i := 0; i < b.N; i++ {
+			list, stringBytes, err := listExecutionsForTaskFullBaseline(ctx, db, target.ID)
+			if err != nil {
+				b.Fatalf("baseline list: %v", err)
+			}
+			if len(list) != rowsPerTask {
+				b.Fatalf("baseline rows = %d, want %d", len(list), rowsPerTask)
+			}
+			totalStringBytes += int64(stringBytes)
+		}
+		b.ReportMetric(float64(totalStringBytes)/float64(b.N), "scanned_string_bytes/op")
+	})
+
+	b.Run("compact_projection", func(b *testing.B) {
+		b.ReportAllocs()
+		var totalStringBytes int64
+		for i := 0; i < b.N; i++ {
+			list, err := repo.ListExecutionsForTask(ctx, target.ID)
+			if err != nil {
+				b.Fatalf("compact list: %v", err)
+			}
+			if len(list) != rowsPerTask {
+				b.Fatalf("compact rows = %d, want %d", len(list), rowsPerTask)
+			}
+			for _, e := range list {
+				totalStringBytes += int64(lifecycleExecutionListStringBytes(e))
+			}
+		}
+		b.ReportMetric(float64(totalStringBytes)/float64(b.N), "scanned_string_bytes/op")
+	})
+}
+
+func seedLifecycleExecutionBenchmarkRows(b *testing.B, db *sql.DB, taskID, agentID, prefix string, count int, inputJSON, outputJSON string) {
+	b.Helper()
+	tx, err := db.Begin()
+	if err != nil {
+		b.Fatalf("begin seed tx: %v", err)
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`
+		INSERT INTO lifecycle_executions
+			(id, task_id, task_run_id, agent_id, when_slot, skill_key, output_contract, status,
+			 input_json, output_json, error, attempt_count, priority, started_at, completed_at)
+		VALUES (?, ?, ?, ?, 'after_complete', ?, 'activity_summary', 'completed', ?, ?, '', 1, 0, ?, ?)`)
+	if err != nil {
+		b.Fatalf("prepare seed statement: %v", err)
+	}
+	defer stmt.Close()
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < count; i++ {
+		started := base.Add(-time.Duration(i) * time.Second).Format("2006-01-02 15:04:05")
+		id := fmt.Sprintf("bench-%s-%05d", prefix, i)
+		if _, err := stmt.Exec(id, taskID, "run-"+id, agentID, "summarize_activity", inputJSON, outputJSON, started, started); err != nil {
+			b.Fatalf("insert benchmark row %d: %v", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		b.Fatalf("commit seed tx: %v", err)
+	}
+}
+
+func listExecutionsForTaskFullBaseline(ctx context.Context, db *sql.DB, taskID string) ([]models.LifecycleExecution, int, error) {
+	rows, err := db.QueryContext(ctx, `
+		SELECT `+execCols+`
+		FROM lifecycle_executions
+		WHERE task_id = ?
+		ORDER BY started_at DESC, id DESC`, taskID)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var out []models.LifecycleExecution
+	stringBytes := 0
+	for rows.Next() {
+		e, err := scanExecution(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, *e)
+		stringBytes += lifecycleExecutionFullStringBytes(*e)
+	}
+	return out, stringBytes, rows.Err()
+}
+
+func lifecycleExecutionFullStringBytes(e models.LifecycleExecution) int {
+	return len(e.ID) + len(e.TaskID) + len(e.TaskRunID) + len(e.AgentID) + len(string(e.When)) + len(e.SkillKey) +
+		len(string(e.OutputContract)) + len(string(e.Status)) + len(e.InputJSON) + len(e.OutputJSON) + len(e.Error) + len(e.IdempotencyKey)
+}
+
+func lifecycleExecutionListStringBytes(e models.LifecycleExecution) int {
+	return len(e.ID) + len(e.AgentID) + len(string(e.When)) + len(e.SkillKey) +
+		len(string(e.OutputContract)) + len(string(e.Status)) + len(e.OutputJSON) + len(e.Error)
 }
 
 func TestLifecycleRepo_PatchExecutionOutputSkills(t *testing.T) {

@@ -221,6 +221,15 @@ const execCols = `id, task_id, task_run_id, agent_id, when_slot, lifecycle_hook_
                   next_retry_at, idempotency_key,
                   started_at, completed_at`
 
+const lifecycleExecutionListCols = `id, agent_id, when_slot, skill_key, output_contract, status,
+					 output_json, error, started_at, completed_at`
+
+const listExecutionsForTaskSQL = `
+	        SELECT ` + lifecycleExecutionListCols + `
+	        FROM lifecycle_executions
+	        WHERE task_id = ?
+	        ORDER BY started_at DESC, id DESC`
+
 func scanExecution(row interface{ Scan(...any) error }) (*models.LifecycleExecution, error) {
 	var e models.LifecycleExecution
 	var agentID, hookID, parent sql.NullString
@@ -247,6 +256,23 @@ func scanExecution(row interface{ Scan(...any) error }) (*models.LifecycleExecut
 	if parent.Valid {
 		v := parent.String
 		e.ParentExecID = &v
+	}
+	e.When = models.LifecycleWhen(when)
+	e.OutputContract = models.LifecycleOutputContract(contract)
+	e.Status = models.LifecycleExecutionStatus(status)
+	return &e, nil
+}
+
+func scanExecutionList(row interface{ Scan(...any) error }) (*models.LifecycleExecution, error) {
+	var e models.LifecycleExecution
+	var agentID sql.NullString
+	var when, contract, status string
+	if err := row.Scan(&e.ID, &agentID, &when, &e.SkillKey, &contract, &status,
+		&e.OutputJSON, &e.Error, &e.StartedAt, &e.CompletedAt); err != nil {
+		return nil, err
+	}
+	if agentID.Valid {
+		e.AgentID = agentID.String
 	}
 	e.When = models.LifecycleWhen(when)
 	e.OutputContract = models.LifecycleOutputContract(contract)
@@ -389,22 +415,19 @@ func (r *LifecycleRepo) UpdateExecution(ctx context.Context, e *models.Lifecycle
 	return nil
 }
 
-// ListExecutionsForTask returns lifecycle executions attached to a task,
-// ordered newest-first (DESC) so the UI shows the most recent activity without
-// requiring the user to scroll to the bottom.
+// ListExecutionsForTask returns compact lifecycle executions attached to a task,
+// ordered newest-first with a deterministic ID tie-breaker so the UI shows the
+// most recent activity without scrolling. It intentionally omits raw input and
+// retry/hook metadata that are not part of the prompt-safe list response.
 func (r *LifecycleRepo) ListExecutionsForTask(ctx context.Context, taskID string) ([]models.LifecycleExecution, error) {
-	rows, err := r.db.QueryContext(ctx, `
-        SELECT `+execCols+`
-        FROM lifecycle_executions
-        WHERE task_id = ?
-        ORDER BY started_at DESC`, taskID)
+	rows, err := r.db.QueryContext(ctx, listExecutionsForTaskSQL, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("listing executions for task %s: %w", taskID, err)
 	}
 	defer rows.Close()
 	var out []models.LifecycleExecution
 	for rows.Next() {
-		e, err := scanExecution(rows)
+		e, err := scanExecutionList(rows)
 		if err != nil {
 			return nil, err
 		}
