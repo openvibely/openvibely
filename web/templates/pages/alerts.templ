@@ -121,8 +121,9 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 					if (response.status === 204) { card.classList.add('hidden'); return; }
 					if (!response.ok) return;
 					var data = await response.json();
-					card.classList.remove('hidden');
 					var available = data.release && data.release.metadata ? data.release.metadata.version : '';
+					if (data.state === 'succeeded' || (available && data.current_version === available)) { card.classList.add('hidden'); return; }
+					card.classList.remove('hidden');
 					document.getElementById('system-update-summary').textContent = 'Current ' + data.current_version + (available ? ' · Available ' + available : ' · No update available') + ' · ' + data.distribution + ' · ' + data.channel;
 					document.getElementById('system-update-state').textContent = data.state;
 						var owner = data.distribution === 'hosted' ? 'A Hosted administrator starts the rollout.' : data.distribution === 'docker' && data.manual ? 'The container operator performs the replacement after OpenVibely is safe to restart.' : data.distribution === 'docker' ? 'An OpenVibely administrator approves the host updater agent request.' : 'An OpenVibely administrator approves restart and installation.';					document.getElementById('system-update-owner').textContent = owner;
