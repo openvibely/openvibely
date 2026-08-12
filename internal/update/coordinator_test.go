@@ -571,7 +571,7 @@ func TestCoordinatorBinaryPreparedClaimRaceKeepsExactGenerationOwned(t *testing.
 	coordinator.state = StateRestarting
 	coordinator.operationGeneration = status.Generation
 	coordinator.staged = staged
-	coordinator.recoveryRetryInterval = time.Millisecond
+	coordinator.recoveryRetryInterval = time.Hour
 	var claimed atomic.Bool
 	coordinator.binaryOutcomeReadHook = func() {
 		if claimed.CompareAndSwap(false, true) {
@@ -594,11 +594,25 @@ func TestCoordinatorBinaryPreparedClaimRaceKeepsExactGenerationOwned(t *testing.
 	if snapshot := coordinator.Snapshot(); snapshot.State != StateRestarting || snapshot.Drain.State == DrainStateIdle || !drain.Owns(status.Generation) {
 		t.Fatalf("helper claim race released exact generation: snapshot=%#v owns=%v", snapshot, drain.Owns(status.Generation))
 	}
-	cancel()
 	coordinator.mu.Lock()
 	coordinator.operationGeneration = ""
 	coordinator.mu.Unlock()
-	time.Sleep(5 * time.Millisecond)
+	cancel()
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		lease, acquired, err := tryAcquireBinaryHelperLease(binaryHelperLeasePath(staged))
+		if err != nil {
+			t.Fatalf("wait for recovery lease release: %v", err)
+		}
+		if acquired {
+			if err := lease.Close(); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("recovery helper lease was not released")
 }
 
 func TestCoordinatorBinaryRestartWithoutHelperHandoffReleasesExactPredecessor(t *testing.T) {
