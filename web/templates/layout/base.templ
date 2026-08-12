@@ -3341,6 +3341,34 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					].join('|');
 				}
 
+				function systemUpdatePendingSuccessFromData(data) {
+					var version = data && data.release && data.release.metadata ? data.release.metadata.version || '' : '';
+					if (!version) return null;
+					return { version: version, noticeKey: systemUpdateNoticeKey(data) };
+				}
+
+				function rememberSystemUpdatePendingSuccess(data) {
+					var pending = systemUpdatePendingSuccessFromData(data);
+					if (!pending) return;
+					try {
+						localStorage.setItem('openvibely-system-update-pending-success', JSON.stringify(pending));
+					} catch (_) {}
+				}
+
+				function consumeSystemUpdatePendingSuccess() {
+					try {
+						var raw = localStorage.getItem('openvibely-system-update-pending-success');
+						if (!raw) return null;
+						localStorage.removeItem('openvibely-system-update-pending-success');
+						var pending = JSON.parse(raw);
+						if (!pending || !pending.version || !pending.noticeKey) return null;
+						return pending;
+					} catch (_) {
+						try { localStorage.removeItem('openvibely-system-update-pending-success'); } catch (_) {}
+						return null;
+					}
+				}
+
 				function navigateSystemUpdateToAlerts() {
 					closeOpenModalsForToastNavigation();
 					if (window.openVibelyNavigate) {
@@ -3356,6 +3384,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (!toast || toast.dataset.systemUpdateApplying === 'true') return;
 					toast.dataset.systemUpdateApplying = 'true';
 					fetch('/api/system/update/apply', { method: 'POST', headers: { 'Accept': 'application/json' } })
+						.then(function(response) {
+							if (!response.ok) return null;
+							return response.json().catch(function() { return null; });
+						})
+						.then(function(data) {
+							if (data) rememberSystemUpdatePendingSuccess(data);
+						})
 						.catch(function(err) { console.error('[system-update] apply failed:', err); })
 						.finally(function() {
 							navigateSystemUpdateToAlerts();
@@ -3363,11 +3398,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						});
 				}
 
-				function showSystemUpdateSucceededToast(data) {
-					if (!data || data.state !== 'succeeded') return;
-					var version = data.release && data.release.metadata ? data.release.metadata.version || '' : data.current_version || '';
+				function showSystemUpdateSucceededToast(data, pending) {
+					if (!pending && (!data || data.state !== 'succeeded')) return;
+					var version = pending ? pending.version : (data.release && data.release.metadata ? data.release.metadata.version || '' : data.current_version || '');
 					if (!version) return;
-					var noticeKey = systemUpdateNoticeKey(data);
+					var noticeKey = pending ? pending.noticeKey : systemUpdateNoticeKey(data);
 					var successKey = 'succeeded|' + noticeKey;
 					try {
 						if (localStorage.getItem('openvibely-system-update-success-toast') === successKey) return;
@@ -3445,6 +3480,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (!data) {
 						setSystemUpdateIndicators(false);
 						dismissSystemUpdateNotice('');
+						showSystemUpdateSucceededToast(null, consumeSystemUpdatePendingSuccess());
 						return;
 					}
 					var actionable = systemUpdateIsActionable(data);
@@ -3452,7 +3488,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (actionable) showSystemUpdateNotice(data);
 					else {
 						dismissSystemUpdateNotice('');
+						var available = data.release && data.release.metadata ? data.release.metadata.version || '' : '';
+						if (data.state === 'waiting_for_idle' || data.state === 'ready' || data.state === 'applying' || data.state === 'restarting' || data.state === 'validating') {
+							rememberSystemUpdatePendingSuccess(data);
+						}
 						showSystemUpdateSucceededToast(data);
+						if (available && data.current_version === available) {
+							showSystemUpdateSucceededToast(null, consumeSystemUpdatePendingSuccess());
+						}
 					}
 				}
 
