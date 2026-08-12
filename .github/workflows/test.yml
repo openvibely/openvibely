@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   test:
+    name: Main test suite (ubuntu-latest)
     runs-on: ubuntu-latest
     env:
       TZ: America/New_York
