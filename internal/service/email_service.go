@@ -246,6 +246,7 @@ type EmailInboundMessage struct {
 	Body          string
 	MessageID     string
 	References    string
+	InReplyTo     string
 	AutoSubmitted string
 	Precedence    string
 	ListUnsub     string
@@ -625,6 +626,7 @@ func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName, skipAtta
 	if msg.Envelope != nil {
 		inbound.Subject = strings.TrimSpace(msg.Envelope.Subject)
 		inbound.MessageID = strings.TrimSpace(msg.Envelope.MessageId)
+		inbound.InReplyTo = strings.TrimSpace(msg.Envelope.InReplyTo)
 		if len(msg.Envelope.From) > 0 {
 			from := msg.Envelope.From[0]
 			inbound.FromName = strings.TrimSpace(from.PersonalName)
@@ -645,6 +647,7 @@ func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName, skipAtta
 			}
 			inbound.MessageID = firstNonEmpty(h.Get("Message-ID"), inbound.MessageID)
 			inbound.References = firstNonEmpty(h.Get("References"), inbound.References)
+			inbound.InReplyTo = firstNonEmpty(h.Get("In-Reply-To"), inbound.InReplyTo)
 			inbound.AutoSubmitted = h.Get("Auto-Submitted")
 			inbound.Precedence = h.Get("Precedence")
 			inbound.ListUnsub = h.Get("List-Unsubscribe")
@@ -790,7 +793,7 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 		return true
 	}
 	prompt := BuildEmailPrompt(msg)
-	sessionKey := EmailSessionKey(msg.FromAddress, msg.MessageID, msg.References, msg.Subject)
+	sessionKey := EmailSessionKey(msg.FromAddress, msg.MessageID, msg.References, msg.InReplyTo, msg.Subject)
 	handedOff := false
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform:              "email",
@@ -1099,15 +1102,17 @@ func BuildEmailPrompt(msg EmailInboundMessage) string {
 	return fmt.Sprintf("[Email from: %s]\n[Subject: %s]\n\n%s", from, strings.TrimSpace(msg.Subject), strings.TrimSpace(msg.Body))
 }
 
-func EmailSessionKey(sender, messageID, references, subject string) string {
+func EmailSessionKey(sender, messageID, references, inReplyTo, subject string) string {
 	sender = repository.NormalizeEmailAddress(sender)
-	root := strings.TrimSpace(references)
-	if root != "" {
-		parts := strings.Fields(root)
-		root = parts[0]
+	var root string
+	if ids := emailReferenceIDs(references); len(ids) > 0 {
+		root = ids[0]
 	}
 	if root == "" {
-		root = strings.TrimSpace(messageID)
+		root = normalizeEmailMessageID(inReplyTo)
+	}
+	if root == "" {
+		root = normalizeEmailMessageID(messageID)
 	}
 	if root != "" {
 		return "email:" + sender + ":" + root
