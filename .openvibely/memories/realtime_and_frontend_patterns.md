@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-11
+updated: 2026-08-12
 source: update_memory
-source_id: 5d753df4f063eafb090e28c4db2369c6:252c1f4efd54e0e9
+source_id: f8784fed42385e3637825fbba0fe356e:60d2fe1a4edb2b2e
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -21,7 +21,7 @@ Realtime and diff contracts:
 - Per-execution SSE accepts optional untrusted `offset` in UTF-8 bytes. The handler clamps to UTF-8 boundaries, subscribes before DB catch-up, skips duplicate/partial overlaps, and uses targeted DB catch-up for dropped deltas or terminal fallback.
 - Fresh, resume, and live-created Chat/task-thread streams track offsets from raw UTF-8 byte lengths, not rendered DOM text, normalized display content, message counts, or scroll/window state.
 - Terminal execution-stream events should publish only after durable terminal writes. `completed` and `cancelled` map to SSE `done`; failures map to SSE `error`. Terminal handlers must replay missing durable output before terminalizing subscribers.
-- Resolved `#440` / PR `#452`: execution stream terminal-event mapping was consolidated in `ExecutionStreamHub.CloseTerminal`, which maps `ExecCompleted` and `ExecCancelled` to `ExecutionStreamDone` with status strings and `ExecFailed` to `ExecutionStreamError` with the supplied error, while non-terminal statuses no-op. Handler cancellation and LLM execution paths now delegate through thin wrappers, and channel-chat completion calls the shared events helper directly; durable-write ordering and path-specific completion/cancellation logic remain outside the helper. Implementation head `efe7bcc83911028800d71d41be92c31f40c343c9` was published to open PR `#452` with `Closes #440` after passing focused execution-stream tests, `go build ./cmd/server && go test ./internal/... -count=1 -timeout 120s`, `git diff --check`, and `go build ./...` (non-fatal macOS desktop linker warnings only). A later read-only audit reported no material implementation or publication issues after verifying the local implementation tree matched the live PR tree `c5670066babf0b11f6c74fbfe1900cacc926266a` and the PR compare contained only the seven issue-related files.
+- Resolved `#440`: execution stream terminal-event mapping is consolidated in `ExecutionStreamHub.CloseTerminal`, which maps `ExecCompleted` and `ExecCancelled` to `ExecutionStreamDone` with status strings and `ExecFailed` to `ExecutionStreamError` with the supplied error, while non-terminal statuses no-op. Handler cancellation and LLM execution paths delegate through thin wrappers, and channel-chat completion calls the shared events helper directly; durable-write ordering and path-specific completion/cancellation logic remain outside the helper.
 - Real-time file changes are invalidation/snapshot signals. `diff_snapshot` events are metadata-only; full diff payloads stay in DB/routes. Browser code refreshes authoritative Changes fragments rather than appending diff DOM directly.
 - Task detail lazily loads Changes content unless `tab=changes` is active; direct `?tab=changes` renders must match lazy route behavior.
 - Diff viewer uses GitHub-style load envelopes and oversized-file placeholders, deletion summaries, constrained rename/copy headers, and viewport-safe overflow boundaries. Worktree diff semantics live in `worktree_and_lineage.md`.
@@ -56,6 +56,7 @@ Shared composer and steering UI:
 
 Transcript parsing and rendering safety:
 - Final Chat/task-thread Markdown rendering uses the shared escaped/unmatched/multiline code-range parser. Raw `<` outside protected code is escaped before Marked, and Marked output is sanitized to remove dangerous elements, event/style/srcdoc/srcset attributes, and unsafe URLs.
+- Shared Chat/task-thread rendered safe external Markdown/autolink anchors open outside the current app view. Sanitization marks proven external anchors with `target="_blank"`, `rel="noopener noreferrer"`, an explicit Chat external-link marker, and an absolute external URL; a global capture-phase click handler opens those marked Chat links with `window.open(..., '_blank', 'noopener,noreferrer')` in web mode so HTMX/app navigation cannot steal them into the current tab. Desktop mode uses the authoritative server-rendered runtime marker and `/open-external` bridge when Wails globals are unavailable. Internal app links preserve normal navigation; unsafe schemes and links inside inline/fenced code remain inert/neutralized.
 - Missing, incomplete, configuration-failing, or parse-failing Marked returns escaped plain-text markup while preserving Markdown source provenance.
 - Go, browser, and generated transcript parsing treat LF, CRLF, and bare CR as equivalent CommonMark line endings without normalizing source bytes. Coded aliases, controls, task metadata, and summaries remain visible and inert; real controls after valid matching fence closers behave normally.
 
@@ -88,13 +89,15 @@ Responsive and shared UI contracts:
 - Active kanban queued/pending dropzones render only real active pending/queued/blocked work; terminal failed/cancelled rows must not appear as queued work.
 - Tasks page date sorting defaults newest-first: Backlog by creation time, Completed by `completed_at` with `updated_at` fallback. Board/drag category edits update `completed_at` through `TaskService.UpdateCategory`; Task Detail edit-form saves are metadata-only and must not activate completed tasks or rerun stored prompts.
 - Responsive card pages such as Models, Agents, Alerts, Channels, and Personality must keep roots/grids/cards/badges shrink-safe. Long badge values truncate within rows.
+- Workers settings tables in `web/templates/pages/worker_settings.templ` are intentionally non-shrinking within the viewport-bound `#main-content` scrollport: the page/card/table wrappers opt out of flex shrinking, row/cell density stays readable as rows increase, live HTMX refresh replaces only table bodies, and narrow viewports contain horizontal table overflow inside the wrapper rather than compressing rows or creating whole-page horizontal scroll.
 - Schedule UI should distinguish disabled schedules; dynamic loop wakeups should remain visually distinct from fixed schedules.
 - Destructive task delete flows from schedule-origin detail pages preserve origin with a whitelisted `return_to=schedule`, not arbitrary return URLs.
 - Global link color token is `--ov-link-color: #7480ff`.
-- Left sidebar navigation preserves hover-only highlight unless intentionally redesigned. Mobile sidebar uses DaisyUI drawer checkbox `#sidebar-toggle`; accepted nav requests close the drawer only after HTMX sends/accepts.
+- Left sidebar navigation preserves hover-only highlight unless intentionally redesigned. Active-page metadata may use `aria-current`, but the sidebar should not apply DaisyUI's visual `.active` class because it can make the previous nav target flash as selected during HTMX navigation. Mobile sidebar uses DaisyUI drawer checkbox `#sidebar-toggle`; accepted nav requests close the drawer only after HTMX sends/accepts.
 - `/models` uses `LLMConfig`/`agent_configs`; `/agents` is plugin-first and has no `color` field.
 - `Managed Memory` in UI/tool profiles is a scoped memory-file capability, not broad repo read/write access.
 - Shared toasts account for native dialog top-layer behavior, reserve right-side inset, use accessible close buttons, and avoid mobile overflow. Native DaisyUI dialogs become full-screen on phone-sized viewports using dimension-based shared CSS.
+- For global indicators driven by page-local polling, expose a shared layout handler and feed it fetched snapshots instead of maintaining divergent state paths. System update card polling uses this pattern to synchronize the Alerts nav update badge, sticky update toast, and auto-dismiss success toast.
 - Destructive deletes for projects, tasks, models, agents, skills, schedules, and channel integrations use the shared DaisyUI `<dialog>` confirmation pattern; avoid browser `confirm()` or immediate `hx-confirm` delete wiring.
 
 Models, Channels, and card-search UI:
@@ -113,5 +116,7 @@ Models, Channels, and card-search UI:
 Automation YAML editor current contracts:
 - The Automation YAML editor and read-only Live YAML panel use line-number gutters, syntax highlighting, indentation guides/rails, horizontal scrolling, and no word wrap.
 - Fold/collapse controls are currently disabled and hidden. Do not reintroduce fold buttons or word wrap without deliberate product approval and real-browser regression coverage for hidden-content preservation, caret geometry, wheel/scroll behavior, and Live read-only parity.
-- Tab inserts two spaces; Shift+Tab removes one two-space indent level from the current line when possible. Active indentation rail highlighting should be theme-aware neutral gray and should not change rail width or flash on typing.
+- Tab inserts two spaces; Shift+Tab removes one two-space indent level from the current line when possible. Active indentation rail highlighting should be exact-theme aware through theme tokens such as `--ov-focus`/`--ov-border-strong` with safe standalone-fixture fallbacks, and should not change rail width or flash on typing.
 - YAML highlight rendering should be shared between editable and read-only panels to avoid indentation drift. Live/read-only panels render line numbers client-side into block elements and use a readonly, non-submittable textarea for text selection.
+- Automation YAML editor/read-only preview font and syntax styling should follow the selected exact theme, including code surface colors, caret, token colors, diagnostic underline, line-number gutter, indentation dots, and rails; do not leave these on generic DaisyUI text/caret/border utilities.
+- Graph/canvas mutations can reserialize YAML and quote previously plain string scalars; semantically equivalent quoted and unquoted string values must keep the same neutral YAML value color so moving graph nodes does not make the YAML view appear to change styling. Booleans, numbers, and null may still use the special scalar color.

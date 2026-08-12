@@ -232,3 +232,15 @@ always_use:
 ## openvibely_bug_finder_workflow
 
 [OpenVibely Bug Finder Workflow](openvibely_bug_finder_workflow/SKILL.md) — Perform focused, evidence-backed, read-only OpenVibely correctness audits and publish actionable GitHub bug issues.
+
+## openvibely_theme_system_workflow
+
+[OpenVibely Theme System Workflow](openvibely_theme_system_workflow/SKILL.md) — Implement and audit OpenVibely built-in theme catalogs, runtime theme selection, and theme-aware code styling.
+
+## openvibely_project_form_source_workflow
+
+[OpenVibely Project Form Source Workflow](openvibely_project_form_source_workflow/SKILL.md) — Keep OpenVibely project create/update form repository-source parsing, validation, clone/reclone, and response behavior aligned.
+
+## openvibely_chat_link_opening_workflow
+
+[OpenVibely Chat Link Opening Workflow](openvibely_chat_link_opening_workflow/SKILL.md) — Implement and audit safe external-link behavior for OpenVibely Chat and task-thread rendered messages, including desktop external browser handling.

@@ -8,6 +8,7 @@
 - [Provider Architecture](provider_architecture.md) - Provider adapters, normalized requests, model selection, OpenAI/Anthropic/Ollama/OpenAI-compatible support, mixtures, OAuth, provider-native tools, and runtime-tool exposure.
 - [Chat and Task-Thread Behavior](chat_thread_system.md) - Chat/task-thread queueing, steering, attachments, admission, runtime actions, status controls, goals, cancellation, scheduling, capacity, and swarms.
 - [Realtime and Frontend Patterns](realtime_and_frontend_patterns.md) - Shared SSE, execution streams, diff invalidation, chat/thread rendering, composer UI, transcript safety, HTMX navigation, responsive UI, card search, and Automation YAML editor behavior.
+- [UI Theming](ui_theming.md) - Native OpenVibely default palettes, built-in VS Code theme catalog, `/themes` page, DOM/persistence contracts, early application, footer mode toggle behavior, and theme-aware syntax highlighting.
 - [Worktree and Lineage](worktree_and_lineage.md) - Isolated worktrees, startup sync, target-relative diffs, merge/rebase/recovery, cleanup, commit messages, follow-up lineage, review comments, and GitHub publication evidence.
 - [Integrations and Channels](integrations_and_channels.md) - GitHub, Slack, Telegram, Discord, Email, webhooks, shared channel ingress/runtime, outbound targets, authorization, rich messaging, attachment handling, and channel/GitHub gaps.
 - [Usage Analytics](usage_analytics.md) - Local model/skill usage, token normalization, OAuth account snapshots, Analytics UI/API, project scoping, and privacy.

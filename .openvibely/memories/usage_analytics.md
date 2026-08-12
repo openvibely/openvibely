@@ -4,7 +4,7 @@ type: project
 created: 2026-06-03
 updated: 2026-08-10
 source: consolidation
-source_id: memory_consolidation_2026_08_10
+source_id: memory_consolidation_2026_08_11
 confidence: high
 title: Usage Analytics
 ---
@@ -16,7 +16,7 @@ Durable analytics model:
 - OpenAI-compatible Chat Completions usage is parsed by the shared client/adapter into canonical input/output/total/cached/reasoning fields and persisted through `RecordUsageFromResult` for `ProviderOpenAICompatible` API-key configs.
 - Skill analytics events are stored locally in `skill_analytics_events`.
 - Usage rows are stored locally in `llm_usage_events`.
-- Analytics date/hour buckets reflect current app/local timezone semantics at query time, matching Schedules. The `#334` direction avoids persisted `localtime` bucket columns/triggers; project/date-bounded aggregate paths should scan indexed raw `llm_usage_events.occurred_at` rows and aggregate bucket labels at read time so later server/process timezone changes preserve legacy SQLite `date/strftime(..., 'localtime')` behavior. Current `#334` publication remains blocked by Automation graph authorization; treat PR publication/reconciliation as separate from the local analytics-bucketing design.
+- Analytics date/hour buckets reflect current app/local timezone semantics at query time, matching Schedules. The `#334` direction avoids persisted `localtime` bucket columns/triggers; project/date-bounded aggregate paths should scan indexed raw `llm_usage_events.occurred_at` rows and aggregate bucket labels at read time so later server/process timezone changes preserve legacy SQLite `date/strftime(..., 'localtime')` behavior. Verify live PR/main state separately before treating implementation as shipped.
 - OAuth account-limit snapshots are stored in `account_usage_snapshots`, with extra/model-specific account limits stored in `account_usage_extra_limits`.
 - Usage capture is one final row per completed provider model call at the owning execution/call-site boundary, not per streamed chunk.
 - Late attachment-bearing steering discovered after the provider call returns is requeued and the original execution's second successful completion still records the final provider usage row.

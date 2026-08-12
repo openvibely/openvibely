@@ -101,9 +101,10 @@ Tool calls (`read_file`, `edit_file`, `write_file`, `bash`) resolve **relative p
 
 ## Changes Tab And Metadata Recovery
 
-- Changes tab should show worktree branch diff vs target branch when available, falling back to execution diff.
-- Active/running worktree Changes should compute one net tracked-file diff from the merge target to the current worktree state, such as `git diff <targetBranch>` inside the worktree, then append synthetic diffs only for genuinely untracked files. Do not concatenate the committed branch diff with `git diff HEAD`; a follow-up that re-edits a file already committed by the previous turn will otherwise render duplicate `diff --git` blocks for the same path while the follow-up is still running.
-- Treat an empty but successful net tracked-file diff as a valid empty diff, not as a Git failure or a reason to fall back to stale committed branch diff. This matters when an in-progress follow-up reverts a tracked file back to the target branch; stale committed file blocks must not reappear, though untracked-file synthetic diffs should still be appended.
+- Changes tab should show changes introduced by the worktree branch since its merge base with the target branch, falling back to execution diff. Use `git diff <targetBranch>...<taskBranch>` for committed branch state so newer target-only commits do not appear as reverse changes.
+- Active/running worktree Changes should resolve `git merge-base <targetBranch> HEAD` inside the worktree and compute one tracked-file diff from that base to the current working tree. This preserves committed, staged, and unstaged task changes while excluding target-only commits; append synthetic diffs only for genuinely untracked files. Do not concatenate the committed branch diff with `git diff HEAD`; a follow-up that re-edits a file already committed by the previous turn will otherwise render duplicate `diff --git` blocks for the same path while the follow-up is still running.
+- Treat an empty but successful merge-base-to-worktree tracked diff as a valid empty diff, not as a Git failure or a reason to fall back to stale committed branch diff. This matters when an in-progress follow-up reverts a tracked file back to the selected merge base; stale committed file blocks must not reappear, though untracked-file synthetic diffs should still be appended.
+- Show `Rebase onto <target>` only when `git rev-list --left-right --count <target>...<taskBranch>` reports at least one unique commit on both sides. A branch that is only behind the target has no task commits to replay, so it should not get the rebase action; Git/ref/count failures should also hide the action.
 - Do not hide or reject merge actions solely because `tasks.merge_status=merged` or worktree metadata is blank. First revalidate against Git and recover conventional `.worktrees/task_<id>` / expected `task/<id_prefix>-<slug>` metadata when present.
 - Clear stale merged metadata whenever Git shows the task branch still has commits beyond the target, including diverged branches where the target also has newer commits.
 - Only treat a task as already merged when the task branch is fully reachable from the target.
@@ -137,7 +138,7 @@ git log --oneline main..HEAD
   ```bash
   git branch --list 'task/<id_prefix>*' -vv
   git for-each-ref --format='%(refname:short) %(objectname:short)' 'refs/heads/task/<id_prefix>*'
-  git diff --stat main..task/<id_prefix>-followup-<epoch>
+  git diff --stat main...task/<id_prefix>-followup-<epoch>
   git rev-list --left-right --count main...task/<id_prefix>-followup-<epoch>
   ```
   Switch the assigned worktree to whichever branch has both a non-zero diff and clean fast-forward ancestry (`main` is an ancestor), then tell the user to refresh the Changes/Merge view. If more than one candidate branch has real commits, treat that as a signal the task metadata/UI may be pointed at the wrong branch and say so explicitly, rather than guessing which one is authoritative.
@@ -161,7 +162,7 @@ git log --oneline main..HEAD
 
 - Add regressions for startup sync proving local branch authority: divergent or ahead `origin/main` must not be fetched/merged by default, mere `origin/main` existence must not change the merge source, broken `origin` should not matter, and upstream-only remotes should still use the selected local branch.
 - Add regressions for stale `merge_status=merged` with blank/recovered metadata, target moved, task branch still has commits, and Changes tab showing local actions after status resets.
-- Cover active follow-up Changes diff regressions where a previous execution committed a file and the running follow-up edits the same file; assert service diff generation and `/tasks/:id/changes` render exactly one diff file/card with the latest net content. Also cover the revert-to-target edge case so a successful empty tracked-file diff does not resurrect stale committed branch diff.
+- Cover active follow-up Changes diff regressions where a previous execution committed a file and the running follow-up edits the same file; assert service diff generation and `/tasks/:id/changes` render exactly one diff file/card with the latest content. Also cover target-only commits being excluded, the revert-to-merge-base edge case, and rebase availability requiring unique commits on both sides.
 - Cover direct `?tab=changes`, lazy `/tasks/:id/changes`, merge POST, worktree panel, and legacy fragments when stale metadata recovery changes.
 - Cover dirty-but-non-overlapping target changes, Git overwrite refusals, true conflicts, squash failure cleanup, checked-out target fast-forward merge, and ref-only target updates.
 - Cover follow-up lineage for terminal merged/stale tasks, dirty follow-up reuse, clean follow-up staleness, startup sync conflict fallback, cleanup preserving conventional worktrees, and chained-task descendants.

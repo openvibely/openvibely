@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-09
+updated: 2026-08-11
 source: update_memory
-source_id: a990ccd47db94c6c46e420a05742f403:2bfabb191a31c1d0
+source_id: 793b4dac66b6748d25008fcbecde93b6:64e505e1c70183dd
 confidence: high
 title: Provider Architecture
 ---
@@ -81,6 +81,7 @@ Mixture of Models provider facts:
 - Mixture reference ordering is a direct ordered selected-reference list in the Models dialog. Users add callable references from an available-model picker, select one ordered reference, and move it up/down relative to other selected references; create/edit hydration and submitted `mixture_config_json` preserve configured order. A hidden comma-ordered `mixture_reference_ids` fallback stays synchronized for native form fallback.
 - Mixture reference subrequests set `AgentRequest.RawDirectPrompt`. Anthropic API and OpenAI-compatible direct adapters honor this raw advisory mode by skipping normal OpenVibely task headers/system prompts; Anthropic raw reference calls also suppress provider-native web tools. Aggregator requests keep normal provider behavior.
 - Model CRUD validation should reject recursive, duplicate, missing, or non-callable mixture slots, and deleting a model used by a mixture should be blocked with affected mixture names.
+- GitHub issue #500 / PR #516 consolidates duplicated model/provider configuration form-to-model normalization across `CreateModel` and `updateModelByID` into a private `normalizeBrowserModelForm` helper. The shared browser form contract covers provider/auth resolution, common model fields, worker parsing/clamping, checkboxes, Ollama, OpenAI-compatible, OAuth form fields, and mixture handling; `updateModelByID` still explicitly owns update-only API-key preservation plus OAuth credential/state clearing on provider/auth/security changes. A fresh strict read-only completion audit on 2026-08-11 found no material issue in the issue-file diff; verify live PR/main state before treating this as merged or shipped.
 - The Models UI treats Mixture of Models as a no-credential virtual provider with aggregator/reference pickers from existing callable non-mixture configs, a direct ordered reference list, an enabled toggle, numeric controls, edit hydration, and cost-warning copy. In the Models modal provider selector, Mixture of Models should be listed first as a virtual provider and visually separated from concrete model providers such as Anthropic, OpenAI, OpenAI-compatible presets, and Ollama.
 - Mixture edit cards should expose `mixture_config_json` as browser-parseable raw attribute-escaped JSON, not a double-encoded JSON string, so the edit modal can hydrate the saved aggregator and ordered references. The generic top-level `Model` selector is only the virtual persisted value (`model=mixture`) and should be hidden for Mixture; users edit the real model choices through the Aggregator and Reference controls.
 - The Models Mixture dialog intentionally allows the selected aggregator model to also be added as one reference when the user wants that self-review/second-pass pattern; duplicate references are still rejected. It should show mixture validation/HTMX server errors inline in the modal and submit a stable virtual model value such as `model=mixture` so Create does not appear inert on invalid browser-side configs.

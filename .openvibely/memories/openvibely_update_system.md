@@ -2,9 +2,9 @@
 name: openvibely_update_system
 type: project
 created: 2026-08-02
-updated: 2026-08-10
-source: consolidation
-source_id: memory_consolidation_2026_08_10
+updated: 2026-08-12
+source: update_memory
+source_id: update_ux_toast_badge_2026_08_12
 confidence: high
 title: OpenVibely Update System
 ---
@@ -18,6 +18,9 @@ Final shared flow:
 - Launch an independent detached updater helper, shut down OpenVibely, replace and relaunch the installation, and validate the expected version through `/api/system/health`.
 - If validation fails, stop the failed replacement, restore the prior installation, and relaunch it.
 - Preserve signed catalog handling, update UI, approval, durable coordinator/drain state, health validation, rollback, and source/Hosted/Docker behavior.
+- Packaged local update offers are user-initiated UI, not automatic installation. Actionable releases surface as a sticky global purple update toast plus a separate Alerts nav `Update` badge; the ordinary unread-alert count remains independent.
+- Clicking the update toast body accepts and starts `POST /api/system/update/apply`, navigates to `/alerts`, and removes that toast. The close button only dismisses that release fingerprint.
+- `/api/system/update` remains the authority for status. After restart/success, `state=succeeded` or `current_version == available` clears the update card/badge and may show one normal auto-dismiss success toast keyed by release fingerprint.
 
 Distribution contracts:
 - Standalone binary: copy the signed running executable and launch that copy as the updater helper. It waits for the original process to exit, atomically replaces the executable, and relaunches with the original arguments and working directory. Preserve arguments and working directory without putting secrets in command-line arguments or durable update state. Official macOS and Windows standalone artifacts are ZIP archives and Linux artifacts are TAR.GZ archives; after catalog and archive verification, staging accepts exactly one root-level regular `openvibely` or `openvibely.exe` member and publishes only the extracted executable.
@@ -39,9 +42,11 @@ Release artifact trust:
 - Windows desktop and server executables must be Authenticode signed and timestamped before packaging. Official release builds and publication fail closed if the required Windows desktop artifact is absent; a native/cross-compiled binary or explicit prebuilt release-job input is required.
 - Official releases also require a Linux amd64 desktop tarball, built natively with GTK/WebKit dependencies or supplied from an explicit Linux release-job input. Linux trust continues to rely on signed OpenVibely release metadata and SHA-256 verification.
 - A copied updater helper must retain the original executable's OS signature.
+- Packaged desktop update E2E on Windows must not use fake parent PIDs. Windows helper wait opens the parent process handle, so tests should pass a real exited fixture PID. Desktop E2E also runs the helper from a copied sibling helper executable so Windows can replace the original app executable without file-lock conflicts. Rollback E2E must clean up the relaunched restored app before temp-dir removal, usually by killing the helper relaunch port, or Windows can keep `openvibely-desktop.exe` locked and fail `TempDir RemoveAll` with `Access is denied`.
+- `stopStartedProcess` is production helper code, not just test code. It should tolerate a Windows permission-style kill race only when the process can be reaped immediately afterward.
 - Update-check telemetry includes a client-owned, cryptographically random 128-bit lowercase-hex `install_id` stored only in `AppDataDir/update-state.json`, not the application database. It survives upgrades, is sent only by the update-check client, and rotates every 90 days so it cannot split the hosted service's 30-day active-user window. The hosted service stores only an HMAC and never joins it to accounts or sessions. `OPENVIBELY_DISABLE_INSTALL_ID`, by presence including an empty value, omits the request field and prevents ID generation/storage; never log the raw value. Persistence failure of this optional metric must not block an update check.
 - Artifact URL policy must be enforced on every HTTP redirect hop, not only the initial signed release URL. Both `Client.Fetch` and `Client.Download` currently allow an approved HTTPS artifact URL to redirect to prohibited plaintext HTTP or local/private destinations; this is tracked in GitHub issue #210 and needs redirect-policy regression coverage.
 - Local implementation direction for GitHub issue `#366`: `Client.CheckIfDue` should record a fresh successful-check timestamp only after packaged signed release verification succeeds. Release verification failures should persist retry backoff without refreshing `LastSuccessfulCheck`, so retries after `NextAttempt` make another HTTP request and a corrected signed release can be accepted and cached normally. Source metric-only checks still persist the 24-hour success throttle after schema validation, and rollback protection through `HighestAcceptedVersion` plus metadata expiration behavior should remain covered by focused `internal/update` regressions.
 - Release tooling must expose signing-credential configuration hooks and fail official release validation when required signing has not occurred. Credentials must never be generated or invented.
 
-Required validation includes macOS, Windows, and Linux builds/tests; successful replacement; health/version validation; rollback; invalid signatures; interrupted replacement; source/Hosted/Docker behavior; and release-script validation. The `packaged-update-native` CI matrix runs only macOS and Windows because the aggregate Ubuntu `go test ./...` job already covers `internal/update` on Linux.
+Required validation includes macOS, Windows, and Linux builds/tests; successful replacement; health/version validation; rollback; invalid signatures; interrupted replacement; source/Hosted/Docker behavior; and release-script validation. The `packaged-update` CI job runs native update tests plus binary and desktop packaged E2E checks across OS/arch rows, with Windows ARM treated as experimental.
