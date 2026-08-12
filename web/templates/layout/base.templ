@@ -3369,6 +3369,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 				}
 
+				function clearSystemUpdatePendingSuccess() {
+					try { localStorage.removeItem('openvibely-system-update-pending-success'); } catch (_) {}
+				}
+
 				function navigateSystemUpdateToAlerts() {
 					closeOpenModalsForToastNavigation();
 					if (window.openVibelyNavigate) {
@@ -3397,6 +3401,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							dismissToast(toast);
 						});
 				}
+
+				window.openVibelyClearSystemUpdatePendingSuccess = clearSystemUpdatePendingSuccess;
 
 				function showSystemUpdateSucceededToast(data, pending) {
 					if (!pending && (!data || data.state !== 'succeeded')) return;
@@ -3495,6 +3501,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						showSystemUpdateSucceededToast(data);
 						if (available && data.current_version === available) {
 							showSystemUpdateSucceededToast(null, consumeSystemUpdatePendingSuccess());
+						} else if (data.state === 'failed' || data.state === 'rolled_back' || data.state === 'idle') {
+							clearSystemUpdatePendingSuccess();
 						}
 					}
 				}

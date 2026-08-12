@@ -148,7 +148,11 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 						document.getElementById('system-update-acceptance').classList.toggle('hidden', !available || !applySupported || data.distribution === 'hosted');
 						document.getElementById('system-update-cancel').classList.toggle('hidden', data.distribution === 'hosted' || (data.state !== 'waiting_for_idle' && data.state !== 'ready'));				} catch (_) {}
 			}
-			async function systemUpdateAction(action) { await fetch('/api/system/update/' + action, {method: 'POST', headers: {'Accept': 'application/json'}}); await refreshSystemUpdateCard(); }
+			async function systemUpdateAction(action) {
+				await fetch('/api/system/update/' + action, {method: 'POST', headers: {'Accept': 'application/json'}});
+				if (action === 'cancel' && window.openVibelyClearSystemUpdatePendingSuccess) window.openVibelyClearSystemUpdatePendingSuccess();
+				await refreshSystemUpdateCard();
+			}
 			refreshSystemUpdateCard();
 			if (window.openVibelySystemUpdatePoll) clearInterval(window.openVibelySystemUpdatePoll);
 			window.openVibelySystemUpdatePoll = setInterval(refreshSystemUpdateCard, 1000);
