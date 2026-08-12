@@ -79,6 +79,7 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 
 	port := freeTCPPort(t)
 	appData := filepath.Join(root, "app-data")
+	stdoutLog, stderrLog, readLogs := openCommandLogs(t, root, "binary-current")
 	cmd := exec.Command(current)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(),
@@ -94,9 +95,8 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=5000",
 		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
 	)
-	var stderr bytes.Buffer
-	cmd.Stdout = io.Discard
-	cmd.Stderr = &stderr
+	cmd.Stdout = stdoutLog
+	cmd.Stderr = stderrLog
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start current app: %v", err)
 	}
@@ -111,14 +111,14 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 	waitForUpdateState(t, baseURL, StateAvailable)
 	resp, err := http.Post(baseURL+"/api/system/update/apply", "application/json", nil)
 	if err != nil {
-		t.Fatalf("accept update: %v\nstderr:\n%s", err, stderr.String())
+		t.Fatalf("accept update: %v\n%s", err, readLogs())
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("accept update HTTP %d\nstderr:\n%s", resp.StatusCode, stderr.String())
+		t.Fatalf("accept update HTTP %d\n%s", resp.StatusCode, readLogs())
 	}
 	if err := cmd.Wait(); err != nil {
-		t.Fatalf("current app exit after handoff: %v\nstderr:\n%s", err, stderr.String())
+		t.Fatalf("current app exit after handoff: %v\n%s", err, readLogs())
 	}
 	if wantState == StateSucceeded {
 		waitForHealthVersion(t, baseURL, releaseVersion)
@@ -278,6 +278,33 @@ func exitedFixtureParentPID(t *testing.T, executable string) int {
 	_, _ = cmd.Process.Wait()
 	t.Fatalf("exited parent fixture did not start: %s", stderr.String())
 	return 0
+}
+
+func openCommandLogs(t *testing.T, dir, name string) (*os.File, *os.File, func() string) {
+	t.Helper()
+	stdoutPath := filepath.Join(dir, name+".stdout.log")
+	stderrPath := filepath.Join(dir, name+".stderr.log")
+	stdout, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatalf("create stdout log: %v", err)
+	}
+	stderr, err := os.Create(stderrPath)
+	if err != nil {
+		_ = stdout.Close()
+		t.Fatalf("create stderr log: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = stdout.Close()
+		_ = stderr.Close()
+	})
+	read := func() string {
+		_ = stdout.Sync()
+		_ = stderr.Sync()
+		stdoutData, _ := os.ReadFile(stdoutPath)
+		stderrData, _ := os.ReadFile(stderrPath)
+		return fmt.Sprintf("stdout:\n%s\nstderr:\n%s", stdoutData, stderrData)
+	}
+	return stdout, stderr, read
 }
 
 func buildGoCommand(t *testing.T, pkg, output string, values map[string]string) {
