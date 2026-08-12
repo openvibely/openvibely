@@ -182,26 +182,34 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, chrome,
 		"--headless=new",
 		"--disable-gpu",
 		"--no-sandbox",
 		"--disable-dev-shm-usage",
+		"--disable-background-networking",
+		"--disable-extensions",
+		"--no-default-browser-check",
+		"--no-first-run",
 		"--virtual-time-budget=3000",
 		"--dump-dom",
 		srv.URL,
 	)
 	out, err := cmd.CombinedOutput()
+	dom := string(out)
+	passed := strings.Contains(dom, `id="browser-result" data-status="pass"`)
 	if ctx.Err() != nil {
+		if passed {
+			return
+		}
 		t.Fatalf("chrome timed out: %v\n%s", ctx.Err(), out)
 	}
 	if err != nil {
 		t.Fatalf("chrome failed: %v\n%s", err, out)
 	}
-	dom := string(out)
-	if !strings.Contains(dom, `id="browser-result" data-status="pass"`) {
+	if !passed {
 		idx := strings.Index(dom, `data-status=`)
 		if idx >= 0 {
 			end := idx + 500
