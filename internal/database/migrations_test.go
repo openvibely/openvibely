@@ -267,6 +267,64 @@ func TestMigration132IndexesLifecycleExecutionParentForeignKey(t *testing.T) {
 	}
 }
 
+func TestMigration159IndexesTaskLifecycleActivityOrdering(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "lifecycle-task-started-index-159.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 158); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-159', 'Migration 159', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt) VALUES
+			('task-159', 'project-159', 'Task 159', 'active', 0, 'completed', 'p'),
+			('other-task-159', 'project-159', 'Other Task 159', 'active', 0, 'completed', 'p');
+		INSERT INTO agents (id, name, system_prompt) VALUES ('agent-159', 'Agent 159', 'x');
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 4000)
+		INSERT INTO lifecycle_executions
+			(id, task_id, agent_id, when_slot, skill_key, output_contract, status, input_json, output_json, started_at)
+		SELECT 'exec-159-' || printf('%05d', n), 'task-159', 'agent-159', 'after_complete', 'summarize_activity', 'activity_summary', 'completed', '{"input":"hidden"}', '{"summary":"shown"}', datetime('2026-01-01 12:00:00', '-' || n || ' seconds')
+		FROM seq;
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 4000)
+		INSERT INTO lifecycle_executions
+			(id, task_id, agent_id, when_slot, skill_key, output_contract, status, input_json, output_json, started_at)
+		SELECT 'other-exec-159-' || printf('%05d', n), 'other-task-159', 'agent-159', 'after_complete', 'summarize_activity', 'activity_summary', 'completed', '{"input":"hidden"}', '{"summary":"shown"}', datetime('2026-01-01 12:00:00', '-' || n || ' seconds')
+		FROM seq;
+	`); err != nil {
+		t.Fatalf("seed lifecycle rows: %v", err)
+	}
+
+	listQuery := `
+		SELECT id, agent_id, when_slot, skill_key, output_contract, status, output_json, error, started_at, completed_at
+		FROM lifecycle_executions
+		WHERE task_id = ?
+		ORDER BY started_at DESC, id DESC`
+	before := explainQueryPlan(t, db, listQuery, "task-159")
+	if !strings.Contains(before, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("migration 158 lifecycle list plan = %q, want temporary sort baseline", before)
+	}
+
+	if err := goose.UpTo(db, ".", 159); err != nil {
+		t.Fatal(err)
+	}
+
+	after := explainQueryPlan(t, db, listQuery, "task-159")
+	if !strings.Contains(after, "idx_lifecycle_executions_task_started") {
+		t.Fatalf("migration 159 lifecycle list plan = %q, want task started index", after)
+	}
+	if strings.Contains(after, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("migration 159 lifecycle list plan = %q, want no temporary sort", after)
+	}
+}
+
 func TestMigration135IndexesProjectScopedAlertOrdering(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "alerts-project-created-index-135.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -878,8 +936,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 158 {
-		t.Fatalf("max goose version = %d, want 158", maxVersion)
+	if maxVersion != 159 {
+		t.Fatalf("max goose version = %d, want 159", maxVersion)
 	}
 }
 
@@ -1030,8 +1088,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 158 {
-		t.Fatalf("max goose version = %d, want 158", maxVersion)
+	if maxVersion != 159 {
+		t.Fatalf("max goose version = %d, want 159", maxVersion)
 	}
 }
 
@@ -1517,8 +1575,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 158 {
-		t.Fatalf("max goose version = %d, want 158", maxVersion)
+	if maxVersion != 159 {
+		t.Fatalf("max goose version = %d, want 159", maxVersion)
 	}
 }
 
@@ -1869,8 +1927,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 158 {
-		t.Fatalf("max goose version = %d, want 158", maxVersion)
+	if maxVersion != 159 {
+		t.Fatalf("max goose version = %d, want 159", maxVersion)
 	}
 }
 
