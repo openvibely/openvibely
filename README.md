@@ -1,5 +1,7 @@
 # OpenVibely
 
+[![codecov](https://codecov.io/github/openvibely/openvibely/graph/badge.svg?token=VL6VTQEKR7)](https://codecov.io/github/openvibely/openvibely)
+
 The only recursive self-improvement command center for software teams.
 
 OpenVibely turns one Chat into the control plane for your entire AI development workflow. Describe a goal once, then let it fan out into parallel task sessions, live agent execution, reviewable diffs, scheduled follow-ups, and durable project learning.
