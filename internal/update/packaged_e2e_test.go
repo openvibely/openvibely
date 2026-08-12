@@ -200,6 +200,7 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 	}
 
 	port := freeTCPPort(t)
+	t.Cleanup(func() { killPort(t, port) })
 	parentPID := exitedFixtureParentPID(t, installedExecutable)
 	helperArgs := []string{
 		"desktop-update-helper",
