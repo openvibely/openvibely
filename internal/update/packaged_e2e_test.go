@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/cyberphone/json-canonicalization/go/src/webpki.org/jsoncanonicalizer"
+	"github.com/openvibely/openvibely/internal/buildinfo"
+	wailsupdater "github.com/wailsapp/wails/v3/pkg/updater"
 )
 
 const updateE2EEnv = "OPENVIBELY_UPDATE_E2E"
@@ -143,20 +145,51 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 	buildGoCommand(t, "./internal/update/testfixture", replacementExe, map[string]string{"main.version": replacementVersion})
 
 	installPath, installedExecutable, executableRelative := installDesktopUnit(t, root, "OpenVibely.app", currentExe)
-	stagedPath, _, _ := installDesktopUnit(t, root, "OpenVibely.app.openvibely-new", replacementExe)
-	if runtime.GOOS != "darwin" {
-		stagedPath = installPath + ".openvibely-new"
-		if err := copyFile(replacementExe, stagedPath, 0o755); err != nil {
-			t.Fatalf("stage desktop executable: %v", err)
-		}
+	artifact, filetype, filename := packageDesktopArtifact(t, replacementExe)
+	publicKeyFile, privateKey := writeE2ETrustRoot(t, root)
+	updateServer := serveSignedRelease(t, artifact, filetype, filename, "app_bundle", expectedVersion, privateKey)
+	defer updateServer.Close()
+	updateKeys, err := DecodePublicKeys("", "", publicKeyFile)
+	if err != nil {
+		t.Fatal(err)
 	}
-	staged := LocalStagedUpdate{
-		ArtifactPath:    stagedPath,
-		InstallPath:     installPath,
-		BackupPath:      installPath + ".openvibely-backup",
-		Version:         expectedVersion,
-		PreviousVersion: "0.5.0",
-		OutcomeID:       "desktop-e2e",
+	client := NewClient(ClientConfig{
+		ServiceURL: updateServer.URL,
+		Channel:    "stable",
+		StatePath:  filepath.Join(root, "desktop-update-state.json"),
+		PublicKeys: updateKeys,
+	})
+	current := CurrentBuild{
+		Build:        buildinfo.Build{Version: "0.5.0", OS: runtime.GOOS, Arch: runtime.GOARCH},
+		Distribution: buildinfo.DistributionDesktop,
+	}
+	release, checked, err := client.CheckIfDue(context.Background(), current)
+	if err != nil {
+		t.Fatalf("desktop update check: %v", err)
+	}
+	if !checked || release == nil {
+		t.Fatal("desktop update check did not return a release")
+	}
+	dataRoot := filepath.Join(root, "data")
+	if err := os.MkdirAll(dataRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installer := &WailsInstaller{
+		Updater:            wailsupdater.New(noopUpdaterHost{}),
+		Provider:           &WailsProvider{Client: client, Current: current},
+		AppPath:            installPath,
+		ProtectedDataPaths: []string{dataRoot},
+	}
+	stagedValue, err := installer.Stage(context.Background(), *release)
+	if err != nil {
+		t.Fatalf("desktop stage: %v", err)
+	}
+	staged, ok := stagedValue.(LocalStagedUpdate)
+	if !ok {
+		t.Fatalf("desktop staged value = %T", stagedValue)
+	}
+	if err := retainDesktopInstallUnit(staged, []string{dataRoot}); err != nil {
+		t.Fatalf("retain desktop install unit: %v", err)
 	}
 	if err := writeBinaryHelperOutcome(staged, binaryOutcomeAuthorized); err != nil {
 		t.Fatalf("write helper authorization: %v", err)
@@ -302,6 +335,39 @@ func packageBinaryArtifact(t *testing.T, executable string) ([]byte, string, str
 	}
 }
 
+func packageDesktopArtifact(t *testing.T, executable string) ([]byte, string, string) {
+	t.Helper()
+	payload, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	if runtime.GOOS == "darwin" {
+		writeZipEntry(t, zw, "OpenVibely.app/Contents/Info.plist", 0o644, []byte(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>OpenVibely</string></dict></plist>`))
+		writeZipEntry(t, zw, "OpenVibely.app/Contents/MacOS/OpenVibely", 0o755, payload)
+	} else {
+		writeZipEntry(t, zw, executableName("openvibely-desktop"), 0o755, payload)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes(), "zip", "openvibely-desktop.zip"
+}
+
+func writeZipEntry(t *testing.T, zw *zip.Writer, name string, mode os.FileMode, payload []byte) {
+	t.Helper()
+	header := &zip.FileHeader{Name: name, Method: zip.Deflate}
+	header.SetMode(mode)
+	w, err := zw.CreateHeader(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeE2ETrustRoot(t *testing.T, root string) (string, ed25519.PrivateKey) {
 	t.Helper()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
@@ -320,6 +386,10 @@ func writeE2ETrustRoot(t *testing.T, root string) (string, ed25519.PrivateKey) {
 }
 
 func serveSignedBinaryRelease(t *testing.T, artifact []byte, filetype, filename, version string, private ed25519.PrivateKey) *httptest.Server {
+	return serveSignedRelease(t, artifact, filetype, filename, "binary", version, private)
+}
+
+func serveSignedRelease(t *testing.T, artifact []byte, filetype, filename, kind, version string, private ed25519.PrivateKey) *httptest.Server {
 	t.Helper()
 	digest := sha256.Sum256(artifact)
 	var server *httptest.Server
@@ -328,7 +398,7 @@ func serveSignedBinaryRelease(t *testing.T, artifact []byte, filetype, filename,
 		case "/api/updates/check":
 			target := Target{
 				ID:       "binary-" + runtime.GOOS + "-" + runtime.GOARCH,
-				Kind:     "binary",
+				Kind:     kind,
 				OS:       runtime.GOOS,
 				Arch:     runtime.GOARCH,
 				URL:      server.URL + "/artifact/" + filename,
@@ -386,6 +456,21 @@ func serveSignedBinaryRelease(t *testing.T, artifact []byte, filetype, filename,
 	}))
 	return server
 }
+
+type noopUpdaterHost struct{}
+
+func (noopUpdaterHost) Emit(string, ...any) bool         { return true }
+func (noopUpdaterHost) OnEvent(string, func(any)) func() { return func() {} }
+func (noopUpdaterHost) OpenWindow(wailsupdater.WindowOptions) wailsupdater.WindowHandle {
+	return noopUpdaterWindow{}
+}
+func (noopUpdaterHost) Quit() {}
+
+type noopUpdaterWindow struct{}
+
+func (noopUpdaterWindow) EmitEvent(string, ...any) bool { return true }
+func (noopUpdaterWindow) Show()                         {}
+func (noopUpdaterWindow) Close()                        {}
 
 func freeTCPPort(t *testing.T) string {
 	t.Helper()
