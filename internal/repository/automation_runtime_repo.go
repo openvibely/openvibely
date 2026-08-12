@@ -81,7 +81,7 @@ const liveNodeCountsSQL = `WITH operational_state AS (
 				AND node.automation_id = position.automation_id AND node.project_id = position.project_id
 			WHERE position.project_id = ? AND position.automation_id = ? AND position.version_id = ?
 				AND position.state IN ('active','waiting','blocked','failed')
-				AND NOT (position.state = 'active' AND node.role = 'github_inbox')
+				AND NOT (position.state = 'active' AND node.role IN ('github_inbox','native_inbox'))
 			UNION ALL
 			SELECT to_node_id, 'recent', 'work:' || work_item_id
 			FROM automation_transitions
@@ -1974,7 +1974,7 @@ func (r *AutomationRepo) PortfolioOperationalCounts(ctx context.Context, project
 		JOIN automation_nodes node ON node.id = position.node_id AND node.version_id = position.version_id
 			AND node.automation_id = position.automation_id AND node.project_id = position.project_id
 		WHERE position.project_id = ? AND position.state IN ('active','waiting','blocked','failed')
-			AND NOT (position.state = 'active' AND node.role = 'github_inbox')
+			AND NOT (position.state = 'active' AND node.role IN ('github_inbox','native_inbox'))
 		UNION
 		SELECT automation_id, 'recent', 'work:' || work_item_id
 		FROM automation_transitions

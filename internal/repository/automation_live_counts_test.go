@@ -35,6 +35,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 		"input":         "agent_task",
 		"position":      "agent_task",
 		"github_inbox":  "github_inbox",
+		"native_inbox":  "native_inbox",
 		"recent":        "agent_task",
 		"priority":      "agent_task",
 		"old_completed": "agent_task",
@@ -134,6 +135,14 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	if err != nil {
 		t.Fatalf("record active github inbox position: %v", err)
 	}
+	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+		Context:     models.AutomationContext{ProjectID: fixture.ProjectID},
+		Binding:     models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID, NodeID: fixture.Nodes["native_inbox"]},
+		WorkItemKey: "native-inbox-work", EventKey: "native-inbox-entered", ToNodeID: fixture.Nodes["native_inbox"], Transition: models.AutomationTransitionEntered,
+	})
+	if err != nil {
+		t.Fatalf("record active native inbox position: %v", err)
+	}
 
 	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
 		Context:     models.AutomationContext{ProjectID: fixture.ProjectID},
@@ -194,6 +203,7 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["input"]], models.AutomationNodeCounts{Running: 1})
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["position"]], models.AutomationNodeCounts{Running: 1})
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["github_inbox"]], models.AutomationNodeCounts{})
+	assertAutomationNodeCounts(t, counts[fixture.Nodes["native_inbox"]], models.AutomationNodeCounts{})
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["recent"]], models.AutomationNodeCounts{CompletedRecently: 1})
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["old_completed"]], models.AutomationNodeCounts{})
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["priority"]], models.AutomationNodeCounts{Failed: 1})
