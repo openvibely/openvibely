@@ -225,8 +225,10 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 	cmd.Env = append(os.Environ(),
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=2000",
 		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
-		"OPENVIBELY_UPDATE_INTEGRATION_EXIT_AFTER_HEALTH=1",
 	)
+	if wantOutcome == binaryOutcomeSucceeded {
+		cmd.Env = append(cmd.Env, "OPENVIBELY_UPDATE_INTEGRATION_EXIT_AFTER_HEALTH=1")
+	}
 	output, helperErr := cmd.CombinedOutput()
 	if helperErr != nil && wantOutcome != binaryOutcomeRolledBack {
 		t.Fatalf("desktop helper failed: %v\n%s", helperErr, output)

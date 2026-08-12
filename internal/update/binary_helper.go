@@ -888,14 +888,39 @@ func packagedRestartCommand(cfg BinaryHelperConfig) func(string, string) (func(c
 func stopStartedProcess(cmd *exec.Cmd) error {
 	killErr := cmd.Process.Kill()
 	if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+		if os.IsPermission(killErr) {
+			if waitErr := waitStartedCommand(cmd, 2*time.Second); waitErr == nil || isExpectedProcessExit(waitErr) {
+				return nil
+			}
+		}
 		return killErr
 	}
-	waitErr := cmd.Wait()
-	var exitErr *exec.ExitError
-	if waitErr == nil || errors.As(waitErr, &exitErr) {
+	waitErr := waitStartedCommand(cmd, 0)
+	if waitErr == nil || isExpectedProcessExit(waitErr) {
 		return nil
 	}
 	return waitErr
+}
+
+func waitStartedCommand(cmd *exec.Cmd, timeout time.Duration) error {
+	if timeout <= 0 {
+		return cmd.Wait()
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		return context.DeadlineExceeded
+	}
+}
+
+func isExpectedProcessExit(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr)
 }
 
 func waitForExpectedHealth(ctx context.Context, endpoint, expected string, client *http.Client) error {
