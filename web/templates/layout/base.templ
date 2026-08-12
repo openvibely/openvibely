@@ -2099,18 +2099,26 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}
 					return escaped;
 				};
-					window.chatLinkOpensOutsideApp = function(href) {
-						if (!href) return false;
-						try {
-							var parsed = new URL(href, window.location && window.location.href ? window.location.href : 'http://openvibely.local/');
-							if (parsed.protocol === 'mailto:') return true;
-							if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
-							if (window.location && window.location.origin && parsed.origin === window.location.origin) return false;
-							return true;
-						} catch (_) {
-							return false;
-						}
-					};
+						window.chatLinkOpensOutsideApp = function(href) {
+							if (!href) return false;
+							try {
+								var parsed = new URL(href, window.location && window.location.href ? window.location.href : 'http://openvibely.local/');
+								if (parsed.protocol === 'mailto:') return true;
+								if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+								if (window.location && window.location.origin && parsed.origin === window.location.origin) return false;
+								return true;
+							} catch (_) {
+								return false;
+							}
+						};
+						window.chatLinkAbsoluteExternalURL = function(href) {
+							if (!window.chatLinkOpensOutsideApp || !window.chatLinkOpensOutsideApp(href)) return '';
+							try {
+								return new URL(href, window.location && window.location.href ? window.location.href : 'http://openvibely.local/').toString();
+							} catch (_) {
+								return '';
+							}
+						};
 					window.sanitizeChatHTMLElement = function(element) {
 						Array.prototype.slice.call(element.attributes || []).forEach(function(attr) {
 							var name = attr.name.toLowerCase();
@@ -2124,12 +2132,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							}
 						});
 						if (element.tagName === 'A') {
-							if (element.hasAttribute('href') && window.chatLinkOpensOutsideApp(element.getAttribute('href'))) {
+							var externalURL = element.hasAttribute('href') && window.chatLinkAbsoluteExternalURL ? window.chatLinkAbsoluteExternalURL(element.getAttribute('href')) : '';
+							if (externalURL) {
 								element.setAttribute('target', '_blank');
 								element.setAttribute('rel', 'noopener noreferrer');
+								element.setAttribute('data-openvibely-chat-external-link', 'true');
+								element.setAttribute('data-openvibely-external-url', externalURL);
 							} else {
 								element.removeAttribute('target');
 								element.removeAttribute('rel');
+								element.removeAttribute('data-openvibely-chat-external-link');
+								element.removeAttribute('data-openvibely-external-url');
 							}
 						}
 					};
@@ -3449,34 +3462,47 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						openExternalViaBackend(url);
 						return true; // handled asynchronously
 					}
-					function handleAnchorClick(event) {
-						if (!isDesktopRuntime()) return;
-						// Allow modifier-clicks to fall through.
-						if (event.defaultPrevented) return;
-						if (event.button !== undefined && event.button !== 0) return;
-						if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-						var target = event.target;
-						var anchor = target && target.closest ? target.closest('a[href]') : null;
-						if (!anchor) return;
-						var href = anchor.getAttribute('href');
-						if (!href) return;
-						// Only act on external links or links explicitly marked target="_blank".
-						var blank = anchor.getAttribute('target') === '_blank';
-						if (!isExternalHref(href) && !blank) return;
-						// If it's target="_blank" but a relative URL, resolve to absolute first
-						// so the system browser receives a usable URL.
-						var absolute = href;
-						try {
-							absolute = new URL(href, window.location.href).toString();
-						} catch (_) {}
-						if (!isExternalHref(absolute)) {
-							// Same-origin relative link in a new tab: let default behavior happen.
-							return;
+						function isChatMessageExternalLink(anchor) {
+							return !!(anchor && anchor.getAttribute('data-openvibely-chat-external-link') === 'true' && anchor.closest && anchor.closest('.chat-stream-content, [id^="streaming-message-"], [data-raw-content]'));
 						}
-						event.preventDefault();
-						event.stopPropagation();
-						callWailsOpenURL(absolute);
-					}
+						function handleAnchorClick(event) {
+							// Allow modifier-clicks to fall through.
+							if (event.defaultPrevented) return;
+							if (event.button !== undefined && event.button !== 0) return;
+							if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+							var target = event.target;
+							var anchor = target && target.closest ? target.closest('a[href]') : null;
+							if (!anchor) return;
+							var href = anchor.getAttribute('href');
+							if (!href) return;
+							var desktop = isDesktopRuntime();
+							var chatExternal = isChatMessageExternalLink(anchor);
+							if (!desktop && !chatExternal) return;
+							// Only act on external links or links explicitly marked target="_blank".
+							var blank = anchor.getAttribute('target') === '_blank';
+							if (!isExternalHref(href) && !blank && !chatExternal) return;
+							// If it's target="_blank" but a relative URL, resolve to absolute first
+							// so the system browser receives a usable URL.
+							var absolute = anchor.getAttribute('data-openvibely-external-url') || href;
+							try {
+								absolute = new URL(absolute, window.location.href).toString();
+							} catch (_) {}
+							if (!isExternalHref(absolute)) {
+								// Same-origin relative link in a new tab: let default behavior happen.
+								return;
+							}
+							event.preventDefault();
+							event.stopPropagation();
+							if (desktop) {
+								callWailsOpenURL(absolute);
+								return;
+							}
+							try {
+								window.open(absolute, '_blank', 'noopener,noreferrer');
+							} catch (_) {
+								if (window.showToast) window.showToast('Failed to open link: ' + absolute, 'failed');
+							}
+						}
 					document.addEventListener('click', handleAnchorClick, true);
 					// Expose for callers that need an explicit opener (e.g., dropdown item buttons).
 					window.openExternalURL = function(url) {
