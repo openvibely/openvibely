@@ -3573,6 +3573,46 @@ func TestAutomationRuntimeNativeNotificationRequiresProducerActionEdge(t *testin
 	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ?`, saved.Definition.Automation.ID))
 	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM automation_activities WHERE automation_id = ? AND activity_type = 'create_notification'`, saved.Definition.Automation.ID))
 	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions WHERE automation_id = ?`, saved.Definition.Automation.ID))
+	producer := automationNodeByKey(t, saved.Definition, "bug_finder")
+	notification := automationNodeByKey(t, saved.Definition, "notification")
+	approval := automationNodeByKey(t, saved.Definition, "approval")
+	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, saved.Definition.Automation.ID, saved.Definition.Version.ID, alert.ID, producer.ID, notification.ID, approval.ID)
+}
+
+func requireAlertCreatedWaitingProjection(t *testing.T, db *sql.DB, projectID, automationID, versionID, alertID, producerNodeID, notificationNodeID, approvalNodeID string) {
+	t.Helper()
+	type transitionRow struct {
+		eventKey string
+		state    models.AutomationTransitionState
+		fromNode sql.NullString
+		toNode   string
+	}
+	rows, err := db.Query(`SELECT event_key, state, from_node_id, to_node_id
+		FROM automation_transitions
+		WHERE project_id = ? AND automation_id = ? AND version_id = ?
+			AND event_key IN (?, ?)
+		ORDER BY event_key`, projectID, automationID, versionID,
+		"alert:"+alertID+":created:notification", "alert:"+alertID+":created:waiting")
+	require.NoError(t, err)
+	defer rows.Close()
+	var transitions []transitionRow
+	for rows.Next() {
+		var value transitionRow
+		require.NoError(t, rows.Scan(&value.eventKey, &value.state, &value.fromNode, &value.toNode))
+		transitions = append(transitions, value)
+	}
+	require.NoError(t, rows.Err())
+	require.Len(t, transitions, 2)
+	require.Equal(t, "alert:"+alertID+":created:notification", transitions[0].eventKey)
+	require.Equal(t, models.AutomationTransitionEntered, transitions[0].state)
+	require.True(t, transitions[0].fromNode.Valid)
+	require.Equal(t, producerNodeID, transitions[0].fromNode.String)
+	require.Equal(t, notificationNodeID, transitions[0].toNode)
+	require.Equal(t, "alert:"+alertID+":created:waiting", transitions[1].eventKey)
+	require.Equal(t, models.AutomationTransitionWaiting, transitions[1].state)
+	require.True(t, transitions[1].fromNode.Valid)
+	require.Equal(t, notificationNodeID, transitions[1].fromNode.String)
+	require.Equal(t, approvalNodeID, transitions[1].toNode)
 }
 
 func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing.T) {
@@ -3681,6 +3721,10 @@ func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate
 	require.NoError(t, err)
 	require.Len(t, implementationContext.Bindings, 1)
 	require.Equal(t, second.Definition.Version.ID, implementationContext.Bindings[0].VersionID, "retained work must project onto the current graph revision")
+	currentProducer := automationNodeByKey(t, second.Definition, "custom_producer")
+	currentNotification := automationNodeByKey(t, second.Definition, "custom_notification")
+	currentApproval := automationNodeByKey(t, second.Definition, "custom_approval")
+	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
 }
 
 func customGitHubMailboxCandidate(name string) models.AutomationDraftCandidate {
@@ -3800,6 +3844,10 @@ func TestAutomationRuntimeNativeInboxOwnershipMovesToCurrentRenamedMailbox(t *te
 	require.Contains(t, output, alert.ID)
 	_, err = handlers["claim_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+alert.ID+`","lease_seconds":60}`))
 	require.NoError(t, err, "a current Native inbox in the same Automation must be allowed to process owned notifications after inbox replacement")
+	currentProducer := automationNodeByKey(t, second.Definition, "custom_producer")
+	currentNotification := automationNodeByKey(t, second.Definition, "custom_notification")
+	currentApproval := automationNodeByKey(t, second.Definition, "custom_approval")
+	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
 }
 
 func TestAutomationRuntimeCustomNativeInboxRequiresSameAutomationOwnership(t *testing.T) {
@@ -3882,6 +3930,12 @@ func TestAutomationRuntimeCustomNativeInboxRequiresSameAutomationOwnership(t *te
 	require.ErrorContains(t, err, "not owned by this Automation inbox")
 	_, err = handlers["claim_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+forgedAlert.ID+`","lease_seconds":60}`))
 	require.ErrorContains(t, err, "not owned by this Automation inbox")
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions
+		WHERE project_id = ? AND automation_id = ? AND event_key IN (?, ?)`, h.project.ID, first.Definition.Automation.ID,
+		"alert:"+secondAlert.ID+":created:notification", "alert:"+secondAlert.ID+":created:waiting"))
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_transitions
+		WHERE project_id = ? AND automation_id = ? AND event_key IN (?, ?)`, h.project.ID, first.Definition.Automation.ID,
+		"alert:"+forgedAlert.ID+":created:notification", "alert:"+forgedAlert.ID+":created:waiting"))
 }
 
 func TestAutomationRuntimeCustomNativeMailboxUsesRoleTopologyInsteadOfMaintainedNodeKeys(t *testing.T) {

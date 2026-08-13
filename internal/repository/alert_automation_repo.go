@@ -141,40 +141,51 @@ func recordAlertCreatedProjection(ctx context.Context, exec SQLExecutor, alert *
 		} else {
 			continue
 		}
-		binding := sourceBinding
-		binding.NodeID = notificationNode
-		resources := []models.AutomationActivityResource{{ResourceType: "alert", ResourceID: alert.ID}}
-		if alert.SourceTaskID != nil && *alert.SourceTaskID != "" {
-			resources = append(resources, models.AutomationActivityResource{ResourceType: "task", ResourceID: *alert.SourceTaskID})
-		}
-		if alert.ExecutionID != nil && *alert.ExecutionID != "" {
-			resources = append(resources, models.AutomationActivityResource{ResourceType: "execution", ResourceID: *alert.ExecutionID})
-		}
-		item, _, err := recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
-			Context: automationContext, Binding: binding,
-			WorkItemKey: "alert:" + alert.ID, WorkItemKind: "suggestion", WorkItemTitle: alert.Title,
-			WorkItemStatus: models.AutomationWorkItemWaiting,
-			ActivityKey:    "alert:" + alert.ID + ":create", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
-			Resources: resources,
-			EventKey:  "alert:" + alert.ID + ":created:notification", FromNodeID: sourceBinding.NodeID,
-			ToNodeID: notificationNode, Transition: models.AutomationTransitionEntered,
-		})
-		if err != nil {
-			return err
-		}
-		binding.WorkItemID = item.ID
-		_, _, err = recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
-			Context: automationContext, Binding: binding,
-			ActivityKey: "alert:" + alert.ID + ":create", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
-			Resources: resources,
-			EventKey:  "alert:" + alert.ID + ":created:waiting", FromNodeID: notificationNode,
-			ToNodeID: approvalNode, Transition: models.AutomationTransitionWaiting,
-		})
+		_, err = recordAlertCreatedWaitingProjection(ctx, exec, alert.ProjectID, alert.ID, alert.Title, sourceBinding, sourceBinding.NodeID, notificationNode, approvalNode, alertAutomationResources(alert.ID, alert.SourceTaskID, alert.ExecutionID))
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func alertAutomationResources(alertID string, sourceTaskID, executionID *string) []models.AutomationActivityResource {
+	resources := []models.AutomationActivityResource{{ResourceType: "alert", ResourceID: alertID}}
+	if sourceTaskID != nil && *sourceTaskID != "" {
+		resources = append(resources, models.AutomationActivityResource{ResourceType: "task", ResourceID: *sourceTaskID})
+	}
+	if executionID != nil && *executionID != "" {
+		resources = append(resources, models.AutomationActivityResource{ResourceType: "execution", ResourceID: *executionID})
+	}
+	return resources
+}
+
+func recordAlertCreatedWaitingProjection(ctx context.Context, exec SQLExecutor, projectID, alertID, title string, sourceBinding models.AutomationBinding, producerNodeID, notificationNodeID, approvalNodeID string, resources []models.AutomationActivityResource) (models.AutomationBinding, error) {
+	binding := sourceBinding
+	binding.NodeID = notificationNodeID
+	projectionContext := models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}
+	item, _, err := recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+		Context: projectionContext, Binding: binding,
+		WorkItemKey: "alert:" + alertID, WorkItemKind: "suggestion", WorkItemTitle: title,
+		WorkItemStatus: models.AutomationWorkItemWaiting,
+		ActivityKey:    "alert:" + alertID + ":create", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
+		Resources: resources,
+		EventKey:  "alert:" + alertID + ":created:notification", FromNodeID: producerNodeID,
+		ToNodeID: notificationNodeID, Transition: models.AutomationTransitionEntered,
+	})
+	if err != nil {
+		return binding, err
+	}
+	binding.WorkItemID = item.ID
+	projectionContext.Bindings[0] = binding
+	_, _, err = recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
+		Context: projectionContext, Binding: binding,
+		ActivityKey: "alert:" + alertID + ":create", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
+		Resources: resources,
+		EventKey:  "alert:" + alertID + ":created:waiting", FromNodeID: notificationNodeID,
+		ToNodeID: approvalNodeID, Transition: models.AutomationTransitionWaiting,
+	})
+	return binding, err
 }
 
 func recordAlertDecisionProjection(ctx context.Context, exec SQLExecutor, projectID, alertID string, state models.AlertDecisionState) error {
@@ -302,32 +313,17 @@ func rebindAlertAutomationProjection(ctx context.Context, exec SQLExecutor, proj
 			return err
 		}
 		for _, value := range paths {
-			binding := inboxBinding
-			binding.NodeID = value.actionID
-			resources := []models.AutomationActivityResource{{ResourceType: "alert", ResourceID: alertID}}
-			if sourceTaskID.Valid && sourceTaskID.String != "" {
-				resources = append(resources, models.AutomationActivityResource{ResourceType: "task", ResourceID: sourceTaskID.String})
+			var sourceTaskIDPtr, executionIDPtr *string
+			if sourceTaskID.Valid {
+				sourceTaskIDPtr = &sourceTaskID.String
 			}
-			if executionID.Valid && executionID.String != "" {
-				resources = append(resources, models.AutomationActivityResource{ResourceType: "execution", ResourceID: executionID.String})
+			if executionID.Valid {
+				executionIDPtr = &executionID.String
 			}
-			item, _, err := recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
-				Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
-				WorkItemKey: "alert:" + alertID, WorkItemKind: "suggestion", WorkItemTitle: title, WorkItemStatus: models.AutomationWorkItemWaiting,
-				ActivityKey: "alert:" + alertID + ":create", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
-				Resources: resources, EventKey: "alert:" + alertID + ":created:notification", FromNodeID: value.producerID,
-				ToNodeID: value.actionID, Transition: models.AutomationTransitionEntered,
-			})
+			resources := alertAutomationResources(alertID, sourceTaskIDPtr, executionIDPtr)
+			binding, err := recordAlertCreatedWaitingProjection(ctx, exec, projectID, alertID, title,
+				inboxBinding, value.producerID, value.actionID, value.gateID, resources)
 			if err != nil {
-				return err
-			}
-			binding.WorkItemID = item.ID
-			if _, _, err := recordProjectionEventWithExecutor(ctx, exec, AutomationProjectionEvent{
-				Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
-				ActivityKey: "alert:" + alertID + ":create", ActivityType: "create_notification", ActivityStatus: models.AutomationActivityCompleted,
-				Resources: resources, EventKey: "alert:" + alertID + ":created:waiting", FromNodeID: value.actionID,
-				ToNodeID: value.gateID, Transition: models.AutomationTransitionWaiting,
-			}); err != nil {
 				return err
 			}
 			if decision == models.AlertDecisionApproved {
