@@ -1,2 +1,5 @@
 ignore:
   - "**/*_templ.go"
+  - "docs/**"
+  - "internal/database/migrations/**"
+  - "internal/update/testfixture/**"
