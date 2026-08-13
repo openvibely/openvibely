@@ -1,8 +1,11 @@
 package database
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -206,6 +209,27 @@ func TestNew_InMemory(t *testing.T) {
 	// Verify max open connections is 1
 	if db.Stats().MaxOpenConnections != 1 {
 		t.Errorf("expected MaxOpenConnections=1, got %d", db.Stats().MaxOpenConnections)
+	}
+}
+
+func TestNew_LogsOneTimeVacuumRebuild(t *testing.T) {
+	var logs bytes.Buffer
+	originalOutput := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(originalOutput) })
+
+	db, err := New(filepath.Join(t.TempDir(), "vacuum-log.db"))
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
+	defer db.Close()
+
+	logOutput := logs.String()
+	if !strings.Contains(logOutput, "database: rebuilding to enable incremental vacuum") {
+		t.Fatalf("expected one-time vacuum rebuild log, got %q", logOutput)
+	}
+	if !strings.Contains(logOutput, "this may take several minutes for large databases") {
+		t.Fatalf("expected rebuild duration warning, got %q", logOutput)
 	}
 }
 

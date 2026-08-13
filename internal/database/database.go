@@ -78,9 +78,7 @@ func enableIncrementalVacuum(db *sql.DB) error {
 	if err := db.QueryRow("PRAGMA freelist_count").Scan(&freelist); err != nil {
 		return fmt.Errorf("reading freelist: %w", err)
 	}
-	if freelist > 1000 {
-		applog.Infof("database: rebuilding to enable incremental vacuum (%d free pages, this may take several minutes)", freelist)
-	}
+	applog.Infof("database: rebuilding to enable incremental vacuum (%d free pages, this may take several minutes for large databases)", freelist)
 	if _, err := db.Exec("VACUUM"); err != nil {
 		return fmt.Errorf("vacuuming database: %w", err)
 	}
