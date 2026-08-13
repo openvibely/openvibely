@@ -356,7 +356,7 @@ func TestHostedRestartReplaysPendingLeaseRenewalPastPreviousDeadline(t *testing.
 	var calls atomic.Int32
 	var firstKey atomic.Value
 	var keyMismatch atomic.Bool
-	authoritativeLease := time.Now().Add(400 * time.Millisecond).UTC()
+	authoritativeLease := time.Now().Add(5 * time.Second).UTC()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/lease") {
 			key := r.Header.Get("Idempotency-Key")
