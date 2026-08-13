@@ -159,6 +159,15 @@ func TestNew_InMemory(t *testing.T) {
 		t.Errorf("expected busy_timeout=5000, got %d", timeout)
 	}
 
+	// Verify incremental auto-vacuum enabled
+	var autoVacuum int
+	if err := db.QueryRow("PRAGMA auto_vacuum").Scan(&autoVacuum); err != nil {
+		t.Fatalf("querying auto_vacuum: %v", err)
+	}
+	if autoVacuum != 2 {
+		t.Errorf("expected auto_vacuum=2, got %d", autoVacuum)
+	}
+
 	// Verify migrations ran - check tables exist
 	tables := []string{"projects", "tasks", "agent_configs", "schedules", "executions", "worker_settings"}
 	for _, table := range tables {

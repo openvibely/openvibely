@@ -1049,6 +1049,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		hostedPendingStore = auth.NewPendingStore(srvCtx, time.Now)
 	}
 
+	database.StartIncrementalVacuum(srvCtx, db)
 	updateDrain.StartExpirySupervisor(srvCtx)
 	workerSvc.Start(srvCtx)
 	automationReconciler.Start(srvCtx)
