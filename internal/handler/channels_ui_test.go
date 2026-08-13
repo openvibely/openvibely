@@ -8,9 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func cardSectionByType(body, channelType string) string {
@@ -409,6 +411,96 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	cardBody = cardRec.Body.String()
 	if !strings.Contains(cardBody, "email: 2") || !strings.Contains(cardBody, "Explicit targets allowed") {
 		t.Fatalf("expected refreshed card fragment to show saved draft and policy badge, got %q", cardBody)
+	}
+}
+
+func TestChannelsPageUsesCompactAgentPickerProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerRepo := repository.NewWorkerRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	alertRepo := repository.NewAlertRepo(db)
+	upcomingRepo := repository.NewUpcomingRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+
+	projectSvc := service.NewProjectService(projectRepo)
+	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
+	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	alertSvc := service.NewAlertService(alertRepo, nil)
+	upcomingSvc := service.NewUpcomingService(upcomingRepo)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h.SetLocalRepoPathEnabled(true)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	e := echo.New()
+	h.RegisterRoutes(e)
+
+	alpha := &models.Agent{Name: "Alpha Picker", SystemPrompt: strings.Repeat("large hidden prompt ", 1024), ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "src", Permissions: []string{"read"}}}}}
+	if err := agentRepo.Create(context.Background(), alpha); err != nil {
+		t.Fatalf("create alpha agent: %v", err)
+	}
+	zulu := &models.Agent{Name: "Zulu Picker", SystemPrompt: strings.Repeat("large hidden prompt ", 1024)}
+	if err := agentRepo.Create(context.Background(), zulu); err != nil {
+		t.Fatalf("create zulu agent: %v", err)
+	}
+	archived := &models.Agent{Name: "Archived Picker", GeneratedStatus: models.AgentStatusArchived}
+	if err := agentRepo.Create(context.Background(), archived); err != nil {
+		t.Fatalf("create archived agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	req.Header.Set("HX-Request", "true")
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+
+	body := rec.Body.String()
+	alphaIdx := strings.Index(body, alpha.ID)
+	zuluIdx := strings.Index(body, zulu.ID)
+	if alphaIdx == -1 || zuluIdx == -1 {
+		t.Fatalf("expected compact picker IDs in Channels response; alpha=%d zulu=%d body=%s", alphaIdx, zuluIdx, body)
+	}
+	if alphaIdx > zuluIdx {
+		t.Fatalf("expected picker JSON to keep name ASC order, alpha index %d after zulu index %d", alphaIdx, zuluIdx)
+	}
+	forbiddenBody := []string{archived.ID, "large hidden prompt", "scoped_files", "tool_config"}
+	for _, forbidden := range forbiddenBody {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("Channels response contained hidden picker payload %q", forbidden)
+		}
+	}
+
+	var pickerQueries []string
+	for _, statement := range counter.Statements() {
+		stmt := strings.ToLower(statement)
+		if strings.Contains(stmt, "from agents") && strings.Contains(stmt, "order by name asc") {
+			pickerQueries = append(pickerQueries, statement)
+		}
+	}
+	if len(pickerQueries) != 1 {
+		t.Fatalf("expected one Channels agent picker query, got %#v from statements %#v", pickerQueries, counter.Statements())
+	}
+	projection := strings.Split(strings.ToLower(pickerQueries[0]), "from agents")[0]
+	if !strings.Contains(projection, "select id, name") {
+		t.Fatalf("Channels picker query used unexpected projection: %s", pickerQueries[0])
+	}
+	for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("Channels picker query selected full agent column %q: %s", forbidden, pickerQueries[0])
+		}
 	}
 }
 

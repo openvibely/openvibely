@@ -36,6 +36,13 @@ type AgentRuntimeSummary struct {
 	MCPServerCount int
 }
 
+// AgentPickerOption is the compact projection needed by settings pickers that
+// render only an agent identifier and display name.
+type AgentPickerOption struct {
+	ID   string
+	Name string
+}
+
 func scanAgent(row interface{ Scan(dest ...any) error }) (*models.Agent, error) {
 	var a models.Agent
 	var (
@@ -175,6 +182,28 @@ func (r *AgentRepo) ListRuntimeSummaries(ctx context.Context) ([]AgentRuntimeSum
 		summaries = append(summaries, summary)
 	}
 	return summaries, rows.Err()
+}
+
+func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]AgentPickerOption, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name
+		FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing agent picker options: %w", err)
+	}
+	defer rows.Close()
+
+	var options []AgentPickerOption
+	for rows.Next() {
+		var option AgentPickerOption
+		if err := rows.Scan(&option.ID, &option.Name); err != nil {
+			return nil, fmt.Errorf("scanning agent picker option: %w", err)
+		}
+		options = append(options, option)
+	}
+	return options, rows.Err()
 }
 
 func (r *AgentRepo) ListSelectableForProject(ctx context.Context, projectID string, limit int) ([]models.Agent, error) {

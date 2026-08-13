@@ -277,10 +277,10 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		webhooks, _ = h.webhookRepo.ListCardsByProject(c.Request().Context(), resolvedProjectID)
 	}
 
-	// Load agents for webhook agent selection
-	var agents []models.Agent
+	// Load compact agents for webhook agent selection.
+	var agentPickerOptions []repository.AgentPickerOption
 	if h.agentRepo != nil {
-		agents, _ = h.agentRepo.List(c.Request().Context())
+		agentPickerOptions, _ = h.agentRepo.ListPickerOptions(c.Request().Context())
 	}
 
 	webhookAgents := map[string][]models.WebhookEndpointAgent{}
@@ -330,7 +330,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		HasDiscordChannel:            hasDiscordChannel,
 		HasEmailChannel:              hasEmailChannel,
 		Webhooks:                     webhooks,
-		Agents:                       agents,
+		AgentPickerOptions:           agentPickerOptions,
 		WebhookAgents:                webhookAgents,
 		ChannelTargets:               channelTargets,
 		SendMessageExplicitTargets:   sendMessageExplicitTargets,
