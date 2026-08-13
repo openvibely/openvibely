@@ -235,21 +235,33 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		var turnResult *agenticTurnResult
 		overflowRecovered := false
-		for {
-			var err error
-			turnResult, err = c.sendAgenticTurn(ctx, inputItems, tools, opts, isChatGPTOAuth)
-			if err == nil {
-				break
-			}
-			if opts.AutoCompaction && !overflowRecovered && isContextLengthExceededError(err) {
+		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+			RetryableError:                       isRetryableResponsesTransportError,
+			RetryConnectionFailuresWithoutBudget: true,
+			Recover: func(err error) (bool, error) {
+				if !opts.AutoCompaction || overflowRecovered || !isContextLengthExceededError(err) {
+					return false, nil
+				}
 				compactedItems, compactErr := compactIfNeeded(inputItems, compactionThreshold, true)
 				if compactErr != nil {
-					return nil, fmt.Errorf("turn %d overflow recovery compaction: %w", turn+1, compactErr)
+					return false, fmt.Errorf("turn %d overflow recovery compaction: %w", turn+1, compactErr)
 				}
 				inputItems = compactedItems
 				overflowRecovered = true
-				continue
-			}
+				return true, nil
+			},
+			OnRetry: func(event httpretry.RetryEvent) {
+				if httpretry.IsConnectionSetupFailure(event.Err) {
+					applog.Infof("[openai-client] reconnecting agentic turn %d after connection error in %v: %v", turn+1, event.Delay, event.Err)
+					return
+				}
+				applog.Infof("[openai-client] retrying agentic turn %d after stream/transport error, retry attempt %d/%d in %v: %v",
+					turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
+			},
+		}, func(attemptCtx context.Context) (*agenticTurnResult, error) {
+			return c.sendAgenticTurn(attemptCtx, inputItems, tools, opts, isChatGPTOAuth)
+		})
+		if err != nil {
 			return nil, fmt.Errorf("turn %d: %w", turn+1, err)
 		}
 
@@ -1021,12 +1033,13 @@ func statelessOAuthOutputItems(items []any) []any {
 // sendAgenticTurn sends a single request and returns parsed results.
 func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {
 	policy := httpretry.DefaultPolicy()
+	policy.MaxRetries = 0
 	policy.AllowReplay = true
 	policy.RetryableError = isRetryableResponsesTransportError
 	policy.OnRetry = func(event httpretry.RetryEvent) {
 		applog.Infof("[openai-client] stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
 	}
-	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*agenticTurnResult, bool, error) {
+	result, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*agenticTurnResult, bool, error) {
 		attemptOpts := *opts
 		observed := false
 		attemptOpts.OnText = func(text string) {
@@ -1056,6 +1069,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, inputItems []any, tools []
 		result, err := c.sendAgenticTurnOnce(attemptCtx, inputItems, tools, &attemptOpts, isChatGPTOAuth)
 		return result, observed, err
 	})
+	return result, err
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, inputItems []any, tools []ToolDefinition, opts *AgenticOptions, isChatGPTOAuth bool) (*agenticTurnResult, error) {

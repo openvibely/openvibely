@@ -66,26 +66,27 @@ func ListOllamaModels(ctx context.Context, baseURL string) ([]OllamaModelInfo, e
 		statusCode int
 		body       []byte
 	}
-	policy := httpretry.DefaultPolicy()
-	policy.AllowReplay = true
-	buffered, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (bufferedResponse, bool, error) {
+	buffered, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{}, func(attemptCtx context.Context) (bufferedResponse, error) {
 		result := bufferedResponse{}
+		policy := httpretry.DefaultPolicy()
+		policy.MaxRetries = 0
+		policy.AllowReplay = true
 		resp, err := httpretry.Do(attemptCtx, OllamaHTTPClient, func() (*http.Request, error) {
 			return http.NewRequestWithContext(attemptCtx, http.MethodGet, url, nil)
 		}, policy)
 		if err != nil {
-			return result, false, err
+			return result, err
 		}
 		defer resp.Body.Close()
 		result.statusCode = resp.StatusCode
 		result.body, err = io.ReadAll(resp.Body)
 		if err != nil {
-			return result, false, httpretry.NewStreamError(fmt.Errorf("reading ollama model list response: %w", err))
+			return result, httpretry.NewStreamError(fmt.Errorf("reading ollama model list response: %w", err))
 		}
 		if httpretry.IsRetryableStatus(resp.StatusCode) {
-			return result, false, httpretry.NewResponseError(resp, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(result.body)))
+			return result, httpretry.NewResponseError(resp, fmt.Errorf("ollama API error (%d): %s", resp.StatusCode, string(result.body)))
 		}
-		return result, false, nil
+		return result, nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ollama API call failed (is Ollama running at %s?): %w", baseURL, err)

@@ -902,7 +902,7 @@ func TestSend_ResponsesLiteCancellationDoesNotDisableWebSocket(t *testing.T) {
 	}
 }
 
-func TestSend_ResponsesLitePartialOutputDisablesWebSocketWithoutReplay(t *testing.T) {
+func TestSend_ResponsesLitePartialOutputFallsBackFromTurnState(t *testing.T) {
 	var websocketAttempts atomic.Int32
 	var httpRequests atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -934,27 +934,21 @@ func TestSend_ResponsesLitePartialOutputDisablesWebSocketWithoutReplay(t *testin
 	defer func() { OpenAIAPIBaseURL = original }()
 
 	client := NewWithAPIKey("sk-test")
-	var firstOutput strings.Builder
-	_, err := client.Send(context.Background(), "first", &SendOptions{
+	var output strings.Builder
+	resp, err := client.Send(context.Background(), "first", &SendOptions{
 		Model:   "gpt-5.6-sol",
-		OnDelta: func(text string) { firstOutput.WriteString(text) },
+		OnDelta: func(text string) { output.WriteString(text) },
 	})
-	if err == nil || !errors.Is(err, errResponsesWebsocketTransport) {
-		t.Fatalf("first Send error = %v, want websocket transport error", err)
-	}
-	if firstOutput.String() != "partial" {
-		t.Fatalf("first output = %q, want partial", firstOutput.String())
-	}
-	if httpRequests.Load() != 0 {
-		t.Fatalf("partially streamed turn was replayed over HTTP")
-	}
-
-	resp, err := client.Send(context.Background(), "second", &SendOptions{Model: "gpt-5.6-sol"})
 	if err != nil {
-		t.Fatalf("second Send: %v", err)
+		t.Fatalf("Send: %v", err)
 	}
 	if resp.Text != "recovered" {
-		t.Fatalf("second text = %q, want recovered", resp.Text)
+		t.Fatalf("text = %q, want recovered", resp.Text)
+	}
+	// The provider response is rebuilt from retry state, while the live stream
+	// intentionally preserves text already emitted by the failed attempt.
+	if output.String() != "partialrecovered" {
+		t.Fatalf("streamed output = %q, want partialrecovered", output.String())
 	}
 	if websocketAttempts.Load() != 1 || httpRequests.Load() != 1 {
 		t.Fatalf("attempts websocket=%d HTTP=%d", websocketAttempts.Load(), httpRequests.Load())

@@ -285,13 +285,16 @@ type ollamaBufferedResponse struct {
 }
 
 func (a *Adapter) bufferedWithRetry(ctx context.Context, url string, body []byte) (ollamaBufferedResponse, error) {
-	policy := httpretry.DefaultPolicy()
-	policy.AllowReplay = true
-	policy.After = retryAfter
-	policy.OnRetry = func(event httpretry.RetryEvent) {
-		applog.Infof("[ollama] response read error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
-	}
-	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (ollamaBufferedResponse, bool, error) {
+	return httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+		After: retryAfter,
+		OnRetry: func(event httpretry.RetryEvent) {
+			if httpretry.IsConnectionSetupFailure(event.Err) {
+				applog.Infof("[ollama] reconnecting response read in %v: %v", event.Delay, event.Err)
+				return
+			}
+			applog.Infof("[ollama] response read error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+		},
+	}, func(attemptCtx context.Context) (ollamaBufferedResponse, error) {
 		result := ollamaBufferedResponse{}
 		resp, err := a.doWithRetry(attemptCtx, func() (*http.Request, error) {
 			httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, url, bytes.NewReader(body))
@@ -302,68 +305,77 @@ func (a *Adapter) bufferedWithRetry(ctx context.Context, url string, body []byte
 			return httpReq, nil
 		})
 		if err != nil {
-			return result, false, err
+			return result, err
 		}
 		defer resp.Body.Close()
 		result.statusCode = resp.StatusCode
 		result.body, err = io.ReadAll(resp.Body)
 		if err != nil {
-			return result, false, httpretry.NewStreamError(fmt.Errorf("reading ollama response: %w", err))
+			return result, httpretry.NewStreamError(fmt.Errorf("reading ollama response: %w", err))
 		}
 		if httpretry.IsRetryableStatus(resp.StatusCode) {
-			return result, false, httpretry.NewResponseError(resp, ollamaResponseError(resp.StatusCode, result.body))
+			return result, httpretry.NewResponseError(resp, ollamaResponseError(resp.StatusCode, result.body))
 		}
-		return result, false, nil
+		return result, nil
 	})
 }
 
 func (a *Adapter) streamWithRetry(ctx context.Context, url string, body []byte, onChunk func(chatStreamChunk) bool) (ollamaStreamResult, error) {
-	policy := httpretry.DefaultPolicy()
-	policy.AllowReplay = true
-	policy.After = retryAfter
-	policy.OnRetry = func(event httpretry.RetryEvent) {
-		applog.Infof("[ollama] stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
-	}
-	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (ollamaStreamResult, bool, error) {
-		result := ollamaStreamResult{}
-		observed := false
-		resp, err := a.doWithRetry(attemptCtx, func() (*http.Request, error) {
-			httpReq, err := http.NewRequestWithContext(attemptCtx, http.MethodPost, url, bytes.NewReader(body))
+	return httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+		After: retryAfter,
+		OnRetry: func(event httpretry.RetryEvent) {
+			if httpretry.IsConnectionSetupFailure(event.Err) {
+				applog.Infof("[ollama] reconnecting stream in %v: %v", event.Delay, event.Err)
+				return
+			}
+			applog.Infof("[ollama] stream error, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+		},
+	}, func(attemptCtx context.Context) (ollamaStreamResult, error) {
+		policy := httpretry.DefaultPolicy()
+		policy.MaxRetries = 0
+		policy.AllowReplay = true
+		policy.After = retryAfter
+		return httpretry.DoStream(attemptCtx, policy, func(streamCtx context.Context) (ollamaStreamResult, bool, error) {
+			result := ollamaStreamResult{}
+			observed := false
+			resp, err := a.doWithRetry(streamCtx, func() (*http.Request, error) {
+				httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, url, bytes.NewReader(body))
+				if err != nil {
+					return nil, err
+				}
+				httpReq.Header.Set("Content-Type", "application/json")
+				return httpReq, nil
+			})
 			if err != nil {
-				return nil, err
+				return result, observed, err
 			}
-			httpReq.Header.Set("Content-Type", "application/json")
-			return httpReq, nil
-		})
-		if err != nil {
-			return result, observed, err
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			respBody, _ := io.ReadAll(resp.Body)
-			err := ollamaResponseError(resp.StatusCode, respBody)
-			return result, observed, httpretry.NewResponseError(resp, err)
-		}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				respBody, _ := io.ReadAll(resp.Body)
+				err := ollamaResponseError(resp.StatusCode, respBody)
+				return result, observed, httpretry.NewResponseError(resp, err)
+			}
 
-		decoder := json.NewDecoder(resp.Body)
-		for {
-			var chunk chatStreamChunk
-			if err := decoder.Decode(&chunk); err != nil {
-				if ctxErr := ctx.Err(); ctxErr != nil {
-					return result, observed, fmt.Errorf("ollama streaming cancelled: %w", ctxErr)
+			decoder := json.NewDecoder(resp.Body)
+			for {
+				var chunk chatStreamChunk
+				if err := decoder.Decode(&chunk); err != nil {
+					if ctxErr := ctx.Err(); ctxErr != nil {
+						return result, observed, fmt.Errorf("ollama streaming cancelled: %w", ctxErr)
+					}
+					if err == io.EOF {
+						err = io.ErrUnexpectedEOF
+					}
+					return result, observed, httpretry.NewStreamError(fmt.Errorf("decoding ollama stream chunk: %w", err))
 				}
-				if err == io.EOF {
-					err = io.ErrUnexpectedEOF
+				observed = onChunk(chunk) || observed
+				if chunk.Done {
+					result.totalTokens = chunk.EvalCount
+					result.promptTokens = chunk.PromptEvalCount
+					return result, observed, nil
 				}
-				return result, observed, httpretry.NewStreamError(fmt.Errorf("decoding ollama stream chunk: %w", err))
 			}
-			observed = onChunk(chunk) || observed
-			if chunk.Done {
-				result.totalTokens = chunk.EvalCount
-				result.promptTokens = chunk.PromptEvalCount
-				return result, observed, nil
-			}
-		}
+		})
 	})
 }
 

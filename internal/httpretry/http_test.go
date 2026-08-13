@@ -287,6 +287,93 @@ func TestDoStreamHonorsResponseRetryAfter(t *testing.T) {
 	}
 }
 
+func TestDoStreamTurnConnectionRetryCanBypassStreamBudget(t *testing.T) {
+	attempts := 0
+	var delays []time.Duration
+	var retryAttempts []int
+	policy := StreamTurnPolicy{
+		RetryConnectionFailuresWithoutBudget: true,
+		After: func(time.Duration) <-chan time.Time {
+			ch := make(chan time.Time, 1)
+			ch <- time.Time{}
+			return ch
+		},
+		OnRetry: func(event RetryEvent) {
+			delays = append(delays, event.Delay)
+			retryAttempts = append(retryAttempts, event.Attempt)
+		},
+	}
+	result, err := DoStreamTurn(context.Background(), policy, func(context.Context) (string, error) {
+		attempts++
+		if attempts <= StreamTurnMaxRetries+2 {
+			return "", errors.New(`send request: Post "https://provider.test": dial tcp: no such host`)
+		}
+		return "ok", nil
+	})
+	if err != nil || result != "ok" {
+		t.Fatalf("result/error = %q/%v, want ok/nil", result, err)
+	}
+	if attempts != StreamTurnMaxRetries+3 {
+		t.Fatalf("attempts = %d, want %d", attempts, StreamTurnMaxRetries+3)
+	}
+	if len(delays) != StreamTurnMaxRetries+2 {
+		t.Fatalf("delays = %v, want %d entries", delays, StreamTurnMaxRetries+2)
+	}
+	for i, want := range []time.Duration{5 * time.Second, 10 * time.Second, 20 * time.Second, 40 * time.Second, 60 * time.Second, 60 * time.Second, 60 * time.Second} {
+		if delays[i] != want {
+			t.Fatalf("delay[%d] = %v, want %v; all delays=%v", i, delays[i], want, delays)
+		}
+	}
+	for i, got := range retryAttempts {
+		if want := i + 1; got != want {
+			t.Fatalf("retry attempt[%d] = %d, want %d; all attempts=%v", i, got, want, retryAttempts)
+		}
+	}
+}
+
+func TestDoStreamTurnConnectionRetryBoundedWhenNotOptedIn(t *testing.T) {
+	attempts := 0
+	policy := StreamTurnPolicy{
+		After: func(time.Duration) <-chan time.Time {
+			ch := make(chan time.Time, 1)
+			ch <- time.Time{}
+			return ch
+		},
+	}
+	_, err := DoStreamTurn(context.Background(), policy, func(context.Context) (string, error) {
+		attempts++
+		return "", errors.New(`send request: Post "http://localhost:11434": dial tcp: connection refused`)
+	})
+	if err == nil {
+		t.Fatal("expected connection error after bounded retries")
+	}
+	if attempts != StreamTurnMaxRetries+1 {
+		t.Fatalf("attempts = %d, want %d", attempts, StreamTurnMaxRetries+1)
+	}
+}
+
+func TestDoStreamTurnRetries429ByDesign(t *testing.T) {
+	attempts := 0
+	policy := StreamTurnPolicy{
+		After: func(time.Duration) <-chan time.Time {
+			ch := make(chan time.Time, 1)
+			ch <- time.Time{}
+			return ch
+		},
+	}
+	result, err := DoStreamTurn(context.Background(), policy, func(context.Context) (string, error) {
+		attempts++
+		if attempts == 1 {
+			resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": []string{"1"}}}
+			return "", NewResponseError(resp, errors.New("rate limited"))
+		}
+		return "ok", nil
+	})
+	if err != nil || result != "ok" || attempts != 2 {
+		t.Fatalf("result/error/attempts = %q/%v/%d, want ok/nil/2", result, err, attempts)
+	}
+}
+
 func TestMaxBackoffAppliesToNetworkAndStreamRetries(t *testing.T) {
 	t.Run("network", func(t *testing.T) {
 		attempts := 0

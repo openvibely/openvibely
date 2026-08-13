@@ -324,7 +324,19 @@ func (c *Client) SendAgentic(ctx context.Context, prompt string, opts *AgenticOp
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
 		// Send request (streaming)
-		resp, err := c.sendAgenticTurn(ctx, messages, tools, opts)
+		resp, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+			RetryConnectionFailuresWithoutBudget: true,
+			OnRetry: func(event httpretry.RetryEvent) {
+				if httpretry.IsConnectionSetupFailure(event.Err) {
+					applog.Infof("[anthropicclient] reconnecting agentic turn %d after connection error in %v: %v", turn+1, event.Delay, event.Err)
+					return
+				}
+				applog.Infof("[anthropicclient] retrying agentic turn %d after stream/transport error, retry attempt %d/%d in %v: %v",
+					turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
+			},
+		}, func(attemptCtx context.Context) (*turnResult, error) {
+			return c.sendAgenticTurn(attemptCtx, messages, tools, opts)
+		})
 		if err != nil {
 			return nil, fmt.Errorf("turn %d: %w", turn+1, err)
 		}
@@ -849,11 +861,12 @@ func usesAdaptiveThinking(model string) bool {
 // sendAgenticTurn sends a single streaming request and returns parsed content blocks.
 func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {
 	policy := httpretry.DefaultPolicy()
+	policy.MaxRetries = 0
 	policy.AllowReplay = true
 	policy.OnRetry = func(event httpretry.RetryEvent) {
 		applog.Infof("[anthropicclient] stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
 	}
-	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*turnResult, bool, error) {
+	result, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*turnResult, bool, error) {
 		attemptOpts := *opts
 		observed := false
 		attemptOpts.OnText = func(text string) {
@@ -883,6 +896,7 @@ func (c *Client) sendAgenticTurn(ctx context.Context, messages []agenticMessage,
 		result, err := c.sendAgenticTurnOnce(attemptCtx, messages, tools, &attemptOpts)
 		return result, observed, err
 	})
+	return result, err
 }
 
 func (c *Client) sendAgenticTurnOnce(ctx context.Context, messages []agenticMessage, tools []ToolDefinition, opts *AgenticOptions) (*turnResult, error) {

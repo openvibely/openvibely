@@ -200,7 +200,19 @@ func (c *Client) SendCompletions(ctx context.Context, prompt string, opts *Compl
 	currentTranscript := []CompletionsHistoryMessage{{Role: "user", Content: prompt}}
 
 	for turn := 0; turn < opts.MaxTurns; turn++ {
-		turnResult, err := c.sendCompletionsTurn(ctx, messages, tools, opts)
+		turnResult, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+			RetryConnectionFailuresWithoutBudget: true,
+			OnRetry: func(event httpretry.RetryEvent) {
+				if httpretry.IsConnectionSetupFailure(event.Err) {
+					applog.Infof("[openai-completions] reconnecting turn %d after connection error in %v: %v", turn+1, event.Delay, event.Err)
+					return
+				}
+				applog.Infof("[openai-completions] retrying turn %d after stream/transport error, retry attempt %d/%d in %v: %v",
+					turn+1, event.Attempt, event.MaxRetries, event.Delay, event.Err)
+			},
+		}, func(attemptCtx context.Context) (*completionsTurnResult, error) {
+			return c.sendCompletionsTurn(attemptCtx, messages, tools, opts)
+		})
 		if err != nil {
 			return nil, fmt.Errorf("turn %d: %w", turn+1, err)
 		}
@@ -346,11 +358,12 @@ type completionsTurnResult struct {
 
 func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {
 	policy := httpretry.DefaultPolicy()
+	policy.MaxRetries = 0
 	policy.AllowReplay = true
 	policy.OnRetry = func(event httpretry.RetryEvent) {
 		applog.Infof("[openai-client] chat completions stream error before output, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
 	}
-	return httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*completionsTurnResult, bool, error) {
+	result, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*completionsTurnResult, bool, error) {
 		attemptOpts := *opts
 		observed := false
 		attemptOpts.OnText = func(text string) {
@@ -362,6 +375,7 @@ func (c *Client) sendCompletionsTurn(ctx context.Context, messages []completions
 		result, err := c.sendCompletionsTurnOnce(attemptCtx, messages, tools, &attemptOpts)
 		return result, observed, err
 	})
+	return result, err
 }
 
 func (c *Client) sendCompletionsTurnOnce(ctx context.Context, messages []completionsMessage, tools []map[string]interface{}, opts *CompletionsOptions) (*completionsTurnResult, error) {

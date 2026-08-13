@@ -1411,6 +1411,123 @@ func TestSendAgentic_WithRetry(t *testing.T) {
 	}
 }
 
+func TestSendAgentic_RetriesStreamAfterPartialOutputFromTurnState(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if attempts == 1 {
+			_, _ = w.Write([]byte(`data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n"))
+			return
+		}
+		_, _ = w.Write([]byte(
+			`data: {"type":"response.output_text.delta","delta":"done"}` + "\n\n" +
+				`data: {"type":"response.completed","response":{"id":"resp_2","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":5,"output_tokens":1}}}` + "\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("sk-test")
+	var streamed strings.Builder
+	resp, err := client.SendAgentic(context.Background(), "test", &AgenticOptions{
+		Model:        "gpt-5.3-codex",
+		DisableTools: true,
+		OnText: func(text string) {
+			streamed.WriteString(text)
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if resp.Text != "done" {
+		t.Fatalf("Text = %q, want done", resp.Text)
+	}
+	// The provider response is rebuilt from retry state, while the live stream
+	// intentionally preserves text already emitted by the failed attempt.
+	if streamed.String() != "partialdone" {
+		t.Fatalf("streamed text = %q, want partialdone", streamed.String())
+	}
+}
+
+func TestSendAgentic_RetriedTurnReplaysCompletedToolOutput(t *testing.T) {
+	var attempts int32
+	var toolExecutions int32
+	var retrySawToolOutput bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempt := atomic.AddInt32(&attempts, 1)
+		body, _ := io.ReadAll(r.Body)
+		var reqBody map[string]any
+		if err := json.Unmarshal(body, &reqBody); err != nil {
+			t.Fatalf("unmarshal request: %v", err)
+		}
+		if attempt == 3 {
+			input, _ := reqBody["input"].([]any)
+			for _, item := range input {
+				m, _ := item.(map[string]any)
+				if m["type"] == "function_call_output" && m["call_id"] == "call_1" && m["output"] == "tool result" {
+					retrySawToolOutput = true
+				}
+			}
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch attempt {
+		case 1:
+			args, _ := json.Marshal(`{"query":"x"}`)
+			_, _ = w.Write([]byte(
+				`data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_1","name":"lookup"}}` + "\n\n" +
+					fmt.Sprintf(`data: {"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"lookup","arguments":%s}}`, args) + "\n\n" +
+					`data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":10,"output_tokens":4}}}` + "\n\n",
+			))
+		case 2:
+			_, _ = w.Write([]byte(`data: {"type":"response.output_text.delta","delta":"partial"}` + "\n\n"))
+		default:
+			_, _ = w.Write([]byte(
+				`data: {"type":"response.output_text.delta","delta":"final"}` + "\n\n" +
+					`data: {"type":"response.completed","response":{"id":"resp_3","status":"completed","model":"gpt-5.3-codex","usage":{"input_tokens":12,"output_tokens":2}}}` + "\n\n",
+			))
+		}
+	}))
+	defer srv.Close()
+
+	oldBaseURL := OpenAIAPIBaseURL
+	OpenAIAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIAPIBaseURL = oldBaseURL }()
+
+	client := NewWithAPIKey("sk-test")
+	resp, err := client.SendAgentic(context.Background(), "use lookup", &AgenticOptions{
+		Model:            "gpt-5.3-codex",
+		SkipDefaultTools: true,
+		ExtraTools:       []ToolDefinition{{Type: "function", Name: "lookup", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		ToolExecutor: func(context.Context, string, json.RawMessage) (string, bool, error) {
+			atomic.AddInt32(&toolExecutions, 1)
+			return "tool result", false, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 3 {
+		t.Fatalf("attempts = %d, want 3", got)
+	}
+	if got := atomic.LoadInt32(&toolExecutions); got != 1 {
+		t.Fatalf("tool executions = %d, want 1", got)
+	}
+	if !retrySawToolOutput {
+		t.Fatal("retried turn did not include completed function_call_output")
+	}
+	if resp.Text != "final" {
+		t.Fatalf("Text = %q, want final", resp.Text)
+	}
+}
+
 func TestSendAgentic_OAuthUsesCorrectEndpoint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("originator"); got != "codex_cli_rs" {

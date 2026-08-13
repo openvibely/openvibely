@@ -350,59 +350,72 @@ func (c *Client) Send(ctx context.Context, prompt string, opts *SendOptions) (*R
 		endpoint += "?beta=true"
 	}
 
-	policy := httpretry.DefaultPolicy()
-	policy.AllowReplay = true
-	result, err := httpretry.DoStream(ctx, policy, func(attemptCtx context.Context) (*Response, bool, error) {
-		buildReq := func() (*http.Request, error) {
-			httpReq, err := http.NewRequestWithContext(attemptCtx, "POST", endpoint, bytes.NewReader(body))
+	result, err := httpretry.DoStreamTurn(ctx, httpretry.StreamTurnPolicy{
+		RetryConnectionFailuresWithoutBudget: true,
+		OnRetry: func(event httpretry.RetryEvent) {
+			if httpretry.IsConnectionSetupFailure(event.Err) {
+				applog.Infof("[anthropicclient] reconnecting messages stream in %v: %v", event.Delay, event.Err)
+				return
+			}
+			applog.Infof("[anthropicclient] retrying messages stream, retry attempt %d/%d in %v: %v", event.Attempt, event.MaxRetries, event.Delay, event.Err)
+		},
+	}, func(attemptCtx context.Context) (*Response, error) {
+		policy := httpretry.DefaultPolicy()
+		policy.MaxRetries = 0
+		policy.AllowReplay = true
+		result, err := httpretry.DoStream(attemptCtx, policy, func(streamCtx context.Context) (*Response, bool, error) {
+			buildReq := func() (*http.Request, error) {
+				httpReq, err := http.NewRequestWithContext(streamCtx, "POST", endpoint, bytes.NewReader(body))
+				if err != nil {
+					return nil, err
+				}
+				httpReq.Header.Set("Content-Type", "application/json")
+				httpReq.Header.Set("anthropic-version", AnthropicAPIVersion)
+				if c.auth.APIKey != "" {
+					httpReq.Header.Set("x-api-key", c.auth.APIKey)
+				} else {
+					httpReq.Header.Set("Authorization", "Bearer "+c.auth.Token)
+					httpReq.Header.Set("x-app", "cli")
+					httpReq.Header.Set("anthropic-beta", strings.Join([]string{
+						"claude-code-20250219", OAuthBetaHeader, "prompt-caching-scope-2026-01-05",
+					}, ","))
+				}
+				return httpReq, nil
+			}
+			resp, err := c.doRequestWithRetry(attemptCtx, buildReq)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
-			httpReq.Header.Set("Content-Type", "application/json")
-			httpReq.Header.Set("anthropic-version", AnthropicAPIVersion)
-			if c.auth.APIKey != "" {
-				httpReq.Header.Set("x-api-key", c.auth.APIKey)
+			defer resp.Body.Close()
+			for k, v := range resp.Header {
+				kl := strings.ToLower(k)
+				if strings.Contains(kl, "ratelimit") || strings.Contains(kl, "rate-limit") || strings.Contains(kl, "retry") || strings.Contains(kl, "x-anthropic") {
+					applog.Debugf("[anthropic-headers] %s: %v", k, v)
+				}
+			}
+			if resp.StatusCode != http.StatusOK {
+				respBody, _ := io.ReadAll(resp.Body)
+				return nil, false, httpretry.NewResponseError(resp, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody)))
+			}
+			observed := false
+			onDelta := func(text string) {
+				observed = true
+				if opts.OnDelta != nil {
+					opts.OnDelta(text)
+				}
+			}
+			var result *Response
+			if opts.Stream {
+				result, err = c.handleStream(resp.Body, onDelta)
 			} else {
-				httpReq.Header.Set("Authorization", "Bearer "+c.auth.Token)
-				httpReq.Header.Set("x-app", "cli")
-				httpReq.Header.Set("anthropic-beta", strings.Join([]string{
-					"claude-code-20250219", OAuthBetaHeader, "prompt-caching-scope-2026-01-05",
-				}, ","))
+				result, err = c.handleResponse(resp.Body)
 			}
-			return httpReq, nil
-		}
-		resp, err := c.doRequestWithRetry(attemptCtx, buildReq)
-		if err != nil {
-			return nil, false, err
-		}
-		defer resp.Body.Close()
-		for k, v := range resp.Header {
-			kl := strings.ToLower(k)
-			if strings.Contains(kl, "ratelimit") || strings.Contains(kl, "rate-limit") || strings.Contains(kl, "retry") || strings.Contains(kl, "x-anthropic") {
-				applog.Debugf("[anthropic-headers] %s: %v", k, v)
+			if err != nil {
+				return result, observed, httpretry.NewStreamError(err)
 			}
-		}
-		if resp.StatusCode != http.StatusOK {
-			respBody, _ := io.ReadAll(resp.Body)
-			return nil, false, httpretry.NewResponseError(resp, fmt.Errorf("API error %d: %s", resp.StatusCode, string(respBody)))
-		}
-		observed := false
-		onDelta := func(text string) {
-			observed = true
-			if opts.OnDelta != nil {
-				opts.OnDelta(text)
-			}
-		}
-		var result *Response
-		if opts.Stream {
-			result, err = c.handleStream(resp.Body, onDelta)
-		} else {
-			result, err = c.handleResponse(resp.Body)
-		}
-		if err != nil {
-			return result, observed, httpretry.NewStreamError(err)
-		}
-		return result, observed, nil
+			return result, observed, nil
+		})
+		return result, err
 	})
 	if err != nil {
 		return nil, err

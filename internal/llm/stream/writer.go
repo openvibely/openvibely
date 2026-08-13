@@ -26,6 +26,9 @@ type ExecutionStreamPublisher interface {
 // output to the database so the UI can display progress in real time.
 // It runs a background goroutine that flushes on a timer, ensuring output
 // is visible even during long pauses (e.g., while a tool is running).
+// Writer is append-only: retry loops that emit live deltas keep failed-attempt
+// deltas in the visible/persisted stream unless the caller adds rollback/reset
+// behavior before writing retry output.
 type Writer struct {
 	buf                   bytes.Buffer
 	textBuf               bytes.Buffer // text-only content (no thinking blocks, no tool markers)
