@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
@@ -10,6 +11,41 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestExecutionRepo_ListByTaskHistoryPageUsesTaskStartedIndex(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	plan := explainExecutionRepoPlan(t, db, taskExecutionHistoryPageSQL, "task-history-plan", 21)
+	if !strings.Contains(plan, "idx_executions_task_started_at") {
+		t.Fatalf("expected execution-history page query to use idx_executions_task_started_at, plan:\n%s", plan)
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("execution-history page query should not sort with a temp B-tree, plan:\n%s", plan)
+	}
+}
+
+func explainExecutionRepoPlan(t testing.TB, db interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatalf("explain query plan: %v", err)
+	}
+	defer rows.Close()
+	var lines []string
+	for rows.Next() {
+		var id, parent, notused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+			t.Fatalf("scan plan: %v", err)
+		}
+		lines = append(lines, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read plan: %v", err)
+	}
+	return strings.Join(lines, "\n")
+}
 
 func TestExecutionRepo_CreateAndComplete(t *testing.T) {
 	db := testutil.NewTestDB(t)

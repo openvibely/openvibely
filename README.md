@@ -2,7 +2,7 @@
 
 [![Test](https://github.com/openvibely/openvibely/actions/workflows/test.yml/badge.svg)](https://github.com/openvibely/openvibely/actions/workflows/test.yml)
 [![codecov](https://codecov.io/github/openvibely/openvibely/graph/badge.svg?token=VL6VTQEKR7)](https://codecov.io/github/openvibely/openvibely)
-[![License: MIT](docs/badges/license-mit.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-2DA44E.svg)](LICENSE)
 
 The only recursive self-improvement command center for software teams.
 

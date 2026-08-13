@@ -45,6 +45,8 @@ const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''),
 const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, '' AS reasoning_content, e.error_message,
 		e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
 
+const taskExecutionHistoryPageSQL = `SELECT ` + executionSelectColumnsLight + ` FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`
+
 func scanExecutionRow(scanner interface {
 	Scan(dest ...interface{}) error
 }) (models.Execution, error) {
@@ -63,15 +65,23 @@ func (r *ExecutionRepo) ListByTask(ctx context.Context, taskID string) ([]models
 	}
 	defer rows.Close()
 
-	var execs []models.Execution
-	for rows.Next() {
-		e, err := scanExecutionRow(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scanning execution: %w", err)
-		}
-		execs = append(execs, e)
+	return scanExecutionsNewestFirst(rows)
+}
+
+// ListByTaskHistoryPage returns the latest executions for a task in display order
+// for the execution-history panel. Callers request limit+1 rows to discover
+// whether an older page exists without loading the whole task history.
+func (r *ExecutionRepo) ListByTaskHistoryPage(ctx context.Context, taskID string, limit int) ([]models.Execution, error) {
+	if limit <= 0 {
+		return []models.Execution{}, nil
 	}
-	return execs, rows.Err()
+	rows, err := r.db.QueryContext(ctx, taskExecutionHistoryPageSQL, taskID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("listing execution history page: %w", err)
+	}
+	defer rows.Close()
+
+	return scanExecutionsNewestFirst(rows)
 }
 
 func (r *ExecutionRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]models.Execution, error) {
@@ -889,7 +899,7 @@ func (r *ExecutionRepo) listTaskExecutionPage(ctx context.Context, taskID, befor
 	return scanExecutionsNewestFirstAsChronological(rows)
 }
 
-func scanExecutionsChronological(rows *sql.Rows) ([]models.Execution, error) {
+func scanExecutionsNewestFirst(rows *sql.Rows) ([]models.Execution, error) {
 	var execs []models.Execution
 	for rows.Next() {
 		e, err := scanExecutionRow(rows)
@@ -899,6 +909,10 @@ func scanExecutionsChronological(rows *sql.Rows) ([]models.Execution, error) {
 		execs = append(execs, e)
 	}
 	return execs, rows.Err()
+}
+
+func scanExecutionsChronological(rows *sql.Rows) ([]models.Execution, error) {
+	return scanExecutionsNewestFirst(rows)
 }
 
 func scanExecutionsNewestFirstAsChronological(rows *sql.Rows) ([]models.Execution, error) {

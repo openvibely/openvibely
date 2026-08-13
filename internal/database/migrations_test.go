@@ -12,30 +12,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func openMigrationTestDB(t *testing.T, dbPath string) *sql.DB {
-	t.Helper()
+func TestMigration153TelegramUsernameOnlyLookupIndexDownDropsOnlyNewIndex(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "telegram-username-index-153.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	db.SetMaxOpenConns(1)
-	for _, pragma := range []string{
-		"PRAGMA journal_mode=WAL",
-		"PRAGMA foreign_keys=ON",
-		"PRAGMA busy_timeout=5000",
-	} {
-		if _, err := db.Exec(pragma); err != nil {
-			db.Close()
-			t.Fatalf("failed to apply %s: %v", pragma, err)
-		}
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
-}
-
-func TestMigration153TelegramUsernameOnlyLookupIndexDownDropsOnlyNewIndex(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "telegram-username-index-153.db")
-	db := openMigrationTestDB(t, dbPath)
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -70,7 +53,11 @@ func TestMigration153TelegramUsernameOnlyLookupIndexDownDropsOnlyNewIndex(t *tes
 
 func TestMigration143DropsPredictiveCollisionTables(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "drop-predictive-collisions-143.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -134,7 +121,11 @@ func TestMigration143DropsPredictiveCollisionTables(t *testing.T) {
 
 func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "task-deletion-indexes-130.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -212,7 +203,11 @@ func TestMigration130IndexesTaskDeletionForeignKeys(t *testing.T) {
 
 func TestMigration130AllowsLegacyDatabaseWithoutArchitectTables(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "legacy-task-deletion-indexes-130.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -247,7 +242,11 @@ func TestMigration130AllowsLegacyDatabaseWithoutArchitectTables(t *testing.T) {
 
 func TestMigration132IndexesLifecycleExecutionParentForeignKey(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "lifecycle-parent-index-132.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -270,7 +269,11 @@ func TestMigration132IndexesLifecycleExecutionParentForeignKey(t *testing.T) {
 
 func TestMigration159IndexesTaskLifecycleActivityOrdering(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "lifecycle-task-started-index-159.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -324,7 +327,11 @@ func TestMigration159IndexesTaskLifecycleActivityOrdering(t *testing.T) {
 
 func TestMigration135IndexesProjectScopedAlertOrdering(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "alerts-project-created-index-135.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -402,7 +409,11 @@ func TestMigration135IndexesProjectScopedAlertOrdering(t *testing.T) {
 
 func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "retired-attachment-sessions-131.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -415,7 +426,7 @@ func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO retired_attachment_sessions(session_id) VALUES (?)`, sessionID); err != nil {
 		t.Fatalf("retiring attachment session: %v", err)
 	}
-	_, err := db.Exec(`
+	_, err = db.Exec(`
 		INSERT INTO thread_inputs
 			(id, scope, project_id, input_mode, input_status, content, attachment_session_id, queue_position)
 		VALUES ('late-owner', 'chat', 'default', 'queued', 'pending', 'late', ?, 1)`, sessionID)
@@ -456,7 +467,11 @@ func explainQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) strin
 
 func TestMigration122DeletesFailedPublicationCreatedSchedulesBeforeDroppingJournal(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-publication-schedules-122.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -530,7 +545,11 @@ func TestMigration122DeletesFailedPublicationCreatedSchedulesBeforeDroppingJourn
 
 func TestMigration124_BackfillsOnlyFeatureOwnedAutomationIssueTasks(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-issue-origin-124.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -597,7 +616,11 @@ func TestMigration124_BackfillsOnlyFeatureOwnedAutomationIssueTasks(t *testing.T
 
 func TestMigration127FailsClosedForExistingGitHubIssueClaims(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-github-issue-dedup-127.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -647,7 +670,11 @@ func TestMigration127FailsClosedForExistingGitHubIssueClaims(t *testing.T) {
 
 func TestMigration128LeavesHistoricalGitHubIssueProjectionSourceUnknown(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-github-issue-projection-source-128.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -678,7 +705,11 @@ func TestMigration128LeavesHistoricalGitHubIssueProjectionSourceUnknown(t *testi
 
 func TestMigration125_RemovesLegacyDraftGraphsAndUnsavedAutomationShells(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automation-current-graph-125.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -797,7 +828,11 @@ func TestMigration125_RemovesLegacyDraftGraphsAndUnsavedAutomationShells(t *test
 
 func TestMigration112_BackfillsOperationalAlertsWithoutInferringProject(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "alerts-112.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -831,7 +866,11 @@ func TestMigration112_BackfillsOperationalAlertsWithoutInferringProject(t *testi
 func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "old-discord-099.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -905,7 +944,11 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "system-channel-auth.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -965,7 +1008,11 @@ func TestMigration108_SystemChannelInboundAuthorizationDedupe(t *testing.T) {
 func TestMigration105_AllowsMixtureProviderAndConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "mixture-105.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -992,7 +1039,11 @@ func TestMigration105_AllowsMixtureProviderAndConfig(t *testing.T) {
 func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "old-swarm-106.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1071,7 +1122,11 @@ func tableHasColumn(t *testing.T, db *sql.DB, table, column string) bool {
 func TestMigration100_ChannelTargetsAllowMultipleUnnamedTargets(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "channel-targets.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1102,7 +1157,11 @@ func TestMigrations_PreserveForeignKeyData(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	// Run all migrations
 	goose.SetBaseFS(migrations.FS)
@@ -1115,35 +1174,41 @@ func TestMigrations_PreserveForeignKeyData(t *testing.T) {
 
 	// Create test data
 	// Create a project
-	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('test-project', 'Test Project', 'Test', '/tmp')`); err != nil {
+	_, err = db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('test-project', 'Test Project', 'Test', '/tmp')`)
+	if err != nil {
 		t.Fatalf("failed to insert project: %v", err)
 	}
 
 	// Create a task
-	if _, err := db.Exec(`INSERT INTO tasks (id, project_id, title, category, status) VALUES ('test-task', 'test-project', 'Test Task', 'scheduled', 'pending')`); err != nil {
+	_, err = db.Exec(`INSERT INTO tasks (id, project_id, title, category, status) VALUES ('test-task', 'test-project', 'Test Task', 'scheduled', 'pending')`)
+	if err != nil {
 		t.Fatalf("failed to insert task: %v", err)
 	}
 
 	// Create a schedule
-	if _, err := db.Exec(`INSERT INTO schedules (id, task_id, run_at, repeat_type) VALUES ('test-schedule', 'test-task', datetime('now'), 'daily')`); err != nil {
+	_, err = db.Exec(`INSERT INTO schedules (id, task_id, run_at, repeat_type) VALUES ('test-schedule', 'test-task', datetime('now'), 'daily')`)
+	if err != nil {
 		t.Fatalf("failed to insert schedule: %v", err)
 	}
 
 	// Create an execution
-	if _, err := db.Exec(`INSERT INTO executions (id, task_id, status, started_at) VALUES ('test-exec', 'test-task', 'completed', datetime('now'))`); err != nil {
+	_, err = db.Exec(`INSERT INTO executions (id, task_id, status, started_at) VALUES ('test-exec', 'test-task', 'completed', datetime('now'))`)
+	if err != nil {
 		t.Fatalf("failed to insert execution: %v", err)
 	}
 
 	// Verify the data exists
 	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM schedules WHERE task_id = 'test-task'").Scan(&count); err != nil {
+	err = db.QueryRow("SELECT COUNT(*) FROM schedules WHERE task_id = 'test-task'").Scan(&count)
+	if err != nil {
 		t.Fatalf("failed to count schedules: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("expected 1 schedule, got %d", count)
 	}
 
-	if err := db.QueryRow("SELECT COUNT(*) FROM executions WHERE task_id = 'test-task'").Scan(&count); err != nil {
+	err = db.QueryRow("SELECT COUNT(*) FROM executions WHERE task_id = 'test-task'").Scan(&count)
+	if err != nil {
 		t.Fatalf("failed to count executions: %v", err)
 	}
 	if count != 1 {
@@ -1152,7 +1217,8 @@ func TestMigrations_PreserveForeignKeyData(t *testing.T) {
 
 	// Now verify that the schema has proper constraints
 	var schema string
-	if err := db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").Scan(&schema); err != nil {
+	err = db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='tasks'").Scan(&schema)
+	if err != nil {
 		t.Fatalf("failed to get tasks schema: %v", err)
 	}
 
@@ -1163,7 +1229,8 @@ func TestMigrations_PreserveForeignKeyData(t *testing.T) {
 
 	// Verify foreign keys are enabled
 	var fkEnabled int
-	if err := db.QueryRow("PRAGMA foreign_keys").Scan(&fkEnabled); err != nil {
+	err = db.QueryRow("PRAGMA foreign_keys").Scan(&fkEnabled)
+	if err != nil {
 		t.Fatalf("failed to check foreign keys: %v", err)
 	}
 	if fkEnabled != 1 {
@@ -1177,7 +1244,11 @@ func TestMigrations_AgentsTableDoesNotContainColorColumn(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1218,7 +1289,11 @@ func TestMigration012_CheckConstraints(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1229,12 +1304,13 @@ func TestMigration012_CheckConstraints(t *testing.T) {
 	}
 
 	// Create a project first
-	if _, err := db.Exec(`INSERT INTO projects (id, name) VALUES ('test-proj', 'Test')`); err != nil {
+	_, err = db.Exec(`INSERT INTO projects (id, name) VALUES ('test-proj', 'Test')`)
+	if err != nil {
 		t.Fatalf("failed to insert project: %v", err)
 	}
 
 	// Test category CHECK constraint
-	_, err := db.Exec(`INSERT INTO tasks (id, project_id, title, category) VALUES ('t1', 'test-proj', 'Test 1', 'invalid-category')`)
+	_, err = db.Exec(`INSERT INTO tasks (id, project_id, title, category) VALUES ('t1', 'test-proj', 'Test 1', 'invalid-category')`)
 	if err == nil {
 		t.Fatal("expected error for invalid category, got nil")
 	}
@@ -1252,7 +1328,8 @@ func TestMigration012_CheckConstraints(t *testing.T) {
 	}
 
 	// Valid inserts should succeed
-	if _, err := db.Exec(`INSERT INTO tasks (id, project_id, title, category, status, tag) VALUES ('t4', 'test-proj', 'Test 4', 'active', 'pending', 'feature')`); err != nil {
+	_, err = db.Exec(`INSERT INTO tasks (id, project_id, title, category, status, tag) VALUES ('t4', 'test-proj', 'Test 4', 'active', 'pending', 'feature')`)
+	if err != nil {
 		t.Fatalf("expected valid insert to succeed: %v", err)
 	}
 
@@ -1263,7 +1340,11 @@ func TestMigrations_GitHubRepoURLAndTaskPullRequests(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1370,7 +1451,11 @@ func TestMigration082_NormalizesUnreleasedSkillCuratorNames(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1460,7 +1545,11 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1495,7 +1584,11 @@ func TestMigration082_AppliesAfterPublic074(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1658,7 +1751,11 @@ func TestMigration071_RebuildsAgentConfigsWithReferences(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		t.Fatalf("failed to enable foreign keys: %v", err)
@@ -1727,7 +1824,11 @@ func TestMigration091_BackfillsHistoricalLLMUsageFromExecutions(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1770,7 +1871,11 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1830,7 +1935,11 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 func TestMigration095_AllowsCreatedSkillAnalyticsEvents(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "skill-analytics-created.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -1972,7 +2081,11 @@ func TestMain(m *testing.M) {
 func TestMigration110_GitHubAuthorizationAndProjectInbox(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "github-auth-110.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -2014,7 +2127,11 @@ func TestMigration110_GitHubAuthorizationAndProjectInbox(t *testing.T) {
 
 func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-113.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -2047,7 +2164,11 @@ func TestMigration113AutomationDefinitionsUpAndDown(t *testing.T) {
 
 func TestMigration121And122LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-atomic-save.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
@@ -2112,7 +2233,11 @@ func TestMigration121And122LeaveOnlyAtomicAutomationSaveSchema(t *testing.T) {
 
 func TestMigration115AutomationPublicationUpAndDown(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-115.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
 		t.Fatal(err)
 	}
@@ -2179,7 +2304,11 @@ func TestMigration115AutomationPublicationUpAndDown(t *testing.T) {
 
 func TestMigration114AutomationRuntimeUpAndDown(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "automations-114.db")
-	db := openMigrationTestDB(t, dbPath)
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
 		t.Fatal(err)
 	}
@@ -2233,7 +2362,11 @@ func TestMigration114AutomationRuntimeUpAndDown(t *testing.T) {
 }
 
 func TestMigration129PreservesExistingScheduleContextSemantics(t *testing.T) {
-	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "schedule-context-129.db"))
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "schedule-context-129.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -2268,7 +2401,11 @@ func TestMigration129PreservesExistingScheduleContextSemantics(t *testing.T) {
 }
 
 func TestMigration134ArtifactMailboxOwnershipSurvivesGraphReplacementWithoutBackfill(t *testing.T) {
-	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "automation-artifact-mailbox-134.db"))
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "automation-artifact-mailbox-134.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -2321,7 +2458,11 @@ func TestMigration134ArtifactMailboxOwnershipSurvivesGraphReplacementWithoutBack
 }
 
 func TestMigration145RetiresGitHubIssueMailboxOwnershipOnly(t *testing.T) {
-	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "retire-github-mailbox-ownership-145.db"))
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "retire-github-mailbox-ownership-145.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -2359,7 +2500,11 @@ func TestMigration145RetiresGitHubIssueMailboxOwnershipOnly(t *testing.T) {
 }
 
 func TestMigration146SimplifiesNativeAlertMailboxOwnership(t *testing.T) {
-	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "simplify-native-alert-mailbox-ownership-146.db"))
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "simplify-native-alert-mailbox-ownership-146.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
@@ -2403,7 +2548,11 @@ func TestMigration146SimplifiesNativeAlertMailboxOwnership(t *testing.T) {
 }
 
 func TestMigration133UsesAutomationLifecycleForScheduleEnablement(t *testing.T) {
-	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "automation-schedule-lifecycle-133.db"))
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "automation-schedule-lifecycle-133.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)

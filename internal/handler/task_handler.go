@@ -27,12 +27,14 @@ import (
 )
 
 const (
-	backlogSortCookieName        = "backlog_sort"
-	completedSortCookieName      = "completed_sort"
-	defaultBacklogSort           = "created_desc"
-	defaultCompletedSort         = "completed_desc"
-	taskThreadWindowLimitDefault = 5
-	taskThreadWindowLimitMax     = 100
+	backlogSortCookieName             = "backlog_sort"
+	completedSortCookieName           = "completed_sort"
+	defaultBacklogSort                = "created_desc"
+	defaultCompletedSort              = "completed_desc"
+	taskThreadWindowLimitDefault      = 5
+	taskThreadWindowLimitMax          = 100
+	taskExecutionHistoryWindowDefault = 18
+	taskExecutionHistoryWindowMax     = 100
 )
 
 type taskSortPreferences struct {
@@ -609,7 +611,10 @@ func (h *Handler) GetTask(c echo.Context) error {
 	return render(c, http.StatusOK, pages.TaskDetailPage(projects, data.task, data.taskGoal, data.executions, data.schedules, data.agents, data.agentDefs, data.attachments, defaultTab, data.reviewComments))
 }
 
-// GetTaskExecutions returns just the execution history for a task (used for polling updates)
+// GetTaskExecutions returns the bounded execution-history fragment for a task.
+// The default polling path renders only the latest window; older pages are loaded
+// deliberately through ?before=<exec_id> so recurring polls do not reload all
+// historical output bytes.
 func (h *Handler) GetTaskExecutions(c echo.Context) error {
 	taskID := c.Param("taskId")
 
@@ -621,9 +626,16 @@ func (h *Handler) GetTaskExecutions(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	executions, _ := h.execRepo.ListByTask(c.Request().Context(), taskID)
+	limit := parseThreadWindowLimit(c.QueryParam("limit"), taskExecutionHistoryWindowDefault, taskExecutionHistoryWindowMax)
+	executions, hasOlder, err := h.loadTaskExecutionHistoryWindow(c.Request().Context(), taskID, c.QueryParam("before"), limit)
+	if err != nil {
+		return err
+	}
+	if c.QueryParam("before") != "" {
+		return render(c, http.StatusOK, components.TaskExecutionHistoryOlderPage(task, executions, hasOlder, limit))
+	}
 
-	return render(c, http.StatusOK, components.TaskExecutionHistory(task, executions))
+	return render(c, http.StatusOK, components.TaskExecutionHistory(task, executions, hasOlder, limit))
 }
 
 // GetTaskDetailStatus returns just the task detail metrics (status badges) for polling updates
@@ -2301,6 +2313,27 @@ func (h *Handler) TaskThreadPendingInputs(c echo.Context) error {
 	return render(c, http.StatusOK, components.ChatComposerQueuedInputRowsForTask(pendingInputs, func(input models.ThreadInput) string {
 		return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, input.ID)
 	}, taskID))
+}
+
+func (h *Handler) loadTaskExecutionHistoryWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
+	queryLimit := limit + 1
+	var rows []models.Execution
+	var err error
+	if beforeExecID != "" {
+		rows, err = h.execRepo.ListByTaskChronologicalBefore(ctx, taskID, beforeExecID, queryLimit)
+		for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+			rows[i], rows[j] = rows[j], rows[i]
+		}
+	} else {
+		rows, err = h.execRepo.ListByTaskHistoryPage(ctx, taskID, queryLimit)
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if len(rows) <= limit {
+		return rows, false, nil
+	}
+	return rows[:limit], true, nil
 }
 
 func (h *Handler) loadTaskThreadExecutionWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {
