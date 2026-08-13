@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/pages"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -33,6 +35,58 @@ import (
 
 func setupTestHandler(t testing.TB) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
 	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	return h, e, llmConfigRepo
+}
+
+func setupTestHandlerForDB(t testing.TB, db *sql.DB) (*Handler, *echo.Echo, *repository.LLMConfigRepo) {
+	t.Helper()
+	oldUploadsDir := uploadsDir
+	uploadsDir = t.TempDir()
+	t.Cleanup(func() {
+		uploadsDir = oldUploadsDir
+	})
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerRepo := repository.NewWorkerRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+
+	alertRepo := repository.NewAlertRepo(db)
+	upcomingRepo := repository.NewUpcomingRepo(db)
+
+	projectSvc := service.NewProjectService(projectRepo)
+	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	workerSvc := service.NewWorkerService(llmSvc, 0, nil)
+	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	taskSvc.SetDeletionUploadsDir(uploadsDir)
+	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	alertSvc := service.NewAlertService(alertRepo, nil)
+	upcomingSvc := service.NewUpcomingService(upcomingRepo)
+
+	settingsRepo := repository.NewSettingsRepo(db)
+	slackAuthRepo := repository.NewSlackAuthRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	discordAuthRepo := repository.NewDiscordAuthRepo(db)
+	discordTaskContextRepo := repository.NewDiscordTaskContextRepo(db)
+	githubAuthRepo := repository.NewGitHubAuthRepo(db)
+
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h.SetGitHubAuthRepo(githubAuthRepo)
+	h.SetSlackAuthRepo(slackAuthRepo)
+	h.SetEmailAuthRepo(emailAuthRepo)
+	h.SetEmailTaskContextRepo(emailTaskContextRepo)
+	h.SetDiscordAuthRepo(discordAuthRepo)
+	h.SetDiscordTaskContextRepo(discordTaskContextRepo)
+	h.SetLocalRepoPathEnabled(true)
+
+	e := echo.New()
+	h.RegisterRoutes(e)
 	return h, e, llmConfigRepo
 }
 
@@ -93,6 +147,10 @@ func setupTestHandlerWithDB(t testing.TB) (*Handler, *echo.Echo, *repository.LLM
 
 // createProject creates a test project with the given name.
 func createProject(t *testing.T, h *Handler, name string) *models.Project {
+	return createProjectTB(t, h, name)
+}
+
+func createProjectTB(t testing.TB, h *Handler, name string) *models.Project {
 	t.Helper()
 	p := &models.Project{Name: name}
 	if err := h.projectSvc.Create(context.Background(), p); err != nil {
@@ -104,6 +162,10 @@ func createProject(t *testing.T, h *Handler, name string) *models.Project {
 // createAgent creates a test LLM config with sensible defaults.
 // Uses ProviderTest so tests never hit real APIs or spawn CLI subprocesses.
 func createAgent(t *testing.T, repo *repository.LLMConfigRepo, opts ...func(*models.LLMConfig)) *models.LLMConfig {
+	return createAgentTB(t, repo, opts...)
+}
+
+func createAgentTB(t testing.TB, repo *repository.LLMConfigRepo, opts ...func(*models.LLMConfig)) *models.LLMConfig {
 	t.Helper()
 	a := &models.LLMConfig{
 		Name: "Test Agent", Provider: models.ProviderTest,
@@ -120,6 +182,10 @@ func createAgent(t *testing.T, repo *repository.LLMConfigRepo, opts ...func(*mod
 
 // createTask creates a test task with sensible defaults (active/pending).
 func createTask(t *testing.T, h *Handler, projectID, title string, opts ...func(*models.Task)) *models.Task {
+	return createTaskTB(t, h, projectID, title, opts...)
+}
+
+func createTaskTB(t testing.TB, h *Handler, projectID, title string, opts ...func(*models.Task)) *models.Task {
 	t.Helper()
 	task := &models.Task{
 		ProjectID: projectID, Title: title,
@@ -367,6 +433,196 @@ func TestHandler_GetTaskExecutions(t *testing.T) {
 	if !strings.Contains(body, "loading-spinner") && !strings.Contains(body, "Model is working") {
 		t.Errorf("expected execution status in response")
 	}
+}
+
+func TestHandler_GetTaskExecutions_BoundedProductionFixture(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Execution History Project")
+	task := createTask(t, h, project.ID, "Large Execution History", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+	})
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/executions")
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `id="task-execution-history"`)
+	assertContains(t, rec, "Load older executions")
+	assertContains(t, rec, "output-199-")
+	assertContains(t, rec, `exec-output-exec-199`)
+	assertContains(t, rec, "Elapsed:")
+	assertContains(t, rec, "output-182-")
+	assertContains(t, rec, "64 tokens, 1s")
+	assertContains(t, rec, "Finished:")
+	assertContains(t, rec, "failure message")
+	assertContains(t, rec, `exec-error-exec-198`)
+	assertNotContains(t, rec, "output-181-")
+	assertNotContains(t, rec, "output-000-")
+	assertContains(t, rec, `id="task-execution-history-loaded-older"`)
+	assertContains(t, rec, `hx-preserve`)
+
+	executions, err := h.execRepo.ListByTask(ctx, task.ID)
+	require.NoError(t, err)
+	var legacy bytes.Buffer
+	require.NoError(t, components.TaskExecutionHistory(task, executions, false, len(executions)).Render(ctx, &legacy))
+	if got, wantLessThan := rec.Body.Len(), legacy.Len()/10; got >= wantLessThan {
+		t.Fatalf("bounded execution-history response too large: got %d bytes, want < %d bytes (legacy all-history %d bytes)", got, wantLessThan, legacy.Len())
+	}
+}
+
+func TestHandler_GetTaskExecutions_LoadOlderPage(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Execution History Project")
+	task := createTask(t, h, project.ID, "Paged Execution History", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+	})
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 25, 16, 64)
+
+	rec := htmxGet(e, "/tasks/"+task.ID+"/executions?limit=5")
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, "output-024-")
+	assertContains(t, rec, "output-020-")
+	assertNotContains(t, rec, "output-019-")
+
+	oldestVisibleID := newestHistoryExecutionID(t, db, task.ID, 5)
+	older := htmxGet(e, "/tasks/"+task.ID+"/executions?before="+oldestVisibleID+"&limit=5")
+	assertCode(t, older, http.StatusOK)
+	assertContains(t, older, `id="task-execution-history-loaded-older"`)
+	assertContains(t, older, `hx-swap-oob="beforeend"`)
+	assertContains(t, older, `id="task-execution-history-older-loader"`)
+	assertContains(t, older, `data-execution-history-card="exec-019"`)
+	assertContains(t, older, "output-019-")
+	assertContains(t, older, "output-015-")
+	assertNotContains(t, older, "output-020-")
+	assertNotContains(t, older, "output-014-")
+	assertContains(t, older, "Load older executions")
+}
+
+func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context, *Handler, *echo.Echo, *models.Task) error
+	}{
+		{
+			name: "legacy_unbounded",
+			run: func(ctx context.Context, h *Handler, _ *echo.Echo, task *models.Task) error {
+				loadedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+				if err != nil {
+					return err
+				}
+				executions, err := h.execRepo.ListByTask(ctx, task.ID)
+				if err != nil {
+					return err
+				}
+				var out bytes.Buffer
+				return components.TaskExecutionHistory(loadedTask, executions, false, len(executions)).Render(ctx, &out)
+			},
+		},
+		{
+			name: "bounded_poll",
+			run: func(_ context.Context, _ *Handler, e *echo.Echo, task *models.Task) error {
+				rec := htmxGet(e, "/tasks/"+task.ID+"/executions")
+				if rec.Code != http.StatusOK {
+					return fmt.Errorf("execution-history request status=%d", rec.Code)
+				}
+				return nil
+			},
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+			agent := createAgentTB(b, llmConfigRepo)
+			project := createProjectTB(b, h, "Contention Benchmark Project")
+			task := createTaskTB(b, h, project.ID, "Contention Benchmark Task", func(tk *models.Task) {
+				tk.Status = models.StatusRunning
+			})
+			seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+
+			var totalLightweightLatency int64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				queryStarted := make(chan struct{})
+				var once sync.Once
+				counter.SetObserver(func(_ context.Context, query string) {
+					if strings.Contains(query, "FROM executions WHERE task_id = ? ORDER BY started_at DESC") {
+						once.Do(func() { close(queryStarted) })
+					}
+				})
+				errCh := make(chan error, 1)
+				go func() {
+					errCh <- tc.run(context.Background(), h, e, task)
+				}()
+				select {
+				case <-queryStarted:
+				case err := <-errCh:
+					b.Fatalf("execution-history request ended before query started: %v", err)
+				case <-time.After(2 * time.Second):
+					b.Fatalf("execution-history query did not start")
+				}
+				lightweightStart := time.Now()
+				if _, err := h.projectSvc.List(context.Background()); err != nil {
+					b.Fatalf("lightweight project list: %v", err)
+				}
+				totalLightweightLatency += time.Since(lightweightStart).Nanoseconds()
+				if err := <-errCh; err != nil {
+					b.Fatal(err)
+				}
+				counter.SetObserver(nil)
+			}
+			b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
+		})
+	}
+}
+
+func seedLargeExecutionHistory(t testing.TB, db *sql.DB, taskID, agentID string, count, promptBytes, outputBytes int) {
+	t.Helper()
+	base := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	stmt, err := db.Prepare(`INSERT INTO executions
+		(id, task_id, agent_config_id, status, prompt_sent, output, error_message, tokens_used, duration_ms, started_at, completed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	require.NoError(t, err)
+	defer stmt.Close()
+	for i := 0; i < count; i++ {
+		status := models.ExecCompleted
+		errorMessage := ""
+		completed := any(base.Add(time.Duration(i)*time.Second + time.Second).Format("2006-01-02 15:04:05"))
+		if i == count-1 {
+			status = models.ExecRunning
+			completed = nil
+		} else if i == count-2 {
+			status = models.ExecFailed
+			errorMessage = "failure message " + strings.Repeat("E", 256)
+		}
+		prompt := fmt.Sprintf("prompt-%03d-", i) + strings.Repeat("P", promptBytes)
+		output := fmt.Sprintf("output-%03d-", i) + strings.Repeat("O", outputBytes)
+		_, err := stmt.Exec(
+			fmt.Sprintf("exec-%03d", i),
+			taskID,
+			agentID,
+			status,
+			prompt,
+			output,
+			errorMessage,
+			64,
+			1500,
+			base.Add(time.Duration(i)*time.Second).Format("2006-01-02 15:04:05"),
+			completed,
+		)
+		require.NoError(t, err)
+	}
+}
+
+func newestHistoryExecutionID(t testing.TB, db *sql.DB, taskID string, offset int) string {
+	t.Helper()
+	var id string
+	err := db.QueryRow(`SELECT id FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1 OFFSET ?`, taskID, offset-1).Scan(&id)
+	require.NoError(t, err)
+	return id
 }
 
 func TestHandler_GetTaskDetailStatus(t *testing.T) {
