@@ -504,31 +504,34 @@ func TestHandler_GetTaskExecutions_LoadOlderPage(t *testing.T) {
 func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *testing.B) {
 	for _, tc := range []struct {
 		name string
-		run  func(context.Context, *Handler, *echo.Echo, *models.Task) error
+		run  func(context.Context, *Handler, *echo.Echo, *models.Task) (int, error)
 	}{
 		{
 			name: "legacy_unbounded",
-			run: func(ctx context.Context, h *Handler, _ *echo.Echo, task *models.Task) error {
+			run: func(ctx context.Context, h *Handler, _ *echo.Echo, task *models.Task) (int, error) {
 				loadedTask, err := h.taskSvc.GetByID(ctx, task.ID)
 				if err != nil {
-					return err
+					return 0, err
 				}
 				executions, err := h.execRepo.ListByTask(ctx, task.ID)
 				if err != nil {
-					return err
+					return 0, err
 				}
 				var out bytes.Buffer
-				return components.TaskExecutionHistory(loadedTask, executions, false, len(executions)).Render(ctx, &out)
+				if err := components.TaskExecutionHistory(loadedTask, executions, false, len(executions)).Render(ctx, &out); err != nil {
+					return 0, err
+				}
+				return out.Len(), nil
 			},
 		},
 		{
 			name: "bounded_poll",
-			run: func(_ context.Context, _ *Handler, e *echo.Echo, task *models.Task) error {
+			run: func(_ context.Context, _ *Handler, e *echo.Echo, task *models.Task) (int, error) {
 				rec := htmxGet(e, "/tasks/"+task.ID+"/executions")
 				if rec.Code != http.StatusOK {
-					return fmt.Errorf("execution-history request status=%d", rec.Code)
+					return 0, fmt.Errorf("execution-history request status=%d", rec.Code)
 				}
-				return nil
+				return rec.Body.Len(), nil
 			},
 		},
 	} {
@@ -543,6 +546,7 @@ func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *te
 			seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
 
 			var totalLightweightLatency int64
+			var totalRenderedBytes int64
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
@@ -553,14 +557,19 @@ func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *te
 						once.Do(func() { close(queryStarted) })
 					}
 				})
-				errCh := make(chan error, 1)
+				type runResult struct {
+					bytes int
+					err   error
+				}
+				resultCh := make(chan runResult, 1)
 				go func() {
-					errCh <- tc.run(context.Background(), h, e, task)
+					bytes, err := tc.run(context.Background(), h, e, task)
+					resultCh <- runResult{bytes: bytes, err: err}
 				}()
 				select {
 				case <-queryStarted:
-				case err := <-errCh:
-					b.Fatalf("execution-history request ended before query started: %v", err)
+				case result := <-resultCh:
+					b.Fatalf("execution-history request ended before query started: %v", result.err)
 				case <-time.After(2 * time.Second):
 					b.Fatalf("execution-history query did not start")
 				}
@@ -569,12 +578,15 @@ func BenchmarkHandler_GetTaskExecutions_ContentionWithLightweightDBRequest(b *te
 					b.Fatalf("lightweight project list: %v", err)
 				}
 				totalLightweightLatency += time.Since(lightweightStart).Nanoseconds()
-				if err := <-errCh; err != nil {
-					b.Fatal(err)
+				result := <-resultCh
+				if result.err != nil {
+					b.Fatal(result.err)
 				}
+				totalRenderedBytes += int64(result.bytes)
 				counter.SetObserver(nil)
 			}
 			b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
+			b.ReportMetric(float64(totalRenderedBytes)/float64(b.N), "rendered_response_bytes/op")
 		})
 	}
 }
