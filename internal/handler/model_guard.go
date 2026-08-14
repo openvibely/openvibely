@@ -26,10 +26,14 @@ func (h *Handler) hasConfiguredModels(c echo.Context) (bool, error) {
 }
 
 func setHTMXToast(c echo.Context, message, status string) {
-	setHTMXToastWithLink(c, message, status, "", "")
+	setHTMXToastWithOptions(c, message, status, "", "", "", "")
 }
 
 func setHTMXToastWithLink(c echo.Context, message, status, linkURL, linkText string) {
+	setHTMXToastWithOptions(c, message, status, linkURL, linkText, "", "")
+}
+
+func setHTMXToastWithOptions(c echo.Context, message, status, linkURL, linkText, taskID, toastKey string) {
 	toast := map[string]any{
 		"message": message,
 		"status":  status,
@@ -39,6 +43,12 @@ func setHTMXToastWithLink(c echo.Context, message, status, linkURL, linkText str
 	}
 	if linkText != "" {
 		toast["link_text"] = linkText
+	}
+	if taskID != "" {
+		toast["task_id"] = taskID
+	}
+	if toastKey != "" {
+		toast["toast_key"] = toastKey
 	}
 
 	payload := map[string]any{

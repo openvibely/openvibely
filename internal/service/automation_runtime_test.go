@@ -288,6 +288,34 @@ func TestAutomationRuntimeAdvancesStaleTerminalScheduledOccurrence(t *testing.T)
 	require.Equal(t, 1, dispatchCount)
 }
 
+func TestAutomationRuntimeScheduledInvocationStartEventIdentifiesAutomation(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
+	broadcaster := events.NewBroadcaster()
+	fixture.repo.SetBroadcaster(broadcaster)
+	sub, err := broadcaster.Subscribe()
+	require.NoError(t, err)
+	defer broadcaster.Unsubscribe(sub)
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	next := fixture.schedule.ComputeNextRun(now)
+	invocation, dispatch, err := fixture.repo.ClaimScheduledOccurrence(ctx, fixture.schedule, now, next)
+	require.NoError(t, err)
+	require.NotNil(t, invocation)
+	require.NotNil(t, dispatch)
+
+	select {
+	case event := <-sub:
+		require.Equal(t, events.AutomationInvocationStarted, event.Type)
+		require.Equal(t, fixture.project.ID, event.ProjectID)
+		require.Equal(t, fixture.definition.Automation.ID, event.AutomationID)
+		require.Equal(t, fixture.definition.Automation.Name, event.TaskName)
+		require.Equal(t, invocation.ID, event.InvocationID)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for automation invocation started event")
+	}
+}
+
 func TestAutomationRuntimeAtomicOccurrenceDispatchAndRestartRecovery(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()

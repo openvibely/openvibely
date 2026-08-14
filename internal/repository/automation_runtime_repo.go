@@ -161,7 +161,7 @@ func (r *AutomationRepo) PublishInvalidation(eventType events.TaskEventType, pro
 	}
 	r.broadcaster.Publish(events.TaskEvent{
 		Type: eventType, ProjectID: projectID, AutomationID: binding.AutomationID,
-		VersionID: binding.VersionID, InvocationID: binding.InvocationID,
+		TaskName: binding.AutomationName, VersionID: binding.VersionID, InvocationID: binding.InvocationID,
 		WorkItemID: binding.WorkItemID, NodeID: binding.NodeID,
 	})
 }
@@ -227,12 +227,12 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 		}
 	}()
 
-	var versionID, adapterKey string
+	var versionID, adapterKey, automationName string
 	var lifecycle models.AutomationLifecycleState
-	if err := conn.QueryRowContext(ctx, `SELECT a.published_version_id, a.lifecycle_state, v.adapter_key
+	if err := conn.QueryRowContext(ctx, `SELECT a.published_version_id, a.lifecycle_state, a.name, v.adapter_key
 		FROM automations a JOIN automation_versions v ON v.id = a.published_version_id
 			AND v.automation_id = a.id AND v.project_id = a.project_id
-		WHERE a.project_id = ? AND a.id = ?`, projectID, automationID).Scan(&versionID, &lifecycle, &adapterKey); err != nil {
+		WHERE a.project_id = ? AND a.id = ?`, projectID, automationID).Scan(&versionID, &lifecycle, &automationName, &adapterKey); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil, errors.New("automation not found")
 		}
@@ -367,8 +367,12 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 			automationobs.String("version_id", versionID), automationobs.String("invocation_id", invocation.ID),
 			automationobs.String("node_id", invocation.TriggerNodeID), automationobs.String("status", string(invocation.Status)),
 			automationobs.String("trigger", "manual"))
-		r.PublishInvalidation(events.AutomationDefinitionUpdated, projectID, models.AutomationBinding{
-			AutomationID: automationID, VersionID: versionID, InvocationID: invocation.ID, NodeID: invocation.TriggerNodeID,
+		eventType := events.AutomationDefinitionUpdated
+		if invocation.Status == models.AutomationInvocationClaimed {
+			eventType = events.AutomationInvocationStarted
+		}
+		r.PublishInvalidation(eventType, projectID, models.AutomationBinding{
+			AutomationID: automationID, AutomationName: automationName, VersionID: versionID, InvocationID: invocation.ID, NodeID: invocation.TriggerNodeID,
 		})
 	}
 	return invocations, dispatches, nil
@@ -413,14 +417,14 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 
 	var owner models.AutomationTriggerOwner
 	var lifecycle models.AutomationLifecycleState
-	var adapterKey string
+	var adapterKey, automationName string
 	err = conn.QueryRowContext(ctx, `SELECT o.schedule_id, o.project_id, o.automation_id, o.version_id, o.node_id,
-		o.ownership_state, o.created_at, o.updated_at, a.lifecycle_state, v.adapter_key
+		o.ownership_state, o.created_at, o.updated_at, a.lifecycle_state, a.name, v.adapter_key
 		FROM automation_trigger_owners o JOIN automations a ON a.id = o.automation_id AND a.project_id = o.project_id
 		JOIN automation_versions v ON v.id = o.version_id AND v.automation_id = o.automation_id AND v.project_id = o.project_id
 		WHERE o.schedule_id = ? AND o.ownership_state = 'active' AND a.lifecycle_state = 'active'`, schedule.ID).
 		Scan(&owner.ScheduleID, &owner.ProjectID, &owner.AutomationID, &owner.VersionID, &owner.NodeID,
-			&owner.OwnershipState, &owner.CreatedAt, &owner.UpdatedAt, &lifecycle, &adapterKey)
+			&owner.OwnershipState, &owner.CreatedAt, &owner.UpdatedAt, &lifecycle, &automationName, &adapterKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, ErrAutomationScheduleChanged
 	}
@@ -574,8 +578,12 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 				ProjectID: owner.ProjectID, Status: string(models.StatusPending), Category: string(preparedCategory), OldCategory: string(taskCategory)})
 		}
 	}
-	r.PublishInvalidation(events.AutomationInvocationStarted, owner.ProjectID, models.AutomationBinding{
-		AutomationID: owner.AutomationID, VersionID: owner.VersionID, InvocationID: invocation.ID, NodeID: owner.NodeID,
+	eventType := events.AutomationDefinitionUpdated
+	if dispatch != nil {
+		eventType = events.AutomationInvocationStarted
+	}
+	r.PublishInvalidation(eventType, owner.ProjectID, models.AutomationBinding{
+		AutomationID: owner.AutomationID, AutomationName: automationName, VersionID: owner.VersionID, InvocationID: invocation.ID, NodeID: owner.NodeID,
 	})
 	return invocation, dispatch, nil
 }

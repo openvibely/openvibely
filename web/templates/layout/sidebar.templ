@@ -187,20 +187,29 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 									}
 								}
 
-								// Show toast notifications for task completion events (current project only).
-								// Skip chat tasks — chat responses appear inline in the chat UI.
-								if (eventType === 'task_status_changed' && projectSelector && data.category !== 'chat') {
-									const currentProjectID = projectSelector.value;
-									if (data.project_id === currentProjectID) {
-										const terminalStatuses = ['completed', 'failed', 'cancelled'];
-										if (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {
-											const taskName = data.task_name || 'Task';
-											window.showToast(taskName, data.status, data.task_id);
+									// Show toast notifications for task completion events (current project only).
+									// Skip chat tasks — chat responses appear inline in the chat UI.
+									if (eventType === 'task_status_changed' && projectSelector && data.category !== 'chat') {
+										const currentProjectID = projectSelector.value;
+										if (data.project_id === currentProjectID) {
+											const terminalStatuses = ['completed', 'failed', 'cancelled'];
+											if (terminalStatuses.includes(data.status) && typeof window.showToast === 'function') {
+												const taskName = data.task_name || 'Task';
+												window.showToast(taskName, data.status, data.task_id);
+											}
 										}
 									}
+
+									if (eventType === 'automation_invocation_started' && projectSelector && typeof window.showToast === 'function') {
+										const currentProjectID = projectSelector.value;
+										if (data.project_id === currentProjectID) {
+											const automationName = data.task_name || 'Automation';
+											const invocationId = data.invocation_id || data.automation_id || '';
+											window.showToast(automationName + ' is now running.', 'info', '', { toastKey: 'automation:' + invocationId });
+										}
+									}
+									return;
 								}
-								return;
-							}
 
 							if (eventType === 'chat_new_message' || eventType === 'chat_response_done' || eventType === 'chat_turn_steered' || eventType === 'chat_thread_input_applied' || eventType === 'chat_thread_input_cancelled' || eventType === 'mixture_progress') {
 								window._tabVisibility.dispatchSSEEvent('sse-chat-live-event', data);

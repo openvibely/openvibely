@@ -3872,6 +3872,25 @@ func TestSidebar_SamePageNavPrevention(t *testing.T) {
 	}
 }
 
+func TestSidebar_AutomationInvocationStartedShowsToast(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	for _, snippet := range []string{
+		`eventType === 'automation_invocation_started'`,
+		`const automationName = data.task_name || 'Automation';`,
+		`window.showToast(automationName + ' is now running.', 'info', '', { toastKey: 'automation:' + invocationId });`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("sidebar automation-start toast script missing snippet: %s", snippet)
+		}
+	}
+}
+
 func TestSidebar_DoesNotPersistSelectedNavHighlight(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 
