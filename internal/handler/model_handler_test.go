@@ -12,6 +12,7 @@ import (
 
 	llmcustomauth "github.com/openvibely/openvibely/internal/llm/customauth"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 func TestResolveProviderAndAuth(t *testing.T) {
@@ -1562,7 +1563,20 @@ func TestCreateModel_HTMX_ReturnsContentInsteadOfRedirect(t *testing.T) {
 }
 
 func TestModelMutations_HTMXReturnRefreshedList(t *testing.T) {
-	_, e, llmConfigRepo := setupTestHandler(t)
+	db, statementCounter := testutil.NewStatementCountingTestDB(t)
+	_, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	largePayload := strings.Repeat("large-edit-only-json", 4096)
+	largeCustom := &models.LLMConfig{
+		Name: "Large Custom Provider", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+		Model: "custom-model", APIKey: "secret-api-key", BaseURL: "https://example.com/v1/",
+		Transport: "chat_completions", PresetSlug: "custom", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largePayload, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largePayload + `"}`,
+	}
+	if err := llmConfigRepo.Create(ctx, largeCustom); err != nil {
+		t.Fatalf("create large custom provider: %v", err)
+	}
 
 	createForm := url.Values{
 		"name":                {"Mutation Created Model"},
@@ -1572,14 +1586,20 @@ func TestModelMutations_HTMXReturnRefreshedList(t *testing.T) {
 		"temperature":         {"0"},
 		"model_max_workers":   {"2"},
 	}
+	statementCounter.Reset()
+	statementCounter.SetEnabled(true)
 	createReq := httptest.NewRequest(http.MethodPost, "/models", strings.NewReader(createForm.Encode()))
 	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	createReq.Header.Set("HX-Request", "true")
 	createRec := httptest.NewRecorder()
 	e.ServeHTTP(createRec, createReq)
-	assertRefreshedModelsResponse(t, createRec, "Mutation Created Model", "0 / 2 active")
+	statementCounter.SetEnabled(false)
+	assertRefreshedModelsResponse(t, createRec, "Mutation Created Model", "Large Custom Provider", "0 / 2 active")
+	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	assertNotContains(t, createRec, largePayload)
+	assertNotContains(t, createRec, "secret-api-key")
 
-	configs, err := llmConfigRepo.List(context.Background())
+	configs, err := llmConfigRepo.List(ctx)
 	if err != nil {
 		t.Fatalf("list models after create: %v", err)
 	}
@@ -1602,18 +1622,43 @@ func TestModelMutations_HTMXReturnRefreshedList(t *testing.T) {
 		"temperature":         {"0"},
 		"model_max_workers":   {"3"},
 	}
+	statementCounter.Reset()
+	statementCounter.SetEnabled(true)
 	updateRec := htmxPut(e, "/models/"+created.ID, updateForm)
-	assertRefreshedModelsResponse(t, updateRec, "Mutation Updated Model", "0 / 3 active")
+	statementCounter.SetEnabled(false)
+	assertRefreshedModelsResponse(t, updateRec, "Mutation Updated Model", "Large Custom Provider", "0 / 3 active")
+	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	assertNotContains(t, updateRec, largePayload)
 
+	statementCounter.Reset()
+	statementCounter.SetEnabled(true)
 	defaultRec := htmxPost(e, "/models/"+created.ID+"/set-default", nil)
-	assertRefreshedModelsResponse(t, defaultRec, "Mutation Updated Model", "data-model-is-default=\"true\"")
+	statementCounter.SetEnabled(false)
+	assertRefreshedModelsResponse(t, defaultRec, "Mutation Updated Model", "Large Custom Provider", "data-model-is-default=\"true\"")
+	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	assertNotContains(t, defaultRec, largePayload)
 
+	statementCounter.Reset()
+	statementCounter.SetEnabled(true)
 	deleteRec := htmxDelete(e, "/models/"+created.ID)
+	statementCounter.SetEnabled(false)
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("delete HTMX response code = %d, want %d: %s", deleteRec.Code, http.StatusOK, deleteRec.Body.String())
 	}
 	if body := deleteRec.Body.String(); !strings.Contains(body, "models-container") || strings.Contains(body, "Mutation Updated Model") {
 		t.Errorf("delete HTMX response did not contain the refreshed model list: %s", body)
+	}
+	assertCompactModelsRefreshQuery(t, statementCounter.Statements())
+	assertNotContains(t, deleteRec, largePayload)
+
+	details := htmxGet(e, "/models/"+largeCustom.ID+"/edit-details")
+	assertCode(t, details, http.StatusOK)
+	var payload modelEditDetails
+	if err := json.Unmarshal(details.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.ExtraBodyJSON != largePayload || payload.ExtraHeadersJSON != largeCustom.ExtraHeadersJSON {
+		t.Fatalf("edit details lost full custom provider fields: %#v", payload)
 	}
 }
 
@@ -1629,6 +1674,31 @@ func assertRefreshedModelsResponse(t *testing.T, rec *httptest.ResponseRecorder,
 	for _, value := range expected {
 		if !strings.Contains(body, value) {
 			t.Errorf("HTMX response missing %q: %s", value, body)
+		}
+	}
+}
+
+func assertCompactModelsRefreshQuery(t *testing.T, statements []string) {
+	t.Helper()
+	var refreshStatements []string
+	for _, statement := range statements {
+		normalized := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
+			refreshStatements = append(refreshStatements, normalized)
+		}
+	}
+	if len(refreshStatements) != 1 {
+		t.Fatalf("expected exactly one model-card refresh query, got %d in statements: %q", len(refreshStatements), statements)
+	}
+	refresh := refreshStatements[0]
+	for _, forbidden := range []string{"oauth_refresh_token", "oauth_client_secret", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json"} {
+		if strings.Contains(refresh, forbidden) {
+			t.Fatalf("model refresh query selected edit-only column %q: %s", forbidden, refresh)
+		}
+	}
+	for _, required := range []string{"CASE WHEN api_key != '' THEN 1 ELSE 0 END", "json_array_length"} {
+		if !strings.Contains(refresh, required) {
+			t.Fatalf("model refresh query does not look like compact card projection; missing %q in %s", required, refresh)
 		}
 	}
 }

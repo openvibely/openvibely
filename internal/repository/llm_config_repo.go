@@ -69,7 +69,7 @@ func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
 func (r *LLMConfigRepo) ListCards(ctx context.Context) ([]models.LLMConfig, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+llmConfigCardColumns+`
-			 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+				 FROM agent_configs ORDER BY is_default DESC, name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing model cards: %w", err)
 	}
@@ -94,6 +94,32 @@ func (r *LLMConfigRepo) ListCards(ctx context.Context) ([]models.LLMConfig, erro
 		}
 		if hasOAuthKey {
 			a.OAuthAccessToken = "present"
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
+}
+
+// ListMixtureDefinitions returns only the fields needed to test whether a model
+// is referenced by any mixture before delete. It intentionally avoids full
+// provider configs and custom-provider request/auth JSON from unrelated rows.
+func (r *LLMConfigRepo) ListMixtureDefinitions(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, name, mixture_config_json
+				 FROM agent_configs
+				 WHERE provider = ? AND mixture_config_json != ''
+				 ORDER BY name ASC`, models.ProviderMixture)
+	if err != nil {
+		return nil, fmt.Errorf("listing mixture model definitions: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var a models.LLMConfig
+		a.Provider = models.ProviderMixture
+		if err := rows.Scan(&a.ID, &a.Name, &a.MixtureConfigJSON); err != nil {
+			return nil, fmt.Errorf("scanning mixture model definition: %w", err)
 		}
 		configs = append(configs, a)
 	}

@@ -789,13 +789,13 @@ func applyModelOAuthForm(c echo.Context, agent *models.LLMConfig, mode modelForm
 }
 
 func (h *Handler) mixturesUsingModel(ctx context.Context, modelID string) ([]string, error) {
-	agents, err := h.llmConfigRepo.List(ctx)
+	agents, err := h.llmConfigRepo.ListMixtureDefinitions(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var names []string
 	for _, agent := range agents {
-		if agent.Provider != models.ProviderMixture || strings.TrimSpace(agent.MixtureConfigJSON) == "" {
+		if strings.TrimSpace(agent.MixtureConfigJSON) == "" {
 			continue
 		}
 		cfg, err := llmmixture.ParseConfig(agent.MixtureConfigJSON)
@@ -1008,7 +1008,7 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 }
 
 func (h *Handler) renderRefreshedModels(c echo.Context) error {
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
+	agents, err := h.llmConfigRepo.ListCards(c.Request().Context())
 	if err != nil {
 		return err
 	}
