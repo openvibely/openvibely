@@ -115,6 +115,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 						data-search-card
 						data-skill-scroll-anchor={ skill.Handle }
 						data-search-text={ skillSearchText(skill) }
+						tabindex="-1"
 						onclick="editSkillFromData(this)"
 					>
 						<div class="card-body relative">
@@ -394,8 +395,8 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					for (var i = 0; i < (saved.focusIDs || []).length; i++) {
 						var card = root.querySelector(skillAnchorSelector(saved.focusIDs[i]));
 						if (card && card.getClientRects().length > 0) {
-							focusTarget = card.querySelector('.dropdown label, button');
-							if (focusTarget) break;
+							focusTarget = card;
+							break;
 						}
 					}
 					if (!focusTarget) focusTarget = root.querySelector('[data-card-search]');

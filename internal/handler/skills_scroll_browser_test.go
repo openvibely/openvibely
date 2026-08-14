@@ -69,6 +69,8 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
   .grid { display: block; }
   .card { display: block; min-height: 96px; margin: 0 0 14px 0; border: 1px solid #ccc; box-sizing: border-box; }
   .card-body { padding: 12px; }
+  .dropdown-content { display: none; }
+  .dropdown:focus-within .dropdown-content { display: block; }
   .hidden { display: none !important; }
   dialog:not([open]) { display: none; }
 </style>
@@ -155,11 +157,16 @@ func TestSkillsDeleteBrowserPreservesFilteredScrollAnchor(t *testing.T) {
           var afterTop = nextSurvivor ? nextSurvivor.getBoundingClientRect().top : 9999;
           var delta = Math.abs(afterTop - beforeTop);
           var filtered = hiddenDrop && hiddenDrop.getClientRects().length === 0;
-          if (removed && filtered && delta <= 6) {
+          var focusedDropdown = !!(document.activeElement && document.activeElement.closest && document.activeElement.closest('.dropdown'));
+          var openDropdowns = Array.prototype.slice.call(document.querySelectorAll('.dropdown-content')).filter(function(menu) {
+            return menu.getClientRects().length > 0;
+          });
+          var focusedSurvivor = nextSurvivor && document.activeElement === nextSurvivor;
+          if (removed && filtered && delta <= 6 && !focusedDropdown && openDropdowns.length === 0 && focusedSurvivor) {
             finish('pass', 'anchor preserved delta=' + delta.toFixed(2));
           } else {
             var state = window.openVibelySkillsViewport || {};
-            finish('fail', 'removed=' + removed + ' filtered=' + filtered + ' delta=' + delta.toFixed(2) + ' scrollY=' + window.scrollY + ' installed=' + !!state.installed + ' prepared=' + !!state.preparedSwap + ' swap=' + !!state.swap + ' ops=' + (window._skillScrollOps || []).join('|'));
+            finish('fail', 'removed=' + removed + ' filtered=' + filtered + ' delta=' + delta.toFixed(2) + ' focusedDropdown=' + focusedDropdown + ' openDropdowns=' + openDropdowns.length + ' focusedSurvivor=' + focusedSurvivor + ' active=' + (document.activeElement && document.activeElement.tagName) + ' scrollY=' + window.scrollY + ' installed=' + !!state.installed + ' prepared=' + !!state.preparedSwap + ' swap=' + !!state.swap + ' ops=' + (window._skillScrollOps || []).join('|'));
           }
         } catch (err) {
           finish('fail', err && err.stack ? err.stack : String(err));
