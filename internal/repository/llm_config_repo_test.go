@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,62 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func BenchmarkLLMConfigRepoListFullVsCardsLargeCustomProviders(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	largeBody := strings.Repeat("x", 64*1024)
+	for i := 0; i < 50; i++ {
+		cfg := &models.LLMConfig{
+			Name: fmt.Sprintf("Large Custom %02d", i), Provider: models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodOAuth, Model: "custom-model", APIKey: "secret-key",
+			OAuthAccessToken: "secret-token", OAuthRefreshToken: "secret-refresh",
+			OAuthClientSecret: "secret-client", BaseURL: "https://example.com/v1/",
+			Transport: "chat_completions", PresetSlug: "custom",
+			ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+			CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+			MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+		}
+		if err := repo.Create(ctx, cfg); err != nil {
+			b.Fatal(err)
+		}
+	}
+	cards, err := repo.ListCards(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, card := range cards {
+		if card.ExtraBodyJSON != "" || card.CustomAuthConfigJSON != "" || card.CustomAuthStateJSON != "" || card.OAuthRefreshToken != "" {
+			b.Fatalf("card projection materialized edit-only fields: %#v", card)
+		}
+	}
+
+	b.Run("full_list", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) < 50 {
+				b.Fatalf("expected production-shaped fixture, got %d configs", len(configs))
+			}
+		}
+	})
+	b.Run("card_projection", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListCards(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) < 50 {
+				b.Fatalf("expected production-shaped fixture, got %d configs", len(configs))
+			}
+		}
+	})
+}
 
 func TestLLMConfigRepo_ListCardsUsesBoundedProjection(t *testing.T) {
 	db := testutil.NewTestDB(t)
@@ -63,6 +120,42 @@ func TestLLMConfigRepo_ListCardsUsesBoundedProjection(t *testing.T) {
 		if strings.Contains(llmConfigCardColumns, forbidden) {
 			t.Fatalf("card projection contains edit-only column %q", forbidden)
 		}
+	}
+}
+
+func TestLLMConfigRepo_ListMixtureDefinitionsUsesBoundedProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	largeBody := strings.Repeat("x", 1024*1024)
+	custom := &models.LLMConfig{
+		Name: "Large Custom", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "custom-model", APIKey: "secret-key", OAuthRefreshToken: "secret-refresh",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, custom); err != nil {
+		t.Fatal(err)
+	}
+	mixture := &models.LLMConfig{
+		Name: "Mixture", Provider: models.ProviderMixture, Model: "mixture",
+		MixtureConfigJSON: `{"aggregator":{"agent_config_id":"` + custom.ID + `"},"reference_models":[]}`,
+	}
+	if err := repo.Create(ctx, mixture); err != nil {
+		t.Fatal(err)
+	}
+
+	defs, err := repo.ListMixtureDefinitions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 1 || defs[0].ID != mixture.ID || defs[0].Name != mixture.Name || defs[0].MixtureConfigJSON != mixture.MixtureConfigJSON {
+		t.Fatalf("mixture definitions = %#v", defs)
+	}
+	if defs[0].ExtraBodyJSON != "" || defs[0].ExtraHeadersJSON != "" || defs[0].OAuthRefreshToken != "" ||
+		defs[0].CustomAuthConfigJSON != "" || defs[0].CustomAuthStateJSON != "" {
+		t.Fatalf("mixture definition query materialized unrelated edit-only fields: %#v", defs[0])
 	}
 }
 
