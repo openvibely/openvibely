@@ -311,53 +311,24 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 				.drag-cursor-surface {
 					cursor: grab;
+					-webkit-user-drag: none;
+					user-select: none;
 				}
 				.drag-cursor-surface:active,
 				.drag-cursor-surface:active *,
 				.drag-cursor-surface.drag-cursor-pressed,
 				.drag-cursor-surface.drag-cursor-pressed *,
-				html.drag-cursor-pressed,
-				html.drag-cursor-pressed *,
-				body.drag-cursor-pressed,
-				body.drag-cursor-pressed * {
-					cursor: grabbing !important;
-				}
 				.drag-cursor-surface.dragging,
 				.drag-cursor-surface.dragging *,
 				html.drag-cursor-active,
 				html.drag-cursor-active *,
 				body.drag-cursor-active,
 				body.drag-cursor-active * {
-					cursor: none !important;
-				}
-				.drag-cursor-indicator {
-					position: fixed;
-					left: 0;
-					top: 0;
-					width: 28px;
-					height: 28px;
-					pointer-events: none;
-					z-index: 2147483647;
-					color: oklch(var(--bc));
-					filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
-					transform: translate(-9999px, -9999px);
-				}
-				.drag-cursor-indicator svg {
-					width: 28px;
-					height: 28px;
-					display: block;
-				}
-				.drag-cursor-drag-image {
-					position: fixed;
-					left: -9999px;
-					top: -9999px;
-					width: 28px;
-					height: 28px;
-					color: oklch(var(--bc));
+					cursor: grabbing !important;
 				}
 				.dragging {
 					opacity: 0.5;
-					cursor: none !important;
+					cursor: grabbing !important;
 				}
 				.drag-over {
 					border-color: hsl(var(--p)) !important;
@@ -2731,8 +2702,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				// Otherwise, let the default focus behavior open the dropdown
 			}
 
-				function handleTaskSelect(event) {
-					// Ignore clicks on links or their children (let HTMX handle them)
+					function handleTaskSelect(event) {
+						if (window._suppressTaskClick) {
+							event.preventDefault();
+							event.stopPropagation();
+							return;
+						}
+
+						// Ignore clicks on links or their children (let HTMX handle them)
 					if (event.target.tagName === 'A' || event.target.closest('a')) {
 						return;
 					}
@@ -2778,82 +2755,31 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					updateSelectionCounter();
 				}
 
-				function closedHandCursorSVG() {
-					return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">' +
-						'<path d="M8 10.5V6.75a1.75 1.75 0 0 1 3.5 0V10h.25V5.75a1.75 1.75 0 0 1 3.5 0V10h.25V7.75a1.75 1.75 0 0 1 3.5 0v5.25c0 4.7-2.8 7.5-7.5 7.5h-1.25A5.75 5.75 0 0 1 4.5 14.75V13a2.5 2.5 0 0 1 2.5-2.5h1z" fill="currentColor" stroke="rgba(255,255,255,0.9)" stroke-width="1.25" stroke-linejoin="round"/>' +
-					'</svg>';
-				}
-
-				function ensureDragCursorIndicator() {
-					let indicator = document.getElementById('drag-cursor-indicator');
-					if (!indicator) {
-						indicator = document.createElement('div');
-						indicator.id = 'drag-cursor-indicator';
-						indicator.className = 'drag-cursor-indicator';
-						indicator.innerHTML = closedHandCursorSVG();
-						document.body.appendChild(indicator);
-					}
-					return indicator;
-				}
-
-				function ensureDragCursorDragImage() {
-					let dragImage = document.getElementById('drag-cursor-drag-image');
-					if (!dragImage) {
-						dragImage = document.createElement('div');
-						dragImage.id = 'drag-cursor-drag-image';
-						dragImage.className = 'drag-cursor-drag-image';
-						dragImage.innerHTML = closedHandCursorSVG();
-						document.body.appendChild(dragImage);
-					}
-					return dragImage;
-				}
-
-				function moveDragCursorIndicator(event) {
-					if (!event || !document.documentElement.classList.contains('drag-cursor-active')) return;
-					if (typeof event.clientX !== 'number' || typeof event.clientY !== 'number') return;
-					if (event.clientX === 0 && event.clientY === 0) return;
-					const indicator = ensureDragCursorIndicator();
-					indicator.style.transform = 'translate(' + (event.clientX - 14) + 'px, ' + (event.clientY - 14) + 'px)';
-				}
-
-				function clearNativeDragCursor() {
-					document.documentElement.classList.remove('drag-cursor-active');
-					document.body.classList.remove('drag-cursor-active');
-					const indicator = document.getElementById('drag-cursor-indicator');
-					if (indicator) indicator.style.transform = 'translate(-9999px, -9999px)';
-				}
-
-				function beginNativeDragCursor(event) {
-					document.documentElement.classList.add('drag-cursor-active');
-					document.body.classList.add('drag-cursor-active');
-					moveDragCursorIndicator(event);
-					if (event && event.dataTransfer && event.dataTransfer.setDragImage) {
-						event.dataTransfer.setDragImage(ensureDragCursorDragImage(), 14, 14);
-					}
+				function setDragCursorActive(active) {
+					document.documentElement.classList.toggle('drag-cursor-active', !!active);
+					document.body.classList.toggle('drag-cursor-active', !!active);
 				}
 
 				function clearDragCursorPress() {
 					document.documentElement.classList.remove('drag-cursor-pressed');
-					document.documentElement.style.cursor = '';
 					document.body.classList.remove('drag-cursor-pressed');
-					document.body.style.cursor = '';
 					document.querySelectorAll('.drag-cursor-pressed').forEach(el => {
-						el.style.cursor = '';
 						el.classList.remove('drag-cursor-pressed');
 					});
+				}
+
+				function isDragCursorInteractiveTarget(event) {
+					return event.target && event.target.closest('button, a, input, select, textarea, summary, label, [role="button"], .dropdown');
 				}
 
 				function handleDragCursorPressStart(event) {
 					if (event.button !== undefined && event.button !== 0) return;
 					const surface = event.currentTarget;
 					if (!surface || !surface.classList || !surface.classList.contains('drag-cursor-surface')) return;
-					if (event.target && event.target.closest('button, a, input, select, textarea, summary, label, [role="button"], .dropdown')) return;
+					if (isDragCursorInteractiveTarget(event)) return;
 					surface.classList.add('drag-cursor-pressed');
-					surface.style.cursor = 'grabbing';
 					document.documentElement.classList.add('drag-cursor-pressed');
-					document.documentElement.style.cursor = 'grabbing';
 					document.body.classList.add('drag-cursor-pressed');
-					document.body.style.cursor = 'grabbing';
 				}
 
 				function handleDragCursorPressEnd(event) {
@@ -2861,15 +2787,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				function handleDragCursorPressCancel(event) {
-					// Native HTML drag can fire pointercancel as the browser takes over the drag.
-					// Keep the closed-hand cursor until mouseup/dragend/blur performs real cleanup.
-					if (document.documentElement.classList.contains('drag-cursor-pressed') || document.body.classList.contains('drag-cursor-active')) return;
 					clearDragCursorPress();
 				}
 
 				window.clearDragCursorPress = clearDragCursorPress;
-				window.clearNativeDragCursor = clearNativeDragCursor;
-				window.beginNativeDragCursor = beginNativeDragCursor;
+				window.setDragCursorActive = setDragCursorActive;
 				window.handleDragCursorPressStart = handleDragCursorPressStart;
 				window.handleDragCursorPressEnd = handleDragCursorPressEnd;
 				window.handleDragCursorPressCancel = handleDragCursorPressCancel;
@@ -2879,17 +2801,31 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					window.addEventListener('pointerup', clearDragCursorPress, true);
 					window.addEventListener('pointercancel', handleDragCursorPressCancel, true);
 					window.addEventListener('mouseup', clearDragCursorPress, true);
-					window.addEventListener('blur', function() { clearDragCursorPress(); clearNativeDragCursor(); });
-					document.addEventListener('drag', moveDragCursorIndicator, true);
-					document.addEventListener('dragover', moveDragCursorIndicator, true);
-					document.addEventListener('dragend', function() { clearDragCursorPress(); clearNativeDragCursor(); }, true);
-					document.addEventListener('drop', function() { clearDragCursorPress(); clearNativeDragCursor(); }, true);
+					window.addEventListener('blur', function() { clearDragCursorPress(); setDragCursorActive(false); });
 				}
 
-				function handleDragStart(event) {
+				let taskPointerDrag = null;
+
+				function taskDropZoneFromPoint(clientX, clientY) {
+					const el = document.elementFromPoint(clientX, clientY);
+					return el ? el.closest('.category-drop-zone, .task-drop-zone') : null;
+				}
+
+				function syntheticDropEvent(originalEvent, dropZone) {
+					return {
+						currentTarget: dropZone,
+						target: dropZone,
+						clientX: originalEvent.clientX,
+						clientY: originalEvent.clientY,
+						stopPropagation: function() {},
+						preventDefault: function() {}
+					};
+				}
+
+				function beginTaskCardDrag(card) {
 					window.isDragging = true;
-					beginNativeDragCursor(event);
-					draggedElement = event.currentTarget;
+					setDragCursorActive(true);
+					draggedElement = card;
 					const taskID = draggedElement.getAttribute('data-task-id');
 					const cat = draggedElement.getAttribute('data-task-category');
 					console.log('[drag] START task=' + taskID + ' category=' + cat);
@@ -2908,29 +2844,121 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						const el = document.getElementById('task-' + id);
 						if (el) el.classList.add('dragging');
 					});
-
-					event.dataTransfer.effectAllowed = 'move';
-					event.dataTransfer.setData('text/plain', draggedTaskIds.join(','));
 				}
 
-				function handleDragEnd(event) {
+				function cleanupTaskCardDrag() {
 					window.isDragging = false;
-					clearNativeDragCursor();
+					setDragCursorActive(false);
 					clearDragCursorPress();
 					stopAutoScroll();
-					// Remove dragging class from all cards - use both the ID list AND
-					// a DOM query as fallback, because handleCategoryDrop/handleActiveDrop
-					// call clearSelection() (which empties draggedTaskIds) before dragend fires.
-					draggedTaskIds.forEach(id => {
-						const el = document.getElementById('task-' + id);
-						if (el) el.classList.remove('dragging');
-					});
 					document.querySelectorAll('.dragging').forEach(el => {
 						el.classList.remove('dragging');
 					});
 					document.querySelectorAll('.category-drop-zone, .task-drop-zone').forEach(zone => {
 						zone.classList.remove('drag-over');
 					});
+				}
+
+				function updateTaskPointerDropZone(event) {
+					const dropZone = taskDropZoneFromPoint(event.clientX, event.clientY);
+					if (taskPointerDrag.lastDropZone && taskPointerDrag.lastDropZone !== dropZone) {
+						taskPointerDrag.lastDropZone.classList.remove('drag-over');
+					}
+					if (dropZone) {
+						dropZone.classList.add('drag-over');
+						handleAutoScroll(event, dropZone);
+					} else {
+						stopAutoScroll();
+					}
+					taskPointerDrag.lastDropZone = dropZone;
+					return dropZone;
+				}
+
+				function handleTaskPointerMove(event) {
+					if (!taskPointerDrag || event.pointerId !== taskPointerDrag.pointerId) return;
+					const dx = event.clientX - taskPointerDrag.startX;
+					const dy = event.clientY - taskPointerDrag.startY;
+					if (!taskPointerDrag.started && (dx * dx + dy * dy) < 16) return;
+					if (!taskPointerDrag.started) {
+						taskPointerDrag.started = true;
+						beginTaskCardDrag(taskPointerDrag.card);
+					}
+					event.preventDefault();
+					updateTaskPointerDropZone(event);
+				}
+
+				function finishTaskPointerDrag(event, cancelled) {
+					if (!taskPointerDrag || event.pointerId !== taskPointerDrag.pointerId) return;
+					const state = taskPointerDrag;
+					taskPointerDrag = null;
+					window.removeEventListener('pointermove', handleTaskPointerMove, true);
+					window.removeEventListener('pointerup', handleTaskPointerUp, true);
+					window.removeEventListener('pointercancel', handleTaskPointerCancel, true);
+					try { state.card.releasePointerCapture(state.pointerId); } catch (_) {}
+
+					if (!state.started) {
+						clearDragCursorPress();
+						return;
+					}
+
+					event.preventDefault();
+					const dropZone = !cancelled ? (taskDropZoneFromPoint(event.clientX, event.clientY) || state.lastDropZone) : null;
+					if (state.lastDropZone && state.lastDropZone !== dropZone) {
+						state.lastDropZone.classList.remove('drag-over');
+					}
+					if (dropZone) dropZone.classList.add('drag-over');
+					window._suppressTaskClick = true;
+					setTimeout(function() { window._suppressTaskClick = false; }, 150);
+
+					if (dropZone) {
+						if (dropZone.classList.contains('task-drop-zone') || dropZone.getAttribute('data-category') === 'active') {
+							handleActiveDrop(syntheticDropEvent(event, dropZone));
+						} else {
+							handleCategoryDrop(syntheticDropEvent(event, dropZone));
+						}
+					}
+					cleanupTaskCardDrag();
+				}
+
+				function handleTaskPointerUp(event) {
+					finishTaskPointerDrag(event, false);
+				}
+
+				function handleTaskPointerCancel(event) {
+					finishTaskPointerDrag(event, true);
+				}
+
+				function handleTaskPointerDown(event) {
+					if (event.button !== undefined && event.button !== 0) return;
+					if (isDragCursorInteractiveTarget(event)) return;
+					handleDragCursorPressStart(event);
+					taskPointerDrag = {
+						card: event.currentTarget,
+						pointerId: event.pointerId,
+						startX: event.clientX,
+						startY: event.clientY,
+						started: false,
+						lastDropZone: null
+					};
+					try { event.currentTarget.setPointerCapture(event.pointerId); } catch (_) {}
+					window.addEventListener('pointermove', handleTaskPointerMove, true);
+					window.addEventListener('pointerup', handleTaskPointerUp, true);
+					window.addEventListener('pointercancel', handleTaskPointerCancel, true);
+				}
+
+				window.handleTaskPointerDown = handleTaskPointerDown;
+
+				function handleDragStart(event) {
+					window.isDragging = true;
+					setDragCursorActive(true);
+					draggedElement = event.currentTarget;
+					beginTaskCardDrag(draggedElement);
+					event.dataTransfer.effectAllowed = 'move';
+					event.dataTransfer.setData('text/plain', draggedTaskIds.join(','));
+				}
+
+				function handleDragEnd(event) {
+					cleanupTaskCardDrag();
 				}
 				function stopAutoScroll() {
 					if (autoScrollInterval) {

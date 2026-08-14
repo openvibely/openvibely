@@ -568,17 +568,11 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 															<div
 																class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-indigo-500 overflow-hidden"
 																title={ scheduleDisplayTitle(occurrence.Task) }
-																draggable="true"
 																data-schedule-id={ getScheduleID(occurrence.Task) }
 																data-task-id={ occurrence.Task.Task.ID }
 																data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
 																onclick="openTaskDialog(this.dataset.taskId)"
-																onpointerdown="handleDragCursorPressStart(event)"
-																onpointerup="handleDragCursorPressEnd(event)"
-																onpointercancel="handleDragCursorPressCancel(event)"
-																onmousedown="handleDragCursorPressStart(event)"
-																onmouseup="handleDragCursorPressEnd(event)"
-																ondragstart="handleScheduleDragStart(event)"
+																onpointerdown="handleSchedulePointerDown(event)"
 															>
 																<div class="font-semibold truncate leading-tight">{ scheduleDisplayTitle(occurrence.Task) }</div>
 																if occurrence.Task.Schedule != nil && occurrence.Task.Schedule.RepeatType.IsSubDaily() {
@@ -950,24 +944,145 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			let _dragSourceHour = null;
 			let _dragSourceDate = null;
 
-			function handleScheduleDragStart(event) {
-				var dragCard = event.currentTarget;
+			function beginScheduleCardDrag(dragCard) {
 				draggedScheduleId = dragCard.dataset.scheduleId;
 				draggedTaskId = dragCard.dataset.taskId;
 				draggedHasSchedule = dragCard.dataset.hasSchedule === 'true';
 				_schedDragActive = true;
-				if (window.beginNativeDragCursor) window.beginNativeDragCursor(event);
+				if (window.setDragCursorActive) window.setDragCursorActive(true);
 				dragCard.classList.add('dragging');
 				// Track source slot so we can detect same-slot drops
 				var sourceZone = dragCard.closest('.drop-zone');
 				_dragSourceHour = sourceZone ? sourceZone.dataset.hour : null;
 				_dragSourceDate = sourceZone ? sourceZone.dataset.date : null;
 				dragCard.style.opacity = '0.5';
+			}
+
+			function handleScheduleDragStart(event) {
+				var dragCard = event.currentTarget;
+				beginScheduleCardDrag(dragCard);
 				event.dataTransfer.effectAllowed = 'move';
 				event.dataTransfer.setData('text/html', dragCard.innerHTML);
 				// Set a custom drag type so drop zones can identify schedule drags
 				// even without relying solely on the global variable
 				event.dataTransfer.setData('application/x-schedule-drag', draggedScheduleId || '');
+			}
+
+			let _schedulePointerDrag = null;
+
+			function scheduleDropZoneFromPoint(clientX, clientY) {
+				var el = document.elementFromPoint(clientX, clientY);
+				return el ? el.closest('.drop-zone') : null;
+			}
+
+			function clearScheduleDragFeedbackAndState() {
+				if (window.setDragCursorActive) window.setDragCursorActive(false);
+				if (window.clearDragCursorPress) window.clearDragCursorPress();
+				document.querySelectorAll('.dragging').forEach(function(el) {
+					el.style.opacity = '1';
+					el.classList.remove('dragging');
+				});
+				document.querySelectorAll('.drop-zone').forEach(function(zone) {
+					clearDropZoneFeedback(zone);
+				});
+				draggedScheduleId = null;
+				draggedTaskId = null;
+				draggedHasSchedule = false;
+				_dragSourceHour = null;
+				_dragSourceDate = null;
+				setTimeout(function() { _schedDragActive = false; }, 150);
+			}
+
+			function updateSchedulePointerDropZone(event) {
+				var dropZone = scheduleDropZoneFromPoint(event.clientX, event.clientY);
+				if (_schedulePointerDrag.lastDropZone && _schedulePointerDrag.lastDropZone !== dropZone) {
+					clearDropZoneFeedback(_schedulePointerDrag.lastDropZone);
+				}
+				if (dropZone) {
+					if (draggedScheduleId && draggedHasSchedule) {
+						dropZone.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
+						dropZone.style.outline = '2px solid rgba(99, 102, 241, 0.5)';
+						dropZone.style.cursor = '';
+					} else {
+						dropZone.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+						dropZone.style.outline = '2px dashed rgba(239, 68, 68, 0.6)';
+						dropZone.style.cursor = 'not-allowed';
+					}
+				}
+				_schedulePointerDrag.lastDropZone = dropZone;
+				return dropZone;
+			}
+
+			function handleSchedulePointerMove(event) {
+				if (!_schedulePointerDrag || event.pointerId !== _schedulePointerDrag.pointerId) return;
+				var dx = event.clientX - _schedulePointerDrag.startX;
+				var dy = event.clientY - _schedulePointerDrag.startY;
+				if (!_schedulePointerDrag.started && (dx * dx + dy * dy) < 16) return;
+				if (!_schedulePointerDrag.started) {
+					_schedulePointerDrag.started = true;
+					beginScheduleCardDrag(_schedulePointerDrag.card);
+				}
+				event.preventDefault();
+				updateSchedulePointerDropZone(event);
+			}
+
+			function finishSchedulePointerDrag(event, cancelled) {
+				if (!_schedulePointerDrag || event.pointerId !== _schedulePointerDrag.pointerId) return;
+				var state = _schedulePointerDrag;
+				_schedulePointerDrag = null;
+				window.removeEventListener('pointermove', handleSchedulePointerMove, true);
+				window.removeEventListener('pointerup', handleSchedulePointerUp, true);
+				window.removeEventListener('pointercancel', handleSchedulePointerCancel, true);
+				try { state.card.releasePointerCapture(state.pointerId); } catch (_) {}
+
+				if (!state.started) {
+					if (window.clearDragCursorPress) window.clearDragCursorPress();
+					return;
+				}
+
+				event.preventDefault();
+				var dropZone = !cancelled ? (scheduleDropZoneFromPoint(event.clientX, event.clientY) || state.lastDropZone) : null;
+				if (state.lastDropZone && state.lastDropZone !== dropZone) {
+					clearDropZoneFeedback(state.lastDropZone);
+				}
+				if (dropZone) {
+					handleScheduleDrop({
+						currentTarget: dropZone,
+						target: dropZone,
+						clientX: event.clientX,
+						clientY: event.clientY,
+						stopPropagation: function() {},
+						preventDefault: function() {}
+					});
+				} else {
+					clearScheduleDragFeedbackAndState();
+				}
+			}
+
+			function handleSchedulePointerUp(event) {
+				finishSchedulePointerDrag(event, false);
+			}
+
+			function handleSchedulePointerCancel(event) {
+				finishSchedulePointerDrag(event, true);
+			}
+
+			function handleSchedulePointerDown(event) {
+				if (event.button !== undefined && event.button !== 0) return;
+				if (event.target && event.target.closest('button, a, input, select, textarea, summary, label, [role="button"], .dropdown')) return;
+				if (window.handleDragCursorPressStart) window.handleDragCursorPressStart(event);
+				_schedulePointerDrag = {
+					card: event.currentTarget,
+					pointerId: event.pointerId,
+					startX: event.clientX,
+					startY: event.clientY,
+					started: false,
+					lastDropZone: null
+				};
+				try { event.currentTarget.setPointerCapture(event.pointerId); } catch (_) {}
+				window.addEventListener('pointermove', handleSchedulePointerMove, true);
+				window.addEventListener('pointerup', handleSchedulePointerUp, true);
+				window.addEventListener('pointercancel', handleSchedulePointerCancel, true);
 			}
 
 			// Clear inline drag feedback styles from a drop zone
@@ -1073,17 +1188,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						window.showToast(reason, 'failed');
 					}
 					// Reset dragged elements
-					if (window.clearNativeDragCursor) window.clearNativeDragCursor();
-					if (window.clearDragCursorPress) window.clearDragCursorPress();
-					document.querySelectorAll('[draggable="true"]').forEach(function(el) {
-						el.style.opacity = '1';
-						el.classList.remove('dragging');
-					});
-					draggedScheduleId = null;
-					draggedTaskId = null;
-					draggedHasSchedule = false;
-					_dragSourceHour = null;
-					_dragSourceDate = null;
+					clearScheduleDragFeedbackAndState();
 					return;
 				}
 
@@ -1126,46 +1231,18 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					});
 				}
 
-				// Reset dragged elements
-				if (window.clearNativeDragCursor) window.clearNativeDragCursor();
-				if (window.clearDragCursorPress) window.clearDragCursorPress();
-				document.querySelectorAll('[draggable="true"]').forEach(function(el) {
-					el.style.opacity = '1';
-					el.classList.remove('dragging');
-				});
-				draggedScheduleId = null;
-				draggedTaskId = null;
-				draggedHasSchedule = false;
-				_dragSourceHour = null;
-				_dragSourceDate = null;
+					// Reset dragged elements
+					clearScheduleDragFeedbackAndState();
 			}
 
 			// Reset opacity and clean up drop zone highlights on drag end
 			// Guard against duplicate registrations on HTMX content swaps
-			if (!window._schedDragendRegistered) {
-				window._schedDragendRegistered = true;
-				document.addEventListener('dragend', function(event) {
-					if (window.clearNativeDragCursor) window.clearNativeDragCursor();
-					if (window.clearDragCursorPress) window.clearDragCursorPress();
-					if (event.target.hasAttribute('draggable')) {
-						event.target.style.opacity = '1';
-						event.target.classList.remove('dragging');
-					}
-					// Clean up any lingering drop zone highlights (use inline style cleanup)
-					document.querySelectorAll('.drop-zone').forEach(function(zone) {
-						clearDropZoneFeedback(zone);
+				if (!window._schedDragendRegistered) {
+					window._schedDragendRegistered = true;
+					document.addEventListener('dragend', function(event) {
+						clearScheduleDragFeedbackAndState();
 					});
-					draggedScheduleId = null;
-					draggedTaskId = null;
-					draggedHasSchedule = false;
-					_dragSourceHour = null;
-					_dragSourceDate = null;
-					// Clear _schedDragActive after a short delay so that any
-					// click event synthesized by the browser after a short drag
-					// is still suppressed by the openTaskDialog guard.
-					setTimeout(function() { _schedDragActive = false; }, 150);
-				});
-			}
+				}
 
 			// Current time timeline indicator
 			function updateNowIndicator() {

@@ -873,123 +873,37 @@ func TestBase_DraggableCardsUseClosedHandCursorWhileActive(t *testing.T) {
 	for _, want := range []string{
 		".drag-cursor-surface {",
 		"cursor: grab;",
+		"-webkit-user-drag: none;",
 		".drag-cursor-surface:active",
 		".drag-cursor-surface.drag-cursor-pressed",
-		"html.drag-cursor-pressed *",
-		"body.drag-cursor-pressed *",
-		"cursor: grabbing !important;",
 		"html.drag-cursor-active *",
 		"body.drag-cursor-active *",
-		"cursor: none !important;",
-		".drag-cursor-indicator {",
-		".drag-cursor-drag-image {",
-		"function closedHandCursorSVG()",
-		"function ensureDragCursorIndicator()",
-		"function ensureDragCursorDragImage()",
-		"function moveDragCursorIndicator(event)",
-		"function beginNativeDragCursor(event)",
-		"event.dataTransfer.setDragImage(ensureDragCursorDragImage(), 14, 14)",
-		"document.addEventListener('dragover', moveDragCursorIndicator, true)",
-		"document.addEventListener('dragend', function() { clearDragCursorPress(); clearNativeDragCursor(); }, true)",
-		"document.addEventListener('drop', function() { clearDragCursorPress(); clearNativeDragCursor(); }, true)",
-		"function handleDragCursorPressStart(event)",
-		"function handleDragCursorPressCancel(event)",
-		"Native HTML drag can fire pointercancel as the browser takes over the drag.",
-		"document.documentElement.classList.contains('drag-cursor-pressed') || document.body.classList.contains('drag-cursor-active')",
-		"function clearDragCursorPress()",
-		"window.clearNativeDragCursor = clearNativeDragCursor",
-		"window.beginNativeDragCursor = beginNativeDragCursor",
-		"window.addEventListener('pointercancel', handleDragCursorPressCancel, true)",
-		"surface.style.cursor = 'grabbing'",
-		"document.documentElement.classList.add('drag-cursor-pressed')",
-		"document.body.classList.add('drag-cursor-pressed')",
-		"beginNativeDragCursor(event)",
-		"clearNativeDragCursor()",
+		"cursor: grabbing !important;",
+		"function setDragCursorActive(active)",
+		"function handleTaskPointerDown(event)",
+		"function beginTaskCardDrag(card)",
+		"function finishTaskPointerDrag(event, cancelled)",
+		"window.handleTaskPointerDown = handleTaskPointerDown",
+		"handleCategoryDrop(syntheticDropEvent(event, dropZone))",
+		"handleActiveDrop(syntheticDropEvent(event, dropZone))",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected draggable card cursor contract %q", want)
 		}
 	}
-}
 
-func TestBase_DraggableCardCursorHelperUsesClosedHandDragImageAndOverlay(t *testing.T) {
-	var buf bytes.Buffer
-	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
-		t.Fatalf("failed to render Base: %v", err)
-	}
-	html := buf.String()
-	start := strings.Index(html, "function closedHandCursorSVG()")
-	if start < 0 {
-		t.Fatal("could not find draggable cursor helper script")
-	}
-	end := strings.Index(html[start:], "function handleDragStart(event)")
-	if end < 0 {
-		t.Fatal("could not isolate draggable cursor helper script")
-	}
-	scriptBody := html[start : start+end]
-	node, err := exec.LookPath("node")
-	if err != nil {
-		t.Skip("node is required to execute draggable cursor helper script")
-	}
-
-	script := `
-class ClassList {
-  constructor() { this.values = new Set(); }
-  add(name) { this.values.add(name); }
-  remove(name) { this.values.delete(name); }
-  contains(name) { return this.values.has(name); }
-}
-const elements = {};
-const documentListeners = {};
-const windowListeners = {};
-function makeElement(id) {
-  return {
-    id: id || '',
-    style: {},
-    className: '',
-    innerHTML: '',
-    classList: new ClassList(),
-    appendChild: function(child) { elements[child.id] = child; },
-    querySelectorAll: function() { return []; },
-  };
-}
-const body = makeElement('body');
-const html = makeElement('html');
-body.appendChild = function(child) { elements[child.id] = child; };
-global.window = {
-  addEventListener: function(name, handler) { windowListeners[name] = handler; },
-};
-global.document = {
-  documentElement: html,
-  body: body,
-  createElement: function() { return makeElement(''); },
-  getElementById: function(id) { return elements[id] || null; },
-  querySelectorAll: function(selector) { return []; },
-  addEventListener: function(name, handler) { documentListeners[name] = handler; },
-};
-` + scriptBody + `
-let dragImageCall = null;
-window.beginNativeDragCursor({
-  clientX: 120,
-  clientY: 90,
-  dataTransfer: { setDragImage: function(element, x, y) { dragImageCall = { element: element, x: x, y: y }; } }
-});
-if (!html.classList.contains('drag-cursor-active')) throw new Error('html active drag cursor class was not set');
-if (!body.classList.contains('drag-cursor-active')) throw new Error('body active drag cursor class was not set');
-if (!dragImageCall || dragImageCall.element.id !== 'drag-cursor-drag-image' || dragImageCall.x !== 14 || dragImageCall.y !== 14) {
-  throw new Error('closed-hand drag image was not installed with the expected offset');
-}
-const indicator = elements['drag-cursor-indicator'];
-if (!indicator || indicator.style.transform !== 'translate(106px, 76px)') throw new Error('closed-hand indicator did not start at the drag cursor: ' + (indicator && indicator.style.transform));
-if (!documentListeners.dragover) throw new Error('dragover listener was not registered for cursor tracking');
-documentListeners.dragover({ clientX: 151, clientY: 111 });
-if (indicator.style.transform !== 'translate(137px, 97px)') throw new Error('closed-hand indicator did not follow dragover: ' + indicator.style.transform);
-window.clearNativeDragCursor();
-if (html.classList.contains('drag-cursor-active') || body.classList.contains('drag-cursor-active')) throw new Error('drag cursor active classes were not cleared');
-if (indicator.style.transform !== 'translate(-9999px, -9999px)') throw new Error('closed-hand indicator was not hidden on cleanup: ' + indicator.style.transform);
-`
-	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
-		t.Fatalf("draggable cursor helper script failed: %v\n%s", err, output)
+	for _, forbidden := range []string{
+		"cursor: none !important;",
+		"drag-cursor-indicator",
+		"drag-cursor-drag-image",
+		"closedHandCursorSVG",
+		"setDragImage",
+		"beginNativeDragCursor",
+		"clearNativeDragCursor",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("draggable card cursor must use default browser cursor behavior, found %q", forbidden)
+		}
 	}
 }
 

@@ -328,13 +328,15 @@ func TestTaskCard_UsesGrabCursorForDrag(t *testing.T) {
 		t.Fatalf("render task card: %v", err)
 	}
 	body := buf.String()
-	for _, want := range []string{"cursor-grab", "active:cursor-grabbing", "drag-cursor-surface", `draggable="true"`, `onpointerdown="handleDragCursorPressStart(event)"`, `onpointerup="handleDragCursorPressEnd(event)"`, `onpointercancel="handleDragCursorPressCancel(event)"`, `onmousedown="handleDragCursorPressStart(event)"`, `onmouseup="handleDragCursorPressEnd(event)"`} {
+	for _, want := range []string{"cursor-grab", "active:cursor-grabbing", "drag-cursor-surface", `onpointerdown="handleTaskPointerDown(event)"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected draggable task card to contain %q, got %s", want, body)
 		}
 	}
-	if strings.Contains(body, "cursor-move") {
-		t.Fatalf("task card should not use four-way move cursor, got %s", body)
+	for _, forbidden := range []string{"cursor-move", `draggable="true"`, `ondragstart="handleDragStart(event)"`, `ondragend="handleDragEnd(event)"`} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("task card should use pointer-driven grab cursor behavior, found %q in %s", forbidden, body)
+		}
 	}
 }
 

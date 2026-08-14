@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -71,70 +72,59 @@ window.addEventListener('DOMContentLoaded', function() {
       poll();
     });
   }
-  function dragDataTransfer() {
-    if (typeof DataTransfer !== 'function') fail('DataTransfer constructor unavailable in browser fixture');
-    return new DataTransfer();
-  }
   function dispatch(target, event) {
     target.dispatchEvent(event);
     return event;
   }
-  function assertClosedHandDragState(card, label, movedX, movedY) {
-    var html = document.documentElement;
-    var body = document.body;
-    if (!html.classList.contains('drag-cursor-active')) fail(label + ': html missing drag-cursor-active');
-    if (!body.classList.contains('drag-cursor-active')) fail(label + ': body missing drag-cursor-active');
-    var cursor = getComputedStyle(card).cursor;
-    if (cursor !== 'none') fail(label + ': native cursor should be hidden while custom closed hand is shown, got ' + cursor);
-    var indicator = document.getElementById('drag-cursor-indicator');
-    if (!indicator) fail(label + ': missing custom closed-hand cursor indicator');
-    var transform = indicator.style.transform || '';
-    if (!transform || transform.indexOf('-9999') !== -1) fail(label + ': closed-hand indicator was not visible after movement: ' + transform);
-    var expectedX = String(movedX - 14);
-    var expectedY = String(movedY - 14);
-    if (transform.indexOf(expectedX) === -1 || transform.indexOf(expectedY) === -1) fail(label + ': indicator did not follow browser drag movement, got ' + transform + ', expected around ' + expectedX + ',' + expectedY);
-    var dragImage = document.getElementById('drag-cursor-drag-image');
-    if (!dragImage || dragImage.querySelector('svg') === null) fail(label + ': custom closed-hand drag image was not installed');
+  function targetDropZoneFor(card, label) {
+    if (label === 'task card') return document.querySelector('.category-drop-zone[data-category="completed"]');
+    var source = card.closest('.drop-zone');
+    if (!source) return null;
+    var date = source.dataset.date;
+    var hour = Number(source.dataset.hour);
+    for (var offset of [1, -1, 2, -2]) {
+      var candidate = document.querySelector('.drop-zone[data-date="' + date + '"][data-hour="' + (hour + offset) + '"]');
+      if (candidate && candidate !== source) return candidate;
+    }
+    return Array.from(document.querySelectorAll('.drop-zone')).find(function(zone) { return zone !== source; });
   }
-  async function exerciseCard(selector, label) {
-    await waitFor(function() { return document.querySelector(selector) && window.beginNativeDragCursor && window.clearNativeDragCursor; }, label + ' ready');
+  async function exerciseCard(selector, handlerName, label) {
+    await waitFor(function() { return document.querySelector(selector) && typeof window[handlerName] === 'function'; }, label + ' ready');
     var card = document.querySelector(selector);
+    if (card.hasAttribute('draggable')) fail(label + ': card must not use native HTML draggable');
+    if (document.getElementById('drag-cursor-indicator')) fail(label + ': custom cursor indicator should not exist before drag');
     var rect = card.getBoundingClientRect();
     var startX = Math.round(rect.left + Math.max(4, Math.min(20, rect.width / 2)));
     var startY = Math.round(rect.top + Math.max(4, Math.min(20, rect.height / 2)));
-    var movedX = startX + 48;
-    var movedY = startY + 36;
+    var targetZone = targetDropZoneFor(card, label);
+    if (!targetZone) fail(label + ': could not find target drop zone');
+    var targetRect = targetZone.getBoundingClientRect();
+    var movedX = Math.round(targetRect.left + targetRect.width / 2);
+    var movedY = Math.round(targetRect.top + targetRect.height / 2);
 
-    dispatch(card, new PointerEvent('pointerdown', {bubbles:true, cancelable:true, button:0, clientX:startX, clientY:startY}));
-    if (!document.documentElement.classList.contains('drag-cursor-pressed')) fail(label + ': pointerdown did not apply pressed cursor state');
+    dispatch(card, new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:77, pointerType:'mouse', button:0, buttons:1, clientX:startX, clientY:startY}));
+    if (getComputedStyle(card).cursor !== 'grabbing') fail(label + ': pointerdown should use default grabbing cursor, got ' + getComputedStyle(card).cursor);
+    dispatch(window, new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:77, pointerType:'mouse', button:0, buttons:1, clientX:movedX, clientY:movedY}));
+    await waitFor(function() { return document.documentElement.classList.contains('drag-cursor-active') && card.classList.contains('dragging'); }, label + ' active pointer drag');
+    var cursor = getComputedStyle(card).cursor;
+    if (cursor !== 'grabbing') fail(label + ': pointer movement should keep default grabbing cursor, got ' + cursor);
+    if (document.getElementById('drag-cursor-indicator')) fail(label + ': default cursor behavior must not create a custom cursor indicator');
+    if (document.documentElement.classList.contains('drag-cursor-active') && getComputedStyle(document.body).cursor !== 'grabbing') fail(label + ': active drag should set body cursor to grabbing, got ' + getComputedStyle(document.body).cursor);
 
-    // Chrome may deliver pointercancel as native dragging takes over. This must not clear the closed hand.
-    dispatch(card, new PointerEvent('pointercancel', {bubbles:true, cancelable:true, clientX:startX + 8, clientY:startY + 8}));
-    if (!document.documentElement.classList.contains('drag-cursor-pressed')) fail(label + ': pointercancel cleared pressed cursor during drag handoff');
-
-    var dt = dragDataTransfer();
-    var dragStart = new DragEvent('dragstart', {bubbles:true, cancelable:true, clientX:startX, clientY:startY, dataTransfer:dt});
-    dispatch(card, dragStart);
-    if (!card.classList.contains('dragging')) fail(label + ': dragstart did not mark card as dragging');
-    dispatch(card, new DragEvent('drag', {bubbles:true, cancelable:true, clientX:movedX, clientY:movedY, dataTransfer:dt}));
-    dispatch(document, new DragEvent('dragover', {bubbles:true, cancelable:true, clientX:movedX, clientY:movedY, dataTransfer:dt}));
-    assertClosedHandDragState(card, label, movedX, movedY);
-
-    dispatch(card, new DragEvent('dragend', {bubbles:true, cancelable:true, clientX:movedX, clientY:movedY, dataTransfer:dt}));
-    await waitFor(function() { return !document.documentElement.classList.contains('drag-cursor-active'); }, label + ' cleanup');
-    if (card.classList.contains('dragging')) fail(label + ': dragend did not remove dragging class');
-    var indicator = document.getElementById('drag-cursor-indicator');
-    if (indicator && (indicator.style.transform || '').indexOf('-9999') === -1) fail(label + ': indicator remained visible after dragend');
+    dispatch(window, new PointerEvent('pointerup', {bubbles:true, cancelable:true, pointerId:77, pointerType:'mouse', button:0, buttons:0, clientX:movedX, clientY:movedY}));
+    await waitFor(function() { return !document.documentElement.classList.contains('drag-cursor-active') && !card.classList.contains('dragging'); }, label + ' cleanup');
+    if (getComputedStyle(card).cursor !== 'grab') fail(label + ': pointerup should restore default grab cursor, got ' + getComputedStyle(card).cursor);
+    await new Promise(function(resolve) { setTimeout(resolve, 100); });
   }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
     if (location.pathname === '/tasks') {
-      await exerciseCard('#task-task-drag-cursor', 'task card');
+      await exerciseCard('#task-task-drag-cursor', 'handleTaskPointerDown', 'task card');
       location.href = '/schedule?project_id=project-card-drag-cursor';
       return;
     }
     if (location.pathname === '/schedule') {
-      await exerciseCard('[data-schedule-id="schedule-drag-cursor"]', 'schedule card');
+      await exerciseCard('[data-schedule-id="schedule-drag-cursor"]', 'handleSchedulePointerDown', 'schedule card');
       await report('pass', '');
       return;
     }
@@ -144,7 +134,12 @@ window.addEventListener('DOMContentLoaded', function() {
 </script>`
 
 	browserResult := make(chan string, 4)
+	var requestMu sync.Mutex
+	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestMu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		requestMu.Unlock()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		switch r.URL.Path {
 		case "/htmx-2.0.4.min.js":
@@ -159,6 +154,10 @@ window.addEventListener('DOMContentLoaded', function() {
 			page = strings.Replace(page, "</head>", runner+"</head>", 1)
 			_, _ = w.Write([]byte(page))
 		case "/schedule":
+			if r.Header.Get("HX-Request") == "true" {
+				_, _ = w.Write([]byte(`<div id="schedule-content" data-project-id="project-card-drag-cursor"></div>`))
+				return
+			}
 			var out bytes.Buffer
 			if err := Schedule([]models.Project{project}, &project, scheduledTasks, 0, nil, nil).Render(context.Background(), &out); err != nil {
 				t.Fatalf("render Schedule page: %v", err)
@@ -168,6 +167,16 @@ window.addEventListener('DOMContentLoaded', function() {
 			_, _ = w.Write([]byte(page))
 		case "/browser-result":
 			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		case "/tasks/task-drag-cursor/category":
+			if r.Method != http.MethodPatch {
+				t.Fatalf("expected task category move to use PATCH, got %s", r.Method)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/schedules/schedule-drag-cursor/reschedule":
+			if r.Method != http.MethodPatch {
+				t.Fatalf("expected schedule reschedule to use PATCH, got %s", r.Method)
+			}
 			w.WriteHeader(http.StatusNoContent)
 		case "/tasks/schedule-task-drag-cursor":
 			w.WriteHeader(http.StatusNoContent)
@@ -201,8 +210,19 @@ window.addEventListener('DOMContentLoaded', function() {
 		outcome = "fail:timed out waiting for browser result"
 	}
 	stopBrowserProcess(cmd)
+	requestMu.Lock()
+	requestList := strings.Join(requests, "\n")
+	requestMu.Unlock()
 	if !strings.HasPrefix(outcome, "pass:") {
 		stderr, _ := os.ReadFile(stderrPath)
-		t.Fatalf("Card drag cursor browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
+		t.Fatalf("Card drag cursor browser regression failed: %s\nRequests:\n%s\nChrome:\n%s", outcome, requestList, strings.TrimSpace(string(stderr)))
+	}
+	for _, want := range []string{
+		"PATCH /tasks/task-drag-cursor/category",
+		"PATCH /schedules/schedule-drag-cursor/reschedule",
+	} {
+		if !strings.Contains(requestList, want) {
+			t.Fatalf("browser drag should preserve drop behavior; missing request %q in:\n%s", want, requestList)
+		}
 	}
 }
