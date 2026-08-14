@@ -3609,38 +3609,77 @@ func TestAutomationRuntimeNativeNotificationRequiresProducerActionEdge(t *testin
 
 func requireAlertCreatedWaitingProjection(t *testing.T, db *sql.DB, projectID, automationID, versionID, alertID, producerNodeID, notificationNodeID, approvalNodeID string) {
 	t.Helper()
+	var workItemID, kind string
+	require.NoError(t, db.QueryRow(`SELECT id, kind FROM automation_work_items
+		WHERE project_id = ? AND automation_id = ? AND origin_version_id = ? AND work_item_key = ?`,
+		projectID, automationID, versionID, "alert:"+alertID).Scan(&workItemID, &kind))
+	require.Equal(t, "suggestion", kind)
+
+	var activityID, activityNode string
+	var activityStatus models.AutomationActivityStatus
+	require.NoError(t, db.QueryRow(`SELECT id, node_id, status FROM automation_activities
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND work_item_id = ?
+			AND activity_key = ? AND activity_type = 'create_notification'`,
+		projectID, automationID, versionID, workItemID, "alert:"+alertID+":create").Scan(&activityID, &activityNode, &activityStatus))
+	require.Equal(t, notificationNodeID, activityNode)
+	require.Equal(t, models.AutomationActivityCompleted, activityStatus)
+	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM automation_activity_resources
+		WHERE activity_id = ? AND resource_type = 'alert' AND resource_id = ?`, activityID, alertID))
+	require.Equal(t, 1, countRows(t, db, `SELECT COUNT(*) FROM automation_activities
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND activity_key = ?`,
+		projectID, automationID, versionID, "alert:"+alertID+":create"))
+
 	type transitionRow struct {
-		eventKey string
-		state    models.AutomationTransitionState
-		fromNode sql.NullString
-		toNode   string
+		eventKey   string
+		activityID sql.NullString
+		state      models.AutomationTransitionState
+		fromNode   sql.NullString
+		toNode     string
 	}
-	rows, err := db.Query(`SELECT event_key, state, from_node_id, to_node_id
+	rows, err := db.Query(`SELECT event_key, activity_id, state, from_node_id, to_node_id
 		FROM automation_transitions
-		WHERE project_id = ? AND automation_id = ? AND version_id = ?
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND work_item_id = ?
 			AND event_key IN (?, ?)
-		ORDER BY event_key`, projectID, automationID, versionID,
+		ORDER BY event_key`, projectID, automationID, versionID, workItemID,
 		"alert:"+alertID+":created:notification", "alert:"+alertID+":created:waiting")
 	require.NoError(t, err)
 	defer rows.Close()
 	var transitions []transitionRow
 	for rows.Next() {
 		var value transitionRow
-		require.NoError(t, rows.Scan(&value.eventKey, &value.state, &value.fromNode, &value.toNode))
+		require.NoError(t, rows.Scan(&value.eventKey, &value.activityID, &value.state, &value.fromNode, &value.toNode))
 		transitions = append(transitions, value)
 	}
 	require.NoError(t, rows.Err())
 	require.Len(t, transitions, 2)
 	require.Equal(t, "alert:"+alertID+":created:notification", transitions[0].eventKey)
+	require.True(t, transitions[0].activityID.Valid)
+	require.Equal(t, activityID, transitions[0].activityID.String)
 	require.Equal(t, models.AutomationTransitionEntered, transitions[0].state)
 	require.True(t, transitions[0].fromNode.Valid)
 	require.Equal(t, producerNodeID, transitions[0].fromNode.String)
 	require.Equal(t, notificationNodeID, transitions[0].toNode)
 	require.Equal(t, "alert:"+alertID+":created:waiting", transitions[1].eventKey)
+	require.True(t, transitions[1].activityID.Valid)
+	require.Equal(t, activityID, transitions[1].activityID.String)
 	require.Equal(t, models.AutomationTransitionWaiting, transitions[1].state)
 	require.True(t, transitions[1].fromNode.Valid)
 	require.Equal(t, notificationNodeID, transitions[1].fromNode.String)
 	require.Equal(t, approvalNodeID, transitions[1].toNode)
+}
+
+func requireAlertApprovedDecisionProjection(t *testing.T, db *sql.DB, projectID, automationID, versionID, alertID, approvalNodeID, inboxNodeID string) {
+	t.Helper()
+	var state models.AutomationTransitionState
+	var fromNode sql.NullString
+	var toNode string
+	require.NoError(t, db.QueryRow(`SELECT state, from_node_id, to_node_id FROM automation_transitions
+		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND event_key = ?`,
+		projectID, automationID, versionID, "alert:"+alertID+":decision:"+string(models.AlertDecisionApproved)).Scan(&state, &fromNode, &toNode))
+	require.Equal(t, models.AutomationTransitionEntered, state)
+	require.True(t, fromNode.Valid)
+	require.Equal(t, approvalNodeID, fromNode.String)
+	require.Equal(t, inboxNodeID, toNode)
 }
 
 func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing.T) {
@@ -3753,6 +3792,7 @@ func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate
 	currentNotification := automationNodeByKey(t, second.Definition, "custom_notification")
 	currentApproval := automationNodeByKey(t, second.Definition, "custom_approval")
 	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
+	requireAlertApprovedDecisionProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentApproval.ID, inbox.ID)
 }
 
 func customGitHubMailboxCandidate(name string) models.AutomationDraftCandidate {
@@ -3876,6 +3916,7 @@ func TestAutomationRuntimeNativeInboxOwnershipMovesToCurrentRenamedMailbox(t *te
 	currentNotification := automationNodeByKey(t, second.Definition, "custom_notification")
 	currentApproval := automationNodeByKey(t, second.Definition, "custom_approval")
 	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
+	requireAlertApprovedDecisionProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentApproval.ID, inbox.ID)
 }
 
 func TestAutomationRuntimeCustomNativeInboxRequiresSameAutomationOwnership(t *testing.T) {
