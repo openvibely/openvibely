@@ -51,6 +51,39 @@ func TestDiscordAuthRepo_CRUD(t *testing.T) {
 	require.Error(t, repo.Delete(ctx, "missing-id"))
 }
 
+func TestDiscordAuthRepo_CreateRefreshesDuplicateUser(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewDiscordAuthRepo(db)
+	projectRepo := NewProjectRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Discord Duplicate"}
+	otherProject := &models.Project{Name: "Discord Duplicate Other"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, otherProject))
+
+	original := &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: " 12345 ", DisplayName: "Alice", AddedBy: "first"}
+	require.NoError(t, repo.Create(ctx, original))
+	require.Equal(t, "12345", original.DiscordUserID)
+
+	refresh := &models.DiscordAuthorizedUser{ProjectID: otherProject.ID, DiscordUserID: "12345", DisplayName: "Alice Updated", AddedBy: "second"}
+	require.NoError(t, repo.Create(ctx, refresh))
+	require.Equal(t, original.ID, refresh.ID)
+	users, err := repo.ListByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, "Alice Updated", users[0].DisplayName)
+	assert.Equal(t, "second", users[0].AddedBy)
+
+	emptyRefresh := &models.DiscordAuthorizedUser{ProjectID: otherProject.ID, DiscordUserID: " 12345 ", DisplayName: "", AddedBy: "third"}
+	require.NoError(t, repo.Create(ctx, emptyRefresh))
+	users, err = repo.ListByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, users, 1)
+	assert.Equal(t, "Alice Updated", users[0].DisplayName)
+	assert.Equal(t, "third", users[0].AddedBy)
+}
+
 func TestDiscordAuthRepo_DeleteByProjectClearsSystemAllowlist(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewDiscordAuthRepo(db)
