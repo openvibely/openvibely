@@ -2819,17 +2819,24 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					state.motion = beginPointerCardMotion(state.card);
 				}
 
-				function updateTaskPointerDropZone(event) {
+				function refreshTaskPointerDropZone(clientX, clientY) {
 					const state = taskPointerDrag;
-					if (!state || !state.started) return;
-					const zone = taskPointerDropZoneAt(event.clientX, event.clientY);
+					if (!state || !state.started) return null;
+					const zone = taskPointerDropZoneAt(clientX, clientY);
 					if (state.dropZone !== zone) {
 						if (state.dropZone) state.dropZone.classList.remove('drag-over');
 						state.dropZone = zone;
 						if (zone) zone.classList.add('drag-over');
 					}
+					return zone;
+				}
+
+				function updateTaskPointerDropZone(event) {
+					const zone = refreshTaskPointerDropZone(event.clientX, event.clientY);
 					const board = document.getElementById('kanban-board');
-					handlePointerAutoScroll(event, board, zone);
+					handlePointerAutoScroll(event, board, zone, function() {
+						refreshTaskPointerDropZone(event.clientX, event.clientY);
+					});
 				}
 
 				function handleTaskPointerMove(event) {
@@ -2921,24 +2928,29 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					currentScrollZone = null;
 					currentScrollDeltaX = 0;
 					currentScrollDeltaY = 0;
+					currentScrollRefresh = null;
 				}
 
 				let currentScrollDeltaX = 0;
 				let currentScrollDeltaY = 0;
+				let currentScrollRefresh = null;
 
-				function startAutoScroll(scrollZone, deltaX, deltaY) {
+				function startAutoScroll(scrollZone, deltaX, deltaY, refresh) {
+					currentScrollRefresh = refresh || null;
 					if (autoScrollInterval && currentScrollZone === scrollZone && currentScrollDeltaX === deltaX && currentScrollDeltaY === deltaY) return;
 					stopAutoScroll();
 					currentScrollZone = scrollZone;
 					currentScrollDeltaX = deltaX;
 					currentScrollDeltaY = deltaY;
+					currentScrollRefresh = refresh || null;
 					autoScrollInterval = setInterval(function() {
 						if (!currentScrollZone) return stopAutoScroll();
 						const previousLeft = currentScrollZone.scrollLeft;
 						const previousTop = currentScrollZone.scrollTop;
 						currentScrollZone.scrollLeft += currentScrollDeltaX;
 						currentScrollZone.scrollTop += currentScrollDeltaY;
-						if (currentScrollZone.scrollLeft === previousLeft && currentScrollZone.scrollTop === previousTop) stopAutoScroll();
+						if (currentScrollZone.scrollLeft === previousLeft && currentScrollZone.scrollTop === previousTop) return stopAutoScroll();
+						if (currentScrollRefresh) currentScrollRefresh();
 					}, 16);
 				}
 
@@ -2964,11 +2976,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					return deltaX || deltaY ? { x: deltaX, y: deltaY } : null;
 				}
 
-				function handlePointerAutoScroll(event, outerContainer, innerContainer) {
+				function handlePointerAutoScroll(event, outerContainer, innerContainer, refresh) {
 					const outerDelta = pointerAutoScrollDelta(event, outerContainer);
-					if (outerDelta) return startAutoScroll(outerContainer, outerDelta.x, outerDelta.y);
+					if (outerDelta) return startAutoScroll(outerContainer, outerDelta.x, outerDelta.y, refresh);
 					const innerDelta = pointerAutoScrollDelta(event, innerContainer);
-					if (innerDelta) return startAutoScroll(innerContainer, innerDelta.x, innerDelta.y);
+					if (innerDelta) return startAutoScroll(innerContainer, innerDelta.x, innerDelta.y, refresh);
 					stopAutoScroll();
 				}
 

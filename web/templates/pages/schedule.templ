@@ -995,17 +995,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					_dragSourceDate = sourceZone ? sourceZone.dataset.date : null;
 				}
 
-				function updateSchedulePointerDropZone(event) {
+				function refreshSchedulePointerDropZone(clientX, clientY) {
 					var state = _schedulePointerDrag;
-					if (!state || !state.started) return;
-					var zone = schedulePointerDropZoneAt(event.clientX, event.clientY);
+					if (!state || !state.started) return null;
+					var zone = schedulePointerDropZoneAt(clientX, clientY);
 					if (state.dropZone !== zone) {
 						clearDropZoneFeedback(state.dropZone);
 						state.dropZone = zone;
 					}
-					var timeline = document.getElementById('schedule-timeline-container');
-					window.handlePointerAutoScroll(event, timeline, null);
-					if (!zone) return;
+					if (!zone) return null;
 					if (draggedScheduleId && draggedHasSchedule) {
 						zone.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
 						zone.style.outline = '2px solid rgba(99, 102, 241, 0.5)';
@@ -1015,6 +1013,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						zone.style.outline = '2px dashed rgba(239, 68, 68, 0.6)';
 						zone.style.cursor = 'not-allowed';
 					}
+					return zone;
+				}
+
+				function updateSchedulePointerDropZone(event) {
+					var zone = refreshSchedulePointerDropZone(event.clientX, event.clientY);
+					var timeline = document.getElementById('schedule-timeline-container');
+					window.handlePointerAutoScroll(event, timeline, null, function() {
+						refreshSchedulePointerDropZone(event.clientX, event.clientY);
+					});
 				}
 
 				function handleSchedulePointerMove(event) {

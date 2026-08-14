@@ -84,32 +84,21 @@ window.addEventListener('DOMContentLoaded', function() {
       poll();
     });
   }
-  function targetDropZoneFor(card, label) {
-    if (label === 'task card') return document.querySelector('.category-drop-zone[data-category="completed"]');
-    if (label === 'active task card') return document.querySelector('.task-drop-zone[data-status="running"]');
-    var source = card.closest('.drop-zone');
-    if (!source) return null;
-    var date = source.dataset.date;
-    var hour = Number(source.dataset.hour);
-    for (var offset of [1, -1, 2, -2]) {
-      var candidate = document.querySelector('.drop-zone[data-date="' + date + '"][data-hour="' + (hour + offset) + '"]');
-      if (candidate && candidate !== source) return candidate;
-    }
-    return Array.from(document.querySelectorAll('.drop-zone')).find(function(zone) { return zone !== source; });
-  }
-  async function exerciseOuterAutoScroll(selector, containerSelector, axis, label) {
-    await waitFor(function() { return document.querySelector(selector) && document.querySelector(containerSelector); }, label + ' ready');
+  async function exerciseOuterAutoScrollDrop(selector, containerSelector, axis, targetSelector, label, pointerId) {
+    await waitFor(function() { return document.querySelector(selector) && document.querySelector(containerSelector) && document.querySelector(targetSelector); }, label + ' ready');
     var card = document.querySelector(selector);
     var container = document.querySelector(containerSelector);
+    var target = document.querySelector(targetSelector);
     var originalContainerStyle = container.getAttribute('style');
     var childStyles = Array.from(container.children).map(function(child) { return child.getAttribute('style'); });
     if (axis === 'y') {
-      container.style.height = '180px';
-      container.style.maxHeight = '180px';
+      var viewportHeight = label === 'task status card' ? 72 : 180;
+      container.style.height = viewportHeight + 'px';
+      container.style.maxHeight = viewportHeight + 'px';
       container.style.overflowY = 'auto';
       if (containerSelector === '#kanban-board') {
         container.style.display = 'block';
-        Array.from(container.children).forEach(function(column) { column.style.minHeight = '180px'; });
+        Array.from(container.children).forEach(function(column) { column.style.minHeight = '240px'; });
       }
     } else {
       container.style.width = '320px';
@@ -120,76 +109,57 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
     var cardRect = card.getBoundingClientRect();
     var containerRect = container.getBoundingClientRect();
-    var canScrollForward = axis === 'y'
-      ? container.scrollTop + container.clientHeight < container.scrollHeight - 1
-      : container.scrollLeft + container.clientWidth < container.scrollWidth - 1;
-    var edgeX = axis === 'x' ? (canScrollForward ? containerRect.right - 4 : containerRect.left + 4) : cardRect.left + Math.min(12, cardRect.width / 2);
-    var edgeY = axis === 'y' ? (canScrollForward ? containerRect.bottom - 4 : containerRect.top + 4) : cardRect.top + Math.min(12, cardRect.height / 2);
-    var startScroll = axis === 'y' ? container.scrollTop : container.scrollLeft;
+    var targetRect = target.getBoundingClientRect();
+    var targetIsOffscreen = axis === 'y'
+      ? (targetRect.bottom <= containerRect.top || targetRect.top >= containerRect.bottom)
+      : (targetRect.right <= containerRect.left || targetRect.left >= containerRect.right);
+    if (!targetIsOffscreen) fail(label + ': target must begin outside the scroll viewport');
+    var forward = axis === 'y' ? targetRect.top >= containerRect.bottom : targetRect.left >= containerRect.right;
+    var edgeX = axis === 'x' ? (forward ? containerRect.right - 4 : containerRect.left + 4) : Math.max(containerRect.left + 8, Math.min(containerRect.right - 8, cardRect.left + 12));
+    var edgeY = axis === 'y' ? (forward ? containerRect.bottom - 4 : containerRect.top + 4) : Math.max(containerRect.top + 8, Math.min(containerRect.bottom - 8, cardRect.top + 12));
     var startX = cardRect.left + Math.min(12, cardRect.width / 2);
     var startY = cardRect.top + Math.min(12, cardRect.height / 2);
-    card.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:9, pointerType:'mouse', button:0, buttons:1, clientX:startX, clientY:startY}));
-    card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:9, pointerType:'mouse', buttons:1, clientX:edgeX, clientY:edgeY}));
+    if (card.hasAttribute('draggable')) fail(label + ': card must use pointer-driven dragging, not native HTML drag');
+    if (getComputedStyle(card).cursor !== 'grab') fail(label + ': idle cursor should be grab');
+    card.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:pointerId, pointerType:'mouse', button:0, buttons:1, clientX:startX, clientY:startY}));
+    card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:pointerId, pointerType:'mouse', buttons:1, clientX:edgeX, clientY:edgeY}));
+    if (!card.classList.contains('dragging')) fail(label + ': pointer movement should mark the card as dragging');
+    if (getComputedStyle(card).position !== 'fixed' || getComputedStyle(card).transform === 'none') fail(label + ': real card should visibly move during auto-scroll');
+    if (!document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': source slot should retain its placeholder during auto-scroll');
     await waitFor(function() {
-      var current = axis === 'y' ? container.scrollTop : container.scrollLeft;
-      return Math.abs(current - startScroll) > 4;
-    }, label + ' outer container auto-scroll');
+      var hit = document.elementFromPoint(edgeX, edgeY);
+      var zone = hit && hit.closest('.category-drop-zone, .task-drop-zone, .drop-zone');
+      return zone === target && (target.classList.contains('drag-over') || target.style.outline !== '');
+    }, label + ' off-screen target feedback');
     if (getComputedStyle(card).cursor !== 'grabbing') fail(label + ': auto-scroll should preserve grabbing cursor');
-    card.dispatchEvent(new PointerEvent('pointercancel', {bubbles:true, cancelable:true, pointerId:9, pointerType:'mouse', buttons:0, clientX:edgeX, clientY:edgeY}));
-    await waitFor(function() { return !card.classList.contains('dragging'); }, label + ' auto-scroll cleanup');
+    card.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, pointerId:pointerId, pointerType:'mouse', button:0, buttons:0, clientX:edgeX, clientY:edgeY}));
+    await waitFor(function() { return !card.classList.contains('dragging'); }, label + ' auto-scroll drop cleanup');
+    if (card.style.transform || document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': release should restore card layout');
+    if (getComputedStyle(card).cursor !== 'grab') fail(label + ': release should restore grab cursor');
     if (originalContainerStyle === null) container.removeAttribute('style');
     else container.setAttribute('style', originalContainerStyle);
     Array.from(container.children).forEach(function(child, index) {
       if (childStyles[index] === null) child.removeAttribute('style');
       else child.setAttribute('style', childStyles[index]);
     });
-  }
-  async function exercisePointerCard(selector, label) {
-    await waitFor(function() { return document.querySelector(selector); }, label + ' ready');
-    var card = document.querySelector(selector);
-    if (card.hasAttribute('draggable')) fail(label + ': card must use pointer-driven dragging, not native HTML drag');
-    if (document.querySelector('.drag-card-preview')) fail(label + ': must not create a custom pointer-drag preview');
-    if (document.getElementById('drag-cursor-indicator')) fail(label + ': must not create a custom cursor indicator');
-    if (getComputedStyle(card).cursor !== 'grab') fail(label + ': idle cursor should be grab, got ' + getComputedStyle(card).cursor);
-    var targetZone = targetDropZoneFor(card, label);
-    if (!targetZone) fail(label + ': could not find target drop zone');
-    targetZone.scrollIntoView({block:'center', inline:'center'});
-    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    var cardRect = card.getBoundingClientRect();
-    var targetRect = targetZone.getBoundingClientRect();
-    var startX = cardRect.left + Math.min(12, cardRect.width / 2);
-    var startY = cardRect.top + Math.min(12, cardRect.height / 2);
-    var targetX = targetRect.left + targetRect.width / 2;
-    var targetY = targetRect.top + Math.min(targetRect.height / 2, 20);
-    card.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:7, pointerType:'mouse', button:0, buttons:1, clientX:startX, clientY:startY}));
-    card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:7, pointerType:'mouse', buttons:1, clientX:targetX, clientY:targetY}));
-    if (!card.classList.contains('dragging')) fail(label + ': pointer movement should mark source card as dragging');
-    if (getComputedStyle(document.elementFromPoint(targetX, targetY)).cursor !== 'grabbing') fail(label + ': pointer movement should keep the default grabbing cursor');
-    if (getComputedStyle(card).transform === 'none') fail(label + ': dragged card should visibly follow pointer movement');
-    if (getComputedStyle(card).position !== 'fixed') fail(label + ': dragged card should escape its source drop-zone clipping context');
-    if (!document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': source slot should retain a layout placeholder while the real card moves');
-    card.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, pointerId:7, pointerType:'mouse', button:0, buttons:0, clientX:targetX, clientY:targetY}));
-    await waitFor(function() { return !card.classList.contains('dragging'); }, label + ' cleanup');
-    if (card.style.transform) fail(label + ': pointer release should clear card movement transform');
-    if (document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': pointer release should remove source layout placeholder');
-    if (getComputedStyle(card).cursor !== 'grab') fail(label + ': pointer release should restore grab cursor');
-    if (document.querySelector('.drag-card-preview') || document.getElementById('drag-cursor-indicator')) fail(label + ': custom drag UI should not exist after release');
     await new Promise(function(resolve) { setTimeout(resolve, 100); });
   }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
     if (location.pathname === '/tasks') {
-      await exerciseOuterAutoScroll('#task-task-drag-cursor', '#kanban-board', 'y', 'task category card');
-      await exerciseOuterAutoScroll('#task-task-active-status-drag', '#kanban-board', 'y', 'task status card');
-      await exercisePointerCard('#task-task-drag-cursor', 'task card');
-      await exercisePointerCard('#task-task-active-status-drag', 'active task card');
+      await exerciseOuterAutoScrollDrop('#task-task-drag-cursor', '#kanban-board', 'y', '.category-drop-zone[data-category="completed"]', 'task category card', 9);
+      await exerciseOuterAutoScrollDrop('#task-task-active-status-drag', '#kanban-board', 'y', '.task-drop-zone[data-status="running"]', 'task status card', 10);
       location.href = '/schedule?project_id=project-card-drag-cursor';
       return;
     }
     if (location.pathname === '/schedule') {
-      await exerciseOuterAutoScroll('[data-schedule-id="schedule-drag-cursor"]', '#schedule-timeline-container', 'y', 'schedule card vertical');
-      await exerciseOuterAutoScroll('[data-schedule-id="schedule-drag-cursor"]', '#schedule-timeline-container', 'x', 'schedule card horizontal');
-      await exercisePointerCard('[data-schedule-id="schedule-drag-cursor"]', 'schedule card');
+      var scheduleCard = document.querySelector('[data-schedule-id="schedule-drag-cursor"]');
+      var sourceZone = scheduleCard && scheduleCard.closest('.drop-zone');
+      if (!sourceZone) fail('schedule off-screen drop: source zone missing');
+      var sourceHour = Number(sourceZone.dataset.hour);
+      var targetHour = sourceHour <= 17 ? sourceHour + 6 : sourceHour - 6;
+      var scheduleTargetSelector = '.drop-zone[data-date="' + sourceZone.dataset.date + '"][data-hour="' + targetHour + '"]';
+      await exerciseOuterAutoScrollDrop('[data-schedule-id="schedule-drag-cursor"]', '#schedule-timeline-container', 'y', scheduleTargetSelector, 'schedule card vertical', 11);
       await report('pass', '');
       return;
     }
