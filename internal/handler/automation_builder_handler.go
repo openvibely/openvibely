@@ -681,11 +681,18 @@ func (h *Handler) RunAutomationNow(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, _, err := h.automationLifecycleSvc.RunNow(c.Request().Context(), projectID, c.Param("automationId")); err != nil {
+	invocations, _, err := h.automationLifecycleSvc.RunNow(c.Request().Context(), projectID, c.Param("automationId"))
+	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "automation not found")
 		}
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if startedInvocationID := firstStartedAutomationInvocationID(invocations); isHTMX(c) && h.automationGraphSvc != nil && startedInvocationID != "" {
+		definition, _, defErr := h.automationGraphSvc.GetDefinition(c.Request().Context(), projectID, c.Param("automationId"))
+		if defErr == nil && definition != nil && strings.TrimSpace(definition.Automation.Name) != "" {
+			setHTMXToastWithOptions(c, strings.TrimSpace(definition.Automation.Name)+" is now running.", "info", "", "", "", "automation:"+startedInvocationID)
+		}
 	}
 	if c.FormValue("return_to") == "portfolio" {
 		if isHTMX(c) {
@@ -697,6 +704,16 @@ func (h *Handler) RunAutomationNow(c echo.Context) error {
 		return h.GetAutomationLive(c)
 	}
 	return c.Redirect(http.StatusSeeOther, "/automations/"+c.Param("automationId")+"?project_id="+projectID)
+}
+
+func firstStartedAutomationInvocationID(invocations []models.AutomationInvocation) string {
+	for _, invocation := range invocations {
+		switch invocation.Status {
+		case models.AutomationInvocationClaimed, models.AutomationInvocationDispatched, models.AutomationInvocationRunning:
+			return invocation.ID
+		}
+	}
+	return ""
 }
 
 func (h *Handler) PauseAutomation(c echo.Context) error {

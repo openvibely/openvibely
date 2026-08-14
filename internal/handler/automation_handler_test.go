@@ -111,6 +111,11 @@ func TestAutomationPortfolioRunNowQueuesManualDispatchWithoutChangingCadence(t *
 	}).Execute()
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), `id="automations-container"`)
+	hxTrigger := response.Header().Get("HX-Trigger")
+	require.Contains(t, hxTrigger, "openvibelyToast")
+	require.Contains(t, hxTrigger, definition.Automation.Name+" is now running.")
+	require.Contains(t, hxTrigger, `"status":"info"`)
+	require.Contains(t, hxTrigger, `"toast_key":"automation:`)
 
 	var triggerType, triggerResourceID, prompt string
 	require.NoError(t, tc.db.QueryRow(`SELECT i.trigger_resource_type, i.trigger_resource_id, t.prompt

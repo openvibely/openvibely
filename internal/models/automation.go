@@ -227,11 +227,12 @@ const (
 )
 
 type AutomationBinding struct {
-	AutomationID string `json:"automation_id"`
-	VersionID    string `json:"version_id"`
-	InvocationID string `json:"invocation_id,omitempty"`
-	NodeID       string `json:"node_id"`
-	WorkItemID   string `json:"work_item_id,omitempty"`
+	AutomationID   string `json:"automation_id"`
+	AutomationName string `json:"automation_name,omitempty"`
+	VersionID      string `json:"version_id"`
+	InvocationID   string `json:"invocation_id,omitempty"`
+	NodeID         string `json:"node_id"`
+	WorkItemID     string `json:"work_item_id,omitempty"`
 }
 
 type AutomationContext struct {

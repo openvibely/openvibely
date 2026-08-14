@@ -3101,6 +3101,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					return document.querySelector('.toast-notification[data-task-id="' + taskId + '"]:not(.toast-dismiss)');
 				}
 
+				function findVisibleToastKey(toastKey) {
+					if (!toastKey) return null;
+					return document.querySelector('.toast-notification[data-toast-key="' + toastKey + '"]:not(.toast-dismiss)');
+				}
+
 				function syncToastContainerHost() {
 					const modal = getTopMostOpenModal();
 					const host = modal || document.body;
@@ -3178,9 +3183,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					const container = getToastContainer();
 					if (!container) return;
 					options = options || {};
+					var toastKey = String(options.toastKey || '').trim();
 
-					// Deduplicate: skip if a toast for this task is already visible
+					// Deduplicate: skip if a toast for this task or explicit toast key is already visible
 					if (taskId && findVisibleTaskToast(taskId)) {
+						return;
+					}
+					if (toastKey && findVisibleToastKey(toastKey)) {
 						return;
 					}
 
@@ -3220,6 +3229,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					toast.setAttribute('role', 'alert');
 					if (taskId) {
 						toast.setAttribute('data-task-id', taskId);
+					}
+					if (toastKey) {
+						toast.setAttribute('data-toast-key', toastKey);
 					}
 					toast.innerHTML = icon +
 						'<div class="toast-message-container flex flex-col gap-0 min-w-0 flex-1 overflow-hidden">' +
@@ -3300,7 +3312,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						var taskId = detail.taskId || detail.task_id || '';
 						var linkURL = detail.linkURL || detail.link_url || '';
 						var linkText = detail.linkText || detail.link_text || '';
-						window.showToast(message, status, taskId, { linkURL: linkURL, linkText: linkText });
+						var toastKey = detail.toastKey || detail.toast_key || '';
+						window.showToast(message, status, taskId, { linkURL: linkURL, linkText: linkText, toastKey: toastKey });
 					});
 				}
 
