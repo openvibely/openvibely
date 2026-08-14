@@ -3883,7 +3883,8 @@ func TestSidebar_AutomationInvocationStartedShowsToast(t *testing.T) {
 	for _, snippet := range []string{
 		`eventType === 'automation_invocation_started'`,
 		`const automationName = data.task_name || 'Automation';`,
-		`window.showToast(automationName + ' is now running.', 'info', '', { toastKey: 'automation:' + invocationId });`,
+		`const automationUrl = '/automations/' + encodeURIComponent(data.automation_id || '') + '?project_id=' + encodeURIComponent(currentProjectID);`,
+		`window.showToast(automationName + ' is now running.', 'info', '', { toastKey: 'automation:' + invocationId, clickURL: automationUrl });`,
 	} {
 		if !strings.Contains(body, snippet) {
 			t.Fatalf("sidebar automation-start toast script missing snippet: %s", snippet)

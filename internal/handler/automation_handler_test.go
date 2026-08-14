@@ -116,6 +116,7 @@ func TestAutomationPortfolioRunNowQueuesManualDispatchWithoutChangingCadence(t *
 	require.Contains(t, hxTrigger, definition.Automation.Name+" is now running.")
 	require.Contains(t, hxTrigger, `"status":"info"`)
 	require.Contains(t, hxTrigger, `"toast_key":"automation:`)
+	require.Contains(t, hxTrigger, `"click_url":"/automations/`+definition.Automation.ID+`?project_id=`+project.ID+`"`)
 
 	var triggerType, triggerResourceID, prompt string
 	require.NoError(t, tc.db.QueryRow(`SELECT i.trigger_resource_type, i.trigger_resource_id, t.prompt
