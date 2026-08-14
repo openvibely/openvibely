@@ -883,6 +883,12 @@ func TestBase_DraggableCardsUseClosedHandCursorWhileActive(t *testing.T) {
 		"movePointerCard(state.motion, deltaX, deltaY)",
 		"data-pointer-drag-placeholder",
 		"taskPointerDropZoneAt(event.clientX, event.clientY)",
+		"handlePointerAutoScroll(event, board, zone)",
+		"function pointerAutoScrollDelta(event, scrollZone)",
+		"styles.overflowY === 'auto' || styles.overflowY === 'scroll'",
+		"taskPointerDropZoneAt(event.clientX, event.clientY) || state.dropZone",
+		"window.handlePointerAutoScroll = handlePointerAutoScroll",
+		"window.stopPointerAutoScroll = stopAutoScroll",
 		"document.body.classList.add('drag-cursor-active')",
 		"document.body.classList.remove('drag-cursor-active')",
 	} {

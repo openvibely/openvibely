@@ -48,6 +48,9 @@ func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {
 		"function handleSchedulePointerMove(event)",
 		"window.movePointerCard(state.motion, deltaX, deltaY)",
 		"window.beginPointerCardMotion(card)",
+		"window.handlePointerAutoScroll(event, timeline, null)",
+		"schedulePointerDropZoneAt(event.clientX, event.clientY) || state.dropZone",
+		"if (window.stopPointerAutoScroll) window.stopPointerAutoScroll()",
 		"document.body.classList.add('drag-cursor-active')",
 		"resetSchedulePointerDrag()",
 	} {

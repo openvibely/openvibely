@@ -97,6 +97,53 @@ window.addEventListener('DOMContentLoaded', function() {
     }
     return Array.from(document.querySelectorAll('.drop-zone')).find(function(zone) { return zone !== source; });
   }
+  async function exerciseOuterAutoScroll(selector, containerSelector, axis, label) {
+    await waitFor(function() { return document.querySelector(selector) && document.querySelector(containerSelector); }, label + ' ready');
+    var card = document.querySelector(selector);
+    var container = document.querySelector(containerSelector);
+    var originalContainerStyle = container.getAttribute('style');
+    var childStyles = Array.from(container.children).map(function(child) { return child.getAttribute('style'); });
+    if (axis === 'y') {
+      container.style.height = '180px';
+      container.style.maxHeight = '180px';
+      container.style.overflowY = 'auto';
+      if (containerSelector === '#kanban-board') {
+        container.style.display = 'block';
+        Array.from(container.children).forEach(function(column) { column.style.minHeight = '180px'; });
+      }
+    } else {
+      container.style.width = '320px';
+      container.style.maxWidth = '320px';
+      container.style.overflowX = 'auto';
+    }
+    card.scrollIntoView({block:'center', inline:'center'});
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    var cardRect = card.getBoundingClientRect();
+    var containerRect = container.getBoundingClientRect();
+    var canScrollForward = axis === 'y'
+      ? container.scrollTop + container.clientHeight < container.scrollHeight - 1
+      : container.scrollLeft + container.clientWidth < container.scrollWidth - 1;
+    var edgeX = axis === 'x' ? (canScrollForward ? containerRect.right - 4 : containerRect.left + 4) : cardRect.left + Math.min(12, cardRect.width / 2);
+    var edgeY = axis === 'y' ? (canScrollForward ? containerRect.bottom - 4 : containerRect.top + 4) : cardRect.top + Math.min(12, cardRect.height / 2);
+    var startScroll = axis === 'y' ? container.scrollTop : container.scrollLeft;
+    var startX = cardRect.left + Math.min(12, cardRect.width / 2);
+    var startY = cardRect.top + Math.min(12, cardRect.height / 2);
+    card.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:9, pointerType:'mouse', button:0, buttons:1, clientX:startX, clientY:startY}));
+    card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:9, pointerType:'mouse', buttons:1, clientX:edgeX, clientY:edgeY}));
+    await waitFor(function() {
+      var current = axis === 'y' ? container.scrollTop : container.scrollLeft;
+      return Math.abs(current - startScroll) > 4;
+    }, label + ' outer container auto-scroll');
+    if (getComputedStyle(card).cursor !== 'grabbing') fail(label + ': auto-scroll should preserve grabbing cursor');
+    card.dispatchEvent(new PointerEvent('pointercancel', {bubbles:true, cancelable:true, pointerId:9, pointerType:'mouse', buttons:0, clientX:edgeX, clientY:edgeY}));
+    await waitFor(function() { return !card.classList.contains('dragging'); }, label + ' auto-scroll cleanup');
+    if (originalContainerStyle === null) container.removeAttribute('style');
+    else container.setAttribute('style', originalContainerStyle);
+    Array.from(container.children).forEach(function(child, index) {
+      if (childStyles[index] === null) child.removeAttribute('style');
+      else child.setAttribute('style', childStyles[index]);
+    });
+  }
   async function exercisePointerCard(selector, label) {
     await waitFor(function() { return document.querySelector(selector); }, label + ' ready');
     var card = document.querySelector(selector);
@@ -132,12 +179,16 @@ window.addEventListener('DOMContentLoaded', function() {
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
     if (location.pathname === '/tasks') {
+      await exerciseOuterAutoScroll('#task-task-drag-cursor', '#kanban-board', 'y', 'task category card');
+      await exerciseOuterAutoScroll('#task-task-active-status-drag', '#kanban-board', 'y', 'task status card');
       await exercisePointerCard('#task-task-drag-cursor', 'task card');
       await exercisePointerCard('#task-task-active-status-drag', 'active task card');
       location.href = '/schedule?project_id=project-card-drag-cursor';
       return;
     }
     if (location.pathname === '/schedule') {
+      await exerciseOuterAutoScroll('[data-schedule-id="schedule-drag-cursor"]', '#schedule-timeline-container', 'y', 'schedule card vertical');
+      await exerciseOuterAutoScroll('[data-schedule-id="schedule-drag-cursor"]', '#schedule-timeline-container', 'x', 'schedule card horizontal');
       await exercisePointerCard('[data-schedule-id="schedule-drag-cursor"]', 'schedule card');
       await report('pass', '');
       return;

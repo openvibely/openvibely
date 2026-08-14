@@ -957,6 +957,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 
 				function resetSchedulePointerDrag() {
 					var state = _schedulePointerDrag;
+					if (window.stopPointerAutoScroll) window.stopPointerAutoScroll();
 					if (state && state.dropZone) clearDropZoneFeedback(state.dropZone);
 					if (state && state.card) {
 						window.endPointerCardMotion(state.motion);
@@ -1002,6 +1003,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						clearDropZoneFeedback(state.dropZone);
 						state.dropZone = zone;
 					}
+					var timeline = document.getElementById('schedule-timeline-container');
+					window.handlePointerAutoScroll(event, timeline, null);
 					if (!zone) return;
 					if (draggedScheduleId && draggedHasSchedule) {
 						zone.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
@@ -1029,7 +1032,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				function handleSchedulePointerUp(event) {
 					var state = _schedulePointerDrag;
 					if (!state || event.pointerId !== state.pointerId) return;
-					var dropZone = state.dropZone || schedulePointerDropZoneAt(event.clientX, event.clientY);
+					var dropZone = schedulePointerDropZoneAt(event.clientX, event.clientY) || state.dropZone;
 					if (state.started && dropZone) {
 						handleScheduleDrop({
 							currentTarget: dropZone,

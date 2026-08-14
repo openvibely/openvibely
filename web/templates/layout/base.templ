@@ -2828,8 +2828,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						state.dropZone = zone;
 						if (zone) zone.classList.add('drag-over');
 					}
-					if (zone) handleAutoScroll(event, zone);
-					else stopAutoScroll();
+					const board = document.getElementById('kanban-board');
+					handlePointerAutoScroll(event, board, zone);
 				}
 
 				function handleTaskPointerMove(event) {
@@ -2867,7 +2867,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				function handleTaskPointerUp(event) {
 					const state = taskPointerDrag;
 					if (!state || event.pointerId !== state.pointerId) return;
-					const dropZone = state.dropZone || taskPointerDropZoneAt(event.clientX, event.clientY);
+					const dropZone = taskPointerDropZoneAt(event.clientX, event.clientY) || state.dropZone;
 					if (state.started) {
 						suppressedTaskClickID = state.card.getAttribute('data-task-id');
 						if (dropZone) {
@@ -2914,65 +2914,66 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				window.handleTaskPointerDown = handleTaskPointerDown;
 
 				function stopAutoScroll() {
-					if (autoScrollInterval) {						clearInterval(autoScrollInterval);
+					if (autoScrollInterval) {
+						clearInterval(autoScrollInterval);
 						autoScrollInterval = null;
 					}
 					currentScrollZone = null;
+					currentScrollDeltaX = 0;
+					currentScrollDeltaY = 0;
 				}
 
-				function startAutoScroll(scrollZone, direction, speed) {
-					// Don't restart if already scrolling the same zone in the same direction
-					if (autoScrollInterval && currentScrollZone === scrollZone) {
-						return;
-					}
+				let currentScrollDeltaX = 0;
+				let currentScrollDeltaY = 0;
 
+				function startAutoScroll(scrollZone, deltaX, deltaY) {
+					if (autoScrollInterval && currentScrollZone === scrollZone && currentScrollDeltaX === deltaX && currentScrollDeltaY === deltaY) return;
 					stopAutoScroll();
 					currentScrollZone = scrollZone;
-
-					autoScrollInterval = setInterval(() => {
-						if (!scrollZone) {
-							stopAutoScroll();
-							return;
-						}
-
-						// Scroll the zone
-						scrollZone.scrollTop += direction * speed;
-
-						// Stop if we've reached the edge
-						if (direction < 0 && scrollZone.scrollTop <= 0) {
-							stopAutoScroll();
-						} else if (direction > 0 && scrollZone.scrollTop + scrollZone.clientHeight >= scrollZone.scrollHeight) {
-							stopAutoScroll();
-						}
-					}, 16); // ~60fps
+					currentScrollDeltaX = deltaX;
+					currentScrollDeltaY = deltaY;
+					autoScrollInterval = setInterval(function() {
+						if (!currentScrollZone) return stopAutoScroll();
+						const previousLeft = currentScrollZone.scrollLeft;
+						const previousTop = currentScrollZone.scrollTop;
+						currentScrollZone.scrollLeft += currentScrollDeltaX;
+						currentScrollZone.scrollTop += currentScrollDeltaY;
+						if (currentScrollZone.scrollLeft === previousLeft && currentScrollZone.scrollTop === previousTop) stopAutoScroll();
+					}, 16);
 				}
 
-				function handleAutoScroll(event, dropZone) {
-					// Only auto-scroll if the zone is scrollable
-					if (dropZone.scrollHeight <= dropZone.clientHeight) {
-						stopAutoScroll();
-						return;
+				function pointerAutoScrollDelta(event, scrollZone) {
+					if (!scrollZone) return null;
+					const rect = scrollZone.getBoundingClientRect();
+					if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) return null;
+					const styles = getComputedStyle(scrollZone);
+					const canScrollX = (styles.overflowX === 'auto' || styles.overflowX === 'scroll') && scrollZone.scrollWidth > scrollZone.clientWidth;
+					const canScrollY = (styles.overflowY === 'auto' || styles.overflowY === 'scroll') && scrollZone.scrollHeight > scrollZone.clientHeight;
+					const thresholdX = Math.min(80, rect.width / 3);
+					const thresholdY = Math.min(80, rect.height / 3);
+					let deltaX = 0;
+					let deltaY = 0;
+					if (canScrollX) {
+						if (event.clientX - rect.left < thresholdX && scrollZone.scrollLeft > 0) deltaX = -8;
+						else if (rect.right - event.clientX < thresholdX && scrollZone.scrollLeft + scrollZone.clientWidth < scrollZone.scrollWidth) deltaX = 8;
 					}
-
-					const rect = dropZone.getBoundingClientRect();
-					const mouseY = event.clientY;
-					const scrollThreshold = 80; // pixels from edge to trigger scroll
-					const scrollSpeed = 8; // pixels per frame
-
-					const distanceFromTop = mouseY - rect.top;
-					const distanceFromBottom = rect.bottom - mouseY;
-
-					if (distanceFromTop < scrollThreshold && distanceFromTop >= 0) {
-						// Near top edge - scroll up
-						startAutoScroll(dropZone, -1, scrollSpeed);
-					} else if (distanceFromBottom < scrollThreshold && distanceFromBottom >= 0) {
-						// Near bottom edge - scroll down
-						startAutoScroll(dropZone, 1, scrollSpeed);
-					} else {
-						// Not near any edge
-						stopAutoScroll();
+					if (canScrollY) {
+						if (event.clientY - rect.top < thresholdY && scrollZone.scrollTop > 0) deltaY = -8;
+						else if (rect.bottom - event.clientY < thresholdY && scrollZone.scrollTop + scrollZone.clientHeight < scrollZone.scrollHeight) deltaY = 8;
 					}
+					return deltaX || deltaY ? { x: deltaX, y: deltaY } : null;
 				}
+
+				function handlePointerAutoScroll(event, outerContainer, innerContainer) {
+					const outerDelta = pointerAutoScrollDelta(event, outerContainer);
+					if (outerDelta) return startAutoScroll(outerContainer, outerDelta.x, outerDelta.y);
+					const innerDelta = pointerAutoScrollDelta(event, innerContainer);
+					if (innerDelta) return startAutoScroll(innerContainer, innerDelta.x, innerDelta.y);
+					stopAutoScroll();
+				}
+
+				window.handlePointerAutoScroll = handlePointerAutoScroll;
+				window.stopPointerAutoScroll = stopAutoScroll;
 
 				// Drop handler for non-Active category columns (category change + reordering)
 				function handleCategoryDrop(event) {
