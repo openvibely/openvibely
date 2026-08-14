@@ -47,8 +47,10 @@ openvibely.db-wal
 bin/
 /server
 *.test
+.tools/
 
 # Local environment overrides
 .env
 .env.local
 .env.*.local
+.release-signing.env

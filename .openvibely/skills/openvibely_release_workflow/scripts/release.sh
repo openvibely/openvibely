@@ -35,6 +35,38 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=release-version.sh
 source "${SCRIPT_DIR}/release-version.sh"
 
+load_release_env_defaults() {
+    local env_file="$1"
+    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_win_p12=0 had_win_pass=0 had_win_desktop=0 had_linux_desktop=0
+    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_win_p12="" saved_win_pass="" saved_win_desktop="" saved_linux_desktop=""
+
+    [[ ${OPENVIBELY_RELEASE_KEY_ID+x} ]] && { had_key=1; saved_key="$OPENVIBELY_RELEASE_KEY_ID"; }
+    [[ ${OPENVIBELY_RELEASE_PUBLIC_KEY+x} ]] && { had_pub=1; saved_pub="$OPENVIBELY_RELEASE_PUBLIC_KEY"; }
+    [[ ${OPENVIBELY_MACOS_SIGN_IDENTITY+x} ]] && { had_mac_id=1; saved_mac_id="$OPENVIBELY_MACOS_SIGN_IDENTITY"; }
+    [[ ${OPENVIBELY_MACOS_NOTARY_PROFILE+x} ]] && { had_notary=1; saved_notary="$OPENVIBELY_MACOS_NOTARY_PROFILE"; }
+    [[ ${OPENVIBELY_WINDOWS_SIGN_COMMAND+x} ]] && { had_win_sign=1; saved_win_sign="$OPENVIBELY_WINDOWS_SIGN_COMMAND"; }
+    [[ ${OPENVIBELY_WINDOWS_VERIFY_COMMAND+x} ]] && { had_win_verify=1; saved_win_verify="$OPENVIBELY_WINDOWS_VERIFY_COMMAND"; }
+    [[ ${WINDOWS_CERT_P12+x} ]] && { had_win_p12=1; saved_win_p12="$WINDOWS_CERT_P12"; }
+    [[ ${WINDOWS_CERT_PASSWORD+x} ]] && { had_win_pass=1; saved_win_pass="$WINDOWS_CERT_PASSWORD"; }
+    [[ ${OPENVIBELY_WINDOWS_DESKTOP_BINARY+x} ]] && { had_win_desktop=1; saved_win_desktop="$OPENVIBELY_WINDOWS_DESKTOP_BINARY"; }
+    [[ ${OPENVIBELY_LINUX_DESKTOP_BINARY+x} ]] && { had_linux_desktop=1; saved_linux_desktop="$OPENVIBELY_LINUX_DESKTOP_BINARY"; }
+
+    # shellcheck source=/dev/null
+    source "$env_file"
+
+    [[ "$had_key" == "1" ]] && OPENVIBELY_RELEASE_KEY_ID="$saved_key"
+    [[ "$had_pub" == "1" ]] && OPENVIBELY_RELEASE_PUBLIC_KEY="$saved_pub"
+    [[ "$had_mac_id" == "1" ]] && OPENVIBELY_MACOS_SIGN_IDENTITY="$saved_mac_id"
+    [[ "$had_notary" == "1" ]] && OPENVIBELY_MACOS_NOTARY_PROFILE="$saved_notary"
+    [[ "$had_win_sign" == "1" ]] && OPENVIBELY_WINDOWS_SIGN_COMMAND="$saved_win_sign"
+    [[ "$had_win_verify" == "1" ]] && OPENVIBELY_WINDOWS_VERIFY_COMMAND="$saved_win_verify"
+    [[ "$had_win_p12" == "1" ]] && WINDOWS_CERT_P12="$saved_win_p12"
+    [[ "$had_win_pass" == "1" ]] && WINDOWS_CERT_PASSWORD="$saved_win_pass"
+    [[ "$had_win_desktop" == "1" ]] && OPENVIBELY_WINDOWS_DESKTOP_BINARY="$saved_win_desktop"
+    [[ "$had_linux_desktop" == "1" ]] && OPENVIBELY_LINUX_DESKTOP_BINARY="$saved_linux_desktop"
+    return 0
+}
+
 ###############################################################################
 # 0. Arguments
 ###############################################################################
@@ -52,6 +84,7 @@ fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || fail "Not in a git repository.")"
 DIST_DIR="${DIST_DIR:-${REPO_ROOT}/dist/${VERSION}}"
+SIGNING_CHECK="${SCRIPT_DIR}/check-release-signing.sh"
 
 export DRY_RUN="${DRY_RUN:-0}"
 export DRAFT="${DRAFT:-0}"
@@ -63,6 +96,28 @@ export DIST_DIR
 log "OpenVibely release pipeline starting for v${VERSION}"
 [[ "$DRY_RUN" == "1" ]] && warn "DRY_RUN=1 — no destructive operations will be performed."
 [[ "$DRAFT" == "1" ]]   && warn "DRAFT=1 — GitHub release will be created as a draft."
+
+###############################################################################
+# 0b. Signing setup
+###############################################################################
+
+if [[ "${SKIP_SIGNING_CHECK:-0}" == "1" ]]; then
+    warn "SKIP_SIGNING_CHECK=1 — skipping signing readiness checks."
+elif [[ -x "$SIGNING_CHECK" ]]; then
+    log "=== Step 0/6: Signing setup/readiness ==="
+    if [[ "$DRY_RUN" == "1" ]]; then
+        "$SIGNING_CHECK" --no-interactive
+    else
+        "$SIGNING_CHECK" --setup
+    fi
+    if [[ "${SKIP_RELEASE_SIGNING_ENV:-0}" != "1" && -f "${REPO_ROOT}/.release-signing.env" ]]; then
+        load_release_env_defaults "${REPO_ROOT}/.release-signing.env"
+        export -n WINDOWS_CERT_PASSWORD 2>/dev/null || true
+    fi
+else
+    warn "Signing readiness script not found: $SIGNING_CHECK"
+fi
+export -n WINDOWS_CERT_PASSWORD 2>/dev/null || true
 
 ###############################################################################
 # 1. Preflight

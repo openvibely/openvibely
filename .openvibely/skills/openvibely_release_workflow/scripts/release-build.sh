@@ -58,6 +58,38 @@ run() {
     fi
 }
 
+load_release_env_defaults() {
+    local env_file="$1"
+    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_win_p12=0 had_win_pass=0 had_win_desktop=0 had_linux_desktop=0
+    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_win_p12="" saved_win_pass="" saved_win_desktop="" saved_linux_desktop=""
+
+    [[ ${OPENVIBELY_RELEASE_KEY_ID+x} ]] && { had_key=1; saved_key="$OPENVIBELY_RELEASE_KEY_ID"; }
+    [[ ${OPENVIBELY_RELEASE_PUBLIC_KEY+x} ]] && { had_pub=1; saved_pub="$OPENVIBELY_RELEASE_PUBLIC_KEY"; }
+    [[ ${OPENVIBELY_MACOS_SIGN_IDENTITY+x} ]] && { had_mac_id=1; saved_mac_id="$OPENVIBELY_MACOS_SIGN_IDENTITY"; }
+    [[ ${OPENVIBELY_MACOS_NOTARY_PROFILE+x} ]] && { had_notary=1; saved_notary="$OPENVIBELY_MACOS_NOTARY_PROFILE"; }
+    [[ ${OPENVIBELY_WINDOWS_SIGN_COMMAND+x} ]] && { had_win_sign=1; saved_win_sign="$OPENVIBELY_WINDOWS_SIGN_COMMAND"; }
+    [[ ${OPENVIBELY_WINDOWS_VERIFY_COMMAND+x} ]] && { had_win_verify=1; saved_win_verify="$OPENVIBELY_WINDOWS_VERIFY_COMMAND"; }
+    [[ ${WINDOWS_CERT_P12+x} ]] && { had_win_p12=1; saved_win_p12="$WINDOWS_CERT_P12"; }
+    [[ ${WINDOWS_CERT_PASSWORD+x} ]] && { had_win_pass=1; saved_win_pass="$WINDOWS_CERT_PASSWORD"; }
+    [[ ${OPENVIBELY_WINDOWS_DESKTOP_BINARY+x} ]] && { had_win_desktop=1; saved_win_desktop="$OPENVIBELY_WINDOWS_DESKTOP_BINARY"; }
+    [[ ${OPENVIBELY_LINUX_DESKTOP_BINARY+x} ]] && { had_linux_desktop=1; saved_linux_desktop="$OPENVIBELY_LINUX_DESKTOP_BINARY"; }
+
+    # shellcheck source=/dev/null
+    source "$env_file"
+
+    [[ "$had_key" == "1" ]] && OPENVIBELY_RELEASE_KEY_ID="$saved_key"
+    [[ "$had_pub" == "1" ]] && OPENVIBELY_RELEASE_PUBLIC_KEY="$saved_pub"
+    [[ "$had_mac_id" == "1" ]] && OPENVIBELY_MACOS_SIGN_IDENTITY="$saved_mac_id"
+    [[ "$had_notary" == "1" ]] && OPENVIBELY_MACOS_NOTARY_PROFILE="$saved_notary"
+    [[ "$had_win_sign" == "1" ]] && OPENVIBELY_WINDOWS_SIGN_COMMAND="$saved_win_sign"
+    [[ "$had_win_verify" == "1" ]] && OPENVIBELY_WINDOWS_VERIFY_COMMAND="$saved_win_verify"
+    [[ "$had_win_p12" == "1" ]] && WINDOWS_CERT_P12="$saved_win_p12"
+    [[ "$had_win_pass" == "1" ]] && WINDOWS_CERT_PASSWORD="$saved_win_pass"
+    [[ "$had_win_desktop" == "1" ]] && OPENVIBELY_WINDOWS_DESKTOP_BINARY="$saved_win_desktop"
+    [[ "$had_linux_desktop" == "1" ]] && OPENVIBELY_LINUX_DESKTOP_BINARY="$saved_linux_desktop"
+    return 0
+}
+
 ###############################################################################
 # 1. Arguments
 ###############################################################################
@@ -71,6 +103,15 @@ VERSION="$(normalize_release_version "$RAW_VERSION")"
 
 if ! is_valid_release_version "$VERSION"; then
     fail "Invalid semver: '$RAW_VERSION'. Expected X.Y.Z or vX.Y.Z."
+fi
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ "${SKIP_RELEASE_SIGNING_ENV:-0}" != "1" && -n "$REPO_ROOT" && -f "${REPO_ROOT}/.release-signing.env" ]]; then
+    load_release_env_defaults "${REPO_ROOT}/.release-signing.env"
+fi
+export -n WINDOWS_CERT_PASSWORD 2>/dev/null || true
+if [[ "${SKIP_SIGNING_CHECK:-0}" != "1" && "${DRY_RUN:-0}" != "1" && -x "${SCRIPT_DIR}/check-release-signing.sh" ]]; then
+    "${SCRIPT_DIR}/check-release-signing.sh"
 fi
 
 RELEASE_KEY_ID="${OPENVIBELY_RELEASE_KEY_ID:-}"
@@ -156,17 +197,29 @@ build_binary() {
 sign_windows_binary() {
     local binary="$1"
     log "Authenticode signing and timestamping $(basename "$binary")..."
-    run "$WINDOWS_SIGN_COMMAND" "$binary"
-    run "$WINDOWS_VERIFY_COMMAND" "$binary"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} $WINDOWS_SIGN_COMMAND $binary"
+        echo -e "${YELLOW}[DRY-RUN]${NC} $WINDOWS_VERIFY_COMMAND $binary"
+    else
+        WINDOWS_CERT_P12="${WINDOWS_CERT_P12:-}" WINDOWS_CERT_PASSWORD="${WINDOWS_CERT_PASSWORD:-}" "$WINDOWS_SIGN_COMMAND" "$binary"
+        WINDOWS_CERT_P12="${WINDOWS_CERT_P12:-}" "$WINDOWS_VERIFY_COMMAND" "$binary"
+    fi
 }
 
 notarize_macos_binary_archive() {
     local binary="$1" archive="$2"
     log "Developer ID signing $(basename "$binary")..."
-    run codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$binary"
-    run codesign --verify --strict --verbose=2 "$binary"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} $SCRIPT_DIR/sign-macos.sh $binary"
+    else
+        env OPENVIBELY_MACOS_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" "$SCRIPT_DIR/sign-macos.sh" "$binary"
+    fi
     run ditto -c -k --keepParent "$binary" "$archive"
-    run xcrun notarytool submit "$archive" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} $SCRIPT_DIR/notarize-macos-archive.sh $archive"
+    else
+        env OPENVIBELY_MACOS_NOTARY_PROFILE="$MACOS_NOTARY_PROFILE" "$SCRIPT_DIR/notarize-macos-archive.sh" "$archive"
+    fi
 }
 
 ###############################################################################
@@ -243,12 +296,11 @@ build_macos_app() {
 PLIST
 
     log "Signing and notarizing ${app_name}..."
-    run codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$app_dir"
+    env OPENVIBELY_MACOS_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" "$SCRIPT_DIR/sign-macos.sh" "$app_dir"
     local notary_zip="${TMP_BIN}/OpenVibely_${goarch}_notary.zip"
     run ditto -c -k --keepParent "$app_dir" "$notary_zip"
-    run xcrun notarytool submit "$notary_zip" --keychain-profile "$MACOS_NOTARY_PROFILE" --wait
+    env OPENVIBELY_MACOS_NOTARY_PROFILE="$MACOS_NOTARY_PROFILE" "$SCRIPT_DIR/notarize-macos-archive.sh" "$notary_zip"
     run xcrun stapler staple "$app_dir"
-    run codesign --verify --deep --strict --verbose=2 "$app_dir"
     run spctl --assess --type execute --verbose=2 "$app_dir"
 
     log "Packaging $zip_name..."

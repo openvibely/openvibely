@@ -101,6 +101,8 @@ Run `release-preflight.sh <version>` first, or let `release.sh` run it automatic
 
 ```bash
 cd /path/to/openvibely
+# The release script automatically creates/loads .release-signing.env and runs
+# signing readiness checks before building.
 DRY_RUN=1 .openvibely/skills/openvibely_release_workflow/scripts/release.sh 0.1.1
 # Review dry-run output, then:
 .openvibely/skills/openvibely_release_workflow/scripts/release.sh 0.1.1
@@ -109,14 +111,15 @@ DRY_RUN=1 .openvibely/skills/openvibely_release_workflow/scripts/release.sh 0.1.
 The orchestrator runs steps in sequence, with a mandatory AI synthesis + docs + review pause before publishing.
 
 ```text
-Step 0: agent sanity check    — verify HEAD/tag target is intended main release commit
-Step 1: release-preflight.sh  — validate environment, auth, tags, build caps
-Step 2: release-build.sh      — build all artifacts → dist/0.1.1/ and verify archive contents
-Step 3: release-notes.sh      — collect COMMITS.txt, render RELEASE_NOTES.md shell
-Step 4: (agent)               — read COMMITS.txt, synthesize release-specific highlights and changelog, fill placeholders
-Step 5: (agent)               — update docs for features added or meaningfully changed in this release
-Step 6: (review)              — confirm RELEASE_NOTES.md, docs updates, and artifact sanity checks look correct
-Step 7: release-publish.sh    — create GitHub release, upload artifacts
+Step 0: agent sanity check          — verify HEAD/tag target is intended main release commit
+Step 0b: check-release-signing.sh   — create/load .release-signing.env, install release tooling, verify signing readiness
+Step 1: release-preflight.sh        — validate environment, auth, tags, build caps
+Step 2: release-build.sh            — build all artifacts → dist/0.1.1/ and verify archive contents
+Step 3: release-notes.sh            — collect COMMITS.txt, render RELEASE_NOTES.md shell
+Step 4: (agent)                     — read COMMITS.txt, synthesize release-specific highlights and changelog, fill placeholders
+Step 5: (agent)                     — update docs for features added or meaningfully changed in this release
+Step 6: (review)                    — confirm RELEASE_NOTES.md, docs updates, and artifact sanity checks look correct
+Step 7: release-publish.sh          — create GitHub release, upload artifacts
 ```
 
 Step 4 is not automated — the orchestrating agent reads `COMMITS.txt` and writes both the `Highlights` and `What's Changed` sections using AI judgment (see Release Notes Generation below). Step 5 is also agent-owned — update the user docs before publishing so the release tag and public documentation include the features being announced.
@@ -130,20 +133,22 @@ SCRIPTS=".openvibely/skills/openvibely_release_workflow/scripts"
 git status --short --branch
 git log --oneline -3
 
-# 1. Preflight
+# 1. Signing readiness + preflight
+bash $SCRIPTS/check-release-signing.sh --setup
 bash $SCRIPTS/release-preflight.sh 0.1.1
 
 # 2. Build artifacts. Official artifacts require the embedded Ed25519 trust
-#    root. macOS builds require a Developer ID identity and notarytool profile.
-#    Windows builds require external Authenticode sign and verification hooks;
-#    the signing hook must timestamp, and verification must fail when absent.
-#    Credentials are supplied by the release environment and are never generated.
-export OPENVIBELY_RELEASE_KEY_ID=openvibely-release-1
-export OPENVIBELY_RELEASE_PUBLIC_KEY='<base64-encoded-32-byte-Ed25519-public-key>'
-export OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Example (TEAMID)'
-export OPENVIBELY_MACOS_NOTARY_PROFILE='openvibely-notary'
-export OPENVIBELY_WINDOWS_SIGN_COMMAND='/secure/path/to/authenticode-sign-and-timestamp'
-export OPENVIBELY_WINDOWS_VERIFY_COMMAND='/secure/path/to/verify-authenticode-and-timestamp'
+#    root. The signing check creates/loads .release-signing.env and downloads
+#    native osslsigncode into .tools/ when needed. Credentials are supplied by
+#    the release environment and are never generated.
+OPENVIBELY_RELEASE_KEY_ID=openvibely-release-1
+OPENVIBELY_RELEASE_PUBLIC_KEY='<base64-encoded-32-byte-Ed25519-public-key>'
+OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Example (TEAMID)'
+OPENVIBELY_MACOS_NOTARY_PROFILE='openvibely-notary'
+WINDOWS_CERT_P12='/secure/path/to/windows-code-signing.pfx'
+WINDOWS_CERT_PASSWORD='<certificate-password>'
+OPENVIBELY_WINDOWS_SIGN_COMMAND="$(pwd)/$SCRIPTS/sign-windows.sh"
+OPENVIBELY_WINDOWS_VERIFY_COMMAND="$(pwd)/$SCRIPTS/verify-windows.sh"
 # On a non-Windows/non-Linux release coordinator, provide binaries built by
 # the corresponding native release jobs. The build fails if either desktop
 # artifact cannot be produced.
@@ -240,7 +245,7 @@ bin/OpenVibely.app/
 
 Treat `bin/openvibely-desktop` as a staging/intermediate Unix executable, not the user-facing desktop app and not a release asset by itself. It exists so the bundle can copy it into `Contents/MacOS/OpenVibely`; the useful macOS artifact is the `.app` bundle, packaged as `.app.zip` for GitHub releases.
 
-The release script signs macOS bundles with hardened runtime and a secure timestamp, notarizes them, staples the notarization ticket, and verifies both the signature and Gatekeeper assessment before packaging.
+The release script delegates OS signing to skill-local helpers: `sign-macos.sh`, `notarize-macos-archive.sh`, `sign-windows.sh`, and `verify-windows.sh`. macOS bundles are hardened-runtime signed with a secure timestamp, notarized, stapled, and Gatekeeper-assessed before packaging. Windows executables are Authenticode signed and timestamped with `osslsigncode` on macOS.
 
 ### macOS app archive verification
 

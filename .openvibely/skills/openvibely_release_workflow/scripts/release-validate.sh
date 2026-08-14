@@ -159,7 +159,7 @@ check_entrypoint_accepts() {
                 bash "${SCRIPT_DIR}/${script}" "$input" "$dist_dir" 2>&1)"
             ;;
         release.sh)
-            output="$(DRY_RUN=1 SKIP_GH_AUTH_CHECK=1 SKIP_GENERATE=1 AUTO_CONFIRM=1 \
+            output="$(DRY_RUN=1 SKIP_GH_AUTH_CHECK=1 SKIP_GENERATE=1 AUTO_CONFIRM=1 SKIP_SIGNING_CHECK=1 \
                 OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true \
                 DIST_DIR="$dist_dir" PATH="${ENTRYPOINT_MOCK_BIN}:$PATH" \
                 bash "${SCRIPT_DIR}/${script}" "$input" 2>&1)"
@@ -305,7 +305,7 @@ for required in OPENVIBELY_MACOS_SIGN_IDENTITY OPENVIBELY_MACOS_NOTARY_PROFILE O
         fail "official build does not require ${required}"
     fi
 done
-for required_call in 'codesign --force --deep --options runtime --timestamp' 'xcrun stapler staple' 'notarize_macos_binary_archive' 'sign_windows_binary "$TMP_BIN/server_windows_amd64.exe"' 'sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe"' 'Official releases require a Windows desktop build' 'Official releases require a Linux desktop build' 'linux_amd64_desktop.tar.gz'; do
+for required_call in 'sign-macos.sh' 'notarize-macos-archive.sh' 'xcrun stapler staple' 'notarize_macos_binary_archive' 'sign_windows_binary "$TMP_BIN/server_windows_amd64.exe"' 'sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe"' 'Official releases require a Windows desktop build' 'Official releases require a Linux desktop build' 'linux_amd64_desktop.tar.gz'; do
     if grep -Fq "$required_call" "$BUILD_SCRIPT"; then
         pass "release build contains signing step: ${required_call}"
     else
@@ -528,22 +528,34 @@ chmod +x "${MOCK_BIN}/uname"
 
 DRY_RUN_OUTPUT="$(DRY_RUN=1 OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" 2>&1)"
 
-if DRY_RUN=1 PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" >/dev/null 2>&1; then
+if DRY_RUN=1 SKIP_RELEASE_SIGNING_ENV=1 PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" >/dev/null 2>&1; then
     fail "release build: accepted missing embedded trust root"
 else
     pass "release build: requires embedded release trust root"
 fi
-if DRY_RUN=1 OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" >/dev/null 2>&1; then
+if DRY_RUN=1 SKIP_RELEASE_SIGNING_ENV=1 OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" >/dev/null 2>&1; then
     fail "release build: accepted missing Windows signing hooks"
 else
     pass "release build: requires Windows signing and timestamp verification hooks"
 fi
-if DRY_RUN=1 OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" >/dev/null 2>&1; then
+if DRY_RUN=1 SKIP_RELEASE_SIGNING_ENV=1 OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true PATH="${MOCK_BIN}:$PATH" bash "${SCRIPT_DIR}/release-build.sh" 9.9.9 "$DRY_RUN_DIST" >/dev/null 2>&1; then
     fail "release build: accepted missing macOS signing credentials"
 else
     pass "release build: requires macOS signing and notarization credentials"
 fi
-for required in 'codesign --force' 'notarytool submit' 'stapler staple' 'codesign --verify' 'spctl --assess'; do
+for required in '--force --deep --options runtime --timestamp' '--force --options runtime --timestamp' 'codesign --verify'; do
+    if grep -q -- "$required" "${SCRIPT_DIR}/sign-macos.sh"; then
+        pass "macOS signing helper: includes $required"
+    else
+        fail "macOS signing helper: missing $required"
+    fi
+done
+if grep -q -- 'notarytool submit' "${SCRIPT_DIR}/notarize-macos-archive.sh"; then
+    pass "macOS notarization helper: includes notarytool submit"
+else
+    fail "macOS notarization helper: missing notarytool submit"
+fi
+for required in 'stapler staple' 'spctl --assess'; do
     if grep -q -- "$required" "${SCRIPT_DIR}/release-build.sh"; then
         pass "release build: includes $required"
     else
@@ -570,7 +582,7 @@ EOF
 chmod +x "${MOCK_BIN}/gh"
 
 FULL_DRY_RUN_DIST="${DRY_RUN_TMP}/full-dist/9.9.9"
-if DRY_RUN=1 SKIP_GH_AUTH_CHECK=1 DIST_DIR="$FULL_DRY_RUN_DIST" OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true PATH="${MOCK_BIN}:$PATH" \
+if DRY_RUN=1 SKIP_SIGNING_CHECK=1 SKIP_GH_AUTH_CHECK=1 DIST_DIR="$FULL_DRY_RUN_DIST" OPENVIBELY_RELEASE_KEY_ID=release-test OPENVIBELY_RELEASE_PUBLIC_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Test' OPENVIBELY_MACOS_NOTARY_PROFILE=test-profile OPENVIBELY_WINDOWS_SIGN_COMMAND=/bin/true OPENVIBELY_WINDOWS_VERIFY_COMMAND=/bin/true PATH="${MOCK_BIN}:$PATH" \
     bash "${SCRIPT_DIR}/release.sh" 9.9.9 >/dev/null 2>&1; then
     pass "dry run: full release rehearsal completes without real artifacts"
 else
