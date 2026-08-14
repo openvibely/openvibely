@@ -76,6 +76,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load projects")
 	}
 
+	ctx := c.Request().Context()
 	resolvedProjectID := projectID
 	if id, err := h.getCurrentProjectID(c); err == nil && id != "" {
 		resolvedProjectID = id
@@ -83,47 +84,82 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		resolvedProjectID = projects[0].ID
 	}
 
-	// Get current Telegram bot token and status
-	var token string
+	settingsValues := map[string]string{}
 	if h.settingsRepo != nil {
-		token, _ = h.settingsRepo.Get(c.Request().Context(), service.TelegramSettingBotToken)
+		keys := []string{
+			service.TelegramSettingBotToken,
+			service.TelegramSettingSendResponses,
+			service.TelegramSettingRichMessagesV2,
+			service.GitHubSettingAuthMode,
+			service.GitHubSettingAppID,
+			service.GitHubSettingAppSlug,
+			service.GitHubSettingAppPrivateKey,
+			service.GitHubSettingPAT,
+			service.GitHubSettingAPIEndpoint,
+			service.SlackSettingClientID,
+			service.SlackSettingClientSecret,
+			service.SlackSettingAppToken,
+			service.SlackSettingBotTokenOverride,
+			service.SlackSettingBotTokenSource,
+			service.SlackSettingBotToken,
+			service.SlackSettingSendResponses,
+			service.DiscordSettingBotToken,
+			service.DiscordSettingSendResponses,
+			service.EmailSettingProvider,
+			service.EmailSettingAddress,
+			service.EmailSettingPassword,
+			service.EmailSettingIMAPHost,
+			service.EmailSettingIMAPPort,
+			service.EmailSettingSMTPHost,
+			service.EmailSettingSMTPPort,
+			service.EmailSettingPollIntervalSeconds,
+			service.EmailSettingSendResponses,
+			service.EmailSettingSkipAttachments,
+			service.EmailSettingMarkExistingSeenOnStart,
+		}
+		if resolvedProjectID != "" {
+			keys = append(keys, service.SendMessageAllowExplicitTargetsSetting+":"+resolvedProjectID)
+		}
+		settingsValues, _ = h.settingsRepo.GetMany(ctx, keys)
 	}
+	setting := func(key string) string {
+		return settingsValues[key]
+	}
+
+	// Get current Telegram bot token and status
+	token := setting(service.TelegramSettingBotToken)
 	isBotRunning := h.telegramService != nil && h.telegramService.IsRunning()
 	hasTelegramChannel := strings.TrimSpace(token) != "" || isBotRunning
 
 	// Load system-level inbound channel authorization allowlists.
 	var authorizedUsers []models.TelegramAuthorizedUser
 	if h.telegramAuthRepo != nil {
-		authorizedUsers, _ = h.telegramAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		authorizedUsers, _ = h.telegramAuthRepo.ListByProject(ctx, resolvedProjectID)
 	}
 
 	var slackAuthorizedUsers []models.SlackAuthorizedUser
 	if h.slackAuthRepo != nil {
-		slackAuthorizedUsers, _ = h.slackAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		slackAuthorizedUsers, _ = h.slackAuthRepo.ListByProject(ctx, resolvedProjectID)
 	}
 
 	var emailAuthorizedSenders []models.EmailAuthorizedSender
 	if h.emailAuthRepo != nil {
-		emailAuthorizedSenders, _ = h.emailAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		emailAuthorizedSenders, _ = h.emailAuthRepo.ListByProject(ctx, resolvedProjectID)
 	}
 
 	var discordAuthorizedUsers []models.DiscordAuthorizedUser
 	if h.discordAuthRepo != nil {
-		discordAuthorizedUsers, _ = h.discordAuthRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		discordAuthorizedUsers, _ = h.discordAuthRepo.ListByProject(ctx, resolvedProjectID)
 	}
 
 	// Load Telegram settings (default: enabled)
 	sendResponses := true
 	richMessagesV2 := true
-	if h.settingsRepo != nil {
-		val, _ := h.settingsRepo.Get(c.Request().Context(), service.TelegramSettingSendResponses)
-		if strings.EqualFold(strings.TrimSpace(val), "false") {
-			sendResponses = false
-		}
-		val, _ = h.settingsRepo.Get(c.Request().Context(), service.TelegramSettingRichMessagesV2)
-		if strings.EqualFold(strings.TrimSpace(val), "false") {
-			richMessagesV2 = false
-		}
+	if strings.EqualFold(strings.TrimSpace(setting(service.TelegramSettingSendResponses)), "false") {
+		sendResponses = false
+	}
+	if strings.EqualFold(strings.TrimSpace(setting(service.TelegramSettingRichMessagesV2)), "false") {
+		richMessagesV2 = false
 	}
 
 	var githubStatus service.GitHubConnectionStatus
@@ -159,92 +195,88 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	emailMarkExistingSeenOnStart := true
 	emailPollIntervalSeconds := "15"
 	if h.githubSvc != nil {
-		githubStatus, _ = h.githubSvc.GetConnectionStatus(c.Request().Context())
+		githubStatus, _ = h.githubSvc.GetConnectionStatus(ctx)
 		if githubStatus.AuthMode != "" {
 			githubAuthMode = service.NormalizeGitHubAuthMode(githubStatus.AuthMode)
 		}
 		githubHasPAT = githubStatus.HasPAT
 	}
-	if h.settingsRepo != nil {
-		githubModeSetting, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAuthMode)
-		githubAppID, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAppID)
-		githubAppSlug, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAppSlug)
-		githubPrivateKeyValue, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAppPrivateKey)
-		githubHasPrivateKey = strings.TrimSpace(githubPrivateKeyValue) != ""
-		githubPATValue, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingPAT)
-		if strings.TrimSpace(githubPATValue) != "" {
-			githubHasPAT = true
-		}
-		githubAPIEndpoint, _ = h.settingsRepo.Get(c.Request().Context(), service.GitHubSettingAPIEndpoint)
-		if strings.TrimSpace(githubModeSetting) != "" {
-			githubAuthMode = service.NormalizeGitHubAuthMode(githubModeSetting)
-		}
+	githubModeSetting = setting(service.GitHubSettingAuthMode)
+	githubAppID = setting(service.GitHubSettingAppID)
+	githubAppSlug = setting(service.GitHubSettingAppSlug)
+	githubPrivateKeyValue = setting(service.GitHubSettingAppPrivateKey)
+	githubHasPrivateKey = strings.TrimSpace(githubPrivateKeyValue) != ""
+	githubPATValue = setting(service.GitHubSettingPAT)
+	if strings.TrimSpace(githubPATValue) != "" {
+		githubHasPAT = true
+	}
+	githubAPIEndpoint = setting(service.GitHubSettingAPIEndpoint)
+	if strings.TrimSpace(githubModeSetting) != "" {
+		githubAuthMode = service.NormalizeGitHubAuthMode(githubModeSetting)
 	}
 	if h.slackSvc != nil {
-		slackStatus, _ = h.slackSvc.GetConnectionStatus(c.Request().Context())
+		slackStatus, _ = h.slackSvc.GetConnectionStatus(ctx)
 	}
 	if h.discordSvc != nil {
-		discordStatus, _ = h.discordSvc.GetConnectionStatus(c.Request().Context())
+		discordStatus, _ = h.discordSvc.GetConnectionStatus(ctx)
 	}
-	if h.settingsRepo != nil {
-		slackClientID, _ = h.settingsRepo.Get(c.Request().Context(), service.SlackSettingClientID)
-		slackClientSecret, _ = h.settingsRepo.Get(c.Request().Context(), service.SlackSettingClientSecret)
-		slackAppToken, _ = h.settingsRepo.Get(c.Request().Context(), service.SlackSettingAppToken)
-		slackBotToken, _ = h.settingsRepo.Get(c.Request().Context(), service.SlackSettingBotTokenOverride)
-		slackBotTokenMode, _ = h.settingsRepo.Get(c.Request().Context(), service.SlackSettingBotTokenSource)
-		slackBotTokenMode = strings.TrimSpace(strings.ToLower(slackBotTokenMode))
-		if slackBotTokenMode != service.SlackBotTokenSourceManual {
-			slackBotTokenMode = service.SlackBotTokenSourceOAuth
-		}
-		oauthBotToken, _ := h.settingsRepo.Get(c.Request().Context(), service.SlackSettingBotToken)
-		slackHasOAuthBotToken = strings.TrimSpace(oauthBotToken) != ""
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.SlackSettingSendResponses); strings.TrimSpace(strings.ToLower(val)) == "false" {
-			slackSendResponses = false
-		}
-		slackHasClientID = strings.TrimSpace(slackClientID) != ""
-		slackHasClientSecret = strings.TrimSpace(slackClientSecret) != ""
-		slackHasAppToken = strings.TrimSpace(slackAppToken) != ""
-		slackHasBotToken = strings.TrimSpace(slackBotToken) != ""
+	slackClientID = setting(service.SlackSettingClientID)
+	slackClientSecret = setting(service.SlackSettingClientSecret)
+	slackAppToken = setting(service.SlackSettingAppToken)
+	slackBotToken = setting(service.SlackSettingBotTokenOverride)
+	slackBotTokenMode = setting(service.SlackSettingBotTokenSource)
+	slackBotTokenMode = strings.TrimSpace(strings.ToLower(slackBotTokenMode))
+	if slackBotTokenMode != service.SlackBotTokenSourceManual {
+		slackBotTokenMode = service.SlackBotTokenSourceOAuth
+	}
+	oauthBotToken := setting(service.SlackSettingBotToken)
+	slackHasOAuthBotToken = strings.TrimSpace(oauthBotToken) != ""
+	if strings.TrimSpace(strings.ToLower(setting(service.SlackSettingSendResponses))) == "false" {
+		slackSendResponses = false
+	}
+	slackHasClientID = strings.TrimSpace(slackClientID) != ""
+	slackHasClientSecret = strings.TrimSpace(slackClientSecret) != ""
+	slackHasAppToken = strings.TrimSpace(slackAppToken) != ""
+	slackHasBotToken = strings.TrimSpace(slackBotToken) != ""
 
-		discordBotToken, _ = h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingBotToken)
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.DiscordSettingSendResponses); strings.TrimSpace(strings.ToLower(val)) == "false" {
-			discordSendResponses = false
-		}
+	discordBotToken = setting(service.DiscordSettingBotToken)
+	if strings.TrimSpace(strings.ToLower(setting(service.DiscordSettingSendResponses))) == "false" {
+		discordSendResponses = false
+	}
 
-		emailProvider, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingProvider)
-		emailAddress, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingAddress)
-		emailPasswordValue, _ = h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPassword)
-		emailHasPassword = strings.TrimSpace(emailPasswordValue) != ""
-		emailIMAPHost, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingIMAPHost)
-		emailIMAPPort, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingIMAPPort)
-		emailSMTPHost, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSMTPHost)
-		emailSMTPPort, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSMTPPort)
-		emailPollIntervalSeconds, _ = h.settingsRepo.Get(c.Request().Context(), service.EmailSettingPollIntervalSeconds)
-		if strings.TrimSpace(emailPollIntervalSeconds) == "" {
-			emailPollIntervalSeconds = "15"
-		}
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSendResponses); strings.TrimSpace(strings.ToLower(val)) == "false" {
-			emailSendResponses = false
-		}
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingSkipAttachments); strings.TrimSpace(strings.ToLower(val)) == "true" {
-			emailSkipAttachments = true
-		}
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.EmailSettingMarkExistingSeenOnStart); strings.TrimSpace(strings.ToLower(val)) == "false" {
-			emailMarkExistingSeenOnStart = false
-		}
-		emailStatus.Provider = service.NormalizeEmailProvider(emailProvider)
-		emailStatus.Address = strings.TrimSpace(emailAddress)
-		emailStatus.IMAPHost = strings.TrimSpace(emailIMAPHost)
-		emailStatus.SMTPHost = strings.TrimSpace(emailSMTPHost)
-		if port, err := strconv.Atoi(strings.TrimSpace(emailIMAPPort)); err == nil && port > 0 {
-			emailStatus.IMAPPort = port
-		}
-		if port, err := strconv.Atoi(strings.TrimSpace(emailSMTPPort)); err == nil && port > 0 {
-			emailStatus.SMTPPort = port
-		}
+	emailProvider := setting(service.EmailSettingProvider)
+	emailAddress := setting(service.EmailSettingAddress)
+	emailPasswordValue = setting(service.EmailSettingPassword)
+	emailHasPassword = strings.TrimSpace(emailPasswordValue) != ""
+	emailIMAPHost := setting(service.EmailSettingIMAPHost)
+	emailIMAPPort := setting(service.EmailSettingIMAPPort)
+	emailSMTPHost := setting(service.EmailSettingSMTPHost)
+	emailSMTPPort := setting(service.EmailSettingSMTPPort)
+	emailPollIntervalSeconds = setting(service.EmailSettingPollIntervalSeconds)
+	if strings.TrimSpace(emailPollIntervalSeconds) == "" {
+		emailPollIntervalSeconds = "15"
+	}
+	if strings.TrimSpace(strings.ToLower(setting(service.EmailSettingSendResponses))) == "false" {
+		emailSendResponses = false
+	}
+	if strings.TrimSpace(strings.ToLower(setting(service.EmailSettingSkipAttachments))) == "true" {
+		emailSkipAttachments = true
+	}
+	if strings.TrimSpace(strings.ToLower(setting(service.EmailSettingMarkExistingSeenOnStart))) == "false" {
+		emailMarkExistingSeenOnStart = false
+	}
+	emailStatus.Provider = service.NormalizeEmailProvider(emailProvider)
+	emailStatus.Address = strings.TrimSpace(emailAddress)
+	emailStatus.IMAPHost = strings.TrimSpace(emailIMAPHost)
+	emailStatus.SMTPHost = strings.TrimSpace(emailSMTPHost)
+	if port, err := strconv.Atoi(strings.TrimSpace(emailIMAPPort)); err == nil && port > 0 {
+		emailStatus.IMAPPort = port
+	}
+	if port, err := strconv.Atoi(strings.TrimSpace(emailSMTPPort)); err == nil && port > 0 {
+		emailStatus.SMTPPort = port
 	}
 	if h.emailService != nil {
-		runtimeStatus := h.emailService.GetConnectionStatus(c.Request().Context())
+		runtimeStatus := h.emailService.GetConnectionStatus(ctx)
 		if runtimeStatus.Address != "" || runtimeStatus.Configured || runtimeStatus.Running {
 			emailStatus = runtimeStatus
 		}
@@ -263,10 +295,10 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	var channelTargets []models.ChannelTarget
 	sendMessageExplicitTargets := false
 	if resolvedProjectID != "" && h.channelTargetRepo != nil {
-		channelTargets, _ = h.channelTargetRepo.ListByProject(c.Request().Context(), resolvedProjectID)
+		channelTargets, _ = h.channelTargetRepo.ListByProject(ctx, resolvedProjectID)
 	}
-	if resolvedProjectID != "" && h.settingsRepo != nil {
-		if val, _ := h.settingsRepo.Get(c.Request().Context(), service.SendMessageAllowExplicitTargetsSetting+":"+resolvedProjectID); strings.TrimSpace(val) != "" {
+	if resolvedProjectID != "" {
+		if val := setting(service.SendMessageAllowExplicitTargetsSetting + ":" + resolvedProjectID); strings.TrimSpace(val) != "" {
 			sendMessageExplicitTargets = strings.EqualFold(strings.TrimSpace(val), "true")
 		}
 	}
@@ -274,13 +306,13 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	// Load webhooks for current project
 	var webhooks []models.WebhookEndpoint
 	if resolvedProjectID != "" && h.webhookRepo != nil {
-		webhooks, _ = h.webhookRepo.ListCardsByProject(c.Request().Context(), resolvedProjectID)
+		webhooks, _ = h.webhookRepo.ListCardsByProject(ctx, resolvedProjectID)
 	}
 
 	// Load compact agents for webhook agent selection.
 	var agentPickerOptions []repository.AgentPickerOption
 	if h.agentRepo != nil {
-		agentPickerOptions, _ = h.agentRepo.ListPickerOptions(c.Request().Context())
+		agentPickerOptions, _ = h.agentRepo.ListPickerOptions(ctx)
 	}
 
 	webhookAgents := map[string][]models.WebhookEndpointAgent{}
