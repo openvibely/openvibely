@@ -265,7 +265,7 @@ func TestCompactAgenticInputItems_APIKeySolUsesResponsesLiteContract(t *testing.
 }
 
 func TestBuildAgenticRemoteCompactionV2History_RetainsAssistantAndTruncatesBoundary(t *testing.T) {
-	oversized := strings.Repeat("A", (openAIRemoteCompactionV2RetainedMessageTokenBudget+100)*4)
+	oversized := "prefix-" + strings.Repeat("A", (openAIRemoteCompactionV2RetainedMessageTokenBudget+100)*4) + "-suffix"
 	inputItems := []any{
 		map[string]any{"type": "message", "role": "user", "content": oversized},
 		map[string]any{"type": "message", "role": "assistant", "content": "intermediate result"},
@@ -285,6 +285,13 @@ func TestBuildAgenticRemoteCompactionV2History_RetainsAssistantAndTruncatesBound
 	if got := len([]rune(first["content"].(string))); got >= len([]rune(oversized)) {
 		t.Fatalf("user message was not truncated; len=%d original=%d", got, len([]rune(oversized)))
 	}
+	truncated := first["content"].(string)
+	if !strings.HasPrefix(truncated, "prefix-") || !strings.HasSuffix(truncated, "-suffix") {
+		t.Fatalf("truncated message should preserve prefix and suffix, got %.80q", truncated)
+	}
+	if !strings.Contains(truncated, "tokens truncated") {
+		t.Fatalf("truncated message missing token marker: %.80q", truncated)
+	}
 	second := history[1].(map[string]any)
 	if second["role"] != "assistant" || second["content"] != "intermediate result" {
 		t.Fatalf("second retained item = %#v, want intermediate assistant message", second)
@@ -292,6 +299,91 @@ func TestBuildAgenticRemoteCompactionV2History_RetainsAssistantAndTruncatesBound
 	last := history[2].(map[string]any)
 	if last["type"] != "compaction" {
 		t.Fatalf("last item = %#v, want compaction", last)
+	}
+}
+
+func TestEstimateInputItemsTokens_UsesModelVisibleBytes(t *testing.T) {
+	item := map[string]any{"type": "message", "role": "user", "content": "hello"}
+	serialized, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := approxOpenAITokensFromByteCount(len(serialized))
+	if got := estimateInputItemsTokens([]any{item}); got != want {
+		t.Fatalf("estimateInputItemsTokens = %d, want serialized byte estimate %d", got, want)
+	}
+}
+
+func TestEstimateAgenticResponseItemModelVisibleBytes_EncryptedCompaction(t *testing.T) {
+	encryptedContent := strings.Repeat("x", 4000)
+	item := map[string]any{"type": "compaction", "encrypted_content": encryptedContent}
+
+	wantBytes := estimateOpenAIReasoningLength(len(encryptedContent))
+	wantTokens := approxOpenAITokensFromByteCount(wantBytes)
+	if got := estimateInputItemsTokens([]any{item}); got != wantTokens {
+		t.Fatalf("estimateInputItemsTokens = %d, want encrypted compaction estimate %d", got, wantTokens)
+	}
+}
+
+func TestEstimateAgenticResponseItemModelVisibleBytes_ReplacesInlineImagePayload(t *testing.T) {
+	payload := strings.Repeat("a", 12000)
+	imageURL := "data:image/png;base64," + payload
+	item := map[string]any{
+		"type": "message",
+		"role": "user",
+		"content": []any{
+			map[string]any{"type": "input_text", "text": "inspect"},
+			map[string]any{"type": "input_image", "image_url": imageURL, "detail": "high"},
+		},
+	}
+	serialized, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantBytes := len(serialized) - len(payload) + openAIResizedImageBytesEstimate
+	if got := estimateAgenticResponseItemModelVisibleBytes(item); got != wantBytes {
+		t.Fatalf("visible bytes = %d, want image payload replacement %d", got, wantBytes)
+	}
+}
+
+func TestEstimateAgenticResponseItemModelVisibleBytes_ReplacesInlineAudioPayload(t *testing.T) {
+	payload := strings.Repeat("b", 12000)
+	audioURL := "data:audio/wav;base64," + payload
+	item := map[string]any{
+		"type": "message",
+		"role": "user",
+		"content": []any{
+			map[string]any{"type": "input_audio", "audio_url": audioURL},
+		},
+	}
+	serialized, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantBytes := len(serialized) - len(payload) + approxOpenAIBytesForTokens(approxOpenAITokenCount(audioURL))
+	if got := estimateAgenticResponseItemModelVisibleBytes(item); got != wantBytes {
+		t.Fatalf("visible bytes = %d, want audio payload replacement %d", got, wantBytes)
+	}
+}
+
+func TestEstimateAgenticResponseItemModelVisibleBytes_ReplacesEncryptedOutputPayload(t *testing.T) {
+	encryptedContent := strings.Repeat("z", 4096)
+	item := map[string]any{
+		"type": "function_call_output",
+		"output": []any{
+			map[string]any{"type": "encrypted_content", "encrypted_content": encryptedContent},
+		},
+	}
+	serialized, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantBytes := len(serialized) - len(encryptedContent) + estimateOpenAIEncryptedFunctionOutputLength(len(encryptedContent))
+	if got := estimateAgenticResponseItemModelVisibleBytes(item); got != wantBytes {
+		t.Fatalf("visible bytes = %d, want encrypted output replacement %d", got, wantBytes)
 	}
 }
 

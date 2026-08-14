@@ -4,9 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"math"
 	"net/http"
@@ -32,6 +37,10 @@ Return only the summary text.`
 	openAICompactionTranscriptGap                      = "\n\n[Middle conversation content omitted before compaction]\n\n"
 	openAIEffectiveContextPercent                      = 95
 	openAIRemoteCompactionV2RetainedMessageTokenBudget = 64000
+	openAIApproxBytesPerToken                          = 4
+	openAIResizedImageBytesEstimate                    = 7373
+	openAIOriginalImagePatchSize                       = 32
+	openAIOriginalImageMaxPatches                      = 10000
 	// Mirrors Codex truncation policy defaults in models_cache.json.
 	openAIToolOutputTokenLimitDefault = 10000
 	// OpenAI native web search tool type for the Responses API.
@@ -497,11 +506,224 @@ func isContextLengthExceededError(err error) bool {
 }
 
 func estimateInputItemsTokens(inputItems []any) int {
-	text := openAIInputItemsTranscript(inputItems)
+	if len(inputItems) == 0 {
+		return 0
+	}
+	total := 0
+	for _, item := range inputItems {
+		total += estimateAgenticInputItemTokens(item)
+	}
+	return total
+}
+
+func estimateAgenticInputItemTokens(item any) int {
+	bytes := estimateAgenticResponseItemModelVisibleBytes(item)
+	if bytes > 0 {
+		return approxOpenAITokensFromByteCount(bytes)
+	}
+	text := openAIInputItemsTranscript([]any{item})
 	if text == "" {
 		return 0
 	}
-	return (len(text) + 3) / 4
+	return approxOpenAITokenCount(text)
+}
+
+func estimateAgenticResponseItemModelVisibleBytes(item any) int {
+	if itemMap, ok := item.(map[string]any); ok {
+		switch strings.TrimSpace(stringFromAny(itemMap["type"])) {
+		case "reasoning", "context_compaction":
+			if encryptedContent := stringFromAny(itemMap["encrypted_content"]); encryptedContent != "" {
+				return estimateOpenAIReasoningLength(len(encryptedContent))
+			}
+		case "compaction":
+			encryptedContent := stringFromAny(itemMap["encrypted_content"])
+			return estimateOpenAIReasoningLength(len(encryptedContent))
+		}
+	}
+
+	serialized, err := json.Marshal(item)
+	if err != nil || len(serialized) == 0 {
+		return 0
+	}
+	raw := len(serialized)
+	imagePayloadBytes, imageReplacementBytes := agenticImageDataURLEstimateAdjustment(item)
+	audioPayloadBytes, audioReplacementBytes := agenticAudioDataURLEstimateAdjustment(item)
+	encryptedPayloadBytes, encryptedReplacementBytes := agenticEncryptedFunctionOutputEstimateAdjustment(item)
+	raw = raw - imagePayloadBytes + imageReplacementBytes - audioPayloadBytes + audioReplacementBytes
+	raw = raw - encryptedPayloadBytes + encryptedReplacementBytes
+	if raw < 0 {
+		return 0
+	}
+	return raw
+}
+
+func estimateOpenAIReasoningLength(encodedLen int) int {
+	if encodedLen <= 0 {
+		return 0
+	}
+	estimated := encodedLen*3/4 - 650
+	if estimated < 0 {
+		return 0
+	}
+	return estimated
+}
+
+func estimateOpenAIEncryptedFunctionOutputLength(encodedLen int) int {
+	if encodedLen <= 0 {
+		return 0
+	}
+	return (encodedLen*9 + 15) / 16
+}
+
+func agenticImageDataURLEstimateAdjustment(item any) (int, int) {
+	payloadBytes := 0
+	replacementBytes := 0
+	forEachAgenticContentBlock(item, func(block map[string]any) {
+		if strings.TrimSpace(stringFromAny(block["type"])) != "input_image" {
+			return
+		}
+		imageURL := firstNonEmpty(stringFromAny(block["image_url"]), stringFromAny(block["url"]))
+		payload, ok := parseAgenticBase64DataURL(imageURL, "image/")
+		if !ok {
+			return
+		}
+		payloadBytes += len(payload)
+		if strings.EqualFold(strings.TrimSpace(stringFromAny(block["detail"])), "original") {
+			replacementBytes += estimateAgenticOriginalImageBytes(imageURL)
+			return
+		}
+		replacementBytes += openAIResizedImageBytesEstimate
+	})
+	return payloadBytes, replacementBytes
+}
+
+func agenticAudioDataURLEstimateAdjustment(item any) (int, int) {
+	payloadBytes := 0
+	replacementBytes := 0
+	forEachAgenticContentBlock(item, func(block map[string]any) {
+		if strings.TrimSpace(stringFromAny(block["type"])) != "input_audio" {
+			return
+		}
+		audioURL := firstNonEmpty(stringFromAny(block["audio_url"]), stringFromAny(block["url"]))
+		payload, ok := parseAgenticBase64DataURL(audioURL, "audio/")
+		if !ok {
+			return
+		}
+		payloadBytes += len(payload)
+		replacementBytes += approxOpenAIBytesForTokens(approxOpenAITokenCount(audioURL))
+	})
+	return payloadBytes, replacementBytes
+}
+
+func agenticEncryptedFunctionOutputEstimateAdjustment(item any) (int, int) {
+	payloadBytes := 0
+	replacementBytes := 0
+	itemMap, ok := item.(map[string]any)
+	if !ok {
+		return 0, 0
+	}
+	itemType := strings.ToLower(strings.TrimSpace(stringFromAny(itemMap["type"])))
+	switch itemType {
+	case "function_call_output", "custom_tool_call_output", "agent_message":
+	default:
+		return 0, 0
+	}
+	forEachAgenticContentBlock(itemMap, func(block map[string]any) {
+		if strings.TrimSpace(stringFromAny(block["type"])) != "encrypted_content" {
+			return
+		}
+		encryptedContent := stringFromAny(block["encrypted_content"])
+		if encryptedContent == "" {
+			return
+		}
+		payloadBytes += len(encryptedContent)
+		replacementBytes += estimateOpenAIEncryptedFunctionOutputLength(len(encryptedContent))
+	})
+	return payloadBytes, replacementBytes
+}
+
+func forEachAgenticContentBlock(value any, visit func(map[string]any)) {
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			forEachAgenticContentBlock(item, visit)
+		}
+	case map[string]any:
+		visit(typed)
+		for _, nested := range typed {
+			switch nested.(type) {
+			case []any, map[string]any:
+				forEachAgenticContentBlock(nested, visit)
+			}
+		}
+	}
+}
+
+func parseAgenticBase64DataURL(url string, mediaTypePrefix string) (string, bool) {
+	if len(url) < len("data:") || !strings.EqualFold(url[:len("data:")], "data:") {
+		return "", false
+	}
+	commaIndex := strings.IndexByte(url, ',')
+	if commaIndex < 0 {
+		return "", false
+	}
+	metadata := url[len("data:"):commaIndex]
+	payload := url[commaIndex+1:]
+	parts := strings.Split(metadata, ";")
+	if len(parts) == 0 || len(parts[0]) < len(mediaTypePrefix) || !strings.EqualFold(parts[0][:len(mediaTypePrefix)], mediaTypePrefix) {
+		return "", false
+	}
+	hasBase64Marker := false
+	for _, part := range parts[1:] {
+		if strings.EqualFold(part, "base64") {
+			hasBase64Marker = true
+			break
+		}
+	}
+	if !hasBase64Marker {
+		return "", false
+	}
+	return payload, true
+}
+
+func estimateAgenticOriginalImageBytes(imageURL string) int {
+	payload, ok := parseAgenticBase64DataURL(imageURL, "image/")
+	if !ok {
+		return openAIResizedImageBytesEstimate
+	}
+	decoded, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return openAIResizedImageBytesEstimate
+	}
+	config, _, err := image.DecodeConfig(bytes.NewReader(decoded))
+	if err != nil || config.Width <= 0 || config.Height <= 0 {
+		return openAIResizedImageBytesEstimate
+	}
+	patchesWide := (config.Width + openAIOriginalImagePatchSize - 1) / openAIOriginalImagePatchSize
+	patchesHigh := (config.Height + openAIOriginalImagePatchSize - 1) / openAIOriginalImagePatchSize
+	patchCount := patchesWide * patchesHigh
+	if patchCount > openAIOriginalImageMaxPatches {
+		patchCount = openAIOriginalImageMaxPatches
+	}
+	return approxOpenAIBytesForTokens(patchCount)
+}
+
+func approxOpenAITokenCount(text string) int {
+	return approxOpenAITokensFromByteCount(len(text))
+}
+
+func approxOpenAITokensFromByteCount(bytes int) int {
+	if bytes <= 0 {
+		return 0
+	}
+	return (bytes + openAIApproxBytesPerToken - 1) / openAIApproxBytesPerToken
+}
+
+func approxOpenAIBytesForTokens(tokens int) int {
+	if tokens <= 0 {
+		return 0
+	}
+	return tokens * openAIApproxBytesPerToken
 }
 
 func normalizedCompactionThreshold(threshold int) int {
@@ -798,7 +1020,7 @@ func buildAgenticRemoteCompactionV2History(inputItems []any, compactionItem any)
 		if !ok || !isRetainedForOpenAIRemoteCompactionV2(item) {
 			continue
 		}
-		tokens := estimateInputItemsTokens([]any{item})
+		tokens := retainedMessageTokenCountForOpenAIRemoteCompactionV2(item)
 		if tokens <= 0 {
 			tokens = 1
 		}
@@ -838,7 +1060,38 @@ func isRetainedForOpenAIRemoteCompactionV2(item map[string]any) bool {
 		}
 		text := openAIInputItemContentText(item["content"])
 		return !strings.HasPrefix(text, "Message Type: FINAL_ANSWER\n") &&
-			estimateInputItemsTokens([]any{item}) <= openAIToolOutputTokenLimitDefault
+			estimateAgenticInputItemTokens(item) <= openAIToolOutputTokenLimitDefault
+	}
+}
+
+func retainedMessageTokenCountForOpenAIRemoteCompactionV2(item map[string]any) int {
+	if strings.EqualFold(strings.TrimSpace(stringFromAny(item["type"])), "message") {
+		if textTokens := messageTextTokenCountForOpenAIRemoteCompactionV2(item); textTokens > 0 {
+			return textTokens
+		}
+	}
+	return estimateAgenticInputItemTokens(item)
+}
+
+func messageTextTokenCountForOpenAIRemoteCompactionV2(item map[string]any) int {
+	switch content := item["content"].(type) {
+	case string:
+		return approxOpenAITokenCount(content)
+	case []any:
+		total := 0
+		for _, raw := range content {
+			block, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			switch strings.TrimSpace(stringFromAny(block["type"])) {
+			case "input_text", "output_text":
+				total += approxOpenAITokenCount(firstNonEmpty(stringFromAny(block["text"]), stringFromAny(block["content"])))
+			}
+		}
+		return total
+	default:
+		return 0
 	}
 }
 
@@ -847,17 +1100,16 @@ func truncateRetainedMessageForOpenAIRemoteCompactionV2(item map[string]any, tok
 		return nil, false
 	}
 	cloned := cloneAgenticMap(item)
-	maxChars := tokenBudget * 4
 	switch content := cloned["content"].(type) {
 	case string:
-		truncated := truncateStringByRunes(strings.TrimSpace(content), maxChars)
+		truncated := truncateTextToOpenAITokenBudget(strings.TrimSpace(content), tokenBudget)
 		if truncated == "" {
 			return nil, false
 		}
 		cloned["content"] = truncated
 		return cloned, true
 	case []any:
-		remaining := maxChars
+		remaining := tokenBudget
 		out := make([]any, 0, len(content))
 		for _, raw := range content {
 			block, ok := raw.(map[string]any)
@@ -872,7 +1124,7 @@ func truncateRetainedMessageForOpenAIRemoteCompactionV2(item map[string]any, tok
 				if text == "" || remaining <= 0 {
 					continue
 				}
-				truncated := truncateStringByRunes(text, remaining)
+				truncated := truncateTextToOpenAITokenBudget(text, remaining)
 				if truncated == "" {
 					continue
 				}
@@ -881,7 +1133,7 @@ func truncateRetainedMessageForOpenAIRemoteCompactionV2(item map[string]any, tok
 				} else {
 					block["content"] = truncated
 				}
-				remaining -= len([]rune(truncated))
+				remaining -= approxOpenAITokenCount(truncated)
 			}
 			out = append(out, block)
 		}
@@ -903,16 +1155,84 @@ func cloneAgenticMap(item map[string]any) map[string]any {
 	return cloned
 }
 
-func truncateStringByRunes(text string, maxRunes int) string {
+func truncateTextToOpenAITokenBudget(text string, maxTokens int) string {
 	text = strings.TrimSpace(text)
-	if maxRunes <= 0 || text == "" {
+	if maxTokens <= 0 || text == "" {
 		return ""
 	}
-	runes := []rune(text)
-	if len(runes) <= maxRunes {
+	maxBytes := approxOpenAIBytesForTokens(maxTokens)
+	if len(text) <= maxBytes {
 		return text
 	}
-	return strings.TrimSpace(string(runes[:maxRunes]))
+	return strings.TrimSpace(truncateMiddleByByteEstimate(text, maxBytes, true))
+}
+
+func truncateMiddleByByteEstimate(text string, maxBytes int, useTokens bool) string {
+	if text == "" {
+		return ""
+	}
+	totalChars := len([]rune(text))
+	if maxBytes <= 0 {
+		return openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, len(text), totalChars))
+	}
+	if len(text) <= maxBytes {
+		return text
+	}
+
+	leftBudget := maxBytes / 2
+	rightBudget := maxBytes - leftBudget
+	removedChars, left, right := splitOpenAITruncationString(text, leftBudget, rightBudget)
+	marker := openAITruncationMarker(useTokens, openAIRemovedUnits(useTokens, len(text)-maxBytes, removedChars))
+	return left + marker + right
+}
+
+func splitOpenAITruncationString(text string, beginningBytes, endBytes int) (int, string, string) {
+	if text == "" {
+		return 0, "", ""
+	}
+	textLen := len(text)
+	tailStartTarget := textLen - endBytes
+	if tailStartTarget < 0 {
+		tailStartTarget = 0
+	}
+
+	prefixEnd := 0
+	suffixStart := textLen
+	removedChars := 0
+	suffixStarted := false
+	for idx, ch := range text {
+		charEnd := idx + len(string(ch))
+		if charEnd <= beginningBytes {
+			prefixEnd = charEnd
+			continue
+		}
+		if idx >= tailStartTarget {
+			if !suffixStarted {
+				suffixStart = idx
+				suffixStarted = true
+			}
+			continue
+		}
+		removedChars++
+	}
+	if suffixStart < prefixEnd {
+		suffixStart = prefixEnd
+	}
+	return removedChars, text[:prefixEnd], text[suffixStart:]
+}
+
+func openAITruncationMarker(useTokens bool, removedCount int) string {
+	if useTokens {
+		return fmt.Sprintf("…%d tokens truncated…", removedCount)
+	}
+	return fmt.Sprintf("…%d chars truncated…", removedCount)
+}
+
+func openAIRemovedUnits(useTokens bool, removedBytes, removedChars int) int {
+	if useTokens {
+		return approxOpenAITokensFromByteCount(removedBytes)
+	}
+	return removedChars
 }
 
 func openAICompactionV2Instructions(opts *AgenticOptions, isChatGPTOAuth bool) string {
@@ -1043,11 +1363,11 @@ func nextCompactionTrimIndex(items []any, protectedIndexes ...int) int {
 func estimateCompactionRequestTokens(inputItems []any, tools []ToolDefinition, instructions string) int {
 	total := estimateInputItemsTokens(inputItems)
 	if instructions != "" {
-		total += (len(instructions) + 3) / 4
+		total += approxOpenAITokenCount(instructions)
 	}
 	if len(tools) > 0 {
 		if encoded, err := json.Marshal(tools); err == nil {
-			total += (len(encoded) + 3) / 4
+			total += approxOpenAITokensFromByteCount(len(encoded))
 		}
 	}
 	return total
