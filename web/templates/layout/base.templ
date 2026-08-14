@@ -2878,8 +2878,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 								stopPropagation: function() {},
 								preventDefault: function() {}
 							};
-							if (dropZone.classList.contains('category-drop-zone')) handleCategoryDrop(dropEvent);
-							else handleActiveDrop(dropEvent);
+							if (dropZone.getAttribute('data-drop-type') === 'status') handleActiveDrop(dropEvent);
+							else handleCategoryDrop(dropEvent);
 						}
 						setTimeout(function() { suppressedTaskClickID = ''; }, 0);
 					}

@@ -26,16 +26,28 @@ func TestTaskAndScheduleCardsUsePointerDragWithGrabCursor(t *testing.T) {
 
 	project := models.Project{ID: "project-card-drag-cursor", Name: "Card Drag Cursor"}
 	now := time.Now().Local().Truncate(time.Hour)
-	tasks := []models.Task{{
-		ID:           "task-drag-cursor",
-		ProjectID:    project.ID,
-		Title:        "Drag cursor task",
-		Category:     models.CategoryBacklog,
-		Status:       models.StatusPending,
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		DisplayOrder: 0,
-	}}
+	tasks := []models.Task{
+		{
+			ID:           "task-drag-cursor",
+			ProjectID:    project.ID,
+			Title:        "Drag cursor task",
+			Category:     models.CategoryBacklog,
+			Status:       models.StatusPending,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			DisplayOrder: 0,
+		},
+		{
+			ID:           "task-active-status-drag",
+			ProjectID:    project.ID,
+			Title:        "Active queued task",
+			Category:     models.CategoryActive,
+			Status:       models.StatusPending,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			DisplayOrder: 0,
+		},
+	}
 	scheduledTasks := []repository.TaskWithSchedule{{
 		Task: models.Task{
 			ID:        "schedule-task-drag-cursor",
@@ -74,6 +86,7 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   function targetDropZoneFor(card, label) {
     if (label === 'task card') return document.querySelector('.category-drop-zone[data-category="completed"]');
+    if (label === 'active task card') return document.querySelector('.task-drop-zone[data-status="running"]');
     var source = card.closest('.drop-zone');
     if (!source) return null;
     var date = source.dataset.date;
@@ -120,6 +133,7 @@ window.addEventListener('DOMContentLoaded', function() {
   (async function() {
     if (location.pathname === '/tasks') {
       await exercisePointerCard('#task-task-drag-cursor', 'task card');
+      await exercisePointerCard('#task-task-active-status-drag', 'active task card');
       location.href = '/schedule?project_id=project-card-drag-cursor';
       return;
     }
@@ -173,6 +187,16 @@ window.addEventListener('DOMContentLoaded', function() {
 				t.Fatalf("expected task category move to use PATCH, got %s", r.Method)
 			}
 			w.WriteHeader(http.StatusNoContent)
+		case "/tasks/task-active-status-drag/status":
+			if r.Method != http.MethodPatch {
+				t.Fatalf("expected Active lane status move to use PATCH, got %s", r.Method)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/tasks/task-active-status-drag/reorder":
+			if r.Method != http.MethodPatch {
+				t.Fatalf("expected task reorder to use PATCH, got %s", r.Method)
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case "/schedules/schedule-drag-cursor/reschedule":
 			if r.Method != http.MethodPatch {
 				t.Fatalf("expected schedule reschedule to use PATCH, got %s", r.Method)
@@ -219,10 +243,14 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 	for _, want := range []string{
 		"PATCH /tasks/task-drag-cursor/category",
+		"PATCH /tasks/task-active-status-drag/status",
 		"PATCH /schedules/schedule-drag-cursor/reschedule",
 	} {
 		if !strings.Contains(requestList, want) {
 			t.Fatalf("browser drag should preserve drop behavior; missing request %q in:\n%s", want, requestList)
 		}
+	}
+	if strings.Contains(requestList, "PATCH /tasks/task-active-status-drag/reorder") {
+		t.Fatalf("Active status-lane drag must not be routed as a reorder:\n%s", requestList)
 	}
 }
