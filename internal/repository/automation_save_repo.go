@@ -183,25 +183,9 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		graphSequence, in.Source, in.Candidate.AdapterKey, in.Candidate.SchemaVersion); err != nil {
 		return nil, nil, fmt.Errorf("creating current Automation graph: %w", err)
 	}
-	if err := writeAutomationGraph(ctx, conn, AutomationGraphWrite{ProjectID: in.ProjectID, AutomationID: in.AutomationID,
-		GraphID: in.GraphID, Candidate: in.Candidate}); err != nil {
-		return nil, nil, err
-	}
-
-	nodeIDs := make(map[string]string, len(in.Candidate.Nodes))
-	rows, err := conn.QueryContext(ctx, `SELECT node_key, id FROM automation_nodes WHERE version_id = ?`, in.GraphID)
+	nodeIDs, err := writeAutomationGraph(ctx, conn, AutomationGraphWrite{ProjectID: in.ProjectID, AutomationID: in.AutomationID,
+		GraphID: in.GraphID, Candidate: in.Candidate})
 	if err != nil {
-		return nil, nil, err
-	}
-	for rows.Next() {
-		var key, id string
-		if err := rows.Scan(&key, &id); err != nil {
-			rows.Close()
-			return nil, nil, err
-		}
-		nodeIDs[key] = id
-	}
-	if err := rows.Close(); err != nil {
 		return nil, nil, err
 	}
 

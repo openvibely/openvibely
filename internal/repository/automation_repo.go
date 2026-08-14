@@ -211,36 +211,9 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		return nil, false, fmt.Errorf("creating automation version: %w", err)
 	}
 
-	nodeIDs := make(map[string]string, len(in.Nodes))
-	for _, n := range in.Nodes {
-		config := n.ConfigJSON
-		if strings.TrimSpace(config) == "" {
-			config = "{}"
-		}
-		var id string
-		if err := conn.QueryRowContext(ctx, `INSERT INTO automation_nodes
-			(project_id, automation_id, version_id, node_key, name, node_type, role, config_json, position_x, position_y)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, in.ProjectID, a.ID, versionID, n.Key, n.Name,
-			n.Type, n.Role, config, n.PositionX, n.PositionY).Scan(&id); err != nil {
-			return nil, false, fmt.Errorf("creating automation node %q: %w", n.Key, err)
-		}
-		nodeIDs[n.Key] = id
-	}
-	for _, e := range in.Edges {
-		sourceID, sourceOK := nodeIDs[e.SourceNodeKey]
-		targetID, targetOK := nodeIDs[e.TargetNodeKey]
-		if !sourceOK || !targetOK {
-			return nil, false, fmt.Errorf("edge %q references an unknown node", e.Key)
-		}
-		condition := e.ConditionJSON
-		if strings.TrimSpace(condition) == "" {
-			condition = "{}"
-		}
-		if _, err := conn.ExecContext(ctx, `INSERT INTO automation_edges
-			(project_id, automation_id, version_id, source_node_id, target_node_id, edge_key, label, condition_json, display_order)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, in.ProjectID, a.ID, versionID, sourceID, targetID, e.Key, e.Label, condition, e.DisplayOrder); err != nil {
-			return nil, false, fmt.Errorf("creating automation edge %q: %w", e.Key, err)
-		}
+	nodeIDs, err := writeAutomationGraphRows(ctx, conn, in.ProjectID, a.ID, versionID, in.Nodes, in.Edges)
+	if err != nil {
+		return nil, false, err
 	}
 
 	newTriggerIDs := make(map[string]struct{})
