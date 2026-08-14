@@ -874,31 +874,25 @@ func TestBase_DraggableCardsUseClosedHandCursorWhileActive(t *testing.T) {
 		".drag-cursor-surface {",
 		"cursor: grab;",
 		".drag-cursor-surface:active",
-		".drag-cursor-surface.drag-cursor-pressed",
-		"html.drag-cursor-pressed *",
 		"html.drag-cursor-active *",
-		"body.drag-cursor-pressed *",
 		"body.drag-cursor-active *",
 		"cursor: grabbing !important;",
-		"function handleDragCursorPressStart(event)",
-		"function handleDragCursorPressCancel(event)",
-		"Native HTML drag can fire pointercancel as the browser takes over the drag.",
-		"document.documentElement.classList.contains('drag-cursor-pressed') || document.documentElement.classList.contains('drag-cursor-active') || document.body.classList.contains('drag-cursor-active')",
-		"function clearDragCursorPress()",
-		"window.addEventListener('pointerup', clearDragCursorPress, true)",
-		"window.addEventListener('pointercancel', handleDragCursorPressCancel, true)",
-		"document.documentElement.style.cursor = ''",
-		"document.body.style.cursor = ''",
-		"surface.style.cursor = 'grabbing'",
-		"document.documentElement.classList.add('drag-cursor-pressed')",
-		"document.documentElement.style.cursor = 'grabbing'",
-		"document.body.classList.add('drag-cursor-pressed')",
-		"document.body.style.cursor = 'grabbing'",
+		"function handleTaskPointerDown(event)",
+		"function handleTaskPointerMove(event)",
+		"card.setPointerCapture(event.pointerId)",
+		"movePointerCard(state.motion, deltaX, deltaY)",
+		"data-pointer-drag-placeholder",
+		"taskPointerDropZoneAt(event.clientX, event.clientY)",
 		"document.body.classList.add('drag-cursor-active')",
 		"document.body.classList.remove('drag-cursor-active')",
 	} {
 		if !strings.Contains(html, want) {
-			t.Fatalf("expected draggable card cursor contract %q", want)
+			t.Fatalf("expected pointer-driven card cursor contract %q", want)
+		}
+	}
+	for _, forbidden := range []string{"drag-cursor-indicator", "drag-card-preview", "setDragImage", "handleDragCursorPressStart"} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("pointer-driven card cursor contract must not contain %q", forbidden)
 		}
 	}
 }

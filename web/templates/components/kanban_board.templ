@@ -471,10 +471,6 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 				data-drop-type="category"
 				data-category={ string(category) }
 				data-project-id={ projectID }
-				ondragover="handleDragOver(event)"
-				ondragenter="handleDragEnter(event)"
-				ondragleave="handleDragLeave(event)"
-				ondrop="handleCategoryDrop(event)"
 			>
 				if len(tasks) > 0 {
 					for _, task := range tasks {
@@ -498,10 +494,6 @@ templ activeColumnContent(tasks []models.Task, projectID string, llmModels []mod
 			data-status="running"
 			data-category="active"
 			data-project-id={ projectID }
-			ondragover="handleDragOver(event)"
-			ondragenter="handleDragEnter(event)"
-			ondragleave="handleDragLeave(event)"
-			ondrop="handleActiveDrop(event)"
 		>
 			if len(filterRunningTasks(tasks)) > 0 {
 				for _, task := range filterRunningTasks(tasks) {
@@ -521,10 +513,6 @@ templ activeColumnContent(tasks []models.Task, projectID string, llmModels []mod
 			data-status="pending"
 			data-category="active"
 			data-project-id={ projectID }
-			ondragover="handleDragOver(event)"
-			ondragenter="handleDragEnter(event)"
-			ondragleave="handleDragLeave(event)"
-			ondrop="handleActiveDrop(event)"
 		>
 			if len(filterPendingTasks(tasks)) > 0 {
 				for _, task := range filterPendingTasks(tasks) {

@@ -425,9 +425,9 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 					window.addEventListener('sse-task-event', handleTaskEvent);
 					window.addEventListener('sse-live-connected', handleSSEReconnected);
 					document.addEventListener('visibilitychange', handleVisibilityChange);
-					document.addEventListener('dragend', handleDragEnd, true);
-					document.addEventListener('drop', handleDragEnd, true);
-					// 'close' does not bubble; capture phase picks it up from <dialog>.
+						document.addEventListener('dragend', handleDragEnd, true);
+						document.addEventListener('drop', handleDragEnd, true);
+						document.addEventListener('task-pointer-dragend', handleDragEnd);					// 'close' does not bubble; capture phase picks it up from <dialog>.
 					document.addEventListener('close', handleDialogClose, true);
 
 					// Clean up listeners when navigating away via HTMX
@@ -438,6 +438,7 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 							document.removeEventListener('visibilitychange', handleVisibilityChange);
 							document.removeEventListener('dragend', handleDragEnd, true);
 							document.removeEventListener('drop', handleDragEnd, true);
+							document.removeEventListener('task-pointer-dragend', handleDragEnd);
 							document.removeEventListener('close', handleDialogClose, true);
 							if (refreshTimeout) clearTimeout(refreshTimeout);
 						}

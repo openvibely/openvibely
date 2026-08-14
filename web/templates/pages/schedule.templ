@@ -546,9 +546,6 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 													data-date={ day.Date.Format("2006-01-02") }
 													data-hour={ fmt.Sprintf("%d", slot.Hour) }
 													style="border-right: 1px solid var(--ov-schedule-grid-border);"
-													ondragover="handleScheduleDragOver(event)"
-													ondrop="handleScheduleDrop(event)"
-													ondragleave="handleScheduleDragLeave(event)"
 												>
 													for _, occurrence := range getTasksForHour(weekData.TasksByDateTime, day.Date, slot.Hour) {
 														if occurrence.Task.Schedule != nil && !occurrence.Task.Schedule.Enabled {
@@ -568,17 +565,11 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 															<div
 																class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-indigo-500 overflow-hidden"
 																title={ scheduleDisplayTitle(occurrence.Task) }
-																draggable="true"
 																data-schedule-id={ getScheduleID(occurrence.Task) }
 																data-task-id={ occurrence.Task.Task.ID }
 																data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
 																onclick="openTaskDialog(this.dataset.taskId)"
-																onpointerdown="handleDragCursorPressStart(event)"
-																onpointerup="handleDragCursorPressEnd(event)"
-																onpointercancel="handleDragCursorPressCancel(event)"
-																onmousedown="handleDragCursorPressStart(event)"
-																onmouseup="handleDragCursorPressEnd(event)"
-																ondragstart="handleScheduleDragStart(event)"
+																onpointerdown="handleSchedulePointerDown(event)"
 															>
 																<div class="font-semibold truncate leading-tight">{ scheduleDisplayTitle(occurrence.Task) }</div>
 																if occurrence.Task.Schedule != nil && occurrence.Task.Schedule.RepeatType.IsSubDaily() {
@@ -950,79 +941,134 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			let _dragSourceHour = null;
 			let _dragSourceDate = null;
 
-			function handleScheduleDragStart(event) {
-				var dragCard = event.currentTarget;
-				draggedScheduleId = dragCard.dataset.scheduleId;
-				draggedTaskId = dragCard.dataset.taskId;
-				draggedHasSchedule = dragCard.dataset.hasSchedule === 'true';
-				_schedDragActive = true;
-				document.documentElement.classList.add('drag-cursor-active');
-				document.body.classList.add('drag-cursor-active');
-				dragCard.classList.add('dragging');
-				// Track source slot so we can detect same-slot drops
-				var sourceZone = dragCard.closest('.drop-zone');
-				_dragSourceHour = sourceZone ? sourceZone.dataset.hour : null;
-				_dragSourceDate = sourceZone ? sourceZone.dataset.date : null;
-				dragCard.style.opacity = '0.5';
-				event.dataTransfer.effectAllowed = 'move';
-				event.dataTransfer.setData('text/html', dragCard.innerHTML);
-				// Set a custom drag type so drop zones can identify schedule drags
-				// even without relying solely on the global variable
-				event.dataTransfer.setData('application/x-schedule-drag', draggedScheduleId || '');
-			}
+				var _schedulePointerDrag = null;
 
-			// Clear inline drag feedback styles from a drop zone
-			function clearDropZoneFeedback(zone) {
-				zone.style.backgroundColor = '';
-				zone.style.outline = '';
-				zone.style.cursor = '';
-			}
-
-			function handleScheduleDragOver(event) {
-				var dropZone = event.currentTarget;
-
-				// Check if this is a schedule drag by looking at drag data types.
-				// dataTransfer.types is available during dragover (unlike getData).
-				var hasScheduleType = event.dataTransfer.types &&
-					event.dataTransfer.types.indexOf('application/x-schedule-drag') !== -1;
-
-				// Valid drop: must be a schedule drag with a valid schedule ID and
-				// the task must actually have schedule configuration
-				var isValidDrop = hasScheduleType && draggedScheduleId && draggedHasSchedule;
-
-				if (isValidDrop) {
-					// Valid scheduled task — accept the drop
-					event.preventDefault();
-					event.dataTransfer.dropEffect = 'move';
-					// Use inline styles to avoid conflicts with Tailwind bg-opacity classes
-					dropZone.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
-					dropZone.style.outline = '2px solid rgba(99, 102, 241, 0.5)';
-					dropZone.style.cursor = '';
-				} else if (hasScheduleType) {
-					// Schedule drag but task has no schedule config — show error feedback.
-					// Still preventDefault so drop event fires and we can show a toast.
-					event.preventDefault();
-					event.dataTransfer.dropEffect = 'none';
-					dropZone.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
-					dropZone.style.outline = '2px dashed rgba(239, 68, 68, 0.6)';
-					dropZone.style.cursor = 'not-allowed';
-				} else {
-					// Not a schedule drag at all (external content, text, kanban card, etc.)
-					// Do NOT preventDefault — browser will reject the drop automatically.
-					event.dataTransfer.dropEffect = 'none';
-					dropZone.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
-					dropZone.style.outline = '2px dashed rgba(239, 68, 68, 0.6)';
-					dropZone.style.cursor = 'not-allowed';
+				function schedulePointerDropZoneAt(clientX, clientY) {
+					var hit = document.elementFromPoint(clientX, clientY);
+					return hit ? hit.closest('.drop-zone') : null;
 				}
-			}
 
-			function handleScheduleDragLeave(event) {
-				clearDropZoneFeedback(event.currentTarget);
-			}
+				function clearDropZoneFeedback(zone) {
+					if (!zone) return;
+					zone.style.backgroundColor = '';
+					zone.style.outline = '';
+					zone.style.cursor = '';
+				}
 
-			function handleScheduleDrop(event) {
-				event.stopPropagation();
-				event.preventDefault();
+				function resetSchedulePointerDrag() {
+					var state = _schedulePointerDrag;
+					if (state && state.dropZone) clearDropZoneFeedback(state.dropZone);
+					if (state && state.card) {
+						window.endPointerCardMotion(state.motion);
+						state.card.classList.remove('dragging');
+					}
+					document.documentElement.classList.remove('drag-cursor-active');
+					document.body.classList.remove('drag-cursor-active');
+					window.removeEventListener('pointermove', handleSchedulePointerMove, true);
+					window.removeEventListener('pointerup', handleSchedulePointerUp, true);
+					window.removeEventListener('pointercancel', handleSchedulePointerCancel, true);
+					_schedulePointerDrag = null;
+					draggedScheduleId = null;
+					draggedTaskId = null;
+					draggedHasSchedule = false;
+					_dragSourceHour = null;
+					_dragSourceDate = null;
+					setTimeout(function() { _schedDragActive = false; }, 150);
+				}
+
+				function beginSchedulePointerDrag() {
+					var state = _schedulePointerDrag;
+					if (!state || state.started) return;
+					state.started = true;
+					var card = state.card;
+					draggedScheduleId = card.dataset.scheduleId;
+					draggedTaskId = card.dataset.taskId;
+					draggedHasSchedule = card.dataset.hasSchedule === 'true';
+					_schedDragActive = true;
+					document.documentElement.classList.add('drag-cursor-active');
+					document.body.classList.add('drag-cursor-active');
+					card.classList.add('dragging');
+					state.motion = window.beginPointerCardMotion(card);
+					var sourceZone = state.motion.placeholder.closest('.drop-zone');
+					_dragSourceHour = sourceZone ? sourceZone.dataset.hour : null;
+					_dragSourceDate = sourceZone ? sourceZone.dataset.date : null;
+				}
+
+				function updateSchedulePointerDropZone(event) {
+					var state = _schedulePointerDrag;
+					if (!state || !state.started) return;
+					var zone = schedulePointerDropZoneAt(event.clientX, event.clientY);
+					if (state.dropZone !== zone) {
+						clearDropZoneFeedback(state.dropZone);
+						state.dropZone = zone;
+					}
+					if (!zone) return;
+					if (draggedScheduleId && draggedHasSchedule) {
+						zone.style.backgroundColor = 'rgba(99, 102, 241, 0.2)';
+						zone.style.outline = '2px solid rgba(99, 102, 241, 0.5)';
+						zone.style.cursor = '';
+					} else {
+						zone.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+						zone.style.outline = '2px dashed rgba(239, 68, 68, 0.6)';
+						zone.style.cursor = 'not-allowed';
+					}
+				}
+
+				function handleSchedulePointerMove(event) {
+					var state = _schedulePointerDrag;
+					if (!state || event.pointerId !== state.pointerId) return;
+					var deltaX = event.clientX - state.startX;
+					var deltaY = event.clientY - state.startY;
+					if (!state.started && Math.hypot(deltaX, deltaY) < 4) return;
+					beginSchedulePointerDrag();
+					event.preventDefault();
+					window.movePointerCard(state.motion, deltaX, deltaY);
+					updateSchedulePointerDropZone(event);
+				}
+
+				function handleSchedulePointerUp(event) {
+					var state = _schedulePointerDrag;
+					if (!state || event.pointerId !== state.pointerId) return;
+					var dropZone = state.dropZone || schedulePointerDropZoneAt(event.clientX, event.clientY);
+					if (state.started && dropZone) {
+						handleScheduleDrop({
+							currentTarget: dropZone,
+							target: dropZone,
+							clientY: event.clientY,
+							stopPropagation: function() {},
+							preventDefault: function() {}
+						});
+					} else {
+						resetSchedulePointerDrag();
+					}
+				}
+
+				function handleSchedulePointerCancel(event) {
+					if (!_schedulePointerDrag || event.pointerId !== _schedulePointerDrag.pointerId) return;
+					resetSchedulePointerDrag();
+				}
+
+				function handleSchedulePointerDown(event) {
+					if (event.button !== 0 || _schedulePointerDrag) return;
+					var card = event.currentTarget;
+					_schedulePointerDrag = {
+						card: card,
+						pointerId: event.pointerId,
+						startX: event.clientX,
+						startY: event.clientY,
+						started: false,
+						dropZone: null
+					};
+					try { card.setPointerCapture(event.pointerId); } catch (_) {}
+					window.addEventListener('pointermove', handleSchedulePointerMove, true);
+					window.addEventListener('pointerup', handleSchedulePointerUp, true);
+					window.addEventListener('pointercancel', handleSchedulePointerCancel, true);
+				}
+				window.handleSchedulePointerDown = handleSchedulePointerDown;
+
+				function handleScheduleDrop(event) {
+					event.stopPropagation();
+					event.preventDefault();
 
 				var dropZone = event.currentTarget;
 				clearDropZoneFeedback(dropZone);
@@ -1073,22 +1119,9 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 							: 'Only tasks with active schedule configuration can be moved between time slots.';
 						window.showToast(reason, 'failed');
 					}
-					// Reset dragged elements
-					document.documentElement.classList.remove('drag-cursor-active');
-					document.body.classList.remove('drag-cursor-active');
-					if (window.clearDragCursorPress) window.clearDragCursorPress();
-					document.querySelectorAll('[draggable="true"]').forEach(function(el) {
-						el.style.opacity = '1';
-						el.classList.remove('dragging');
-					});
-					draggedScheduleId = null;
-					draggedTaskId = null;
-					draggedHasSchedule = false;
-					_dragSourceHour = null;
-					_dragSourceDate = null;
+					resetSchedulePointerDrag();
 					return;
 				}
-
 				if (newDate && newHour) {
 					// Send reschedule request
 					var formData = new FormData();
@@ -1128,49 +1161,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					});
 				}
 
-				// Reset dragged elements
-				document.documentElement.classList.remove('drag-cursor-active');
-				document.body.classList.remove('drag-cursor-active');
-				if (window.clearDragCursorPress) window.clearDragCursorPress();
-				document.querySelectorAll('[draggable="true"]').forEach(function(el) {
-					el.style.opacity = '1';
-					el.classList.remove('dragging');
-				});
-				draggedScheduleId = null;
-				draggedTaskId = null;
-				draggedHasSchedule = false;
-				_dragSourceHour = null;
-				_dragSourceDate = null;
+				resetSchedulePointerDrag();
 			}
-
-			// Reset opacity and clean up drop zone highlights on drag end
-			// Guard against duplicate registrations on HTMX content swaps
-			if (!window._schedDragendRegistered) {
-				window._schedDragendRegistered = true;
-				document.addEventListener('dragend', function(event) {
-					document.documentElement.classList.remove('drag-cursor-active');
-					document.body.classList.remove('drag-cursor-active');
-					if (window.clearDragCursorPress) window.clearDragCursorPress();
-					if (event.target.hasAttribute('draggable')) {
-						event.target.style.opacity = '1';
-						event.target.classList.remove('dragging');
-					}
-					// Clean up any lingering drop zone highlights (use inline style cleanup)
-					document.querySelectorAll('.drop-zone').forEach(function(zone) {
-						clearDropZoneFeedback(zone);
-					});
-					draggedScheduleId = null;
-					draggedTaskId = null;
-					draggedHasSchedule = false;
-					_dragSourceHour = null;
-					_dragSourceDate = null;
-					// Clear _schedDragActive after a short delay so that any
-					// click event synthesized by the browser after a short drag
-					// is still suppressed by the openTaskDialog guard.
-					setTimeout(function() { _schedDragActive = false; }, 150);
-				});
-			}
-
 			// Current time timeline indicator
 			function updateNowIndicator() {
 				const timelineBefore = document.getElementById('timeline-before');

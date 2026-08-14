@@ -145,10 +145,14 @@ window.addEventListener('DOMContentLoaded', function() {
     assertOrder('completed', ['completed-live', 'completed-new', 'completed-legacy', 'completed-old'], 'live Completed completion order');
 
     var card = document.getElementById('task-active-move');
-    handleDragStart({currentTarget:card, dataTransfer:{effectAllowed:'', setData:function(){}}});
     var completedZone = zone('completed');
-    handleCategoryDrop({currentTarget:completedZone, stopPropagation:function(){}, preventDefault:function(){}, clientY:completedZone.getBoundingClientRect().top + 1});
-    handleDragEnd({});
+    var cardRect = card.getBoundingClientRect();
+    var zoneRect = completedZone.getBoundingClientRect();
+    var startX = cardRect.left + 10, startY = cardRect.top + 10;
+    var dropX = zoneRect.left + zoneRect.width / 2, dropY = zoneRect.top + 10;
+    card.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, pointerId:9, pointerType:'mouse', button:0, buttons:1, clientX:startX, clientY:startY}));
+    window.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:9, pointerType:'mouse', buttons:1, clientX:dropX, clientY:dropY}));
+    window.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, pointerId:9, pointerType:'mouse', button:0, clientX:dropX, clientY:dropY}));
     await waitFor(function() { return ids('completed')[0] === 'active-move'; }, 'drag into Completed');
     assertOrder('completed', ['active-move', 'completed-live', 'completed-new', 'completed-legacy', 'completed-old'], 'dragged task completion order');
 
@@ -252,7 +256,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
-		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "tasks-browser-profile"),
+		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "tasks-browser-profile"),
 		server.URL+"/tasks?project_id="+project.ID,
 	)
 	cmd.Stderr = stderrFile

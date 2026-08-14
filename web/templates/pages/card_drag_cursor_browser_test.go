@@ -17,7 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
-func TestTaskAndScheduleCardsUseNativeDragWithGrabCursor(t *testing.T) {
+func TestTaskAndScheduleCardsUsePointerDragWithGrabCursor(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -84,36 +84,47 @@ window.addEventListener('DOMContentLoaded', function() {
     }
     return Array.from(document.querySelectorAll('.drop-zone')).find(function(zone) { return zone !== source; });
   }
-  async function exerciseNativeCard(selector, label) {
+  async function exercisePointerCard(selector, label) {
     await waitFor(function() { return document.querySelector(selector); }, label + ' ready');
     var card = document.querySelector(selector);
-    if (!card.hasAttribute('draggable')) fail(label + ': card must preserve native HTML draggable behavior');
+    if (card.hasAttribute('draggable')) fail(label + ': card must use pointer-driven dragging, not native HTML drag');
     if (document.querySelector('.drag-card-preview')) fail(label + ': must not create a custom pointer-drag preview');
     if (document.getElementById('drag-cursor-indicator')) fail(label + ': must not create a custom cursor indicator');
     if (getComputedStyle(card).cursor !== 'grab') fail(label + ': idle cursor should be grab, got ' + getComputedStyle(card).cursor);
     var targetZone = targetDropZoneFor(card, label);
     if (!targetZone) fail(label + ': could not find target drop zone');
-    var dataTransfer = new DataTransfer();
-    var started = card.dispatchEvent(new DragEvent('dragstart', {bubbles:true, cancelable:true, dataTransfer:dataTransfer}));
-    if (!started) fail(label + ': dragstart should not be cancelled');
-    if (!card.classList.contains('dragging')) fail(label + ': dragstart should mark source card as dragging');
-    if (getComputedStyle(card).cursor !== 'grabbing') fail(label + ': dragstart should use grabbing cursor, got ' + getComputedStyle(card).cursor);
-    targetZone.dispatchEvent(new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer:dataTransfer}));
-    targetZone.dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dataTransfer}));
-    card.dispatchEvent(new DragEvent('dragend', {bubbles:true, cancelable:true, dataTransfer:dataTransfer}));
+    targetZone.scrollIntoView({block:'center', inline:'center'});
+    await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
+    var cardRect = card.getBoundingClientRect();
+    var targetRect = targetZone.getBoundingClientRect();
+    var startX = cardRect.left + Math.min(12, cardRect.width / 2);
+    var startY = cardRect.top + Math.min(12, cardRect.height / 2);
+    var targetX = targetRect.left + targetRect.width / 2;
+    var targetY = targetRect.top + Math.min(targetRect.height / 2, 20);
+    card.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:7, pointerType:'mouse', button:0, buttons:1, clientX:startX, clientY:startY}));
+    card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:7, pointerType:'mouse', buttons:1, clientX:targetX, clientY:targetY}));
+    if (!card.classList.contains('dragging')) fail(label + ': pointer movement should mark source card as dragging');
+    if (getComputedStyle(document.elementFromPoint(targetX, targetY)).cursor !== 'grabbing') fail(label + ': pointer movement should keep the default grabbing cursor');
+    if (getComputedStyle(card).transform === 'none') fail(label + ': dragged card should visibly follow pointer movement');
+    if (getComputedStyle(card).position !== 'fixed') fail(label + ': dragged card should escape its source drop-zone clipping context');
+    if (!document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': source slot should retain a layout placeholder while the real card moves');
+    card.dispatchEvent(new PointerEvent('pointerup', {bubbles:true, cancelable:true, pointerId:7, pointerType:'mouse', button:0, buttons:0, clientX:targetX, clientY:targetY}));
     await waitFor(function() { return !card.classList.contains('dragging'); }, label + ' cleanup');
-    if (document.querySelector('.drag-card-preview') || document.getElementById('drag-cursor-indicator')) fail(label + ': custom drag UI should not remain after dragend');
+    if (card.style.transform) fail(label + ': pointer release should clear card movement transform');
+    if (document.querySelector('[data-pointer-drag-placeholder]')) fail(label + ': pointer release should remove source layout placeholder');
+    if (getComputedStyle(card).cursor !== 'grab') fail(label + ': pointer release should restore grab cursor');
+    if (document.querySelector('.drag-card-preview') || document.getElementById('drag-cursor-indicator')) fail(label + ': custom drag UI should not exist after release');
     await new Promise(function(resolve) { setTimeout(resolve, 100); });
   }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
     if (location.pathname === '/tasks') {
-      await exerciseNativeCard('#task-task-drag-cursor', 'task card');
+      await exercisePointerCard('#task-task-drag-cursor', 'task card');
       location.href = '/schedule?project_id=project-card-drag-cursor';
       return;
     }
     if (location.pathname === '/schedule') {
-      await exerciseNativeCard('[data-schedule-id="schedule-drag-cursor"]', 'schedule card');
+      await exercisePointerCard('[data-schedule-id="schedule-drag-cursor"]', 'schedule card');
       await report('pass', '');
       return;
     }

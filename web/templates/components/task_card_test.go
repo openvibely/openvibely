@@ -328,12 +328,12 @@ func TestTaskCard_UsesGrabCursorForDrag(t *testing.T) {
 		t.Fatalf("render task card: %v", err)
 	}
 	body := buf.String()
-	for _, want := range []string{"cursor-grab", "active:cursor-grabbing", "drag-cursor-surface", `draggable="true"`, `ondragstart="handleDragStart(event)"`, `ondragend="handleDragEnd(event)"`} {
+	for _, want := range []string{"cursor-grab", "active:cursor-grabbing", "drag-cursor-surface", `onpointerdown="handleTaskPointerDown(event)"`} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("expected native draggable task card to contain %q, got %s", want, body)
+			t.Fatalf("expected pointer-draggable task card to contain %q, got %s", want, body)
 		}
 	}
-	for _, forbidden := range []string{"cursor-move", `onpointerdown="handleTaskPointerDown(event)"`, "drag-card-preview", "drag-cursor-indicator"} {
+	for _, forbidden := range []string{"cursor-move", `draggable="true"`, `ondragstart=`, `ondragend=`, "drag-card-preview", "drag-cursor-indicator"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("task card should preserve native drag with grab cursor styling, found %q in %s", forbidden, body)
 		}

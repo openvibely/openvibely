@@ -251,19 +251,12 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 	<div
 		id={ fmt.Sprintf("task-%s", task.ID) }
 		class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all mb-2 cursor-grab active:cursor-grabbing drag-cursor-surface relative min-w-0 overflow-hidden"
-		draggable="true"
 		data-task-id={ task.ID }
 		data-task-status={ string(task.Status) }
 		data-task-category={ string(task.Category) }
 		data-display-order={ fmt.Sprintf("%d", task.DisplayOrder) }
 		onclick="handleTaskSelect(event)"
-		onpointerdown="handleDragCursorPressStart(event)"
-		onpointerup="handleDragCursorPressEnd(event)"
-		onpointercancel="handleDragCursorPressCancel(event)"
-		onmousedown="handleDragCursorPressStart(event)"
-		onmouseup="handleDragCursorPressEnd(event)"
-		ondragstart="handleDragStart(event)"
-		ondragend="handleDragEnd(event)"
+		onpointerdown="handleTaskPointerDown(event)"
 	>
 		<!-- Kebab menu in top right corner -->
 		<div class="dropdown dropdown-end absolute top-2 right-14 lg:right-8 z-30" onclick="event.stopPropagation()">
