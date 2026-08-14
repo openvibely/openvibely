@@ -1465,7 +1465,15 @@ templ ChatEmptyState(message string) {
 }
 
 templ ChatComposerActionButtonOOB(targetID, stopEndpoint string, isRunning bool, activeTurnID string) {
-	<div id={ targetID } data-composer-running={ boolStr(isRunning) } data-active-turn-id={ activeTurnID } hx-swap-oob="outerHTML">
+	<div
+		id={ targetID }
+		data-composer-running={ boolStr(isRunning) }
+		data-active-turn-id={ activeTurnID }
+		if isRunning && stopEndpoint != "" {
+			data-composer-stop-endpoint={ stopEndpoint }
+		}
+		hx-swap-oob="outerHTML"
+	>
 		@chatComposerActionButton(stopEndpoint, isRunning)
 	</div>
 }
@@ -1628,7 +1636,14 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							<rect x="6" y="6" width="12" height="12" rx="2"></rect>
 						</svg>
 					</button>
-					<div id={ config.FormID + "-primary-action" } data-composer-running={ boolStr(config.IsRunning) } data-active-turn-id={ config.ActiveTurnID }>
+					<div
+						id={ config.FormID + "-primary-action" }
+						data-composer-running={ boolStr(config.IsRunning) }
+						data-active-turn-id={ config.ActiveTurnID }
+						if config.IsRunning && config.StopEndpoint != "" {
+							data-composer-stop-endpoint={ config.StopEndpoint }
+						}
+					>
 						@chatComposerActionButton(config.StopEndpoint, config.IsRunning)
 					</div>
 				</div>
@@ -1858,12 +1873,56 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							textarea.setAttribute('title', shortcutHint());
 						};
 						window.refreshChatComposerShortcutHint(messageInput);
-							function currentSubmitButton() {
-								return form.querySelector('button[type="submit"]');
-							}
-							function updatePrimaryActionModifierVisual() {
-								var action = document.getElementById(formId + '-primary-action');
-								var showSteer = shortcutModifierHeld && action && action.getAttribute('data-composer-running') === 'true';
+								function currentSubmitButton() {
+									return form.querySelector('button[type="submit"]');
+								}
+								function buildPrimaryActionButton(kind, stopEndpoint) {
+									var button = document.createElement('button');
+									button.className = 'btn btn-primary btn-sm rounded-full min-h-0 h-8 w-8 p-0 flex-shrink-0';
+									if (kind === 'stop') {
+										button.type = 'button';
+										button.setAttribute('hx-post', stopEndpoint);
+										button.setAttribute('hx-swap', 'none');
+										button.title = 'Stop response';
+										button.setAttribute('aria-label', 'Stop response');
+										button.innerHTML = '<svg data-composer-stop-icon="true" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg><svg data-composer-steer-icon="true" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 hidden" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 3l20 9-20 9 5-9-5-9z"></path></svg>';
+										return button;
+									}
+									button.type = 'submit';
+									button.title = 'Send message';
+									button.setAttribute('aria-label', 'Send message');
+									button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 3l20 9-20 9 5-9-5-9z"></path></svg>';
+									return button;
+								}
+								function primaryActionStopEndpoint(action) {
+									if (!action) return '';
+									var endpoint = action.getAttribute('data-composer-stop-endpoint') || '';
+									var stopButton = action.querySelector('button[aria-label="Stop response"][hx-post]');
+									if (!endpoint && stopButton) endpoint = stopButton.getAttribute('hx-post') || '';
+									if (endpoint) action.setAttribute('data-composer-stop-endpoint', endpoint);
+									return endpoint;
+								}
+								function refreshPrimaryActionForInput() {
+									var action = document.getElementById(formId + '-primary-action');
+									if (!action) return;
+									var running = action.getAttribute('data-composer-running') === 'true';
+									var hasContent = !!(messageInput && messageInput.value.trim() !== '');
+									var stopEndpoint = primaryActionStopEndpoint(action);
+									var wantStop = running && !hasContent && !!stopEndpoint;
+									var wantLabel = wantStop ? 'Stop response' : 'Send message';
+									var currentButton = action.querySelector('button');
+									if (currentButton && currentButton.getAttribute('aria-label') === wantLabel) {
+										updatePrimaryActionModifierVisual();
+										return;
+									}
+									action.innerHTML = '';
+									action.appendChild(buildPrimaryActionButton(wantStop ? 'stop' : 'send', stopEndpoint));
+									if (typeof htmx !== 'undefined') htmx.process(action);
+									updatePrimaryActionModifierVisual();
+								}
+									function updatePrimaryActionModifierVisual() {
+										var action = document.getElementById(formId + '-primary-action');
+										var showSteer = shortcutModifierHeld && action && action.getAttribute('data-composer-running') === 'true';
 								var stopIcon = action ? action.querySelector('[data-composer-stop-icon]') : null;
 								var steerIcon = action ? action.querySelector('[data-composer-steer-icon]') : null;
 								if (stopIcon) stopIcon.classList.toggle('hidden', !!showSteer);
@@ -2022,18 +2081,19 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							setExpectedTurnID(turnID);
 							submitComposer(steerEndpoint, 'steer', payload);
 						}
-							function handleComposerStateMutation() {
-								clearExpectedTurnIDWhenIdle();
-								updatePrimaryActionModifierVisual();
-								flushDeferredSteer();
+									function handleComposerStateMutation() {
+										clearExpectedTurnIDWhenIdle();
+										refreshPrimaryActionForInput();
+										flushDeferredSteer();
+									}
+									if (typeof MutationObserver !== 'undefined') {
+										new MutationObserver(handleComposerStateMutation).observe(form, { childList: true, subtree: true });
 						}
-						if (typeof MutationObserver !== 'undefined') {
-							new MutationObserver(handleComposerStateMutation).observe(form, { childList: true, subtree: true });
-						}
-						clearExpectedTurnIDWhenIdle();
+							clearExpectedTurnIDWhenIdle();
+							refreshPrimaryActionForInput();
 
-				var messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';
-				var messageHistoryLimit = 50;
+					var messageHistoryStorageKey = form.getAttribute('data-message-history-key') || '';
+					var messageHistoryLimit = 50;
 				var messageHistoryEntries = [];
 				var messageHistoryIndex = -1;
 				var messageHistoryDraft = '';
@@ -2271,9 +2331,11 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								submitComposer(normalPostEndpoint, 'normal');
 							}
 							});
-							messageInput.addEventListener('input', function() {								if (!suppressMessageHistoryInputReset) resetMessageHistoryNavigation();
-							});
-						}
+								messageInput.addEventListener('input', function() {
+									refreshPrimaryActionForInput();
+									if (!suppressMessageHistoryInputReset) resetMessageHistoryNavigation();
+								});
+							}
 
 					// Normalize primary-action clicks to the shared submit paths, even after
 					// the button is replaced out-of-band between Send and Stop. A platform
@@ -2840,9 +2902,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								if (window.markChatSendScrollIntent) window.markChatSendScrollIntent(form);
 								rememberSubmittedMessage(submittedMessage);
 								resetMessageHistoryNavigation();
-								if (messageInput && messageInput.value === submittedMessage) messageInput.value = '';
-								if (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();
-							}
+									if (messageInput && messageInput.value === submittedMessage) {
+										messageInput.value = '';
+										refreshPrimaryActionForInput();
+									}
+									if (sessionInput && sessionInput.value === submittedAttachmentSession && window[clearFuncName]) window[clearFuncName]();
+								}
 						} else if (completedIntent === 'steer' && !request._chatSubmittedFallbackFromSteer && submittedMessage.trim() !== '' && request.status === 409) {
 							replayAsNormal = true;
 							steerFallbackPending = true;

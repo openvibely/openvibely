@@ -257,7 +257,7 @@ func TestHandler_TaskThreadComposerAction_RendersStopAndSendStates(t *testing.T)
 		t.Fatalf("active composer action status=%d body=%s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `id="task-thread-form-primary-action" data-composer-running="true" data-active-turn-id="`+runningExec.ID+`" hx-swap-oob="outerHTML"`) {
+	if !strings.Contains(body, `id="task-thread-form-primary-action" data-composer-running="true" data-active-turn-id="`+runningExec.ID+`" data-composer-stop-endpoint="/tasks/`+task.ID+`/cancel?composer_stop=1" hx-swap-oob="outerHTML"`) {
 		t.Fatalf("expected active OOB primary action fragment, got %s", body)
 	}
 	if !strings.Contains(body, `title="Stop response"`) || !strings.Contains(body, `/tasks/`+task.ID+`/cancel?composer_stop=1`) {

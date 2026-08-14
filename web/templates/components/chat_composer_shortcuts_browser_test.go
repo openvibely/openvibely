@@ -663,9 +663,10 @@ func TestChatComposerRunningActionModifierSteersInChrome(t *testing.T) {
   if (!action.querySelector('[data-composer-stop-icon]').classList.contains('hidden')) fail('holding modifier did not hide Stop icon');
   if (action.querySelector('[data-composer-steer-icon]').classList.contains('hidden')) fail('holding modifier did not show Send icon');
 
-  input.value = 'keyboard after send'; key(input, modifier); await wait();
-  input.value = 'click after send'; action.dispatchEvent(new MouseEvent('click', Object.assign({bubbles:true, cancelable:true}, modifier))); await wait();
-  document.getElementById('browser-result').textContent = 'PASS';
+	  input.value = 'keyboard after send'; key(input, modifier); await wait();
+	  input.value = 'click after send';
+	  document.querySelector('#chat-form-primary-action button').dispatchEvent(new MouseEvent('click', Object.assign({bubbles:true, cancelable:true}, modifier))); await wait();
+	  document.getElementById('browser-result').textContent = 'PASS';
   document.body.setAttribute('data-test-result', 'pass');
 })().catch(function(error) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', error.message); });
 </script></body></html>`, form.String())
@@ -693,5 +694,118 @@ func TestChatComposerRunningActionModifierSteersInChrome(t *testing.T) {
 		if got := records[i].Form.Get("expected_turn_id"); got != "new-turn" {
 			t.Fatalf("request %d expected turn = %q, want new-turn", i, got)
 		}
+	}
+}
+
+func TestChatComposerRunningPrimaryActionSwapsWithInputContentInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+
+	renderForm := func(config ChatInputFormConfig) string {
+		var buf bytes.Buffer
+		if err := ChatInputForm(config).Render(context.Background(), &buf); err != nil {
+			t.Fatalf("render composer: %v", err)
+		}
+		return buf.String()
+	}
+
+	chat := renderForm(ChatInputFormConfig{
+		FormID:        "chat-form",
+		InputID:       "message-input",
+		PostEndpoint:  "/chat/send",
+		SteerEndpoint: "/chat/steer",
+		StopEndpoint:  "/chat/cancel",
+		TargetID:      "chat-messages",
+		IsRunning:     true,
+		ActiveTurnID:  "chat-turn",
+	})
+	task := renderForm(ChatInputFormConfig{
+		FormID:        "task-thread-form",
+		InputID:       "task-message-input",
+		PostEndpoint:  "/tasks/task-1/thread",
+		SteerEndpoint: "/tasks/task-1/thread/steer",
+		StopEndpoint:  "/tasks/task-1/cancel?composer_stop=1",
+		TargetID:      "task-thread-messages",
+		TaskID:        "task-1",
+		IsRunning:     true,
+		ActiveTurnID:  "task-turn",
+	})
+
+	var mu sync.Mutex
+	var unexpectedRequests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/htmx.js":
+			w.Header().Set("Content-Type", "text/javascript")
+			_, _ = w.Write(htmx204)
+		case "/":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = fmt.Fprintf(w, `<!doctype html><html><body data-test-result="pending">
+	<script src="/htmx.js"></script>
+	<div id="chat-messages"><div data-execution-pair="true" data-exec-status="running" data-exec-id="chat-turn"></div></div>%s
+	<div id="task-thread-messages"><div data-execution-pair="true" data-exec-status="running" data-exec-id="task-turn"></div></div>%s
+	<div id="browser-result">pending</div>
+	<script>
+	(async function() {
+	  function fail(message) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', message); document.getElementById('browser-result').textContent = 'FAIL:' + message; throw new Error(message); }
+	  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms || 80); }); }
+	  function dispatchInput(input, inputType) {
+	    var event;
+	    try { event = new InputEvent('input', {bubbles:true, cancelable:false, inputType: inputType || 'insertText'}); }
+	    catch (_) { event = new Event('input', {bubbles:true}); }
+	    input.dispatchEvent(event);
+	  }
+	  function actionLabel(formId) {
+	    var button = document.querySelector('#' + formId + '-primary-action button');
+	    return button ? button.getAttribute('aria-label') : '';
+	  }
+	  function expectAction(formId, want, context) {
+	    var got = actionLabel(formId);
+	    if (got !== want) fail(context + ': action label was ' + got + ', want ' + want);
+	  }
+	  async function exercise(formId, inputId) {
+	    var input = document.getElementById(inputId);
+	    expectAction(formId, 'Stop response', 'initial empty running ' + formId);
+	    input.value = 'x'; dispatchInput(input, 'insertText');
+	    expectAction(formId, 'Send message', 'typed content ' + formId);
+	    input.value = ''; dispatchInput(input, 'deleteContentBackward');
+	    expectAction(formId, 'Stop response', 'deleted to empty ' + formId);
+	    input.value = 'pasted text'; dispatchInput(input, 'insertFromPaste');
+	    expectAction(formId, 'Send message', 'pasted content ' + formId);
+	    input.value = ''; dispatchInput(input, 'deleteByCut');
+	    expectAction(formId, 'Stop response', 'cut to empty ' + formId);
+	    input.value = 'queued draft'; dispatchInput(input, 'insertText');
+	    document.getElementById(formId + '-primary-action').outerHTML = '<div id="' + formId + '-primary-action" data-composer-running="false" data-active-turn-id=""><button type="submit" aria-label="Send message">Send</button></div>';
+	    await wait();
+	    expectAction(formId, 'Send message', 'terminal idle OOB ' + formId);
+	    input.value = ''; dispatchInput(input, 'deleteContentBackward');
+	    expectAction(formId, 'Send message', 'idle empty stays send ' + formId);
+	    document.getElementById(formId + '-primary-action').outerHTML = '<div id="' + formId + '-primary-action" data-composer-running="true" data-active-turn-id="restored-turn" data-composer-stop-endpoint="/restored-stop"><button type="button" aria-label="Stop response" hx-post="/restored-stop" hx-swap="none"><svg data-composer-stop-icon="true"></svg><svg data-composer-steer-icon="true" class="hidden"></svg></button></div>';
+	    input.value = 'existing draft after OOB'; dispatchInput(input, 'insertText');
+	    await wait();
+	    expectAction(formId, 'Send message', 'running OOB with existing draft ' + formId);
+	  }
+	  await exercise('chat-form', 'message-input');
+	  await exercise('task-thread-form', 'task-message-input');
+	  document.getElementById('browser-result').textContent = 'PASS';
+	  document.body.setAttribute('data-test-result', 'pass');
+	})().catch(function(error) { document.body.setAttribute('data-test-result', 'fail'); document.body.setAttribute('data-test-error', error && error.stack || error.message || String(error)); });
+	</script></body></html>`, chat, task)
+		case "/favicon.ico":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			mu.Lock()
+			unexpectedRequests = append(unexpectedRequests, r.Method+" "+r.URL.String())
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer server.Close()
+
+	runHeadlessChromeFixture(t, chrome, server.URL+"/", "running composer primary action content swap", 10000, 25*time.Second)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(unexpectedRequests) != 0 {
+		t.Fatalf("button toggling made network requests: %v", unexpectedRequests)
 	}
 }
