@@ -314,8 +314,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 				.drag-cursor-surface:active,
 				.drag-cursor-surface:active *,
+				.drag-cursor-surface.drag-cursor-pressed,
+				.drag-cursor-surface.drag-cursor-pressed *,
 				.drag-cursor-surface.dragging,
 				.drag-cursor-surface.dragging *,
+				body.drag-cursor-pressed,
+				body.drag-cursor-pressed *,
 				body.drag-cursor-active,
 				body.drag-cursor-active * {
 					cursor: grabbing !important;
@@ -2743,6 +2747,38 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					updateSelectionCounter();
 				}
 
+				function clearDragCursorPress() {
+					document.body.classList.remove('drag-cursor-pressed');
+					document.body.style.cursor = '';
+					document.querySelectorAll('.drag-cursor-pressed').forEach(el => {
+						el.style.cursor = '';
+						el.classList.remove('drag-cursor-pressed');
+					});
+				}
+
+				function handleDragCursorPressStart(event) {
+					if (event.button !== undefined && event.button !== 0) return;
+					const surface = event.currentTarget;
+					if (!surface || !surface.classList || !surface.classList.contains('drag-cursor-surface')) return;
+					if (event.target && event.target.closest('button, a, input, select, textarea, summary, label, [role="button"], .dropdown')) return;
+					surface.classList.add('drag-cursor-pressed');
+					surface.style.cursor = 'grabbing';
+					document.body.classList.add('drag-cursor-pressed');
+					document.body.style.cursor = 'grabbing';
+				}
+
+				function handleDragCursorPressEnd(event) {
+					clearDragCursorPress();
+				}
+
+				if (!window._dragCursorPressCleanupRegistered) {
+					window._dragCursorPressCleanupRegistered = true;
+					window.addEventListener('pointerup', clearDragCursorPress, true);
+					window.addEventListener('pointercancel', clearDragCursorPress, true);
+					window.addEventListener('mouseup', clearDragCursorPress, true);
+					window.addEventListener('blur', clearDragCursorPress);
+				}
+
 				function handleDragStart(event) {
 					window.isDragging = true;
 					document.body.classList.add('drag-cursor-active');
@@ -2773,6 +2809,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				function handleDragEnd(event) {
 					window.isDragging = false;
 					document.body.classList.remove('drag-cursor-active');
+					clearDragCursorPress();
 					stopAutoScroll();
 					// Remove dragging class from all cards - use both the ID list AND
 					// a DOM query as fallback, because handleCategoryDrop/handleActiveDrop
@@ -2788,7 +2825,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						zone.classList.remove('drag-over');
 					});
 				}
-
 				function stopAutoScroll() {
 					if (autoScrollInterval) {
 						clearInterval(autoScrollInterval);

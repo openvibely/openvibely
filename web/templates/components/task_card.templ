@@ -257,6 +257,11 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 		data-task-category={ string(task.Category) }
 		data-display-order={ fmt.Sprintf("%d", task.DisplayOrder) }
 		onclick="handleTaskSelect(event)"
+		onpointerdown="handleDragCursorPressStart(event)"
+		onpointerup="handleDragCursorPressEnd(event)"
+		onpointercancel="handleDragCursorPressEnd(event)"
+		onmousedown="handleDragCursorPressStart(event)"
+		onmouseup="handleDragCursorPressEnd(event)"
 		ondragstart="handleDragStart(event)"
 		ondragend="handleDragEnd(event)"
 	>

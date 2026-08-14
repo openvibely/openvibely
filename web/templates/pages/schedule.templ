@@ -573,6 +573,11 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 																data-task-id={ occurrence.Task.Task.ID }
 																data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
 																onclick="openTaskDialog(this.dataset.taskId)"
+																onpointerdown="handleDragCursorPressStart(event)"
+																onpointerup="handleDragCursorPressEnd(event)"
+																onpointercancel="handleDragCursorPressEnd(event)"
+																onmousedown="handleDragCursorPressStart(event)"
+																onmouseup="handleDragCursorPressEnd(event)"
 																ondragstart="handleScheduleDragStart(event)"
 															>
 																<div class="font-semibold truncate leading-tight">{ scheduleDisplayTitle(occurrence.Task) }</div>
@@ -1069,6 +1074,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					}
 					// Reset dragged elements
 					document.body.classList.remove('drag-cursor-active');
+					if (window.clearDragCursorPress) window.clearDragCursorPress();
 					document.querySelectorAll('[draggable="true"]').forEach(function(el) {
 						el.style.opacity = '1';
 						el.classList.remove('dragging');
@@ -1122,6 +1128,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 
 				// Reset dragged elements
 				document.body.classList.remove('drag-cursor-active');
+				if (window.clearDragCursorPress) window.clearDragCursorPress();
 				document.querySelectorAll('[draggable="true"]').forEach(function(el) {
 					el.style.opacity = '1';
 					el.classList.remove('dragging');
@@ -1139,6 +1146,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				window._schedDragendRegistered = true;
 				document.addEventListener('dragend', function(event) {
 					document.body.classList.remove('drag-cursor-active');
+					if (window.clearDragCursorPress) window.clearDragCursorPress();
 					if (event.target.hasAttribute('draggable')) {
 						event.target.style.opacity = '1';
 						event.target.classList.remove('dragging');
