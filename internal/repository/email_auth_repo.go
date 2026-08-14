@@ -11,12 +11,32 @@ import (
 
 // EmailAuthRepo handles database operations for Email authorized senders.
 type EmailAuthRepo struct {
-	db *sql.DB
+	allowlist singleIdentifierAllowlist[models.EmailAuthorizedSender]
 }
 
 // NewEmailAuthRepo creates a new EmailAuthRepo.
 func NewEmailAuthRepo(db *sql.DB) *EmailAuthRepo {
-	return &EmailAuthRepo{db: db}
+	return &EmailAuthRepo{allowlist: singleIdentifierAllowlist[models.EmailAuthorizedSender]{
+		db:                          db,
+		table:                       "email_authorized_senders",
+		identityColumn:              "email_address",
+		conflictTarget:              "lower(email_address)",
+		matchClause:                 `lower(email_address) = lower(?)`,
+		listErrLabel:                "email authorized senders",
+		scanErrLabel:                "email authorized sender",
+		getErrLabel:                 "get email authorized sender",
+		deleteEntityLabel:           "email authorized sender",
+		countAnyErrLabel:            "email authorized senders anywhere",
+		checkAnywhereErrLabel:       "check email authorization anywhere",
+		checkProjectErrLabel:        "check email project authorization",
+		updateAddedByOnEmptyDisplay: false,
+		normalize:                   NormalizeEmailAddress,
+		scan: func(scanner taskContextScanner) (models.EmailAuthorizedSender, error) {
+			var s models.EmailAuthorizedSender
+			err := scanner.Scan(&s.ID, &s.ProjectID, &s.EmailAddress, &s.DisplayName, &s.AddedAt, &s.AddedBy)
+			return s, err
+		},
+	}}
 }
 
 // NormalizeEmailAddress extracts the mailbox address when possible, then trims and lowercases it for storage and matching.
@@ -34,12 +54,7 @@ func NormalizeEmailAddress(email string) string {
 // ListByProject returns all system-level authorized email senders.
 // projectID is accepted for UI compatibility but does not scope inbound authorization.
 func (r *EmailAuthRepo) ListByProject(ctx context.Context, projectID string) ([]models.EmailAuthorizedSender, error) {
-	return listAuthorizedUsers(ctx, r.db, "email_authorized_senders", "email_address", "email authorized senders", "email authorized sender",
-		func(rows *sql.Rows) (models.EmailAuthorizedSender, error) {
-			var s models.EmailAuthorizedSender
-			err := rows.Scan(&s.ID, &s.ProjectID, &s.EmailAddress, &s.DisplayName, &s.AddedAt, &s.AddedBy)
-			return s, err
-		})
+	return r.allowlist.List(ctx)
 }
 
 // IsAuthorized checks whether an email address is authorized at the system channel level.
@@ -50,8 +65,7 @@ func (r *EmailAuthRepo) IsAuthorized(ctx context.Context, projectID, emailAddres
 
 // IsAuthorizedForProject checks the legacy project-scoped row ownership for diagnostics/tests.
 func (r *EmailAuthRepo) IsAuthorizedForProject(ctx context.Context, projectID, emailAddress string) (bool, error) {
-	return countWhere(ctx, r.db, "email_authorized_senders", "check email project authorization",
-		`project_id = ? AND lower(email_address) = lower(?)`, projectID, NormalizeEmailAddress(emailAddress))
+	return r.allowlist.IsAuthorizedForProject(ctx, projectID, emailAddress)
 }
 
 // HasAnyAuthorizedUsers checks whether any system-level email authorized senders are configured.
@@ -62,52 +76,32 @@ func (r *EmailAuthRepo) HasAnyAuthorizedUsers(ctx context.Context, projectID str
 
 // HasAnyAuthorizedUsersAnywhere checks whether any project has email authorized senders configured.
 func (r *EmailAuthRepo) HasAnyAuthorizedUsersAnywhere(ctx context.Context) (bool, error) {
-	return countAny(ctx, r.db, "email_authorized_senders", "email authorized senders anywhere")
+	return r.allowlist.HasAny(ctx)
 }
 
 // IsAuthorizedAnywhere checks whether an email address is authorized in any project.
 func (r *EmailAuthRepo) IsAuthorizedAnywhere(ctx context.Context, emailAddress string) (bool, error) {
-	return countWhere(ctx, r.db, "email_authorized_senders", "check email authorization anywhere",
-		`lower(email_address) = lower(?)`, NormalizeEmailAddress(emailAddress))
+	return r.allowlist.IsAuthorizedAnywhere(ctx, emailAddress)
 }
 
 // Create adds a system-level authorized email sender.
 func (r *EmailAuthRepo) Create(ctx context.Context, s *models.EmailAuthorizedSender) error {
-	s.EmailAddress = NormalizeEmailAddress(s.EmailAddress)
-	err := r.db.QueryRowContext(ctx,
-		`INSERT INTO email_authorized_senders (project_id, email_address, display_name, added_by)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT DO NOTHING
-		 RETURNING id, added_at`,
-		s.ProjectID, s.EmailAddress, s.DisplayName, s.AddedBy).
-		Scan(&s.ID, &s.AddedAt)
-	if err == nil {
-		return nil
-	}
-	if err != sql.ErrNoRows {
+	identity, id, addedAt, err := r.allowlist.Create(ctx, s.ProjectID, s.EmailAddress, s.DisplayName, s.AddedBy)
+	if err != nil {
 		return err
 	}
-	if s.DisplayName != "" {
-		if _, updateErr := r.db.ExecContext(ctx, `UPDATE email_authorized_senders SET display_name = ?, added_by = ? WHERE lower(email_address) = lower(?)`, s.DisplayName, s.AddedBy, s.EmailAddress); updateErr != nil {
-			return updateErr
-		}
-	}
-	return r.db.QueryRowContext(ctx,
-		`SELECT id, added_at FROM email_authorized_senders WHERE lower(email_address) = lower(?)`,
-		s.EmailAddress).Scan(&s.ID, &s.AddedAt)
+	s.EmailAddress = identity
+	s.ID = id
+	s.AddedAt = addedAt
+	return nil
 }
 
 // Delete removes an authorized email sender by ID.
 func (r *EmailAuthRepo) Delete(ctx context.Context, id string) error {
-	return deleteByID(ctx, r.db, "email_authorized_senders", "email authorized sender", id)
+	return r.allowlist.Delete(ctx, id)
 }
 
 // GetByID returns a single authorized email sender by ID.
 func (r *EmailAuthRepo) GetByID(ctx context.Context, id string) (*models.EmailAuthorizedSender, error) {
-	return getAuthorizedUserByID(ctx, r.db, "email_authorized_senders", "email_address", "get email authorized sender", id,
-		func(row *sql.Row) (models.EmailAuthorizedSender, error) {
-			var s models.EmailAuthorizedSender
-			err := row.Scan(&s.ID, &s.ProjectID, &s.EmailAddress, &s.DisplayName, &s.AddedAt, &s.AddedBy)
-			return s, err
-		})
+	return r.allowlist.GetByID(ctx, id)
 }

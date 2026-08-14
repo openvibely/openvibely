@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // deleteByID deletes a single row identified by id from table and returns a
@@ -198,4 +199,82 @@ func countWhere(ctx context.Context, db *sql.DB, table, errLabel, whereClause st
 		return false, fmt.Errorf("%s: %w", errLabel, err)
 	}
 	return count > 0, nil
+}
+
+type singleIdentifierAllowlist[T any] struct {
+	db                          *sql.DB
+	table                       string
+	identityColumn              string
+	conflictTarget              string
+	matchClause                 string
+	listErrLabel                string
+	scanErrLabel                string
+	getErrLabel                 string
+	deleteEntityLabel           string
+	countAnyErrLabel            string
+	checkAnywhereErrLabel       string
+	checkProjectErrLabel        string
+	updateAddedByOnEmptyDisplay bool
+	normalize                   func(string) string
+	scan                        func(taskContextScanner) (T, error)
+}
+
+func (h singleIdentifierAllowlist[T]) normalizedIdentity(identity string) string {
+	if h.normalize == nil {
+		return identity
+	}
+	return h.normalize(identity)
+}
+
+func (h singleIdentifierAllowlist[T]) List(ctx context.Context) ([]T, error) {
+	return listAuthorizedUsers(ctx, h.db, h.table, h.identityColumn, h.listErrLabel, h.scanErrLabel,
+		func(rows *sql.Rows) (T, error) {
+			return h.scan(rows)
+		})
+}
+
+func (h singleIdentifierAllowlist[T]) GetByID(ctx context.Context, id string) (*T, error) {
+	return getAuthorizedUserByID(ctx, h.db, h.table, h.identityColumn, h.getErrLabel, id,
+		func(row *sql.Row) (T, error) {
+			return h.scan(row)
+		})
+}
+
+func (h singleIdentifierAllowlist[T]) Delete(ctx context.Context, id string) error {
+	return deleteByID(ctx, h.db, h.table, h.deleteEntityLabel, id)
+}
+
+func (h singleIdentifierAllowlist[T]) HasAny(ctx context.Context) (bool, error) {
+	return countAny(ctx, h.db, h.table, h.countAnyErrLabel)
+}
+
+func (h singleIdentifierAllowlist[T]) IsAuthorizedAnywhere(ctx context.Context, identity string) (bool, error) {
+	return countWhere(ctx, h.db, h.table, h.checkAnywhereErrLabel, h.matchClause, h.normalizedIdentity(identity))
+}
+
+func (h singleIdentifierAllowlist[T]) IsAuthorizedForProject(ctx context.Context, projectID, identity string) (bool, error) {
+	return countWhere(ctx, h.db, h.table, h.checkProjectErrLabel, `project_id = ? AND `+h.matchClause, projectID, h.normalizedIdentity(identity))
+}
+
+func (h singleIdentifierAllowlist[T]) Create(ctx context.Context, projectID, identity, displayName, addedBy string) (string, string, time.Time, error) {
+	identity = h.normalizedIdentity(identity)
+	addedByUpdate := "added_by = excluded.added_by"
+	if !h.updateAddedByOnEmptyDisplay {
+		addedByUpdate = fmt.Sprintf("added_by = CASE WHEN excluded.display_name != '' THEN excluded.added_by ELSE %s.added_by END", h.table)
+	}
+	query := fmt.Sprintf(
+		`INSERT INTO %s (project_id, %s, display_name, added_by)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(%s) DO UPDATE SET
+			display_name = CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE %s.display_name END,
+			%s
+		 RETURNING id, added_at`,
+		h.table, h.identityColumn, h.conflictTarget, h.table, addedByUpdate)
+
+	var id string
+	var addedAt time.Time
+	if err := h.db.QueryRowContext(ctx, query, projectID, identity, displayName, addedBy).Scan(&id, &addedAt); err != nil {
+		return identity, "", time.Time{}, err
+	}
+	return identity, id, addedAt, nil
 }
