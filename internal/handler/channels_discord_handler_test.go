@@ -246,13 +246,14 @@ func TestChannelsDiscordTestConnection(t *testing.T) {
 		t.Fatalf("expected success response, got %d %q", rec.Code, rec.Body.String())
 	}
 
-	h.SetDiscordService(&fakeDiscordService{testFn: func(ctx context.Context) error { return errors.New("bad token") }})
+	h.SetDiscordService(&fakeDiscordService{testFn: func(ctx context.Context) error { return errors.New(`discord <bad> & "quoted"`) }})
 	req2 := httptest.NewRequest(http.MethodPost, "/channels/discord/test", nil)
 	rec2 := httptest.NewRecorder()
 	e.ServeHTTP(rec2, req2)
 
-	if rec2.Code != http.StatusOK || !strings.Contains(rec2.Body.String(), "bad token") {
-		t.Fatalf("expected failure response, got %d %q", rec2.Code, rec2.Body.String())
+	wantFailure := `<div class="flex items-center gap-2 text-error"><span>Connection failed: discord &lt;bad&gt; &amp; &quot;quoted&quot;</span></div>`
+	if rec2.Code != http.StatusOK || rec2.Body.String() != wantFailure {
+		t.Fatalf("expected escaped failure response %q, got %d %q", wantFailure, rec2.Code, rec2.Body.String())
 	}
 }
 

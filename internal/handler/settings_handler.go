@@ -432,39 +432,15 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 
 // handleTelegramTest tests the Telegram bot connection
 func (h *Handler) handleTelegramTest(c echo.Context) error {
-	if h.telegramService == nil || !h.telegramService.IsRunning() {
-		// Return error HTML with red X icon
-		errorHTML := `
-			<div class="flex items-center gap-2 text-error" id="telegram-test-feedback">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-				</svg>
-				<span>Connection failed: Bot is not running</span>
-			</div>
-		`
-		return c.HTML(http.StatusOK, errorHTML)
+	options := channelConnectionTestFeedbackOptions{
+		ElementID:          "telegram-test-feedback",
+		MissingServiceText: "Connection failed: Bot is not running",
+		AutoDismissSuccess: true,
 	}
-
-	// Return success HTML with green checkmark and auto-dismiss
-	successHTML := `
-		<div class="flex items-center gap-2 text-success" id="telegram-test-feedback">
-			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-			</svg>
-			<span>Connection successful!</span>
-		</div>
-		<script>
-			setTimeout(function() {
-				var el = document.getElementById('telegram-test-feedback');
-				if (el) {
-					el.style.transition = 'opacity 0.5s';
-					el.style.opacity = '0';
-					setTimeout(function() { el.remove(); }, 500);
-				}
-			}, 3000);
-		</script>
-	`
-	return c.HTML(http.StatusOK, successHTML)
+	if h.telegramService == nil || !h.telegramService.IsRunning() {
+		return renderStandardChannelConnectionTestFeedback(c, "Telegram", false, nil, options)
+	}
+	return renderStandardChannelConnectionTestFeedback(c, "Telegram", true, nil, options)
 }
 
 // handleTelegramSendResponses toggles the "send task responses to Telegram" setting
@@ -932,14 +908,45 @@ func boolFormValue(value string, fallback bool) string {
 	return "false"
 }
 
-func renderStandardChannelConnectionTestFeedback(c echo.Context, channelName string, serviceConfigured bool, testErr error) error {
+type channelConnectionTestFeedbackOptions struct {
+	ElementID          string
+	MissingServiceText string
+	AutoDismissSuccess bool
+}
+
+func renderStandardChannelConnectionTestFeedback(c echo.Context, channelName string, serviceConfigured bool, testErr error, opts ...channelConnectionTestFeedbackOptions) error {
+	options := channelConnectionTestFeedbackOptions{}
+	if len(opts) > 0 {
+		options = opts[0]
+	}
+	elementID := ""
+	if options.ElementID != "" {
+		elementID = ` id="` + templateEscape(options.ElementID) + `"`
+	}
 	if !serviceConfigured {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>`+channelName+` service not configured</span></div>`)
+		message := channelName + " service not configured"
+		if options.MissingServiceText != "" {
+			message = options.MissingServiceText
+		}
+		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"`+elementID+`><span>`+templateEscape(message)+`</span></div>`)
 	}
 	if testErr != nil {
-		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"><span>Connection failed: `+templateEscape(testErr.Error())+`</span></div>`)
+		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-error"`+elementID+`><span>Connection failed: `+templateEscape(testErr.Error())+`</span></div>`)
 	}
-	return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Connection successful!</span></div>`)
+	feedbackHTML := `<div class="flex items-center gap-2 text-success"` + elementID + `><span>Connection successful!</span></div>`
+	if options.AutoDismissSuccess && options.ElementID != "" {
+		feedbackHTML += `<script>
+			setTimeout(function() {
+				var el = document.getElementById(` + strconv.Quote(options.ElementID) + `);
+				if (el) {
+					el.style.transition = 'opacity 0.5s';
+					el.style.opacity = '0';
+					setTimeout(function() { el.remove(); }, 500);
+				}
+			}, 3000);
+		</script>`
+	}
+	return c.HTML(http.StatusOK, feedbackHTML)
 }
 
 func (h *Handler) buildAbsoluteURL(c echo.Context, path string) string {

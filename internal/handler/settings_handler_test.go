@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"testing"
+	"unsafe"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -28,20 +30,37 @@ func TestHandleTelegramTest_NotRunning(t *testing.T) {
 	err := h.handleTelegramTest(c)
 	require.NoError(t, err)
 
-	// Verify handler returns 200 OK with error HTML
+	assert.Equal(t, http.StatusOK, rec.Code)
+	want := `<div class="flex items-center gap-2 text-error" id="telegram-test-feedback"><span>Connection failed: Bot is not running</span></div>`
+	assert.Equal(t, want, rec.Body.String())
+	assert.NotContains(t, rec.Body.String(), "setTimeout") // errors should persist
+}
+
+func TestHandleTelegramTest_Success(t *testing.T) {
+	e := echo.New()
+	h := New(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	h.telegramService = &service.TelegramService{}
+	markTelegramServiceRunningForTest(t, h.telegramService)
+
+	req := httptest.NewRequest(http.MethodPost, "/channels/telegram/test", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.handleTelegramTest(c)
+	require.NoError(t, err)
+
 	assert.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
+	assert.Contains(t, body, `<div class="flex items-center gap-2 text-success" id="telegram-test-feedback"><span>Connection successful!</span></div>`)
+	assert.Contains(t, body, `document.getElementById("telegram-test-feedback")`)
+	assert.Contains(t, body, "setTimeout")
+}
 
-	// Verify error feedback HTML contains:
-	// - Error styling (text-error class)
-	// - Error icon (X SVG path)
-	// - Error message
-	// - No auto-dismiss script (errors should persist)
-	assert.Contains(t, body, "text-error")
-	assert.Contains(t, body, "Connection failed")
-	assert.Contains(t, body, "Bot is not running")
-	assert.Contains(t, body, "M6 18L18 6M6 6l12 12") // X SVG path
-	assert.NotContains(t, body, "setTimeout")        // should NOT auto-dismiss
+func markTelegramServiceRunningForTest(t *testing.T, svc *service.TelegramService) {
+	t.Helper()
+	running := reflect.ValueOf(svc).Elem().FieldByName("running")
+	require.True(t, running.IsValid())
+	reflect.NewAt(running.Type(), unsafe.Pointer(running.UnsafeAddr())).Elem().SetBool(true)
 }
 
 func assertChannelsRefreshTrigger(t *testing.T, rec *httptest.ResponseRecorder) {
