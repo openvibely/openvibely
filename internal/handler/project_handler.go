@@ -678,8 +678,11 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 
 func render(c echo.Context, status int, component templ.Component) error {
 	ctx := c.Request().Context()
-	if h, ok := c.Get("handler").(*Handler); ok && h.desktopMode {
-		ctx = layout.WithDesktopMode(ctx, true)
+	if h, ok := c.Get("handler").(*Handler); ok {
+		ctx = layout.WithDesktopMode(ctx, h.desktopMode)
+		if !isHTMX(c) {
+			ctx = layout.WithUIPreferences(ctx, h.uiPreferences(ctx))
+		}
 	}
 	c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 	c.Response().WriteHeader(status)

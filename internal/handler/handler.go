@@ -545,6 +545,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Machine-readable readiness and immutable build identity.
 	e.GET("/api/system/health", h.SystemHealth)
+	e.POST("/ui/preferences", h.SaveUIPreferences)
 
 	// Machine-readable system update state and administrator actions.
 	e.GET("/api/system/update", h.SystemUpdate)

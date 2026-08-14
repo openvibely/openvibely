@@ -3912,6 +3912,132 @@ func TestSidebar_DoesNotPersistSelectedNavHighlight(t *testing.T) {
 	}
 }
 
+func TestLayout_ThemeAndSidebarPreferencesPersistBeforeFirstPaint(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	required := []string{
+		`rawSaved = document.documentElement.getAttribute('data-ui-theme') || ''`,
+		`saved = normalizeStoredTheme(rawSaved)`,
+		`'openvibely-light'`,
+		`'openvibely-dark'`,
+		`document.documentElement.setAttribute('data-theme', mode)`,
+		`document.documentElement.setAttribute('data-color-theme', themeID)`,
+		`localStorage.setItem('theme', themeID)`,
+		`window.applyOpenVibelyTheme`,
+		`document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true'`,
+		`document.body.classList.add('sidebar-collapsed-pending')`,
+		`body.sidebar-collapsed-pending .sidebar-aside`,
+		`body.sidebar-collapsed-pending .sidebar-aside .sidebar-inner`,
+		`document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed)`,
+		`/ui/preferences`,
+		`JSON.stringify({ sidebar_collapsed: isCollapsed })`,
+	}
+	for _, snippet := range required {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("layout missing persisted preference snippet: %s", snippet)
+		}
+	}
+
+	if strings.Contains(body, `localStorage.setItem('theme', next)`) {
+		t.Fatal("theme toggle must persist stable exact theme IDs, not raw light/dark mode values")
+	}
+}
+
+func TestLayout_UIPreferencesRestoreFromSettings(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	require.NoError(t, h.settingsRepo.Set(context.Background(), uiPreferenceThemeKey, "openvibely-light"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), uiPreferenceSidebarCollapsedKey, "true"))
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	for _, snippet := range []string{
+		`data-openvibely-runtime="web"`,
+		`data-ui-theme="openvibely-light"`,
+		`data-ui-sidebar-collapsed="true"`,
+		`rawSaved = document.documentElement.getAttribute('data-ui-theme') || ''`,
+		`document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true'`,
+		`fetch('/ui/preferences'`,
+		`JSON.stringify({ sidebar_collapsed: isCollapsed })`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("UI preference restore missing snippet: %s", snippet)
+		}
+	}
+	if strings.Contains(body, `document.cookie`) || strings.Contains(body, `openvibely-sidebar-collapsed`) || strings.Contains(body, `openvibely-theme`) {
+		t.Fatal("UI preferences must persist through DB settings, not port/origin scoped cookies")
+	}
+	if strings.Contains(body, `if (document.documentElement.getAttribute('data-openvibely-runtime') !== 'desktop') return`) {
+		t.Fatal("UI preferences must persist to DB in web/server mode as well as desktop mode")
+	}
+}
+
+func TestLayout_UIPreferencesDoNotReadSettingsForHTMXFragments(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	settingsQueries := 0
+	h.settingsRepo.SetQueryObserver(func(query string) {
+		if strings.Contains(query, "app_settings") {
+			settingsQueries++
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
+	req.Header.Set("HX-Request", "true")
+	req.Header.Set("HX-Target", "main-content")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if settingsQueries != 0 {
+		t.Fatalf("HTMX fragment render should not read UI preferences from app_settings, got %d settings queries", settingsQueries)
+	}
+}
+
+func TestSaveUIPreferences_PersistsPreferencesToSettings(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"theme":"openvibely-dark","sidebar_collapsed":true}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	theme, err := h.settingsRepo.Get(context.Background(), uiPreferenceThemeKey)
+	require.NoError(t, err)
+	require.Equal(t, "openvibely-dark", theme)
+	sidebar, err := h.settingsRepo.Get(context.Background(), uiPreferenceSidebarCollapsedKey)
+	require.NoError(t, err)
+	require.Equal(t, "true", sidebar)
+}
+
+func TestSaveUIPreferences_RejectsInvalidThemeID(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"theme":"bad theme"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid theme, got %d", rec.Code)
+	}
+}
+
 func TestSidebar_ProjectSelectorSingleBorderAndFocusVisible(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 

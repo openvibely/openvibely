@@ -962,8 +962,11 @@ func TestThemeToggle_UsesImmediateSwitch(t *testing.T) {
 		"[data-theme=\"dark\"] .theme-toggle-pill {",
 		"background: #3a4455;",
 		"window.toggleTheme = function() {",
-		"html.setAttribute('data-theme', next);",
-		"localStorage.setItem('theme', next);",
+		"var nativeThemeByMode = { light: 'openvibely-light', dark: 'openvibely-dark' };",
+		"html.setAttribute('data-theme', mode);",
+		"html.setAttribute('data-color-theme', themeID);",
+		"localStorage.setItem('theme', themeID);",
+		"window.applyOpenVibelyTheme(nativeThemeByMode[nextMode], true);",
 	}
 	for _, fragment := range expected {
 		if !strings.Contains(html, fragment) {

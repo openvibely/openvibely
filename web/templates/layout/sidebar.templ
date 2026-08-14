@@ -363,11 +363,22 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					});
 				})();
 
-				// Sidebar collapse/expand toggle with localStorage persistence
-				(function() {
-					var sidebar = document.getElementById('sidebar');
-					var btn = document.getElementById('sidebar-collapse-btn');
-					if (!sidebar || !btn) return;
+					// Sidebar collapse/expand toggle with localStorage persistence
+					(function() {
+						var sidebar = document.getElementById('sidebar');
+						var btn = document.getElementById('sidebar-collapse-btn');
+						if (!sidebar || !btn) return;
+
+					function persistSidebarPreference(isCollapsed) {
+						try {
+							fetch('/ui/preferences', {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({ sidebar_collapsed: isCollapsed }),
+								keepalive: true
+							}).catch(function() {});
+						} catch (_) {}
+					}
 
 					// Update accessibility attributes based on collapsed state
 					function updateSidebarToggleA11y(isCollapsed) {
@@ -375,21 +386,23 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						btn.setAttribute('aria-label', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');
 						btn.setAttribute('title', isCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)');
 						btn.setAttribute('data-tip', isCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
+						if (document.body) document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed);
 					}
 
-					// Restore saved state
-					var collapsed = localStorage.getItem('sidebar-collapsed') === 'true';
-					if (collapsed) {
-						sidebar.classList.add('sidebar-collapsed');
-					}
-					updateSidebarToggleA11y(collapsed);
+						// Restore saved state
+							var collapsed = document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';
+						if (collapsed) {
+							sidebar.classList.add('sidebar-collapsed');
+						}
+						updateSidebarToggleA11y(collapsed);
 
 					btn.addEventListener('click', function(e) {
 						e.preventDefault();
-						sidebar.classList.toggle('sidebar-collapsed');
-						var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
-						localStorage.setItem('sidebar-collapsed', isCollapsed);
-						updateSidebarToggleA11y(isCollapsed);
+							sidebar.classList.toggle('sidebar-collapsed');
+							var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
+							try { localStorage.setItem('sidebar-collapsed', isCollapsed); } catch (_) {}
+							persistSidebarPreference(isCollapsed);
+							updateSidebarToggleA11y(isCollapsed);
 					});
 
 					// Keyboard shortcut: Ctrl+B or Cmd+B to toggle sidebar
@@ -401,7 +414,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							e.preventDefault();
 							sidebar.classList.toggle('sidebar-collapsed');
 							var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
-							localStorage.setItem('sidebar-collapsed', isCollapsed);
+							try { localStorage.setItem('sidebar-collapsed', isCollapsed); } catch (_) {}
+							persistSidebarPreference(isCollapsed);
 							updateSidebarToggleA11y(isCollapsed);
 						}
 					});

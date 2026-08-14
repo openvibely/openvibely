@@ -81,6 +81,22 @@ func TestEnsureDesktopPluginRootUsesExternalApplicationData(t *testing.T) {
 	}
 }
 
+func TestDesktopWindowUsesEphemeralPortWebViewWithPersistentStorage(t *testing.T) {
+	content, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read desktop main.go: %v", err)
+	}
+	source := string(content)
+	if !strings.Contains(source, `application.WebviewWindowOptions{`) || !strings.Contains(source, `URL:       baseURL,`) {
+		t.Fatal("desktop launcher must keep loading the server UI through a Wails WebView window")
+	}
+	for _, disallowed := range []string{`DataPath:`, `PrivateMode`, `Incognito`, `Ephemeral`, `ClearBrowsingData`} {
+		if strings.Contains(source, disallowed) {
+			t.Fatalf("desktop launcher appears to override persistent WebView storage with %s", disallowed)
+		}
+	}
+}
+
 func TestRunDesktopLaunchesNativeWindow(t *testing.T) {
 	cfg := &config.Config{Mode: config.ModeDesktop}
 

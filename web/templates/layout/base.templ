@@ -7,9 +7,19 @@ import (
 )
 
 type desktopModeContextKey struct{}
+type uiPreferencesContextKey struct{}
+
+type UIPreferences struct {
+	Theme            string
+	SidebarCollapsed string
+}
 
 func WithDesktopMode(ctx context.Context, desktop bool) context.Context {
 	return context.WithValue(ctx, desktopModeContextKey{}, desktop)
+}
+
+func WithUIPreferences(ctx context.Context, prefs UIPreferences) context.Context {
+	return context.WithValue(ctx, uiPreferencesContextKey{}, prefs)
 }
 
 func serverRuntimeMode(ctx context.Context) string {
@@ -17,6 +27,11 @@ func serverRuntimeMode(ctx context.Context) string {
 		return "desktop"
 	}
 	return "web"
+}
+
+func uiPreferences(ctx context.Context) UIPreferences {
+	prefs, _ := ctx.Value(uiPreferencesContextKey{}).(UIPreferences)
+	return prefs
 }
 
 func documentTitle(title string) string {
@@ -32,21 +47,62 @@ templ PageTitle(title string) {
 
 templ Base(title string, projects []models.Project, currentProjectID string) {
 	<!DOCTYPE html>
-		<html lang="en" data-theme="dark" data-openvibely-runtime={ serverRuntimeMode(ctx) } data-runtime={ serverRuntimeMode(ctx) }>
-			<head>
+		<html
+		lang="en"
+		data-theme="dark"
+		data-openvibely-runtime={ serverRuntimeMode(ctx) }
+		data-runtime={ serverRuntimeMode(ctx) }
+		data-ui-theme={ uiPreferences(ctx).Theme }
+		data-ui-sidebar-collapsed={ uiPreferences(ctx).SidebarCollapsed }
+	>
+		<head>
 			<meta charset="UTF-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 			<title>{ documentTitle(title) }</title>
 			<!-- Theme init: must run before any CSS to prevent flash -->
 			<script>
 				(function() {
-					var saved = localStorage.getItem('theme');
-					if (saved === 'light' || saved === 'dark') {
-						document.documentElement.setAttribute('data-theme', saved);
-					} else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
-						document.documentElement.setAttribute('data-theme', 'light');
-					}
-					// else: keep the default "dark" from HTML attribute
+						var nativeThemeByMode = { light: 'openvibely-light', dark: 'openvibely-dark' };
+						var nativeThemeModes = { 'openvibely-light': 'light', 'openvibely-dark': 'dark' };
+						function normalizeStoredTheme(value) {
+							value = String(value || '').trim();
+							if (nativeThemeModes[value]) return value;
+							if (value === 'light' || value === 'dark') return nativeThemeByMode[value];
+							if (/^[a-z0-9][a-z0-9._:-]*$/i.test(value)) return value;
+							return '';
+						}
+						function modeForTheme(themeID) {
+							if (nativeThemeModes[themeID]) return nativeThemeModes[themeID];
+							return /light/i.test(themeID) && !/dark/i.test(themeID) ? 'light' : 'dark';
+						}
+						function persistUIPreference(payload) {
+							try {
+								fetch('/ui/preferences', {
+									method: 'POST',
+									headers: { 'Content-Type': 'application/json' },
+									body: JSON.stringify(payload),
+									keepalive: true
+								}).catch(function() {});
+							} catch (_) {}
+						}
+						function applyStoredTheme(themeID, persistLocal, persistDB) {
+							var mode = modeForTheme(themeID);
+							document.documentElement.setAttribute('data-theme', mode);
+							document.documentElement.setAttribute('data-color-theme', themeID);
+							if (persistLocal) {
+								try { localStorage.setItem('theme', themeID); } catch (_) {}
+							}
+							if (persistDB) {
+								persistUIPreference({ theme: themeID });
+							}
+						}
+						var rawSaved = document.documentElement.getAttribute('data-ui-theme') || '';
+						var saved = normalizeStoredTheme(rawSaved);
+						if (saved) {
+							applyStoredTheme(saved, true, rawSaved !== saved);
+						} else {
+							applyStoredTheme('openvibely-dark', true, false);
+						}
 					function detectDesktopRuntime() {
 						try {
 							if (typeof window === 'undefined') return false;
@@ -663,7 +719,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					transition: width 0.2s ease;
 					overflow: hidden;
 				}
-				.sidebar-aside.sidebar-collapsed {
+				body.sidebar-collapsed-pending .sidebar-aside,
+					.sidebar-aside.sidebar-collapsed {
 					width: 3.5rem !important;
 				}
 				.sidebar-aside .sidebar-text {
@@ -671,7 +728,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					white-space: nowrap;
 					overflow: hidden;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-text {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-text,
+					.sidebar-aside.sidebar-collapsed .sidebar-text {
 					opacity: 0;
 					pointer-events: none;
 					width: 0;
@@ -690,23 +748,27 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					padding: 0 0.5rem;
 					flex-shrink: 0;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-hide-collapsed {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-hide-collapsed,
+					.sidebar-aside.sidebar-collapsed .sidebar-hide-collapsed {
 					display: none !important;
 				}
 				.sidebar-aside .sidebar-toggle-icon {
 					transition: transform 0.2s ease;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-toggle-icon {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-toggle-icon,
+					.sidebar-aside.sidebar-collapsed .sidebar-toggle-icon {
 					transform: rotate(180deg);
 				}
-				/* Collapsed sidebar: flex column, perfectly centered icons */
-				.sidebar-aside.sidebar-collapsed .sidebar-inner {
+					/* Collapsed sidebar: flex column, perfectly centered icons */
+					body.sidebar-collapsed-pending .sidebar-aside .sidebar-inner,
+					.sidebar-aside.sidebar-collapsed .sidebar-inner {
 					padding: 0.375rem 0 !important;
 					display: flex !important;
 					flex-direction: column !important;
 					align-items: center !important;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-header {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-header,
+					.sidebar-aside.sidebar-collapsed .sidebar-header {
 					display: flex !important;
 					flex-direction: column !important;
 					justify-content: center !important;
@@ -716,7 +778,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					width: 2.5rem !important;
 					gap: 2px !important;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-header .btn {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-header .btn,
+					.sidebar-aside.sidebar-collapsed .sidebar-header .btn {
 					width: 2.5rem !important;
 					height: 2.5rem !important;
 					min-height: 2.5rem !important;
@@ -726,13 +789,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					align-items: center !important;
 					justify-content: center !important;
 				}
-				.sidebar-aside.sidebar-collapsed .menu {
+				body.sidebar-collapsed-pending .sidebar-aside .menu,
+					.sidebar-aside.sidebar-collapsed .menu {
 					padding: 0 !important;
 					margin: 0 !important;
 					gap: 2px !important;
 					width: 2.5rem !important;
 				}
-				.sidebar-aside.sidebar-collapsed .menu li:not(.sidebar-hide-collapsed):not(.sidebar-divider) {
+				body.sidebar-collapsed-pending .sidebar-aside .menu li:not(.sidebar-hide-collapsed):not(.sidebar-divider),
+					.sidebar-aside.sidebar-collapsed .menu li:not(.sidebar-hide-collapsed):not(.sidebar-divider) {
 					display: flex !important;
 					justify-content: center !important;
 					align-items: center !important;
@@ -740,12 +805,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					margin: 0 !important;
 					width: 2.5rem !important;
 				}
-				.sidebar-aside.sidebar-collapsed .menu :where(li ul) {
+				body.sidebar-collapsed-pending .sidebar-aside .menu :where(li ul),
+					.sidebar-aside.sidebar-collapsed .menu :where(li ul) {
 					padding: 0 !important;
 					margin: 0 !important;
 				}
-				.sidebar-aside.sidebar-collapsed .menu a,
-				.sidebar-aside.sidebar-collapsed .menu summary {
+					body.sidebar-collapsed-pending .sidebar-aside .menu a,
+					body.sidebar-collapsed-pending .sidebar-aside .menu summary,
+					.sidebar-aside.sidebar-collapsed .menu a,
+					.sidebar-aside.sidebar-collapsed .menu summary {
 					display: flex !important;
 					align-items: center !important;
 					justify-content: center !important;
@@ -757,19 +825,23 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					min-height: 2.5rem !important;
 					border-radius: 0.5rem;
 				}
-				.sidebar-aside.sidebar-collapsed .sidebar-divider {
+				body.sidebar-collapsed-pending .sidebar-aside .sidebar-divider,
+					.sidebar-aside.sidebar-collapsed .sidebar-divider {
 					display: none;
 				}
 					/* Collapsed sidebar: disable custom hover tooltip boxes next to icons */
-					.sidebar-aside.sidebar-collapsed [data-tip] {
+					body.sidebar-collapsed-pending .sidebar-aside [data-tip],
+						.sidebar-aside.sidebar-collapsed [data-tip] {
 						position: relative;
 					}
-					.sidebar-aside.sidebar-collapsed [data-tip]::after {
+					body.sidebar-collapsed-pending .sidebar-aside [data-tip]::after,
+						.sidebar-aside.sidebar-collapsed [data-tip]::after {
 						content: none !important;
 						display: none !important;
 						opacity: 0 !important;
 					}
-					.sidebar-aside.sidebar-collapsed [data-tip]:hover::after {
+					body.sidebar-collapsed-pending .sidebar-aside [data-tip]:hover::after,
+						.sidebar-aside.sidebar-collapsed [data-tip]:hover::after {
 						opacity: 0 !important;
 					}
 						/* Theme toggle shared styling */					.theme-toggle-pill {
@@ -2388,30 +2460,70 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						pre.appendChild(btn);
 					});
 				};
-// Theme toggle function
-				window.toggleTheme = function() {
-					var html = document.documentElement;
-					var current = html.getAttribute('data-theme');
-					var next = (current === 'dark') ? 'light' : 'dark';
+	// Theme toggle function
+					(function() {
+						var nativeThemeByMode = { light: 'openvibely-light', dark: 'openvibely-dark' };
+						var nativeThemeModes = { 'openvibely-light': 'light', 'openvibely-dark': 'dark' };
 
-					html.setAttribute('data-theme', next);
-					localStorage.setItem('theme', next);
-
-					// Update toggle icon
-					var icons = document.querySelectorAll('.theme-toggle-icon');
-					icons.forEach(function(icon) {
-						icon.setAttribute('data-theme-current', next);
-					});
-				};
-
-				// Listen for system theme changes (when no manual preference is saved)
-				if (window.matchMedia) {
-					window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
-						if (!localStorage.getItem('theme')) {
-							document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+						function normalizeThemeID(value) {
+							value = String(value || '').trim();
+							if (nativeThemeModes[value]) return value;
+							if (value === 'light' || value === 'dark') return nativeThemeByMode[value];
+							if (/^[a-z0-9][a-z0-9._:-]*$/i.test(value)) return value;
+							return '';
 						}
-					});
-				}
+
+						function modeForTheme(themeID) {
+							if (nativeThemeModes[themeID]) return nativeThemeModes[themeID];
+							return /light/i.test(themeID) && !/dark/i.test(themeID) ? 'light' : 'dark';
+						}
+
+						function persistUIPreference(payload) {
+							try {
+								fetch('/ui/preferences', {
+									method: 'POST',
+									headers: { 'Content-Type': 'application/json' },
+									body: JSON.stringify(payload),
+									keepalive: true
+								}).catch(function() {});
+							} catch (_) {}
+						}
+
+						window.applyOpenVibelyTheme = function(themeID, persist) {
+							themeID = normalizeThemeID(themeID) || nativeThemeByMode.dark;
+							var mode = modeForTheme(themeID);
+							var html = document.documentElement;
+							html.setAttribute('data-theme', mode);
+							html.setAttribute('data-color-theme', themeID);
+							if (persist) {
+								try { localStorage.setItem('theme', themeID); } catch (_) {}
+								persistUIPreference({ theme: themeID });
+							}
+
+							// Update toggle icon
+							var icons = document.querySelectorAll('.theme-toggle-icon');
+							icons.forEach(function(icon) {
+								icon.setAttribute('data-theme-current', mode);
+							});
+						};
+
+						window.toggleTheme = function() {
+							var current = document.documentElement.getAttribute('data-theme');
+							var nextMode = (current === 'dark') ? 'light' : 'dark';
+							window.applyOpenVibelyTheme(nativeThemeByMode[nextMode], true);
+						};
+
+						window.applyOpenVibelyTheme(document.documentElement.getAttribute('data-color-theme'), false);
+
+						// Listen for system theme changes (when no manual preference is saved)
+						if (window.matchMedia) {
+							window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+								if (!localStorage.getItem('theme')) {
+									window.applyOpenVibelyTheme(e.matches ? nativeThemeByMode.dark : nativeThemeByMode.light, false);
+								}
+							});
+						}
+					})();
 
 				// Scrollbar gutter and CSS overflow-y: scroll handle layout shifts in modern browsers
 				// No JavaScript workaround needed
@@ -3026,6 +3138,13 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			</script>
 		</head>
 		<body class="h-screen bg-base-200 overflow-hidden" hx-ext="morph">
+			<script>
+						(function() {
+							var collapsed = document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';
+							if (collapsed) {
+								document.body.classList.add('sidebar-collapsed-pending');
+							}
+						})();				</script>
 			<div class="drawer lg:drawer-open h-full">
 				<input id="sidebar-toggle" type="checkbox" class="drawer-toggle"/>
 				<div class="drawer-content flex flex-col h-full overflow-hidden">
@@ -3047,20 +3166,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						{ children... }
 					</main>
 				</div>
-					<!-- Sidebar -->
-					<div class="drawer-side z-[200] lg:z-auto">
-						<label for="sidebar-toggle" aria-label="close sidebar" class="drawer-overlay z-[190] lg:z-auto"></label>
-						@Sidebar(projects, currentProjectID)
-					</div>
-					<!-- Apply sidebar collapsed state immediately to prevent flash -->
+				<!-- Sidebar -->
+				<div class="drawer-side z-[200] lg:z-auto">
+					<label for="sidebar-toggle" aria-label="close sidebar" class="drawer-overlay z-[190] lg:z-auto"></label>
+					@Sidebar(projects, currentProjectID)
+				</div>
+				<!-- Apply sidebar collapsed state immediately after insertion; body marker was set before insertion to avoid layout jump. -->
 				<script>
-					(function() {
-						if (localStorage.getItem('sidebar-collapsed') === 'true') {
-							var s = document.getElementById('sidebar');
-							if (s) s.classList.add('sidebar-collapsed');
-						}
-					})();
-				</script>
+						(function() {
+								var collapsed = document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';
+								if (collapsed) {
+									var s = document.getElementById('sidebar');
+									if (s) s.classList.add('sidebar-collapsed');
+								}						})();
+					</script>
 			</div>
 			<!-- Toast Notification Container -->
 			<div id="toast-container"></div>
@@ -3538,7 +3657,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					document.body.addEventListener('alertUpdate', refreshGlobalSystemUpdateIndicators);
 				}
 			</script>
-
 			<!-- Card Search Helper -->
 			<script>
 				(function() {
@@ -3641,7 +3759,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					});
 				})();
 			</script>
-
 			<!-- Desktop external-link bridge -->
 			<script>
 					// In Wails desktop mode, the embedded WebView does not handle
@@ -3767,7 +3884,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					};
 				})();
 			</script>
-
 			<!-- Selection Counter -->
 			<div id="selection-counter">
 				<span id="selection-count">0</span>
