@@ -444,17 +444,19 @@ func (h *Handler) GetTaskChangesWorktree(c echo.Context) error {
 		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
 	}
 
+	diffView := h.uiDiffViewPreference(ctx)
+
 	if state.UseWorktreeContent {
 		var taskPR *models.TaskPullRequest
 		if h.taskPullRequestRepo != nil {
 			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
 		}
-		return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.BranchAlreadyMerged, state.RebaseAvailable,
+		return render(c, http.StatusOK, pages.TaskChangesWorktreeContentWithView(
+			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.BranchAlreadyMerged, state.RebaseAvailable, diffView,
 		))
 	}
 
-	return render(c, http.StatusOK, pages.TaskChangesContent(state.DiffOutput, task.ID, reviewComments))
+	return render(c, http.StatusOK, pages.TaskChangesContentWithView(state.DiffOutput, task.ID, reviewComments, diffView))
 }
 
 // UpdateWorktreeSettings updates global worktree settings.

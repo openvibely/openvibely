@@ -159,6 +159,10 @@ templ WorktreeInfoPanel(task *models.Task, fileStats []service.WorktreeFileStat)
 // regardless of the stored merge_status, because re-running a merge would be
 // redundant.
 templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, branchAlreadyMerged bool, rebaseAvailable bool) {
+	@TaskChangesWorktreeContentWithView(diffOutput, task, fileStats, reviewComments, taskPR, branchAlreadyMerged, rebaseAvailable, "inline")
+}
+
+templ TaskChangesWorktreeContentWithView(diffOutput string, task *models.Task, fileStats []service.WorktreeFileStat, reviewComments []models.ReviewComment, taskPR *models.TaskPullRequest, branchAlreadyMerged bool, rebaseAvailable bool, diffView string) {
 	<div class="card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body">
 			// Worktree branch info header
@@ -287,7 +291,7 @@ templ TaskChangesWorktreeContent(diffOutput string, task *models.Task, fileStats
 			}
 
 			// Diff viewer
-			@components.DiffViewerWithReview(diffOutput, task.ID, reviewComments)
+			@components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView)
 		</div>
 	</div>
 }

@@ -11,11 +11,15 @@ import (
 
 // TaskChangesContent renders just the changes tab content (for HTMX partial updates)
 templ TaskChangesContent(diffOutput string, taskID string, reviewComments []models.ReviewComment) {
+	@TaskChangesContentWithView(diffOutput, taskID, reviewComments, "inline")
+}
+
+templ TaskChangesContentWithView(diffOutput string, taskID string, reviewComments []models.ReviewComment, diffView string) {
 	<div class="card bg-base-100 shadow-sm border border-base-300">
 		<div class="card-body">
 			<h4 class="text-lg font-bold mb-3">File Changes</h4>
 			<div id="diff-viewer-container">
-				@components.DiffViewerWithReview(diffOutput, taskID, reviewComments)
+				@components.DiffViewerWithReviewView(diffOutput, taskID, reviewComments, diffView)
 			</div>
 		</div>
 	</div>
@@ -1425,7 +1429,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 							requestAnimationFrame(function() {
 								// Restore diff view mode (inline/split).
 								if (viewMode === 'split' && typeof switchDiffView === 'function') {
-									switchDiffView('split');
+									switchDiffView('split', false);
 								}
 								// Restore scroll position so the user stays where they were.
 								window.scrollTo(scrollX, scrollY);

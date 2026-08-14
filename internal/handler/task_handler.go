@@ -1002,17 +1002,19 @@ func (h *Handler) GetTaskChanges(c echo.Context) error {
 		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
 	}
 
+	diffView := h.uiDiffViewPreference(ctx)
+
 	if state.UseWorktreeContent {
 		var taskPR *models.TaskPullRequest
 		if h.taskPullRequestRepo != nil {
 			taskPR, _ = h.taskPullRequestRepo.GetByTaskID(ctx, taskID)
 		}
-		return render(c, http.StatusOK, pages.TaskChangesWorktreeContent(
-			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.BranchAlreadyMerged, state.RebaseAvailable,
+		return render(c, http.StatusOK, pages.TaskChangesWorktreeContentWithView(
+			state.DiffOutput, task, state.FileStats, reviewComments, taskPR, state.BranchAlreadyMerged, state.RebaseAvailable, diffView,
 		))
 	}
 
-	return render(c, http.StatusOK, pages.TaskChangesContent(state.DiffOutput, task.ID, reviewComments))
+	return render(c, http.StatusOK, pages.TaskChangesContentWithView(state.DiffOutput, task.ID, reviewComments, diffView))
 }
 
 // GetTaskChangesFile returns a single diff file card for per-file lazy loading.
@@ -1082,7 +1084,8 @@ func (h *Handler) GetTaskChangesLive(c echo.Context) error {
 		if _, err := io.WriteString(w, `<div id="diff-viewer-container">`); err != nil {
 			return err
 		}
-		if err := components.DiffViewerWithReview(diffOutput, task.ID, reviewComments).Render(ctx, w); err != nil {
+		diffView := h.uiDiffViewPreference(c.Request().Context())
+		if err := components.DiffViewerWithReviewView(diffOutput, task.ID, reviewComments, diffView).Render(ctx, w); err != nil {
 			return err
 		}
 		_, err := io.WriteString(w, `</div>`)

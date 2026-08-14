@@ -59,6 +59,30 @@ const (
 	autoLoadFileDiffChars     = 20 * 1024
 )
 
+func normalizeDiffViewMode(view string) string {
+	if strings.TrimSpace(view) == "split" {
+		return "split"
+	}
+	return "inline"
+}
+
+func diffViewButtonClass(mode string, activeView string) string {
+	classes := "btn btn-sm join-item"
+	if normalizeDiffViewMode(activeView) == mode {
+		classes += " btn-active"
+	}
+	return classes
+}
+
+func diffViewContentClass(mode string, activeView string) string {
+	classes := "space-y-4"
+	if normalizeDiffViewMode(activeView) != mode {
+		classes += " hidden"
+	}
+	return classes
+}
+
+
 // DiffFileRenderMeta controls how a file should render under diff limits.
 type DiffFileRenderMeta struct {
 	Index           int
@@ -399,6 +423,10 @@ func langClass(path string) string {
 }
 
 templ DiffViewer(diffOutput string) {
+	@DiffViewerWithView(diffOutput, "inline")
+}
+
+templ DiffViewerWithView(diffOutput string, initialView string) {
 	if diffOutput == "" {
 		<div class="flex flex-col items-center justify-center py-16 text-base-content/50">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -408,12 +436,16 @@ templ DiffViewer(diffOutput string) {
 			<p class="text-sm mt-1">No files were modified during this execution.</p>
 		</div>
 	} else {
-		@diffViewerContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)))
+		@diffViewerContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), initialView)
 	}
 }
 
 // DiffViewerWithReview renders the diff viewer with inline code review support.
 templ DiffViewerWithReview(diffOutput string, taskID string, reviewComments []models.ReviewComment) {
+	@DiffViewerWithReviewView(diffOutput, taskID, reviewComments, "inline")
+}
+
+templ DiffViewerWithReviewView(diffOutput string, taskID string, reviewComments []models.ReviewComment, initialView string) {
 	if diffOutput == "" {
 		<div class="flex flex-col items-center justify-center py-16 text-base-content/50">
 			<svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mb-4 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -423,7 +455,7 @@ templ DiffViewerWithReview(diffOutput string, taskID string, reviewComments []mo
 			<p class="text-sm mt-1">No files were modified during this execution.</p>
 		</div>
 	} else {
-		@diffViewerWithReviewContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), taskID, reviewComments)
+		@diffViewerWithReviewContent(buildDiffRenderMetas(ParseDiffOutput(diffOutput)), taskID, reviewComments, initialView)
 	}
 }
 
@@ -495,8 +527,8 @@ func lineNumForReview(line DiffLine) int {
 	return line.NewNum
 }
 
-templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment) {
-	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID } data-state-key={ diffViewerStateKey(metas, taskID) }>
+templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment, initialView string) {
+	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-task-id={ taskID } data-state-key={ diffViewerStateKey(metas, taskID) } data-initial-view={ normalizeDiffViewMode(initialView) }>
 		<!-- Toolbar -->
 		<div class="flex flex-wrap items-center gap-2 mb-4">
 			<div class="flex items-center gap-2 flex-1">
@@ -522,14 +554,14 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				@ReviewToolbar(taskID, len(reviewComments))
 				<div class="join">
 					<button
-						class="btn btn-sm join-item btn-active"
+						class={ diffViewButtonClass("inline", initialView) }
 						id="diff-btn-inline"
 						onclick="switchDiffView('inline')"
 					>
 						Inline
 					</button>
 					<button
-						class="btn btn-sm join-item"
+						class={ diffViewButtonClass("split", initialView) }
 						id="diff-btn-split"
 						onclick="switchDiffView('split')"
 					>
@@ -556,7 +588,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 			</div>
 		}
 		<!-- Diff Content with Review -->
-		<div id="diff-content-inline" class="space-y-4">
+		<div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }>
 			for _, m := range metas {
 				if m.AutoLoad {
 					@inlineDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
@@ -565,7 +597,7 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				}
 			}
 		</div>
-		<div id="diff-content-split" class="space-y-4 hidden">
+		<div id="diff-content-split" class={ diffViewContentClass("split", initialView) }>
 			for _, m := range metas {
 				if m.AutoLoad {
 					@splitDiffFileWithReview(m.File, m.Index, shouldDefaultExpand(len(metas)), taskID, buildCommentMap(reviewComments))
@@ -784,11 +816,23 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				fallbackCopy();
 			}
 
-			function switchDiffView(mode) {
+			function persistDiffViewPreference(mode) {
+				try {
+					fetch('/ui/preferences', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ diff_view: mode }),
+						keepalive: true
+					}).catch(function() {});
+				} catch (_) {}
+			}
+
+			function switchDiffView(mode, persist) {
 				var inlineEl = document.getElementById('diff-content-inline');
 				var splitEl = document.getElementById('diff-content-split');
 				var btnInline = document.getElementById('diff-btn-inline');
 				var btnSplit = document.getElementById('diff-btn-split');
+				if (!inlineEl || !splitEl || !btnInline || !btnSplit) return;
 
 				if (mode === 'split') {
 					inlineEl.classList.add('hidden');
@@ -800,6 +844,9 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 					inlineEl.classList.remove('hidden');
 					btnInline.classList.add('btn-active');
 					btnSplit.classList.remove('btn-active');
+				}
+				if (persist !== false) {
+					persistDiffViewPreference(mode === 'split' ? 'split' : 'inline');
 				}
 			}
 
@@ -1665,8 +1712,8 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 	</div>
 }
 
-templ diffViewerContent(metas []DiffFileRenderMeta) {
-	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-state-key={ diffViewerStateKey(metas, "") }>
+templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
+	<div id="diff-viewer" class="flex flex-col h-full" data-file-count={ fmt.Sprintf("%d", len(metas)) } data-state-key={ diffViewerStateKey(metas, "") } data-initial-view={ normalizeDiffViewMode(initialView) }>
 		<!-- Toolbar -->
 		<div class="flex flex-wrap items-center gap-2 mb-4">
 			<div class="flex items-center gap-2 flex-1">
@@ -1690,14 +1737,14 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 			</div>
 			<div class="join ml-auto">
 				<button
-					class="btn btn-sm join-item btn-active"
+					class={ diffViewButtonClass("inline", initialView) }
 					id="diff-btn-inline"
 					onclick="switchDiffView('inline')"
 				>
 					Inline
 				</button>
 				<button
-					class="btn btn-sm join-item"
+					class={ diffViewButtonClass("split", initialView) }
 					id="diff-btn-split"
 					onclick="switchDiffView('split')"
 				>
@@ -1723,7 +1770,7 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 			</div>
 		}
 		<!-- Diff Content -->
-		<div id="diff-content-inline" class="space-y-4">
+		<div id="diff-content-inline" class={ diffViewContentClass("inline", initialView) }>
 			for _, m := range metas {
 				if m.AutoLoad {
 					@inlineDiffFile(m.File, m.Index, shouldDefaultExpand(len(metas)))
@@ -1732,7 +1779,7 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 				}
 			}
 		</div>
-		<div id="diff-content-split" class="space-y-4 hidden">
+		<div id="diff-content-split" class={ diffViewContentClass("split", initialView) }>
 			for _, m := range metas {
 				if m.AutoLoad {
 					@splitDiffFile(m.File, m.Index, shouldDefaultExpand(len(metas)))
@@ -2010,11 +2057,23 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 				fallbackCopy();
 			}
 
-			function switchDiffView(mode) {
+			function persistDiffViewPreference(mode) {
+				try {
+					fetch('/ui/preferences', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ diff_view: mode }),
+						keepalive: true
+					}).catch(function() {});
+				} catch (_) {}
+			}
+
+			function switchDiffView(mode, persist) {
 				var inlineEl = document.getElementById('diff-content-inline');
 				var splitEl = document.getElementById('diff-content-split');
 				var btnInline = document.getElementById('diff-btn-inline');
 				var btnSplit = document.getElementById('diff-btn-split');
+				if (!inlineEl || !splitEl || !btnInline || !btnSplit) return;
 
 				if (mode === 'split') {
 					inlineEl.classList.add('hidden');
@@ -2026,6 +2085,9 @@ templ diffViewerContent(metas []DiffFileRenderMeta) {
 					inlineEl.classList.remove('hidden');
 					btnInline.classList.add('btn-active');
 					btnSplit.classList.remove('btn-active');
+				}
+				if (persist !== false) {
+					persistDiffViewPreference(mode === 'split' ? 'split' : 'inline');
 				}
 			}
 

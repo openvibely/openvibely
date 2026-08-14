@@ -4011,7 +4011,7 @@ func TestLayout_UIPreferencesDoNotReadSettingsForHTMXFragments(t *testing.T) {
 
 func TestSaveUIPreferences_PersistsPreferencesToSettings(t *testing.T) {
 	h, e, _, _ := setupTestHandlerWithDB(t)
-	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"theme":"openvibely-dark","sidebar_collapsed":true}`))
+	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"theme":"openvibely-dark","sidebar_collapsed":true,"diff_view":"split"}`))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -4025,6 +4025,54 @@ func TestSaveUIPreferences_PersistsPreferencesToSettings(t *testing.T) {
 	sidebar, err := h.settingsRepo.Get(context.Background(), uiPreferenceSidebarCollapsedKey)
 	require.NoError(t, err)
 	require.Equal(t, "true", sidebar)
+	diffView, err := h.settingsRepo.Get(context.Background(), uiPreferenceDiffViewKey)
+	require.NoError(t, err)
+	require.Equal(t, "split", diffView)
+}
+
+func TestSaveUIPreferences_RejectsInvalidDiffView(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"diff_view":"side-by-side"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid diff view, got %d", rec.Code)
+	}
+}
+
+func TestTaskChangesUsesPersistedSplitDiffViewPreference(t *testing.T) {
+	h, e, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Diff Pref Project")
+	agent := createAgent(t, llmConfigRepo)
+	task := createTask(t, h, project.ID, "Diff Pref Task")
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecCompleted
+	})
+	require.NoError(t, h.execRepo.UpdateDiffOutput(context.Background(), exec.ID, "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), uiPreferenceDiffViewKey, "split"))
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, body)
+	}
+	for _, snippet := range []string{
+		`data-initial-view="split"`,
+		`id="diff-btn-split"`,
+		`class="btn btn-sm join-item btn-active"`,
+		`id="diff-content-split" class="space-y-4"`,
+		`id="diff-content-inline" class="space-y-4 hidden"`,
+		`JSON.stringify({ diff_view: mode })`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("changes diff view preference render missing snippet: %s", snippet)
+		}
+	}
 }
 
 func TestSaveUIPreferences_RejectsInvalidThemeID(t *testing.T) {

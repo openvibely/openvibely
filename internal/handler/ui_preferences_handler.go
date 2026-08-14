@@ -14,6 +14,7 @@ import (
 const (
 	uiPreferenceThemeKey            = "ui.theme"
 	uiPreferenceSidebarCollapsedKey = "ui.sidebar_collapsed"
+	uiPreferenceDiffViewKey         = "ui.diff_view"
 )
 
 func (h *Handler) uiPreferences(ctx context.Context) layout.UIPreferences {
@@ -49,9 +50,36 @@ func isSafeUIPreferenceValue(value string) bool {
 	return true
 }
 
+func normalizeUIDiffView(value string) (string, bool) {
+	switch strings.TrimSpace(value) {
+	case "split":
+		return "split", true
+	case "inline", "unified", "":
+		return "inline", true
+	default:
+		return "", false
+	}
+}
+
+func (h *Handler) uiDiffViewPreference(ctx context.Context) string {
+	if h == nil || h.settingsRepo == nil {
+		return "inline"
+	}
+	value, err := h.settingsRepo.Get(ctx, uiPreferenceDiffViewKey)
+	if err != nil {
+		applog.Debugf("[handler] failed to load UI diff view preference: %v", err)
+		return "inline"
+	}
+	if view, ok := normalizeUIDiffView(value); ok {
+		return view
+	}
+	return "inline"
+}
+
 type uiPreferencesRequest struct {
 	Theme            string `json:"theme"`
 	SidebarCollapsed *bool  `json:"sidebar_collapsed"`
+	DiffView         string `json:"diff_view"`
 }
 
 func (h *Handler) SaveUIPreferences(c echo.Context) error {
@@ -77,6 +105,15 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 			value = "true"
 		}
 		if err := h.settingsRepo.Set(ctx, uiPreferenceSidebarCollapsedKey, value); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(req.DiffView) != "" {
+		value, ok := normalizeUIDiffView(req.DiffView)
+		if !ok {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid diff view")
+		}
+		if err := h.settingsRepo.Set(ctx, uiPreferenceDiffViewKey, value); err != nil {
 			return err
 		}
 	}
