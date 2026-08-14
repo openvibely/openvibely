@@ -259,6 +259,12 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	if !strings.Contains(body, `name="candidate_json"`) {
 		t.Error("Details view must preserve the prior card-form candidate submission")
 	}
+	if !strings.Contains(body, `data-automation-builder-save`) {
+		t.Error("Edit header must retain the primary save button")
+	}
+	if strings.Contains(body, `data-automation-details-save`) || strings.Contains(body, `>Save changes</button>`) {
+		t.Error("Details view must not render a duplicate bottom save button")
+	}
 	if !strings.Contains(body, `>A YAML-authored Automation description.</p>`) {
 		t.Error("Edit header must retain its description")
 	}
@@ -994,6 +1000,18 @@ window.addEventListener('DOMContentLoaded', function() {
     name.dispatchEvent(new Event('input', {bubbles: true}));
     detailsButton.click();
     if (detailsPanel.hidden || window.getComputedStyle(detailsPanel).display === 'none') return fail('Details panel was not selected before header save');
+    function assertSingleHeaderSave(theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+      var headerSaves = document.querySelectorAll('[data-automation-builder-save]');
+      if (headerSaves.length !== 1) return fail(theme + ' theme rendered header save count=' + headerSaves.length);
+      if (detailsPanel.querySelector('[data-automation-details-save]')) return fail(theme + ' theme rendered duplicate Details save marker');
+      var duplicateText = Array.prototype.filter.call(detailsPanel.querySelectorAll('button'), function(button) {
+        return button.textContent.trim().toLowerCase() === 'save changes';
+      });
+      if (duplicateText.length) return fail(theme + ' theme rendered duplicate Details Save changes button');
+    }
+    assertSingleHeaderSave('dark');
+    assertSingleHeaderSave('light');
     save.click();
   } catch (error) {
     fail(String(error && error.stack || error));
