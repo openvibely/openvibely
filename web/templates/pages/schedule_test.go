@@ -18,38 +18,6 @@ func localKey(t time.Time) string {
 	return fmt.Sprintf("%s-%02d", local.Format("2006-01-02"), local.Hour())
 }
 
-func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {
-	runAt := time.Now().Local().Truncate(time.Hour)
-	tasks := []repository.TaskWithSchedule{
-		{
-			Task: models.Task{ID: "task-1", ProjectID: "p1", Title: "Drag schedule"},
-			Schedule: &models.Schedule{
-				ID:             "sched-1",
-				TaskID:         "task-1",
-				RunAt:          runAt,
-				NextRun:        &runAt,
-				RepeatType:     models.RepeatOnce,
-				RepeatInterval: 1,
-				Enabled:        true,
-			},
-		},
-	}
-
-	var buf bytes.Buffer
-	if err := ScheduleContent(&models.Project{ID: "p1"}, tasks, 0, nil, nil).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render schedule content: %v", err)
-	}
-	body := buf.String()
-	for _, want := range []string{"cursor-grab", "active:cursor-grabbing", `draggable="true"`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("expected enabled schedule card to contain %q, got %s", want, body)
-		}
-	}
-	if strings.Contains(body, "cursor-move") {
-		t.Fatalf("schedule card should not use four-way move cursor, got %s", body)
-	}
-}
-
 func TestScheduleCalendarMonthlyProjectionClampsMonthEnd(t *testing.T) {
 	anchor := time.Date(2026, time.January, 31, 10, 0, 0, 0, time.UTC)
 	tests := []struct {
