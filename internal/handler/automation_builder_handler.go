@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -691,7 +692,8 @@ func (h *Handler) RunAutomationNow(c echo.Context) error {
 	if startedInvocationID := firstStartedAutomationInvocationID(invocations); isHTMX(c) && h.automationGraphSvc != nil && startedInvocationID != "" {
 		definition, _, defErr := h.automationGraphSvc.GetDefinition(c.Request().Context(), projectID, c.Param("automationId"))
 		if defErr == nil && definition != nil && strings.TrimSpace(definition.Automation.Name) != "" {
-			setHTMXToastWithOptions(c, strings.TrimSpace(definition.Automation.Name)+" is now running.", "info", "", "", "", "automation:"+startedInvocationID)
+			clickURL := "/automations/" + c.Param("automationId") + "?project_id=" + url.QueryEscape(projectID)
+			setHTMXToastWithOptions(c, strings.TrimSpace(definition.Automation.Name)+" is now running.", "info", "", "", "", "automation:"+startedInvocationID, clickURL)
 		}
 	}
 	if c.FormValue("return_to") == "portfolio" {

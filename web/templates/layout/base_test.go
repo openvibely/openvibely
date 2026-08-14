@@ -489,9 +489,12 @@ func TestToastDismissalCleanup(t *testing.T) {
 		t.Error("toast system must include duplicate suppression map and helper")
 	}
 
-	// Verify HTMX toast bridge passes optional action-link fields
+	// Verify HTMX toast bridge passes optional action-link and click-target fields
 	if !strings.Contains(html, "detail.linkURL || detail.link_url || ''") || !strings.Contains(html, "detail.linkText || detail.link_text || ''") {
 		t.Error("openvibelyToast bridge must map link_url/link_text fields for clickable toast actions")
+	}
+	if !strings.Contains(html, "detail.clickURL || detail.click_url || ''") || !strings.Contains(html, "var navigateURL = clickURL || (taskId ? '/tasks/' + taskId : '')") {
+		t.Error("openvibelyToast bridge must map click_url and use it for toast body navigation")
 	}
 
 	// Verify Wails runtime is loaded so desktop pages can call window.wails.OpenURL.

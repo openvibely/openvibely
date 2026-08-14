@@ -3181,6 +3181,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (!container) return;
 					options = options || {};
 					var toastKey = String(options.toastKey || '').trim();
+					var clickURL = String(options.clickURL || options.clickUrl || '').trim();
 
 					// Deduplicate: skip if a toast for this task or explicit toast key is already visible
 					if (taskId && findVisibleTaskToast(taskId)) {
@@ -3264,12 +3265,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						}
 					}
 
-					// Click to navigate to task detail page (if taskId provided)
-					if (taskId) {
+					// Click to navigate when a target is provided. Task toasts keep their task-detail default.
+					var navigateURL = clickURL || (taskId ? '/tasks/' + taskId : '');
+					if (navigateURL) {
+						toast.classList.add('cursor-pointer');
 						toast.addEventListener('click', function() {
 							closeOpenModalsForToastNavigation();
-							window.openVibelyNavigate('/tasks/' + taskId).catch(function(err) {
-								console.error('[toast] Failed to load task detail:', err);
+							window.openVibelyNavigate(navigateURL).catch(function(err) {
+								console.error('[toast] Failed to load toast target:', err);
 							});
 							dismissToast(toast);
 						});
@@ -3310,7 +3313,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						var linkURL = detail.linkURL || detail.link_url || '';
 						var linkText = detail.linkText || detail.link_text || '';
 						var toastKey = detail.toastKey || detail.toast_key || '';
-						window.showToast(message, status, taskId, { linkURL: linkURL, linkText: linkText, toastKey: toastKey });
+						var clickURL = detail.clickURL || detail.click_url || '';
+						window.showToast(message, status, taskId, { linkURL: linkURL, linkText: linkText, toastKey: toastKey, clickURL: clickURL });
 					});
 				}
 
