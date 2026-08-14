@@ -117,7 +117,7 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 	if resp.StatusCode != http.StatusAccepted {
 		t.Fatalf("accept update HTTP %d\n%s", resp.StatusCode, readLogs())
 	}
-	if err := cmd.Wait(); err != nil {
+	if err := waitForCommandExit(cmd, time.Minute); err != nil {
 		t.Fatalf("current app exit after handoff: %v\n%s", err, readLogs())
 	}
 	if wantState == StateSucceeded {
@@ -305,6 +305,19 @@ func openCommandLogs(t *testing.T, dir, name string) (*os.File, *os.File, func()
 		return fmt.Sprintf("stdout:\n%s\nstderr:\n%s", stdoutData, stderrData)
 	}
 	return stdout, stderr, read
+}
+
+func waitForCommandExit(cmd *exec.Cmd, timeout time.Duration) error {
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		return fmt.Errorf("timed out after %s waiting for process %d to exit", timeout, cmd.Process.Pid)
+	}
 }
 
 func buildGoCommand(t *testing.T, pkg, output string, values map[string]string) {
