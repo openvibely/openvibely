@@ -780,12 +780,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						width: 46px;
 						height: 24px;
 						border-radius: 9999px;
-						background: #3a4455;
+						background: #E8E8E8;
 						cursor: pointer;
 						padding: 0 4px;
 						transition: background 0.2s;
 						user-select: none;
 						flex-shrink: 0;
+					}
+					[data-theme="dark"] .theme-toggle-pill {
+						background: #3a4455;
 					}
 					.theme-toggle-icon {
 						display: flex;
@@ -868,10 +871,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					--er: 0.68 0.15 26;
 
 					/* Light 2026 semantic aliases — indigo/purple accent palette. */
-					--ov-l-canvas: #F5F5F5;
-					--ov-l-panel: #FAFAFA;
-					--ov-l-bg: var(--ov-l-panel);
-					--ov-l-surface: var(--ov-l-canvas);
+					--ov-l-bg: #FAFAFA;
+					--ov-l-surface: #F5F5F5;
 					--ov-l-surface-hover: #F2F2F2;
 					--ov-l-surface-active: #E8E8E8;
 					--ov-l-border: #E5E5E5;
@@ -915,13 +916,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						background-color: var(--ov-diff-del-bg) !important;
 					}
 				/* --- App shell surfaces --- */
-				[data-theme="light"],
 				[data-theme="light"] body,
 				[data-theme="light"] .drawer-content {
-					background-color: var(--ov-l-canvas);
+					background-color: var(--ov-l-surface);
 				}
 				[data-theme="light"] #main-content {
-					background-color: var(--ov-l-canvas);
+					background-color: var(--ov-l-surface);
 				}
 				[data-theme="light"] .navbar.bg-base-100 {
 					background-color: var(--ov-l-surface);
