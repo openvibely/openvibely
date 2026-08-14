@@ -314,6 +314,30 @@ func activeStatusDropZone(t *testing.T, body, status string) string {
 	return body[start : start+len(marker)+next]
 }
 
+func TestTaskCard_UsesGrabCursorForDrag(t *testing.T) {
+	task := models.Task{
+		ID:        "task-1",
+		ProjectID: "default",
+		Title:     "Drag me",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}
+
+	var buf bytes.Buffer
+	if err := TaskCard(task, "default", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task card: %v", err)
+	}
+	body := buf.String()
+	for _, want := range []string{"cursor-grab", "active:cursor-grabbing", `draggable="true"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected draggable task card to contain %q, got %s", want, body)
+		}
+	}
+	if strings.Contains(body, "cursor-move") {
+		t.Fatalf("task card should not use four-way move cursor, got %s", body)
+	}
+}
+
 func TestTaskCard_HasMobileSafeActionsAndReadableText(t *testing.T) {
 	task := models.Task{
 		ID:        "task-1",
