@@ -33,7 +33,7 @@ const (
 	defaultCompletedSort              = "completed_desc"
 	taskThreadWindowLimitDefault      = 5
 	taskThreadWindowLimitMax          = 100
-	taskExecutionHistoryWindowDefault = 18
+	taskExecutionHistoryWindowDefault = 15
 	taskExecutionHistoryWindowMax     = 100
 )
 
