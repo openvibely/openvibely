@@ -1427,9 +1427,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 
 							// Let the browser settle the new DOM, then restore UI state.
 							requestAnimationFrame(function() {
-								// Restore diff view mode (inline/split).
-								if (viewMode === 'split' && typeof switchDiffView === 'function') {
-									switchDiffView('split', false);
+								// Restore diff view mode (inline/split) without saving during refresh restore.
+								if ((viewMode === 'inline' || viewMode === 'split') && typeof switchDiffView === 'function') {
+									switchDiffView(viewMode, false);
 								}
 								// Restore scroll position so the user stays where they were.
 								window.scrollTo(scrollX, scrollY);

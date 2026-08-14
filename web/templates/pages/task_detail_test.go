@@ -502,8 +502,9 @@ func TestTaskDetailContent_DiffUpdateUsesPreSwapFingerprint(t *testing.T) {
 		strings.Contains(output, "// Restore diff view mode (inline/split).							if (viewMode") {
 		t.Fatal("expected diff view restoration if-statement to stay off the line comment")
 	}
-	if !strings.Contains(output, "// Restore diff view mode (inline/split).\n") ||
-		!strings.Contains(output, "if (viewMode === 'split' && typeof switchDiffView === 'function') {") {
+	if !strings.Contains(output, "// Restore diff view mode (inline/split) without saving during refresh restore.\n") ||
+		!strings.Contains(output, "if ((viewMode === 'inline' || viewMode === 'split') && typeof switchDiffView === 'function') {") ||
+		!strings.Contains(output, "switchDiffView(viewMode, false)") {
 		t.Fatal("expected syntactically valid diff view restoration block")
 	}
 }

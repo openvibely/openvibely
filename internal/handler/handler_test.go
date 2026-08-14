@@ -4075,6 +4075,33 @@ func TestTaskChangesUsesPersistedSplitDiffViewPreference(t *testing.T) {
 	}
 }
 
+func TestTaskDetailChangesRefreshRestoresInlineOrSplitWithoutSaving(t *testing.T) {
+	h, e, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Diff Refresh Project")
+	task := createTask(t, h, project.ID, "Diff Refresh Task")
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"?tab=changes", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	body := rec.Body.String()
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, body)
+	}
+	for _, snippet := range []string{
+		`var viewMode = _getDiffViewMode()`,
+		`if ((viewMode === 'inline' || viewMode === 'split') && typeof switchDiffView === 'function')`,
+		`switchDiffView(viewMode, false)`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("changes refresh restore missing snippet: %s", snippet)
+		}
+	}
+	if strings.Contains(body, `viewMode === 'split' && typeof switchDiffView === 'function'`) {
+		t.Fatal("changes refresh must restore inline as well as split")
+	}
+}
+
 func TestSaveUIPreferences_RejectsInvalidThemeID(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"theme":"bad theme"}`))
