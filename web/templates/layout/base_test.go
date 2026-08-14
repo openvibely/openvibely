@@ -873,36 +873,32 @@ func TestBase_DraggableCardsUseClosedHandCursorWhileActive(t *testing.T) {
 	for _, want := range []string{
 		".drag-cursor-surface {",
 		"cursor: grab;",
-		"-webkit-user-drag: none;",
 		".drag-cursor-surface:active",
 		".drag-cursor-surface.drag-cursor-pressed",
+		"html.drag-cursor-pressed *",
 		"html.drag-cursor-active *",
+		"body.drag-cursor-pressed *",
 		"body.drag-cursor-active *",
 		"cursor: grabbing !important;",
-		"function setDragCursorActive(active)",
-		"function handleTaskPointerDown(event)",
-		"function beginTaskCardDrag(card)",
-		"function finishTaskPointerDrag(event, cancelled)",
-		"window.handleTaskPointerDown = handleTaskPointerDown",
-		"handleCategoryDrop(syntheticDropEvent(event, dropZone))",
-		"handleActiveDrop(syntheticDropEvent(event, dropZone))",
+		"function handleDragCursorPressStart(event)",
+		"function handleDragCursorPressCancel(event)",
+		"Native HTML drag can fire pointercancel as the browser takes over the drag.",
+		"document.documentElement.classList.contains('drag-cursor-pressed') || document.documentElement.classList.contains('drag-cursor-active') || document.body.classList.contains('drag-cursor-active')",
+		"function clearDragCursorPress()",
+		"window.addEventListener('pointerup', clearDragCursorPress, true)",
+		"window.addEventListener('pointercancel', handleDragCursorPressCancel, true)",
+		"document.documentElement.style.cursor = ''",
+		"document.body.style.cursor = ''",
+		"surface.style.cursor = 'grabbing'",
+		"document.documentElement.classList.add('drag-cursor-pressed')",
+		"document.documentElement.style.cursor = 'grabbing'",
+		"document.body.classList.add('drag-cursor-pressed')",
+		"document.body.style.cursor = 'grabbing'",
+		"document.body.classList.add('drag-cursor-active')",
+		"document.body.classList.remove('drag-cursor-active')",
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("expected draggable card cursor contract %q", want)
-		}
-	}
-
-	for _, forbidden := range []string{
-		"cursor: none !important;",
-		"drag-cursor-indicator",
-		"drag-cursor-drag-image",
-		"closedHandCursorSVG",
-		"setDragImage",
-		"beginNativeDragCursor",
-		"clearNativeDragCursor",
-	} {
-		if strings.Contains(html, forbidden) {
-			t.Fatalf("draggable card cursor must use default browser cursor behavior, found %q", forbidden)
 		}
 	}
 }

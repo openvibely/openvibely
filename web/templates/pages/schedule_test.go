@@ -44,20 +44,23 @@ func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {
 		"cursor-grab",
 		"active:cursor-grabbing",
 		"drag-cursor-surface",
-		`onpointerdown="handleSchedulePointerDown(event)"`,
-		"function handleSchedulePointerDown(event)",
-		"beginScheduleCardDrag(_schedulePointerDrag.card)",
-		"handleScheduleDrop({",
-		"clearScheduleDragFeedbackAndState()",
+		`draggable="true"`,
+		`onpointerdown="handleDragCursorPressStart(event)"`,
+		`onpointerup="handleDragCursorPressEnd(event)"`,
+		`onpointercancel="handleDragCursorPressCancel(event)"`,
+		`onmousedown="handleDragCursorPressStart(event)"`,
+		`onmouseup="handleDragCursorPressEnd(event)"`,
+		"document.body.classList.add('drag-cursor-active')",
+		"dragCard.classList.add('dragging')",
+		"document.body.classList.remove('drag-cursor-active')",
+		"el.classList.remove('dragging')",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected enabled schedule card to contain %q, got %s", want, body)
 		}
 	}
-	for _, forbidden := range []string{"cursor-move", `draggable="true"`, `ondragstart="handleScheduleDragStart(event)"`, "beginNativeDragCursor", "clearNativeDragCursor"} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("schedule card should use pointer-driven grab cursor behavior, found %q in %s", forbidden, body)
-		}
+	if strings.Contains(body, "cursor-move") {
+		t.Fatalf("schedule card should not use four-way move cursor, got %s", body)
 	}
 }
 

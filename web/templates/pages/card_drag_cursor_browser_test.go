@@ -17,7 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
-func TestTaskAndScheduleCardsKeepClosedHandCursorDuringBrowserDrag(t *testing.T) {
+func TestTaskAndScheduleCardsUseNativeDragWithGrabCursor(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
 	if err != nil {
@@ -72,10 +72,6 @@ window.addEventListener('DOMContentLoaded', function() {
       poll();
     });
   }
-  function dispatch(target, event) {
-    target.dispatchEvent(event);
-    return event;
-  }
   function targetDropZoneFor(card, label) {
     if (label === 'task card') return document.querySelector('.category-drop-zone[data-category="completed"]');
     var source = card.closest('.drop-zone');
@@ -88,43 +84,36 @@ window.addEventListener('DOMContentLoaded', function() {
     }
     return Array.from(document.querySelectorAll('.drop-zone')).find(function(zone) { return zone !== source; });
   }
-  async function exerciseCard(selector, handlerName, label) {
-    await waitFor(function() { return document.querySelector(selector) && typeof window[handlerName] === 'function'; }, label + ' ready');
+  async function exerciseNativeCard(selector, label) {
+    await waitFor(function() { return document.querySelector(selector); }, label + ' ready');
     var card = document.querySelector(selector);
-    if (card.hasAttribute('draggable')) fail(label + ': card must not use native HTML draggable');
-    if (document.getElementById('drag-cursor-indicator')) fail(label + ': custom cursor indicator should not exist before drag');
-    var rect = card.getBoundingClientRect();
-    var startX = Math.round(rect.left + Math.max(4, Math.min(20, rect.width / 2)));
-    var startY = Math.round(rect.top + Math.max(4, Math.min(20, rect.height / 2)));
+    if (!card.hasAttribute('draggable')) fail(label + ': card must preserve native HTML draggable behavior');
+    if (document.querySelector('.drag-card-preview')) fail(label + ': must not create a custom pointer-drag preview');
+    if (document.getElementById('drag-cursor-indicator')) fail(label + ': must not create a custom cursor indicator');
+    if (getComputedStyle(card).cursor !== 'grab') fail(label + ': idle cursor should be grab, got ' + getComputedStyle(card).cursor);
     var targetZone = targetDropZoneFor(card, label);
     if (!targetZone) fail(label + ': could not find target drop zone');
-    var targetRect = targetZone.getBoundingClientRect();
-    var movedX = Math.round(targetRect.left + targetRect.width / 2);
-    var movedY = Math.round(targetRect.top + targetRect.height / 2);
-
-    dispatch(card, new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:77, pointerType:'mouse', button:0, buttons:1, clientX:startX, clientY:startY}));
-    if (getComputedStyle(card).cursor !== 'grabbing') fail(label + ': pointerdown should use default grabbing cursor, got ' + getComputedStyle(card).cursor);
-    dispatch(window, new PointerEvent('pointermove', {bubbles:true, cancelable:true, pointerId:77, pointerType:'mouse', button:0, buttons:1, clientX:movedX, clientY:movedY}));
-    await waitFor(function() { return document.documentElement.classList.contains('drag-cursor-active') && card.classList.contains('dragging'); }, label + ' active pointer drag');
-    var cursor = getComputedStyle(card).cursor;
-    if (cursor !== 'grabbing') fail(label + ': pointer movement should keep default grabbing cursor, got ' + cursor);
-    if (document.getElementById('drag-cursor-indicator')) fail(label + ': default cursor behavior must not create a custom cursor indicator');
-    if (document.documentElement.classList.contains('drag-cursor-active') && getComputedStyle(document.body).cursor !== 'grabbing') fail(label + ': active drag should set body cursor to grabbing, got ' + getComputedStyle(document.body).cursor);
-
-    dispatch(window, new PointerEvent('pointerup', {bubbles:true, cancelable:true, pointerId:77, pointerType:'mouse', button:0, buttons:0, clientX:movedX, clientY:movedY}));
-    await waitFor(function() { return !document.documentElement.classList.contains('drag-cursor-active') && !card.classList.contains('dragging'); }, label + ' cleanup');
-    if (getComputedStyle(card).cursor !== 'grab') fail(label + ': pointerup should restore default grab cursor, got ' + getComputedStyle(card).cursor);
+    var dataTransfer = new DataTransfer();
+    var started = card.dispatchEvent(new DragEvent('dragstart', {bubbles:true, cancelable:true, dataTransfer:dataTransfer}));
+    if (!started) fail(label + ': dragstart should not be cancelled');
+    if (!card.classList.contains('dragging')) fail(label + ': dragstart should mark source card as dragging');
+    if (getComputedStyle(card).cursor !== 'grabbing') fail(label + ': dragstart should use grabbing cursor, got ' + getComputedStyle(card).cursor);
+    targetZone.dispatchEvent(new DragEvent('dragover', {bubbles:true, cancelable:true, dataTransfer:dataTransfer}));
+    targetZone.dispatchEvent(new DragEvent('drop', {bubbles:true, cancelable:true, dataTransfer:dataTransfer}));
+    card.dispatchEvent(new DragEvent('dragend', {bubbles:true, cancelable:true, dataTransfer:dataTransfer}));
+    await waitFor(function() { return !card.classList.contains('dragging'); }, label + ' cleanup');
+    if (document.querySelector('.drag-card-preview') || document.getElementById('drag-cursor-indicator')) fail(label + ': custom drag UI should not remain after dragend');
     await new Promise(function(resolve) { setTimeout(resolve, 100); });
   }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
     if (location.pathname === '/tasks') {
-      await exerciseCard('#task-task-drag-cursor', 'handleTaskPointerDown', 'task card');
+      await exerciseNativeCard('#task-task-drag-cursor', 'task card');
       location.href = '/schedule?project_id=project-card-drag-cursor';
       return;
     }
     if (location.pathname === '/schedule') {
-      await exerciseCard('[data-schedule-id="schedule-drag-cursor"]', 'handleSchedulePointerDown', 'schedule card');
+      await exerciseNativeCard('[data-schedule-id="schedule-drag-cursor"]', 'schedule card');
       await report('pass', '');
       return;
     }
