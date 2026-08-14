@@ -162,15 +162,18 @@ func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.
 	var gotHeader string
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/responses/compact" {
-			t.Fatalf("path = %q, want /responses/compact", r.URL.Path)
+		if r.URL.Path != "/responses" {
+			t.Fatalf("path = %q, want /responses", r.URL.Path)
 		}
 		gotHeader = r.Header.Get("x-openai-internal-codex-responses-lite")
 		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Fatalf("decode compact body: %v", err)
+			t.Fatalf("decode compaction body: %v", err)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"output":[{"type":"compaction","encrypted_content":"summary"}]}`))
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"summary\"}}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_compact\",\"status\":\"completed\",\"model\":\"gpt-5.6-luna\",\"usage\":{\"input_tokens\":9,\"output_tokens\":2}}}\n\n",
+		))
 	}))
 	defer srv.Close()
 
@@ -180,7 +183,7 @@ func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.
 
 	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
 	items := []any{map[string]any{"type": "message", "role": "user", "content": "hello"}}
-	_, _, err := client.compactAgenticInputItems(context.Background(), items, DefaultTools(), &AgenticOptions{
+	compactedItems, summary, err := client.compactAgenticInputItems(context.Background(), items, DefaultTools(), &AgenticOptions{
 		Model:           "gpt-5.6-luna",
 		ReasoningEffort: "max",
 	}, true)
@@ -194,8 +197,29 @@ func TestCompactAgenticInputItems_OAuthLunaUsesResponsesLiteContract(t *testing.
 	if reasoning["context"] != "all_turns" || reasoning["effort"] != "max" {
 		t.Fatalf("reasoning = %#v", reasoning)
 	}
+	if got, ok := gotBody["store"].(bool); !ok || got {
+		t.Fatalf("store = %#v, want false", gotBody["store"])
+	}
+	if _, ok := gotBody["max_output_tokens"]; ok {
+		t.Fatalf("max_output_tokens should be omitted for OAuth requests")
+	}
 	if parallel, ok := gotBody["parallel_tool_calls"].(bool); !ok || parallel {
 		t.Fatalf("parallel_tool_calls = %#v, want false", gotBody["parallel_tool_calls"])
+	}
+	input := gotBody["input"].([]any)
+	trigger, ok := input[len(input)-1].(map[string]any)
+	if !ok || trigger["type"] != "compaction_trigger" {
+		t.Fatalf("last compaction input = %#v, want compaction_trigger", input[len(input)-1])
+	}
+	if len(compactedItems) < 1 {
+		t.Fatalf("compacted item count = %d, want at least 1", len(compactedItems))
+	}
+	compaction, ok := compactedItems[len(compactedItems)-1].(map[string]any)
+	if !ok || compaction["type"] != "compaction" {
+		t.Fatalf("last compacted item = %#v, want compaction", compactedItems[len(compactedItems)-1])
+	}
+	if summary != "summary" {
+		t.Fatalf("summary = %q, want summary", summary)
 	}
 }
 
@@ -237,6 +261,37 @@ func TestCompactAgenticInputItems_APIKeySolUsesResponsesLiteContract(t *testing.
 	}, false)
 	if err != nil {
 		t.Fatalf("compactAgenticInputItems: %v", err)
+	}
+}
+
+func TestBuildAgenticRemoteCompactionV2History_RetainsAssistantAndTruncatesBoundary(t *testing.T) {
+	oversized := strings.Repeat("A", (openAIRemoteCompactionV2RetainedMessageTokenBudget+100)*4)
+	inputItems := []any{
+		map[string]any{"type": "message", "role": "user", "content": oversized},
+		map[string]any{"type": "message", "role": "assistant", "content": "intermediate result"},
+		map[string]any{"type": "message", "role": "assistant", "content": "Message Type: FINAL_ANSWER\nfinished"},
+		map[string]any{"type": "function_call", "name": "read_file", "arguments": "{}"},
+	}
+	compaction := map[string]any{"type": "compaction", "encrypted_content": "summary"}
+
+	history := buildAgenticRemoteCompactionV2History(inputItems, compaction)
+	if len(history) != 3 {
+		t.Fatalf("history len = %d, want truncated user, assistant, compaction", len(history))
+	}
+	first := history[0].(map[string]any)
+	if first["role"] != "user" {
+		t.Fatalf("first retained item = %#v, want user message", first)
+	}
+	if got := len([]rune(first["content"].(string))); got >= len([]rune(oversized)) {
+		t.Fatalf("user message was not truncated; len=%d original=%d", got, len([]rune(oversized)))
+	}
+	second := history[1].(map[string]any)
+	if second["role"] != "assistant" || second["content"] != "intermediate result" {
+		t.Fatalf("second retained item = %#v, want intermediate assistant message", second)
+	}
+	last := history[2].(map[string]any)
+	if last["type"] != "compaction" {
+		t.Fatalf("last item = %#v, want compaction", last)
 	}
 }
 
@@ -1958,32 +2013,32 @@ func TestSendAgentic_AutoCompactionOAuthUsesOAuthRequestShape(t *testing.T) {
 		}
 
 		if requests == 1 {
-			if !strings.HasSuffix(r.URL.Path, "/responses/compact") {
-				t.Fatalf("request 1 path = %q, want /responses/compact", r.URL.Path)
+			if strings.HasSuffix(r.URL.Path, "/responses/compact") || !strings.HasSuffix(r.URL.Path, "/responses") {
+				t.Fatalf("request 1 path = %q, want /responses compaction", r.URL.Path)
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"output":[{"type":"message","role":"user","content":"oauth history"},{"type":"compaction","encrypted_content":"oauth summary"}]}`))
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(
+				"data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"oauth summary\"}}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_compact\",\"status\":\"completed\",\"model\":\"gpt-5.5\",\"usage\":{\"input_tokens\":9,\"output_tokens\":2}}}\n\n",
+			))
 			return
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		input := body["input"].([]any)
-		if len(input) < 3 {
-			t.Fatalf("input len = %d, want at least 3 (compacted history + prompt)", len(input))
+		if len(input) < 2 {
+			t.Fatalf("input len = %d, want compaction plus current prompt", len(input))
 		}
 		foundCompaction := false
 		for _, raw := range input {
 			item, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			if item["type"] == "compaction" {
+			if ok && item["type"] == "compaction" {
 				foundCompaction = true
 				break
 			}
 		}
 		if !foundCompaction {
-			t.Fatal("expected compacted history to include compaction item")
+			t.Fatalf("turn input missing compaction item: %#v", input)
 		}
 		_, _ = w.Write([]byte(
 			"data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
@@ -2014,6 +2069,116 @@ func TestSendAgentic_AutoCompactionOAuthUsesOAuthRequestShape(t *testing.T) {
 	}
 	if !resp.Compacted {
 		t.Fatal("expected response to report compaction")
+	}
+	if resp.Text != "ok" {
+		t.Fatalf("Text = %q, want ok", resp.Text)
+	}
+}
+
+func TestSendAgentic_AutoCompactionOAuthUsesResponsesEndpoint(t *testing.T) {
+	requests := 0
+	var compactionCallback string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+
+		if got := r.Header.Get("originator"); got != "codex_cli_rs" {
+			t.Fatalf("originator = %q, want codex_cli_rs", got)
+		}
+		if got := r.URL.Query().Get("client_version"); got != "0.144.0" {
+			t.Fatalf("client_version = %q, want 0.144.0", got)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if got := body["model"]; got != "gpt-5.5" {
+			t.Fatalf("model = %#v, want gpt-5.5", got)
+		}
+		if _, ok := body["max_output_tokens"]; ok {
+			t.Fatalf("max_output_tokens should be omitted for OAuth requests")
+		}
+
+		switch requests {
+		case 1:
+			if strings.HasSuffix(r.URL.Path, "/responses/compact") || !strings.HasSuffix(r.URL.Path, "/responses") {
+				t.Fatalf("request 1 path = %q, want /responses compaction", r.URL.Path)
+			}
+			if got := body["instructions"]; got != "You are a helpful assistant." {
+				t.Fatalf("compaction instructions = %#v, want base instructions", got)
+			}
+			if got, ok := body["store"].(bool); !ok || got {
+				t.Fatalf("compaction store = %#v, want false", body["store"])
+			}
+			input := body["input"].([]any)
+			trigger, ok := input[len(input)-1].(map[string]any)
+			if !ok || trigger["type"] != "compaction_trigger" {
+				t.Fatalf("last compaction input = %#v, want compaction_trigger", input[len(input)-1])
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(
+				"data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"oauth summary\"}}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_compact\",\"status\":\"completed\",\"model\":\"gpt-5.5\",\"usage\":{\"input_tokens\":9,\"output_tokens\":2}}}\n\n",
+			))
+		case 2:
+			if !strings.HasSuffix(r.URL.Path, "/responses") {
+				t.Fatalf("request 2 path = %q, want /responses", r.URL.Path)
+			}
+			input := body["input"].([]any)
+			if len(input) < 2 {
+				t.Fatalf("input len = %d, want compaction plus current prompt", len(input))
+			}
+			foundCompaction := false
+			for _, raw := range input {
+				item, ok := raw.(map[string]any)
+				if ok && item["type"] == "compaction" {
+					foundCompaction = true
+					break
+				}
+			}
+			if !foundCompaction {
+				t.Fatalf("turn input missing compaction item: %#v", input)
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte(
+				"data: {\"type\":\"response.output_text.delta\",\"delta\":\"ok\"}\n\n" +
+					"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_final\",\"status\":\"completed\",\"model\":\"gpt-5.5\",\"usage\":{\"input_tokens\":5,\"output_tokens\":1}}}\n\n",
+			))
+		default:
+			t.Fatalf("unexpected request %d", requests)
+		}
+	}))
+	defer srv.Close()
+
+	oldChatGPTBaseURL := OpenAIChatGPTAPIBaseURL
+	OpenAIChatGPTAPIBaseURL = srv.URL + "/"
+	defer func() { OpenAIChatGPTAPIBaseURL = oldChatGPTBaseURL }()
+
+	client := NewWithOAuthToken(testOAuthJWT("org_test"), "refresh", time.Now().Add(2*time.Hour).UnixMilli(), "org_test")
+	client.History = []Message{{Role: "user", Content: "oauth history"}}
+
+	resp, err := client.SendAgentic(context.Background(), "continue", &AgenticOptions{
+		Model:                    "gpt-5.5",
+		DisableTools:             true,
+		AutoCompaction:           true,
+		CompactionTokenThreshold: 1,
+		OnCompaction: func(summary string) {
+			compactionCallback = summary
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendAgentic: %v", err)
+	}
+
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if !resp.Compacted {
+		t.Fatal("expected response to report compaction")
+	}
+	if compactionCallback != "oauth summary" {
+		t.Fatalf("OnCompaction summary = %q, want oauth summary", compactionCallback)
 	}
 	if resp.Text != "ok" {
 		t.Fatalf("Text = %q, want ok", resp.Text)
