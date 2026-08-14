@@ -1027,7 +1027,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" onclick=\"openTaskDialog(this.dataset.taskId)\" onpointerdown=\"handleDragCursorPressStart(event)\" onpointerup=\"handleDragCursorPressEnd(event)\" onpointercancel=\"handleDragCursorPressEnd(event)\" onmousedown=\"handleDragCursorPressStart(event)\" onmouseup=\"handleDragCursorPressEnd(event)\" ondragstart=\"handleScheduleDragStart(event)\"><div class=\"font-semibold truncate leading-tight\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "\" onclick=\"openTaskDialog(this.dataset.taskId)\" onpointerdown=\"handleDragCursorPressStart(event)\" onpointerup=\"handleDragCursorPressEnd(event)\" onpointercancel=\"handleDragCursorPressCancel(event)\" onmousedown=\"handleDragCursorPressStart(event)\" onmouseup=\"handleDragCursorPressEnd(event)\" ondragstart=\"handleScheduleDragStart(event)\"><div class=\"font-semibold truncate leading-tight\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}

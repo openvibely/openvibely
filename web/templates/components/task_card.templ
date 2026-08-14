@@ -259,7 +259,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 		onclick="handleTaskSelect(event)"
 		onpointerdown="handleDragCursorPressStart(event)"
 		onpointerup="handleDragCursorPressEnd(event)"
-		onpointercancel="handleDragCursorPressEnd(event)"
+		onpointercancel="handleDragCursorPressCancel(event)"
 		onmousedown="handleDragCursorPressStart(event)"
 		onmouseup="handleDragCursorPressEnd(event)"
 		ondragstart="handleDragStart(event)"

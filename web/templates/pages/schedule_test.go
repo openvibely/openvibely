@@ -47,7 +47,7 @@ func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {
 		`draggable="true"`,
 		`onpointerdown="handleDragCursorPressStart(event)"`,
 		`onpointerup="handleDragCursorPressEnd(event)"`,
-		`onpointercancel="handleDragCursorPressEnd(event)"`,
+		`onpointercancel="handleDragCursorPressCancel(event)"`,
 		`onmousedown="handleDragCursorPressStart(event)"`,
 		`onmouseup="handleDragCursorPressEnd(event)"`,
 		"document.body.classList.add('drag-cursor-active')",

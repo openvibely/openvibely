@@ -318,6 +318,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.drag-cursor-surface.drag-cursor-pressed *,
 				.drag-cursor-surface.dragging,
 				.drag-cursor-surface.dragging *,
+				html.drag-cursor-pressed,
+				html.drag-cursor-pressed *,
+				html.drag-cursor-active,
+				html.drag-cursor-active *,
 				body.drag-cursor-pressed,
 				body.drag-cursor-pressed *,
 				body.drag-cursor-active,
@@ -2748,6 +2752,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				function clearDragCursorPress() {
+					document.documentElement.classList.remove('drag-cursor-pressed');
+					document.documentElement.style.cursor = '';
 					document.body.classList.remove('drag-cursor-pressed');
 					document.body.style.cursor = '';
 					document.querySelectorAll('.drag-cursor-pressed').forEach(el => {
@@ -2763,6 +2769,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					if (event.target && event.target.closest('button, a, input, select, textarea, summary, label, [role="button"], .dropdown')) return;
 					surface.classList.add('drag-cursor-pressed');
 					surface.style.cursor = 'grabbing';
+					document.documentElement.classList.add('drag-cursor-pressed');
+					document.documentElement.style.cursor = 'grabbing';
 					document.body.classList.add('drag-cursor-pressed');
 					document.body.style.cursor = 'grabbing';
 				}
@@ -2771,10 +2779,17 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					clearDragCursorPress();
 				}
 
+				function handleDragCursorPressCancel(event) {
+					// Native HTML drag can fire pointercancel as the browser takes over the drag.
+					// Keep the closed-hand cursor until mouseup/dragend/blur performs real cleanup.
+					if (document.documentElement.classList.contains('drag-cursor-pressed') || document.body.classList.contains('drag-cursor-active')) return;
+					clearDragCursorPress();
+				}
+
 				if (!window._dragCursorPressCleanupRegistered) {
 					window._dragCursorPressCleanupRegistered = true;
 					window.addEventListener('pointerup', clearDragCursorPress, true);
-					window.addEventListener('pointercancel', clearDragCursorPress, true);
+					window.addEventListener('pointercancel', handleDragCursorPressCancel, true);
 					window.addEventListener('mouseup', clearDragCursorPress, true);
 					window.addEventListener('blur', clearDragCursorPress);
 				}
