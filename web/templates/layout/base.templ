@@ -316,21 +316,48 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				.drag-cursor-surface:active *,
 				.drag-cursor-surface.drag-cursor-pressed,
 				.drag-cursor-surface.drag-cursor-pressed *,
-				.drag-cursor-surface.dragging,
-				.drag-cursor-surface.dragging *,
 				html.drag-cursor-pressed,
 				html.drag-cursor-pressed *,
+				body.drag-cursor-pressed,
+				body.drag-cursor-pressed * {
+					cursor: grabbing !important;
+				}
+				.drag-cursor-surface.dragging,
+				.drag-cursor-surface.dragging *,
 				html.drag-cursor-active,
 				html.drag-cursor-active *,
-				body.drag-cursor-pressed,
-				body.drag-cursor-pressed *,
 				body.drag-cursor-active,
 				body.drag-cursor-active * {
-					cursor: grabbing !important;
+					cursor: none !important;
+				}
+				.drag-cursor-indicator {
+					position: fixed;
+					left: 0;
+					top: 0;
+					width: 28px;
+					height: 28px;
+					pointer-events: none;
+					z-index: 2147483647;
+					color: oklch(var(--bc));
+					filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+					transform: translate(-9999px, -9999px);
+				}
+				.drag-cursor-indicator svg {
+					width: 28px;
+					height: 28px;
+					display: block;
+				}
+				.drag-cursor-drag-image {
+					position: fixed;
+					left: -9999px;
+					top: -9999px;
+					width: 28px;
+					height: 28px;
+					color: oklch(var(--bc));
 				}
 				.dragging {
 					opacity: 0.5;
-					cursor: grabbing !important;
+					cursor: none !important;
 				}
 				.drag-over {
 					border-color: hsl(var(--p)) !important;
@@ -2751,6 +2778,60 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					updateSelectionCounter();
 				}
 
+				function closedHandCursorSVG() {
+					return '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">' +
+						'<path d="M8 10.5V6.75a1.75 1.75 0 0 1 3.5 0V10h.25V5.75a1.75 1.75 0 0 1 3.5 0V10h.25V7.75a1.75 1.75 0 0 1 3.5 0v5.25c0 4.7-2.8 7.5-7.5 7.5h-1.25A5.75 5.75 0 0 1 4.5 14.75V13a2.5 2.5 0 0 1 2.5-2.5h1z" fill="currentColor" stroke="rgba(255,255,255,0.9)" stroke-width="1.25" stroke-linejoin="round"/>' +
+					'</svg>';
+				}
+
+				function ensureDragCursorIndicator() {
+					let indicator = document.getElementById('drag-cursor-indicator');
+					if (!indicator) {
+						indicator = document.createElement('div');
+						indicator.id = 'drag-cursor-indicator';
+						indicator.className = 'drag-cursor-indicator';
+						indicator.innerHTML = closedHandCursorSVG();
+						document.body.appendChild(indicator);
+					}
+					return indicator;
+				}
+
+				function ensureDragCursorDragImage() {
+					let dragImage = document.getElementById('drag-cursor-drag-image');
+					if (!dragImage) {
+						dragImage = document.createElement('div');
+						dragImage.id = 'drag-cursor-drag-image';
+						dragImage.className = 'drag-cursor-drag-image';
+						dragImage.innerHTML = closedHandCursorSVG();
+						document.body.appendChild(dragImage);
+					}
+					return dragImage;
+				}
+
+				function moveDragCursorIndicator(event) {
+					if (!event || !document.documentElement.classList.contains('drag-cursor-active')) return;
+					if (typeof event.clientX !== 'number' || typeof event.clientY !== 'number') return;
+					if (event.clientX === 0 && event.clientY === 0) return;
+					const indicator = ensureDragCursorIndicator();
+					indicator.style.transform = 'translate(' + (event.clientX - 14) + 'px, ' + (event.clientY - 14) + 'px)';
+				}
+
+				function clearNativeDragCursor() {
+					document.documentElement.classList.remove('drag-cursor-active');
+					document.body.classList.remove('drag-cursor-active');
+					const indicator = document.getElementById('drag-cursor-indicator');
+					if (indicator) indicator.style.transform = 'translate(-9999px, -9999px)';
+				}
+
+				function beginNativeDragCursor(event) {
+					document.documentElement.classList.add('drag-cursor-active');
+					document.body.classList.add('drag-cursor-active');
+					moveDragCursorIndicator(event);
+					if (event && event.dataTransfer && event.dataTransfer.setDragImage) {
+						event.dataTransfer.setDragImage(ensureDragCursorDragImage(), 14, 14);
+					}
+				}
+
 				function clearDragCursorPress() {
 					document.documentElement.classList.remove('drag-cursor-pressed');
 					document.documentElement.style.cursor = '';
@@ -2786,17 +2867,28 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					clearDragCursorPress();
 				}
 
+				window.clearDragCursorPress = clearDragCursorPress;
+				window.clearNativeDragCursor = clearNativeDragCursor;
+				window.beginNativeDragCursor = beginNativeDragCursor;
+				window.handleDragCursorPressStart = handleDragCursorPressStart;
+				window.handleDragCursorPressEnd = handleDragCursorPressEnd;
+				window.handleDragCursorPressCancel = handleDragCursorPressCancel;
+
 				if (!window._dragCursorPressCleanupRegistered) {
 					window._dragCursorPressCleanupRegistered = true;
 					window.addEventListener('pointerup', clearDragCursorPress, true);
 					window.addEventListener('pointercancel', handleDragCursorPressCancel, true);
 					window.addEventListener('mouseup', clearDragCursorPress, true);
-					window.addEventListener('blur', clearDragCursorPress);
+					window.addEventListener('blur', function() { clearDragCursorPress(); clearNativeDragCursor(); });
+					document.addEventListener('drag', moveDragCursorIndicator, true);
+					document.addEventListener('dragover', moveDragCursorIndicator, true);
+					document.addEventListener('dragend', function() { clearDragCursorPress(); clearNativeDragCursor(); }, true);
+					document.addEventListener('drop', function() { clearDragCursorPress(); clearNativeDragCursor(); }, true);
 				}
 
 				function handleDragStart(event) {
 					window.isDragging = true;
-					document.body.classList.add('drag-cursor-active');
+					beginNativeDragCursor(event);
 					draggedElement = event.currentTarget;
 					const taskID = draggedElement.getAttribute('data-task-id');
 					const cat = draggedElement.getAttribute('data-task-category');
@@ -2823,7 +2915,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 				function handleDragEnd(event) {
 					window.isDragging = false;
-					document.body.classList.remove('drag-cursor-active');
+					clearNativeDragCursor();
 					clearDragCursorPress();
 					stopAutoScroll();
 					// Remove dragging class from all cards - use both the ID list AND

@@ -50,9 +50,9 @@ func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {
 		`onpointercancel="handleDragCursorPressCancel(event)"`,
 		`onmousedown="handleDragCursorPressStart(event)"`,
 		`onmouseup="handleDragCursorPressEnd(event)"`,
-		"document.body.classList.add('drag-cursor-active')",
+		"if (window.beginNativeDragCursor) window.beginNativeDragCursor(event)",
 		"dragCard.classList.add('dragging')",
-		"document.body.classList.remove('drag-cursor-active')",
+		"if (window.clearNativeDragCursor) window.clearNativeDragCursor()",
 		"el.classList.remove('dragging')",
 	} {
 		if !strings.Contains(body, want) {
