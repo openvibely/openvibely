@@ -40,7 +40,16 @@ func TestScheduleContent_EnabledCardsUseGrabCursorForDrag(t *testing.T) {
 		t.Fatalf("render schedule content: %v", err)
 	}
 	body := buf.String()
-	for _, want := range []string{"cursor-grab", "active:cursor-grabbing", `draggable="true"`} {
+	for _, want := range []string{
+		"cursor-grab",
+		"active:cursor-grabbing",
+		"drag-cursor-surface",
+		`draggable="true"`,
+		"document.body.classList.add('drag-cursor-active')",
+		"dragCard.classList.add('dragging')",
+		"document.body.classList.remove('drag-cursor-active')",
+		"el.classList.remove('dragging')",
+	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected enabled schedule card to contain %q, got %s", want, body)
 		}

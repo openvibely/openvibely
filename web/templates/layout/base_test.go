@@ -863,6 +863,28 @@ func TestBase_KanbanColumnCSSDoesNotOverrideResponsiveGridWidth(t *testing.T) {
 	}
 }
 
+func TestBase_DraggableCardsUseClosedHandCursorWhileActive(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+
+	for _, want := range []string{
+		".drag-cursor-surface {",
+		"cursor: grab;",
+		".drag-cursor-surface:active",
+		"body.drag-cursor-active *",
+		"cursor: grabbing !important;",
+		"document.body.classList.add('drag-cursor-active')",
+		"document.body.classList.remove('drag-cursor-active')",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("expected draggable card cursor contract %q", want)
+		}
+	}
+}
+
 func TestBase_MobileDrawerLayerStaysAboveStickyPageContent(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {

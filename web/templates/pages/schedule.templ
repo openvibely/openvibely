@@ -566,7 +566,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 															</div>
 														} else {
 															<div
-																class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-grab active:cursor-grabbing transition-colors border-l-2 border-indigo-500 overflow-hidden"
+																class="text-[10px] px-1.5 py-1 mb-0.5 rounded bg-indigo-600 bg-opacity-30 hover:bg-opacity-40 cursor-grab active:cursor-grabbing drag-cursor-surface transition-colors border-l-2 border-indigo-500 overflow-hidden"
 																title={ scheduleDisplayTitle(occurrence.Task) }
 																draggable="true"
 																data-schedule-id={ getScheduleID(occurrence.Task) }
@@ -946,17 +946,20 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			let _dragSourceDate = null;
 
 			function handleScheduleDragStart(event) {
-				draggedScheduleId = event.target.dataset.scheduleId;
-				draggedTaskId = event.target.dataset.taskId;
-				draggedHasSchedule = event.target.dataset.hasSchedule === 'true';
+				var dragCard = event.currentTarget;
+				draggedScheduleId = dragCard.dataset.scheduleId;
+				draggedTaskId = dragCard.dataset.taskId;
+				draggedHasSchedule = dragCard.dataset.hasSchedule === 'true';
 				_schedDragActive = true;
+				document.body.classList.add('drag-cursor-active');
+				dragCard.classList.add('dragging');
 				// Track source slot so we can detect same-slot drops
-				var sourceZone = event.target.closest('.drop-zone');
+				var sourceZone = dragCard.closest('.drop-zone');
 				_dragSourceHour = sourceZone ? sourceZone.dataset.hour : null;
 				_dragSourceDate = sourceZone ? sourceZone.dataset.date : null;
-				event.target.style.opacity = '0.5';
+				dragCard.style.opacity = '0.5';
 				event.dataTransfer.effectAllowed = 'move';
-				event.dataTransfer.setData('text/html', event.target.innerHTML);
+				event.dataTransfer.setData('text/html', dragCard.innerHTML);
 				// Set a custom drag type so drop zones can identify schedule drags
 				// even without relying solely on the global variable
 				event.dataTransfer.setData('application/x-schedule-drag', draggedScheduleId || '');
@@ -1065,8 +1068,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 						window.showToast(reason, 'failed');
 					}
 					// Reset dragged elements
+					document.body.classList.remove('drag-cursor-active');
 					document.querySelectorAll('[draggable="true"]').forEach(function(el) {
 						el.style.opacity = '1';
+						el.classList.remove('dragging');
 					});
 					draggedScheduleId = null;
 					draggedTaskId = null;
@@ -1116,8 +1121,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				}
 
 				// Reset dragged elements
+				document.body.classList.remove('drag-cursor-active');
 				document.querySelectorAll('[draggable="true"]').forEach(function(el) {
 					el.style.opacity = '1';
+					el.classList.remove('dragging');
 				});
 				draggedScheduleId = null;
 				draggedTaskId = null;
@@ -1131,8 +1138,10 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			if (!window._schedDragendRegistered) {
 				window._schedDragendRegistered = true;
 				document.addEventListener('dragend', function(event) {
+					document.body.classList.remove('drag-cursor-active');
 					if (event.target.hasAttribute('draggable')) {
 						event.target.style.opacity = '1';
+						event.target.classList.remove('dragging');
 					}
 					// Clean up any lingering drop zone highlights (use inline style cleanup)
 					document.querySelectorAll('.drop-zone').forEach(function(zone) {

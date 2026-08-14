@@ -328,7 +328,7 @@ func TestTaskCard_UsesGrabCursorForDrag(t *testing.T) {
 		t.Fatalf("render task card: %v", err)
 	}
 	body := buf.String()
-	for _, want := range []string{"cursor-grab", "active:cursor-grabbing", `draggable="true"`} {
+	for _, want := range []string{"cursor-grab", "active:cursor-grabbing", "drag-cursor-surface", `draggable="true"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected draggable task card to contain %q, got %s", want, body)
 		}

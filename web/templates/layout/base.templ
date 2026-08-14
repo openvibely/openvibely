@@ -309,9 +309,20 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					height: 100vh;
 					width: 100vw;
 				}
+				.drag-cursor-surface {
+					cursor: grab;
+				}
+				.drag-cursor-surface:active,
+				.drag-cursor-surface:active *,
+				.drag-cursor-surface.dragging,
+				.drag-cursor-surface.dragging *,
+				body.drag-cursor-active,
+				body.drag-cursor-active * {
+					cursor: grabbing !important;
+				}
 				.dragging {
 					opacity: 0.5;
-					cursor: grabbing;
+					cursor: grabbing !important;
 				}
 				.drag-over {
 					border-color: hsl(var(--p)) !important;
@@ -2734,6 +2745,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 				function handleDragStart(event) {
 					window.isDragging = true;
+					document.body.classList.add('drag-cursor-active');
 					draggedElement = event.currentTarget;
 					const taskID = draggedElement.getAttribute('data-task-id');
 					const cat = draggedElement.getAttribute('data-task-category');
@@ -2760,6 +2772,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 				function handleDragEnd(event) {
 					window.isDragging = false;
+					document.body.classList.remove('drag-cursor-active');
 					stopAutoScroll();
 					// Remove dragging class from all cards - use both the ID list AND
 					// a DOM query as fallback, because handleCategoryDrop/handleActiveDrop
