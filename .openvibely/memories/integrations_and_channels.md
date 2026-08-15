@@ -3,8 +3,8 @@ name: integrations_and_channels
 type: project
 created: 2026-05-09
 updated: 2026-08-15
-source: consolidation
-source_id: memory_consolidation_2026_08_15
+source: update_memory
+source_id: ae4bd808d91d68ea8225eea706d02803:1a915f1bd5e360dd
 confidence: high
 title: Integrations and Channels
 ---
@@ -54,10 +54,10 @@ GitHub integration:
 - Enterprise PR references inherit the selected project's custom API base URL. Fetch, deduplication, and persistence use each PR record's repository identity, compared case-insensitively and canonicalized lowercase for new rows.
 - GitHub issue read/comment/label operations share authenticated JSON request helpers; operation-specific validation/endpoints/payloads stay at call sites.
 - Interactive Chat handlers and Automation runtimes share a canonical issue-action contract and service-level core for inbox, authorization, issue reads/comments/labels, PR-associated listing, and assigned-issue operations. Automation-only filtering/provenance/duplicate prevention/PR behavior stays outside the generic core.
-- Open GitHub issue-action contract bug `#468`: generic web Chat `github_create_issue` advertises `idempotency_key` but drops the decoded key before issue creation; preserve it so retries and reworded calls remain idempotent.
+- Resolved GitHub issue-action contract note `#468`: model-facing `github_create_issue` no longer advertises `idempotency_key`, so generic web Chat and SDLC finder prompts should not ask the model to invent one. Optional backend/direct-caller idempotency behavior remains separate from the LLM tool schema.
 - Manually created OpenVibely tasks referencing an existing GitHub issue should use the ordinary task PR flow and do not need GitHub SDLC Automation issue-task provenance. The provenance guard applies only to GitHub SDLC Automation implementation tasks.
 - Explicit-assignee list tools require the assignee to be a configured GitHub Authorized User before repository resolution/provider calls. PAT-owner scanning uses `github_list_my_assigned_issues`.
-- Scheduled GitHub Dev Inbox treats assignment to the PAT owner or configured Authorized User as approval to implement. It does not require an approved label, existing PR, or prior Automation-created/mapping owner row. Manual assigned issues are eligible; GitHub issue mailbox-owner mappings were retired on 2026-08-08 and migration 145 deletes existing `github_issue` owner rows.
+- Scheduled GitHub Dev Inbox treats assignment to the PAT owner or configured Authorized User as approval to implement. It does not require an approved label, existing PR, or prior Automation-created/mapping owner row. Manual assigned issues are eligible; GitHub issue mailbox-owner mappings were retired on 2026-08-08 and migration 145 deletes existing `github_issue` owner rows. Workflow labels should stay unprefixed, such as `task-created`, `in-progress`, `blocked`, `needs-human`, and `pr-opened`; do not use labels beginning with `openvibely:`.
 - Resolved issue `#462`: default GitHub Dev Inbox scans trust `github_list_assigned_issues` / `github_list_my_assigned_issues` list entries without `github_get_issue` detail hydration only when task-creation completeness is explicitly known from raw GitHub JSON fields (`html_url`, `title`, `body`, `state`, `assignees`, `labels`). Incomplete or unknown-completeness entries are detail-hydrated only after repository/issue deduplication and cached by repo plus issue number across Authorized User and PAT-owner scans.
 - Open stale-PR gap `#233`: ordinary task PR records are not reconciled with GitHub after creation, so closed/merged remote PRs can still receive forwarded feedback or be reported reusable.
 - GitHub SDLC hygiene gap: closed issues can retain workflow labels/authorized-assignee state and stale local PR records can mislead inbox/review workflows. GitHub Dev Inbox should reconcile assigned open issues to existing implementation tasks without duplicating work, and workflow cleanup needs to handle stale closed-issue labels, stale assignments, and stale PR rows explicitly.

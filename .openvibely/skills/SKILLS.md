@@ -252,3 +252,7 @@ always_use:
 ## openvibely_ui_preference_persistence
 
 [OpenVibely UI Preference Persistence](openvibely_ui_preference_persistence/SKILL.md) — Persist browser and desktop UI preferences without theme flashes, layout jumps, or split storage contracts.
+
+## openvibely_sdlc_finder_deduplication_workflow
+
+[OpenVibely SDLC Finder Deduplication Workflow](openvibely_sdlc_finder_deduplication_workflow/SKILL.md) — Keep GitHub and Native SDLC Automation finder loops from recreating already-reported work.

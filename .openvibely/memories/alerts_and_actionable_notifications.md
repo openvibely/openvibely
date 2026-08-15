@@ -2,9 +2,9 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-08-14
-source: consolidation
-source_id: memory_consolidation_2026_08_14
+updated: 2026-08-15
+source: update_memory
+source_id: ae4bd808d91d68ea8225eea706d02803:52d96ed0b9d6f9e9
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -23,7 +23,9 @@ Authorization, concurrency, and runtime facts:
 - Scheduled execution context uses persisted `task.ProjectID`, not process-global or current UI project state. Scheduled Task runtimes specialize `list_alerts` so `project_id` and `read` are not model-visible and strip either key if a provider injects defaults; these scans cannot be redirected and always include both read states.
 - Ordinary Chat and non-scheduled Task runtimes retain optional `project_id` equality assertions and `read` filtering.
 - `create_alert` preserves the legacy operational-alert contract: title is required, type defaults to `custom`, and message, severity, operational type, and same-project `task_id` remain optional. Operational alerts use `decision=not_required` and `processing=not_applicable` rather than entering approval workflow.
-- `create_notification` creates a pending project-scoped actionable notification, binds source-task identity from the persisted caller task, accepts structured metadata, and supports project-scoped idempotency keys.
+- `create_notification` creates a pending project-scoped actionable notification, binds source-task identity from the persisted caller task, accepts structured metadata, and retains optional project-scoped idempotency-key support for backend/direct callers; the model-facing runtime tool schema no longer advertises `idempotency_key`.
+- `idempotency_key` is optional low-level notification support, not a Native SDLC finder contract. Native SDLC maintained prompts, embedded templates, bootstrap skills, and user guide direct finders to inspect existing Automation notifications first, hydrate similar candidates with `get_alert` when needed, skip already-covered findings, and call `create_notification` without `idempotency_key` for new findings. Automation-bound notification creation no longer fails solely because the key is missing. Keep the optional stored field available for backend/direct callers that want project-scoped idempotent creation.
+- Open audit finding from task run `ae4bd808d91d68ea8225eea706d02803:52d96ed0b9d6f9e9`: Native `create_notification` still decodes a hidden supplied `idempotency_key`, validates its length, stores it on the Alert, and feeds the repository's `ON CONFLICT(project_id, idempotency_key)` path even though the model-facing schema no longer exposes the field. Fix the model-facing runtime path to ignore/remove hidden supplied keys while preserving optional backend/direct-caller idempotency support.
 - Initial tasks, scheduled tasks, ordinary task-thread follow-ups, ordinary web/API Chat, Slack, Telegram, Discord, and Email expose `create_notification` when the selected provider/auth path supports runtime tools. Dispatch derives project and trusted source-task identity from persisted execution context.
 - Ordinary Chat exposes the full notification lifecycle in Orchestrate mode and only read operations such as `list_alerts` and `get_alert` in Plan mode. Runtime-tool-incapable provider/auth paths receive no notification tools and no bracket-marker fallback.
 - The structured runtime surface covers stable filtered/paginated listing, detail, atomic claim, atomic implementation-task creation/linkage, explicit linkage, processing completion/failure, and claim release/retry.
