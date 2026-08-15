@@ -1396,20 +1396,23 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 						function yamlContinuousIndentationRails(lines, visibleLines, activeInfo) {
 						var rails = [], maxIndent = 0, candidates = [];
 						visibleLines.forEach(function(lineIndex) { maxIndent = Math.max(maxIndent, yamlLineIndent(lines[lineIndex])); });
-						for (var column = 0; column < maxIndent; column += 2) {
-							var startLine = 0, endLine = 0;
-							visibleLines.forEach(function(lineIndex) {
-								var line = lines[lineIndex], ignorable = !line.trim() || /^\s*#/.test(line), continues = yamlLineIndent(line) > column || (startLine && ignorable);
-								if (continues) {
-									if (!startLine) startLine = lineIndex + 1;
-									endLine = lineIndex + 1;
-								} else if (startLine) {
-									candidates.push({column: column, start: startLine, end: endLine});
-									startLine = 0;
-								}
-							});
-							if (startLine) candidates.push({column: column, start: startLine, end: endLine});
-						}
+							for (var column = 0; column < maxIndent; column += 2) {
+								var startLine = 0, endLine = 0, startRow = 0, endRow = 0;
+								visibleLines.forEach(function(lineIndex, rowIndex) {
+									var line = lines[lineIndex], ignorable = !line.trim() || /^\s*#/.test(line), continues = yamlLineIndent(line) > column || (startLine && ignorable);
+									if (continues) {
+										if (!startLine) startLine = lineIndex + 1;
+										endLine = lineIndex + 1;
+										if (!startRow) startRow = rowIndex + 1;
+										endRow = rowIndex + 1;
+									} else if (startLine) {
+										candidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});
+										startLine = 0;
+										startRow = 0;
+									}
+								});
+								if (startLine) candidates.push({column: column, start: startLine, end: endLine, rowStart: startRow, rowEnd: endRow});
+							}
 							var activeCandidate = null;
 							if (activeInfo) {
 								candidates.forEach(function(candidate) {
@@ -1418,10 +1421,10 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 									if ((withinGroup || onGroupHeader) && (!activeCandidate || candidate.column > activeCandidate.column)) activeCandidate = candidate;
 								});
 							}
-							candidates.forEach(function(candidate) {
-								var color = yamlRailColor(candidate === activeCandidate);
-								rails.push('<span class="pointer-events-none absolute transition-colors" style="left:calc(0.75rem + ' + candidate.column + 'ch);top:0;height:0;width:1px;z-index:20;background-color:' + color + '" data-automation-yaml-indent-rail data-yaml-rail-start="' + candidate.start + '" data-yaml-rail-end="' + candidate.end + '" data-yaml-rail-column="' + candidate.column + '" aria-hidden="true"></span>');
-							});
+								candidates.forEach(function(candidate) {
+									var color = yamlRailColor(candidate === activeCandidate);
+									rails.push('<span class="pointer-events-none absolute transition-colors" style="left:calc(0.75rem + ' + candidate.column + 'ch);top:calc(' + (candidate.rowStart - 1) + ' * 1.5rem);height:calc(' + (candidate.rowEnd - candidate.rowStart + 1) + ' * 1.5rem);width:1px;z-index:20;background-color:' + color + '" data-automation-yaml-indent-rail data-yaml-rail-start="' + candidate.start + '" data-yaml-rail-end="' + candidate.end + '" data-yaml-rail-column="' + candidate.column + '" aria-hidden="true"></span>');
+								});
 						return rails.join('');
 					}
 						function updateYAMLActiveRail() {
