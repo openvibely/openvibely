@@ -267,7 +267,8 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 		"do not add persisted goals to recurring loop tasks",
 		"prompt memory alone",
 		"github_list_existing_automation_issues",
-		"server-side idempotency keys as a retry safeguard",
+		"github_get_issue",
+		"skip covered candidates",
 		"Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass",
 		"GitHub Bug Finder`",
 		"GitHub Optimization Finder`",
@@ -421,7 +422,8 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"do not add persisted goals to recurring loop tasks",
 		"prompt memory alone",
 		"github_list_existing_automation_issues",
-		"server-side idempotency keys as a retry safeguard",
+		"github_get_issue",
+		"skip covered candidates",
 		"Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass",
 		"GitHub Bug Finder`",
 		"GitHub Optimization Finder`",
@@ -528,8 +530,6 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 			"call `github_get_issue` for that issue and read the body",
 			"skip that candidate and keep searching",
 			"Try to create at most one new GitHub issue this run",
-			"Use a required `idempotency_key`",
-			"Reuse the exact key when the same finding is retried",
 		} {
 			if !strings.Contains(text.body, want) {
 				t.Fatalf("%s must include existing-issue discovery guidance %q", text.name, want)
@@ -538,6 +538,7 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	}
 
 	for _, forbidden := range []string{
+		"idempotency_key",
 		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
 		"Do not require a repository-wide issue or pull-request listing/search before publication",
 		"Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated",

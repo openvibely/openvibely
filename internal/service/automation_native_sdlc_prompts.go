@@ -17,9 +17,7 @@ In 2-4 plain-language sentences, explain what is wrong or being suggested, give 
 
 After the Summary, preserve the detailed information needed by an implementation agent: inspected component, evidence and concrete failure paths, expected versus actual behavior, risk, suggested implementation direction, acceptance criteria, relevant file/symbol references, and regression cases. Technical detail is useful and must not be omitted; it just must not come before the Summary.`
 
-const nativeSDLCExistingNotificationDiscoveryInstructions = `Before creating any notification, call ` + "`" + `list_existing_automation_notifications` + "`" + `. Use the returned notification IDs, titles, types, lifecycle states, and messages to avoid reporting work already covered by this Native SDLC Automation. If a candidate might match an existing notification, call ` + "`" + `get_alert` + "`" + ` for that notification and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new notification this run. Only call ` + "`" + `create_notification` + "`" + ` after you believe the finding is not already represented. If no new finding remains, report that no new notification was found.
-
-Call create_notification with a required stable idempotency_key built from facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.`
+const nativeSDLCExistingNotificationDiscoveryInstructions = `Before creating any notification, call ` + "`" + `list_existing_automation_notifications` + "`" + `. Use the returned notification IDs, titles, types, lifecycle states, and messages to avoid reporting work already covered by this Native SDLC Automation. If a candidate might match an existing notification, call ` + "`" + `get_alert` + "`" + ` for that notification and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new notification this run. Only call ` + "`" + `create_notification` + "`" + ` after you believe the finding is not already represented. If no new finding remains, report that no new notification was found.`
 
 const nativeSDLCVisionSuggestionsPrompt = `Choose one focused project component or workflow to inspect this run. Compare that area with the configured project vision or source-of-truth files and identify small, reviewable gaps. Vary the component over time instead of repeatedly auditing the same files.
 
@@ -77,7 +75,7 @@ Only after execute_tasks succeeds, call complete_alert_processing. If creation, 
 
 const nativeSDLCLoopAuditorPrompt = `Audit this project's Native SDLC loop for stale notifications, expired or failed claims, missing notification/task links, duplicate implementation work, and blocked tasks.
 
-Inspect only project-scoped OpenVibely notification and task state. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification and task state is authoritative for this loop. Report each actionable audit finding through create_notification with concrete evidence and a stable idempotency_key. The auditor does not bypass approval, create or alter implementation work, merge, release, or deploy.`
+Inspect only project-scoped OpenVibely notification and task state. Do not list, search, or inspect GitHub issues for duplicate detection. Native notification and task state is authoritative for this loop. Report each actionable audit finding through create_notification with concrete evidence. The auditor does not bypass approval, create or alter implementation work, merge, release, or deploy.`
 
 func nativeSDLCRolePrompt(role string) (string, error) {
 	switch strings.TrimSpace(role) {

@@ -2498,7 +2498,7 @@ func TestAutomationGitHubIssueRuntimeListsExistingAutomationIssues(t *testing.T)
 	require.Contains(t, output, `"body_excerpt":"## Summary Existing covered behavior"`)
 }
 
-func TestAutomationGitHubIssueCreationRequiresStableIdempotencyKey(t *testing.T) {
+func TestAutomationGitHubIssueCreationAllowsMissingIdempotencyKey(t *testing.T) {
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
@@ -2511,10 +2511,10 @@ func TestAutomationGitHubIssueCreationRequiresStableIdempotencyKey(t *testing.T)
 	}
 	_, newCausalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
 
-	output, err := createIssue(newCausalContext("missing-key"), json.RawMessage(`{"title":"Missing stable key","body":"body"}`))
-	require.ErrorContains(t, err, "idempotency_key")
-	require.Empty(t, output)
-	require.Equal(t, int32(0), createCalls.Load(), "missing keys must fail before mutating GitHub")
+	output, err := createIssue(newCausalContext("missing-key"), json.RawMessage(`{"title":"Existing-work checked issue","body":"body"}`))
+	require.NoError(t, err)
+	require.Contains(t, output, `"Number":97`)
+	require.Equal(t, int32(1), createCalls.Load())
 }
 
 func TestAutomationGitHubIssueCreationDeduplicatesStableFindingKeyAcrossRewordedTitles(t *testing.T) {

@@ -29,8 +29,6 @@ nodes:
 
             Before creating any notification, call `list_existing_automation_notifications`. Use the returned notification IDs, titles, types, lifecycle states, and messages to avoid reporting work already covered by this Native SDLC Automation. If a candidate might match an existing notification, call `get_alert` for that notification and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new notification this run. Only call `create_notification` after you believe the finding is not already represented. If no new finding remains, report that no new notification was found.
 
-            Call create_notification with a required stable idempotency_key built from facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.
-
             The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.
         repeat_interval: 1
         repeat_type: daily
@@ -67,8 +65,6 @@ nodes:
             Use create_notification with type bug_suggestion for new findings.
 
             Before creating any notification, call `list_existing_automation_notifications`. Use the returned notification IDs, titles, types, lifecycle states, and messages to avoid reporting work already covered by this Native SDLC Automation. If a candidate might match an existing notification, call `get_alert` for that notification and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new notification this run. Only call `create_notification` after you believe the finding is not already represented. If no new finding remains, report that no new notification was found.
-
-            Call create_notification with a required stable idempotency_key built from facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.
 
             The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.
         repeat_interval: 1
@@ -107,8 +103,6 @@ nodes:
 
             Before creating any notification, call `list_existing_automation_notifications`. Use the returned notification IDs, titles, types, lifecycle states, and messages to avoid reporting work already covered by this Native SDLC Automation. If a candidate might match an existing notification, call `get_alert` for that notification and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new notification this run. Only call `create_notification` after you believe the finding is not already represented. If no new finding remains, report that no new notification was found.
 
-            Call create_notification with a required stable idempotency_key built from facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.
-
             The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.
         repeat_interval: 1
         repeat_type: daily
@@ -145,8 +139,6 @@ nodes:
             Use create_notification with type maintenance_suggestion for new findings.
 
             Before creating any notification, call `list_existing_automation_notifications`. Use the returned notification IDs, titles, types, lifecycle states, and messages to avoid reporting work already covered by this Native SDLC Automation. If a candidate might match an existing notification, call `get_alert` for that notification and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new notification this run. Only call `create_notification` after you believe the finding is not already represented. If no new finding remains, report that no new notification was found.
-
-            Call create_notification with a required stable idempotency_key built from facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.
 
             The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.
         repeat_interval: 1

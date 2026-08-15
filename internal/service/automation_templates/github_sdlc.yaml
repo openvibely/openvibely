@@ -28,8 +28,6 @@ nodes:
             Pass the required category label in the github_create_issue labels argument; do not rely on body text to communicate the category.
 
             Include enough context for a human to approve, reject, or assign the issue. Before creating any issue, call `github_list_existing_automation_issues`. Use the returned issue numbers, titles, labels, states, and body excerpts to avoid reporting work already covered by this Automation account. If a candidate might match an existing issue, call `github_get_issue` for that issue and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new GitHub issue this run. Only call `github_create_issue` after you believe the finding is not already represented. If no new finding remains, report that no new issue was found.
-
-            Call github_create_issue with a required idempotency_key built from stable facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.
         repeat_interval: 1
         repeat_type: daily
         run_at: "09:00"
@@ -65,8 +63,6 @@ nodes:
             Pass the required category label in the github_create_issue labels argument; do not rely on body text to communicate the category.
 
             Before creating any issue, call `github_list_existing_automation_issues`. Use the returned issue numbers, titles, labels, states, and body excerpts to avoid reporting work already covered by this Automation account. If a candidate might match an existing issue, call `github_get_issue` for that issue and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new GitHub issue this run. Only call `github_create_issue` after you believe the finding is not already represented. If no new finding remains, report that no new issue was found.
-
-            Call github_create_issue with a required idempotency_key built from stable facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.
 
             Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.
         repeat_interval: 1
@@ -105,8 +101,6 @@ nodes:
 
             Before creating any issue, call `github_list_existing_automation_issues`. Use the returned issue numbers, titles, labels, states, and body excerpts to avoid reporting work already covered by this Automation account. If a candidate might match an existing issue, call `github_get_issue` for that issue and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new GitHub issue this run. Only call `github_create_issue` after you believe the finding is not already represented. If no new finding remains, report that no new issue was found.
 
-            Call github_create_issue with a required idempotency_key built from stable facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.
-
             Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.
         repeat_interval: 1
         repeat_type: daily
@@ -143,8 +137,6 @@ nodes:
             Pass the required category label in the github_create_issue labels argument; do not rely on body text to communicate the category.
 
             Before creating any issue, call `github_list_existing_automation_issues`. Use the returned issue numbers, titles, labels, states, and body excerpts to avoid reporting work already covered by this Automation account. If a candidate might match an existing issue, call `github_get_issue` for that issue and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new GitHub issue this run. Only call `github_create_issue` after you believe the finding is not already represented. If no new finding remains, report that no new issue was found.
-
-            Call github_create_issue with a required idempotency_key built from stable facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.
 
             Do not modify code, do not create OpenVibely implementation tasks, and do not open PRs. The Dev Inbox will create implementation tasks later if a human accepts the issue by assigning it to the configured OpenVibely GitHub inbox identity.
         repeat_interval: 1

@@ -19,9 +19,7 @@ After the Summary, preserve the detailed information needed by an implementation
 
 Pass the required category label in the github_create_issue labels argument; do not rely on body text to communicate the category.`
 
-const githubSDLCExistingIssueDiscoveryInstructions = `Before creating any issue, call ` + "`" + `github_list_existing_automation_issues` + "`" + `. Use the returned issue numbers, titles, labels, states, and body excerpts to avoid reporting work already covered by this Automation account. If a candidate might match an existing issue, call ` + "`" + `github_get_issue` + "`" + ` for that issue and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new GitHub issue this run. Only call ` + "`" + `github_create_issue` + "`" + ` after you believe the finding is not already represented. If no new finding remains, report that no new issue was found.
-
-Call github_create_issue with a required idempotency_key built from stable facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.`
+const githubSDLCExistingIssueDiscoveryInstructions = `Before creating any issue, call ` + "`" + `github_list_existing_automation_issues` + "`" + `. Use the returned issue numbers, titles, labels, states, and body excerpts to avoid reporting work already covered by this Automation account. If a candidate might match an existing issue, call ` + "`" + `github_get_issue` + "`" + ` for that issue and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new GitHub issue this run. Only call ` + "`" + `github_create_issue` + "`" + ` after you believe the finding is not already represented. If no new finding remains, report that no new issue was found.`
 
 const githubSDLCDevInboxPrompt = `Check GitHub for implementation mailbox work and PR review feedback for this project.
 

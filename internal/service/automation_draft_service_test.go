@@ -261,7 +261,7 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	require.Contains(t, visionPrompt, "Vary the component over time")
 	require.Contains(t, visionPrompt, "project vision or source-of-truth files")
 	require.Contains(t, visionPrompt, "create_notification")
-	require.Contains(t, visionPrompt, "stable idempotency_key")
+	require.NotContains(t, visionPrompt, "idempotency_key")
 	require.Contains(t, visionPrompt, "list_existing_automation_notifications")
 	require.Contains(t, visionPrompt, "skip that candidate and keep searching")
 	require.Contains(t, visionPrompt, "Do not modify code")
@@ -295,7 +295,7 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 		require.Contains(t, prompt, "Make the title and message understandable to a product user")
 		require.Contains(t, prompt, "Choose one focused project component or workflow")
 		require.Contains(t, prompt, "create_notification")
-		require.Contains(t, prompt, "stable idempotency_key")
+		require.NotContains(t, prompt, "idempotency_key")
 		require.Contains(t, prompt, "list_existing_automation_notifications")
 		require.Contains(t, prompt, "skip that candidate and keep searching")
 		require.Contains(t, prompt, "acceptance criteria")
@@ -448,7 +448,7 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 		require.Contains(t, prompt, "skip that candidate and keep searching", name)
 		require.Contains(t, prompt, "Try to create at most one new GitHub issue this run", name)
 		require.Contains(t, prompt, "Only call `github_create_issue` after you believe the finding is not already represented", name)
-		require.Contains(t, prompt, "required idempotency_key built from stable facts", name)
+		require.NotContains(t, prompt, "idempotency_key", name)
 		require.NotContains(t, prompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection", name)
 	}
 

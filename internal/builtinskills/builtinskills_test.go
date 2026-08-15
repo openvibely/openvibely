@@ -140,7 +140,6 @@ func TestSyncTo_GitHubBootstrapUsesProjectRepositoryAndExistingIssueDiscovery(t 
 		"github_get_issue",
 		"skip that candidate and keep searching",
 		"at most one new GitHub issue",
-		"idempotency_key",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("GitHub bootstrap skill missing repository/deduplication guidance %q:\n%s", want, body)
@@ -150,6 +149,7 @@ func TestSyncTo_GitHubBootstrapUsesProjectRepositoryAndExistingIssueDiscovery(t 
 		"set `source_github_repo_url` when polling a non-default repository",
 		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
 		"Do not require a repository-wide issue or pull-request listing/search before publication",
+		"idempotency_key",
 		"Avoid duplicates by searching/inspecting existing visible work",
 	} {
 		if strings.Contains(body, forbidden) {
