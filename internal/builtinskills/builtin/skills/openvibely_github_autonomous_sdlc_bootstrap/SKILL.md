@@ -76,7 +76,7 @@ Review the configured project vision/source files and identify small, reviewable
 
 Open GitHub suggestion issues only. Use `github_create_issue` with unprefixed labels such as `suggestion` and `feature`. Do not create implementation tasks and do not modify code.
 
-Include enough context for a human to approve, reject, or assign the issue. Before creating any issue, call `github_list_existing_automation_issues`. Use the returned issue numbers, titles, labels, states, and body excerpts to avoid reporting work already covered by this Automation account. If a candidate might match an existing issue, call `github_get_issue` for that issue and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new GitHub issue this run. Only call `github_create_issue` after you believe the finding is not already represented. If no new finding remains, report that no new issue was found.
+Include enough context for a human to approve, reject, or assign the issue. Before creating any issue, call `github_list_existing_automation_issues`. Use the returned issue numbers, titles, labels, and states to avoid reporting work already covered by this Automation account. If a candidate might match an existing issue, call `github_get_issue` for that issue and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new GitHub issue this run. Only call `github_create_issue` after you believe the finding is not already represented. If no new finding remains, report that no new issue was found.
 ```
 
 ## Role-Specific Finder Prompts

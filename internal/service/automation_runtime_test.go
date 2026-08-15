@@ -2495,7 +2495,8 @@ func TestAutomationGitHubIssueRuntimeListsExistingAutomationIssues(t *testing.T)
 	require.Contains(t, output, `"repository":"example/runtime"`)
 	require.Contains(t, output, `"created_by":"automation-bot"`)
 	require.Contains(t, output, `"title":"Existing duplicate candidate"`)
-	require.Contains(t, output, `"body_excerpt":"## Summary Existing covered behavior"`)
+	require.NotContains(t, output, `"body_excerpt"`)
+	require.NotContains(t, output, "Existing covered behavior")
 }
 
 func TestAutomationGitHubIssueCreationAllowsMissingIdempotencyKey(t *testing.T) {
@@ -3926,6 +3927,12 @@ func TestAutomationRuntimeNativeExistingNotificationListScopesToAutomationOwners
 	require.NoError(t, err)
 	require.Contains(t, output, owned.ID)
 	require.Contains(t, output, "Owned Native existing notification")
+	require.Contains(t, output, `"decision_state"`)
+	require.Contains(t, output, `"processing_state"`)
+	require.NotContains(t, output, "already covered")
+	require.NotContains(t, output, "native-existing-owned")
+	require.NotContains(t, output, `"message"`)
+	require.NotContains(t, output, `"idempotency_key"`)
 	require.NotContains(t, output, "Unowned alert")
 }
 

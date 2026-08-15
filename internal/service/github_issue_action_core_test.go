@@ -106,8 +106,11 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 		t.Fatalf("assigned output=%q err=%v", out, err)
 	}
 	out, err = core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"repo_url":"created","limit":1}`))
-	if err != nil || !strings.Contains(out, `"repository":"owner/repo"`) || !strings.Contains(out, `"title":"Existing issue"`) || !strings.Contains(out, `"body_excerpt":"Detailed existing issue body"`) {
+	if err != nil || !strings.Contains(out, `"repository":"owner/repo"`) || !strings.Contains(out, `"title":"Existing issue"`) {
 		t.Fatalf("existing Automation issues output=%q err=%v", out, err)
+	}
+	if strings.Contains(out, `"body_excerpt"`) || strings.Contains(out, "Detailed existing issue body") {
+		t.Fatalf("existing Automation issues should omit compact body text: %q", out)
 	}
 	if postprocessCalls != 2 {
 		t.Fatalf("postprocess calls=%d, want 2", postprocessCalls)

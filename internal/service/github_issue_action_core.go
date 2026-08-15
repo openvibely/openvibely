@@ -193,28 +193,15 @@ func compactExistingGitHubIssues(issues []GitHubIssue, limit int) []map[string]a
 	summaries := make([]map[string]any, 0, limit)
 	for _, issue := range issues[:limit] {
 		summaries = append(summaries, map[string]any{
-			"number":       issue.Number,
-			"url":          issue.URL,
-			"title":        issue.Title,
-			"state":        issue.State,
-			"labels":       issue.Labels,
-			"created_by":   issue.UserLogin,
-			"body_excerpt": compactGitHubIssueBodyExcerpt(issue.Body, 500),
+			"number":     issue.Number,
+			"url":        issue.URL,
+			"title":      issue.Title,
+			"state":      issue.State,
+			"labels":     issue.Labels,
+			"created_by": issue.UserLogin,
 		})
 	}
 	return summaries
-}
-
-func compactGitHubIssueBodyExcerpt(body string, maxRunes int) string {
-	text := strings.Join(strings.Fields(strings.TrimSpace(body)), " ")
-	if maxRunes <= 0 || text == "" {
-		return ""
-	}
-	runes := []rune(text)
-	if len(runes) <= maxRunes {
-		return text
-	}
-	return string(runes[:maxRunes]) + "…"
 }
 
 func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, input json.RawMessage, postprocess GitHubAssignedIssuesPostprocessor) (string, error) {

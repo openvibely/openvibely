@@ -1037,11 +1037,29 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err != nil {
 				return "", err
 			}
+			compact := make([]map[string]any, 0, len(notifications))
+			for _, notification := range notifications {
+				compact = append(compact, map[string]any{
+					"id":                         notification.ID,
+					"project_id":                 notification.ProjectID,
+					"type":                       notification.Type,
+					"severity":                   notification.Severity,
+					"title":                      notification.Title,
+					"source":                     notification.Source,
+					"decision_state":             notification.DecisionState,
+					"processing_state":           notification.ProcessingState,
+					"implementation_task_id":     notification.ImplementationTaskID,
+					"implementation_task_linked": notification.ImplementationTaskID != nil,
+					"is_read":                    notification.IsRead,
+					"created_at":                 notification.CreatedAt,
+					"updated_at":                 notification.UpdatedAt,
+				})
+			}
 			nextOffset := 0
 			if len(notifications) == req.Limit {
 				nextOffset = req.Offset + len(notifications)
 			}
-			return resultJSON(map[string]any{"notifications": notifications, "project_id": opts.ProjectID, "offset": req.Offset, "next_offset": nextOffset})
+			return resultJSON(map[string]any{"notifications": compact, "project_id": opts.ProjectID, "offset": req.Offset, "next_offset": nextOffset})
 		},
 		"list_alerts": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req struct {
