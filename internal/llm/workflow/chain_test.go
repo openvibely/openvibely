@@ -9,27 +9,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-type fakeProjectResolver struct{ workDir string }
-
-func (f fakeProjectResolver) ResolveWorkDir(context.Context, string) string { return f.workDir }
-
-type fakeAgentCaller struct {
-	message string
-	agent   models.LLMConfig
-	workDir string
-	err     error
-}
-
-func (f *fakeAgentCaller) CallAgentDirect(_ context.Context, message string, agent models.LLMConfig, workDir string) (string, error) {
-	f.message = message
-	f.agent = agent
-	f.workDir = workDir
-	if f.err != nil {
-		return "", f.err
-	}
-	return "agent output", nil
-}
-
 type fakeTaskCreator struct {
 	created []*models.Task
 	err     error
@@ -57,20 +36,6 @@ func (f fakeLineageResolver) ResolveParentLineage(context.Context, models.Task) 
 	return f.branch, f.sha, f.err
 }
 
-func TestServiceCallAgentForWorkflowUsesResolvedWorkDir(t *testing.T) {
-	caller := &fakeAgentCaller{}
-	svc := NewService(fakeProjectResolver{workDir: "/repo"}, nil, caller)
-	agent := &models.LLMConfig{ID: "agent-1", Provider: "test"}
-
-	out, err := svc.CallAgentForWorkflow(context.Background(), "prompt", agent, "project-1")
-	if err != nil || out != "agent output" {
-		t.Fatalf("CallAgentForWorkflow = %q, %v", out, err)
-	}
-	if caller.message != "prompt" || caller.agent.ID != "agent-1" || caller.workDir != "/repo" {
-		t.Fatalf("caller captured message=%q agent=%#v workDir=%q", caller.message, caller.agent, caller.workDir)
-	}
-}
-
 func TestCleanOutputForChainStripsControlMarkersOutsideCode(t *testing.T) {
 	input := "[Thinking]\nprivate\n[/Thinking]\nkeep\n[Using tool: bash]\n[Tool bash done: ok]\n```text\n[Thinking]\ncode stays\n[/Thinking]\n```"
 	got := CleanOutputForChain(input)
@@ -84,7 +49,7 @@ func TestCleanOutputForChainStripsControlMarkersOutsideCode(t *testing.T) {
 
 func TestTriggerTaskChainCreatesChildAndBlockedGrandchild(t *testing.T) {
 	creator := &fakeTaskCreator{}
-	svc := NewService(nil, creator, &fakeAgentCaller{})
+	svc := NewService(creator)
 	svc.SetLineageResolver(fakeLineageResolver{branch: "main", sha: "abc123"})
 	parent := models.Task{
 		ID:           "parent-1",
@@ -133,7 +98,7 @@ func TestTriggerTaskChainCreatesChildAndBlockedGrandchild(t *testing.T) {
 }
 
 func TestTriggerTaskChainNoopsAndSurfacesErrors(t *testing.T) {
-	svc := NewService(nil, &fakeTaskCreator{}, &fakeAgentCaller{})
+	svc := NewService(&fakeTaskCreator{})
 	parent := models.Task{ID: "parent", ProjectID: "project", Title: "Parent", ChainConfig: `{"enabled":false}`}
 	if err := svc.TriggerTaskChain(context.Background(), parent, "output"); err != nil {
 		t.Fatalf("disabled chain should no-op: %v", err)
@@ -149,7 +114,7 @@ func TestTriggerTaskChainNoopsAndSurfacesErrors(t *testing.T) {
 
 	wantErr := errors.New("create failed")
 	creator := &fakeTaskCreator{err: wantErr}
-	svc = NewService(nil, creator, &fakeAgentCaller{})
+	svc = NewService(creator)
 	_ = parent.SetChainConfig(&models.ChainConfiguration{Enabled: true, Trigger: "on_completion"})
 	if err := svc.TriggerTaskChain(context.Background(), parent, "output"); !errors.Is(err, wantErr) {
 		t.Fatalf("expected create error, got %v", err)

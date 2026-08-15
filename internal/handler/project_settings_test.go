@@ -55,14 +55,7 @@ func TestProjectSettings_EndToEnd(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		taskRepo,
 		scheduleRepo,
@@ -316,14 +309,7 @@ func TestNewProjectDialog(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo
@@ -451,14 +437,7 @@ func TestProjectDialogs_GitHubOnlyModeHidesLocalSourceOption(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo
@@ -591,14 +570,7 @@ func TestUpdateProject_SwitchLocalToGitHub_LocalDisabled(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo
@@ -716,14 +688,7 @@ func TestProjectCreate_WithDefaultSettings(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo
@@ -962,14 +927,7 @@ func TestProjectCreate_WithSettings(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo
@@ -1076,14 +1034,7 @@ func TestDeleteProject(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		taskRepo,
 		scheduleRepo,
@@ -1313,14 +1264,7 @@ func TestGlobalPersonality(t *testing.T) {
 		nil, // schedulerSvc
 		nil, // alertSvc
 		nil, // upcomingSvc
-		nil, // workflowSvc
 		nil, // insightsSvc
-		nil, // architectSvc
-		nil, // backlogSvc
-		nil, // autonomousTriggerSvc
-		nil, // trendSvc
-		nil, // templateSvc
-		nil, // patternSvc
 		llmConfigRepo,
 		nil, // taskRepo
 		nil, // scheduleRepo

@@ -476,7 +476,7 @@ func TestChannelsPageUsesCompactAgentPickerProjection(t *testing.T) {
 	schedulerSvc := service.NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
 	alertSvc := service.NewAlertService(alertRepo, nil)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
-	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, nil, nil, nil, nil, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
+	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
 	h.SetLocalRepoPathEnabled(true)
 	agentRepo := repository.NewAgentRepo(db)
 	h.SetAgentRepo(agentRepo)

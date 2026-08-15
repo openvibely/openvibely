@@ -15,30 +15,6 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 )
 
-type workflowProjectResolver struct {
-	s *LLMService
-}
-
-func (r workflowProjectResolver) ResolveWorkDir(ctx context.Context, projectID string) string {
-	if projectID == "" || r.s.projectRepo == nil {
-		return ""
-	}
-	project, err := r.s.projectRepo.GetByID(ctx, projectID)
-	if err != nil || project == nil {
-		return ""
-	}
-	return project.RepoPath
-}
-
-type workflowAgentCaller struct {
-	s *LLMService
-}
-
-func (c workflowAgentCaller) CallAgentDirect(ctx context.Context, message string, agent models.LLMConfig, workDir string) (string, error) {
-	out, _, err := c.s.CallAgentDirect(ctx, message, nil, agent, workDir)
-	return out, err
-}
-
 type workflowTaskCreator struct {
 	s *LLMService
 }
@@ -112,19 +88,9 @@ func resolveGitRef(repoDir, ref string) (string, error) {
 }
 
 func (s *LLMService) workflowChainService() *llmworkflow.Service {
-	svc := llmworkflow.NewService(
-		workflowProjectResolver{s: s},
-		workflowTaskCreator{s: s},
-		workflowAgentCaller{s: s},
-	)
+	svc := llmworkflow.NewService(workflowTaskCreator{s: s})
 	svc.SetLineageResolver(workflowLineageResolver{s: s})
 	return svc
-}
-
-// CallAgentForWorkflow calls an LLM agent for workflow step execution.
-// It resolves the project working directory and delegates to CallAgentDirect.
-func (s *LLMService) CallAgentForWorkflow(ctx context.Context, prompt string, agent *models.LLMConfig, projectID string) (string, error) {
-	return s.workflowChainService().CallAgentForWorkflow(ctx, prompt, agent, projectID)
 }
 
 func cleanOutputForChain(output string) string {

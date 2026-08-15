@@ -1052,7 +1052,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	})
 
 	h := handler.New(
-		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, insightsSvc, nil, nil, nil, nil, nil, nil,
+		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, insightsSvc,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, broadcaster, telegramSvc,
 	)
 	h.SetChatBroadcaster(chatBroadcaster)
