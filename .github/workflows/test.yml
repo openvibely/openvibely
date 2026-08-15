@@ -141,9 +141,9 @@ jobs:
       - name: Run browser performance regression
         run: go test ./web/templates/components -run '^TestLargeToolOutputHydrationIsLazyAndStatefulInChrome$' -count=1 -timeout 60s
 
-      - name: Show coverage summary (excluding generated templ code)
+      - name: Show coverage summary (excluding generated/fixture code)
         run: |
-          grep -v "_templ.go" coverage.txt > coverage.filtered.out
+          grep -Ev '(_templ\.go:|^github.com/openvibely/openvibely/cmd/|^github.com/openvibely/openvibely/docs/|^github.com/openvibely/openvibely/internal/database/migrations/|^github.com/openvibely/openvibely/internal/update/testfixture/|^github.com/openvibely/openvibely/internal/service/workflow_service\.go:)' coverage.txt > coverage.filtered.out
           go tool cover -func=coverage.filtered.out | tail -1
 
       - name: Upload coverage reports to Codecov

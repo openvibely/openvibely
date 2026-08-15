@@ -190,6 +190,23 @@ func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
 	}
 }
 
+func TestParseKnowledgeEntriesExtractsJSONArrays(t *testing.T) {
+	entries, err := parseKnowledgeEntries(`Here you go:
+[
+  {"topic":"deploys","content":"Use staged rollouts","tags":["release","safety"]},
+  {"topic":"tests","content":"Keep fixtures small","tags":[]}
+]`)
+	if err != nil {
+		t.Fatalf("parseKnowledgeEntries: %v", err)
+	}
+	if len(entries) != 2 || entries[0].Topic != "deploys" || entries[0].Tags[1] != "safety" || entries[1].Content != "Keep fixtures small" {
+		t.Fatalf("unexpected entries: %#v", entries)
+	}
+	if _, err := parseKnowledgeEntries("not json"); err == nil {
+		t.Fatal("expected invalid knowledge JSON to fail")
+	}
+}
+
 func TestInsightsService_ExtractJSONArray(t *testing.T) {
 	tests := []struct {
 		name  string

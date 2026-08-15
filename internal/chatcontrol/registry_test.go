@@ -60,6 +60,19 @@ func TestRegistry_NoDuplicateNames(t *testing.T) {
 	}
 }
 
+func TestRegistry_AllActionNamesMatchesRegistryOrder(t *testing.T) {
+	names := AllActionNames()
+	actions := Registry()
+	if len(names) != len(actions) {
+		t.Fatalf("AllActionNames length = %d, want %d", len(names), len(actions))
+	}
+	for i, action := range actions {
+		if names[i] != action.Name {
+			t.Fatalf("AllActionNames[%d] = %q, want %q", i, names[i], action.Name)
+		}
+	}
+}
+
 func TestRegistry_AllNamesLowercase(t *testing.T) {
 	for _, a := range Registry() {
 		if a.Name != strings.ToLower(a.Name) {

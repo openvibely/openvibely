@@ -110,6 +110,24 @@ func TestFileChangeBroadcaster_MultipleSubscribers(t *testing.T) {
 	}
 }
 
+func TestFileChangeBroadcasterSubscriberCount(t *testing.T) {
+	b := NewFileChangeBroadcaster()
+	if got := b.SubscriberCount(); got != 0 {
+		t.Fatalf("initial SubscriberCount = %d, want 0", got)
+	}
+	sub, err := b.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if got := b.SubscriberCount(); got != 1 {
+		t.Fatalf("SubscriberCount after subscribe = %d, want 1", got)
+	}
+	b.Unsubscribe(sub)
+	if got := b.SubscriberCount(); got != 0 {
+		t.Fatalf("SubscriberCount after unsubscribe = %d, want 0", got)
+	}
+}
+
 func TestFileChangeEvent_ToSSE(t *testing.T) {
 	event := FileChangeEvent{
 		Type:      FileModified,

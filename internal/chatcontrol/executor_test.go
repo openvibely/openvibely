@@ -3,6 +3,8 @@ package chatcontrol
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -171,5 +173,57 @@ func TestBuildRuntimeToolExecutor_PlanModeReadActionsWork(t *testing.T) {
 		if output == "" {
 			t.Errorf("tool %q: expected non-empty output", tool)
 		}
+	}
+}
+
+func TestBuildRuntimeToolExecutor_NormalizesNameAndSurfacesHandlerErrors(t *testing.T) {
+	wantErr := errors.New("boom")
+	handlers := map[string]RuntimeActionHandler{
+		"list_models": func(_ context.Context, input json.RawMessage) (string, error) {
+			if string(input) != `{"ok":true}` {
+				t.Fatalf("unexpected input: %s", input)
+			}
+			return "", wantErr
+		},
+	}
+	executor := BuildRuntimeToolExecutor(models.ChatModeOrchestrate, SurfaceWeb, handlers)
+
+	_, handled, isError, err := executor(context.Background(), " LIST_MODELS ", json.RawMessage(`{"ok":true}`))
+	if !handled || !isError || !errors.Is(err, wantErr) {
+		t.Fatalf("expected handler error to surface with handled=true/isError=true, handled=%v isError=%v err=%v", handled, isError, err)
+	}
+}
+
+func TestBuildRuntimeToolExecutor_RegisteredMissingHandlerReturnsToolError(t *testing.T) {
+	executor := BuildRuntimeToolExecutor(models.ChatModeOrchestrate, SurfaceWeb, map[string]RuntimeActionHandler{})
+
+	out, handled, isError, err := executor(context.Background(), "list_models", json.RawMessage(`{}`))
+	if err != nil || !handled || !isError {
+		t.Fatalf("expected handled tool error for missing handler, handled=%v isError=%v err=%v out=%q", handled, isError, err, out)
+	}
+	if !strings.Contains(out, `"handler_missing"`) || !strings.Contains(out, `"list_models"`) {
+		t.Fatalf("missing handler output did not describe failure: %s", out)
+	}
+}
+
+func TestValidateHandlerCoverageIgnoresExternalMemoryTool(t *testing.T) {
+	handlers := map[string]RuntimeActionHandler{}
+	err := ValidateHandlerCoverage(models.ChatModePlan, SurfaceWeb, false, handlers)
+	if err == nil || !strings.Contains(err.Error(), "list_models") {
+		t.Fatalf("expected missing handler error for normal tools, got %v", err)
+	}
+	if strings.Contains(err.Error(), "memory_view") {
+		t.Fatalf("memory_view is external and should be ignored, got %v", err)
+	}
+
+	fullHandlers := map[string]RuntimeActionHandler{}
+	for _, def := range ToolDefsForContext(models.ChatModePlan, SurfaceWeb, false) {
+		if isExternalRuntimeTool(def.Name) {
+			continue
+		}
+		fullHandlers[def.Name] = func(context.Context, json.RawMessage) (string, error) { return "ok", nil }
+	}
+	if err := ValidateHandlerCoverage(models.ChatModePlan, SurfaceWeb, false, fullHandlers); err != nil {
+		t.Fatalf("expected full handler coverage: %v", err)
 	}
 }

@@ -2956,6 +2956,177 @@ func TestTaskRepo_ListWithSchedulesByProject_UsesCalendarProjection(t *testing.T
 	}
 }
 
+func TestTaskRepoCoveragePriorityTagsWorktreeOriginsAndDescendants(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	parent := &models.Task{ProjectID: "default", Title: "Coverage parent", Category: models.CategoryBacklog, Status: models.StatusBlocked, Prompt: "parent", Priority: 5, SwarmRole: models.SwarmRoleParent, Tag: models.TagFeature}
+	high := &models.Task{ProjectID: "default", Title: "Coverage high", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "high", Priority: 5, Tag: models.TagBug}
+	low := &models.Task{ProjectID: "default", Title: "Coverage low", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: "low", Priority: 1, Tag: models.TagFeature}
+	active := &models.Task{ProjectID: "default", Title: "Coverage active", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "active", Priority: 3, Tag: models.TagFeature}
+	chatRunning := &models.Task{ProjectID: "default", Title: "Coverage chat running", Category: models.CategoryChat, Status: models.StatusRunning, Prompt: "chat"}
+	chatDone := &models.Task{ProjectID: "default", Title: "Coverage chat done", Category: models.CategoryChat, Status: models.StatusCompleted, Prompt: "chat done"}
+	for _, task := range []*models.Task{parent, high, low, active, chatRunning, chatDone} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create %s: %v", task.Title, err)
+		}
+	}
+	child := &models.Task{ProjectID: "default", Title: "Coverage child", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "child", ParentTaskID: &parent.ID}
+	grandchild := &models.Task{ProjectID: "default", Title: "Coverage grandchild", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "grandchild", ParentTaskID: &child.ID}
+	for _, task := range []*models.Task{child, grandchild} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("create descendant %s: %v", task.Title, err)
+		}
+	}
+
+	backlog, err := repo.ListBacklogByPriority(ctx, "default", 0)
+	if err != nil {
+		t.Fatalf("ListBacklogByPriority all: %v", err)
+	}
+	if len(backlog) != 3 || backlog[0].Priority < backlog[1].Priority {
+		t.Fatalf("unexpected backlog priority list: %#v", backlog)
+	}
+	priorityFive, err := repo.ListBacklogByPriority(ctx, "default", 5)
+	if err != nil {
+		t.Fatalf("ListBacklogByPriority priority: %v", err)
+	}
+	if len(priorityFive) != 2 {
+		t.Fatalf("expected two priority-five backlog tasks, got %#v", priorityFive)
+	}
+	counts, err := repo.CountBacklogByPriority(ctx, "default")
+	if err != nil {
+		t.Fatalf("CountBacklogByPriority: %v", err)
+	}
+	if counts[5] != 2 || counts[1] != 1 {
+		t.Fatalf("priority counts = %#v", counts)
+	}
+
+	tagged, err := repo.ListByTags(ctx, []models.TaskTag{models.TagFeature}, "default", models.CategoryBacklog, 2, "")
+	if err != nil {
+		t.Fatalf("ListByTags: %v", err)
+	}
+	if len(tagged) != 1 || tagged[0].ID != parent.ID {
+		t.Fatalf("expected only feature backlog task with priority >=2, got %#v", tagged)
+	}
+	activeTagged, err := repo.ListByTags(ctx, nil, "default", models.CategoryActive, 0, models.StatusPending)
+	if err != nil {
+		t.Fatalf("ListByTags status/category: %v", err)
+	}
+	if len(activeTagged) != 2 {
+		t.Fatalf("expected active pending tasks, got %#v", activeTagged)
+	}
+
+	runningChatIDs, err := repo.ListRunningChatTaskIDs(ctx, "default")
+	if err != nil {
+		t.Fatalf("ListRunningChatTaskIDs: %v", err)
+	}
+	if !reflect.DeepEqual(runningChatIDs, []string{chatRunning.ID}) {
+		t.Fatalf("running chat IDs = %#v", runningChatIDs)
+	}
+
+	if err := repo.UpdateSwarmFields(ctx, child.ID, models.SwarmRoleWorker, "blocked", `{"role":"worker"}`, 7); err != nil {
+		t.Fatalf("UpdateSwarmFields: %v", err)
+	}
+	defaultAgentID := defaultAgentConfigID(t, ctx, db)
+	if err := repo.UpdateAgentID(ctx, child.ID, defaultAgentID); err != nil {
+		t.Fatalf("UpdateAgentID set: %v", err)
+	}
+	if err := repo.UpdateAgentID(ctx, child.ID, ""); err != nil {
+		t.Fatalf("UpdateAgentID clear: %v", err)
+	}
+	if err := repo.UpdateWorktreeInfo(ctx, child.ID, "/tmp/worktree", "task/branch"); err != nil {
+		t.Fatalf("UpdateWorktreeInfo: %v", err)
+	}
+	if err := repo.UpdateMergeStatus(ctx, child.ID, models.MergeStatusMerged); err != nil {
+		t.Fatalf("UpdateMergeStatus: %v", err)
+	}
+	if err := repo.UpdateAutoMerge(ctx, child.ID, true, "main"); err != nil {
+		t.Fatalf("UpdateAutoMerge: %v", err)
+	}
+	if err := repo.UpdateLineage(ctx, child.ID, "main", strings.Repeat("a", 40), 2); err != nil {
+		t.Fatalf("UpdateLineage: %v", err)
+	}
+	if err := repo.UpdateTelegramOrigin(ctx, child.ID, 123); err != nil {
+		t.Fatalf("UpdateTelegramOrigin: %v", err)
+	}
+	if err := repo.UpdateSlackOrigin(ctx, child.ID); err != nil {
+		t.Fatalf("UpdateSlackOrigin: %v", err)
+	}
+	if err := repo.UpdateEmailOrigin(ctx, child.ID); err != nil {
+		t.Fatalf("UpdateEmailOrigin: %v", err)
+	}
+	if err := repo.UpdateDiscordOrigin(ctx, child.ID); err != nil {
+		t.Fatalf("UpdateDiscordOrigin: %v", err)
+	}
+
+	updated, err := repo.GetByID(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetByID updated child: %v", err)
+	}
+	if updated.AgentID != nil || updated.WorktreePath != "/tmp/worktree" || updated.WorktreeBranch != "task/branch" ||
+		updated.MergeStatus != models.MergeStatusMerged || !updated.AutoMerge || updated.MergeTargetBranch != "main" ||
+		updated.BaseBranch != "main" || updated.LineageDepth != 2 || updated.CreatedVia != models.TaskOriginDiscord {
+		t.Fatalf("updated child = %#v", updated)
+	}
+	if err := repo.ClearWorktreeInfo(ctx, child.ID); err != nil {
+		t.Fatalf("ClearWorktreeInfo: %v", err)
+	}
+	cleared, err := repo.GetByID(ctx, child.ID)
+	if err != nil {
+		t.Fatalf("GetByID cleared child: %v", err)
+	}
+	if cleared.WorktreePath != "" || cleared.WorktreeBranch != "" {
+		t.Fatalf("worktree info not cleared: %#v", cleared)
+	}
+
+	hasActiveDescendant, err := repo.HasNonTerminalDescendants(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("HasNonTerminalDescendants active: %v", err)
+	}
+	if !hasActiveDescendant {
+		t.Fatal("expected active descendant")
+	}
+	if err := repo.UpdateStatus(ctx, child.ID, models.StatusCompleted); err != nil {
+		t.Fatalf("complete child: %v", err)
+	}
+	hasActiveDescendant, err = repo.HasNonTerminalDescendants(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("HasNonTerminalDescendants terminal: %v", err)
+	}
+	if hasActiveDescendant {
+		t.Fatal("expected only terminal descendants")
+	}
+
+	foundChild, err := repo.FindBlockedChildByParent(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("FindBlockedChildByParent before blocked: %v", err)
+	}
+	if foundChild != nil {
+		t.Fatalf("completed child should not be returned as blocked: %#v", foundChild)
+	}
+	if err := repo.UpdateStatus(ctx, child.ID, models.StatusBlocked); err != nil {
+		t.Fatalf("block child: %v", err)
+	}
+	foundChild, err = repo.FindBlockedChildByParent(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("FindBlockedChildByParent: %v", err)
+	}
+	if foundChild == nil || foundChild.ID != child.ID {
+		t.Fatalf("blocked child = %#v", foundChild)
+	}
+	if err := repo.DeleteBlockedChildrenByParent(ctx, parent.ID); err != nil {
+		t.Fatalf("DeleteBlockedChildrenByParent: %v", err)
+	}
+	foundChild, err = repo.FindBlockedChildByParent(ctx, parent.ID)
+	if err != nil {
+		t.Fatalf("FindBlockedChildByParent after delete: %v", err)
+	}
+	if foundChild != nil {
+		t.Fatalf("blocked child still present: %#v", foundChild)
+	}
+}
+
 func insertAutomationScheduleOwner(t *testing.T, ctx context.Context, db *sql.DB, projectID, scheduleID, nodeName string) {
 	t.Helper()
 	automationID := "calendar-automation-" + scheduleID

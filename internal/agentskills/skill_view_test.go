@@ -38,6 +38,36 @@ func TestSkillView_RejectsHandleNotInFrozenIndex(t *testing.T) {
 	}
 }
 
+func TestSelectedSkillRuntimeToolsOmitsLibraryToolsAndViewsSelectedSkill(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "skill", "---\ntitle: T\n---\nselected body")
+	cat, _ := BuildCatalog("turn-1", root, "")
+
+	rt := SelectedSkillRuntimeTools(cat)
+	if rt == nil {
+		t.Fatal("SelectedSkillRuntimeTools returned nil")
+	}
+	if len(rt.Definitions) != 1 || rt.Definitions[0].Name != "skill_view" {
+		t.Fatalf("selected runtime should expose only skill_view, got %+v", rt.Definitions)
+	}
+	if mine, allowed := rt.Filter("skills_list"); mine || allowed {
+		t.Fatal("selected runtime should not own skills_list")
+	}
+	if mine, allowed := rt.Filter(" skill_view "); !mine || !allowed {
+		t.Fatalf("selected runtime should own skill_view, got mine=%v allowed=%v", mine, allowed)
+	}
+
+	out, handled, isErr, err := rt.Executor(context.Background(), "skills_list", json.RawMessage(`{}`))
+	if handled || isErr || err != nil || out != "" {
+		t.Fatalf("skills_list should fall through for selected runtime, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+
+	out, handled, isErr, err = rt.Executor(context.Background(), "skill_view", json.RawMessage(`{"handle":"skill"}`))
+	if !handled || isErr || err != nil || !strings.Contains(out, "selected body") {
+		t.Fatalf("expected selected skill view, handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+}
+
 func TestSkillView_RejectsTraversalAbsoluteAndAgentPrefixedPaths(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "skill", "---\ntitle: T\n---\nbody")

@@ -392,6 +392,72 @@ func TestFormatGitHubAPIError(t *testing.T) {
 			t.Fatalf("expected raw body fallback, got %q", got)
 		}
 	})
+
+	t.Run("formats structured error without message", func(t *testing.T) {
+		body := []byte(`{"errors":[{"resource":"Reference","field":"ref","code":"already_exists"}]}`)
+		if got := formatGitHubAPIError(body); got != "Reference ref already_exists" {
+			t.Fatalf("expected synthesized error detail, got %q", got)
+		}
+	})
+
+	t.Run("falls back to docs url", func(t *testing.T) {
+		body := []byte(`{"documentation_url":"https://docs.github.com/rest"}`)
+		if got := formatGitHubAPIError(body); got != "https://docs.github.com/rest" {
+			t.Fatalf("expected documentation url fallback, got %q", got)
+		}
+	})
+
+	t.Run("truncates long raw body", func(t *testing.T) {
+		body := []byte(strings.Repeat("x", 350))
+		got := formatGitHubAPIError(body)
+		if len(got) != 303 || !strings.HasSuffix(got, "...") {
+			t.Fatalf("expected truncated raw body, got len=%d value=%q", len(got), got)
+		}
+	})
+}
+
+func TestGitHubServiceLowLevelHelpers(t *testing.T) {
+	base := t.TempDir()
+	inside := filepath.Join(base, "child", "repo")
+	outside := filepath.Join(t.TempDir(), "repo")
+
+	if ok, err := isPathWithin(base, inside); err != nil || !ok {
+		t.Fatalf("isPathWithin inside = %v, %v", ok, err)
+	}
+	if ok, err := isPathWithin(base, base); err != nil || !ok {
+		t.Fatalf("isPathWithin same path = %v, %v", ok, err)
+	}
+	if ok, err := isPathWithin(base, outside); err != nil || ok {
+		t.Fatalf("isPathWithin outside = %v, %v", ok, err)
+	}
+	if ok, err := isPathWithin("", inside); err != nil || ok {
+		t.Fatalf("isPathWithin blank = %v, %v", ok, err)
+	}
+
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	pemValue := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}))
+	escaped := strings.ReplaceAll(pemValue, "\n", `\\n`)
+	if parsed, err := parseGitHubAppPrivateKey(escaped); err != nil || parsed.N.Cmp(key.N) != 0 {
+		t.Fatalf("parse escaped rsa key = %#v, %v", parsed, err)
+	}
+	if _, err := parseGitHubAppPrivateKey(""); err == nil {
+		t.Fatal("expected empty private key to fail")
+	}
+	if _, err := parseGitHubAppPrivateKey("not pem"); err == nil {
+		t.Fatal("expected invalid PEM to fail")
+	}
+
+	svc := NewGitHubService(nil, "1", "slug", pemValue, "")
+	if !svc.isConfigured() {
+		t.Fatal("expected service app config to be configured")
+	}
+	partial := NewGitHubService(nil, "1", "", pemValue, "")
+	if partial.isConfigured() {
+		t.Fatal("expected partial service app config to be incomplete")
+	}
 }
 
 func TestCloneProjectRepo_NoPATFallsBackToLocalGitCLI(t *testing.T) {

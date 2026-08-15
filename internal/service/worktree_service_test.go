@@ -152,6 +152,64 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
+func TestWorktreeCommitLabelHelpers(t *testing.T) {
+	if got := commonChangeLabel(nil); got != "changes" {
+		t.Fatalf("commonChangeLabel(nil) = %q", got)
+	}
+	if got := commonChangeLabel([]worktreeCommitChange{
+		{Path: "internal/service/foo.go"},
+		{Path: "internal/service/bar.go"},
+	}); got != "internal service files" {
+		t.Fatalf("common directory label = %q", got)
+	}
+	if got := commonChangeLabel([]worktreeCommitChange{
+		{Path: "internal/service/task_handler.go"},
+		{Path: "web/src/task_panel.tsx"},
+	}); got != "tasks" {
+		t.Fatalf("common base word label = %q", got)
+	}
+	if got := commonChangeLabel([]worktreeCommitChange{
+		{Path: "internal/service/task_handler.go"},
+		{Path: "web/src/dashboard_panel.tsx"},
+	}); got != "2 files" {
+		t.Fatalf("fallback change label = %q", got)
+	}
+	if got := pathTokens("internal/service/task_handler_test.go"); strings.Join(got, ",") != "internal,service,task,handler,test" {
+		t.Fatalf("pathTokens = %#v", got)
+	}
+	if got := pathTokens(" "); got != nil {
+		t.Fatalf("blank pathTokens = %#v", got)
+	}
+	if got := pluralizeCommitLabel(""); got != "files" {
+		t.Fatalf("pluralize empty = %q", got)
+	}
+	if got := pluralizeCommitLabel("class"); got != "class" {
+		t.Fatalf("pluralize suffix-s = %q", got)
+	}
+	if got := pluralizeCommitLabel("task"); got != "tasks" {
+		t.Fatalf("pluralize task = %q", got)
+	}
+}
+
+func TestParseGitStatusFileStats(t *testing.T) {
+	stats := parseGitStatusFileStats([]byte(" M internal/service/foo.go\nA  new/file.go\nR  old.go -> newer.go\n?? scratch.txt\nD  removed.go\n"))
+	if len(stats) != 5 {
+		t.Fatalf("stats length = %d, want 5: %#v", len(stats), stats)
+	}
+	want := []WorktreeFileStat{
+		{Path: "internal/service/foo.go", Status: "modified"},
+		{Path: "new/file.go", Status: "added"},
+		{Path: "newer.go", Status: "modified"},
+		{Path: "scratch.txt", Status: "added"},
+		{Path: "removed.go", Status: "deleted"},
+	}
+	for i := range want {
+		if stats[i] != want[i] {
+			t.Fatalf("stats[%d] = %#v, want %#v", i, stats[i], want[i])
+		}
+	}
+}
+
 func TestSetupWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

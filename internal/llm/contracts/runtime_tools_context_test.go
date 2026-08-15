@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 )
@@ -79,5 +80,79 @@ func TestCompositeRuntimeToolsDeduplicatesDefinitions(t *testing.T) {
 	}
 	if !got.HasDefinition("memory_view") || !got.HasDefinition("list_capabilities") {
 		t.Fatalf("expected memory_view and list_capabilities definitions, got %#v", got.Definitions)
+	}
+}
+
+func TestCompositeRuntimeToolsExecutorAndFilterChain(t *testing.T) {
+	wantErr := errors.New("tool failed")
+	first := &RuntimeTools{
+		Definitions:      []RuntimeToolDefinition{{Name: "first"}},
+		SkipDefaultTools: true,
+		Executor: func(context.Context, string, json.RawMessage) (string, bool, bool, error) {
+			return "", false, false, nil
+		},
+		Filter: func(name string) (bool, bool) {
+			if name == "first" {
+				return true, true
+			}
+			return false, false
+		},
+	}
+	second := &RuntimeTools{
+		Definitions: []RuntimeToolDefinition{{Name: "second"}},
+		Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+			if name == "explode" {
+				return "", false, false, wantErr
+			}
+			return "ok", true, false, nil
+		},
+		Filter: func(name string) (bool, bool) {
+			if name == "second" {
+				return false, true
+			}
+			return false, false
+		},
+	}
+	got := CompositeRuntimeTools(nil, first, second)
+	if got == nil || !got.SkipDefaultTools {
+		t.Fatalf("expected composite with SkipDefaultTools, got %#v", got)
+	}
+	out, handled, isErr, err := got.Executor(context.Background(), "second", json.RawMessage(`{}`))
+	if out != "ok" || !handled || isErr || err != nil {
+		t.Fatalf("executor chain = out=%q handled=%v isErr=%v err=%v", out, handled, isErr, err)
+	}
+	if _, _, _, err := got.Executor(context.Background(), "explode", nil); !errors.Is(err, wantErr) {
+		t.Fatalf("expected executor error, got %v", err)
+	}
+	if allow, handled := got.Filter("first"); !allow || !handled {
+		t.Fatalf("expected first filter to allow, got allow=%v handled=%v", allow, handled)
+	}
+	if allow, handled := got.Filter("second"); allow || !handled {
+		t.Fatalf("expected second filter to deny, got allow=%v handled=%v", allow, handled)
+	}
+	if allow, handled := got.Filter("unknown"); allow || handled {
+		t.Fatalf("expected unknown filter to fall through, got allow=%v handled=%v", allow, handled)
+	}
+	if CompositeRuntimeTools(nil, nil) != nil {
+		t.Fatal("all nil composite should be nil")
+	}
+	if CompositeRuntimeTools(first) != first {
+		t.Fatal("single runtime tool should be returned unchanged")
+	}
+}
+
+func TestRuntimeToolsHelpersCoverNilAndTrimmedNames(t *testing.T) {
+	if (*RuntimeTools)(nil).HasDefinition("anything") {
+		t.Fatal("nil RuntimeTools should not have definitions")
+	}
+	rt := &RuntimeTools{Definitions: []RuntimeToolDefinition{{Name: " List_Models "}}}
+	if !rt.HasDefinition(" list_models ") || rt.HasDefinition(" ") {
+		t.Fatalf("HasDefinition did not normalize names")
+	}
+	if RuntimeToolsFromContext(nil) != nil {
+		t.Fatal("nil context should have no runtime tools")
+	}
+	if WithRuntimeTools(nil, nil) == nil || WithoutRuntimeTools(nil) == nil {
+		t.Fatal("nil-safe context helpers should return contexts")
 	}
 }
