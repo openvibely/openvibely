@@ -3571,9 +3571,10 @@ func TestTelegramService_HandleChatMessageSniffsOctetStreamImageForVisionModel(t
 	defaultAgent, err := llmConfigRepo.GetDefault(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, defaultAgent)
-	defaultAgent.Provider = models.ProviderAnthropic
-	defaultAgent.AuthMethod = models.AuthMethodCLI
-	defaultAgent.Model = "claude-sonnet-4-5"
+	defaultAgent.Provider = models.ProviderOpenAICompatible
+	defaultAgent.AuthMethod = models.AuthMethodAPIKey
+	defaultAgent.APIKey = "test-key"
+	defaultAgent.Model = "text-only-compatible"
 	defaultAgent.IsDefault = true
 	require.NoError(t, llmConfigRepo.Update(ctx, defaultAgent))
 	visionAgent := &models.LLMConfig{

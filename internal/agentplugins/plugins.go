@@ -45,7 +45,6 @@ const (
 // RuntimeBundle is the plugin-derived runtime payload merged into an agent.
 type RuntimeBundle struct {
 	PluginIDs    []string
-	PluginDirs   []string
 	Skills       []models.SkillConfig
 	MCPServers   []models.MCPServerConfig
 	MCPToolNames []string
@@ -411,7 +410,6 @@ func ResolveRuntimeBundle(ctx context.Context, pluginIDs []string) (*RuntimeBund
 	}
 
 	type pluginAccum struct {
-		dir     string
 		skills  []models.SkillConfig
 		servers []models.MCPServerConfig
 	}
@@ -438,20 +436,14 @@ func ResolveRuntimeBundle(ctx context.Context, pluginIDs []string) (*RuntimeBund
 		skills := loadPluginSkills(dir)
 		servers := loadPluginMCPServers(dir)
 		accum = append(accum, pluginAccum{
-			dir:     dir,
 			skills:  skills,
 			servers: servers,
 		})
 	}
 
-	dirSeen := map[string]struct{}{}
 	skillSeen := map[string]struct{}{}
 	serverSeen := map[string]struct{}{}
 	for _, p := range accum {
-		if _, ok := dirSeen[p.dir]; !ok && p.dir != "" {
-			dirSeen[p.dir] = struct{}{}
-			bundle.PluginDirs = append(bundle.PluginDirs, p.dir)
-		}
 		for _, skill := range p.skills {
 			key := strings.ToLower(strings.TrimSpace(skill.Name))
 			if key == "" {
@@ -476,7 +468,6 @@ func ResolveRuntimeBundle(ctx context.Context, pluginIDs []string) (*RuntimeBund
 		}
 	}
 
-	sort.Strings(bundle.PluginDirs)
 	sort.Slice(bundle.Skills, func(i, j int) bool {
 		return strings.ToLower(bundle.Skills[i].Name) < strings.ToLower(bundle.Skills[j].Name)
 	})

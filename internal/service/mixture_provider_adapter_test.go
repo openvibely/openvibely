@@ -96,7 +96,6 @@ func TestMixtureProviderAdapterReferenceIsolationAndAggregatorContext(t *testing
 		ChatSystemContext:   "private chat context",
 		WorkDir:             "/tmp/work",
 		AgentDefinition:     agentDef,
-		PluginDirs:          []string{"/plugins/acting"},
 		ProjectInstructions: "project instructions",
 	})
 	if err != nil {
@@ -129,7 +128,7 @@ func TestMixtureProviderAdapterReferenceIsolationAndAggregatorContext(t *testing
 		t.Fatalf("expected 2 reference calls, got %d", len(refReqs))
 	}
 	for _, req := range refReqs {
-		if req.Operation != llmcontracts.OperationDirect || !req.DisableTools || !req.RawDirectPrompt || req.ExecID != "" || req.AgentDefinition != nil || len(req.PluginDirs) != 0 || len(req.Attachments) != 0 || req.ProjectInstructions != "" || req.ChatSystemContext != "" {
+		if req.Operation != llmcontracts.OperationDirect || !req.DisableTools || !req.RawDirectPrompt || req.ExecID != "" || req.AgentDefinition != nil || len(req.Attachments) != 0 || req.ProjectInstructions != "" || req.ChatSystemContext != "" {
 			t.Fatalf("reference request was not isolated: %+v", req)
 		}
 		if rt := llmcontracts.RuntimeToolsFromContext(req.Ctx); rt != nil {
@@ -139,7 +138,7 @@ func TestMixtureProviderAdapterReferenceIsolationAndAggregatorContext(t *testing
 			t.Fatalf("reference advisory prompt missing expected content:\n%s", req.Message)
 		}
 	}
-	if aggReq.Operation != llmcontracts.OperationStreaming || aggReq.RawDirectPrompt || aggReq.ExecID != "exec-main" || aggReq.AgentDefinition != agentDef || len(aggReq.PluginDirs) != 1 || len(aggReq.Attachments) != 1 {
+	if aggReq.Operation != llmcontracts.OperationStreaming || aggReq.RawDirectPrompt || aggReq.ExecID != "exec-main" || aggReq.AgentDefinition != agentDef || len(aggReq.Attachments) != 1 {
 		t.Fatalf("aggregator did not preserve acting context: %+v", aggReq)
 	}
 	if rt := llmcontracts.RuntimeToolsFromContext(aggReq.Ctx); rt == nil || !rt.HasDefinition("send_message") {

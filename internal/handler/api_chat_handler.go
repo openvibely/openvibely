@@ -421,7 +421,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		fullContext += personalityContext
 	}
 
-	// Get working directory for CLI
+	// Get working directory for the provider call.
 	workDir := project.RepoPath
 
 	// Process the LLM call asynchronously using the shared streaming response processor.

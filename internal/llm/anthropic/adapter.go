@@ -430,7 +430,7 @@ func New(llmConfigRepo *repository.LLMConfigRepo, execRepo *repository.Execution
 func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workDir string, w *llmstream.Writer) (llmcontracts.AgentResult, error) {
 	agent := req.Agent
 
-	// API paths only (OAuth or API key). CLI is handled in service layer.
+	// API paths only (OAuth or API key).
 	if !agent.IsOAuth() && !agent.IsAnthropicAPIKey() {
 		return llmcontracts.AgentResult{}, fmt.Errorf("anthropic adapter requires OAuth or API key auth method")
 	}

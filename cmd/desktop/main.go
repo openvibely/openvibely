@@ -49,8 +49,7 @@ func main() {
 
 	// GUI launches often inherit a minimal desktop-session PATH instead of the
 	// user's shell-initialized PATH. Merge the user's real shell PATH once here
-	// so every subprocess (task shells, Claude/Codex CLI shelling out to
-	// `bash -c "go ..."`, plugin MCP servers, etc.) inherits it.
+	// so every subprocess (task shells, plugin MCP servers, etc.) inherits it.
 	config.EnsureDesktopPATH()
 	applog.Infof("[desktop] initialized task PATH from user shell")
 

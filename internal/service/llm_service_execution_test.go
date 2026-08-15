@@ -3664,9 +3664,6 @@ func TestLLMService_ExecuteTaskWithAgent_NoAgentDef_NilPluginContext(t *testing.
 	if capture.lastReq.AgentDefinition != nil {
 		t.Fatalf("expected nil AgentDefinition for task without agent def, got %+v", capture.lastReq.AgentDefinition)
 	}
-	if len(capture.lastReq.PluginDirs) != 0 {
-		t.Fatalf("expected zero PluginDirs for task without agent def, got %v", capture.lastReq.PluginDirs)
-	}
 }
 
 // TestLLMService_ExecuteTaskWithAgent_WrongAgentDefNotUsed verifies that

@@ -27,9 +27,7 @@ func SetUploadsDir(dir string) {
 		return
 	}
 	// Convert uploadsDir to absolute path so file paths stored in the DB work
-	// regardless of the working directory. This is critical for task execution:
-	// the Claude CLI agent runs with cmd.Dir set to the project's repo path,
-	// so relative paths like "uploads/tasks/{id}/file.png" would be unresolvable.
+	// regardless of the project's configured working directory.
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}

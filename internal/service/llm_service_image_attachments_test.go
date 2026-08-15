@@ -46,7 +46,7 @@ func TestLLMService_ReconcileMissingTaskAttachmentsRemovesBrokenMetadata(t *test
 	}
 }
 
-func TestLLMService_ImageAttachments_CLI_ShouldWarnUserNotReadFile(t *testing.T) {
+func TestLLMService_ImageAttachments_TextOnlyAgentRoutesToVisionAgent(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
 
@@ -64,16 +64,17 @@ func TestLLMService_ImageAttachments_CLI_ShouldWarnUserNotReadFile(t *testing.T)
 		t.Fatalf("Failed to create project: %v", err)
 	}
 
-	// Create a CLI agent (no vision support)
-	cliAgent := &models.LLMConfig{
-		Name:       "Claude CLI",
-		Provider:   models.ProviderAnthropic,
-		AuthMethod: models.AuthMethodCLI,
-		Model:      "claude-sonnet-4-5-20250929",
+	// Create a text-only agent (no vision support)
+	textOnlyAgent := &models.LLMConfig{
+		Name:       "Text Only Compatible",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "test-compatible-key",
+		Model:      "text-only-compatible",
 		MaxTokens:  4096,
 	}
-	if err := llmConfigRepo.Create(ctx, cliAgent); err != nil {
-		t.Fatalf("Failed to create CLI agent: %v", err)
+	if err := llmConfigRepo.Create(ctx, textOnlyAgent); err != nil {
+		t.Fatalf("Failed to create text-only agent: %v", err)
 	}
 
 	// Create a vision-capable API agent
@@ -96,7 +97,7 @@ func TestLLMService_ImageAttachments_CLI_ShouldWarnUserNotReadFile(t *testing.T)
 		Prompt:    "What do you see in this screenshot?",
 		Category:  models.CategoryBacklog,
 		Status:    models.StatusPending,
-		AgentID:   &cliAgent.ID, // Explicitly use CLI agent
+		AgentID:   &textOnlyAgent.ID, // Explicitly use text-only agent
 	}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("Failed to create task: %v", err)
@@ -140,7 +141,7 @@ func TestLLMService_ImageAttachments_CLI_ShouldWarnUserNotReadFile(t *testing.T)
 		t.Fatalf("Failed to load attachments: %v", err)
 	}
 
-	visionDecision := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, loadedTask.Prompt, attachments, *cliAgent, "Test", task.ID)
+	visionDecision := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, loadedTask.Prompt, attachments, *textOnlyAgent, "Test", task.ID)
 
 	// Verify that the agent was switched to a vision-capable agent
 	if !visionDecision.Changed {
@@ -163,7 +164,7 @@ func TestLLMService_ImageAttachments_CLI_ShouldWarnUserNotReadFile(t *testing.T)
 	defer os.Setenv("ANTHROPIC_API_KEY", oldAPIKey)
 
 	// Try vision routing again
-	visionDecision2 := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, loadedTask.Prompt, attachments, *cliAgent, "Test", task.ID)
+	visionDecision2 := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, loadedTask.Prompt, attachments, *textOnlyAgent, "Test", task.ID)
 
 	// Verify that no agent was switched but a warning reason is provided
 	if visionDecision2.Changed {
@@ -198,17 +199,18 @@ func TestLLMService_ImageAttachments_VisionRouting_Integration(t *testing.T) {
 		t.Fatalf("Failed to create project: %v", err)
 	}
 
-	// Create a CLI agent (no vision) as default
-	cliAgent := &models.LLMConfig{
-		Name:       "Claude CLI Default",
-		Provider:   models.ProviderAnthropic,
-		AuthMethod: models.AuthMethodCLI,
-		Model:      "claude-sonnet-4-5-20250929",
+	// Create a text-only agent (no vision) as default
+	textOnlyAgent := &models.LLMConfig{
+		Name:       "Text Only Default",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "test-compatible-key",
+		Model:      "text-only-compatible",
 		MaxTokens:  4096,
 		IsDefault:  true,
 	}
-	if err := llmConfigRepo.Create(ctx, cliAgent); err != nil {
-		t.Fatalf("Failed to create CLI agent: %v", err)
+	if err := llmConfigRepo.Create(ctx, textOnlyAgent); err != nil {
+		t.Fatalf("Failed to create text-only agent: %v", err)
 	}
 
 	// Create a vision-capable API agent
@@ -231,7 +233,7 @@ func TestLLMService_ImageAttachments_VisionRouting_Integration(t *testing.T) {
 		Prompt:    "What do you see in this screenshot?",
 		Category:  models.CategoryBacklog,
 		Status:    models.StatusPending,
-		// No explicit agent assigned - should use default (CLI)
+		// No explicit agent assigned - should use default text-only model.
 	}
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("Failed to create task: %v", err)
@@ -276,24 +278,24 @@ func TestLLMService_ImageAttachments_VisionRouting_Integration(t *testing.T) {
 	}
 
 	// Execute vision routing
-	visionDecision := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, loadedTask.Prompt, attachments, *cliAgent, "ExecuteTaskWithAgent", task.ID)
+	visionDecision := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, loadedTask.Prompt, attachments, *textOnlyAgent, "ExecuteTaskWithAgent", task.ID)
 
 	// CRITICAL: The agent should be switched to a vision-capable agent
 	if !visionDecision.Changed {
-		t.Errorf("BUG REPRODUCED: Vision routing did NOT switch from CLI to vision-capable agent. Reason: %s, Detail: %s", visionDecision.Reason, visionDecision.Detail)
+		t.Errorf("BUG REPRODUCED: Vision routing did NOT switch from text-only to vision-capable agent. Reason: %s, Detail: %s", visionDecision.Reason, visionDecision.Detail)
 	}
 
-	if visionDecision.Agent.Provider != models.ProviderAnthropic || visionDecision.Agent.AuthMethod == models.AuthMethodCLI {
+	if visionDecision.Agent.Provider != models.ProviderAnthropic || visionDecision.Agent.AuthMethod != models.AuthMethodAPIKey {
 		t.Errorf("BUG REPRODUCED: Expected switch to API agent, but got provider=%s auth=%s", visionDecision.Agent.Provider, visionDecision.Agent.AuthMethod)
 	}
 
 	// Verify the selected agent supports vision
 	if visionDecision.Agent.IsAnthropicCLI() {
-		t.Error("BUG REPRODUCED: Selected agent is still CLI (no vision support)")
+		t.Error("BUG REPRODUCED: Selected agent is still a non-vision legacy CLI config")
 	}
 
 	// Success: Agent was properly switched to vision-capable agent
-	t.Logf("SUCCESS: Vision routing correctly switched from CLI agent to vision-capable agent: %s (provider=%s, auth=%s)",
+	t.Logf("SUCCESS: Vision routing correctly switched from text-only agent to vision-capable agent: %s (provider=%s, auth=%s)",
 		visionDecision.Agent.Name, visionDecision.Agent.Provider, visionDecision.Agent.AuthMethod)
 }
 
@@ -315,17 +317,18 @@ func TestLLMService_ImageAttachments_NoVisionAgent_ClearError(t *testing.T) {
 		t.Fatalf("Failed to create project: %v", err)
 	}
 
-	// Create ONLY a CLI agent (no vision agents available)
-	cliAgent := &models.LLMConfig{
-		Name:       "Claude CLI Only",
-		Provider:   models.ProviderAnthropic,
-		AuthMethod: models.AuthMethodCLI,
-		Model:      "claude-sonnet-4-5-20250929",
+	// Create ONLY a text-only agent (no vision agents available)
+	textOnlyAgent := &models.LLMConfig{
+		Name:       "Text Only Compatible",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "test-compatible-key",
+		Model:      "text-only-compatible",
 		MaxTokens:  4096,
 		IsDefault:  true,
 	}
-	if err := llmConfigRepo.Create(ctx, cliAgent); err != nil {
-		t.Fatalf("Failed to create CLI agent: %v", err)
+	if err := llmConfigRepo.Create(ctx, textOnlyAgent); err != nil {
+		t.Fatalf("Failed to create text-only agent: %v", err)
 	}
 
 	// Clear environment fallback
@@ -379,7 +382,7 @@ func TestLLMService_ImageAttachments_NoVisionAgent_ClearError(t *testing.T) {
 	}
 
 	// Execute vision routing
-	visionDecision := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, loadedTask.Prompt, attachments, *cliAgent, "ExecuteTaskWithAgent", task.ID)
+	visionDecision := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, loadedTask.Prompt, attachments, *textOnlyAgent, "ExecuteTaskWithAgent", task.ID)
 
 	// Agent should NOT change (no vision agents available)
 	if visionDecision.Changed {
@@ -396,72 +399,5 @@ func TestLLMService_ImageAttachments_NoVisionAgent_ClearError(t *testing.T) {
 		t.Errorf("Expected detail to mention vision-capable agents, got: %s", visionDecision.Detail)
 	}
 
-	// Now test the CLI attachment instructions to ensure they warn the user
-	instructions := buildAttachmentInstructionsForCLI(attachments)
-
-	// Should contain a warning about vision
-	lowerInstr := strings.ToLower(instructions)
-	if !strings.Contains(lowerInstr, "cannot view") {
-		t.Errorf("Expected CLI instructions to warn 'cannot view' images, got: %s", instructions)
-	}
-
-	if !strings.Contains(lowerInstr, "cli mode") {
-		t.Errorf("Expected CLI instructions to mention 'cli mode', got: %s", instructions)
-	}
-
-	if !strings.Contains(lowerInstr, "vision-capable") {
-		t.Errorf("Expected CLI instructions to suggest 'vision-capable' model, got: %s", instructions)
-	}
-
 	t.Logf("SUCCESS: When no vision agents available, system provides clear warning: %s", visionDecision.Detail)
-	t.Logf("CLI instructions correctly warn user: %s", instructions)
-}
-
-func TestBuildAttachmentInstructions_ShouldNotTellAgentToReadImages(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create test files
-	textPath := filepath.Join(tmpDir, "notes.txt")
-	if err := os.WriteFile(textPath, []byte("test content"), 0644); err != nil {
-		t.Fatalf("Failed to create text file: %v", err)
-	}
-
-	imgPath := filepath.Join(tmpDir, "screenshot.png")
-	if err := os.WriteFile(imgPath, []byte("fake png"), 0644); err != nil {
-		t.Fatalf("Failed to create image file: %v", err)
-	}
-
-	// Test with mixed attachments
-	attachments := []models.Attachment{
-		{FileName: "notes.txt", FilePath: textPath, MediaType: "text/plain"},
-		{FileName: "screenshot.png", FilePath: imgPath, MediaType: "image/png"},
-	}
-
-	result := buildAttachmentInstructionsForCLI(attachments)
-
-	// Should mention text files in the readable section
-	if !strings.Contains(result, "notes.txt") {
-		t.Error("Expected instructions to mention text file")
-	}
-
-	// Should mention image files in a separate warning section
-	if !strings.Contains(result, "screenshot.png") {
-		t.Error("Expected instructions to mention image file")
-	}
-
-	// Should tell agent to examine text files but not images
-	if !strings.Contains(result, "examine these files") {
-		t.Error("Expected instructions to tell agent to examine text files")
-	}
-
-	// Should contain a warning about vision/CLI mode
-	lowerResult := strings.ToLower(result)
-	if !strings.Contains(lowerResult, "cannot view") && !strings.Contains(lowerResult, "cli mode") {
-		t.Errorf("Expected warning about images not being viewable via CLI, got: %s", result)
-	}
-
-	// Should suggest reconfiguring to vision-capable model
-	if !strings.Contains(lowerResult, "vision-capable") {
-		t.Errorf("Expected suggestion to use vision-capable model, got: %s", result)
-	}
 }

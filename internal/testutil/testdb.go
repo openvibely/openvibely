@@ -198,7 +198,7 @@ func (s *statementCountingStmt) QueryContext(ctx context.Context, args []driver.
 }
 
 func init() {
-	// Set GO_TESTING environment variable to prevent real external API/CLI calls during tests
+	// Set GO_TESTING environment variable to prevent real external provider calls during tests.
 	os.Setenv("GO_TESTING", "1")
 }
 
@@ -355,8 +355,8 @@ func seedTestDefaultAgent(tb testing.TB, db *sql.DB) {
 	}
 
 	if _, err := db.Exec(`
-		INSERT INTO agent_configs (name, provider, model, is_default, auth_method)
-		VALUES ('Test Default Agent', 'anthropic', 'claude-sonnet-4-5-20250929', 1, 'cli')
+		INSERT INTO agent_configs (name, provider, model, api_key, is_default, auth_method)
+			VALUES ('Test Default Agent', 'test', 'test-model', 'test-key', 1, 'api_key')
 	`); err != nil {
 		tb.Fatalf("failed to seed default test agent: %v", err)
 	}

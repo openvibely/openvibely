@@ -17,13 +17,12 @@ import (
 	llmollama "github.com/openvibely/openvibely/internal/llm/ollama"
 	llmopenai "github.com/openvibely/openvibely/internal/llm/openai"
 	llmopenai_compatible "github.com/openvibely/openvibely/internal/llm/openai_compatible"
-	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	llmusage "github.com/openvibely/openvibely/internal/llm/usage"
 	"github.com/openvibely/openvibely/internal/models"
 )
 
 // ProviderAdapter isolates provider-specific call routing from core orchestration.
-// Implementations can choose API key, OAuth, or CLI transports per provider.
+// Implementations choose the active API/OAuth transport for each provider.
 type ProviderAdapter interface {
 	Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error)
 }
@@ -88,22 +87,22 @@ func callProviderOnce(fn func() (llmcontracts.AgentResult, error)) (llmcontracts
 	return fn()
 }
 
-func resolveAgentRuntime(ctx context.Context, ad *models.Agent) (raw *models.Agent, merged *models.Agent, pluginDirs []string) {
+func resolveAgentRuntime(ctx context.Context, ad *models.Agent) (raw *models.Agent, merged *models.Agent) {
 	if ad == nil {
-		return nil, nil, nil
+		return nil, nil
 	}
 	raw = ad
 	merged = ad
 	if len(ad.Plugins) == 0 {
-		return raw, merged, nil
+		return raw, merged
 	}
 	runtime, err := resolvePluginRuntimeBundleFn(ctx, ad.Plugins)
 	if err != nil {
 		applog.Infof("[agent-svc] resolveAgentRuntime failed for %s: %v", ad.Name, err)
-		return raw, merged, nil
+		return raw, merged
 	}
 	merged = agentplugins.MergeAgentWithRuntime(ad, runtime)
-	return raw, merged, runtime.PluginDirs
+	return raw, merged
 }
 
 type anthropicProviderAdapter struct {
@@ -115,11 +114,14 @@ func anthropicAdapterEnabled(agent models.LLMConfig) bool {
 	return agent.IsOAuth() || agent.IsAnthropicAPIKey()
 }
 
+func unsupportedModelTransport(provider models.LLMProvider, authMethod models.AuthMethod) error {
+	return fmt.Errorf("%s model auth method %q is no longer supported; reconfigure the model to use OAuth or an API key", provider, authMethod)
+}
+
 func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	rawAgentDef, runtimeAgentDef, runtimePluginDirs := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
+	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
 	if runtimeAgentDef != nil {
 		req.AgentDefinition = runtimeAgentDef
-		req.PluginDirs = runtimePluginDirs
 	}
 	return callProviderOnce(func() (llmcontracts.AgentResult, error) {
 		switch req.Operation {
@@ -127,45 +129,19 @@ func (a *anthropicProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontr
 			if anthropicAdapterEnabled(req.Agent) {
 				return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
 			}
-			if req.Agent.IsAnthropicCLI() {
-				if req.DisableTools {
-					return llmcontracts.AgentResult{}, fmt.Errorf("direct no-tools mode is not supported for Anthropic CLI transport")
-				}
-				output, tokens, err := a.svc.callClaudeCLISimple(req.Ctx, req.Message, req.Attachments, req.Agent, req.WorkDir, req.DisableTools)
-				return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
-			}
-			output, tokens, err := a.svc.callAnthropic(req.Ctx, req.Message, req.Attachments, req.Agent)
-			return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
+			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
 
 		case llmcontracts.OperationStreaming:
 			if anthropicAdapterEnabled(req.Agent) {
 				return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
 			}
-			if req.Agent.IsAnthropicCLI() {
-				if requestUsesChatStreaming(req) {
-					output, tokens, err := a.svc.callClaudeCLIChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.WorkDir, req.Followup, req.ChatMode, req.PluginDirs)
-					return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
-				}
-				output, textOnly, tokens, err := a.svc.callClaudeCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.PluginDirs, rawAgentDef)
-				return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
-			}
-			if requestUsesChatStreaming(req) {
-				output, tokens, err := a.svc.callAnthropicChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode)
-				return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
-			}
-			output, tokens, err := a.svc.callAnthropic(req.Ctx, llmprompt.ApplyTaskCreationToolMode(req.Message, nil), req.Attachments, req.Agent)
-			return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
+			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
 
 		case llmcontracts.OperationTask:
 			if anthropicAdapterEnabled(req.Agent) {
 				return a.adapter.Call(req.Ctx, req, req.WorkDir, nil)
 			}
-			if req.Agent.IsAnthropicCLI() {
-				output, textOnly, tokens, err := a.svc.callClaudeCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.PluginDirs, rawAgentDef)
-				return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
-			}
-			output, tokens, err := a.svc.callAnthropic(req.Ctx, llmprompt.ApplyTaskCreationToolMode(req.Message, nil), req.Attachments, req.Agent)
-			return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
+			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
 		default:
 			return llmcontracts.AgentResult{}, fmt.Errorf("unsupported operation: %s", req.Operation)
 		}
@@ -178,7 +154,7 @@ type openAIProviderAdapter struct {
 }
 
 func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	_, runtimeAgentDef, _ := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
+	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
 	if runtimeAgentDef != nil {
 		req.AgentDefinition = runtimeAgentDef
 	}
@@ -197,11 +173,7 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 				output, usage, err := a.adapter.CallDirect(req.Ctx, req.Message, req.Attachments, req.Agent, req.WorkDir, req.ProjectInstructions, req.DisableTools, req.RawDirectPrompt, req.LifecycleHookCall)
 				return canonicalResult(output, output, usage, err)
 			}
-			if req.DisableTools {
-				return llmcontracts.AgentResult{}, fmt.Errorf("direct no-tools mode is not supported for OpenAI CLI transport")
-			}
-			output, tokens, err := a.svc.callCodexCLISimple(req.Ctx, req.Message, req.Attachments, req.Agent, req.WorkDir, req.DisableTools)
-			return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
+			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
 
 		case llmcontracts.OperationStreaming:
 			if openAIDirectClientEnabled(req.Agent) {
@@ -212,20 +184,14 @@ func (a *openAIProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontract
 				output, textOnly, usage, err := a.adapter.CallStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
 				return canonicalResult(output, textOnly, usage, err)
 			}
-			if requestUsesChatStreaming(req) {
-				output, tokens, err := a.svc.callCodexCLIChat(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.WorkDir, req.Followup, req.ChatMode)
-				return canonicalResult(output, output, llmusage.FromTotal(tokens), err)
-			}
-			output, textOnly, tokens, err := a.svc.callCodexCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir)
-			return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
+			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
 
 		case llmcontracts.OperationTask:
 			if openAIDirectClientEnabled(req.Agent) {
 				output, textOnly, usage, err := a.adapter.CallStreaming(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir, req.ProjectInstructions, req.AgentDefinition)
 				return canonicalResult(output, textOnly, usage, err)
 			}
-			output, textOnly, tokens, err := a.svc.callCodexCLI(req.Ctx, req.Message, req.Attachments, req.Agent, req.ExecID, req.WorkDir)
-			return canonicalResult(output, textOnly, llmusage.FromTotal(tokens), err)
+			return llmcontracts.AgentResult{}, unsupportedModelTransport(req.Agent.Provider, req.Agent.AuthMethod)
 		default:
 			return llmcontracts.AgentResult{}, fmt.Errorf("unsupported operation: %s", req.Operation)
 		}
@@ -238,7 +204,7 @@ type openAICompatibleProviderAdapter struct {
 }
 
 func (a *openAICompatibleProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	_, runtimeAgentDef, _ := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
+	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
 	if runtimeAgentDef != nil {
 		req.AgentDefinition = runtimeAgentDef
 	}
@@ -260,7 +226,7 @@ type ollamaProviderAdapter struct {
 }
 
 func (a *ollamaProviderAdapter) Call(req llmcontracts.AgentRequest) (llmcontracts.AgentResult, error) {
-	_, runtimeAgentDef, _ := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
+	_, runtimeAgentDef := resolveAgentRuntime(req.Ctx, req.AgentDefinition)
 	if runtimeAgentDef != nil {
 		req.AgentDefinition = runtimeAgentDef
 	}
@@ -416,7 +382,6 @@ func (a *mixtureProviderAdapter) callMixtureReference(req llmcontracts.AgentRequ
 	refReq.RawDirectPrompt = true
 	refReq.ExecID = ""
 	refReq.AgentDefinition = nil
-	refReq.PluginDirs = nil
 	refReq.ProjectInstructions = ""
 	refReq.ChatSystemContext = ""
 	refReq.Attachments = nil

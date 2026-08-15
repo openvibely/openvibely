@@ -500,9 +500,6 @@ func TestResolveRuntimeBundleDeduplicatesPluginResourcesAndMapsServers(t *testin
 	if !reflect.DeepEqual(bundle.PluginIDs, []string{"first@market", "second@market"}) {
 		t.Fatalf("plugin IDs = %#v", bundle.PluginIDs)
 	}
-	if len(bundle.PluginDirs) != 2 {
-		t.Fatalf("plugin dirs = %#v", bundle.PluginDirs)
-	}
 	if len(bundle.Skills) != 1 || bundle.Skills[0].Name != "Audit" {
 		t.Fatalf("skills = %#v", bundle.Skills)
 	}

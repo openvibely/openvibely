@@ -254,8 +254,6 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 										if agent.Provider == models.ProviderAnthropic {
 											if agent.AuthMethod == models.AuthMethodOAuth {
 												Anthropic (OAuth - API) / { agent.Model }
-											} else if agent.AuthMethod == models.AuthMethodCLI && agent.APIKey == "" {
-												Anthropic (OAuth - CLI) / { agent.Model }
 											} else {
 												Anthropic (API Key) / { agent.Model }
 											}
@@ -267,7 +265,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 											} else if agent.AuthMethod == models.AuthMethodOAuth {
 												OpenAI (OAuth - API) / { agent.Model }
 											} else {
-												OpenAI (OAuth - CLI) / { agent.Model }
+												OpenAI (API Key) / { agent.Model }
 											}
 										} else if agent.Provider == models.ProviderOpenAICompatible {
 											OpenAI-Compatible (API Key) / { agent.Model }
@@ -497,39 +495,12 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 							<option value="oauth">API (OAuth via web)</option>
 						</select>
 					</div>
-					<div id="subscription_info_cli" class="mb-3 hidden">
-						<div class="alert alert-info">
-							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-							<div>
-								<p class="font-semibold">OAuth via CLI</p>
-								<p class="text-sm">Uses the <code>claude</code> CLI for authentication. Make sure you are logged in. No API key needed.</p>
-							</div>
-						</div>
-					</div>
 					<div id="subscription_info_oauth" class="mb-3 hidden">
 						<div class="alert alert-info">
 							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
 							<div>
 								<p class="font-semibold">OAuth via API</p>
 								<p class="text-sm">Uses the Anthropic API directly via OAuth. After saving, click "Connect with OAuth" on the model card to authorize.</p>
-							</div>
-						</div>
-					</div>
-					<div id="subscription_info_codex" class="mb-3 hidden">
-						<div class="alert alert-info">
-							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-							<div>
-								<p class="font-semibold">Uses local Codex CLI</p>
-								<p class="text-sm">No API key needed here. Ensure the <code>codex</code> command is installed and authenticated on this machine.</p>
-							</div>
-						</div>
-					</div>
-					<div id="openai_subscription_info_cli" class="mb-3 hidden">
-						<div class="alert alert-info">
-							<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-							<div>
-								<p class="font-semibold">OAuth via CLI</p>
-								<p class="text-sm">Uses the <code>codex</code> CLI for authentication. Make sure you are logged in. No API key needed.</p>
 							</div>
 						</div>
 					</div>
@@ -1654,15 +1625,14 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 									status.textContent = err.message || 'Model discovery failed; enter the model ID manually.';
 								});					}
 
-				function hideAllInfoBoxes() {					document.getElementById('subscription_info_cli').classList.add('hidden');
-					document.getElementById('subscription_info_oauth').classList.add('hidden');
-					document.getElementById('subscription_info_codex').classList.add('hidden');
-						document.getElementById('ollama_info').classList.add('hidden');
+					function hideAllInfoBoxes() {
+						document.getElementById('subscription_info_oauth').classList.add('hidden');
+							document.getElementById('ollama_info').classList.add('hidden');
 						document.getElementById('ollama_fields').classList.add('hidden');
 								document.getElementById('openai_compatible_info').classList.add('hidden');
 								document.getElementById('openai_compatible_fields').classList.add('hidden');
 								document.getElementById('mixture_fields').classList.add('hidden');
-								document.getElementById('openai_api_key_info').classList.add('hidden');					document.getElementById('openai_subscription_info_cli').classList.add('hidden');					document.getElementById('openai_subscription_info_oauth').classList.add('hidden');
+									document.getElementById('openai_api_key_info').classList.add('hidden');					document.getElementById('openai_subscription_info_oauth').classList.add('hidden');
 				}
 
 				function selectedProjectIDForModelMutation() {
@@ -1772,7 +1742,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 						modelTemperature: String(details.temperature || 0),
 						modelIsDefault: String(details.is_default === true),
 						modelApiKey: details.api_key || '',
-						modelAuthMethod: details.auth_method || 'cli',
+						modelAuthMethod: details.auth_method || 'api_key',
 						modelMaxWorkers: String(details.max_workers || 0),
 						modelWorkerTimeout: String(details.worker_timeout || 0),
 						modelOauthClientId: details.oauth_client_id || '',
@@ -1809,7 +1779,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 						var isDefault = button.dataset.modelIsDefault === 'true';
 						var apiKey = button.dataset.modelApiKey || '';
 						var hasAPIKey = apiKey !== '';
-							var authMethod = button.dataset.modelAuthMethod || 'cli';					var modelMaxWorkers = parseInt(button.dataset.modelMaxWorkers) || 0;
+							var authMethod = button.dataset.modelAuthMethod || 'api_key';					var modelMaxWorkers = parseInt(button.dataset.modelMaxWorkers) || 0;
 					var workerTimeout = parseInt(button.dataset.modelWorkerTimeout) || 0;
 					var ollamaBaseUrl = button.dataset.modelOllamaBaseUrl || '';
 					var baseUrl = button.dataset.modelBaseUrl || '';
@@ -1852,7 +1822,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 						openaiAuthType = 'api_key';
 					} else {
 						openaiAuthType = 'oauth';
-						openaiConnectionMethod = authMethod; // 'cli' or 'oauth'
+							openaiConnectionMethod = 'oauth';
 					}
 				}
 
@@ -2084,18 +2054,15 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					}
 				}
 
-			function toggleSubscriptionMethodFields() {
-				var method = document.getElementById('model_auth_method').value;
-				var subscriptionInfoCli = document.getElementById('subscription_info_cli');
-				var subscriptionInfoOauth = document.getElementById('subscription_info_oauth');
-				if (method === 'oauth') {
-					subscriptionInfoCli.classList.add('hidden');
-					subscriptionInfoOauth.classList.remove('hidden');
-				} else {
-					subscriptionInfoCli.classList.remove('hidden');
-					subscriptionInfoOauth.classList.add('hidden');
+				function toggleSubscriptionMethodFields() {
+					var method = document.getElementById('model_auth_method').value;
+					var subscriptionInfoOauth = document.getElementById('subscription_info_oauth');
+					if (method === 'oauth') {
+						subscriptionInfoOauth.classList.remove('hidden');
+					} else {
+						subscriptionInfoOauth.classList.remove('hidden');
+					}
 				}
-			}
 
 			function toggleOpenAIAuthFields() {
 				var authType = document.getElementById('model_openai_auth_type').value;
@@ -2121,22 +2088,10 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 				}
 			}
 
-				function toggleOpenAIConnectionMethodFields() {
-					var method = document.getElementById('model_openai_connection_method').value;
-					var subscriptionInfoCli = document.getElementById('openai_subscription_info_cli');
-					var subscriptionInfoOauth = document.getElementById('openai_subscription_info_oauth');
-
-					hideAllInfoBoxes();
-
-					if (method === 'oauth') {
-						subscriptionInfoOauth.classList.remove('hidden');
-						subscriptionInfoCli.classList.add('hidden');
-					} else {
-						// cli
-						subscriptionInfoCli.classList.remove('hidden');
-						subscriptionInfoOauth.classList.add('hidden');
+					function toggleOpenAIConnectionMethodFields() {
+						hideAllInfoBoxes();
+						document.getElementById('openai_subscription_info_oauth').classList.remove('hidden');
 					}
-				}
 
 				function closeModelModal() {
 					window._modelEditRequestGeneration = (window._modelEditRequestGeneration || 0) + 1;

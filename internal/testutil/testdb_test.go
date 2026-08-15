@@ -156,8 +156,8 @@ func TestNewTestDBDefaultAgent(t *testing.T) {
 	).Scan(&name, &provider, &model, &authMethod); err != nil {
 		t.Fatalf("read default agent: %v", err)
 	}
-	if name != "Test Default Agent" || provider != "anthropic" ||
-		model != "claude-sonnet-4-5-20250929" || authMethod != "cli" {
+	if name != "Test Default Agent" || provider != "test" ||
+		model != "test-model" || authMethod != "api_key" {
 		t.Fatalf("unexpected default agent: name=%q provider=%q model=%q auth=%q",
 			name, provider, model, authMethod)
 	}

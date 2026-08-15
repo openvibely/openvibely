@@ -766,7 +766,7 @@ func channelListModelsResult(ctx context.Context, repo *repository.LLMConfigRepo
 		}
 		auth := string(c.AuthMethod)
 		if auth == "" {
-			auth = "cli"
+			auth = string(models.AuthMethodAPIKey)
 		}
 		sb.WriteString(fmt.Sprintf("- %s%s — provider: %s, model: %s, auth: %s\n", c.Name, defaultStr, c.Provider, c.Model, auth))
 	}

@@ -35,13 +35,13 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodAPIKey,
 		},
 		{
-			name:           "anthropic subscription cli",
+			name:           "anthropic subscription legacy cli normalizes to oauth",
 			provider:       "anthropic",
 			anthropicAuth:  "subscription",
 			openaiAuth:     "",
 			authMethod:     "cli",
 			wantProvider:   models.ProviderAnthropic,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "anthropic subscription oauth",
@@ -80,13 +80,13 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodAPIKey,
 		},
 		{
-			name:           "openai subscription cli",
+			name:           "openai subscription legacy cli normalizes to oauth",
 			provider:       "openai",
 			anthropicAuth:  "",
 			openaiAuth:     "subscription",
 			authMethod:     "cli",
 			wantProvider:   models.ProviderOpenAI,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "openai subscription oauth",
@@ -107,13 +107,13 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
-			name:           "openai defaults to cli for backwards compat",
+			name:           "openai defaults to api key",
 			provider:       "openai",
 			anthropicAuth:  "",
 			openaiAuth:     "",
 			authMethod:     "",
 			wantProvider:   models.ProviderOpenAI,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodAPIKey,
 		},
 		{
 			name:           "openai compatible api key",
@@ -149,7 +149,7 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			openaiAuth:     "",
 			authMethod:     "",
 			wantProvider:   models.LLMProvider("openai_compatible_xai"),
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodAPIKey,
 		}, {
 			name:           "ollama",
 			provider:       "ollama",
@@ -157,7 +157,7 @@ func TestResolveProviderAndAuth(t *testing.T) {
 			openaiAuth:     "",
 			authMethod:     "",
 			wantProvider:   models.ProviderOllama,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodAPIKey,
 		}}
 
 	for _, tt := range tests {
@@ -1747,11 +1747,11 @@ func TestNormalizeBrowserModelFormCommonWorkerAndCheckboxSettings(t *testing.T) 
 	}
 }
 
-func TestCreateModel_SubscriptionCLI(t *testing.T) {
+func TestCreateModel_SubscriptionLegacyCLINormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
 	form := url.Values{}
-	form.Set("name", "My CLI Model")
+	form.Set("name", "My Legacy CLI Model")
 	form.Set("provider", "anthropic")
 	form.Set("anthropic_auth_type", "subscription")
 	form.Set("auth_method", "cli")
@@ -1775,7 +1775,7 @@ func TestCreateModel_SubscriptionCLI(t *testing.T) {
 
 	var found *models.LLMConfig
 	for i := range configs {
-		if configs[i].Name == "My CLI Model" {
+		if configs[i].Name == "My Legacy CLI Model" {
 			found = &configs[i]
 			break
 		}
@@ -1786,8 +1786,8 @@ func TestCreateModel_SubscriptionCLI(t *testing.T) {
 	if found.Provider != models.ProviderAnthropic {
 		t.Errorf("provider = %q, want %q", found.Provider, models.ProviderAnthropic)
 	}
-	if found.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodCLI)
+	if found.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
@@ -2549,11 +2549,11 @@ func TestUpdateModel_SwitchFromAPIKeyToSubscription(t *testing.T) {
 	}
 }
 
-func TestUpdateModel_ChangeAuthMethod_CLIToOAuth(t *testing.T) {
+func TestUpdateModel_ChangeAuthMethod_LegacyCLIToOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
-	// Create a Claude Max model with CLI auth method
+	// Create a historical subscription model with retired CLI auth method.
 	agent := &models.LLMConfig{
 		Name:       "Sonnet CLI",
 		Provider:   models.ProviderAnthropic,
@@ -2598,7 +2598,7 @@ func TestUpdateModel_ChangeAuthMethod_CLIToOAuth(t *testing.T) {
 	}
 }
 
-func TestUpdateModel_ChangeAuthMethod_OAuthToCLI(t *testing.T) {
+func TestUpdateModel_ChangeAuthMethod_OAuthStaleCLIFormNormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
@@ -2615,7 +2615,7 @@ func TestUpdateModel_ChangeAuthMethod_OAuthToCLI(t *testing.T) {
 		t.Fatalf("create error: %v", err)
 	}
 
-	// Update: change auth_method from OAuth to CLI
+	// Update: a stale CLI value from a subscription form normalizes back to OAuth.
 	form := url.Values{}
 	form.Set("name", "Sonnet OAuth")
 	form.Set("provider", "anthropic")
@@ -2642,8 +2642,8 @@ func TestUpdateModel_ChangeAuthMethod_OAuthToCLI(t *testing.T) {
 	if updated.Provider != models.ProviderAnthropic {
 		t.Errorf("provider = %q, want %q", updated.Provider, models.ProviderAnthropic)
 	}
-	if updated.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("auth_method = %q, want %q", updated.AuthMethod, models.AuthMethodCLI)
+	if updated.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q", updated.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
@@ -2769,10 +2769,9 @@ func TestUpdateModel_DuplicateAuthMethodFormFields(t *testing.T) {
 	}
 
 	// With duplicate form fields, Go's FormValue returns the first value ("cli").
-	// The UI prevents this via toggleProviderFields(), which disables the inactive
-	// provider's select. An explicit "cli" value is still respected by the handler.
-	if updated.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("auth_method = %q, want %q (FormValue returns first duplicate)", updated.AuthMethod, models.AuthMethodCLI)
+	// The handler normalizes stale subscription CLI values back to OAuth.
+	if updated.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q", updated.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
@@ -2796,12 +2795,12 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
-			name:           "anthropic oauth with cli connection",
+			name:           "anthropic oauth with legacy cli connection normalizes to oauth",
 			provider:       "anthropic",
 			anthropicAuth:  "oauth",
 			authMethod:     "cli",
 			wantProvider:   models.ProviderAnthropic,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "anthropic oauth defaults to oauth when auth_method absent",
@@ -2820,12 +2819,12 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
-			name:           "openai oauth with cli connection",
+			name:           "openai oauth with legacy cli connection normalizes to oauth",
 			provider:       "openai",
 			openaiAuth:     "oauth",
 			authMethod:     "cli",
 			wantProvider:   models.ProviderOpenAI,
-			wantAuthMethod: models.AuthMethodCLI,
+			wantAuthMethod: models.AuthMethodOAuth,
 		},
 		{
 			name:           "openai oauth defaults to oauth when auth_method absent",
@@ -2850,11 +2849,11 @@ func TestResolveProviderAndAuth_OAuthFormValue(t *testing.T) {
 	}
 }
 
-func TestCreateModel_OAuthCLI(t *testing.T) {
+func TestCreateModel_OAuthLegacyCLINormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
 	form := url.Values{}
-	form.Set("name", "My OAuth CLI Model")
+	form.Set("name", "My OAuth Legacy CLI Model")
 	form.Set("provider", "anthropic")
 	form.Set("anthropic_auth_type", "oauth")
 	form.Set("auth_method", "cli")
@@ -2878,7 +2877,7 @@ func TestCreateModel_OAuthCLI(t *testing.T) {
 
 	var found *models.LLMConfig
 	for i := range configs {
-		if configs[i].Name == "My OAuth CLI Model" {
+		if configs[i].Name == "My OAuth Legacy CLI Model" {
 			found = &configs[i]
 			break
 		}
@@ -2889,8 +2888,8 @@ func TestCreateModel_OAuthCLI(t *testing.T) {
 	if found.Provider != models.ProviderAnthropic {
 		t.Errorf("provider = %q, want %q", found.Provider, models.ProviderAnthropic)
 	}
-	if found.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodCLI)
+	if found.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
@@ -3068,11 +3067,11 @@ func TestCreateModel_OpenAIOAuthAPI(t *testing.T) {
 	}
 }
 
-func TestCreateModel_OpenAIOAuthCLI(t *testing.T) {
+func TestCreateModel_OpenAIOAuthLegacyCLINormalizesOAuth(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 
 	form := url.Values{}
-	form.Set("name", "OpenAI OAuth CLI Model")
+	form.Set("name", "OpenAI OAuth Legacy CLI Model")
 	form.Set("provider", "openai")
 	form.Set("openai_auth_type", "oauth")
 	form.Set("auth_method", "cli")
@@ -3096,7 +3095,7 @@ func TestCreateModel_OpenAIOAuthCLI(t *testing.T) {
 
 	var found *models.LLMConfig
 	for i := range configs {
-		if configs[i].Name == "OpenAI OAuth CLI Model" {
+		if configs[i].Name == "OpenAI OAuth Legacy CLI Model" {
 			found = &configs[i]
 			break
 		}
@@ -3107,8 +3106,8 @@ func TestCreateModel_OpenAIOAuthCLI(t *testing.T) {
 	if found.Provider != models.ProviderOpenAI {
 		t.Errorf("provider = %q, want %q", found.Provider, models.ProviderOpenAI)
 	}
-	if found.AuthMethod != models.AuthMethodCLI {
-		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodCLI)
+	if found.AuthMethod != models.AuthMethodOAuth {
+		t.Errorf("auth_method = %q, want %q", found.AuthMethod, models.AuthMethodOAuth)
 	}
 }
 
@@ -3354,7 +3353,7 @@ func TestUpdateModel_SwitchFromSubscriptionToAPIKey(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
 
-	// Create a Claude Max (subscription CLI) model
+	// Create a historical subscription model with retired CLI auth method.
 	agent := &models.LLMConfig{
 		Name:       "Sub to API",
 		Provider:   models.ProviderAnthropic,

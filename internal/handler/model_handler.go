@@ -139,11 +139,11 @@ func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMet
 		return models.ProviderOpenAICompatible, models.AuthMethodAPIKey
 	}
 	// Accept both "subscription" (legacy) and "oauth" (current) form values.
-	// Default to OAuth (not CLI) when auth_method is absent or unrecognized — the UI
-	// no longer exposes CLI as an option for these providers.
+	// CLI auth is no longer a supported model transport, so legacy or absent
+	// auth_method values normalize to OAuth for subscription-backed providers.
 	if provider == "anthropic" && (anthropicAuthType == "subscription" || anthropicAuthType == "oauth") {
 		am := models.AuthMethod(authMethod)
-		if am != models.AuthMethodCLI && am != models.AuthMethodOAuth {
+		if am != models.AuthMethodOAuth {
 			am = models.AuthMethodOAuth
 		}
 		return models.ProviderAnthropic, am
@@ -155,20 +155,19 @@ func resolveProviderAndAuth(provider, anthropicAuthType, openaiAuthType, authMet
 		return models.ProviderOpenAI, models.AuthMethodAPIKey
 	}
 	// Accept both "subscription" (legacy) and "oauth" (current) form values.
-	// Default to OAuth (not CLI) when auth_method is absent or unrecognized — the UI
-	// no longer exposes CLI as an option for these providers.
+	// CLI auth is no longer a supported model transport, so legacy or absent
+	// auth_method values normalize to OAuth for subscription-backed providers.
 	if provider == "openai" && (openaiAuthType == "subscription" || openaiAuthType == "oauth") {
 		am := models.AuthMethod(authMethod)
-		if am != models.AuthMethodCLI && am != models.AuthMethodOAuth {
+		if am != models.AuthMethodOAuth {
 			am = models.AuthMethodOAuth
 		}
 		return models.ProviderOpenAI, am
 	}
 	if provider == "openai" {
-		// Fallback for backwards compatibility
-		return models.ProviderOpenAI, models.AuthMethodCLI
+		return models.ProviderOpenAI, models.AuthMethodAPIKey
 	}
-	return models.LLMProvider(provider), models.AuthMethodCLI
+	return models.LLMProvider(provider), models.AuthMethodAPIKey
 }
 
 func isKnownOpenAICompatibleUIProvider(provider string) bool {

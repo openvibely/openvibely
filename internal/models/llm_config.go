@@ -20,7 +20,7 @@ const (
 type AuthMethod string
 
 const (
-	AuthMethodCLI    AuthMethod = "cli"     // Use Claude/Codex CLI (default)
+	AuthMethodCLI    AuthMethod = "cli"     // Legacy value for retired CLI auth.
 	AuthMethodOAuth  AuthMethod = "oauth"   // Use OAuth tokens (Claude Max or OpenAI)
 	AuthMethodAPIKey AuthMethod = "api_key" // Use API key directly (OpenAI)
 )

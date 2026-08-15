@@ -403,7 +403,7 @@ func TestLLMConfigRepo_GetDefault(t *testing.T) {
 	repo := NewLLMConfigRepo(db)
 	ctx := context.Background()
 
-	// Migration 003 seeds a default Claude Max model config
+	// Test fixtures seed a hermetic default model config.
 	def, err := repo.GetDefault(ctx)
 	if err != nil {
 		t.Fatalf("GetDefault: %v", err)
@@ -411,8 +411,8 @@ func TestLLMConfigRepo_GetDefault(t *testing.T) {
 	if def == nil {
 		t.Fatal("expected seeded default model config, got nil")
 	}
-	if def.Provider != models.ProviderAnthropic {
-		t.Errorf("expected default Provider=anthropic, got %q", def.Provider)
+	if def.Provider != models.ProviderTest {
+		t.Errorf("expected default Provider=test, got %q", def.Provider)
 	}
 	if !def.IsDefault {
 		t.Error("expected IsDefault=true")

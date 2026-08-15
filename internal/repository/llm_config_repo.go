@@ -223,7 +223,7 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 		}
 	}
 	if a.AuthMethod == "" {
-		a.AuthMethod = models.AuthMethodCLI
+		a.AuthMethod = models.AuthMethodAPIKey
 	}
 	err = tx.QueryRowContext(ctx,
 		`INSERT INTO agent_configs (id, name, provider, model, reasoning_effort, api_key, max_tokens, temperature, is_default, auth_method, oauth_access_token, oauth_refresh_token, oauth_expires_at, oauth_account_id, max_workers, worker_timeout, oauth_client_id, oauth_client_secret, oauth_authorize_url, oauth_token_url, oauth_scopes, ollama_base_url, base_url, transport, preset_slug, models_url, auth_header_name, auth_header_value_prefix, extra_headers_json, extra_body_json, default_max_tokens, token_exchange_format, token_refresh_format, custom_auth_config_json, custom_auth_state_json, mixture_config_json, auto_start_tasks)
@@ -261,7 +261,7 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 		}
 	}
 	if a.AuthMethod == "" {
-		a.AuthMethod = models.AuthMethodCLI
+		a.AuthMethod = models.AuthMethodAPIKey
 	}
 	_, err = tx.ExecContext(ctx,
 		`UPDATE agent_configs SET name = ?, provider = ?, model = ?, reasoning_effort = ?, api_key = ?,

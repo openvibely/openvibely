@@ -2526,8 +2526,8 @@ func (h *Handler) autoSelectAgent(ctx context.Context, message string, hasImages
 	return &agents[0], nil
 }
 
-// resolveWorkDir retrieves the repository path for a project to use as the working
-// directory for CLI-based agents (e.g., Claude CLI subprocess execution).
+// resolveWorkDir retrieves the repository path for a project to use as the
+// working directory for model calls and task execution.
 //
 // Returns an empty string if the project is not found or has no configured repo path.
 // This graceful degradation allows the LLM service to handle missing work directories
@@ -3187,7 +3187,7 @@ func (h *Handler) executeListModels(ctx context.Context) string {
 			}
 			authStr := string(c.AuthMethod)
 			if authStr == "" {
-				authStr = "cli"
+				authStr = string(models.AuthMethodAPIKey)
 			}
 			workerInfo := ""
 			if c.MaxWorkers > 0 {

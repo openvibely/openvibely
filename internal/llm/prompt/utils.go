@@ -125,13 +125,9 @@ func BuildTaskPromptHeader() string {
 	return "IMPORTANT: Do not use plan mode. Take direct action immediately. Do not ask for approval or create plans — execute the task directly.\n\n"
 }
 
-// BuildAttachmentInstructions builds the text block that tells CLI-based agents
-// about attached files with their absolute paths. Returns an empty string if
-// there are no attachments.
-//
-// NOTE: This function separates image files from text files. CLI agents cannot
-// view images natively (no vision support), so we provide a clear message that
-// images are listed but cannot be analyzed. Text files can be read normally.
+// BuildAttachmentInstructions builds the text block that tells text-only model
+// calls about attached files with their absolute paths. Returns an empty string
+// if there are no attachments.
 func BuildAttachmentInstructions(attachments []models.Attachment) string {
 	if len(attachments) == 0 {
 		return ""
@@ -160,26 +156,25 @@ func BuildAttachmentInstructions(attachments []models.Attachment) string {
 		sb.WriteString("\nPlease examine these files as part of your task. Use the absolute paths above to access them.\n\n")
 	}
 
-	// Warn about image files that cannot be viewed
+	// Warn about image files that cannot be viewed.
 	if len(imageFiles) > 0 {
 		if len(textFiles) > 0 {
 			sb.WriteString("---\n\n")
 		}
-		sb.WriteString("NOTE: The following image files were attached, but you cannot view them directly because you are running in CLI mode without vision support:\n")
+		sb.WriteString("NOTE: The following image files were attached, but this model call cannot view them directly because it does not have vision support:\n")
 		for _, att := range imageFiles {
 			absPath := AttachmentAbsPath(att)
 			sb.WriteString(fmt.Sprintf("- %s (path: %s)\n", att.FileName, absPath))
 		}
-		sb.WriteString("\nIf image analysis is required for this task, ask the user to reconfigure the task with a vision-capable model (e.g., Anthropic API or OpenAI API with an API key or OAuth).\n\n")
+		sb.WriteString("\nIf image analysis is required for this task, ask the user to reconfigure the task with a vision-capable model.\n\n")
 	}
 
 	return sb.String()
 }
 
 // BuildChatHistoryText formats chat history as a text block with "User:" and
-// "Assistant:" prefixes, suitable for CLI-based agents. It limits history to
-// MaxChatHistoryTurns, cleans output, and includes both completed and failed turns.
-// Returns an empty string if history is empty.
+// "Assistant:" prefixes. It limits history to MaxChatHistoryTurns, cleans output,
+// and includes both completed and failed turns. Returns an empty string if history is empty.
 func BuildChatHistoryText(history []models.Execution) string {
 	history = LimitChatHistory(history)
 	if len(history) == 0 {
@@ -231,17 +226,4 @@ func LimitChatHistory(history []models.Execution) []models.Execution {
 		return history[len(history)-MaxChatHistoryTurns:]
 	}
 	return history
-}
-
-// FilteredEnvWithoutClaudeCode returns os.Environ() with the CLAUDECODE
-// variable stripped, so spawned CLI subprocesses don't think they're nested.
-func FilteredEnvWithoutClaudeCode() []string {
-	env := os.Environ()
-	filtered := make([]string, 0, len(env))
-	for _, e := range env {
-		if !strings.HasPrefix(e, "CLAUDECODE=") {
-			filtered = append(filtered, e)
-		}
-	}
-	return filtered
 }

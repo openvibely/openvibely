@@ -19,10 +19,10 @@ func ForAgent(agent models.LLMConfig) Features {
 
 	switch agent.Provider {
 	case models.ProviderAnthropic:
-		// Anthropic CLI cannot send multimodal image blocks, API/OAuth can.
+		// Retired legacy CLI configs cannot send multimodal image blocks; API/OAuth can.
 		f.Vision = !agent.IsAnthropicCLI()
 	case models.ProviderOpenAI:
-		// Direct OpenAI API/OAuth supports multimodal attachments; Codex CLI path is file-based.
+		// Direct OpenAI API/OAuth supports multimodal attachments.
 		f.Vision = agent.IsOpenAIAPIKey() || agent.IsOpenAIOAuth()
 	case models.ProviderOllama:
 		// We support image attachments via /api/chat images field.
