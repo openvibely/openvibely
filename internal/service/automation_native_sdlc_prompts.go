@@ -17,11 +17,17 @@ In 2-4 plain-language sentences, explain what is wrong or being suggested, give 
 
 After the Summary, preserve the detailed information needed by an implementation agent: inspected component, evidence and concrete failure paths, expected versus actual behavior, risk, suggested implementation direction, acceptance criteria, relevant file/symbol references, and regression cases. Technical detail is useful and must not be omitted; it just must not come before the Summary.`
 
+const nativeSDLCExistingNotificationDiscoveryInstructions = `Before creating any notification, call ` + "`" + `list_existing_automation_notifications` + "`" + `. Use the returned notification IDs, titles, types, lifecycle states, and messages to avoid reporting work already covered by this Native SDLC Automation. If a candidate might match an existing notification, call ` + "`" + `get_alert` + "`" + ` for that notification and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new notification this run. Only call ` + "`" + `create_notification` + "`" + ` after you believe the finding is not already represented. If no new finding remains, report that no new notification was found.
+
+Call create_notification with a required stable idempotency_key built from facts such as finder-role, primary file or component, and stable symbol or behavior. Reuse the exact key when the same finding is retried; never include a run ID, date, timestamp, or random value.`
+
 const nativeSDLCVisionSuggestionsPrompt = `Choose one focused project component or workflow to inspect this run. Compare that area with the configured project vision or source-of-truth files and identify small, reviewable gaps. Vary the component over time instead of repeatedly auditing the same files.
 
 Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection.` + nativeSDLCReadableNotificationInstructions + `
 
-Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with a generic type such as product_suggestion, the reader-first title, message, and body above, structured metadata identifying the inspected area and evidence, and a stable idempotency_key built as finder-role:primary-file-or-component:stable-symbol-or-behavior. Reuse the exact key when the same finding is reworded or retried; never include a run ID, date, timestamp, or random value.
+Use create_notification with type product_suggestion for new findings.
+
+` + nativeSDLCExistingNotificationDiscoveryInstructions + `
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 
@@ -31,7 +37,9 @@ Look only for likely correctness defects, edge-case failures, broken behavior, o
 
 Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection.` + nativeSDLCReadableNotificationInstructions + `
 
-Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with type bug_suggestion, the reader-first title, message, and body above, structured metadata identifying the inspected component and evidence, and a stable idempotency_key built as finder-role:primary-file-or-component:stable-symbol-or-behavior. Reuse the exact key when the same finding is reworded or retried; never include a run ID, date, timestamp, or random value.
+Use create_notification with type bug_suggestion for new findings.
+
+` + nativeSDLCExistingNotificationDiscoveryInstructions + `
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 
@@ -41,7 +49,9 @@ Look only for measurable performance, latency, throughput, memory, build, or wor
 
 Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection.` + nativeSDLCReadableNotificationInstructions + `
 
-Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with type performance_suggestion, the reader-first title, message, and body above, structured metadata identifying the inspected component and evidence, and a stable idempotency_key built as finder-role:primary-file-or-component:stable-symbol-or-behavior. Reuse the exact key when the same finding is reworded or retried; never include a run ID, date, timestamp, or random value.
+Use create_notification with type performance_suggestion for new findings.
+
+` + nativeSDLCExistingNotificationDiscoveryInstructions + `
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 
@@ -51,7 +61,9 @@ Look only for demonstrated duplicated or redundant code, configuration, or workf
 
 Do not modify code and do not create implementation tasks. Do not list, search, or inspect GitHub issues for duplicate detection.` + nativeSDLCReadableNotificationInstructions + `
 
-Native notification idempotency is the duplicate-prevention boundary: for each actionable finding, call create_notification with type maintenance_suggestion, the reader-first title, message, and body above, structured metadata identifying the inspected component and evidence, and a stable idempotency_key built as finder-role:primary-file-or-component:stable-symbol-or-behavior. Reuse the exact key when the same finding is reworded or retried; never include a run ID, date, timestamp, or random value.
+Use create_notification with type maintenance_suggestion for new findings.
+
+` + nativeSDLCExistingNotificationDiscoveryInstructions + `
 
 The notification remains pending until a human approves or rejects it on Alerts. Approval authorizes task creation only, not merge, release, or deployment.`
 

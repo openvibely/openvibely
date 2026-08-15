@@ -262,8 +262,8 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	require.Contains(t, visionPrompt, "project vision or source-of-truth files")
 	require.Contains(t, visionPrompt, "create_notification")
 	require.Contains(t, visionPrompt, "stable idempotency_key")
-	require.Contains(t, visionPrompt, "Do not list, search, or inspect GitHub issues for duplicate detection")
-	require.Contains(t, visionPrompt, "Native notification idempotency")
+	require.Contains(t, visionPrompt, "list_existing_automation_notifications")
+	require.Contains(t, visionPrompt, "skip that candidate and keep searching")
 	require.Contains(t, visionPrompt, "Do not modify code")
 	require.Contains(t, visionPrompt, "do not create implementation tasks")
 	require.Contains(t, visionPrompt, "## Summary")
@@ -296,8 +296,8 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 		require.Contains(t, prompt, "Choose one focused project component or workflow")
 		require.Contains(t, prompt, "create_notification")
 		require.Contains(t, prompt, "stable idempotency_key")
-		require.Contains(t, prompt, "Do not list, search, or inspect GitHub issues for duplicate detection")
-		require.Contains(t, prompt, "Native notification idempotency")
+		require.Contains(t, prompt, "list_existing_automation_notifications")
+		require.Contains(t, prompt, "skip that candidate and keep searching")
 		require.Contains(t, prompt, "acceptance criteria")
 		require.Contains(t, prompt, "Approval authorizes task creation only")
 	}
@@ -444,12 +444,12 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 		require.Contains(t, prompt, "Technical detail is useful and must not be omitted", name)
 		require.Contains(t, prompt, "Write this for a product user", name)
 		require.Contains(t, prompt, "Pass the required category label", name)
-		require.Contains(t, prompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection", name)
-		require.Contains(t, prompt, "Do not require a repository-wide issue or pull-request listing/search before publication", name)
-		require.Contains(t, prompt, "Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated", name)
-		require.Contains(t, prompt, "Call github_create_issue for each actionable finding with an idempotency_key built as finder-role:primary-file-or-component:stable-symbol-or-behavior", name)
-		require.Contains(t, prompt, "Reuse the exact key when the same finding is reworded or retried", name)
-		require.NotContains(t, prompt, "searching/inspecting existing visible work", name)
+		require.Contains(t, prompt, "github_list_existing_automation_issues", name)
+		require.Contains(t, prompt, "skip that candidate and keep searching", name)
+		require.Contains(t, prompt, "Try to create at most one new GitHub issue this run", name)
+		require.Contains(t, prompt, "Only call `github_create_issue` after you believe the finding is not already represented", name)
+		require.Contains(t, prompt, "required idempotency_key built from stable facts", name)
+		require.NotContains(t, prompt, "Do not list, search, or inspect existing GitHub issues for duplicate detection", name)
 	}
 
 	candidate := models.AutomationDraftCandidate{
@@ -543,6 +543,10 @@ func TestGitHubSDLCTemplateUsesAutomationOwnedPrompts(t *testing.T) {
 		require.Equal(t, prompt, automationCompiledTaskPrompt(candidate, node), "%s must persist the exact Automation template prompt without custom-graph additions", nodeKey)
 		require.NotContains(t, node.Config["prompt"], "references/dev-inbox-execution-invariants.md")
 		require.NotContains(t, node.Config["prompt"], "repository-wide current issue listing or search")
+		if nodeKey != "dev_inbox" {
+			require.Contains(t, node.Config["prompt"], "github_list_existing_automation_issues")
+			require.Contains(t, node.Config["prompt"], "keep searching")
+		}
 		require.Equal(t, expectedCadence[nodeKey].repeatType, node.Config["repeat_type"], "%s cadence must match the maintained template", nodeKey)
 		require.EqualValues(t, expectedCadence[nodeKey].interval, node.Config["repeat_interval"])
 		require.Equal(t, expectedCadence[nodeKey].runAt, node.Config["run_at"], "%s run_at must match the maintained template", nodeKey)

@@ -2471,6 +2471,33 @@ func replaceAutomationGitHubIssueGraphWithCandidate(t *testing.T, fixture automa
 	return saved.Definition
 }
 
+func TestAutomationGitHubIssueRuntimeListsExistingAutomationIssues(t *testing.T) {
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+		},
+		listCreatedIssuesFn: func(_ context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			require.Equal(t, "example/runtime", repo.FullName)
+			return &GitHubAuthenticatedUser{Login: "automation-bot", Source: GitHubAuthModePAT}, []GitHubIssue{
+				{Number: 42, URL: "https://github.com/example/runtime/issues/42", Title: "Existing duplicate candidate", Body: "## Summary\nExisting covered behavior", State: "open", UserLogin: "automation-bot", Labels: []string{"bug"}},
+			}, nil
+		},
+	}
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime.git"
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
+		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
+	output, err := handlers["github_list_existing_automation_issues"](ctx, json.RawMessage(`{"limit":1}`))
+	require.NoError(t, err)
+	require.Contains(t, output, `"repository":"example/runtime"`)
+	require.Contains(t, output, `"created_by":"automation-bot"`)
+	require.Contains(t, output, `"title":"Existing duplicate candidate"`)
+	require.Contains(t, output, `"body_excerpt":"## Summary Existing covered behavior"`)
+}
+
 func TestAutomationGitHubIssueCreationRequiresStableIdempotencyKey(t *testing.T) {
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
@@ -3875,6 +3902,32 @@ func TestAutomationRuntimeNativeNotificationCreationAllowsDistinctIdempotencyKey
 	require.NoError(t, err)
 	require.NotEqual(t, first.ID, second.ID)
 	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND idempotency_key IN ('native-distinct-one', 'native-distinct-two')`, h.project.ID))
+}
+
+func TestAutomationRuntimeNativeExistingNotificationListScopesToAutomationOwnership(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Native existing notification list")
+	ctx := context.Background()
+	candidate := customNativeMailboxCandidate("Native existing notification list")
+	definition, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+
+	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo.SetAutomationRepo(h.automationRepo)
+	alertSvc := NewAlertService(alertRepo, nil)
+	producer := automationNodeByKey(t, definition.Definition, "custom_producer")
+	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: definition.Definition.Automation.ID, VersionID: definition.Definition.Version.ID, NodeID: producer.ID,
+	}}})
+	owned, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Owned Native existing notification", Message: "already covered", IdempotencyKey: "native-existing-owned"})
+	require.NoError(t, err)
+	require.NoError(t, alertSvc.Create(ctx, &models.Alert{ProjectID: h.project.ID, Type: models.AlertCustom, Title: "Unowned alert", Message: "should not appear", Severity: models.SeverityInfo}))
+
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: h.project.ID, AlertSvc: alertSvc})
+	output, err := handlers["list_existing_automation_notifications"](producerCtx, json.RawMessage(`{"limit":10}`))
+	require.NoError(t, err)
+	require.Contains(t, output, owned.ID)
+	require.Contains(t, output, "Owned Native existing notification")
+	require.NotContains(t, output, "Unowned alert")
 }
 
 func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {

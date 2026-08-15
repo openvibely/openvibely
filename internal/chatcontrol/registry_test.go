@@ -224,7 +224,7 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	// Must have new read actions
 	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view")
 	// Must have GitHub mailbox actions on web/API surfaces.
-	mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
+	mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 	// Must have thread tools when requested
 	mustContain(t, names, "view_task_thread", "send_to_task")
 }
@@ -253,7 +253,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",
 		"list_personalities", "view_settings", "project_info",
 		"get_chat_mode", "list_capabilities", "get_alert", "get_model",
-		"get_personality", "get_current_project", "memory_view", "view_task_thread", "list_schedules", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
+		"get_personality", "get_current_project", "memory_view", "view_task_thread", "list_schedules", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
 }
 
 func TestListSchedulesRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
@@ -350,12 +350,12 @@ func TestGitHubToolDefsOnlyExposeOnWebAndAPI(t *testing.T) {
 	for _, surface := range []Surface{SurfaceWeb, SurfaceAPI} {
 		defs := ToolDefsForContext(models.ChatModeOrchestrate, surface, true)
 		names := toolDefNames(defs)
-		mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
+		mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 	}
 	for _, surface := range []Surface{SurfaceSlack, SurfaceTelegram, SurfaceDiscord, SurfaceEmail} {
 		defs := ToolDefsForContext(models.ChatModeOrchestrate, surface, true)
 		names := toolDefNames(defs)
-		mustNotContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
+		mustNotContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 	}
 }
 
@@ -455,12 +455,12 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"list_models", "list_agents",
 		"view_settings", "project_info",
 		"list_projects", "switch_project",
-		"list_alerts", "create_alert", "create_notification", "delete_alert", "toggle_alert",
+		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "delete_alert", "toggle_alert",
 		// new actions
 		"get_chat_mode", "set_chat_mode", "list_capabilities",
 		"get_alert", "get_model", "get_personality", "get_current_project",
 		"memory_view", "send_message",
-		"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
+		"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
 	}
 	names := map[string]bool{}
 	for _, a := range Registry() {
@@ -498,7 +498,7 @@ func TestActionError_StructuredFields(t *testing.T) {
 
 func TestRegistry_AlertFlowActions(t *testing.T) {
 	// list alerts, get specific alert
-	for _, name := range []string{"list_alerts", "get_alert"} {
+	for _, name := range []string{"list_alerts", "get_alert", "list_existing_automation_notifications"} {
 		def := Get(name)
 		if def == nil {
 			t.Fatalf("missing action %q", name)

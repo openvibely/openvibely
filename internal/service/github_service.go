@@ -1792,20 +1792,7 @@ func (s *GitHubService) ListAssignedIssues(ctx context.Context, repo *GitHubRepo
 }
 
 func (s *GitHubService) ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
-	var user *GitHubAuthenticatedUser
-	var err error
-	if repo != nil && strings.TrimSpace(repo.APIBaseURL) != "" {
-		user, err = s.getPATAuthenticatedUserForRepo(ctx, repo)
-	} else {
-		user, err = s.GetAuthenticatedUser(ctx)
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	if user.Source == GitHubAuthModeApp {
-		return nil, nil, fmt.Errorf("github_list_my_assigned_issues requires a PAT user token; GitHub App installations can be installed on organizations and do not identify an assignable issue user. Add the real issue assignee account to GitHub Authorized Users, call github_get_project_inbox, then call github_list_assigned_issues with each returned assignee")
-	}
-	token, err := s.createOperationAccessToken(ctx, githubAPIBaseURLForRepo(repo, s.apiBaseURL))
+	user, token, err := s.authenticatedPATUserAndToken(ctx, repo, "github_list_my_assigned_issues")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1814,6 +1801,39 @@ func (s *GitHubService) ListAuthenticatedAssignedIssues(ctx context.Context, rep
 		return nil, nil, err
 	}
 	return user, issues, nil
+}
+
+func (s *GitHubService) ListAuthenticatedCreatedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+	user, token, err := s.authenticatedPATUserAndToken(ctx, repo, "github_list_existing_automation_issues")
+	if err != nil {
+		return nil, nil, err
+	}
+	issues, err := s.listCreatedIssuesWithToken(ctx, repo, user.Login, token)
+	if err != nil {
+		return nil, nil, err
+	}
+	return user, issues, nil
+}
+
+func (s *GitHubService) authenticatedPATUserAndToken(ctx context.Context, repo *GitHubRepoRef, toolName string) (*GitHubAuthenticatedUser, string, error) {
+	var user *GitHubAuthenticatedUser
+	var err error
+	if repo != nil && strings.TrimSpace(repo.APIBaseURL) != "" {
+		user, err = s.getPATAuthenticatedUserForRepo(ctx, repo)
+	} else {
+		user, err = s.GetAuthenticatedUser(ctx)
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	if user.Source == GitHubAuthModeApp {
+		return nil, "", fmt.Errorf("%s requires a PAT user token; GitHub App installations can be installed on organizations and do not identify a single issue creator account", toolName)
+	}
+	token, err := s.createOperationAccessToken(ctx, githubAPIBaseURLForRepo(repo, s.apiBaseURL))
+	if err != nil {
+		return nil, "", err
+	}
+	return user, token, nil
 }
 
 func (s *GitHubService) listAssignedIssuesWithToken(ctx context.Context, repo *GitHubRepoRef, assignee, token string) ([]GitHubIssue, error) {
@@ -1830,6 +1850,29 @@ func (s *GitHubService) listAssignedIssuesWithToken(ctx context.Context, repo *G
 	query.Set("assignee", assignee)
 	query.Set("per_page", "100")
 	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues?%s", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), query.Encode())
+	return s.listIssuesWithToken(ctx, repo, token, endpoint)
+}
+
+func (s *GitHubService) listCreatedIssuesWithToken(ctx context.Context, repo *GitHubRepoRef, creator, token string) ([]GitHubIssue, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository reference is required")
+	}
+	creator = strings.TrimSpace(creator)
+	if creator == "" {
+		return nil, fmt.Errorf("creator is required")
+	}
+
+	query := url.Values{}
+	query.Set("state", "all")
+	query.Set("creator", creator)
+	query.Set("sort", "created")
+	query.Set("direction", "desc")
+	query.Set("per_page", "100")
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues?%s", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), query.Encode())
+	return s.listIssuesWithToken(ctx, repo, token, endpoint)
+}
+
+func (s *GitHubService) listIssuesWithToken(ctx context.Context, repo *GitHubRepoRef, token, endpoint string) ([]GitHubIssue, error) {
 	raw, err := getPaginatedGitHubJSON[githubIssueAPI](ctx, s, token, endpoint, "")
 	if err != nil {
 		return nil, err

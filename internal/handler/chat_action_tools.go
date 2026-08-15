@@ -310,6 +310,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubListMyAssignedIssuesTool(ctx, params.ProjectID, input)
 		},
+		"github_list_existing_automation_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubListExistingAutomationIssuesTool(ctx, params.ProjectID, input)
+		},
 		"github_list_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubListAssignedIssuesTool(ctx, params.ProjectID, input)
 		},
@@ -401,16 +404,17 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSwitchProject(ctx, params.ProjectID, input), nil
 		},
-		"list_alerts":                      alertHandlers["list_alerts"],
-		"get_alert":                        alertHandlers["get_alert"],
-		"create_alert":                     alertHandlers["create_alert"],
-		"create_notification":              alertHandlers["create_notification"],
-		"claim_alert":                      alertHandlers["claim_alert"],
-		"create_alert_implementation_task": alertHandlers["create_alert_implementation_task"],
-		"link_alert_implementation_task":   alertHandlers["link_alert_implementation_task"],
-		"complete_alert_processing":        alertHandlers["complete_alert_processing"],
-		"fail_alert_processing":            alertHandlers["fail_alert_processing"],
-		"release_alert_claim":              alertHandlers["release_alert_claim"],
+		"list_alerts":                            alertHandlers["list_alerts"],
+		"get_alert":                              alertHandlers["get_alert"],
+		"list_existing_automation_notifications": alertHandlers["list_existing_automation_notifications"],
+		"create_alert":                           alertHandlers["create_alert"],
+		"create_notification":                    alertHandlers["create_notification"],
+		"claim_alert":                            alertHandlers["claim_alert"],
+		"create_alert_implementation_task":       alertHandlers["create_alert_implementation_task"],
+		"link_alert_implementation_task":         alertHandlers["link_alert_implementation_task"],
+		"complete_alert_processing":              alertHandlers["complete_alert_processing"],
+		"fail_alert_processing":                  alertHandlers["fail_alert_processing"],
+		"release_alert_claim":                    alertHandlers["release_alert_claim"],
 		"delete_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.DeleteAlertRequest
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
@@ -535,6 +539,10 @@ func (h *Handler) executeGitHubIsActorAuthorizedTool(ctx context.Context, input 
 
 func (h *Handler) executeGitHubListMyAssignedIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
 	return h.githubIssueActionCore(projectID).ExecuteListMyAssignedIssues(ctx, input, nil)
+}
+
+func (h *Handler) executeGitHubListExistingAutomationIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	return h.githubIssueActionCore(projectID).ExecuteListExistingAutomationIssues(ctx, input)
 }
 
 func (h *Handler) executeGitHubListAssignedIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
@@ -1137,45 +1145,47 @@ func assignedAgentToolDenied(toolName string, agentDef *models.Agent) bool {
 
 func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 	allowed := map[string]bool{
-		"list_tasks":                           true,
-		"view_task_thread":                     true,
-		"send_to_task":                         true,
-		"send_message":                         true,
-		"create_task":                          true,
-		"execute_tasks":                        true,
-		"create_swarm_task":                    true,
-		"list_schedules":                       true,
-		"schedule_task":                        true,
-		"delete_schedule":                      true,
-		"modify_schedule":                      true,
-		"create_alert":                         true,
-		"create_notification":                  true,
-		"list_alerts":                          true,
-		"get_alert":                            true,
-		"claim_alert":                          true,
-		"create_alert_implementation_task":     true,
-		"link_alert_implementation_task":       true,
-		"complete_alert_processing":            true,
-		"fail_alert_processing":                true,
-		"release_alert_claim":                  true,
-		"github_create_issue":                  true,
-		"github_get_issue":                     true,
-		"github_get_project_inbox":             true,
-		"github_is_actor_authorized":           true,
-		"github_list_my_assigned_issues":       true,
-		"github_list_assigned_issues":          true,
-		"github_list_assigned_issues_with_prs": true,
-		"github_comment_on_issue":              true,
-		"github_add_issue_labels":              true,
-		"github_open_pull_request":             true,
-		"github_replace_pull_request_branch":   true,
-		"github_forward_pr_feedback_to_tasks":  true,
-		"set_task_goal":                        true,
-		"clear_task_goal":                      true,
-		"get_task_goal":                        true,
-		"pause_task_goal":                      true,
-		"resume_task_goal":                     true,
-		"list_capabilities":                    true,
+		"list_tasks":                             true,
+		"view_task_thread":                       true,
+		"send_to_task":                           true,
+		"send_message":                           true,
+		"create_task":                            true,
+		"execute_tasks":                          true,
+		"create_swarm_task":                      true,
+		"list_schedules":                         true,
+		"schedule_task":                          true,
+		"delete_schedule":                        true,
+		"modify_schedule":                        true,
+		"create_alert":                           true,
+		"create_notification":                    true,
+		"list_alerts":                            true,
+		"get_alert":                              true,
+		"list_existing_automation_notifications": true,
+		"claim_alert":                            true,
+		"create_alert_implementation_task":       true,
+		"link_alert_implementation_task":         true,
+		"complete_alert_processing":              true,
+		"fail_alert_processing":                  true,
+		"release_alert_claim":                    true,
+		"github_create_issue":                    true,
+		"github_get_issue":                       true,
+		"github_get_project_inbox":               true,
+		"github_is_actor_authorized":             true,
+		"github_list_my_assigned_issues":         true,
+		"github_list_existing_automation_issues": true,
+		"github_list_assigned_issues":            true,
+		"github_list_assigned_issues_with_prs":   true,
+		"github_comment_on_issue":                true,
+		"github_add_issue_labels":                true,
+		"github_open_pull_request":               true,
+		"github_replace_pull_request_branch":     true,
+		"github_forward_pr_feedback_to_tasks":    true,
+		"set_task_goal":                          true,
+		"clear_task_goal":                        true,
+		"get_task_goal":                          true,
+		"pause_task_goal":                        true,
+		"resume_task_goal":                       true,
+		"list_capabilities":                      true,
 	}
 	for _, tool := range explicitlyGrantedTaskThreadRuntimeTools(agentDef) {
 		allowed[tool] = true

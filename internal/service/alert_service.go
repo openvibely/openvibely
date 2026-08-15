@@ -120,6 +120,35 @@ func (s *AlertService) ListFilteredSummariesForRuntime(ctx context.Context, proj
 	return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
 }
 
+func (s *AlertService) ListExistingAutomationNotificationSummariesForRuntime(ctx context.Context, projectID string, filter models.AlertListFilter) ([]models.AlertSummary, error) {
+	if s == nil || s.alertRepo == nil {
+		return nil, fmt.Errorf("alert service not available")
+	}
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound {
+		return nil, fmt.Errorf("Automation context is required to list existing Automation notifications")
+	}
+	if automationContext.ProjectID != projectID {
+		return nil, fmt.Errorf("alert Automation project mismatch")
+	}
+	seen := map[string]bool{}
+	bindings := make([]models.AutomationBinding, 0, len(automationContext.Bindings))
+	for _, binding := range automationContext.Bindings {
+		automationID := strings.TrimSpace(binding.AutomationID)
+		if automationID == "" || seen[automationID] {
+			continue
+		}
+		seen[automationID] = true
+		binding.AutomationID = automationID
+		bindings = append(bindings, binding)
+	}
+	if len(bindings) == 0 {
+		return []models.AlertSummary{}, nil
+	}
+	filter.AutomationInboxBindings = bindings
+	return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
+}
+
 func (s *AlertService) RequireAutomationInboxOwnership(ctx context.Context, projectID, alertID string) error {
 	automationContext, automationBound := AutomationContextFromContext(ctx)
 	if !automationBound {

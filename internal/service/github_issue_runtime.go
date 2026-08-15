@@ -30,6 +30,7 @@ type GitHubIssueRuntimeProvider interface {
 	GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error)
 	GetAuthenticatedUserForRepo(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, error)
 	ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
+	ListAuthenticatedCreatedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error)
 	FindPullRequestForIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubPullRequest, error)
@@ -296,6 +297,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return core.ExecuteListMyAssignedIssues(ctx, input, postprocessAssigned)
 		},
+		"github_list_existing_automation_issues": core.ExecuteListExistingAutomationIssues,
 		"github_list_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return core.ExecuteListAssignedIssues(ctx, input, postprocessAssigned)
 		},

@@ -1351,6 +1351,65 @@ func TestListAuthenticatedAssignedIssuesUsesConfiguredTokenUser(t *testing.T) {
 	}
 }
 
+func TestListAuthenticatedCreatedIssuesUsesConfiguredTokenCreator(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	if err := settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT); err != nil {
+		t.Fatalf("set auth mode: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, GitHubSettingPAT, "ghp_test"); err != nil {
+		t.Fatalf("set pat: %v", err)
+	}
+
+	var sawUser bool
+	var issueListQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/user":
+			sawUser = true
+			_, _ = w.Write([]byte(`{"login":"automation-bot"}`))
+		case "/repos/openvibely/openvibely/issues":
+			issueListQuery = r.URL.RawQuery
+			if got := r.URL.Query().Get("creator"); got != "automation-bot" {
+				t.Fatalf("expected authenticated creator filter, got %q", got)
+			}
+			if got := r.URL.Query().Get("state"); got != "all" {
+				t.Fatalf("expected all issue query, got state=%q", got)
+			}
+			if got := r.URL.Query().Get("sort"); got != "created" {
+				t.Fatalf("expected created sort, got %q", got)
+			}
+			_, _ = w.Write([]byte(`[
+				{"number":9,"html_url":"https://github.com/openvibely/openvibely/issues/9","title":"Prior automation issue","body":"body","state":"closed","user":{"login":"automation-bot"},"assignees":[],"labels":[{"name":"bug"}]},
+				{"number":10,"html_url":"https://github.com/openvibely/openvibely/pull/10","title":"PR object","state":"open","pull_request":{}}
+			]`))
+		default:
+			t.Fatalf("unexpected GitHub API path: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(settingsRepo, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+
+	user, issues, err := svc.ListAuthenticatedCreatedIssues(ctx, repo)
+	if err != nil {
+		t.Fatalf("ListAuthenticatedCreatedIssues returned error: %v", err)
+	}
+	if !sawUser || issueListQuery == "" {
+		t.Fatalf("expected /user and creator issues endpoints, sawUser=%v query=%q", sawUser, issueListQuery)
+	}
+	if user == nil || user.Login != "automation-bot" || user.Source != GitHubAuthModePAT {
+		t.Fatalf("unexpected authenticated user: %#v", user)
+	}
+	if len(issues) != 1 || issues[0].Number != 9 || issues[0].Title != "Prior automation issue" || issues[0].Body != "body" {
+		t.Fatalf("expected only real issue created by token user, got %#v", issues)
+	}
+}
+
 func TestGetAuthenticatedUserForEnterpriseRepoBypassesGlobalPATLoginCache(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
@@ -1542,7 +1601,7 @@ func TestListAuthenticatedAssignedIssuesRejectsGitHubAppInstallationAccount(t *t
 	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
 
 	_, _, err := svc.ListAuthenticatedAssignedIssues(ctx, repo)
-	if err == nil || !strings.Contains(err.Error(), "requires a PAT user token") || !strings.Contains(err.Error(), "github_list_assigned_issues") {
+	if err == nil || !strings.Contains(err.Error(), "requires a PAT user token") || !strings.Contains(err.Error(), "github_list_my_assigned_issues") {
 		t.Fatalf("expected GitHub App guidance error, got %v", err)
 	}
 	if sawIssueList {

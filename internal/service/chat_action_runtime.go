@@ -1020,6 +1020,33 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			}
 			return resultJSON(map[string]any{"notification": created})
 		},
+		"list_existing_automation_notifications": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req struct {
+				Limit  int `json:"limit"`
+				Offset int `json:"offset"`
+			}
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := requireService(); err != nil {
+				return "", err
+			}
+			if req.Limit == 0 {
+				req.Limit = 50
+			}
+			if req.Limit < 1 || req.Limit > 100 || req.Offset < 0 {
+				return "", fmt.Errorf("limit must be 1-100 and offset must be non-negative")
+			}
+			notifications, err := opts.AlertSvc.ListExistingAutomationNotificationSummariesForRuntime(ctx, opts.ProjectID, models.AlertListFilter{Limit: req.Limit, Offset: req.Offset})
+			if err != nil {
+				return "", err
+			}
+			nextOffset := 0
+			if len(notifications) == req.Limit {
+				nextOffset = req.Offset + len(notifications)
+			}
+			return resultJSON(map[string]any{"notifications": notifications, "project_id": opts.ProjectID, "offset": req.Offset, "next_offset": nextOffset})
+		},
 		"list_alerts": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req struct {
 				ProjectID                string `json:"project_id"`

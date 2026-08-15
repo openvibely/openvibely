@@ -28,11 +28,13 @@ type GitHubIssueActionRequest struct {
 	Draft                 bool     `json:"draft"`
 	ExpectedHeadSHA       string   `json:"expected_head_sha"`
 	ConfirmHistoryRewrite bool     `json:"confirm_history_rewrite"`
+	Limit                 int      `json:"limit"`
 }
 
 type GitHubIssueActionProvider interface {
 	GetIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) (*GitHubIssue, error)
 	ListAuthenticatedAssignedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
+	ListAuthenticatedCreatedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error)
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error)
 	CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error
@@ -159,6 +161,60 @@ func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context,
 		return "", err
 	}
 	return githubIssueActionJSON(map[string]any{"ok": true, "account": user, "issues": issues})
+}
+
+func (c *GitHubIssueActionCore) ExecuteListExistingAutomationIssues(ctx context.Context, input json.RawMessage) (string, error) {
+	req, repo, err := c.requestAndRepo(ctx, input, nil)
+	if err != nil {
+		return "", err
+	}
+	limit := req.Limit
+	if limit == 0 {
+		limit = 50
+	}
+	if limit < 1 || limit > 100 {
+		return "", fmt.Errorf("limit must be 1-100")
+	}
+	user, issues, err := c.provider.ListAuthenticatedCreatedIssues(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	summaries := compactExistingGitHubIssues(issues, limit)
+	return githubIssueActionJSON(map[string]any{
+		"ok": true, "account": user, "repository": repo.FullName,
+		"issues": summaries, "returned": len(summaries), "total": len(issues), "truncated": len(issues) > len(summaries),
+	})
+}
+
+func compactExistingGitHubIssues(issues []GitHubIssue, limit int) []map[string]any {
+	if limit > len(issues) {
+		limit = len(issues)
+	}
+	summaries := make([]map[string]any, 0, limit)
+	for _, issue := range issues[:limit] {
+		summaries = append(summaries, map[string]any{
+			"number":       issue.Number,
+			"url":          issue.URL,
+			"title":        issue.Title,
+			"state":        issue.State,
+			"labels":       issue.Labels,
+			"created_by":   issue.UserLogin,
+			"body_excerpt": compactGitHubIssueBodyExcerpt(issue.Body, 500),
+		})
+	}
+	return summaries
+}
+
+func compactGitHubIssueBodyExcerpt(body string, maxRunes int) string {
+	text := strings.Join(strings.Fields(strings.TrimSpace(body)), " ")
+	if maxRunes <= 0 || text == "" {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= maxRunes {
+		return text
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, input json.RawMessage, postprocess GitHubAssignedIssuesPostprocessor) (string, error) {

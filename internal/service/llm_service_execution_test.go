@@ -3864,6 +3864,7 @@ type fakeGitHubIssueRuntimeProvider struct {
 	findPRFn             func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	addLabelsFn          func(context.Context, *GitHubRepoRef, int, []string) error
 	listMyIssuesFn       func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
+	listCreatedIssuesFn  func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	listAssignedIssuesFn func(context.Context, *GitHubRepoRef, string) ([]GitHubIssue, error)
 	listIssuesPRFn       func(context.Context, *GitHubRepoRef, string) ([]GitHubIssueWithPullRequest, error)
 	listPRFeedbackFn     func(context.Context, *GitHubRepoRef, int) ([]GitHubPullRequestFeedback, error)
@@ -3990,6 +3991,13 @@ func (f *fakeGitHubIssueRuntimeProvider) ListAuthenticatedAssignedIssues(ctx con
 		return f.listMyIssuesFn(ctx, repo)
 	}
 	return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, []GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
+}
+
+func (f *fakeGitHubIssueRuntimeProvider) ListAuthenticatedCreatedIssues(ctx context.Context, repo *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+	if f.listCreatedIssuesFn != nil {
+		return f.listCreatedIssuesFn(ctx, repo)
+	}
+	return &GitHubAuthenticatedUser{Login: "channel-user", Source: GitHubAuthModePAT}, []GitHubIssue{{Number: 7, URL: "https://github.com/openvibely/openvibely/issues/7", Title: "Existing Automation issue", State: "open", UserLogin: "channel-user"}}, nil
 }
 
 func (f *fakeGitHubIssueRuntimeProvider) ListAssignedIssues(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {

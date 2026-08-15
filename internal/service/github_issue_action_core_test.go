@@ -26,6 +26,9 @@ func (f *fakeGitHubIssueActionProvider) GetIssue(_ context.Context, _ *GitHubRep
 func (f *fakeGitHubIssueActionProvider) ListAuthenticatedAssignedIssues(_ context.Context, _ *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
 	return &GitHubAuthenticatedUser{Login: "Me"}, []GitHubIssue{{Number: 1}}, nil
 }
+func (f *fakeGitHubIssueActionProvider) ListAuthenticatedCreatedIssues(_ context.Context, _ *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+	return &GitHubAuthenticatedUser{Login: "Me"}, []GitHubIssue{{Number: 9, URL: "https://github.com/owner/repo/issues/9", Title: "Existing issue", Body: "Detailed existing issue body", State: "open", UserLogin: "Me", Labels: []string{"bug"}}}, nil
+}
 func (f *fakeGitHubIssueActionProvider) ListAssignedIssues(_ context.Context, _ *GitHubRepoRef, _ string) ([]GitHubIssue, error) {
 	return []GitHubIssue{{Number: 2}}, nil
 }
@@ -102,6 +105,10 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 	if err != nil || !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":2`) || !strings.Contains(out, `"Number":9`) {
 		t.Fatalf("assigned output=%q err=%v", out, err)
 	}
+	out, err = core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"repo_url":"created","limit":1}`))
+	if err != nil || !strings.Contains(out, `"repository":"owner/repo"`) || !strings.Contains(out, `"title":"Existing issue"`) || !strings.Contains(out, `"body_excerpt":"Detailed existing issue body"`) {
+		t.Fatalf("existing Automation issues output=%q err=%v", out, err)
+	}
 	if postprocessCalls != 2 {
 		t.Fatalf("postprocess calls=%d, want 2", postprocessCalls)
 	}
@@ -119,7 +126,7 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 		t.Fatalf("labels output=%q request=%d/%v err=%v", out, provider.labelNumber, provider.labels, err)
 	}
 
-	wantResolved := []string{"get", "my-assigned", "assigned", "assigned-with-prs", "comment", "labels"}
+	wantResolved := []string{"get", "my-assigned", "assigned", "created", "assigned-with-prs", "comment", "labels"}
 	if !reflect.DeepEqual(resolved, wantResolved) {
 		t.Fatalf("resolved repositories=%v, want %v", resolved, wantResolved)
 	}

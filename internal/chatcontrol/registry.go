@@ -146,6 +146,7 @@ const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":
 const githubIssueNumberParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},` + githubRepoURLProperty + `},"required":["issue_number"],"additionalProperties":false}`
 const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login whose assigned open issues should be listed."},` + githubRepoURLProperty + `},"required":["assignee"],"additionalProperties":false}`
 const githubListMyAssignedIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + `},"additionalProperties":false}`
+const githubListExistingAutomationIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + `,"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum number of newest issues to return; defaults to 50."}},"additionalProperties":false}`
 const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"},` + githubRepoURLProperty + `},"required":["issue_number","body"],"additionalProperties":false}`
 const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."},` + githubRepoURLProperty + `},"required":["issue_number","labels"],"additionalProperties":false}`
 const githubOpenPullRequestParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"pr_title":{"type":"string","description":"Optional pull request title. Defaults to the task title."},"pr_body":{"type":"string","description":"Optional pull request body. For GitHub SDLC work, provide a concise factual Markdown summary of the changes and validation plus a closing reference to the source issue. Defaults to a concise summary and closes the supplied issue."},"base":{"type":"string","description":"Optional target branch. Defaults to the task merge target or repository default branch."},"draft":{"type":"boolean"},"issue_number":{"type":"integer","minimum":1,"description":"Optional GitHub issue number to persist on the task PR record."},"issue_url":{"type":"string","description":"Optional GitHub issue URL to persist on the task PR record."}},"additionalProperties":false}`
@@ -375,6 +376,16 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(githubListMyAssignedIssuesParams),
 	},
 	{
+		Name:         "github_list_existing_automation_issues",
+		Description:  "List recent GitHub issues in the current project repository created by the authenticated PAT account so GitHub SDLC finders can avoid duplicate reports. Pass repo_url for a specific GitHub repository URL.",
+		Domain:       DomainGitHub,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
+		Parameters:   json.RawMessage(githubListExistingAutomationIssuesParams),
+	},
+	{
 		Name:         "github_list_assigned_issues",
 		Description:  "List open GitHub issues assigned to a configured GitHub Authorized User, defaulting to the current project repository. Pull request objects are omitted. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
 		Domain:       DomainGitHub,
@@ -506,6 +517,16 @@ var registry = []ActionDef{
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"alert_id":{"type":"string"}},"required":["alert_id"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "list_existing_automation_notifications",
+		Description:  "List existing actionable notifications owned by the current Native SDLC Automation so finders can avoid duplicate reports before creating a new notification.",
+		Domain:       DomainAlerts,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Max notifications to return; defaults to 50."},"offset":{"type":"integer","minimum":0}},"additionalProperties":false}`),
 	},
 	{
 		Name:         "create_alert",
