@@ -100,7 +100,7 @@ func TestHandler_IntegratedNotificationApprovalToImplementationTask(t *testing.T
 	require.NoError(t, taskRepo.Create(ctx, caller))
 	runtime := service.BuildAlertRuntimeActionHandlers(service.AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: h.alertSvc})
 
-	createdJSON, err := runtime["create_notification"](ctx, json.RawMessage(`{"type":"product_suggestion","title":"Integrated suggestion","body":"Implement after approval","idempotency_key":"integrated-flow"}`))
+	createdJSON, err := runtime["create_notification"](ctx, json.RawMessage(`{"type":"product_suggestion","title":"Integrated suggestion","body":"Implement after approval"}`))
 	require.NoError(t, err)
 	var created struct {
 		Notification models.Alert `json:"notification"`

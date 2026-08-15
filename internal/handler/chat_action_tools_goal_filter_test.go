@@ -99,8 +99,7 @@ func TestFilterTaskThreadRuntimeToolDefs_CreateNotificationDispatchUsesPersisted
 	output, handled, isErr, err := runtime.Executor(ctx, "create_notification", json.RawMessage(`{
 		"type":"task_thread_suggestion",
 		"title":"Follow-up suggestion",
-		"body":"Created from an ordinary task follow-up",
-		"idempotency_key":"task-thread-followup"
+		"body":"Created from an ordinary task follow-up"
 	}`))
 	require.NoError(t, err)
 	require.True(t, handled)

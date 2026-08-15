@@ -193,6 +193,34 @@ func TestAutomationNotificationCreationAllowsMissingIdempotencyKey(t *testing.T)
 	require.Contains(t, createdJSON, "Existing-work checked notification")
 }
 
+func TestAlertRuntimeCreateNotificationIgnoresHiddenIdempotencyKey(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Runtime hidden idempotency"}
+	require.NoError(t, repository.NewProjectRepo(db).Create(ctx, project))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, AlertSvc: alertSvc})
+	input := json.RawMessage(`{"type":"bug_suggestion","title":"Hidden key notification","idempotency_key":"hidden-runtime-key"}`)
+
+	firstJSON, err := handlers["create_notification"](ctx, input)
+	require.NoError(t, err)
+	secondJSON, err := handlers["create_notification"](ctx, input)
+	require.NoError(t, err)
+	var first, second struct {
+		Notification models.Alert `json:"notification"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(firstJSON), &first))
+	require.NoError(t, json.Unmarshal([]byte(secondJSON), &second))
+	require.NotEmpty(t, first.Notification.ID)
+	require.NotEmpty(t, second.Notification.ID)
+	require.NotEqual(t, first.Notification.ID, second.Notification.ID)
+	require.Empty(t, first.Notification.IdempotencyKey)
+	require.Empty(t, second.Notification.IdempotencyKey)
+	var storedWithHiddenKey int
+	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM alerts WHERE project_id = ? AND idempotency_key = ?`, project.ID, "hidden-runtime-key").Scan(&storedWithHiddenKey))
+	require.Zero(t, storedWithHiddenKey)
+}
+
 func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -207,7 +235,7 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "scheduled_task", AlertSvc: alertSvc})
 
-	createInput := json.RawMessage(`{"project_id":"` + project.ID + `","type":"product_suggestion","title":"Add approval inbox","message":"Review this","body":"Detailed implementation context","metadata":{"component":"alerts"},"idempotency_key":"suggestion:approval-inbox"}`)
+	createInput := json.RawMessage(`{"project_id":"` + project.ID + `","type":"product_suggestion","title":"Add approval inbox","message":"Review this","body":"Detailed implementation context","metadata":{"component":"alerts"}}`)
 	createdJSON, err := handlers["create_notification"](ctx, createInput)
 	require.NoError(t, err)
 	var created struct {
@@ -218,14 +246,6 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	require.Equal(t, project.ID, created.Notification.ProjectID)
 	require.Equal(t, models.AlertDecisionPending, created.Notification.DecisionState)
 	require.Equal(t, caller.ID, *created.Notification.SourceTaskID)
-
-	duplicateJSON, err := handlers["create_notification"](ctx, createInput)
-	require.NoError(t, err)
-	var duplicate struct {
-		Notification models.Alert `json:"notification"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(duplicateJSON), &duplicate))
-	require.Equal(t, created.Notification.ID, duplicate.Notification.ID)
 
 	_, err = handlers["list_alerts"](ctx, json.RawMessage(`{"project_id":"`+foreign.ID+`"}`))
 	require.ErrorContains(t, err, "outside the caller's authorized project")

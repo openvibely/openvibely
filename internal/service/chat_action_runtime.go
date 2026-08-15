@@ -958,15 +958,14 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 		},
 		"create_notification": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req struct {
-				ProjectID      string         `json:"project_id"`
-				Type           string         `json:"type"`
-				Title          string         `json:"title"`
-				Message        string         `json:"message"`
-				Body           string         `json:"body"`
-				Severity       string         `json:"severity"`
-				Source         string         `json:"source"`
-				Metadata       map[string]any `json:"metadata"`
-				IdempotencyKey string         `json:"idempotency_key"`
+				ProjectID string         `json:"project_id"`
+				Type      string         `json:"type"`
+				Title     string         `json:"title"`
+				Message   string         `json:"message"`
+				Body      string         `json:"body"`
+				Severity  string         `json:"severity"`
+				Source    string         `json:"source"`
+				Metadata  map[string]any `json:"metadata"`
 			}
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
@@ -986,7 +985,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if req.Type == "" || len(req.Type) > 100 {
 				return "", fmt.Errorf("type is required and must be at most 100 characters")
 			}
-			if len(req.Message) > 2000 || len(req.Body) > 20000 || len(req.IdempotencyKey) > 200 {
+			if len(req.Message) > 2000 || len(req.Body) > 20000 {
 				return "", fmt.Errorf("notification content exceeds the allowed size")
 			}
 			severity, severityErr := channelAlertSeverity(req.Severity)
@@ -1006,7 +1005,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			delete(req.Metadata, models.AlertAutomationProvenanceMetadataKey)
 			a := &models.Alert{ProjectID: opts.ProjectID, Scope: models.AlertScopeProject, Type: models.AlertType(req.Type),
 				Severity: severity, Title: req.Title, Message: req.Message, Body: req.Body, Source: source,
-				Metadata: req.Metadata, IdempotencyKey: strings.TrimSpace(req.IdempotencyKey)}
+				Metadata: req.Metadata}
 			if opts.CallerTaskID != "" {
 				sourceTaskID := opts.CallerTaskID
 				a.SourceTaskID = &sourceTaskID
