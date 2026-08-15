@@ -2264,6 +2264,67 @@ func TestMergeBranch_FastForward(t *testing.T) {
 	}
 }
 
+func TestMergeBranch_FastForward_SkipsAutoRebaseWhenAlreadyFastForwardable(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+
+	repoDir := createTestGitRepo(t)
+	defaultBranch := GetCurrentBranch(repoDir)
+	ws := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+
+	task := &models.Task{ProjectID: "default", Title: "Already FF", Category: models.CategoryActive, Status: models.StatusPending, MergeTargetBranch: defaultBranch}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, branchName, err := ws.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = branchName
+	if err := os.WriteFile(filepath.Join(wtPath, "already_ff.txt"), []byte("already fast-forwardable\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "add already fast-forwardable change"); err != nil {
+		t.Fatal(err)
+	}
+	expectedHead := gitRevParseTest(t, wtPath, "HEAD")
+	if out, err := gitOutput(wtPath, "merge-base", "--is-ancestor", defaultBranch, "HEAD"); err != nil {
+		t.Fatalf("test setup expected %s to already be an ancestor of task HEAD: %v\n%s", defaultBranch, err, out)
+	}
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapperDir := t.TempDir()
+	wrapperPath := filepath.Join(wrapperDir, "git")
+	wrapper := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"rebase\" ]; then\n" +
+		"  echo unexpected rebase >&2\n" +
+		"  exit 42\n" +
+		"fi\n" +
+		"exec \"" + realGit + "\" \"$@\"\n"
+	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", wrapperDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	result, err := ws.MergeBranch(ctx, task, repoDir, "ff")
+	if err != nil {
+		t.Fatalf("MergeBranch ff should skip unnecessary rebase: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected fast-forward merge success without rebase: %s", result.ErrorMessage)
+	}
+	if got := gitRevParseTest(t, repoDir, "refs/heads/"+defaultBranch); got != expectedHead {
+		t.Fatalf("expected target branch to advance to task head %s, got %s", expectedHead, got)
+	}
+}
+
 func TestMergeBranch_FastForward_SequentialMergesAutoRebaseSecondTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

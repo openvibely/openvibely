@@ -1299,20 +1299,25 @@ func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, 
 		return &MergeResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
 	}
 
-	rebaseOut, rebaseErr := gitOutput(task.WorktreePath, "rebase", targetBranch)
-	if rebaseErr != nil {
-		conflictFiles := detectConflicts(task.WorktreePath)
-		if len(conflictFiles) > 0 {
-			_ = AbortRebase(task.WorktreePath)
-			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
-			return &MergeResult{
-				Success:       false,
-				ConflictFiles: conflictFiles,
-				ErrorMessage:  fmt.Sprintf("Local fast-forward merge requires updating branch from %s. Auto-rebase encountered conflicts; rebase was aborted. Resolve conflicts in worktree and retry merge.", targetBranch),
-			}, nil
+	if out, err := gitOutput(task.WorktreePath, "merge-base", "--is-ancestor", targetBranch, "HEAD"); err != nil {
+		if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
+			applog.Debugf("[worktree] task branch %s is not already fast-forwardable from %s before auto-rebase: %s", task.WorktreeBranch, targetBranch, trimmed)
 		}
-		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
-		return &MergeResult{ErrorMessage: strings.TrimSpace(string(rebaseOut))}, fmt.Errorf("auto-rebase task branch onto %s failed: %w", targetBranch, rebaseErr)
+		rebaseOut, rebaseErr := gitOutput(task.WorktreePath, "rebase", targetBranch)
+		if rebaseErr != nil {
+			conflictFiles := detectConflicts(task.WorktreePath)
+			if len(conflictFiles) > 0 {
+				_ = AbortRebase(task.WorktreePath)
+				_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict)
+				return &MergeResult{
+					Success:       false,
+					ConflictFiles: conflictFiles,
+					ErrorMessage:  fmt.Sprintf("Local fast-forward merge requires updating branch from %s. Auto-rebase encountered conflicts; rebase was aborted. Resolve conflicts in worktree and retry merge.", targetBranch),
+				}, nil
+			}
+			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
+			return &MergeResult{ErrorMessage: strings.TrimSpace(string(rebaseOut))}, fmt.Errorf("auto-rebase task branch onto %s failed: %w", targetBranch, rebaseErr)
+		}
 	}
 
 	oldTargetOut, err := gitOutput(task.WorktreePath, "rev-parse", "refs/heads/"+targetBranch)
