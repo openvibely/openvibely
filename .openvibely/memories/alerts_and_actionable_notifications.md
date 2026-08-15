@@ -2,9 +2,9 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-08-12
-source: after_complete
-source_id: d87ef6d051970bf69bec289136a3a796
+updated: 2026-08-14
+source: consolidation
+source_id: memory_consolidation_2026_08_14
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -55,6 +55,7 @@ Product surfaces:
 - Newly inserted operational alerts and actionable notifications are never auto-focused. Only deletion workflows transfer focus, using `preventScroll`, to the next or previous visible delete control. Hidden rows are excluded from viewport/focus candidates; end-of-list deletion remains bottom-anchored.
 - The independently API-authoritative `#system-update-card` uses `hx-preserve` so Alerts fragment swaps retain its live visibility/state instead of recreating it hidden and revealing it above the restored anchor on the next poll. It hides when `/api/system/update` returns 204, `state=succeeded`, or `current_version == available`. Its one-second poll forwards each snapshot to `window.openVibelyHandleSystemUpdateSnapshot` so the layout-level update badge and success toast settle immediately instead of waiting for the global poll.
 - Open duplication gap `#351`: `internal/handler/alert_handler.go` repeats the same post-mutation `#alerts-content` refresh plus `HX-Trigger: alertUpdate` badge-update contract across approve/reject/dismiss, mark-read, mark-all-read, HTMX delete, and delete-all paths. Consolidate that response tail while preserving non-HTMX redirects and mutation-specific behavior.
+- Issue `#538`: Native notification Automation projection uses a shared helper for the common "alert created and waiting for approval" work-item/projection event assembly in initial creation (`recordAlertCreatedProjection`) and retained-notification rebinding (`rebindAlertAutomationProjection`). Fresh-create and rebind-specific validation, graph/current-revision lookup, approved-decision replay, invalidation behavior, and test coverage for fresh creation, compatible replacement, renamed-inbox rebind, forged/foreign ownership rejection, and separate approved-decision replay should remain separate. Verify live GitHub merge/issue state before treating prior PRs as merged or closed.
 - The Alerts page currently fetches only the newest 100 project alerts, while search is client-side and decision-state filters and pagination are absent. Older pending approvals can become unreachable behind newer operational alerts; durable product direction is server-side filtering/pagination so pending human decisions remain reachable.
 - Notification bodies should start with a short nontechnical `## Summary` section followed by technical evidence and implementation detail, matching Automation content standards and reviewable-autonomy scanability goals.
 - Alerts/notification UI should make pending approval summaries easy to scan without requiring users to expand technical detail first; body/detail expansion remains useful for full evidence, metadata, and copy actions.

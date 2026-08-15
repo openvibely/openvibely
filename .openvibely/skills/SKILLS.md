@@ -244,3 +244,11 @@ always_use:
 ## openvibely_chat_link_opening_workflow
 
 [OpenVibely Chat Link Opening Workflow](openvibely_chat_link_opening_workflow/SKILL.md) — Implement and audit safe external-link behavior for OpenVibely Chat and task-thread rendered messages, including desktop external browser handling.
+
+## openvibely_toast_notification_workflow
+
+[OpenVibely Toast Notification Workflow](openvibely_toast_notification_workflow/SKILL.md) — Implement and audit OpenVibely toast notifications using the shared HTMX/SSE toast bridge without duplicate or misleading toasts.
+
+## openvibely_ui_preference_persistence
+
+[OpenVibely UI Preference Persistence](openvibely_ui_preference_persistence/SKILL.md) — Persist browser and desktop UI preferences without theme flashes, layout jumps, or split storage contracts.

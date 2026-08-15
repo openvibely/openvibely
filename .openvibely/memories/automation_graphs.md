@@ -2,9 +2,9 @@
 name: automation_graphs
 type: project
 created: 2026-07-18
-updated: 2026-08-12
-source: update_memory
-source_id: 57462399a300ea2d9cd7247bc2dfb5bb:83e4b09c1d64e1cf
+updated: 2026-08-15
+source: consolidation
+source_id: memory_consolidation_2026_08_15
 confidence: high
 title: Automation Graphs
 ---
@@ -75,6 +75,7 @@ Runtime and approval contracts:
 - Missing PR rows, non-open rows, rows lacking a published head, and live PRs whose head SHA differs from the recorded publication head block completion; the task is finalized failed/backlog with a visible failure message and alert.
 - Loop Auditors are inspect/report-only for direct task/swarm/execution creation; those grants are removed based on durable `automation:<id>:auditor` origin. The user deferred further restriction of alert/claim tool grants.
 - `Run now` manually dispatches each schedule-owned entry Task using persisted prompt, Agent, model, and tool configuration. It does not mutate timing, skips queued/running/reserved entries, and rejects Paused or Archived Automations.
+- Automation start feedback is keyed to successful invocation creation/claim plus dispatchable work, before per-node task activity. Successful manual and scheduled starts publish a project-scoped `automation_invocation_started` event carrying the Automation display name; skipped/busy invocations refresh state without showing a misleading running toast. Automation-start toasts navigate to the Automation Live/detail page when clicked, while deduping by invocation rather than by task.
 - Automation scheduled occurrence idempotency is scoped to Automation-owned schedules. Occurrences dedupe by schedule ID plus scheduled time; crash recovery should reuse/recover committed occurrences rather than intentionally starting a second invocation for the same schedule/time.
 - If an enabled repeating Automation schedule still points `next_run` at a terminal past invocation for the same scheduled time, the Automation claim path advances `next_run` instead of returning the old invocation forever.
 - Automation Live no longer surfaces manual `GitHub state`, Fresh/Stale badge, persisted-update timestamp, or `Refresh GitHub state`. `AutomationReconciler` refreshes stale tracked PR state in the background only while the Automation Live page is recently open/polling, using `AutomationLiveViewTracker`.
@@ -89,9 +90,10 @@ GitHub and notification content standards:
 - For Automation-created implementation tasks whose original graph version is no longer current, PR publication is authorized only through durable same-project GitHub issue task provenance plus the current active Automation graph's retained implementation-to-PR policy. Spoofed `created_via` tasks and other stale-origin GitHub writes remain fail-closed.
 
 Current gaps and incidents to remember:
+- Automation graph repository persistence has a durable consolidation direction: shared graph-writing code should accept neutral node/edge specs, return the node-key-to-ID map for resource binding, and preserve saved graph metadata, schedule trigger ownership, maintained Native/GitHub registrations, and fail-closed unknown-node handling. Verify live main/PR state before treating any prior implementation as shipped.
 - Open Automation UI scanability gaps: Automation cards should surface already-populated next/last run, active work, counts, and resource summaries; Automation Live Details should expose linked resources, resource URLs/statuses, status counts, and task links equivalent to canvas task drill-downs (`#474`, `#480`).
 - Resolved Automation Live projection gap: `LiveNodeCounts` and `PortfolioOperationalCounts` rank activities by current projection identity (`node + work_item`) and use only the latest activity before applying state priority, so later completed work supersedes earlier failed activity for the same node. They also ignore nonterminal activity states (`pending`, `running`, `waiting`, `failed`) for work items already marked `completed`, preventing stale late failures from keeping an already-completed approval/work path red while preserving real waiting positions and recent completion signals. This completed-work-item filter is role-agnostic and covers GitHub SDLC `Human Assignment` (`github_assignment`) as well as Native `Human Approval` paths.
-- PR `#518` addresses `#490` for Automation Live detail: `LiveNodeCounts` uses compact `automation_live_activity_states` keyed by `(project_id, automation_id, version_id, node_id, state_key)` instead of ranking full `automation_activities` history during page render. Preserve activity insert/update projection maintenance, migration backfill, active invocation fallback, pending thread-input bindings, work-item positions, recent completion cutoff, state priority, and `github_inbox`/`native_inbox` active-position exclusion. Migration numbering was corrected to avoid main's lifecycle migration `159`; verify live PR/main state before treating this as shipped.
+- Gap `#490`: Automation Live detail should use compact `automation_live_activity_states` keyed by `(project_id, automation_id, version_id, node_id, state_key)` instead of ranking full `automation_activities` history during page render. Preserve activity insert/update projection maintenance, migration backfill, active invocation fallback, pending thread-input bindings, work-item positions, recent completion cutoff, state priority, `github_inbox`/`native_inbox` active-position exclusion, and query-plan coverage. Verify live PR/main state before treating prior implementation as shipped.
 - Resolved Automation Live display-state gap: node display state prioritizes `failed > blocked > running > waiting_human > recently_completed`, so active running work is labeled Running even when waiting items remain visible in counts.
 - Open gap `#387`: newly added custom Automation Schedule/Task nodes omit `skills` and `source_files` config defaults, so Details view does not show Skills or Source files selectors unless users hand-edit YAML first.
 - Stale-origin GitHub SDLC implementation tasks can publish PRs after graph replacement only when durable graph-independent issue-task provenance proves the Automation-created task/source-issue relationship. Review-node causal bindings can still block PR publication if authorization fails to distinguish implementation-to-open-PR policy from review-node bindings.
