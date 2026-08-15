@@ -93,10 +93,6 @@ func (s *LLMService) workflowChainService() *llmworkflow.Service {
 	return svc
 }
 
-func cleanOutputForChain(output string) string {
-	return llmworkflow.CleanOutputForChain(output)
-}
-
 func defaultRunnableChildCategory(parentCategory models.TaskCategory) models.TaskCategory {
 	switch parentCategory {
 	case models.CategoryActive, models.CategoryBacklog:

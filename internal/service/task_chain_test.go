@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/events"
+	llmworkflow "github.com/openvibely/openvibely/internal/llm/workflow"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -795,9 +796,9 @@ func TestCleanOutputForChain(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := cleanOutputForChain(tt.input)
+			got := llmworkflow.CleanOutputForChain(tt.input)
 			if got != tt.expected {
-				t.Errorf("cleanOutputForChain()\ngot:  %q\nwant: %q", got, tt.expected)
+				t.Errorf("CleanOutputForChain()\ngot:  %q\nwant: %q", got, tt.expected)
 			}
 		})
 	}
@@ -813,7 +814,7 @@ func TestCleanOutputForChain_PreservesCodedAliasesAndCleansRealAliases(t *testin
 		"<thinking>real internal</thinking>\nVisible child context.\n" +
 		`[Using tool: bash">` + "\n" + `<parameter name="command">echo real</parameter>` + "\n" + `</invoke>`
 
-	got := cleanOutputForChain(input)
+	got := llmworkflow.CleanOutputForChain(input)
 	for _, literal := range []string{
 		"`<thinking>coded</thinking>`",
 		"`" + codedTool + "`",
