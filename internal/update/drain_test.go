@@ -167,14 +167,14 @@ func TestDrainPersistenceFailureDoesNotPublishOwnershipRenewalOrRelease(t *testi
 
 func TestWorkTrackerAccountsEveryClassAndRejectsAfterDrainCloses(t *testing.T) {
 	tracker := NewWorkTracker()
-	for _, class := range []WorkClass{WorkTask, WorkChat, WorkWorkflow, WorkAutomation} {
+	for _, class := range []WorkClass{WorkTask, WorkChat, WorkAutomation} {
 		done, err := tracker.Start(class)
 		if err != nil {
 			t.Fatalf("start %s: %v", class, err)
 		}
 		defer done()
 	}
-	if got := tracker.Active(); got != (ActiveWork{TaskExecutions: 1, ChatExecutions: 1, WorkflowExecutions: 1, AutomationActivities: 1}) {
+	if got := tracker.Active(); got != (ActiveWork{TaskExecutions: 1, ChatExecutions: 1, AutomationActivities: 1}) {
 		t.Fatalf("active = %#v", got)
 	}
 	tracker.Close()

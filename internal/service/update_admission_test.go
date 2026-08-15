@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -10,13 +9,9 @@ import (
 	"github.com/openvibely/openvibely/internal/update"
 )
 
-func TestUpdateDrainGatesWorkflowSchedulerAutomationAndRecoveryPaths(t *testing.T) {
+func TestUpdateDrainGatesSchedulerAutomationAndRecoveryPaths(t *testing.T) {
 	tracker := update.NewWorkTracker()
 	tracker.Close()
-	workflow := &WorkflowService{updateTracker: tracker}
-	if _, err := workflow.ExecuteWorkflow(context.Background(), "workflow", "task"); !errors.Is(err, update.ErrDraining) {
-		t.Fatalf("workflow start = %v", err)
-	}
 	scheduler := &SchedulerService{updateTracker: tracker}
 	scheduler.checkDueTasks(context.Background())
 	dispatcher := &AutomationDispatcher{updateTracker: tracker}

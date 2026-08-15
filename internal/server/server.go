@@ -643,41 +643,12 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	llmSvc.SetAutomationRegistrationService(automationRegistrationSvc)
 	llmSvc.SetAutomationRepo(automationRepo)
 	upcomingSvc := service.NewUpcomingService(upcomingRepo)
-	workflowRepo := repository.NewWorkflowRepo(db)
-	workflowSvc := service.NewWorkflowService(workflowRepo, llmConfigRepo, taskRepo, llmSvc)
-	workflowSvc.SetUpdateWorkTracker(updateTracker)
-	workflowSvc.SetAlertService(alertSvc)
 	insightsRepo := repository.NewInsightsRepo(db)
 	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 	insightsSvc.SetLLMService(llmSvc)
-	architectRepo := repository.NewArchitectRepo(db)
-	architectSvc := service.NewArchitectService(architectRepo, taskRepo, projectRepo, llmConfigRepo)
-	architectSvc.SetLLMService(llmSvc)
-	backlogRepo := repository.NewBacklogRepo(db)
-	backlogSvc := service.NewBacklogService(backlogRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
-	backlogSvc.SetLLMService(llmSvc)
-	upcomingSvc.SetBacklogRepo(backlogRepo)
 	upcomingSvc.SetProjectRepo(projectRepo)
 	upcomingSvc.SetLLMService(llmSvc)
 	upcomingSvc.SetLLMConfigRepo(llmConfigRepo)
-
-	// Autonomous Builds (task-chain based)
-	autonomousRepo := repository.NewAutonomousRepo(db)
-	autonomousTriggerSvc := service.NewAutonomousTriggerService(taskSvc, projectRepo, taskRepo, execRepo, autonomousRepo)
-
-	// Trend Intelligence (enriches autonomous builds with external data)
-	trendRepo := repository.NewTrendRepo(db)
-	trendSvc := service.NewTrendIntelligenceService(trendRepo, projectRepo, llmConfigRepo)
-	trendSvc.SetLLMService(llmSvc)
-	autonomousTriggerSvc.SetTrendIntelligenceService(trendSvc)
-
-	// Task Templates
-	templateRepo := repository.NewTemplateRepo(db)
-	templateSvc := service.NewTemplateService(templateRepo, taskRepo, projectRepo)
-
-	// Pattern Library
-	patternRepo := repository.NewPatternRepo(db)
-	patternSvc := service.NewPatternService(patternRepo, taskRepo)
 
 	llmSvc.SetAlertService(alertSvc)
 	llmSvc.SetTaskService(taskSvc)
@@ -1081,7 +1052,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	})
 
 	h := handler.New(
-		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, workflowSvc, insightsSvc, architectSvc, backlogSvc, autonomousTriggerSvc, trendSvc, templateSvc, patternSvc,
+		projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, alertSvc, upcomingSvc, nil, insightsSvc, nil, nil, nil, nil, nil, nil,
 		llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, broadcaster, telegramSvc,
 	)
 	h.SetChatBroadcaster(chatBroadcaster)

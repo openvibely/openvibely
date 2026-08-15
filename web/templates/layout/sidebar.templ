@@ -124,9 +124,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						// Determine which page to load based on current URL
 						const currentPath = window.location.pathname;
 						let newUrl;
-						if (currentPath.includes('/dashboard-mockup')) {
-							newUrl = '/dashboard-mockup?project_id=' + newProjectId;
-						} else if (currentPath.includes('/automations')) {
+						if (currentPath.includes('/automations')) {
 							newUrl = '/automations?project_id=' + newProjectId;
 						} else if (currentPath.includes('/schedule')) {
 							newUrl = '/schedule?project_id=' + newProjectId;
@@ -148,16 +146,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							newUrl = '/alerts?project_id=' + newProjectId;
 						} else if (currentPath.includes('/workers')) {
 							newUrl = '/workers?project_id=' + newProjectId;
-						} else if (currentPath.includes('/suggestions')) {
-							newUrl = '/suggestions?project_id=' + newProjectId;
 						} else if (currentPath.includes('/insights')) {
 							newUrl = '/insights?project_id=' + newProjectId;
-						} else if (currentPath.includes('/architect')) {
-							newUrl = '/architect?project_id=' + newProjectId;
-						} else if (currentPath.includes('/backlog')) {
-							newUrl = '/backlog?project_id=' + newProjectId;
-						} else if (currentPath.includes('/autonomous')) {
-							newUrl = '/autonomous?project_id=' + newProjectId;
 						} else if (currentPath.includes('/channels')) {
 							newUrl = '/channels?project_id=' + newProjectId;
 						} else if (currentPath.includes('/personality')) {

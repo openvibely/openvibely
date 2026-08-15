@@ -25,12 +25,11 @@ var ErrDraining = errors.New("OpenVibely is preparing for an update; retry later
 type ActiveWork struct {
 	TaskExecutions       int `json:"task_executions"`
 	ChatExecutions       int `json:"chat_executions"`
-	WorkflowExecutions   int `json:"workflow_executions"`
 	AutomationActivities int `json:"automation_activities"`
 }
 
 func (a ActiveWork) Total() int {
-	return a.TaskExecutions + a.ChatExecutions + a.WorkflowExecutions + a.AutomationActivities
+	return a.TaskExecutions + a.ChatExecutions + a.AutomationActivities
 }
 
 type WorkClass string
@@ -38,7 +37,6 @@ type WorkClass string
 const (
 	WorkTask       WorkClass = "task"
 	WorkChat       WorkClass = "chat"
-	WorkWorkflow   WorkClass = "workflow"
 	WorkAutomation WorkClass = "automation"
 )
 
@@ -61,8 +59,6 @@ func (t *WorkTracker) Start(class WorkClass) (func(), error) {
 		t.active.TaskExecutions++
 	case WorkChat:
 		t.active.ChatExecutions++
-	case WorkWorkflow:
-		t.active.WorkflowExecutions++
 	case WorkAutomation:
 		t.active.AutomationActivities++
 	default:
@@ -78,8 +74,6 @@ func (t *WorkTracker) Start(class WorkClass) (func(), error) {
 				t.active.TaskExecutions--
 			case WorkChat:
 				t.active.ChatExecutions--
-			case WorkWorkflow:
-				t.active.WorkflowExecutions--
 			case WorkAutomation:
 				t.active.AutomationActivities--
 			}

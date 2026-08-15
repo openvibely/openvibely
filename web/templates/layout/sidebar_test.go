@@ -88,17 +88,6 @@ func TestSidebar_NavigationHeadingHiddenAndLinksPreserved(t *testing.T) {
 		}
 	}
 
-	hiddenLinks := []string{
-		`data-nav-base="/dashboard-mockup"`,
-		`data-nav-base="/architect"`,
-		`data-nav-base="/autonomous"`,
-		`data-nav-base="/suggestions"`,
-	}
-	for _, marker := range hiddenLinks {
-		if strings.Contains(html, marker) {
-			t.Fatalf("sidebar link marker should be hidden: %s", marker)
-		}
-	}
 }
 
 func TestSidebar_AlertsKeepsUnreadCountSeparateFromSystemUpdateBadge(t *testing.T) {

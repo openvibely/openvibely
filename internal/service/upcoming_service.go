@@ -19,7 +19,6 @@ import (
 
 type UpcomingService struct {
 	upcomingRepo  *repository.UpcomingRepo
-	backlogRepo   *repository.BacklogRepo
 	projectRepo   *repository.ProjectRepo
 	llmSvc        *LLMService
 	llmConfigRepo *repository.LLMConfigRepo
@@ -27,11 +26,6 @@ type UpcomingService struct {
 
 func NewUpcomingService(upcomingRepo *repository.UpcomingRepo) *UpcomingService {
 	return &UpcomingService{upcomingRepo: upcomingRepo}
-}
-
-// SetBacklogRepo sets the backlog repository for health metrics on the Pulse page
-func (s *UpcomingService) SetBacklogRepo(backlogRepo *repository.BacklogRepo) {
-	s.backlogRepo = backlogRepo
 }
 
 // SetProjectRepo sets the project repository for git change summaries
@@ -73,17 +67,6 @@ func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string
 		return nil, err
 	}
 
-	// Fetch backlog health if repo is available
-	var backlogHealth *models.BacklogHealthSnapshot
-	if s.backlogRepo != nil {
-		health, err := s.backlogRepo.GetLatestHealth(ctx, projectID)
-		if err != nil {
-			applog.Infof("[upcoming-svc] error getting backlog health (non-fatal): %v", err)
-		} else {
-			backlogHealth = health
-		}
-	}
-
 	// Fetch task summary metrics
 	taskSummary, err := s.upcomingRepo.GetTaskSummary(ctx, projectID, now)
 	if err != nil {
@@ -96,7 +79,6 @@ func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string
 		RunningTasks:   running,
 		PendingTasks:   pending,
 		ScheduledTasks: scheduled,
-		BacklogHealth:  backlogHealth,
 		TaskSummary:    taskSummary,
 	}
 
@@ -202,11 +184,6 @@ func (s *UpcomingService) GeneratePulseSummary(ctx context.Context, projectID st
 		sb.WriteString(fmt.Sprintf("Task summary: %d pending total, %d urgent, %d high, %d failed, %d overdue\n",
 			ts.TotalPending, ts.UrgentCount, ts.HighCount, ts.FailedCount, ts.OverdueCount))
 	}
-	if upcoming.BacklogHealth != nil {
-		sb.WriteString(fmt.Sprintf("Backlog health: %.0f%% score, %d total, %d stale\n",
-			upcoming.BacklogHealth.HealthScore, upcoming.BacklogHealth.TotalTasks, upcoming.BacklogHealth.StaleCount))
-	}
-
 	prompt := fmt.Sprintf(`You are summarizing the current state of a software project for a dashboard.
 Given the following data about what is happening right now, write a brief 2-3 sentence summary.
 Be direct and factual. Focus on what matters most: anything running, urgent items, failures, or overdue work.

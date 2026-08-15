@@ -51,16 +51,3 @@ func TestPrimaryNavigationFragmentsIncludeAuthoritativePageTitles(t *testing.T) 
 		})
 	}
 }
-
-func TestArchitectWizardIncludesAuthoritativeDynamicPageTitle(t *testing.T) {
-	detail := &models.ArchitectSessionDetail{
-		Session: models.ArchitectSession{Title: "API <migration> & rollout"},
-	}
-	var buf bytes.Buffer
-	if err := ArchitectWizard(detail).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render architect wizard: %v", err)
-	}
-	if !strings.Contains(buf.String(), `data-openvibely-page-title="Architect - API &lt;migration&gt; &amp; rollout - OpenVibely"`) {
-		t.Fatalf("architect wizard missing escaped authoritative title marker: %s", buf.String())
-	}
-}

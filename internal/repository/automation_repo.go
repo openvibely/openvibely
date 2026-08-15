@@ -461,13 +461,6 @@ func validateAutomationResource(ctx context.Context, q queryer, projectID, resou
 			}
 			return err
 		}
-	case "workflow":
-		if err := q.QueryRowContext(ctx, `SELECT project_id FROM workflows WHERE id = ?`, resourceID).Scan(&ownerProjectID); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("workflow resource %q not found", resourceID)
-			}
-			return err
-		}
 	default:
 		return fmt.Errorf("registered automation resource type %q is not supported in phase 1", resourceType)
 	}

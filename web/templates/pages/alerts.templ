@@ -133,7 +133,7 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 					document.getElementById('system-update-state').textContent = data.state;
 						var owner = data.distribution === 'hosted' ? 'A Hosted administrator starts the rollout.' : data.distribution === 'docker' && data.manual ? 'The container operator performs the replacement after OpenVibely is safe to restart.' : data.distribution === 'docker' ? 'An OpenVibely administrator approves the host updater agent request.' : 'An OpenVibely administrator approves restart and installation.';					document.getElementById('system-update-owner').textContent = owner;
 					var active = data.drain && data.drain.active ? data.drain.active : {};
-					var total = (active.task_executions || 0) + (active.chat_executions || 0) + (active.workflow_executions || 0) + (active.automation_activities || 0);
+					var total = (active.task_executions || 0) + (active.chat_executions || 0) + (active.automation_activities || 0);
 					document.getElementById('system-update-work').textContent = data.state === 'waiting_for_idle' ? 'Waiting for AI work to finish · ' + total + ' active' : (data.state === 'ready' ? 'Safe to restart' : total + ' active AI operations');
 					var digest = document.getElementById('system-update-digest'); var imageRef = data.release && data.release.target ? data.release.target.image_ref || '' : '';
 					digest.textContent = imageRef ? 'Verified image: ' + imageRef : ''; digest.classList.toggle('hidden', !imageRef);

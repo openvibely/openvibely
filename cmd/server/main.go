@@ -45,15 +45,6 @@ import (
 // @tag.name capacity
 // @tag.description Worker capacity and utilization API endpoints
 
-// @tag.name workflows
-// @tag.description Multi-agent workflow and metrics API endpoints
-
-// @tag.name autonomous
-// @tag.description Autonomous build and trend intelligence API endpoints
-
-// @tag.name collisions
-// @tag.description Semantic collision analysis API endpoints
-
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "update-helper" {
 		cfg, err := update.ParseBinaryHelperArgs(os.Args[2:])

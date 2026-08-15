@@ -78,12 +78,7 @@ func (r *ProjectRepo) Delete(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback()
 
-	// Delete workflows first (references projects without ON DELETE CASCADE)
-	if _, err := tx.ExecContext(ctx, `DELETE FROM workflows WHERE project_id = ?`, id); err != nil {
-		return fmt.Errorf("deleting project workflows: %w", err)
-	}
-
-	// Delete the project (all other FKs use ON DELETE CASCADE)
+	// Delete the project (related live tables use ON DELETE CASCADE)
 	result, err := tx.ExecContext(ctx, `DELETE FROM projects WHERE id = ? AND is_default = 0`, id)
 	if err != nil {
 		return fmt.Errorf("deleting project: %w", err)

@@ -1565,12 +1565,6 @@ func TestHandler_HomeRedirectsToChat(t *testing.T) {
 	}
 }
 
-func TestHandler_Dashboard(t *testing.T) {
-	_, e, _ := setupTestHandler(t)
-	rec := htmxGet(e, "/dashboard")
-	assertCode(t, rec, http.StatusOK)
-}
-
 func TestHandler_TasksPage_RendersCategoryDrivenSwarmPlannerCopy(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Tasks Swarm UI Project")

@@ -242,11 +242,10 @@ func TestAutomationRuntimeResourceURLCoverage(t *testing.T) {
 		resourceID   string
 		want         string
 	}{
-		"alert":              {"alert", "alert id", "/alerts?project_id=proj+id&alert_id=alert+id"},
-		"goal":               {"goal", "task/goal", "/tasks/task%2Fgoal?project_id=proj+id#task-goal-panel"},
-		"workflow execution": {"workflow_execution", "workflow/run", "/workflows/executions/workflow%2Frun"},
-		"invalid issue":      {"github_issue", "github:owner:issue:42", ""},
-		"unknown":            {"something_else", "id", ""},
+		"alert":         {"alert", "alert id", "/alerts?project_id=proj+id&alert_id=alert+id"},
+		"goal":          {"goal", "task/goal", "/tasks/task%2Fgoal?project_id=proj+id#task-goal-panel"},
+		"invalid issue": {"github_issue", "github:owner:issue:42", ""},
+		"unknown":       {"something_else", "id", ""},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

@@ -1735,8 +1735,6 @@ func validateAutomationActivityResource(ctx context.Context, exec SQLExecutor, p
 		query = `SELECT 1 FROM alerts WHERE id = ? AND project_id = ?`
 	case "goal":
 		query = `SELECT 1 FROM task_goals g JOIN tasks t ON t.id = g.task_id WHERE g.task_id = ? AND t.project_id = ?`
-	case "workflow_execution":
-		query = `SELECT 1 FROM workflow_executions we JOIN workflows w ON w.id = we.workflow_id WHERE we.id = ? AND w.project_id = ?`
 	case "pull_request", "github_issue", "review":
 		if err := validateCanonicalGitHubResourceID(resourceType, resourceID); err != nil {
 			return err
@@ -2844,8 +2842,6 @@ func automationRuntimeResourceURL(projectID, resourceType, resourceID string) st
 		return "/alerts?project_id=" + url.QueryEscape(projectID) + "&alert_id=" + url.QueryEscape(resourceID)
 	case "goal":
 		return "/tasks/" + url.PathEscape(resourceID) + "?project_id=" + url.QueryEscape(projectID) + "#task-goal-panel"
-	case "workflow_execution":
-		return "/workflows/executions/" + url.PathEscape(resourceID)
 	case "github_issue", "pull_request", "review":
 		parts := strings.Split(resourceID, ":")
 		repositoryParts := []string(nil)

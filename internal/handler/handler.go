@@ -29,14 +29,7 @@ type Handler struct {
 	schedulerSvc               *service.SchedulerService
 	alertSvc                   *service.AlertService
 	upcomingSvc                *service.UpcomingService
-	workflowSvc                *service.WorkflowService
 	insightsSvc                *service.InsightsService
-	architectSvc               *service.ArchitectService
-	backlogSvc                 *service.BacklogService
-	autonomousTriggerSvc       *service.AutonomousTriggerService
-	trendSvc                   *service.TrendIntelligenceService
-	templateSvc                *service.TemplateService
-	patternSvc                 *service.PatternService
 	automationGraphSvc         *service.AutomationGraphService
 	automationRegistrationSvc  *service.AutomationRegistrationService
 	automationDraftSvc         *service.AutomationDraftService
@@ -185,14 +178,14 @@ func New(
 	schedulerSvc *service.SchedulerService,
 	alertSvc *service.AlertService,
 	upcomingSvc *service.UpcomingService,
-	workflowSvc *service.WorkflowService,
+	_ any,
 	insightsSvc *service.InsightsService,
-	architectSvc *service.ArchitectService,
-	backlogSvc *service.BacklogService,
-	autonomousTriggerSvc *service.AutonomousTriggerService,
-	trendSvc *service.TrendIntelligenceService,
-	templateSvc *service.TemplateService,
-	patternSvc *service.PatternService,
+	_ any,
+	_ any,
+	_ any,
+	_ any,
+	_ any,
+	_ any,
 	llmConfigRepo *repository.LLMConfigRepo,
 	taskRepo *repository.TaskRepo,
 	scheduleRepo *repository.ScheduleRepo,
@@ -257,38 +250,31 @@ func New(
 	}
 
 	h = &Handler{
-		projectSvc:           projectSvc,
-		taskSvc:              taskSvc,
-		swarmSvc:             swarmSvc,
-		llmSvc:               llmSvc,
-		workerSvc:            workerSvc,
-		schedulerSvc:         schedulerSvc,
-		alertSvc:             alertSvc,
-		upcomingSvc:          upcomingSvc,
-		workflowSvc:          workflowSvc,
-		insightsSvc:          insightsSvc,
-		architectSvc:         architectSvc,
-		backlogSvc:           backlogSvc,
-		autonomousTriggerSvc: autonomousTriggerSvc,
-		trendSvc:             trendSvc,
-		templateSvc:          templateSvc,
-		patternSvc:           patternSvc,
-		llmConfigRepo:        llmConfigRepo,
-		taskRepo:             taskRepo,
-		scheduleRepo:         scheduleRepo,
-		execRepo:             execRepo,
-		threadInputRepo:      threadInputRepo,
-		usageRepo:            usageRepo,
-		skillAnalyticsRepo:   skillAnalyticsRepo,
-		usageAnalyticsSvc:    usageAnalyticsSvc,
-		workerRepo:           workerRepo,
-		attachmentRepo:       attachmentRepo,
-		chatAttachmentRepo:   chatAttachmentRepo,
-		projectRepo:          projectRepo,
-		settingsRepo:         settingsRepo,
-		broadcaster:          broadcaster,
-		telegramService:      telegramSvc,
-		projectFolderPicker:  pickProjectFolderNative,
+		projectSvc:          projectSvc,
+		taskSvc:             taskSvc,
+		swarmSvc:            swarmSvc,
+		llmSvc:              llmSvc,
+		workerSvc:           workerSvc,
+		schedulerSvc:        schedulerSvc,
+		alertSvc:            alertSvc,
+		upcomingSvc:         upcomingSvc,
+		insightsSvc:         insightsSvc,
+		llmConfigRepo:       llmConfigRepo,
+		taskRepo:            taskRepo,
+		scheduleRepo:        scheduleRepo,
+		execRepo:            execRepo,
+		threadInputRepo:     threadInputRepo,
+		usageRepo:           usageRepo,
+		skillAnalyticsRepo:  skillAnalyticsRepo,
+		usageAnalyticsSvc:   usageAnalyticsSvc,
+		workerRepo:          workerRepo,
+		attachmentRepo:      attachmentRepo,
+		chatAttachmentRepo:  chatAttachmentRepo,
+		projectRepo:         projectRepo,
+		settingsRepo:        settingsRepo,
+		broadcaster:         broadcaster,
+		telegramService:     telegramSvc,
+		projectFolderPicker: pickProjectFolderNative,
 	}
 	if taskSvc != nil {
 		taskSvc.SetQueuedTaskThreadFollowupHook(h.StartPendingTaskThreadFollowup)
@@ -586,9 +572,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Dashboard
 	e.GET("/", h.Home)
-	e.GET("/dashboard", h.Dashboard)
-	e.GET("/dashboard-mockup", h.DashboardMockup)
-	e.POST("/dashboard-mockup/actions", h.DashboardMockupAction)
 	e.GET("/analytics", h.Analytics)
 
 	// Analytics API endpoints
@@ -889,37 +872,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.DELETE("/alerts", h.DeleteAllAlerts)
 	e.GET("/alerts/unread-count", h.GetUnreadAlertCount)
 
-	// Multi-Agent Workflows
-	e.GET("/workflows", h.ListWorkflows)
-	e.POST("/workflows", h.CreateWorkflow)
-	e.GET("/workflows/:id", h.GetWorkflow)
-	e.PUT("/workflows/:id", h.UpdateWorkflow)
-	e.DELETE("/workflows/:id", h.DeleteWorkflow)
-	e.POST("/workflows/:id/steps", h.AddWorkflowStep)
-	e.DELETE("/workflows/:id/steps/:stepId", h.DeleteWorkflowStep)
-	e.POST("/workflows/:id/execute", h.ExecuteWorkflow)
-	e.POST("/workflows/executions/:execId/cancel", h.CancelWorkflowExecution)
-	e.GET("/workflows/executions/:execId", h.GetWorkflowExecution)
-
-	// Workflow Templates
-	e.GET("/workflows/templates", h.ListWorkflowTemplates)
-
-	// Task Complexity Analysis
-	e.GET("/tasks/:taskId/analyze", h.AnalyzeTaskComplexity)
-
-	// Agent Performance Metrics
-	e.GET("/api/workflows/metrics", h.GetAllAgentMetrics)
-	e.GET("/api/workflows/metrics/:agentId", h.GetAgentMetrics)
-	e.GET("/api/workflows/best-agent", h.GetBestAgent)
-	e.GET("/api/workflows/cheapest-agent", h.GetCheapestAgent)
-
-	// Vote Records
-	e.GET("/api/workflows/votes/:stepExecId", h.GetVoteRecords)
-
-	// Unified Suggestions (combined Insights + Backlog)
-	e.GET("/suggestions", h.UnifiedSuggestions)
-	e.POST("/suggestions/analyze", h.RunCombinedAnalysis)
-
 	// Proactive Insights (individual endpoints still work)
 	e.GET("/insights", h.ProactiveInsights)
 	e.POST("/insights/analyze", h.RunInsightsAnalysis)
@@ -932,73 +884,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/insights/reports", h.ListInsightReports)
 	e.POST("/insights/health-check", h.RunHealthCheck)
 	e.POST("/history/grade-ideas", h.GradeIdeas)
-
-	// Architect
-	e.GET("/architect", h.ArchitectMode)
-	e.POST("/architect/sessions", h.CreateArchitectSession)
-	e.GET("/architect/sessions/:id", h.GetArchitectSession)
-	e.DELETE("/architect/sessions/:id", h.DeleteArchitectSession)
-	e.POST("/architect/sessions/:id/messages", h.SendArchitectMessage)
-	e.POST("/architect/sessions/:id/advance", h.AdvanceArchitectPhase)
-	e.POST("/architect/sessions/:id/architecture", h.GenerateArchitectArchitecture)
-	e.POST("/architect/sessions/:id/risks", h.GenerateArchitectRisks)
-	e.POST("/architect/sessions/:id/tasks", h.GenerateArchitectTasks)
-	e.POST("/architect/sessions/:id/activate", h.ActivateArchitectPhase)
-	e.POST("/architect/sessions/:id/abandon", h.AbandonArchitectSession)
-	e.POST("/architect/sessions/:id/template", h.SaveArchitectTemplate)
-	e.DELETE("/architect/templates/:id", h.DeleteArchitectTemplate)
-
-	// Backlog Management
-	e.GET("/backlog", h.BacklogManagement)
-	e.POST("/backlog/analyze", h.RunBacklogAnalysis)
-	e.PATCH("/backlog/suggestions/:id/status", h.UpdateBacklogSuggestionStatus)
-	e.POST("/backlog/suggestions/:id/apply", h.ApplyBacklogSuggestion)
-	e.DELETE("/backlog/suggestions/:id", h.DeleteBacklogSuggestion)
-	e.POST("/backlog/health", h.SnapshotBacklogHealth)
-	e.GET("/backlog/reports", h.ListBacklogReports)
-
-	// Autonomous Builds
-	e.GET("/autonomous", h.AutonomousBuilds)
-	e.POST("/api/autonomous/trigger", h.TriggerAutonomousBuild)
-	e.PUT("/api/autonomous/config", h.UpdateAutonomousConfig)
-	e.GET("/api/autonomous/summary/:taskId", h.GetBuildSummary)
-	e.GET("/api/autonomous/chain/:taskId", h.GetBuildChain)
-
-	// Trend Intelligence (part of Autonomous)
-	e.PUT("/api/autonomous/x-credentials", h.SaveXCredentials)
-	e.POST("/api/autonomous/trends/sources", h.AddTrendSource)
-	e.DELETE("/api/autonomous/trends/sources/:id", h.DeleteTrendSource)
-	e.PATCH("/api/autonomous/trends/sources/:id/toggle", h.ToggleTrendSource)
-	e.POST("/api/autonomous/trends/collect", h.CollectTrends)
-	e.POST("/api/autonomous/trends/analyze", h.AnalyzeTrends)
-	e.POST("/api/autonomous/trends/competitors", h.AnalyzeCompetitors)
-	e.PATCH("/api/autonomous/trends/patterns/:id/status", h.UpdateTrendPatternStatus)
-	e.GET("/api/autonomous/trends/dashboard", h.GetTrendDashboard)
-
-	// Task Templates
-	e.GET("/templates", h.Templates)
-	e.POST("/templates", h.CreateTemplate)
-	e.POST("/templates/:id/create-task", h.CreateTaskFromTemplate)
-	e.POST("/tasks/:id/save-as-template", h.SaveTaskAsTemplate)
-	e.PUT("/templates/:id", h.UpdateTemplate)
-	e.DELETE("/templates/:id", h.DeleteTemplate)
-	e.POST("/templates/:id/favorite", h.ToggleFavoriteTemplate)
-	e.GET("/templates/search", h.SearchTemplates)
-	e.GET("/templates/filter", h.FilterTemplates)
-
-	// Pattern Library
-	e.GET("/patterns", h.PatternsPage)
-	e.POST("/patterns", h.CreatePattern)
-	e.GET("/patterns/:id", h.GetPattern)
-	e.PUT("/patterns/:id", h.UpdatePattern)
-	e.DELETE("/patterns/:id", h.DeletePattern)
-	e.GET("/patterns/:id/apply", h.ApplyPatternForm)
-	e.POST("/patterns/:id/apply", h.ApplyPattern)
-	e.POST("/patterns/:id/duplicate", h.DuplicatePattern)
-	e.GET("/patterns/search", h.SearchPatterns)
-	e.GET("/patterns/export", h.ExportPatterns)
-	e.POST("/patterns/import", h.ImportPatterns)
-	e.GET("/patterns/category/:category", h.ListPatternsByCategory)
 
 	// Server-Sent Events for real-time updates
 	e.GET("/events/live", h.LiveEventsSSE)

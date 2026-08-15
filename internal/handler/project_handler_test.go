@@ -73,26 +73,6 @@ func TestHome_WithProjectID(t *testing.T) {
 	}
 }
 
-// ---- Dashboard ----
-
-func TestDashboard_Success(t *testing.T) {
-	tc := NewTestContext(t)
-	project := tc.CreateProject().WithName("Dash Project").Build()
-	rec := tc.HTTP().Get("/dashboard?project_id=" + project.ID).Execute()
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestDashboard_NoProject(t *testing.T) {
-	tc := NewTestContext(t)
-	rec := tc.HTTP().Get("/dashboard").Execute()
-	// Should succeed even with no project_id — defaults to first project or empty
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
-	}
-}
-
 // ---- ListProjects ----
 
 func TestListProjects(t *testing.T) {
