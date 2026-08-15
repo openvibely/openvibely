@@ -458,7 +458,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     window.renderLiveChatContent = window.renderStreamingContent;
     var draft = document.getElementById('message-input');
     var session = document.getElementById('chat-form-session-id');
-    draft.value = 'preserved stream-only draft';
+    draft.value = '';
     session.value = 'preserved-stream-only-session';
     window.__phase = 'running';
     window.__composerActionHTML = ` + string(stopActionJSON) + `;
@@ -469,7 +469,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     var stopButton = document.querySelector('#chat-form-primary-action button');
     if (!pair || !stream) fail('stream-only terminal fixture did not attach its execution stream');
     if (!stopButton || stopButton.getAttribute('aria-label') !== 'Stop response') fail('normal live Chat start did not change Send to Stop');
-    if (document.getElementById('message-input') !== draft || draft.value !== 'preserved stream-only draft') fail('live start replaced or cleared Chat draft');
+    if (document.getElementById('message-input') !== draft || draft.value !== '') fail('live start replaced or changed empty Chat draft');
     if (document.getElementById('chat-form-session-id') !== session || session.value !== 'preserved-stream-only-session') fail('live start replaced or cleared Chat attachment session');
 
     window.__phase = 'terminal';
@@ -481,6 +481,7 @@ window.addEventListener('DOMContentLoaded', async function() {
     if (!sendButton || sendButton.getAttribute('aria-label') !== 'Send message') fail('per-execution-only ` + string(terminalStatus) + ` terminal did not change Stop to Send');
     if (document.getElementById('chat-execution-` + execID + `') !== pair) fail('stream-only terminal replaced the Chat execution node');
     if (pair.getAttribute('data-exec-status') !== '` + string(terminalStatus) + `') fail('stream-only terminal status was not authoritative: ' + pair.getAttribute('data-exec-status'));
+    draft.value = 'preserved stream-only draft';
     var expectedHolder = document.createElement('template');
     expectedHolder.innerHTML = window.__snapshots.terminal;
     var expectedRevision = expectedHolder.content.querySelector('#chat-page-root').getAttribute('data-chat-revision');
