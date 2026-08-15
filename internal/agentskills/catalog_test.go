@@ -265,7 +265,9 @@ func TestBuiltInGitHubAutonomousSDLCBootstrapSkillContent(t *testing.T) {
 		"attach their recurring schedules without setting persisted task goals",
 		"Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues",
 		"do not add persisted goals to recurring loop tasks",
-		"implementation-task goals for per-issue work records",
+		"prompt memory alone",
+		"github_list_existing_automation_issues",
+		"server-side idempotency keys as a retry safeguard",
 		"Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass",
 		"GitHub Bug Finder`",
 		"GitHub Optimization Finder`",
@@ -321,8 +323,10 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"usually daily",
 		"commonly hourly",
 		"must not create implementation tasks or modify code",
-		"Do not list, search, or inspect GitHub issues for duplicate detection",
-		"Native notification idempotency",
+		"list_existing_automation_notifications",
+		"get_alert",
+		"skip covered candidates",
+		"at most one new notification",
 		"Call `list_alerts` without `project_id`",
 		"pass the `read` filter",
 		"both read and unread approved notifications",
@@ -362,6 +366,7 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 	}
 
 	for _, forbidden := range []string{
+		"Native notification idempotency is the duplicate-prevention boundary",
 		"Create a scheduled suggestion producer and a project-scoped approved-notification inbox",
 		"A typical setup schedules the suggestion producer daily and the approved-notification inbox hourly",
 	} {
@@ -414,7 +419,9 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"attach their recurring schedules without setting persisted task goals",
 		"Use `set_task_goal` only for implementation tasks that Dev Inbox creates from assigned GitHub issues",
 		"do not add persisted goals to recurring loop tasks",
-		"implementation-task goals for per-issue work records",
+		"prompt memory alone",
+		"github_list_existing_automation_issues",
+		"server-side idempotency keys as a retry safeguard",
 		"Do not start Dev Inbox or scanner/finder tasks as extra one-off setup work unless the user explicitly asks for an immediate poll/scan pass",
 		"GitHub Bug Finder`",
 		"GitHub Optimization Finder`",
@@ -473,8 +480,10 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"`github_sdlc`",
 		"`github-sdlc/default`",
 		"`vision_suggestions`, `bug_finder`, `optimization_finder`, `redundancy_finder`, and `dev_inbox`",
-		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
-		"the server prevents duplicate Automation-created issues using trusted local state",
+		"github_list_existing_automation_issues",
+		"github_get_issue",
+		"skip that candidate and keep searching",
+		"at most one new GitHub issue",
 		"First call `github_forward_pr_feedback_to_tasks` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users",
 		"forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback",
 		"For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue",
@@ -515,18 +524,23 @@ func TestGitHubAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		body string
 	}{{name: "GitHub bootstrap skill", body: skillText}, {name: "GitHub autonomous SDLC guide", body: guideText}} {
 		for _, want := range []string{
-			"Do not require a repository-wide issue or pull-request listing/search before publication",
-			"Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated",
-			"Call `github_create_issue` for each actionable finding with an `idempotency_key` in the form",
-			"Reuse the exact key for a reworded finding or retry",
+			"Before creating any issue, call `github_list_existing_automation_issues`",
+			"call `github_get_issue` for that issue and read the body",
+			"skip that candidate and keep searching",
+			"Try to create at most one new GitHub issue this run",
+			"Use a required `idempotency_key`",
+			"Reuse the exact key when the same finding is retried",
 		} {
-			if strings.Count(text.body, want) < 2 {
-				t.Fatalf("%s must include Offering Manager and finder duplicate-boundary guidance %q", text.name, want)
+			if !strings.Contains(text.body, want) {
+				t.Fatalf("%s must include existing-issue discovery guidance %q", text.name, want)
 			}
 		}
 	}
 
 	for _, forbidden := range []string{
+		"Do not list, search, or inspect existing GitHub issues for duplicate detection",
+		"Do not require a repository-wide issue or pull-request listing/search before publication",
+		"Do not block publication because such a listing/search is unavailable, unauthenticated, incomplete, or unpaginated",
 		"Avoid duplicates by searching or inspecting existing visible work",
 		"Avoid duplicates by searching/inspecting existing visible work",
 		"Start with two scheduled tasks before adding more scanner/finder loops",
