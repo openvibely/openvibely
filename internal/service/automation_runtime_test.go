@@ -1914,7 +1914,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo,
 		TaskPullRequestRepo: repository.NewTaskPullRequestRepo(fixture.repo.DB()), AutomationRepo: fixture.repo, GitHub: provider}
 	handlers := buildGitHubIssueRuntimeHandlers(opts)
-	input := json.RawMessage(`{"title":"Exact issue","body":"body","labels":["bug"]}`)
+	input := json.RawMessage(`{"title":"Exact issue","body":"body","labels":["bug"],"idempotency_key":"bug:runtime:exact-issue"}`)
 	first, err := handlers["github_create_issue"](ctx, input)
 	require.NoError(t, err)
 	require.Contains(t, first, `"Number":42`)
@@ -1923,7 +1923,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Contains(t, second, `"reused":true`)
 	require.Equal(t, int32(1), createCalls.Load(), "successful issue creation retry must resolve persisted provenance")
 
-	ambiguousInput := githubCreateIssueRuntimeInput{Title: "Ambiguous issue", Body: "body", Labels: []string{"bug"}}
+	ambiguousInput := githubCreateIssueRuntimeInput{Title: "Ambiguous issue", Body: "body", Labels: []string{"bug"}, IdempotencyKey: "bug:runtime:ambiguous-issue"}
 	repoRef, err := provider.ResolveRepo(ctx, fixture.project.RepoURL, fixture.project.RepoPath)
 	require.NoError(t, err)
 	for _, ownedIssue := range []GitHubIssue{{Number: 43, Title: "Second owned issue"}, {Number: 44, Title: "Local remote issue"}} {
@@ -1935,7 +1935,7 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	resourceID, err := fixture.repo.ReserveExternalActivity(ctx, fixture.project.ID, binding, ambiguousKey, "create_github_issue", "github_issue")
 	require.NoError(t, err)
 	require.Empty(t, resourceID)
-	_, err = handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"Ambiguous issue","body":"body"}`))
+	_, err = handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"Ambiguous issue","body":"body","idempotency_key":"bug:runtime:ambiguous-issue"}`))
 	require.ErrorIs(t, err, repository.ErrAutomationExternalReconciliation)
 	require.Equal(t, int32(1), createCalls.Load(), "an ambiguous prior mutation must not call GitHub again")
 
@@ -2471,6 +2471,25 @@ func replaceAutomationGitHubIssueGraphWithCandidate(t *testing.T, fixture automa
 	return saved.Definition
 }
 
+func TestAutomationGitHubIssueCreationRequiresStableIdempotencyKey(t *testing.T) {
+	var createCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			createCalls.Add(1)
+			return &GitHubIssue{Number: 97, URL: "https://github.com/example/runtime/issues/97", Title: req.Title, State: "open"}, nil
+		},
+	}
+	_, newCausalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
+
+	output, err := createIssue(newCausalContext("missing-key"), json.RawMessage(`{"title":"Missing stable key","body":"body"}`))
+	require.ErrorContains(t, err, "idempotency_key")
+	require.Empty(t, output)
+	require.Equal(t, int32(0), createCalls.Load(), "missing keys must fail before mutating GitHub")
+}
+
 func TestAutomationGitHubIssueCreationDeduplicatesStableFindingKeyAcrossRewordedTitles(t *testing.T) {
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
@@ -2504,6 +2523,29 @@ func TestAutomationGitHubIssueCreationDeduplicatesStableFindingKeyAcrossReworded
 	require.Equal(t, int32(1), createCalls.Load(), "a reworded duplicate finding must reuse the locally claimed issue")
 }
 
+func TestAutomationGitHubIssueCreationAllowsDistinctStableFindingKeys(t *testing.T) {
+	var createCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+		},
+		createIssueFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreateIssueRequest) (*GitHubIssue, error) {
+			number := int(createCalls.Add(1)) + 100
+			return &GitHubIssue{Number: number, URL: fmt.Sprintf("https://github.com/example/runtime/issues/%d", number), Title: req.Title, State: "open"}, nil
+		},
+	}
+	fixture, newCausalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
+
+	first, firstErr := createIssue(newCausalContext("distinct-first"), json.RawMessage(`{"title":"First distinct finding","body":"body","idempotency_key":"bug:runtime:first-distinct-finding"}`))
+	require.NoError(t, firstErr)
+	require.Contains(t, first, `"Number":101`)
+	second, secondErr := createIssue(newCausalContext("distinct-second"), json.RawMessage(`{"title":"Second distinct finding","body":"body","idempotency_key":"bug:runtime:second-distinct-finding"}`))
+	require.NoError(t, secondErr)
+	require.Contains(t, second, `"Number":102`)
+	require.Equal(t, int32(2), createCalls.Load(), "legitimate distinct finding keys must create separate GitHub issues")
+	require.Equal(t, 2, countRows(t, fixture.repo.DB(), `SELECT COUNT(*) FROM automation_github_issue_dedup_leases WHERE project_id = ? AND repository_full_name = ? AND mutation_state = 'completed'`, fixture.project.ID, "example/runtime"))
+}
+
 func TestAutomationGitHubIssueCreationReusesCompletedClaimFromDifferentAutomation(t *testing.T) {
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
@@ -2526,13 +2568,13 @@ func TestAutomationGitHubIssueCreationReusesCompletedClaimFromDifferentAutomatio
 		},
 	})
 	require.NoError(t, err)
-	input := json.RawMessage(`{"title":"Cross Automation collision","body":"body"}`)
+	input := json.RawMessage(`{"title":"Cross Automation collision","body":"body","idempotency_key":"bug:runtime:cross-automation-collision"}`)
 
 	firstOutput, firstErr := createIssue(newFirstContext("cross-automation-first"), input)
 	require.NoError(t, firstErr)
 	require.Contains(t, firstOutput, `"Number":93`)
 	secondCtx := newAutomationGitHubIssueCausalContext(t, fixture, secondDefinition, secondTask, "bug_finder", "cross-automation-second")
-	secondOutput, secondErr := createIssue(secondCtx, json.RawMessage(`{"title":"  cross   automation COLLISION ","body":"different"}`))
+	secondOutput, secondErr := createIssue(secondCtx, json.RawMessage(`{"title":"Reworded cross Automation duplicate","body":"different","idempotency_key":"bug:runtime:cross-automation-collision"}`))
 	require.NoError(t, secondErr)
 	require.Contains(t, secondOutput, `"reused":true`)
 	require.Equal(t, int32(1), createCalls.Load(), "a duplicate finding from another saved Automation must reuse the existing local issue claim")
@@ -2589,9 +2631,9 @@ func TestAutomationGitHubIssueProjectionRepairRejectsDeletedSourceGraph(t *testi
 	}
 	fixture, newOriginalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
 	title := "Deleted projection source"
-	_, firstErr := createIssue(newOriginalContext("deleted-source-first"), json.RawMessage(`{"title":"Deleted projection source","body":"body"}`))
+	_, firstErr := createIssue(newOriginalContext("deleted-source-first"), json.RawMessage(`{"title":"Deleted projection source","body":"body","idempotency_key":"bug:runtime:deleted-projection-source"}`))
 	require.NoError(t, firstErr)
-	fingerprint := githubIssueTitleFingerprint(title)
+	fingerprint := githubIssueDedupFingerprint(title, "bug:runtime:deleted-projection-source")
 	var ownerToken, sourceJSON string
 	var issueNumber int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT owner_token, projection_source_json, created_issue_number
@@ -2622,11 +2664,11 @@ func TestAutomationGitHubIssueCreationFailsClosedAfterAmbiguousProviderOutcome(t
 		},
 	}
 	fixture, newCausalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
-	input := json.RawMessage(`{"title":"Ambiguous post-mutation issue","body":"body"}`)
+	input := json.RawMessage(`{"title":"Ambiguous post-mutation issue","body":"body","idempotency_key":"bug:runtime:ambiguous-post-mutation-issue"}`)
 
 	_, firstErr := createIssue(newCausalContext("ambiguous-first"), input)
 	require.ErrorContains(t, firstErr, "provider timeout")
-	fingerprint := githubIssueTitleFingerprint("Ambiguous post-mutation issue")
+	fingerprint := githubIssueDedupFingerprint("Ambiguous post-mutation issue", "bug:runtime:ambiguous-post-mutation-issue")
 	_, err := fixture.repo.DB().Exec(`UPDATE automation_github_issue_dedup_leases SET lease_expires_at = ?
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ?`, time.Now().UTC().Add(-time.Hour),
 		fixture.project.ID, "example/runtime", fingerprint)
@@ -2663,14 +2705,14 @@ func TestAutomationGitHubIssueCreationRecordsSuccessDespiteRequestCancellation(t
 	firstCtx, cancel := context.WithCancel(firstBaseCtx)
 	cancelFirst = cancel
 	defer cancel()
-	input := json.RawMessage(`{"title":"Canceled successful issue","body":"body"}`)
+	input := json.RawMessage(`{"title":"Canceled successful issue","body":"body","idempotency_key":"bug:runtime:canceled-successful-issue"}`)
 	activityKey := githubIssueCreationActivityKey(firstBaseCtx, &GitHubRepoRef{FullName: "example/runtime"},
-		githubCreateIssueRuntimeInput{Title: "Canceled successful issue", Body: "body", Labels: []string{"bug"}})
+		githubCreateIssueRuntimeInput{Title: "Canceled successful issue", Body: "body", Labels: []string{"bug"}, IdempotencyKey: "bug:runtime:canceled-successful-issue"})
 
 	firstOutput, firstErr := createIssue(firstCtx, input)
 	require.NoError(t, firstErr)
 	require.Contains(t, firstOutput, `"Number":91`)
-	fingerprint := githubIssueTitleFingerprint("Canceled successful issue")
+	fingerprint := githubIssueDedupFingerprint("Canceled successful issue", "bug:runtime:canceled-successful-issue")
 	var mutationState string
 	var recordedNumber sql.NullInt64
 	var projectionSource string
@@ -2732,9 +2774,9 @@ func TestAutomationGitHubIssueCreationRepairsCompletedClaimProjection(t *testing
 			}
 			fixture, newCausalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
 			firstCtx := newCausalContext("projection-failure-first")
-			input := json.RawMessage(`{"title":"Projection repair issue","body":"body"}`)
+			input := json.RawMessage(`{"title":"Projection repair issue","body":"body","idempotency_key":"bug:runtime:projection-repair-issue"}`)
 			activityKey := githubIssueCreationActivityKey(firstCtx, &GitHubRepoRef{FullName: "example/runtime"},
-				githubCreateIssueRuntimeInput{Title: "Projection repair issue", Body: "body", Labels: []string{"bug"}})
+				githubCreateIssueRuntimeInput{Title: "Projection repair issue", Body: "body", Labels: []string{"bug"}, IdempotencyKey: "bug:runtime:projection-repair-issue"})
 			_, err := fixture.repo.DB().Exec(tc.triggerSQL)
 			require.NoError(t, err)
 
@@ -2742,7 +2784,7 @@ func TestAutomationGitHubIssueCreationRepairsCompletedClaimProjection(t *testing
 			require.ErrorContains(t, firstErr, "injected issue projection failure")
 			_, err = fixture.repo.DB().Exec(`DROP TRIGGER fail_automation_issue_projection`)
 			require.NoError(t, err)
-			fingerprint := githubIssueTitleFingerprint("Projection repair issue")
+			fingerprint := githubIssueDedupFingerprint("Projection repair issue", "bug:runtime:projection-repair-issue")
 			var mutationState string
 			var recordedNumber sql.NullInt64
 			require.NoError(t, fixture.repo.DB().QueryRow(`SELECT mutation_state, created_issue_number FROM automation_github_issue_dedup_leases
@@ -2757,7 +2799,7 @@ func TestAutomationGitHubIssueCreationRepairsCompletedClaimProjection(t *testing
 			require.Contains(t, sameOutput, `"reused":true`)
 			laterCtx := newCausalContext("projection-failure-later")
 			laterActivityKey := githubIssueCreationActivityKey(laterCtx, &GitHubRepoRef{FullName: "example/runtime"},
-				githubCreateIssueRuntimeInput{Title: "Projection repair issue", Body: "body", Labels: []string{"bug"}})
+				githubCreateIssueRuntimeInput{Title: "Projection repair issue", Body: "body", Labels: []string{"bug"}, IdempotencyKey: "bug:runtime:projection-repair-issue"})
 			laterAutomationContext, ok := AutomationContextFromContext(laterCtx)
 			require.True(t, ok)
 			for _, binding := range laterAutomationContext.Bindings {
@@ -2822,9 +2864,9 @@ func TestAutomationGitHubIssueCreationRepairsPartialMultiBindingProjection(t *te
 	require.NoError(t, repository.NewExecutionRepo(fixture.repo.DB()).Create(ctx, &execution))
 	causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: bindings})
 	causalCtx = withAutomationExecution(causalCtx, fixture.task.ID, execution.ID)
-	input := json.RawMessage(`{"title":"Partial multi-binding projection","body":"body"}`)
+	input := json.RawMessage(`{"title":"Partial multi-binding projection","body":"body","idempotency_key":"bug:runtime:partial-multi-binding-projection"}`)
 	activityKey := githubIssueCreationActivityKey(causalCtx, &GitHubRepoRef{FullName: "example/runtime"},
-		githubCreateIssueRuntimeInput{Title: "Partial multi-binding projection", Body: "body", Labels: []string{"bug"}})
+		githubCreateIssueRuntimeInput{Title: "Partial multi-binding projection", Body: "body", Labels: []string{"bug"}, IdempotencyKey: "bug:runtime:partial-multi-binding-projection"})
 
 	_, err = fixture.repo.DB().Exec(fmt.Sprintf(`CREATE TRIGGER fail_second_automation_issue_projection
 		BEFORE INSERT ON automation_work_items WHEN NEW.automation_id = '%s' BEGIN
@@ -2874,12 +2916,12 @@ func TestAutomationGitHubIssueCreationUsesLaunchAuthorizationAfterGraphReplaceme
 	_, err := fixture.repo.DB().ExecContext(context.Background(), `UPDATE tasks SET created_via = ? WHERE id = ?`, fixture.task.CreatedVia, fixture.task.ID)
 	require.NoError(t, err)
 	activityKey := githubIssueCreationActivityKey(ctx, &GitHubRepoRef{FullName: "example/runtime"}, githubCreateIssueRuntimeInput{
-		Title: "Launch-safe bug", Body: "## Summary\nA user-visible bug.", Labels: []string{"bug"},
+		Title: "Launch-safe bug", Body: "## Summary\nA user-visible bug.", Labels: []string{"bug"}, IdempotencyKey: "bug:runtime:launch-safe-bug",
 	})
 	llmSvc := &LLMService{automationRepo: fixture.repo, githubIssueRuntime: provider, projectRepo: repository.NewProjectRepo(fixture.repo.DB()), taskRepo: fixture.taskRepo}
 	runtime := llmSvc.AutomationGitHubRuntimeTools(ctx, fixture.task, gitHubIssueRuntimeToolDefs(true))
 	require.NotNil(t, runtime)
-	output, handled, isErr, err := runtime.Executor(ctx, "github_create_issue", json.RawMessage(`{"title":"Launch-safe bug","body":"## Summary\nA user-visible bug."}`))
+	output, handled, isErr, err := runtime.Executor(ctx, "github_create_issue", json.RawMessage(`{"title":"Launch-safe bug","body":"## Summary\nA user-visible bug.","idempotency_key":"bug:runtime:launch-safe-bug"}`))
 	require.NoError(t, err)
 	require.True(t, handled)
 	require.False(t, isErr)
@@ -2902,7 +2944,7 @@ func TestMaintainedGitHubSDLCAppliesFinderCategoryLabels(t *testing.T) {
 			node := automationNodeByKey(t, fixture.definition, nodeKey)
 			binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: node.ID}
 			boundCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}})
-			req := &githubCreateIssueRuntimeInput{Title: "Readable finding", Body: "Readable body"}
+			req := &githubCreateIssueRuntimeInput{Title: "Readable finding", Body: "Readable body", IdempotencyKey: "bug:runtime:readable-finding"}
 			authorized, err := applyAutomationGitHubIssueConfiguration(boundCtx, githubIssueRuntimeOptions{ProjectID: fixture.project.ID, AutomationRepo: fixture.repo}, req)
 			require.NoError(t, err)
 			require.True(t, authorized)
@@ -2964,7 +3006,7 @@ func TestMaintainedGitHubSDLCCategoryLabelsAreProvisionedAndVerified(t *testing.
 			}
 			handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID,
 				ProjectRepo: projectRepo, TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
-			output, err := handlers["github_create_issue"](boundCtx, json.RawMessage(`{"title":"Readable bug finding","body":"## Summary\\nA user-visible problem."}`))
+			output, err := handlers["github_create_issue"](boundCtx, json.RawMessage(`{"title":"Readable bug finding","body":"## Summary\\nA user-visible problem.","idempotency_key":"bug:runtime:readable-bug-finding"}`))
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
 				require.Empty(t, output)
@@ -3025,7 +3067,7 @@ func TestAutomationGitHubIssueCreationDoesNotReadExistingIssuesForDeduplication(
 	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
 		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
 
-	output, err := handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"Safe duplicate boundary","body":"body"}`))
+	output, err := handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"Safe duplicate boundary","body":"body","idempotency_key":"bug:runtime:safe-duplicate-boundary"}`))
 	require.NoError(t, err)
 	require.Contains(t, output, `"Number":88`)
 	require.Zero(t, lookupCalls.Load(), "Automation duplicate protection must not read existing GitHub issues")
@@ -3098,7 +3140,7 @@ func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *te
 	}
 	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
 		TaskRepo: fixture.taskRepo, AutomationRepo: fixture.repo, GitHub: provider})
-	input := json.RawMessage(`{"title":"Concurrent duplicate","body":"first body"}`)
+	input := json.RawMessage(`{"title":"Concurrent duplicate","body":"first body","idempotency_key":"bug:runtime:concurrent-duplicate"}`)
 	type result struct {
 		output string
 		err    error
@@ -3114,7 +3156,7 @@ func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *te
 		t.Fatal("first execution did not enter GitHub issue creation")
 	}
 
-	secondOutput, secondErr := handlers["github_create_issue"](secondCtx, json.RawMessage(`{"title":"  concurrent   duplicate  ","body":"second body"}`))
+	secondOutput, secondErr := handlers["github_create_issue"](secondCtx, json.RawMessage(`{"title":"Reworded concurrent duplicate","body":"second body","idempotency_key":"bug:runtime:concurrent-duplicate"}`))
 	require.ErrorContains(t, secondErr, "already checking or creating")
 	require.Empty(t, secondOutput)
 	close(releaseCreate)
@@ -3124,7 +3166,7 @@ func TestAutomationGitHubIssueCreationSerializesLocalDedupAcrossExecutions(t *te
 	require.Equal(t, int32(1), createCalls.Load(), "concurrent Automation runs must create one canonical issue")
 
 	issueHasBugLabel.Store(false) // Simulate the category label being removed after the first successful creation.
-	duplicateOutput, duplicateErr := handlers["github_create_issue"](secondCtx, json.RawMessage(`{"title":"CONCURRENT DUPLICATE","body":"retry body"}`))
+	duplicateOutput, duplicateErr := handlers["github_create_issue"](secondCtx, json.RawMessage(`{"title":"Concurrent duplicate rewritten","body":"retry body","idempotency_key":"bug:runtime:concurrent-duplicate"}`))
 	require.NoError(t, duplicateErr)
 	require.Contains(t, duplicateOutput, `"Number":88`)
 	require.Contains(t, duplicateOutput, `"URL":"https://github.com/example/runtime/issues/88"`)
@@ -3810,6 +3852,29 @@ func TestAutomationRuntimeNativeNotificationCreationReusesIdempotencyKeyAfterGra
 	currentNotification := automationNodeByKey(t, second.Definition, "custom_notification")
 	currentApproval := automationNodeByKey(t, second.Definition, "custom_approval")
 	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, firstAlert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
+}
+
+func TestAutomationRuntimeNativeNotificationCreationAllowsDistinctIdempotencyKeys(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Native producer distinct idempotency keys")
+	ctx := context.Background()
+	candidate := customNativeMailboxCandidate("Native producer distinct idempotency keys")
+	definition, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+
+	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo.SetAutomationRepo(h.automationRepo)
+	alertSvc := NewAlertService(alertRepo, nil)
+	producer := automationNodeByKey(t, definition.Definition, "custom_producer")
+	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: definition.Definition.Automation.ID, VersionID: definition.Definition.Version.ID, NodeID: producer.ID,
+	}}})
+
+	first, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "First Native finding", IdempotencyKey: "native-distinct-one"})
+	require.NoError(t, err)
+	second, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Second Native finding", IdempotencyKey: "native-distinct-two"})
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID, second.ID)
+	require.Equal(t, 2, countRows(t, h.db, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND idempotency_key IN ('native-distinct-one', 'native-distinct-two')`, h.project.ID))
 }
 
 func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {

@@ -609,7 +609,9 @@ func applyAutomationGitHubIssueConfiguration(ctx context.Context, opts githubIss
 	if !actionAuthorized {
 		return false, errors.New("github_create_issue is not authorized by the caller's Automation graph")
 	}
-	if key := strings.Join(strings.Fields(strings.TrimSpace(req.IdempotencyKey)), " "); len(key) > 200 {
+	if key := strings.Join(strings.Fields(strings.TrimSpace(req.IdempotencyKey)), " "); key == "" {
+		return false, errors.New("Automation GitHub issue creation requires a stable idempotency_key")
+	} else if len(key) > 200 {
 		return false, errors.New("GitHub issue idempotency_key must be at most 200 characters")
 	} else {
 		req.IdempotencyKey = key

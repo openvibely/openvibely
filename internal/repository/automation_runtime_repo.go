@@ -122,23 +122,6 @@ type AutomationGitHubIssueDedupClaim struct {
 	Source      AutomationGitHubIssueDedupSource
 }
 
-func sameAutomationGitHubIssueDedupSource(left, right AutomationGitHubIssueDedupSource) bool {
-	if strings.TrimSpace(left.Context.ProjectID) != strings.TrimSpace(right.Context.ProjectID) {
-		return false
-	}
-	leftAutomations := dedupSourceAutomationCounts(left)
-	rightAutomations := dedupSourceAutomationCounts(right)
-	if len(leftAutomations) == 0 || len(leftAutomations) != len(rightAutomations) {
-		return false
-	}
-	for automationID, count := range leftAutomations {
-		if rightAutomations[automationID] != count {
-			return false
-		}
-	}
-	return true
-}
-
 func dedupSourceAutomationCounts(source AutomationGitHubIssueDedupSource) map[string]int {
 	counts := make(map[string]int)
 	seen := make(map[string]bool)
@@ -2386,8 +2369,8 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 			claim.Source = AutomationGitHubIssueDedupSource{}
 		}
 		if createdIssueNumber.Valid && createdIssueNumber.Int64 > 0 {
-			if !sameAutomationGitHubIssueDedupSource(claim.Source, source) {
-				return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("%w: completed GitHub issue belongs to a different Automation source", ErrAutomationExternalReconciliation)
+			if len(dedupSourceAutomationCounts(claim.Source)) == 0 {
+				return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("%w: completed GitHub issue has no trusted Automation source", ErrAutomationExternalReconciliation)
 			}
 			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 				return AutomationGitHubIssueDedupClaim{}, err
