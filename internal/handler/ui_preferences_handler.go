@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	uiPreferenceThemeKey            = "ui.theme"
-	uiPreferenceSidebarCollapsedKey = "ui.sidebar_collapsed"
-	uiPreferenceDiffViewKey         = "ui.diff_view"
+	uiPreferenceThemeKey             = "ui.theme"
+	uiPreferenceSidebarCollapsedKey  = "ui.sidebar_collapsed"
+	uiPreferenceDiffViewKey          = "ui.diff_view"
+	uiPreferenceSelectedProjectIDKey = "ui.selected_project_id"
 )
 
 func (h *Handler) uiPreferences(ctx context.Context) layout.UIPreferences {
@@ -80,6 +81,7 @@ type uiPreferencesRequest struct {
 	Theme            string `json:"theme"`
 	SidebarCollapsed *bool  `json:"sidebar_collapsed"`
 	DiffView         string `json:"diff_view"`
+	ProjectID        string `json:"project_id"`
 }
 
 func (h *Handler) SaveUIPreferences(c echo.Context) error {
@@ -114,6 +116,21 @@ func (h *Handler) SaveUIPreferences(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid diff view")
 		}
 		if err := h.settingsRepo.Set(ctx, uiPreferenceDiffViewKey, value); err != nil {
+			return err
+		}
+	}
+	if projectID := strings.TrimSpace(req.ProjectID); projectID != "" {
+		if h.projectSvc == nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "projects unavailable")
+		}
+		project, err := h.projectSvc.GetByID(ctx, projectID)
+		if err != nil {
+			return err
+		}
+		if project == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid project")
+		}
+		if err := h.settingsRepo.Set(ctx, uiPreferenceSelectedProjectIDKey, projectID); err != nil {
 			return err
 		}
 	}

@@ -3940,6 +3940,7 @@ func TestLayout_ThemeAndSidebarPreferencesPersistBeforeFirstPaint(t *testing.T) 
 		`document.body.classList.toggle('sidebar-collapsed-pending', isCollapsed)`,
 		`/ui/preferences`,
 		`JSON.stringify({ sidebar_collapsed: isCollapsed })`,
+		`JSON.stringify({ project_id: projectID })`,
 	}
 	for _, snippet := range required {
 		if !strings.Contains(body, snippet) {
@@ -4011,7 +4012,8 @@ func TestLayout_UIPreferencesDoNotReadSettingsForHTMXFragments(t *testing.T) {
 
 func TestSaveUIPreferences_PersistsPreferencesToSettings(t *testing.T) {
 	h, e, _, _ := setupTestHandlerWithDB(t)
-	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"theme":"openvibely-dark","sidebar_collapsed":true,"diff_view":"split"}`))
+	project := createProject(t, h, "Selected Project")
+	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(fmt.Sprintf(`{"theme":"openvibely-dark","sidebar_collapsed":true,"diff_view":"split","project_id":%q}`, project.ID)))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -4028,6 +4030,20 @@ func TestSaveUIPreferences_PersistsPreferencesToSettings(t *testing.T) {
 	diffView, err := h.settingsRepo.Get(context.Background(), uiPreferenceDiffViewKey)
 	require.NoError(t, err)
 	require.Equal(t, "split", diffView)
+	selectedProjectID, err := h.settingsRepo.Get(context.Background(), uiPreferenceSelectedProjectIDKey)
+	require.NoError(t, err)
+	require.Equal(t, project.ID, selectedProjectID)
+}
+
+func TestSaveUIPreferences_RejectsInvalidProjectID(t *testing.T) {
+	_, e, _ := setupTestHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/ui/preferences", strings.NewReader(`{"project_id":"missing-project"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid project id, got %d", rec.Code)
+	}
 }
 
 func TestSaveUIPreferences_RejectsInvalidDiffView(t *testing.T) {

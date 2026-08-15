@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -492,9 +493,10 @@ func (h *Handler) SetAgentLibraryMaintenanceService(svc *service.AgentLibraryMai
 // If project_id is provided and valid, it uses GetByID to verify it exists.
 // Otherwise it falls back to listing all projects and using the first one.
 func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
+	ctx := c.Request().Context()
 	projectID := c.QueryParam("project_id")
 	if projectID != "" && projectID != "default" {
-		p, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
+		p, err := h.projectSvc.GetByID(ctx, projectID)
 		if err != nil {
 			return "", err
 		}
@@ -502,7 +504,21 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 			return projectID, nil
 		}
 	}
-	projects, err := h.projectSvc.List(c.Request().Context())
+	if h.settingsRepo != nil {
+		selectedProjectID, err := h.settingsRepo.Get(ctx, uiPreferenceSelectedProjectIDKey)
+		if err != nil {
+			applog.Debugf("[handler] failed to load selected project preference: %v", err)
+		} else if selectedProjectID = strings.TrimSpace(selectedProjectID); selectedProjectID != "" {
+			p, err := h.projectSvc.GetByID(ctx, selectedProjectID)
+			if err != nil {
+				return "", err
+			}
+			if p != nil {
+				return selectedProjectID, nil
+			}
+		}
+	}
+	projects, err := h.projectSvc.List(ctx)
 	if err != nil {
 		return "", err
 	}

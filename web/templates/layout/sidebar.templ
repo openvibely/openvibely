@@ -77,6 +77,17 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 					const sel = document.getElementById('project-selector');
 					if (!sel) return;
 
+					function persistSelectedProject(projectID) {
+						try {
+							fetch('/ui/preferences', {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/json' },
+								body: JSON.stringify({ project_id: projectID }),
+								keepalive: true
+							}).catch(function() {});
+						} catch (_) {}
+					}
+
 					sel.addEventListener('change', function() {
 						const newProjectId = sel.value;
 
@@ -154,6 +165,8 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						} else {
 							newUrl = '/tasks?project_id=' + newProjectId;
 						}
+
+						persistSelectedProject(newProjectId);
 
 						// HTMX owns the content swap, URL update, and history cache.
 						window.openVibelyNavigate(newUrl);
