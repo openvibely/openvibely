@@ -26,6 +26,7 @@ func TestTaskAndScheduleCardsUsePointerDragWithGrabCursor(t *testing.T) {
 
 	project := models.Project{ID: "project-card-drag-cursor", Name: "Card Drag Cursor"}
 	now := time.Now().Local().Truncate(time.Hour)
+	scheduleRunAt := time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, now.Location())
 	tasks := []models.Task{
 		{
 			ID:           "task-drag-cursor",
@@ -61,8 +62,8 @@ func TestTaskAndScheduleCardsUsePointerDragWithGrabCursor(t *testing.T) {
 		Schedule: &models.Schedule{
 			ID:             "schedule-drag-cursor",
 			TaskID:         "schedule-task-drag-cursor",
-			RunAt:          now,
-			NextRun:        &now,
+			RunAt:          scheduleRunAt,
+			NextRun:        &scheduleRunAt,
 			RepeatType:     models.RepeatOnce,
 			RepeatInterval: 1,
 			Enabled:        true,
@@ -157,7 +158,7 @@ window.addEventListener('DOMContentLoaded', function() {
       var sourceZone = scheduleCard && scheduleCard.closest('.drop-zone');
       if (!sourceZone) fail('schedule off-screen drop: source zone missing');
       var sourceHour = Number(sourceZone.dataset.hour);
-      var targetHour = sourceHour <= 17 ? sourceHour + 6 : sourceHour - 6;
+      var targetHour = 23;
       var scheduleTargetSelector = '.drop-zone[data-date="' + sourceZone.dataset.date + '"][data-hour="' + targetHour + '"]';
       await exerciseOuterAutoScrollDrop('[data-schedule-id="schedule-drag-cursor"]', '#schedule-timeline-container', 'y', scheduleTargetSelector, 'schedule card vertical', 11);
       await report('pass', '');

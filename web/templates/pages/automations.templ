@@ -1546,6 +1546,15 @@ yamlViewport.scrollTop = 0;
 								.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });
 						}, 300);
 					}
+					function validateYAMLNow() {
+						if (!yamlEditor || !yamlEditor.dataset.automationYamlParseUrl) return;
+						var request = ++yamlParseRequest;
+						window.clearTimeout(yamlParseTimer);
+						fetch(yamlEditor.dataset.automationYamlParseUrl, {method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams({automation_yaml: automationYAMLValue()})})
+							.then(function(response) { return response.ok ? response.json() : Promise.reject(new Error('YAML validation is unavailable.')); })
+							.then(function(result) { if (request === yamlParseRequest) showYAMLDiagnostic(result.valid ? '' : result.message); })
+							.catch(function(error) { if (request === yamlParseRequest) showYAMLDiagnostic(error.message); });
+					}
 					if (yamlEditor) {
 						yamlEditor.addEventListener('scroll', syncYAMLHighlightScroll);
 							yamlEditor.addEventListener('keydown', function(event) {
@@ -1958,7 +1967,7 @@ yamlViewport.scrollTop = 0;
 							yamlButton.setAttribute('aria-pressed', String(yamlSelected));
 							detailsButton.setAttribute('aria-pressed', String(detailsSelected));
 							queueYAMLLineLayout();
-							if (yamlSelected) validateYAMLWhileTyping();
+							if (yamlSelected) validateYAMLNow();
 						}
 						function previewYAMLThenSelect(view) {
 							var form = document.getElementById('automation-design-form');

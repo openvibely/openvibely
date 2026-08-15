@@ -2770,6 +2770,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					card.style.height = rect.height + 'px';
 					card.style.margin = '0';
 					card.style.zIndex = '1000';
+					card.style.pointerEvents = 'none';
 					return { card: card, placeholder: placeholder, originalStyle: originalStyle };
 				}
 
