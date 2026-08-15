@@ -154,9 +154,9 @@ func (r *AlertRepo) CreateIdempotent(ctx context.Context, a *models.Alert) (*mod
 			if !createdNew {
 				for _, binding := range automationContext.Bindings {
 					var exists bool
-					if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM automation_transitions
-						WHERE project_id = ? AND automation_id = ? AND version_id = ? AND from_node_id = ? AND event_key = ?)`,
-						a.ProjectID, binding.AutomationID, binding.VersionID, binding.NodeID, "alert:"+created.ID+":created:notification").Scan(&exists); err != nil {
+					if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM automation_artifact_mailbox_owners
+							WHERE project_id = ? AND automation_id = ? AND artifact_type = 'alert' AND artifact_id = ?)`,
+						a.ProjectID, binding.AutomationID, created.ID).Scan(&exists); err != nil {
 						return err
 					}
 					if !exists {

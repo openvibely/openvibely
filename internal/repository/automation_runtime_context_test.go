@@ -256,29 +256,27 @@ func TestAutomationRuntimeResourceURLCoverage(t *testing.T) {
 	}
 }
 
-func TestAutomationGitHubIssueDedupSourceComparisonIgnoresBindingOrder(t *testing.T) {
+func TestAutomationGitHubIssueDedupSourceComparisonIgnoresGraphRevisionAndTaskIdentity(t *testing.T) {
 	left := AutomationGitHubIssueDedupSource{
 		Context: models.AutomationContext{ProjectID: " project ", Bindings: []models.AutomationBinding{
 			{AutomationID: "auto", VersionID: "v1", NodeID: "n1"},
-			{AutomationID: "auto", VersionID: "v1", NodeID: "n2"},
 		}},
-		TaskID:      " task ",
+		TaskID:      "old-task",
 		ExecutionID: "one",
 	}
 	right := AutomationGitHubIssueDedupSource{
 		Context: models.AutomationContext{ProjectID: "project", Bindings: []models.AutomationBinding{
-			{AutomationID: "auto", VersionID: "v1", NodeID: "n2"},
-			{AutomationID: "auto", VersionID: "v1", NodeID: "n1"},
+			{AutomationID: "auto", VersionID: "v2", NodeID: "replacement-node"},
 		}},
-		TaskID:      "task",
+		TaskID:      "new-task",
 		ExecutionID: "two",
 	}
 	if !sameAutomationGitHubIssueDedupSource(left, right) {
-		t.Fatal("expected equivalent sources with bindings in different order")
+		t.Fatal("expected equivalent sources from the same Automation after graph replacement")
 	}
-	right.Context.Bindings[0].NodeID = "other"
+	right.Context.Bindings[0].AutomationID = "other-auto"
 	if sameAutomationGitHubIssueDedupSource(left, right) {
-		t.Fatal("expected different node bindings to be non-equivalent")
+		t.Fatal("expected different Automation sources to be non-equivalent")
 	}
 }
 

@@ -151,6 +151,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			automationContext, hasAutomationContext := AutomationContextFromContext(ctx)
 			var reservedBindings []models.AutomationBinding
 			var reconciliationBindings []models.AutomationBinding
+			var dedupSourceBindings []models.AutomationBinding
 			reservationNeedsReconciliation := false
 			if opts.AutomationRepo != nil && hasAutomationContext {
 				for _, binding := range automationContext.Bindings {
@@ -171,6 +172,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 					if issueNode == nil {
 						continue
 					}
+					dedupSourceBindings = append(dedupSourceBindings, effectiveBinding)
 					effectiveBinding.NodeID = issueNode.ID
 					resourceID, reserveErr := opts.AutomationRepo.ReserveExternalActivity(ctx, opts.ProjectID, effectiveBinding,
 						activityKey, "create_github_issue", "github_issue")
@@ -200,10 +202,14 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 				if !hasAutomationContext || !hasExecution {
 					return "", errors.New("complete Automation source is required for GitHub issue creation")
 				}
+				dedupSourceContext := automationContext
+				if len(dedupSourceBindings) > 0 {
+					dedupSourceContext = models.AutomationContext{ProjectID: automationContext.ProjectID, Bindings: dedupSourceBindings}
+				}
 				dedupFingerprint = githubIssueDedupFingerprint(req.Title, req.IdempotencyKey)
 				dedupOwner = activityKey
 				dedupClaim, err = opts.AutomationRepo.AcquireGitHubIssueDedupLease(ctx, opts.ProjectID, repo.FullName, dedupFingerprint,
-					dedupOwner, repository.AutomationGitHubIssueDedupSource{Context: automationContext, TaskID: taskID, ExecutionID: executionID},
+					dedupOwner, repository.AutomationGitHubIssueDedupSource{Context: dedupSourceContext, TaskID: taskID, ExecutionID: executionID},
 					time.Now().UTC(), automationGitHubIssueDedupLeaseDuration)
 				if err != nil {
 					if releaseErr := releaseGitHubIssueActivityReservationsDetached(opts, reservedBindings, activityKey); releaseErr != nil {
@@ -952,23 +958,72 @@ func releaseGitHubIssueActivityReservationsDetached(opts githubIssueRuntimeOptio
 	return releaseGitHubIssueActivityReservations(ctx, opts, bindings, activityKey)
 }
 
+func currentGitHubIssueProjectionSource(ctx context.Context, opts githubIssueRuntimeOptions, source repository.AutomationGitHubIssueDedupSource) (repository.AutomationGitHubIssueDedupSource, error) {
+	current := source
+	current.Context.Bindings = nil
+	seen := map[string]bool{}
+	for _, stable := range source.StableBindings {
+		automationID := strings.TrimSpace(stable.AutomationID)
+		nodeKey := strings.TrimSpace(stable.NodeKey)
+		if automationID == "" || nodeKey == "" {
+			continue
+		}
+		binding, ok, err := opts.AutomationRepo.CurrentActiveBindingForNodeKey(ctx, opts.ProjectID, automationID, nodeKey, "create_github_issue")
+		if err != nil {
+			return current, err
+		}
+		if !ok {
+			continue
+		}
+		key := binding.AutomationID + "\x00" + binding.VersionID + "\x00" + binding.NodeID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		current.Context.Bindings = append(current.Context.Bindings, binding)
+	}
+	if len(current.Context.Bindings) > 0 {
+		return current, nil
+	}
+	for _, binding := range source.Context.Bindings {
+		effective, err := effectiveAutomationGitHubIssueBinding(ctx, opts, binding)
+		if err != nil {
+			return current, err
+		}
+		key := effective.AutomationID + "\x00" + effective.VersionID + "\x00" + effective.NodeID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		current.Context.Bindings = append(current.Context.Bindings, effective)
+	}
+	if len(current.Context.Bindings) == 0 {
+		return current, errors.New("trusted local GitHub issue projection source no longer maps to the current Automation graph")
+	}
+	return current, nil
+}
+
 func repairAutomationGitHubIssueProjection(opts githubIssueRuntimeOptions, repo *GitHubRepoRef, title string, claim repository.AutomationGitHubIssueDedupClaim) (*GitHubIssue, error) {
 	if claim.IssueNumber <= 0 || strings.TrimSpace(claim.OwnerToken) == "" || claim.Source.Context.ProjectID != opts.ProjectID ||
 		len(claim.Source.Context.Bindings) == 0 || strings.TrimSpace(claim.Source.TaskID) == "" || strings.TrimSpace(claim.Source.ExecutionID) == "" {
 		return nil, errors.New("trusted local GitHub issue projection source is unavailable")
 	}
-	ctx := WithAutomationContext(context.Background(), claim.Source.Context)
-	ctx = withAutomationExecution(ctx, claim.Source.TaskID, claim.Source.ExecutionID)
-	ctx, cancel := context.WithTimeout(ctx, automationGitHubIssueDedupPersistenceTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), automationGitHubIssueDedupPersistenceTimeout)
 	defer cancel()
+	projectionSource, err := currentGitHubIssueProjectionSource(ctx, opts, claim.Source)
+	if err != nil {
+		return nil, err
+	}
+	ctx = WithAutomationContext(ctx, projectionSource.Context)
+	ctx = withAutomationExecution(ctx, projectionSource.TaskID, projectionSource.ExecutionID)
 	projectionIssue := githubIssueFromCanonicalResource(githubIssueResourceID(repo, claim.IssueNumber))
 	projectionIssue.Title = strings.TrimSpace(title)
 	recordedBindings, err := recordGitHubIssueCreated(ctx, opts, repo, projectionIssue, claim.OwnerToken)
 	if err != nil {
 		return nil, err
 	}
-	if recordedBindings != len(claim.Source.Context.Bindings) {
-		return nil, fmt.Errorf("expected GitHub issue projection for %d source binding(s), recorded %d", len(claim.Source.Context.Bindings), recordedBindings)
+	if recordedBindings != len(projectionSource.Context.Bindings) {
+		return nil, fmt.Errorf("expected GitHub issue projection for %d source binding(s), recorded %d", len(projectionSource.Context.Bindings), recordedBindings)
 	}
 	return githubIssueFromCanonicalResource(githubIssueResourceID(repo, claim.IssueNumber)), nil
 }

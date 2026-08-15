@@ -47,7 +47,9 @@ type AutomationAdapterRegistry struct{ adapters map[string]AutomationAdapter }
 // and existing Automations should offer destructive replacement with that template.
 func CurrentAutomationTemplateRevision(adapterKey string) int {
 	switch adapterKey {
-	case AutomationAdapterNativeSDLC, AutomationAdapterGitHubSDLC:
+	case AutomationAdapterNativeSDLC:
+		return 4
+	case AutomationAdapterGitHubSDLC:
 		return 3
 	default:
 		return 0

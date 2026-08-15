@@ -104,9 +104,16 @@ const liveNodeCountsSQL = `WITH operational_state AS (
 			FROM identity_state GROUP BY node_id`
 
 type AutomationGitHubIssueDedupSource struct {
-	Context     models.AutomationContext `json:"context"`
-	TaskID      string                   `json:"task_id"`
-	ExecutionID string                   `json:"execution_id"`
+	Context        models.AutomationContext               `json:"context"`
+	TaskID         string                                 `json:"task_id"`
+	ExecutionID    string                                 `json:"execution_id"`
+	StableBindings []AutomationGitHubIssueDedupNodeSource `json:"stable_bindings,omitempty"`
+}
+
+type AutomationGitHubIssueDedupNodeSource struct {
+	AutomationID string `json:"automation_id"`
+	NodeKey      string `json:"node_key"`
+	Role         string `json:"role"`
 }
 
 type AutomationGitHubIssueDedupClaim struct {
@@ -116,24 +123,42 @@ type AutomationGitHubIssueDedupClaim struct {
 }
 
 func sameAutomationGitHubIssueDedupSource(left, right AutomationGitHubIssueDedupSource) bool {
-	if strings.TrimSpace(left.Context.ProjectID) != strings.TrimSpace(right.Context.ProjectID) ||
-		strings.TrimSpace(left.TaskID) != strings.TrimSpace(right.TaskID) ||
-		len(left.Context.Bindings) != len(right.Context.Bindings) {
+	if strings.TrimSpace(left.Context.ProjectID) != strings.TrimSpace(right.Context.ProjectID) {
 		return false
 	}
-	bindingCounts := make(map[string]int, len(left.Context.Bindings))
-	for _, binding := range left.Context.Bindings {
-		key := strings.TrimSpace(binding.AutomationID) + "\x00" + strings.TrimSpace(binding.VersionID) + "\x00" + strings.TrimSpace(binding.NodeID)
-		bindingCounts[key]++
+	leftAutomations := dedupSourceAutomationCounts(left)
+	rightAutomations := dedupSourceAutomationCounts(right)
+	if len(leftAutomations) == 0 || len(leftAutomations) != len(rightAutomations) {
+		return false
 	}
-	for _, binding := range right.Context.Bindings {
-		key := strings.TrimSpace(binding.AutomationID) + "\x00" + strings.TrimSpace(binding.VersionID) + "\x00" + strings.TrimSpace(binding.NodeID)
-		if bindingCounts[key] == 0 {
+	for automationID, count := range leftAutomations {
+		if rightAutomations[automationID] != count {
 			return false
 		}
-		bindingCounts[key]--
 	}
 	return true
+}
+
+func dedupSourceAutomationCounts(source AutomationGitHubIssueDedupSource) map[string]int {
+	counts := make(map[string]int)
+	seen := make(map[string]bool)
+	for _, binding := range source.Context.Bindings {
+		automationID := strings.TrimSpace(binding.AutomationID)
+		if automationID == "" || seen[automationID] {
+			continue
+		}
+		seen[automationID] = true
+		counts[automationID]++
+	}
+	for _, binding := range source.StableBindings {
+		automationID := strings.TrimSpace(binding.AutomationID)
+		if automationID == "" || seen[automationID] {
+			continue
+		}
+		seen[automationID] = true
+		counts[automationID]++
+	}
+	return counts
 }
 
 type AutomationProjectionEvent struct {
@@ -2272,6 +2297,26 @@ func (r *AutomationRepo) GetCustomNotificationHandoff(ctx context.Context, proje
 	return &node, err
 }
 
+func enrichGitHubIssueDedupSource(ctx context.Context, exec SQLExecutor, projectID string, source AutomationGitHubIssueDedupSource) (AutomationGitHubIssueDedupSource, error) {
+	if len(source.StableBindings) > 0 {
+		return source, nil
+	}
+	for _, binding := range source.Context.Bindings {
+		var stable AutomationGitHubIssueDedupNodeSource
+		err := exec.QueryRowContext(ctx, `SELECT automation_id, node_key, role FROM automation_nodes
+			WHERE project_id = ? AND automation_id = ? AND version_id = ? AND id = ?`,
+			projectID, binding.AutomationID, binding.VersionID, binding.NodeID).Scan(&stable.AutomationID, &stable.NodeKey, &stable.Role)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return source, fmt.Errorf("loading GitHub issue duplicate source node: %w", err)
+		}
+		source.StableBindings = append(source.StableBindings, stable)
+	}
+	return source, nil
+}
+
 func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string, source AutomationGitHubIssueDedupSource, now time.Time, leaseDuration time.Duration) (AutomationGitHubIssueDedupClaim, error) {
 	projectID = strings.TrimSpace(projectID)
 	repositoryFullName = strings.ToLower(strings.TrimSpace(repositoryFullName))
@@ -2288,15 +2333,19 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 			return AutomationGitHubIssueDedupClaim{}, errors.New("complete GitHub issue projection binding is required")
 		}
 	}
-	projectionSourceJSON, err := json.Marshal(source)
-	if err != nil {
-		return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("encoding GitHub issue projection source: %w", err)
-	}
 	conn, err := r.db.Conn(ctx)
 	if err != nil {
 		return AutomationGitHubIssueDedupClaim{}, err
 	}
 	defer conn.Close()
+	source, err = enrichGitHubIssueDedupSource(ctx, conn, projectID, source)
+	if err != nil {
+		return AutomationGitHubIssueDedupClaim{}, err
+	}
+	projectionSourceJSON, err := json.Marshal(source)
+	if err != nil {
+		return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("encoding GitHub issue projection source: %w", err)
+	}
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return AutomationGitHubIssueDedupClaim{}, err
 	}

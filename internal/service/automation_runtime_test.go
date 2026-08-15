@@ -2423,6 +2423,31 @@ func assertAutomationGitHubIssueProjectionForDefinition(t *testing.T, fixture au
 
 func replaceAutomationGitHubIssueGraph(t *testing.T, fixture automationRuntimeFixture) *models.AutomationDefinition {
 	t.Helper()
+	return replaceAutomationGitHubIssueGraphWithCandidate(t, fixture, func(*models.AutomationDraftCandidate) {})
+}
+
+func replaceAutomationGitHubIssueGraphWithoutNode(t *testing.T, fixture automationRuntimeFixture, removedNodeKey string) *models.AutomationDefinition {
+	t.Helper()
+	return replaceAutomationGitHubIssueGraphWithCandidate(t, fixture, func(candidate *models.AutomationDraftCandidate) {
+		nodes := make([]models.AutomationDraftNode, 0, len(candidate.Nodes))
+		for _, node := range candidate.Nodes {
+			if node.Key != removedNodeKey {
+				nodes = append(nodes, node)
+			}
+		}
+		candidate.Nodes = nodes
+		edges := make([]models.AutomationDraftEdge, 0, len(candidate.Edges))
+		for _, edge := range candidate.Edges {
+			if edge.From != removedNodeKey && edge.To != removedNodeKey {
+				edges = append(edges, edge)
+			}
+		}
+		candidate.Edges = edges
+	})
+}
+
+func replaceAutomationGitHubIssueGraphWithCandidate(t *testing.T, fixture automationRuntimeFixture, mutate func(*models.AutomationDraftCandidate)) *models.AutomationDefinition {
+	t.Helper()
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
 	settingsRepo := repository.NewSettingsRepo(fixture.repo.DB())
@@ -2434,6 +2459,7 @@ func replaceAutomationGitHubIssueGraph(t *testing.T, fixture automationRuntimeFi
 	drafts := NewAutomationDraftService(fixture.repo, registry)
 	candidate, err := drafts.TemplateCandidate(AutomationAdapterGitHubSDLC)
 	require.NoError(t, err)
+	mutate(&candidate)
 	validator := NewAutomationSaveValidator(registry, drafts)
 	validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
 	taskSvc := NewTaskService(fixture.taskRepo, repository.NewAttachmentRepo(fixture.repo.DB()), nil)
@@ -2478,7 +2504,7 @@ func TestAutomationGitHubIssueCreationDeduplicatesStableFindingKeyAcrossReworded
 	require.Equal(t, int32(1), createCalls.Load(), "a reworded duplicate finding must reuse the locally claimed issue")
 }
 
-func TestAutomationGitHubIssueCreationRejectsCompletedClaimFromDifferentAutomation(t *testing.T) {
+func TestAutomationGitHubIssueCreationReusesCompletedClaimFromDifferentAutomation(t *testing.T) {
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
@@ -2506,18 +2532,18 @@ func TestAutomationGitHubIssueCreationRejectsCompletedClaimFromDifferentAutomati
 	require.NoError(t, firstErr)
 	require.Contains(t, firstOutput, `"Number":93`)
 	secondCtx := newAutomationGitHubIssueCausalContext(t, fixture, secondDefinition, secondTask, "bug_finder", "cross-automation-second")
-	_, secondErr := createIssue(secondCtx, json.RawMessage(`{"title":"  cross   automation COLLISION ","body":"different"}`))
-	require.ErrorIs(t, secondErr, repository.ErrAutomationExternalReconciliation)
-	require.ErrorContains(t, secondErr, "different Automation source")
-	require.Equal(t, int32(1), createCalls.Load(), "a source collision must neither reuse nor recreate the issue")
+	secondOutput, secondErr := createIssue(secondCtx, json.RawMessage(`{"title":"  cross   automation COLLISION ","body":"different"}`))
+	require.NoError(t, secondErr)
+	require.Contains(t, secondOutput, `"reused":true`)
+	require.Equal(t, int32(1), createCalls.Load(), "a duplicate finding from another saved Automation must reuse the existing local issue claim")
 	var secondActivities int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_activities
 		WHERE project_id = ? AND automation_id = ? AND activity_type = 'create_github_issue'`,
 		fixture.project.ID, secondDefinition.Automation.ID).Scan(&secondActivities))
-	require.Zero(t, secondActivities, "the colliding Automation must not adopt the original issue projection")
+	require.Zero(t, secondActivities, "the second Automation must not adopt the original issue projection while suppressing duplicate GitHub creation")
 }
 
-func TestAutomationGitHubIssueCreationRejectsCompletedClaimAfterGraphReplacement(t *testing.T) {
+func TestAutomationGitHubIssueCreationReusesCompletedClaimAfterGraphReplacement(t *testing.T) {
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
@@ -2529,7 +2555,7 @@ func TestAutomationGitHubIssueCreationRejectsCompletedClaimAfterGraphReplacement
 		},
 	}
 	fixture, newOriginalContext, createIssue := newAutomationGitHubIssueDedupHarness(t, provider)
-	input := json.RawMessage(`{"title":"Replaced graph collision","body":"body"}`)
+	input := json.RawMessage(`{"title":"Replaced graph collision","body":"body","idempotency_key":"bug:runtime:replaced-graph-collision"}`)
 	_, firstErr := createIssue(newOriginalContext("replacement-first"), input)
 	require.NoError(t, firstErr)
 	oldVersionID := fixture.definition.Version.ID
@@ -2543,10 +2569,13 @@ func TestAutomationGitHubIssueCreationRejectsCompletedClaimAfterGraphReplacement
 	require.NotNil(t, replacementTask)
 
 	replacementCtx := newAutomationGitHubIssueCausalContext(t, fixture, replacement, *replacementTask, "bug_finder", "replacement-second")
-	_, retryErr := createIssue(replacementCtx, input)
-	require.ErrorIs(t, retryErr, repository.ErrAutomationExternalReconciliation)
-	require.ErrorContains(t, retryErr, "different Automation source")
-	require.Equal(t, int32(1), createCalls.Load(), "graph replacement must neither adopt nor recreate the original issue")
+	retry, retryErr := createIssue(replacementCtx, json.RawMessage(`{"title":"Reworded replaced graph finding","body":"updated body","idempotency_key":"bug:runtime:replaced-graph-collision"}`))
+	require.NoError(t, retryErr)
+	require.Contains(t, retry, `"reused":true`)
+	require.Equal(t, int32(1), createCalls.Load(), "graph replacement must reuse the original issue instead of recreating it")
+	require.Equal(t, 1, countRows(t, fixture.repo.DB(), `SELECT COUNT(*) FROM automation_work_items
+		WHERE project_id = ? AND automation_id = ? AND origin_version_id = ? AND work_item_key = ?`,
+		fixture.project.ID, replacement.Automation.ID, replacement.Version.ID, githubIssueResourceID(&GitHubRepoRef{FullName: "example/runtime"}, 94)))
 }
 
 func TestAutomationGitHubIssueProjectionRepairRejectsDeletedSourceGraph(t *testing.T) {
@@ -2571,7 +2600,7 @@ func TestAutomationGitHubIssueProjectionRepairRejectsDeletedSourceGraph(t *testi
 		Scan(&ownerToken, &sourceJSON, &issueNumber))
 	var source repository.AutomationGitHubIssueDedupSource
 	require.NoError(t, json.Unmarshal([]byte(sourceJSON), &source))
-	replaceAutomationGitHubIssueGraph(t, fixture)
+	replaceAutomationGitHubIssueGraphWithoutNode(t, fixture, "bug_finder")
 
 	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
 	opts := githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
@@ -3746,6 +3775,41 @@ func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing
 	require.NoError(t, err)
 	require.NotNil(t, goal)
 	require.Equal(t, configuredGoal, goal.Objective)
+}
+
+func TestAutomationRuntimeNativeNotificationCreationReusesIdempotencyKeyAfterGraphReplacement(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Native producer idempotency replacement")
+	ctx := context.Background()
+	candidate := customNativeMailboxCandidate("Native producer idempotency replacement")
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+
+	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo.SetAutomationRepo(h.automationRepo)
+	alertSvc := NewAlertService(alertRepo, nil)
+	createFromProducer := func(definition *models.AutomationDefinition, title string) (*models.Alert, error) {
+		producer := automationNodeByKey(t, definition, "custom_producer")
+		producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+			AutomationID: definition.Automation.ID, VersionID: definition.Version.ID, NodeID: producer.ID,
+		}}})
+		return alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: title, IdempotencyKey: "native-reused-after-save"})
+	}
+	firstAlert, err := createFromProducer(first.Definition, "Original Native finding")
+	require.NoError(t, err)
+
+	candidate.Description = "Updated without changing the logical mailbox."
+	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.NotEqual(t, first.Definition.Version.ID, second.Definition.Version.ID)
+	secondAlert, err := createFromProducer(second.Definition, "Reworded Native finding")
+	require.NoError(t, err)
+	require.Equal(t, firstAlert.ID, secondAlert.ID)
+	require.Equal(t, 1, countRows(t, h.db, `SELECT COUNT(*) FROM alerts WHERE project_id = ? AND idempotency_key = ?`, h.project.ID, "native-reused-after-save"))
+
+	currentProducer := automationNodeByKey(t, second.Definition, "custom_producer")
+	currentNotification := automationNodeByKey(t, second.Definition, "custom_notification")
+	currentApproval := automationNodeByKey(t, second.Definition, "custom_approval")
+	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, firstAlert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
 }
 
 func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {
