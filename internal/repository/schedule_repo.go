@@ -298,6 +298,17 @@ func (r *ScheduleRepo) ToggleEnabled(ctx context.Context, id string, enabled boo
 	return nil
 }
 
+func (r *ScheduleRepo) DisableOrphan(ctx context.Context, id, taskID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE schedules SET enabled = 0, next_run = NULL, updated_at = datetime('now')
+		 WHERE id = ? AND task_id = ? AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = schedules.task_id)`,
+		id, taskID)
+	if err != nil {
+		return fmt.Errorf("disabling orphan schedule: %w", err)
+	}
+	return nil
+}
+
 func (r *ScheduleRepo) scanRows(rows *sql.Rows) ([]models.Schedule, error) {
 	var schedules []models.Schedule
 	for rows.Next() {

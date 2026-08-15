@@ -108,6 +108,37 @@ func TestSchedulerService_CheckDueTasksClearsCancellationRequestBeforeSubmit(t *
 	require.False(t, workerSvc.IsCancellationRequested(task.ID), "due scheduled submission should clear stale cancellation marker")
 }
 
+func TestSchedulerService_CheckDueTasksDisablesOrphanedDueSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+	svc := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+
+	_, err := db.Exec(`PRAGMA foreign_keys = OFF`)
+	require.NoError(t, err)
+	dueAt := time.Now().UTC().Add(-time.Minute)
+	_, err = db.Exec(`INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+		VALUES ('orphan-schedule', 'missing-task', ?, 'once', 1, 1, ?)`, dueAt, dueAt)
+	require.NoError(t, err)
+	_, err = db.Exec(`PRAGMA foreign_keys = ON`)
+	require.NoError(t, err)
+
+	svc.checkDueTasks(ctx)
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("orphan schedule submitted unexpected task: %s", submitted.ID)
+	default:
+	}
+	updated, err := scheduleRepo.GetByID(ctx, "orphan-schedule")
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.False(t, updated.Enabled)
+	require.Nil(t, updated.NextRun)
+}
+
 func TestSchedulerService_CheckDueTasksSubmitsOneTimeScheduleCreatedForCompletedScheduledTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)

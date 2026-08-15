@@ -103,7 +103,7 @@ func (s *SchedulerService) run(ctx context.Context) {
 			applog.Infof("[scheduler] context cancelled, exiting run loop")
 			return
 		case t := <-ticker.C:
-			applog.Infof("[scheduler] tick at %s, checking due tasks and active tasks", t.Format("15:04:05"))
+			applog.Debugf("[scheduler] tick at %s, checking due tasks and active tasks", t.Format("15:04:05"))
 			s.checkDueTasks(ctx)
 			s.checkActiveTasks(ctx)
 
@@ -161,8 +161,15 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			}
 		}
 		task, err := s.taskRepo.GetByID(ctx, sched.TaskID)
-		if err != nil || task == nil {
+		if err != nil {
 			applog.Infof("[scheduler] checkDueTasks error getting task %s: %v", sched.TaskID, err)
+			continue
+		}
+		if task == nil {
+			applog.Infof("[scheduler] checkDueTasks disabling orphaned schedule=%s missing_task=%s", sched.ID, sched.TaskID)
+			if err := s.scheduleRepo.DisableOrphan(ctx, sched.ID, sched.TaskID); err != nil {
+				applog.Infof("[scheduler] checkDueTasks error disabling orphaned schedule %s: %v", sched.ID, err)
+			}
 			continue
 		}
 

@@ -1248,6 +1248,19 @@ func TestAutomationRuntimeReconcilesTerminalExecutionProjectionAfterCrash(t *tes
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT status FROM automation_activities WHERE activity_key = ?`, "execution:"+execution.ID+":external-action").Scan(&externalStatus))
 	require.Equal(t, "completed", externalStatus, "execution reconciliation must not rewrite a successful domain action")
 	require.Greater(t, automationobs.Snapshot()["automation.reconciliation.projection_repaired"].Count, uint64(0))
+
+	_, err = fixture.repo.DB().Exec(`INSERT OR IGNORE INTO automation_work_item_positions
+		(work_item_id, project_id, automation_id, version_id, node_id, state, entered_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 'active', datetime('now', '-1 minute'), datetime('now', '-1 minute'))`,
+		item.ID, fixture.project.ID, fixture.definition.Automation.ID, fixture.definition.Version.ID, implementation.ID)
+	require.NoError(t, err, "simulate stale active position left behind after terminal transition")
+	repairs, err := fixture.repo.ListExecutionProjectionRepairs(ctx, 100)
+	require.NoError(t, err)
+	require.Empty(t, repairs, "terminal execution projection with an existing terminal transition must not repair forever")
+	require.NoError(t, reconciler.ReconcileOnce(ctx))
+	var positions int
+	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = ? AND node_id = ?`, item.ID, implementation.ID).Scan(&positions))
+	require.Zero(t, positions, "stale completed terminal positions must be pruned from live counts")
 }
 
 func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T) {

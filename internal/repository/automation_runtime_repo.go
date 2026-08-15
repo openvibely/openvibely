@@ -1023,6 +1023,36 @@ func (r *AutomationRepo) ReconcileInvocationCompletions(ctx context.Context, lim
 	return result.RowsAffected()
 }
 
+func (r *AutomationRepo) PruneTerminalizedAutomationPositions(ctx context.Context, limit int) (int64, error) {
+	if r == nil {
+		return 0, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 100
+	}
+	result, err := r.db.ExecContext(ctx, `DELETE FROM automation_work_item_positions
+		WHERE rowid IN (
+			SELECT p.rowid
+			FROM automation_work_item_positions p
+			WHERE EXISTS (
+				SELECT 1
+				FROM automation_transitions tr
+				WHERE tr.project_id = p.project_id
+				AND tr.automation_id = p.automation_id
+				AND tr.version_id = p.version_id
+				AND tr.work_item_id = p.work_item_id
+				AND tr.from_node_id = p.node_id
+				AND tr.state IN ('completed','cancelled')
+				AND tr.occurred_at >= p.entered_at)
+			ORDER BY p.updated_at, p.work_item_id, p.node_id
+			LIMIT ?
+		)`, limit)
+	if err != nil {
+		return 0, fmt.Errorf("pruning terminalized automation positions: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projectID, executionID string, status models.ExecutionStatus) error {
 	if r == nil || projectID == "" || executionID == "" || status == models.ExecRunning {
 		return nil
@@ -2666,10 +2696,14 @@ func (r *AutomationRepo) ListExecutionProjectionRepairs(ctx context.Context, lim
 		JOIN automation_activity_resources ar ON ar.resource_type = 'execution' AND ar.resource_id = e.id
 		JOIN automation_activities a ON a.id = ar.activity_id
 		WHERE a.activity_type IN ('task_execution','thread_input_execution')
-		AND (a.status <> e.status OR (e.status IN ('completed','failed','cancelled') AND a.completed_at IS NULL)
-			OR (e.status IN ('completed','failed','cancelled') AND a.work_item_id IS NOT NULL AND EXISTS (
-				SELECT 1 FROM automation_work_item_positions p WHERE p.work_item_id = a.work_item_id AND p.node_id = a.node_id)))
-		ORDER BY e.started_at, e.id LIMIT ?`, limit)
+			AND (a.status <> e.status OR (e.status IN ('completed','failed','cancelled') AND a.completed_at IS NULL)
+				OR (e.status IN ('completed','failed','cancelled') AND a.work_item_id IS NOT NULL AND EXISTS (
+					SELECT 1 FROM automation_work_item_positions p WHERE p.work_item_id = a.work_item_id AND p.node_id = a.node_id)
+					AND NOT EXISTS (
+						SELECT 1 FROM automation_transitions tr
+						WHERE tr.automation_id = a.automation_id AND tr.version_id = a.version_id
+						AND tr.event_key = 'execution:' || e.id || ':terminal:' || e.status)))
+			ORDER BY e.started_at, e.id LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
 	}

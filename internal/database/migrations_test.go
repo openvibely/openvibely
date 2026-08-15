@@ -897,8 +897,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 163 {
-		t.Fatalf("max goose version = %d, want 163", maxVersion)
+	if maxVersion != 165 {
+		t.Fatalf("max goose version = %d, want 165", maxVersion)
 	}
 }
 
@@ -1037,8 +1037,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 163 {
-		t.Fatalf("max goose version = %d, want 163", maxVersion)
+	if maxVersion != 165 {
+		t.Fatalf("max goose version = %d, want 165", maxVersion)
 	}
 }
 
@@ -1486,8 +1486,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 163 {
-		t.Fatalf("max goose version = %d, want 163", maxVersion)
+	if maxVersion != 165 {
+		t.Fatalf("max goose version = %d, want 165", maxVersion)
 	}
 }
 
@@ -1822,8 +1822,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 163 {
-		t.Fatalf("max goose version = %d, want 163", maxVersion)
+	if maxVersion != 165 {
+		t.Fatalf("max goose version = %d, want 165", maxVersion)
 	}
 }
 
@@ -2446,5 +2446,97 @@ func TestMigration133UsesAutomationLifecycleForScheduleEnablement(t *testing.T) 
 	}
 	if !activeEnabled || pausedEnabled {
 		t.Fatalf("migration 133 must enable only active Automation schedules: active=%t paused=%t", activeEnabled, pausedEnabled)
+	}
+}
+
+func TestMigration164DeletesOrphanedSchedules(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "orphaned-schedules-164.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 163); err != nil {
+		t.Fatalf("failed to run migrations through 163: %v", err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-164', 'Migration 164', '', '');
+		INSERT INTO tasks (id, project_id, title, prompt) VALUES ('task-164', 'project-164', 'Kept task', '');
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('schedule-kept-164', 'task-164', CURRENT_TIMESTAMP, 'once', 1, 1, CURRENT_TIMESTAMP);
+		INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, next_run)
+			VALUES ('schedule-orphan-164', 'missing-task-164', CURRENT_TIMESTAMP, 'once', 1, 1, CURRENT_TIMESTAMP);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 164); err != nil {
+		t.Fatalf("failed to run migration 164: %v", err)
+	}
+	var kept, orphan int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE id = 'schedule-kept-164'`).Scan(&kept); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schedules WHERE id = 'schedule-orphan-164'`).Scan(&orphan); err != nil {
+		t.Fatal(err)
+	}
+	if kept != 1 || orphan != 0 {
+		t.Fatalf("migration 164 schedules: kept=%d orphan=%d, want kept=1 orphan=0", kept, orphan)
+	}
+}
+
+func TestMigration165DeletesTerminalizedAutomationPositions(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "terminalized-positions-165.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 164); err != nil {
+		t.Fatalf("failed to run migrations through 164: %v", err)
+	}
+	_, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-165', 'Migration 165', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, lifecycle_state)
+			VALUES ('automation-165', 'project-165', 'automation-165', 'Automation 165', 'active');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-165', 'project-165', 'automation-165', 1, 'published', 'manual', 'native_sdlc');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('node-165', 'project-165', 'automation-165', 'version-165', 'implementation', 'Implementation', 'agent_task', 'agent');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key, status)
+			VALUES ('item-165-terminal', 'project-165', 'automation-165', 'version-165', 'item-165-terminal', 'completed'),
+				('item-165-failed', 'project-165', 'automation-165', 'version-165', 'item-165-failed', 'failed'),
+				('item-165-newer', 'project-165', 'automation-165', 'version-165', 'item-165-newer', 'active');
+		INSERT INTO automation_work_item_positions (work_item_id, project_id, automation_id, version_id, node_id, state, entered_at, updated_at)
+			VALUES ('item-165-terminal', 'project-165', 'automation-165', 'version-165', 'node-165', 'waiting', '2026-08-15 10:00:00', '2026-08-15 10:00:00'),
+				('item-165-failed', 'project-165', 'automation-165', 'version-165', 'node-165', 'failed', '2026-08-15 10:00:00', '2026-08-15 10:00:00'),
+				('item-165-newer', 'project-165', 'automation-165', 'version-165', 'node-165', 'active', '2026-08-15 12:00:00', '2026-08-15 12:00:00');
+		INSERT INTO automation_transitions (id, project_id, automation_id, version_id, work_item_id, from_node_id, to_node_id, event_key, state, occurred_at)
+			VALUES ('transition-165-completed', 'project-165', 'automation-165', 'version-165', 'item-165-terminal', 'node-165', 'node-165', 'execution:terminal-165:terminal:completed', 'completed', '2026-08-15 11:00:00'),
+				('transition-165-failed', 'project-165', 'automation-165', 'version-165', 'item-165-failed', 'node-165', 'node-165', 'execution:failed-165:terminal:failed', 'failed', '2026-08-15 11:00:00'),
+				('transition-165-older', 'project-165', 'automation-165', 'version-165', 'item-165-newer', 'node-165', 'node-165', 'execution:older-165:terminal:completed', 'completed', '2026-08-15 11:00:00');
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 165); err != nil {
+		t.Fatalf("failed to run migration 165: %v", err)
+	}
+	var remaining int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id = 'item-165-terminal'`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("terminalized completed position count = %d, want 0", remaining)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_work_item_positions WHERE work_item_id IN ('item-165-failed', 'item-165-newer')`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 2 {
+		t.Fatalf("preserved position count = %d, want 2", remaining)
 	}
 }

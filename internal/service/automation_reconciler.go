@@ -136,6 +136,11 @@ func (r *AutomationReconciler) ReconcileOnce(ctx context.Context) error {
 			automationobs.String("status", string(repair.Status)))
 		applog.Infof("[automation-reconciler] repaired execution projection execution=%s", repair.ExecutionID)
 	}
+	if pruned, err := r.automationRepo.PruneTerminalizedAutomationPositions(ctx, 100); err != nil {
+		return err
+	} else if pruned > 0 {
+		applog.Infof("[automation-reconciler] pruned %d terminalized automation position(s)", pruned)
+	}
 	if completed, err := r.automationRepo.ReconcileInvocationCompletions(ctx, 100); err != nil {
 		return err
 	} else if completed > 0 {
