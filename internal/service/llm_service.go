@@ -314,6 +314,22 @@ func (s *LLMService) AutomationBootstrapRuntimeTools(ctx context.Context, task m
 	return s.automationBootstrapRuntimeTools(ctx, task)
 }
 
+func nativeSDLCFinderRuntimeTask(task models.Task) bool {
+	if task.Category != models.CategoryScheduled {
+		return false
+	}
+	_, nodeKey, ok := automationCreatedViaNode(task.CreatedVia)
+	if !ok {
+		return false
+	}
+	switch nodeKey {
+	case "vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *LLMService) automationBootstrapRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
 	if s == nil || s.automationRegistrationSvc == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
@@ -374,32 +390,39 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 	defs := chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true)
 	filtered := make([]llmcontracts.RuntimeToolDefinition, 0, 5)
 	allowed := map[string]bool{
-		"list_tasks":                       true,
-		"create_task":                      true,
-		"create_swarm_task":                true,
-		"execute_tasks":                    true,
-		"set_task_goal":                    true,
-		"clear_task_goal":                  true,
-		"get_task_goal":                    true,
-		"pause_task_goal":                  true,
-		"resume_task_goal":                 true,
-		"list_schedules":                   true,
-		"schedule_task":                    true,
-		"delete_schedule":                  true,
-		"modify_schedule":                  true,
-		"create_alert":                     true,
-		"create_notification":              true,
-		"list_alerts":                      true,
-		"get_alert":                        true,
-		"claim_alert":                      true,
-		"create_alert_implementation_task": true,
-		"link_alert_implementation_task":   true,
-		"complete_alert_processing":        true,
-		"fail_alert_processing":            true,
-		"release_alert_claim":              true,
-		"list_capabilities":                true,
+		"list_tasks":                             true,
+		"create_task":                            true,
+		"create_swarm_task":                      true,
+		"execute_tasks":                          true,
+		"set_task_goal":                          true,
+		"clear_task_goal":                        true,
+		"get_task_goal":                          true,
+		"pause_task_goal":                        true,
+		"resume_task_goal":                       true,
+		"list_schedules":                         true,
+		"schedule_task":                          true,
+		"delete_schedule":                        true,
+		"modify_schedule":                        true,
+		"create_alert":                           true,
+		"create_notification":                    true,
+		"list_existing_automation_notifications": true,
+		"list_alerts":                            true,
+		"get_alert":                              true,
+		"claim_alert":                            true,
+		"create_alert_implementation_task":       true,
+		"link_alert_implementation_task":         true,
+		"complete_alert_processing":              true,
+		"fail_alert_processing":                  true,
+		"release_alert_claim":                    true,
+		"list_capabilities":                      true,
 	}
-	if strings.HasPrefix(task.CreatedVia, "automation:") && strings.HasSuffix(task.CreatedVia, ":auditor") {
+	if nativeSDLCFinderRuntimeTask(task) {
+		allowed = map[string]bool{
+			"create_notification":                    true,
+			"list_existing_automation_notifications": true,
+			"get_alert":                              true,
+		}
+	} else if strings.HasPrefix(task.CreatedVia, "automation:") && strings.HasSuffix(task.CreatedVia, ":auditor") {
 		delete(allowed, "create_task")
 		delete(allowed, "create_swarm_task")
 		delete(allowed, "execute_tasks")

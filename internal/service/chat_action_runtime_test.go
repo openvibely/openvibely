@@ -627,6 +627,45 @@ func TestTaskControlRuntimeOmitsImplementationTaskToolsForLoopAuditor(t *testing
 	}
 }
 
+func TestTaskControlRuntimeNativeFinderUsesCompactNotificationDiscoveryOnly(t *testing.T) {
+	finder := models.Task{
+		ProjectID:  "project",
+		Category:   models.CategoryScheduled,
+		CreatedVia: "automation:native:optimization_finder",
+	}
+
+	runtime := (&LLMService{}).taskControlRuntimeTools(finder)
+	require.NotNil(t, runtime)
+	for _, tool := range []string{"create_notification", "list_existing_automation_notifications", "get_alert"} {
+		require.Truef(t, runtime.HasDefinition(tool), "Native finder must expose %s", tool)
+	}
+	for _, tool := range []string{
+		"list_alerts",
+		"list_tasks",
+		"list_capabilities",
+		"create_alert",
+		"claim_alert",
+		"create_alert_implementation_task",
+		"execute_tasks",
+	} {
+		require.Falsef(t, runtime.HasDefinition(tool), "Native finder must not expose broad/inbox tool %s", tool)
+	}
+}
+
+func TestTaskControlRuntimeNativeInboxKeepsApprovalProcessingTools(t *testing.T) {
+	inbox := models.Task{
+		ProjectID:  "project",
+		Category:   models.CategoryScheduled,
+		CreatedVia: "automation:native:inbox",
+	}
+
+	runtime := (&LLMService{}).taskControlRuntimeTools(inbox)
+	require.NotNil(t, runtime)
+	for _, tool := range []string{"list_alerts", "claim_alert", "create_alert_implementation_task", "execute_tasks"} {
+		require.Truef(t, runtime.HasDefinition(tool), "Native inbox must retain %s", tool)
+	}
+}
+
 func TestTaskControlRuntimeExposesExecuteTasksAndStartsExactBacklogTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
