@@ -3,9 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"html"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -40,6 +42,62 @@ func setupCustomPersonalityHandler(t *testing.T) (*Handler, *echo.Echo, *reposit
 	h.RegisterRoutes(e)
 
 	return h, e, customPersonalityRepo, settingsRepo
+}
+
+func renderPersonalityPageBody(t *testing.T, h *Handler, e *echo.Echo) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	c := e.NewContext(httptest.NewRequest(http.MethodGet, "/personality", nil), rec)
+	require.NoError(t, h.handleAppSettings(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	return rec.Body.String()
+}
+
+func personalityCardHTML(t *testing.T, body, key string) string {
+	t.Helper()
+	marker := `data-personality-key="` + key + `"`
+	idx := strings.Index(body, marker)
+	require.Greater(t, idx, -1, "card %q should render", key)
+	start := strings.LastIndex(body[:idx], "<div")
+	require.Greater(t, start, -1, "card %q should have an opening div", key)
+	remaining := body[idx+len(marker):]
+	end := len(remaining)
+	if next := strings.Index(remaining, `data-personality-key=`); next >= 0 && next < end {
+		end = next
+	}
+	if modal := strings.Index(remaining, `<dialog id="personality_modal"`); modal >= 0 && modal < end {
+		end = modal
+	}
+	return body[start : idx+len(marker)+end]
+}
+
+func basePersonalityCardHTML(t *testing.T, body string) string {
+	t.Helper()
+	marker := `data-personality-is-default-card="true"`
+	idx := strings.Index(body, marker)
+	require.Greater(t, idx, -1, "base card should render")
+	start := strings.LastIndex(body[:idx], "<div")
+	require.Greater(t, start, -1, "base card should have an opening div")
+	remaining := body[idx+len(marker):]
+	end := len(remaining)
+	if next := strings.Index(remaining, `data-personality-key=`); next >= 0 && next < end {
+		end = next
+	}
+	return body[start : idx+len(marker)+end]
+}
+
+func assertPersonalityCardCommon(t *testing.T, card, key, name, description, preview, isPreset, hasCustom string) {
+	t.Helper()
+	assert.Contains(t, card, `data-personality-key="`+html.EscapeString(key)+`"`)
+	assert.Contains(t, card, `data-personality-name="`+html.EscapeString(name)+`"`)
+	assert.Contains(t, card, `data-personality-description="`+html.EscapeString(description)+`"`)
+	assert.Contains(t, card, `data-personality-preview="`+html.EscapeString(preview)+`"`)
+	assert.Contains(t, card, `data-personality-is-preset="`+isPreset+`"`)
+	assert.Contains(t, card, `data-personality-has-custom="`+hasCustom+`"`)
+	assert.Contains(t, card, `data-search-card`)
+	assert.Contains(t, card, `onclick="editPersonalityFromData(this)"`)
+	assert.Contains(t, card, `onclick="editPersonalityFromData(this.closest('[data-personality-key]'))"`)
+	assert.Contains(t, card, `handleDropdownToggle(event)`)
 }
 
 func TestHandler_CreateCustomPersonality(t *testing.T) {
@@ -291,6 +349,114 @@ func TestHandler_PersonalityPage_HeaderAlignsAddButtonWithOtherManagementPages(t
 	assert.NotContains(t, body, `<div id="settings-container">`)
 	// Search input present
 	assert.Contains(t, body, `data-card-search="personality"`)
+}
+
+func TestHandler_PersonalityTemplateUsesSharedCardComponentsForSelectedAndNonSelectedCards(t *testing.T) {
+	source, err := os.ReadFile("../../web/templates/pages/app_settings.templ")
+	require.NoError(t, err)
+	src := string(source)
+
+	assert.Equal(t, 2, strings.Count(src, "@builtInPersonalityCard("), "selected and non-selected built-in cards should both use the shared helper")
+	assert.Equal(t, 2, strings.Count(src, "@customPersonalityCard("), "selected and non-selected custom cards should both use the shared helper")
+}
+
+func TestHandler_PersonalityPage_SharedCardRenderingPreservesBuiltinVariants(t *testing.T) {
+	h, e, repo, settingsRepo := setupCustomPersonalityHandler(t)
+	ctx := context.Background()
+
+	override := &models.CustomPersonality{
+		Name:         "Pirate Captain (Overridden)",
+		Key:          "pirate_captain",
+		Description:  "My pirate override",
+		SystemPrompt: "You be a custom pirate, arr matey with special behavior!",
+	}
+	require.NoError(t, repo.Create(ctx, override))
+
+	require.NoError(t, settingsRepo.Set(ctx, "personality", "zen_debugger"))
+	body := renderPersonalityPageBody(t, h, e)
+	zenCard := personalityCardHTML(t, body, "zen_debugger")
+	zenPreview := service.GetPersonalityPrompt("zen_debugger")[:150] + "..."
+	assertPersonalityCardCommon(t, zenCard, "zen_debugger", "Zen Debugger", "Calm, meditative approach — mindful and measured", zenPreview, "true", "false")
+	assert.Contains(t, zenCard, `badge badge-sm ml-2 ov-badge-default">Active</span>`)
+	assert.NotContains(t, zenCard, `hx-post="/personality/save?personality=zen_debugger"`)
+	assert.NotContains(t, zenCard, `badge badge-warning badge-sm ml-1">Override</span>`)
+	pirateCard := personalityCardHTML(t, body, "pirate_captain")
+	assertPersonalityCardCommon(t, pirateCard, "pirate_captain", "Pirate Captain (Overridden)", "My pirate override", "You be a custom pirate, arr matey with special behavior!", "true", "true")
+	assert.Contains(t, pirateCard, `badge badge-warning badge-sm ml-1">Override</span>`)
+	assert.Contains(t, pirateCard, `hx-post="/personality/save?personality=pirate_captain"`)
+	assert.Contains(t, pirateCard, `hx-target="#personality-section"`)
+	assert.Contains(t, pirateCard, `hx-swap="outerHTML"`)
+
+	require.NoError(t, settingsRepo.Set(ctx, "personality", "pirate_captain"))
+	body = renderPersonalityPageBody(t, h, e)
+	pirateCard = personalityCardHTML(t, body, "pirate_captain")
+	baseCard := basePersonalityCardHTML(t, body)
+	assert.Less(t, strings.Index(body, `data-personality-key="pirate_captain"`), strings.Index(body, `data-personality-is-default-card="true"`))
+	assert.Contains(t, pirateCard, `badge badge-sm ml-2 ov-badge-default">Active</span>`)
+	assert.Contains(t, pirateCard, `badge badge-warning badge-sm ml-1">Override</span>`)
+	assert.NotContains(t, pirateCard, `hx-post="/personality/save?personality=pirate_captain"`)
+	zenCard = personalityCardHTML(t, body, "zen_debugger")
+	assertPersonalityCardCommon(t, zenCard, "zen_debugger", "Zen Debugger", "Calm, meditative approach — mindful and measured", zenPreview, "true", "false")
+	assert.Contains(t, zenCard, `hx-post="/personality/save?personality=zen_debugger"`)
+	assert.Contains(t, baseCard, `hx-post="/personality/save?personality="`)
+	assert.Contains(t, baseCard, `hx-target="#personality-section"`)
+}
+
+func TestHandler_PersonalityPage_SharedCardRenderingPreservesCustomVariantsAndRefresh(t *testing.T) {
+	h, e, repo, settingsRepo := setupCustomPersonalityHandler(t)
+	ctx := context.Background()
+
+	custom := &models.CustomPersonality{
+		Name:         "Custom Reviewer",
+		Key:          "custom_reviewer",
+		Description:  "Reviews like a teammate",
+		SystemPrompt: "You are a custom reviewer with enough detail to satisfy validation.",
+	}
+	require.NoError(t, repo.Create(ctx, custom))
+
+	require.NoError(t, settingsRepo.Set(ctx, "personality", "zen_debugger"))
+	body := renderPersonalityPageBody(t, h, e)
+	customCard := personalityCardHTML(t, body, "custom_reviewer")
+	assertPersonalityCardCommon(t, customCard, "custom_reviewer", "Custom Reviewer", "Reviews like a teammate", "You are a custom reviewer with enough detail to satisfy validation.", "false", "true")
+	assert.Contains(t, customCard, `badge badge-ghost badge-sm ml-1">Custom</span>`)
+	assert.Contains(t, customCard, `hx-post="/personality/save?personality=custom_reviewer"`)
+	assert.Contains(t, customCard, `hx-delete="/personality/custom/custom_reviewer"`)
+	assert.Contains(t, customCard, `hx-confirm="Delete this custom personality?"`)
+	assert.Contains(t, customCard, `hx-target="#personality-section"`)
+	assert.Contains(t, customCard, `hx-swap="outerHTML"`)
+
+	require.NoError(t, settingsRepo.Set(ctx, "personality", "custom_reviewer"))
+	body = renderPersonalityPageBody(t, h, e)
+	customCard = personalityCardHTML(t, body, "custom_reviewer")
+	assert.Less(t, strings.Index(body, `data-personality-key="custom_reviewer"`), strings.Index(body, `data-personality-is-default-card="true"`))
+	assert.Contains(t, customCard, `badge badge-sm ml-2 ov-badge-default">Active</span>`)
+	assert.Contains(t, customCard, `badge badge-ghost badge-sm ml-1">Custom</span>`)
+	assert.Contains(t, customCard, `hx-delete="/personality/custom/custom_reviewer"`)
+	assert.NotContains(t, customCard, `hx-post="/personality/save?personality=custom_reviewer"`)
+
+	req := httptest.NewRequest(http.MethodPost, "/personality/save?personality=custom_reviewer", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	require.NoError(t, h.handlePersonalitySave(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	val, err := settingsRepo.Get(ctx, "personality")
+	require.NoError(t, err)
+	assert.Equal(t, "custom_reviewer", val)
+
+	req = httptest.NewRequest(http.MethodDelete, "/personality/custom/custom_reviewer", nil)
+	req.Header.Set("HX-Request", "true")
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	c.SetPath("/personality/custom/:key")
+	c.SetParamNames("key")
+	c.SetParamValues("custom_reviewer")
+	require.NoError(t, h.DeleteCustomPersonality(c))
+	require.Equal(t, http.StatusOK, rec.Code)
+	body = rec.Body.String()
+	assert.Contains(t, body, `id="personality-section"`)
+	assert.NotContains(t, body, `data-personality-key="custom_reviewer"`)
+	assert.NotContains(t, body, "Custom Reviewer")
 }
 
 func TestHandler_PersonalityPage_CardRendering(t *testing.T) {

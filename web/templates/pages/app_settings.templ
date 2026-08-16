@@ -289,128 +289,13 @@ templ PersonalitySection(personality string, customPersonalities []models.Custom
 			<!-- Built-in personality cards -->
 			for _, p := range service.AllPersonalities() {
 				if p.Key != "" && p.Key != personality {
-					<div
-						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
-						data-personality-key={ p.Key }
-						data-personality-name={ personalityNameForKey(p.Key, customPersonalities) }
-						data-personality-description={ personalityDescriptionForKey(p.Key, customPersonalities) }
-						data-personality-preview={ personalityPromptPreviewForKey(p.Key, customPersonalities) }
-						data-personality-is-preset="true"
-						data-personality-has-custom={ boolString(personalityHasCustomEntry(p.Key, customPersonalities)) }
-						data-search-card
-						data-search-text={ personalityNameForKey(p.Key, customPersonalities) + " " + personalityDescriptionForKey(p.Key, customPersonalities) + " " + personalityPromptPreviewForKey(p.Key, customPersonalities) }
-						onclick="editPersonalityFromData(this)"
-					>
-						<div class="card-body relative">
-							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-								<div class="dropdown dropdown-end">
-									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-										</svg>
-									</label>
-									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
-										<li>
-											<button onclick="editPersonalityFromData(this.closest('[data-personality-key]'))">Edit</button>
-										</li>
-										if personality != p.Key {
-											<li>
-												<button
-													hx-post={ "/personality/save?personality=" + p.Key }
-													hx-target="#personality-section"
-													hx-swap="outerHTML"
-												>
-													Set as Default
-												</button>
-											</li>
-										}
-									</ul>
-								</div>
-							</div>
-							<div class="pr-12">
-								<h3 class="font-bold">
-									{ personalityNameForKey(p.Key, customPersonalities) }
-									if personality == p.Key {
-										<span class="badge badge-sm ml-2 ov-badge-default">Active</span>
-									}
-									if personalityHasCustomEntry(p.Key, customPersonalities) {
-										<span class="badge badge-warning badge-sm ml-1">Override</span>
-									}
-								</h3>
-								<p class="text-sm opacity-60 mt-1">{ personalityDescriptionForKey(p.Key, customPersonalities) }</p>
-								<p class="text-sm opacity-40 mt-1 line-clamp-2">{ personalityPromptPreviewForKey(p.Key, customPersonalities) }</p>
-							</div>
-						</div>
-					</div>
+					@builtInPersonalityCard(p, personality, customPersonalities)
 				}
 			}
 			<!-- Non-preset custom personality cards -->
 			for _, cp := range nonPresetCustoms(customPersonalities) {
 				if cp.Key != personality {
-					<div
-						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
-						data-personality-key={ cp.Key }
-						data-personality-name={ cp.Name }
-						data-personality-description={ cp.Description }
-						data-personality-preview={ cp.SystemPromptPreview }
-						data-personality-is-preset="false"
-						data-personality-has-custom="true"
-						data-search-card
-						data-search-text={ cp.Name + " " + cp.Description + " " + cp.SystemPromptPreview }
-						onclick="editPersonalityFromData(this)"
-					>
-						<div class="card-body relative">
-							<div class="absolute top-4 right-4" onclick="event.stopPropagation()">
-								<div class="dropdown dropdown-end">
-									<label tabindex="0" class="btn btn-ghost btn-sm" onclick="handleDropdownToggle(event)">
-										<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
-										</svg>
-									</label>
-									<ul tabindex="0" class="dropdown-content z-[100] menu p-2 shadow bg-base-100 rounded-box w-48 border border-base-300">
-										<li>
-											<button onclick="editPersonalityFromData(this.closest('[data-personality-key]'))">Edit</button>
-										</li>
-										if personality != cp.Key {
-											<li>
-												<button
-													hx-post={ "/personality/save?personality=" + cp.Key }
-													hx-target="#personality-section"
-													hx-swap="outerHTML"
-												>
-													Set as Default
-												</button>
-											</li>
-										}
-										<li>
-											<button
-												class="text-error"
-												hx-delete={ "/personality/custom/" + cp.Key }
-												hx-target="#personality-section"
-												hx-swap="outerHTML"
-												hx-confirm="Delete this custom personality?"
-											>
-												Delete
-											</button>
-										</li>
-									</ul>
-								</div>
-							</div>
-							<div class="pr-12">
-								<h3 class="font-bold">
-									{ cp.Name }
-									if personality == cp.Key {
-										<span class="badge badge-sm ml-2 ov-badge-default">Active</span>
-									}
-									<span class="badge badge-ghost badge-sm ml-1">Custom</span>
-								</h3>
-								if cp.Description != "" {
-									<p class="text-sm opacity-60 mt-1">{ cp.Description }</p>
-								}
-								<p class="text-sm opacity-40 mt-1 line-clamp-2">{ cp.SystemPromptPreview }</p>
-							</div>
-						</div>
-					</div>
+					@customPersonalityCard(cp, personality)
 				}
 			}
 		</div>
