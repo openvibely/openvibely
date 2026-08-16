@@ -802,7 +802,7 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 	sessionKey, err := s.resolveEmailSessionKey(ctx, projectID, msg)
 	if err != nil {
 		applog.Infof("[email] session resolution failed for sender=%s: %v", redactEmail(msg.FromAddress), err)
-		return false
+		return emailIncomingProcessResult{}
 	}
 	handedOff := false
 	receiptRecorded := false
