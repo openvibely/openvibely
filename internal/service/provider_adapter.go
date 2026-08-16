@@ -325,6 +325,7 @@ func (a *mixtureProviderAdapter) runMixtureReferences(req llmcontracts.AgentRequ
 	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
 	var finishedReferences atomic.Int64
+	var progressMu sync.Mutex
 	for i, slot := range cfg.ReferenceModels {
 		i, slot := i, slot
 		results[i] = llmmixture.ReferenceResult{
@@ -343,6 +344,8 @@ func (a *mixtureProviderAdapter) runMixtureReferences(req llmcontracts.AgentRequ
 			defer wg.Done()
 			defer func() { <-sem }()
 			results[i] = a.callMixtureReference(req, cfg, slot, i)
+			progressMu.Lock()
+			defer progressMu.Unlock()
 			completed := int(finishedReferences.Add(1))
 			a.publishMixtureProgress(req, "reference_complete", completed, len(cfg.ReferenceModels), fmt.Sprintf("Reference model %d complete", i+1))
 		}()
