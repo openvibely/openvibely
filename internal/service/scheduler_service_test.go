@@ -108,7 +108,7 @@ func TestSchedulerService_CheckDueTasksClearsCancellationRequestBeforeSubmit(t *
 	require.False(t, workerSvc.IsCancellationRequested(task.ID), "due scheduled submission should clear stale cancellation marker")
 }
 
-func TestSchedulerService_CheckDueTasksDisablesOrphanedDueSchedule(t *testing.T) {
+func TestSchedulerService_CheckDueTasksDeletesOrphanedDueSchedule(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -134,9 +134,7 @@ func TestSchedulerService_CheckDueTasksDisablesOrphanedDueSchedule(t *testing.T)
 	}
 	updated, err := scheduleRepo.GetByID(ctx, "orphan-schedule")
 	require.NoError(t, err)
-	require.NotNil(t, updated)
-	require.False(t, updated.Enabled)
-	require.Nil(t, updated.NextRun)
+	require.Nil(t, updated)
 }
 
 func TestSchedulerService_CheckDueTasksSubmitsOneTimeScheduleCreatedForCompletedScheduledTask(t *testing.T) {
