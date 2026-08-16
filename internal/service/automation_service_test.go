@@ -31,6 +31,12 @@ func (r automationEnterpriseRepoResolver) GlobalAPIEndpoint(context.Context) str
 	return r.endpoint
 }
 
+func TestCurrentAutomationTemplateRevisionTracksMaintainedTemplateChanges(t *testing.T) {
+	require.Equal(t, 6, CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC))
+	require.Equal(t, 4, CurrentAutomationTemplateRevision(AutomationAdapterGitHubSDLC))
+	require.Zero(t, CurrentAutomationTemplateRevision(AutomationAdapterCustom))
+}
+
 func TestResolveAutomationProjectGitHubRepository_AppliesGlobalEndpoint(t *testing.T) {
 	const endpoint = "https://github.example.com/api/v3"
 	project := &models.Project{RepoURL: "https://github.example.com/acme/widgets"}
