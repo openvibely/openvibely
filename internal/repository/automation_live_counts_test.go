@@ -28,17 +28,19 @@ type automationLiveCountsFixture struct {
 func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{
-		"activity":      "agent_task",
-		"work":          "agent_task",
-		"task":          "agent_task",
-		"invocation":    "trigger",
-		"input":         "agent_task",
-		"position":      "agent_task",
-		"github_inbox":  "github_inbox",
-		"native_inbox":  "native_inbox",
-		"recent":        "agent_task",
-		"priority":      "agent_task",
-		"old_completed": "agent_task",
+		"activity":                "agent_task",
+		"work":                    "agent_task",
+		"task":                    "agent_task",
+		"invocation":              "trigger",
+		"input":                   "agent_task",
+		"position":                "agent_task",
+		"github_inbox":            "github_inbox",
+		"native_inbox":            "native_inbox",
+		"recent":                  "agent_task",
+		"priority":                "agent_task",
+		"old_completed":           "agent_task",
+		"retained_task_execution": "agent_task",
+		"represented_execution":   "agent_task",
 	})
 	repo := NewAutomationRepo(db)
 	ctx := context.Background()
@@ -95,6 +97,25 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	})
 	if err != nil {
 		t.Fatalf("record latest task identity activity: %v", err)
+	}
+
+	insertAutomationLiveCountsTask(t, db, "retained-task-execution-task", fixture.ProjectID)
+	insertAutomationLiveCountsDefinitionResource(t, db, fixture, fixture.Nodes["retained_task_execution"], "task", "retained-task-execution-task")
+	insertAutomationLiveCountsExecution(t, db, "retained-task-execution", "retained-task-execution-task", "running")
+
+	insertAutomationLiveCountsTask(t, db, "represented-execution-task", fixture.ProjectID)
+	insertAutomationLiveCountsDefinitionResource(t, db, fixture, fixture.Nodes["represented_execution"], "task", "represented-execution-task")
+	insertAutomationLiveCountsExecution(t, db, "represented-execution", "represented-execution-task", "running")
+	insertAutomationLiveCountsInvocation(t, db, "represented-execution-invocation", fixture, fixture.Nodes["represented_execution"], "completed")
+	_, _, err = repo.RecordProjectionEvent(ctx, AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.ProjectID},
+		Binding: models.AutomationBinding{AutomationID: fixture.AutomationID, VersionID: fixture.VersionID,
+			NodeID: fixture.Nodes["represented_execution"], InvocationID: "represented-execution-invocation"},
+		ActivityKey: "represented-execution-running", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityRunning,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: "represented-execution-task"}, {ResourceType: "execution", ResourceID: "represented-execution"}},
+	})
+	if err != nil {
+		t.Fatalf("record represented execution activity: %v", err)
 	}
 
 	insertAutomationLiveCountsInvocation(t, db, "fallback-invocation", fixture, fixture.Nodes["invocation"], "running")
@@ -199,6 +220,8 @@ func TestAutomationRepoLiveNodeCountsUsesProjectedActivityStateSemantics(t *test
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["activity"]], models.AutomationNodeCounts{Running: 1})
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["work"]], models.AutomationNodeCounts{Failed: 1})
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["task"]], models.AutomationNodeCounts{CompletedRecently: 1})
+	assertAutomationNodeCounts(t, counts[fixture.Nodes["retained_task_execution"]], models.AutomationNodeCounts{Running: 1})
+	assertAutomationNodeCounts(t, counts[fixture.Nodes["represented_execution"]], models.AutomationNodeCounts{Running: 1})
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["invocation"]], models.AutomationNodeCounts{Running: 2})
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["input"]], models.AutomationNodeCounts{Running: 1})
 	assertAutomationNodeCounts(t, counts[fixture.Nodes["position"]], models.AutomationNodeCounts{Running: 1})
@@ -406,6 +429,28 @@ func insertAutomationLiveCountsTask(tb testing.TB, db *sql.DB, id, projectID str
 	}
 }
 
+func insertAutomationLiveCountsDefinitionResource(tb testing.TB, db *sql.DB, fixture automationLiveCountsFixture, nodeID, resourceType, resourceID string) {
+	tb.Helper()
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO automation_definition_resources
+		(project_id, automation_id, version_id, node_id, resource_type, resource_id, relation)
+		VALUES (?, ?, ?, ?, ?, ?, 'owned')`, fixture.ProjectID, fixture.AutomationID, fixture.VersionID, nodeID, resourceType, resourceID); err != nil {
+		tb.Fatalf("insert automation definition resource %s/%s: %v", resourceType, resourceID, err)
+	}
+}
+
+func insertAutomationLiveCountsExecution(tb testing.TB, db *sql.DB, id, taskID, status string) {
+	tb.Helper()
+	completed := "NULL"
+	if status == "completed" || status == "failed" || status == "cancelled" {
+		completed = "datetime('now')"
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO executions
+		(id, task_id, status, prompt_sent, started_at, completed_at)
+		VALUES (?, ?, ?, 'prompt', datetime('now'), `+completed+`)`, id, taskID, status); err != nil {
+		tb.Fatalf("insert execution %s: %v", id, err)
+	}
+}
+
 func insertAutomationLiveCountsPendingInput(tb testing.TB, db *sql.DB, id string, fixture automationLiveCountsFixture, nodeID, workItemID string) {
 	tb.Helper()
 	ctx := context.Background()
@@ -433,6 +478,7 @@ func explainAutomationLiveNodeCountsPlan(tb testing.TB, db *sql.DB, fixture auto
 	rows, err := db.Query("EXPLAIN QUERY PLAN "+liveNodeCountsSQL,
 		fixture.ProjectID, fixture.AutomationID, fixture.VersionID,
 		fixture.ProjectID, fixture.AutomationID, fixture.VersionID, cutoff.UTC(),
+		fixture.ProjectID, fixture.AutomationID, fixture.VersionID,
 		fixture.ProjectID, fixture.AutomationID, fixture.VersionID,
 		fixture.ProjectID, fixture.AutomationID, fixture.VersionID,
 		fixture.ProjectID, fixture.AutomationID, fixture.VersionID,

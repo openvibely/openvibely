@@ -75,6 +75,19 @@ const liveNodeCountsSQL = `WITH operational_state AS (
 			WHERE binding.project_id = ? AND binding.automation_id = ? AND binding.version_id = ?
 				AND input.input_status = 'pending'
 			UNION ALL
+			SELECT resource.node_id, 'running', 'execution:' || execution.id
+				FROM automation_definition_resources resource
+				JOIN executions execution INDEXED BY idx_executions_task_status ON execution.task_id = resource.resource_id
+					AND execution.status IN ('queued','running')
+				WHERE resource.project_id = ? AND resource.automation_id = ? AND resource.version_id = ?
+					AND resource.resource_type = 'task' AND resource.relation = 'owned'
+					AND NOT EXISTS (
+						SELECT 1 FROM automation_activity_resources activity_resource
+						JOIN automation_activities activity ON activity.id = activity_resource.activity_id
+						WHERE activity_resource.resource_type = 'execution' AND activity_resource.resource_id = execution.id
+							AND activity.project_id = resource.project_id AND activity.automation_id = resource.automation_id
+							AND activity.version_id = resource.version_id)
+			UNION ALL
 			SELECT position.node_id,
 				CASE WHEN position.state = 'active' THEN 'running' WHEN position.state = 'waiting' THEN 'waiting'
 					WHEN position.state = 'blocked' THEN 'blocked' WHEN position.state = 'failed' THEN 'failed' END,
@@ -1953,6 +1966,7 @@ func appendAutomationTransition(ctx context.Context, exec SQLExecutor, in Automa
 func (r *AutomationRepo) LiveNodeCounts(ctx context.Context, projectID, automationID, versionID string, recentCutoff time.Time) (map[string]models.AutomationNodeCounts, int, int, error) {
 	rows, err := r.db.QueryContext(ctx, liveNodeCountsSQL, projectID, automationID, versionID,
 		projectID, automationID, versionID, recentCutoff.UTC(),
+		projectID, automationID, versionID,
 		projectID, automationID, versionID,
 		projectID, automationID, versionID,
 		projectID, automationID, versionID,
