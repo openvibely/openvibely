@@ -200,7 +200,7 @@ func (i *WailsInstaller) startDesktopHelper(ctx context.Context, staged LocalSta
 	if start == nil {
 		start = func(command *exec.Cmd) error { return command.Start() }
 	}
-	if err := start(cmd); err != nil {
+	if err := startDetachedHelper(cmd, start); err != nil {
 		return err
 	}
 	if recovery {
@@ -233,6 +233,21 @@ func (i *WailsInstaller) startDesktopHelper(ctx context.Context, staged LocalSta
 		}
 	}
 	i.Shutdown()
+	return nil
+}
+
+func startDetachedHelper(cmd *exec.Cmd, start func(*exec.Cmd) error) error {
+	if start == nil {
+		start = func(command *exec.Cmd) error { return command.Start() }
+	}
+	if err := start(cmd); err != nil {
+		if !relaxDetachedHelperBreakaway(cmd) {
+			return err
+		}
+		if retryErr := start(cmd); retryErr != nil {
+			return errors.Join(err, retryErr)
+		}
+	}
 	return nil
 }
 
@@ -963,7 +978,7 @@ func (i *BinaryInstaller) Apply(ctx context.Context, value any) error {
 	if start == nil {
 		start = func(cmd *exec.Cmd) error { return cmd.Start() }
 	}
-	if err := start(cmd); err != nil {
+	if err := startDetachedHelper(cmd, start); err != nil {
 		_ = os.Remove(helperPath)
 		_ = removeBinaryHelperOutcome(staged)
 		return err
@@ -1007,7 +1022,7 @@ func (i *BinaryInstaller) RecoverBinaryRestart(ctx context.Context, staged Local
 	if start == nil {
 		start = func(cmd *exec.Cmd) error { return cmd.Start() }
 	}
-	if err := start(cmd); err != nil {
+	if err := startDetachedHelper(cmd, start); err != nil {
 		return fmt.Errorf("start binary recovery helper: %w", err)
 	}
 	if ctx == nil {
