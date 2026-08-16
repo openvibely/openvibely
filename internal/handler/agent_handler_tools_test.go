@@ -32,6 +32,7 @@ func TestNormalizeAgentToolsKeepsRuntimeMessagingGitHubAndTaskGoalTools(t *testi
 		"github_list_assigned_issues_with_prs",
 		"github_comment_on_issue",
 		"github_add_issue_labels",
+		"github_close_issue",
 		"github_open_pull_request",
 		"create_alert",
 		"create_notification",

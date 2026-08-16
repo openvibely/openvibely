@@ -1647,6 +1647,27 @@ func (s *GitHubService) AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRe
 	return s.doGitHubJSON(req, nil)
 }
 
+func (s *GitHubService) CloseIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) error {
+	if repo == nil {
+		return fmt.Errorf("repository reference is required")
+	}
+	if issueNumber <= 0 {
+		return fmt.Errorf("issue number is required")
+	}
+
+	token, err := s.createOperationAccessToken(ctx, githubAPIBaseURLForRepo(repo, s.apiBaseURL))
+	if err != nil {
+		return err
+	}
+
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), issueNumber)
+	req, err := s.newGitHubJSONRequest(ctx, http.MethodPatch, endpoint, token, map[string]string{"state": "closed"})
+	if err != nil {
+		return err
+	}
+	return s.doGitHubJSON(req, nil)
+}
+
 func (s *GitHubService) GetAuthenticatedUser(ctx context.Context) (*GitHubAuthenticatedUser, error) {
 	return s.getAuthenticatedUser(ctx, nil)
 }

@@ -32,6 +32,7 @@ type fakeGitHubService struct {
 	listPRFeedbackFn       func(ctx context.Context, repo *service.GitHubRepoRef, prNumber int) ([]service.GitHubPullRequestFeedback, error)
 	commentOnIssueFn       func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
 	addLabelsToIssueFn     func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
+	closeIssueFn           func(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) error
 	globalAPIEndpoint      string
 }
 
@@ -209,6 +210,13 @@ func (f *fakeGitHubService) AddLabelsToIssue(ctx context.Context, repo *service.
 		return f.addLabelsToIssueFn(ctx, repo, issueNumber, labels)
 	}
 	return fmt.Errorf("add labels to issue not configured")
+}
+
+func (f *fakeGitHubService) CloseIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) error {
+	if f != nil && f.closeIssueFn != nil {
+		return f.closeIssueFn(ctx, repo, issueNumber)
+	}
+	return fmt.Errorf("close issue not configured")
 }
 
 func (f *fakeGitHubService) GlobalAPIEndpoint(_ context.Context) string {

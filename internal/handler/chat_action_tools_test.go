@@ -1156,7 +1156,7 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 		t.Fatalf("configure dev-bot authorized actor: %v", err)
 	}
 	var sawMyAssignedIssues bool
-	var createdRepo, commentedRepo, labeledRepo string
+	var createdRepo, commentedRepo, labeledRepo, closedRepo string
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
 			switch repoURL {
@@ -1203,6 +1203,13 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 			labeledRepo = repo.FullName
 			if issueNumber != 9 || len(labels) != 1 || labels[0] != "approved" {
 				t.Fatalf("unexpected labels input issue=%d labels=%v", issueNumber, labels)
+			}
+			return nil
+		},
+		closeIssueFn: func(_ context.Context, repo *service.GitHubRepoRef, issueNumber int) error {
+			closedRepo = repo.FullName
+			if issueNumber != 9 {
+				t.Fatalf("unexpected close input issue=%d", issueNumber)
 			}
 			return nil
 		},
@@ -1282,5 +1289,12 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	}
 	if labeledRepo != "example/other" || !strings.Contains(out, `"labels":["approved"]`) {
 		t.Fatalf("expected explicit repo_url label output repo=%q out=%s", labeledRepo, out)
+	}
+	out, err = handlers["github_close_issue"](ctx, json.RawMessage(`{"issue_number":9,"repo_url":"https://github.com/example/other"}`))
+	if err != nil {
+		t.Fatalf("github_close_issue with repo_url returned error: %v", err)
+	}
+	if closedRepo != "example/other" || !strings.Contains(out, `"state":"closed"`) {
+		t.Fatalf("expected explicit repo_url close output repo=%q out=%s", closedRepo, out)
 	}
 }

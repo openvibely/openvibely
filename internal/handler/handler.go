@@ -140,6 +140,7 @@ type GitHubServiceProvider interface {
 	ListPullRequestFeedback(ctx context.Context, repo *service.GitHubRepoRef, prNumber int) ([]service.GitHubPullRequestFeedback, error)
 	CommentOnIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int, labels []string) error
+	CloseIssue(ctx context.Context, repo *service.GitHubRepoRef, issueNumber int) error
 	GlobalAPIEndpoint(ctx context.Context) string
 }
 
