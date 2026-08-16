@@ -190,7 +190,7 @@ func TestTaskDetailContent_TabsRemainScrollableOnMobile(t *testing.T) {
 	}
 
 	output := buf.String()
-	if !strings.Contains(output, `role="tablist" class="tabs tabs-bordered mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap"`) {
+	if !strings.Contains(output, `role="tablist" class="tabs tabs-bordered tabs-sm mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap"`) {
 		t.Fatal("expected task detail tabs to scroll horizontally instead of clipping on mobile")
 	}
 	for _, label := range []string{"Details", "Thread", "Changes", "Schedules", "Chaining", "Attachments", "Lifecycle"} {

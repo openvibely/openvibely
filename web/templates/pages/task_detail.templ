@@ -124,7 +124,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 			</script>
 		</div>
 		<!-- Tabs Navigation -->
-		<div role="tablist" class="tabs tabs-bordered mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap">
+		<div role="tablist" class="tabs tabs-bordered tabs-sm mb-6 flex-shrink-0 w-full overflow-x-auto flex-nowrap">
 			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "details") } data-tab="details" onclick="switchTaskTab('details')">Details</a>
 			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "chat") } data-tab="chat" onclick="switchTaskTab('chat')">Thread</a>
 			<a role="tab" class={ "tab", templ.KV("tab-active", defaultTab == "changes") } data-tab="changes" onclick="switchTaskTab('changes')">Changes</a>
