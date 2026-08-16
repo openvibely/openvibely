@@ -17,9 +17,10 @@ type automationPreviewActionInput struct {
 }
 
 type automationSaveActionInput struct {
-	Source      string `json:"source"`
-	TemplateKey string `json:"template_key"`
-	Description string `json:"description"`
+	Source         string `json:"source"`
+	TemplateKey    string `json:"template_key"`
+	Description    string `json:"description"`
+	AutomationYAML string `json:"automation_yaml"`
 }
 
 func (h *Handler) executeAutomationPreviewAction(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
@@ -66,8 +67,15 @@ func (h *Handler) executeAutomationSaveAction(ctx context.Context, params stream
 		}
 		candidate = preview.Candidate
 		source = "manual"
+	case "yaml":
+		var err error
+		candidate, err = service.DecodeAutomationDraftYAML([]byte(request.AutomationYAML))
+		if err != nil {
+			return automationValidationResultForChat("invalid_yaml", err.Error())
+		}
+		source = "manual"
 	default:
-		return "", errors.New("automation source must be template, describe, or blank")
+		return "", errors.New("automation source must be template, describe, blank, or yaml")
 	}
 	plan, candidate, err := h.automationCompiler.PreviewSave(ctx, params.ProjectID, candidate)
 	if err != nil {
@@ -134,6 +142,13 @@ func automationSavePlanDisplayName(name string) string {
 		return name
 	}
 	return name[:marker]
+}
+
+func automationValidationResultForChat(code, message string) (string, error) {
+	return marshalAutomationActionResult(map[string]any{
+		"validation_errors": []models.AutomationValidationIssue{{Code: code, Message: message}},
+		"active":            false,
+	})
 }
 
 func marshalAutomationActionResult(value any) (string, error) {

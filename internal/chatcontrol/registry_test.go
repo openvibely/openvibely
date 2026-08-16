@@ -129,9 +129,12 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 	if err := json.Unmarshal(save.Parameters, &schema); err != nil {
 		t.Fatalf("decode Automation save schema: %v", err)
 	}
-	want := []string{"template", "describe", "blank"}
+	want := []string{"template", "describe", "blank", "yaml"}
 	if !reflect.DeepEqual(want, schema.Properties.Source.Enum) {
 		t.Fatalf("Automation save source enum = %v, want %v", schema.Properties.Source.Enum, want)
+	}
+	if !strings.Contains(string(save.Parameters), `"automation_yaml"`) || !strings.Contains(strings.ToLower(save.Description), "yaml") {
+		t.Fatal("public Automation save action must advertise the canonical YAML input path")
 	}
 	if strings.Contains(string(save.Parameters), `"candidate"`) || strings.Contains(save.Description, "structured candidate") {
 		t.Fatal("public Automation save action must not expose a candidate creation identity")
