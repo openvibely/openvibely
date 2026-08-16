@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/httpretry"
 	"github.com/openvibely/openvibely/internal/mcpconfig"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
@@ -1521,6 +1522,16 @@ func (h *Handler) ListAgents(c echo.Context) error {
 	return render(c, http.StatusOK, pages.Agents(projects, currentProjectID, agents, modelOptions))
 }
 
+func agentNameValidationHTTPError(err error) error {
+	if errors.Is(err, repository.ErrAgentNameRequired) {
+		return echo.NewHTTPError(http.StatusBadRequest, "agent name is required")
+	}
+	if errors.Is(err, repository.ErrSelectableAgentNameAlreadyExists) {
+		return echo.NewHTTPError(http.StatusBadRequest, "enabled selectable primary agent name already exists")
+	}
+	return nil
+}
+
 func (h *Handler) CreateAgent(c echo.Context) error {
 	agent := models.Agent{}
 	if err := h.applyAgentDialogFormFields(c, &agent, agentDialogFormOptions{operation: "CreateAgent", defaultMissingCollections: true}); err != nil {
@@ -1532,6 +1543,9 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 
 	if err := h.agentRepo.Create(c.Request().Context(), &agent); err != nil {
 		applog.Infof("[handler] CreateAgent error: %v", err)
+		if httpErr := agentNameValidationHTTPError(err); httpErr != nil {
+			return httpErr
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if err := h.saveAgentLifecycleHooksFromForm(c, agent.ID); err != nil {
@@ -1565,6 +1579,9 @@ func (h *Handler) UpdateAgent(c echo.Context) error {
 
 	if err := h.agentRepo.Update(c.Request().Context(), existing); err != nil {
 		applog.Infof("[handler] UpdateAgent error: %v", err)
+		if httpErr := agentNameValidationHTTPError(err); httpErr != nil {
+			return httpErr
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	if existing.GeneratedStatus != models.AgentStatusProtected {

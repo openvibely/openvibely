@@ -1757,6 +1757,42 @@ func TestExecuteTaskCreations_ResolvesAgentNameInSharedService(t *testing.T) {
 	}
 }
 
+func TestExecuteTaskCreations_ResolvesSingleSelectableAgentByTrimmedName(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := repository.NewAgentRepo(db)
+	taskSvc.SetAgentRepo(agentRepo)
+
+	project := &models.Project{Name: "Trimmed Agent Resolution"}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO agents (id, name, key, model, enabled, selectable_as_primary) VALUES (lower(hex(randomblob(16))), ?, ?, 'inherit', 1, 1)`, " Reviewer ", "legacy_spaced_reviewer"); err != nil {
+		t.Fatalf("insert legacy spaced agent: %v", err)
+	}
+	legacy, err := agentRepo.GetUniqueSelectableByName(ctx, "Reviewer")
+	if err != nil {
+		t.Fatalf("resolve legacy spaced reviewer: %v", err)
+	}
+	if legacy == nil || legacy.Name != " Reviewer " {
+		t.Fatalf("expected single legacy spaced reviewer match, got %+v", legacy)
+	}
+
+	created, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{Title: "Review code", Prompt: "Review blah.go", Agent: "Reviewer"}}, project.ID, taskSvc)
+	if len(created) != 1 {
+		t.Fatalf("expected one task, got %d summary=%q", len(created), summary)
+	}
+	task, err := taskSvc.GetByID(ctx, created[0].ID)
+	if err != nil {
+		t.Fatalf("get created task: %v", err)
+	}
+	if task.AgentDefinitionID == nil || *task.AgentDefinitionID != legacy.ID {
+		t.Fatalf("expected legacy agent definition %s, got %v", legacy.ID, task.AgentDefinitionID)
+	}
+}
+
 func TestExecuteTaskCreations_UnresolvedAgentNameFailsInsteadOfCreatingUnassignedTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

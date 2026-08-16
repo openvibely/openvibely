@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -13,6 +14,11 @@ import (
 type AgentRepo struct {
 	db *sql.DB
 }
+
+var (
+	ErrAgentNameRequired                = errors.New("agent name is required")
+	ErrSelectableAgentNameAlreadyExists = errors.New("enabled selectable primary agent name already exists")
+)
 
 func NewAgentRepo(db *sql.DB) *AgentRepo {
 	return &AgentRepo{db: db}
@@ -153,6 +159,40 @@ func marshalJSON(v any) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+func (r *AgentRepo) normalizeAndValidateAgentName(ctx context.Context, a *models.Agent) error {
+	if a == nil {
+		return nil
+	}
+	a.Name = strings.TrimSpace(a.Name)
+	if a.Name == "" {
+		return ErrAgentNameRequired
+	}
+	if !a.Enabled || !a.SelectableAsPrimary {
+		return nil
+	}
+
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id
+		FROM agents
+		WHERE LOWER(TRIM(name)) = LOWER(?)
+		  AND id <> ?
+		  AND COALESCE(enabled, 1) = 1
+		  AND COALESCE(selectable_as_primary, 1) = 1
+		  AND COALESCE(generated_status, 'user_edited') <> 'archived'
+		LIMIT 1`, a.Name, a.ID)
+	if err != nil {
+		return fmt.Errorf("checking agent name uniqueness: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		return ErrSelectableAgentNameAlreadyExists
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("checking agent name uniqueness: %w", err)
+	}
+	return nil
 }
 
 func normalizeAgentToolConfig(a *models.Agent) {
@@ -333,7 +373,7 @@ func (r *AgentRepo) ListSelectableByName(ctx context.Context, name string) ([]mo
 
 func (r *AgentRepo) listByName(ctx context.Context, name, extraWhere string) ([]models.Agent, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+agentColumns+` FROM agents WHERE LOWER(name) = LOWER(?) AND COALESCE(generated_status, 'user_edited') <> 'archived'`+extraWhere+` ORDER BY created_at ASC`, name)
+		`SELECT `+agentColumns+` FROM agents WHERE LOWER(TRIM(name)) = LOWER(?) AND COALESCE(generated_status, 'user_edited') <> 'archived'`+extraWhere+` ORDER BY created_at ASC`, strings.TrimSpace(name))
 	if err != nil {
 		return nil, fmt.Errorf("listing agents by name: %w", err)
 	}
@@ -444,6 +484,9 @@ func (r *AgentRepo) ListBySystemKind(ctx context.Context, systemKind string) ([]
 
 func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {
 	applyAgentDefaults(a)
+	if err := r.normalizeAndValidateAgentName(ctx, a); err != nil {
+		return err
+	}
 	normalizeAgentToolConfig(a)
 	toolsJSON, err := marshalJSON(a.Tools)
 	if err != nil {
@@ -529,6 +572,9 @@ func applyAgentDefaults(a *models.Agent) {
 
 func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 	applyAgentDefaults(a)
+	if err := r.normalizeAndValidateAgentName(ctx, a); err != nil {
+		return err
+	}
 	normalizeAgentToolConfig(a)
 	toolsJSON, err := marshalJSON(a.Tools)
 	if err != nil {
