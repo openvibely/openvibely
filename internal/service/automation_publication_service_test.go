@@ -51,6 +51,30 @@ func newAutomationSaveHarness(t *testing.T, name string) automationSaveHarness {
 		lifecycle: NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)}
 }
 
+func TestAutomationSaveDefaultModelSentinelUsesRuntimeDefaultLookup(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Default model execution")
+	ctx := context.Background()
+
+	candidate := customTaskOnlyCandidate("Default model execution", "Run with the runtime default model.", models.CategoryActive)
+	candidate.Nodes[0].Config["model_config_id"] = automationDefaultModelConfigID
+	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	compiler := NewAutomationCompiler(h.automationRepo, recorder, h.taskRepo, h.scheduleRepo, NewAutomationSaveValidator(NewAutomationAdapterRegistry(), h.drafts))
+
+	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	taskID := automationResourceID(t, saved.Definition, "root", "task")
+	stored, err := h.taskRepo.GetByID(ctx, taskID)
+	require.NoError(t, err)
+	require.Nil(t, stored.AgentID)
+	require.Len(t, recorder.submitted, 1)
+	require.Nil(t, recorder.submitted[0].AgentID)
+
+	claim, claimed, err := h.taskRepo.ClaimTaskForDispatch(ctx, taskID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.Nil(t, claim.Task.AgentID)
+}
+
 func TestAutomationSaveStoresSelectedModelForTaskExecution(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Selected model execution")
 	ctx := context.Background()

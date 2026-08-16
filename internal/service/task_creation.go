@@ -39,8 +39,12 @@ func EffectiveTaskCreationCategory(req TaskCreationRequest, availableAgents []mo
 }
 
 func selectTaskCreationAgent(req TaskCreationRequest, availableAgents []models.LLMConfig) (string, string) {
-	if req.AgentID != "" {
-		return req.AgentID, ""
+	requestedAgentID := strings.TrimSpace(req.AgentID)
+	if strings.EqualFold(requestedAgentID, automationDefaultModelConfigID) {
+		return "", ""
+	}
+	if requestedAgentID != "" {
+		return requestedAgentID, ""
 	}
 	if len(availableAgents) > 1 {
 		complexity := AnalyzeComplexity(req.Prompt)

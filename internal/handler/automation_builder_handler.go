@@ -127,22 +127,8 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 	return h.saveAutomationBuilderCandidate(c, projectID, page, false)
 }
 
-func (h *Handler) applyAutomationTemplateDefaultModel(ctx context.Context, projectID string, candidate *models.AutomationDraftCandidate) {
+func (h *Handler) applyAutomationTemplateDefaultModel(_ context.Context, _ string, candidate *models.AutomationDraftCandidate) {
 	if h == nil || candidate == nil {
-		return
-	}
-	modelID := ""
-	if h.projectRepo != nil && strings.TrimSpace(projectID) != "" {
-		if project, err := h.projectRepo.GetByID(ctx, projectID); err == nil && project != nil && project.DefaultAgentConfigID != nil {
-			modelID = strings.TrimSpace(*project.DefaultAgentConfigID)
-		}
-	}
-	if modelID == "" && h.llmConfigRepo != nil {
-		if model, err := h.llmConfigRepo.GetDefault(ctx); err == nil && model != nil {
-			modelID = strings.TrimSpace(model.ID)
-		}
-	}
-	if modelID == "" {
 		return
 	}
 	for i := range candidate.Nodes {
@@ -157,7 +143,7 @@ func (h *Handler) applyAutomationTemplateDefaultModel(ctx context.Context, proje
 			continue
 		}
 		if _, hasPrompt := node.Config["prompt"]; hasPrompt || node.Role == "implementation" {
-			node.Config["model_config_id"] = modelID
+			node.Config["model_config_id"] = "default"
 		}
 	}
 }

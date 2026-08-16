@@ -2647,6 +2647,41 @@ func TestAutoStartTasks_DisabledInModel(t *testing.T) {
 	}
 }
 
+func TestTaskCreationDefaultModelSentinelSkipsAutoSelection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	project := &models.Project{Name: "Test Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+
+	requests := []TaskCreationRequest{{
+		Title:    "Use Default Model Task",
+		Prompt:   "Do something complex enough that auto-selection would otherwise run.",
+		AgentID:  automationDefaultModelConfigID,
+		Priority: 2,
+	}}
+	agents := []models.LLMConfig{
+		{ID: "model-a", Name: "Model A", AutoStartTasks: true},
+		{ID: "model-b", Name: "Model B"},
+	}
+	createdTasks, _ := ExecuteTaskCreationsWithReturn(ctx, requests, project.ID, taskSvc, agents)
+
+	if len(createdTasks) != 1 {
+		t.Fatalf("expected 1 task created, got %d", len(createdTasks))
+	}
+	if createdTasks[0].AgentID != nil {
+		t.Fatalf("expected no explicit model for default sentinel, got %v", *createdTasks[0].AgentID)
+	}
+	if createdTasks[0].Category != models.CategoryBacklog {
+		t.Errorf("expected default-sentinel task to stay backlog without auto-start model, got %q", createdTasks[0].Category)
+	}
+}
+
 func TestAutoStartTasks_ExplicitCategoryOverrides(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

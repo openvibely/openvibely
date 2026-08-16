@@ -1276,7 +1276,8 @@ func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.
 		if node.Type == models.AutomationNodeTrigger || node.Type == models.AutomationNodeAgentTask {
 			if _, hasPrompt := node.Config["prompt"]; hasPrompt || node.Role == "implementation" {
 				modelConfigID, _ := node.Config["model_config_id"].(string)
-				require.Equal(t, projectDefault.ID, modelConfigID, "node %s should default to project model", node.Key)
+				require.Equal(t, "default", modelConfigID, "node %s should use dynamic project default model", node.Key)
+				require.NotEqual(t, projectDefault.ID, modelConfigID, "node %s should not pin the current project model ID", node.Key)
 			}
 		}
 	}

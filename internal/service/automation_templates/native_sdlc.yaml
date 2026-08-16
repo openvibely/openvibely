@@ -14,7 +14,7 @@ nodes:
         enabled: true
         goal: ""
         priority: 2
-        model_config_id: ""
+        model_config_id: default
         prompt: |-
             Choose one focused project component or workflow to inspect this run. Compare that area with the configured project vision or source-of-truth files and identify small, reviewable gaps. Vary the component over time instead of repeatedly auditing the same files.
 
@@ -50,7 +50,7 @@ nodes:
         enabled: true
         goal: ""
         priority: 2
-        model_config_id: ""
+        model_config_id: default
         prompt: |-
             You are the Bug Finder. Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
 
@@ -88,7 +88,7 @@ nodes:
         enabled: true
         goal: ""
         priority: 2
-        model_config_id: ""
+        model_config_id: default
         prompt: |-
             You are the Optimization Finder. Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
 
@@ -126,7 +126,7 @@ nodes:
         enabled: true
         goal: ""
         priority: 2
-        model_config_id: ""
+        model_config_id: default
         prompt: |-
             You are the Redundancy Finder. Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
 
@@ -183,7 +183,7 @@ nodes:
         enabled: true
         goal: ""
         priority: 2
-        model_config_id: ""
+        model_config_id: default
         prompt: |-
             Process approved actionable notifications for this scheduled task's own project.
 
@@ -207,7 +207,7 @@ nodes:
       role: implementation
       config:
         goal: ""
-        model_config_id: ""
+        model_config_id: default
       position:
         x: 880
         "y": 270

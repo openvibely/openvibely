@@ -150,6 +150,17 @@ func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.Au
 	return candidate, nil
 }
 
+const automationDefaultModelConfigID = "default"
+
+func automationExplicitModelConfigID(value any) string {
+	modelConfigID, _ := value.(string)
+	modelConfigID = strings.TrimSpace(modelConfigID)
+	if strings.EqualFold(modelConfigID, automationDefaultModelConfigID) {
+		return ""
+	}
+	return modelConfigID
+}
+
 func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[string]any, error) {
 	configs := make(map[string]map[string]any, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
@@ -165,7 +176,7 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 			config["priority"] = 2
 			config["skills"] = []string{}
 			config["source_files"] = []string{}
-			config["model_config_id"] = ""
+			config["model_config_id"] = automationDefaultModelConfigID
 			if adapter.Key == AutomationAdapterGitHubSDLC && node.Role == "implementation" {
 				config["category"] = string(models.CategoryActive)
 			}
@@ -189,7 +200,7 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 		}
 		if adapter.Key == AutomationAdapterNativeSDLC && node.Role == "implementation" {
 			config["goal"] = ""
-			config["model_config_id"] = ""
+			config["model_config_id"] = automationDefaultModelConfigID
 		}
 		switch node.Role {
 		case "create_notification":
@@ -1526,8 +1537,7 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 		}
 		agentRef, _ := node.Config["agent_ref"].(string)
 		agentRef = strings.TrimSpace(agentRef)
-		modelConfigID, _ := node.Config["model_config_id"].(string)
-		modelConfigID = strings.TrimSpace(modelConfigID)
+		modelConfigID := automationExplicitModelConfigID(node.Config["model_config_id"])
 		if agentRef != "" && !agents[agentRef] {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection is unavailable in this project."})
 		}

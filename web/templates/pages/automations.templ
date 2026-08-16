@@ -847,7 +847,7 @@ func automationLiveCardFields(raw string) []automationLiveCardField {
 		label := strings.Title(strings.ReplaceAll(key, "_", " "))
 		if key == "model_config_id" {
 			label = "Model"
-			if strings.TrimSpace(value) == "" {
+			if value == "default" || strings.TrimSpace(value) == "" {
 				value = "Project default"
 			}
 		}
@@ -896,7 +896,7 @@ templ automationLiveDetailsPanel(graph models.AutomationLiveGraph) {
 }
 
 templ automationTaskModelSelector(node models.AutomationDraftNode, modelOptions []models.AutomationCapabilityRef) {
-	<label class="form-control"><span class="label-text">Model</span><select class="select select-bordered" name={ "node_" + node.Key + "_model_config_id" }><option value="" selected?={ automationDraftStringConfig(node, "model_config_id") == "" }>Project default model</option>
+	<label class="form-control"><span class="label-text">Model</span><select class="select select-bordered" name={ "node_" + node.Key + "_model_config_id" }><option value="default" selected?={ automationDraftModelConfigIsDefault(node) }>Project default model</option>
 		for _, model := range modelOptions {
 			<option value={ model.ID } selected?={ automationDraftStringConfig(node, "model_config_id") == model.ID }>{ automationModelOptionLabel(model) }</option>
 		}
@@ -2086,6 +2086,7 @@ func automationDraftSupportsModel(node models.AutomationDraftNode) bool {
 	return hasPrompt
 }
 func automationDraftStringConfig(node models.AutomationDraftNode, key string) string { value, _ := node.Config[key].(string); return value }
+func automationDraftModelConfigIsDefault(node models.AutomationDraftNode) bool { value := strings.TrimSpace(automationDraftStringConfig(node, "model_config_id")); return value == "" || value == "default" }
 func automationDraftStringSliceConfig(node models.AutomationDraftNode, key string) string { values := []string{}; switch configured := node.Config[key].(type) { case []string: values = append(values, configured...); case []any: for _, value := range configured { if text, ok := value.(string); ok { values = append(values, text) } } }; return strings.Join(values, ", ") }
 func automationDraftStringSliceContains(node models.AutomationDraftNode, key, expected string) bool { switch values := node.Config[key].(type) { case []string: for _, value := range values { if value == expected { return true } }; case []any: for _, value := range values { if text, ok := value.(string); ok && text == expected { return true } } }; return false }
 func automationDraftIntConfig(node models.AutomationDraftNode, key string) int { switch value := node.Config[key].(type) { case int: return value; case float64: return int(value); case json.Number: parsed, _ := value.Int64(); return int(parsed) }; return 0 }
@@ -2109,7 +2110,7 @@ func automationDraftNodeModelLabel(node models.AutomationDraftNode, modelOptions
 		return ""
 	}
 	modelID := strings.TrimSpace(automationDraftStringConfig(node, "model_config_id"))
-	if modelID == "" {
+	if modelID == "" || modelID == "default" {
 		return "Model: Project default"
 	}
 	for _, model := range modelOptions {
@@ -2134,7 +2135,7 @@ func automationLiveNodeModelLabel(node models.AutomationLiveNode) string {
 	}
 	modelID, _ := config["model_config_id"].(string)
 	modelID = strings.TrimSpace(modelID)
-	if modelID == "" {
+	if modelID == "" || modelID == "default" {
 		return "Model: Project default"
 	}
 	return "Model: " + modelID

@@ -236,8 +236,7 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		if agent != nil {
 			agentDefinitionID = &agent.ID
 		}
-		modelConfigID, _ := node.Config["model_config_id"].(string)
-		modelConfigID = strings.TrimSpace(modelConfigID)
+		modelConfigID := automationExplicitModelConfigID(node.Config["model_config_id"])
 		var agentID *string
 		if modelConfigID != "" {
 			agentID = &modelConfigID

@@ -595,8 +595,12 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 	request.Category = category
 	priority, _ := draftInt(config["priority"])
 	request.Priority = priority
-	if modelConfigID, _ := config["model_config_id"].(string); strings.TrimSpace(modelConfigID) != "" {
-		request.AgentID = strings.TrimSpace(modelConfigID)
+	modelConfigID, modelConfigConfigured := config["model_config_id"].(string)
+	modelConfigID = strings.TrimSpace(modelConfigID)
+	if strings.EqualFold(modelConfigID, automationDefaultModelConfigID) || !modelConfigConfigured || modelConfigID == "" {
+		request.AgentID = automationDefaultModelConfigID
+	} else {
+		request.AgentID = modelConfigID
 	}
 	if ref, _ := config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
 		agent, err := resolveAutomationAgent(ctx, s.agentRepo, projectID, ref)
@@ -648,8 +652,7 @@ func (s *LLMService) prepareAutomationAlertImplementationTask(ctx context.Contex
 			}
 			configuredGoal = goal
 		}
-		modelConfigID, _ := config["model_config_id"].(string)
-		modelConfigID = strings.TrimSpace(modelConfigID)
+		modelConfigID := automationExplicitModelConfigID(config["model_config_id"])
 		if modelConfigID != "" {
 			if configuredModelConfigID != "" && configuredModelConfigID != modelConfigID {
 				return errors.New("Automation bindings have conflicting Native implementation task models")
