@@ -149,6 +149,67 @@ func TestCallDirectReturnsErrorOnRefusalStopReason(t *testing.T) {
 	}
 }
 
+func TestCallDirectOperationUsesRuntimeToolsAndDefaultFraming(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, evt := range []string{
+			`{"type":"message_start","message":{"id":"msg_1","model":"claude-test","usage":{"input_tokens":8,"cache_creation_input_tokens":1,"cache_read_input_tokens":2}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"direct result"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions:      []llmcontracts.RuntimeToolDefinition{{Name: "create_task", Description: "Create a task", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		SkipDefaultTools: true,
+	})
+	adapter := New(nil, nil, nil)
+	result, err := adapter.Call(ctx, llmcontracts.AgentRequest{
+		Operation:           llmcontracts.OperationDirect,
+		Message:             "solve it",
+		ProjectInstructions: "project rules",
+		Agent: models.LLMConfig{
+			Name:            "Claude API",
+			Provider:        models.ProviderAnthropic,
+			Model:           "claude-opus-5",
+			ReasoningEffort: "low",
+			AuthMethod:      models.AuthMethodAPIKey,
+			APIKey:          "test-key",
+		},
+	}, "/repo/worktree", nil)
+	if err != nil {
+		t.Fatalf("Call direct: %v", err)
+	}
+	if result.Output != "direct result" || result.Usage.InputTokens != 8 || result.Usage.OutputTokens != 3 {
+		t.Fatalf("result = %#v", result)
+	}
+	if system := fmt.Sprint(gotBody["system"]); !strings.Contains(system, "project rules") || !strings.Contains(system, "expert software engineer") {
+		t.Fatalf("direct call omitted default system framing: %#v", gotBody["system"])
+	}
+	if !strings.Contains(fmt.Sprint(gotBody["messages"]), "solve it") {
+		t.Fatalf("direct call omitted task prompt: %#v", gotBody["messages"])
+	}
+	if tools := fmt.Sprint(gotBody["tools"]); !strings.Contains(tools, "create_task") || strings.Contains(tools, "Bash") {
+		t.Fatalf("runtime/default tool set = %s", tools)
+	}
+}
+
 func TestCallDirectRawPromptOmitsOpenVibelySystemTaskPromptAndTools(t *testing.T) {
 	var gotBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
