@@ -441,6 +441,7 @@ func backfillLegacyGitHubIssueTaskOrigins(ctx context.Context, exec SQLExecutor,
 			AND node.project_id = activity.project_id
 		JOIN automation_activity_resources task_resource ON task_resource.activity_id = activity.id
 			AND task_resource.resource_type = 'task' AND task_resource.relation = 'child'
+		JOIN tasks task ON task.id = task_resource.resource_id AND task.project_id = activity.project_id
 		JOIN automation_activity_resources issue_resource ON issue_resource.activity_id = activity.id
 			AND issue_resource.resource_type = 'github_issue'
 		WHERE activity.project_id = ? AND activity.automation_id = ? AND activity.version_id = ?

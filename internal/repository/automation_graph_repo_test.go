@@ -61,6 +61,53 @@ func TestSaveCurrentGraphWritesGraphRowsAndUsesNodeIDsForResourceBindings(t *tes
 	require.Equal(t, 1, automationGraphCountRows(t, db, `SELECT COUNT(*) FROM automation_graph_metadata WHERE version_id = ? AND automation_id = ?`, definition.Version.ID, definition.Automation.ID))
 }
 
+func TestSaveCurrentGraphSkipsStaleGitHubIssueTaskBackfillResources(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	project := automationGraphTestProject(t, db, "Stale GitHub task backfill")
+	repo := NewAutomationRepo(db)
+	ctx := context.Background()
+	automationID := NewID()
+
+	candidate := models.AutomationDraftCandidate{
+		SchemaVersion:  1,
+		Name:           "Stale GitHub Backfill",
+		AutomationType: "github_sdlc",
+		AdapterKey:     "github_sdlc",
+		Nodes: []models.AutomationDraftNode{
+			{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "implementation", Config: map[string]any{"prompt": "Implement assigned issues."}},
+		},
+	}
+	first, _, err := repo.SaveCurrentGraph(ctx, AutomationSaveWrite{
+		ProjectID: project.ID, AutomationID: automationID, GraphID: NewID(), Candidate: candidate,
+	})
+	require.NoError(t, err)
+
+	var implementationNodeID string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT id FROM automation_nodes WHERE project_id = ? AND automation_id = ? AND version_id = ? AND node_key = 'implementation'`,
+		project.ID, automationID, first.Version.ID).Scan(&implementationNodeID))
+
+	workItemID := NewID()
+	require.NoError(t, execAutomationGraphTestSQL(ctx, db, `INSERT INTO automation_work_items
+		(id, project_id, automation_id, origin_version_id, work_item_key, kind, title, status)
+		VALUES (?, ?, ?, ?, 'github-issue:example/repo:42', 'github_issue', 'Issue 42', 'active')`,
+		workItemID, project.ID, automationID, first.Version.ID))
+	activityID := NewID()
+	require.NoError(t, execAutomationGraphTestSQL(ctx, db, `INSERT INTO automation_activities
+		(id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, 'create_task', 'completed')`,
+		activityID, project.ID, automationID, first.Version.ID, implementationNodeID, workItemID, "work-item:"+workItemID+":implementation-task"))
+	require.NoError(t, execAutomationGraphTestSQL(ctx, db, `INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
+		VALUES (?, 'task', 'deleted-task-id', 'child'), (?, 'github_issue', 'github:issue:example/repo:42', 'subject')`, activityID, activityID))
+
+	updated := candidate
+	updated.Name = "Updated Stale GitHub Backfill"
+	_, _, err = repo.SaveCurrentGraph(ctx, AutomationSaveWrite{
+		ProjectID: project.ID, AutomationID: automationID, GraphID: NewID(), ExpectedCurrentGraphID: first.Version.ID, Candidate: updated,
+	})
+	require.NoError(t, err)
+	require.Equal(t, 0, automationGraphCountRows(t, db, `SELECT COUNT(*) FROM automation_github_issue_task_provenance WHERE project_id = ? AND automation_id = ?`, project.ID, automationID))
+}
+
 func TestAutomationGraphWriterRejectsUnknownEdgeNodesForSaveAndRegistration(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	project := automationGraphTestProject(t, db, "Unknown graph edge")
@@ -101,4 +148,9 @@ func automationGraphCountRows(t *testing.T, db *sql.DB, query string, args ...an
 	var count int
 	require.NoError(t, db.QueryRowContext(context.Background(), query, args...).Scan(&count))
 	return count
+}
+
+func execAutomationGraphTestSQL(ctx context.Context, db *sql.DB, query string, args ...any) error {
+	_, err := db.ExecContext(ctx, query, args...)
+	return err
 }
