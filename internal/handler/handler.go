@@ -858,6 +858,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 
 	// Alerts
 	e.GET("/alerts", h.ListAlerts)
+	e.GET("/alerts/:id/details", h.GetAlertDetail)
 	e.POST("/alerts/:id/read", h.MarkAlertRead)
 	e.POST("/alerts/:id/approve", h.ApproveAlert)
 	e.POST("/alerts/:id/reject", h.RejectAlert)

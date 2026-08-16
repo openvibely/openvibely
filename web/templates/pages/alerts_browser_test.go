@@ -41,8 +41,20 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 		},
 	}
 	var rendered bytes.Buffer
-	if err := AlertsContent(alerts, "project-alerts-browser", 3).Render(context.Background(), &rendered); err != nil {
-		t.Fatalf("render Alerts content: %v", err)
+	// The list no longer embeds body/metadata or copy controls; those now live in
+	// the lazily loaded per-alert detail fragment. Render an empty list first to
+	// supply the shared copyAlertDetails/loadAlertDetail scripts, then render each
+	// alert's detail fragment inside a matching card wrapper so the copy-feedback
+	// interaction is exercised exactly as the browser sees it after lazy load.
+	if err := AlertsContent(nil, "project-alerts-browser", 0).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render Alerts content scripts: %v", err)
+	}
+	for _, alert := range alerts {
+		rendered.WriteString(fmt.Sprintf(`<div id="alert-%s">`, alert.ID))
+		if err := AlertDetail(alert).Render(context.Background(), &rendered); err != nil {
+			t.Fatalf("render alert detail: %v", err)
+		}
+		rendered.WriteString(`</div>`)
 	}
 
 	runner := `<style>
@@ -148,13 +160,13 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	}
 
 	var mu sync.Mutex
-	alerts := make([]models.Alert, 30)
+	alerts := make([]models.AlertSummary, 30)
 	for i := range alerts {
 		message := strings.Repeat("Long alert content ", 5)
 		if i == 2 || i == 5 || i == 8 || i == 11 || i == 14 || i == 17 || i == 20 || i == 24 || i == 27 {
 			message += " filtered-focus"
 		}
-		alerts[i] = models.Alert{
+		alerts[i] = models.AlertSummary{
 			ID:        fmt.Sprintf("item-%02d", i),
 			ProjectID: "project-alerts-browser",
 			Title:     fmt.Sprintf("Notification %02d", i),
@@ -177,7 +189,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 			}
 		}
 		var out bytes.Buffer
-		if err := AlertsContent(append([]models.Alert(nil), alerts...), "project-alerts-browser", unread).Render(context.Background(), &out); err != nil {
+		if err := AlertsContent(append([]models.AlertSummary(nil), alerts...), "project-alerts-browser", unread).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Alerts content: %v", err)
 		}
 		return out.String()
@@ -192,7 +204,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 			}
 		}
 		var out bytes.Buffer
-		if err := Alerts(nil, "project-alerts-browser", append([]models.Alert(nil), alerts...), unread).Render(context.Background(), &out); err != nil {
+		if err := Alerts(nil, "project-alerts-browser", append([]models.AlertSummary(nil), alerts...), unread).Render(context.Background(), &out); err != nil {
 			t.Fatalf("render Alerts page: %v", err)
 		}
 		return out.String()
@@ -210,7 +222,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 	prependAlert := func(kind string) {
 		mu.Lock()
 		defer mu.Unlock()
-		alert := models.Alert{
+		alert := models.AlertSummary{
 			ID:            "live-" + kind,
 			ProjectID:     "project-alerts-browser",
 			Title:         "Live " + kind,
@@ -220,7 +232,7 @@ func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) 
 		if kind == "notification" {
 			alert.DecisionState = models.AlertDecisionPending
 		}
-		alerts = append([]models.Alert{alert}, alerts...)
+		alerts = append([]models.AlertSummary{alert}, alerts...)
 	}
 
 	runner := `<script>
