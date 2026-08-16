@@ -19,6 +19,123 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
+func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
+	if got := applyOpenAIOAuthSystemPrompt("base", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey}); got != "base" {
+		t.Fatalf("non-OAuth prompt changed: %q", got)
+	}
+	if got := applyOpenAIOAuthSystemPrompt("base", models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth}); !strings.Contains(got, "base") || got == "base" {
+		t.Fatalf("OAuth prompt missing wrapper guidance: %q", got)
+	}
+
+	mapped := map[string]string{"read_file": "Read", "write_file": "Write", "edit_file": "Edit", "bash": "Bash", "list_files": "Glob", "grep_search": "Grep", "web_search_preview": "WebSearch", "unknown": ""}
+	for name, want := range mapped {
+		if got := mapBuiltInToolName(" " + name + " "); got != want {
+			t.Fatalf("mapBuiltInToolName(%q)=%q want %q", name, got, want)
+		}
+	}
+
+	if !agentAllowsBuiltInTool(nil, "bash") {
+		t.Fatal("nil agent should allow built-in tools")
+	}
+	if agentAllowsBuiltInTool(&models.Agent{ToolConfig: models.AgentToolConfig{SkipDefaultTools: true}}, "bash") {
+		t.Fatal("SkipDefaultTools should deny built-in tools")
+	}
+	if !agentAllowsBuiltInTool(&models.Agent{Tools: []string{" read "}}, "read_file") {
+		t.Fatal("explicit Read grant should allow read_file")
+	}
+	if agentAllowsBuiltInTool(&models.Agent{Tools: []string{" read "}}, "bash") {
+		t.Fatal("missing Bash grant should deny bash")
+	}
+	if !agentAllowsBuiltInTool(&models.Agent{Tools: []string{" read "}}, "custom_runtime_tool") {
+		t.Fatal("unmapped non-built-in tools should pass through")
+	}
+
+	if !planModeAllowsReadOnlyTool("grep_search") || planModeAllowsReadOnlyTool("bash") {
+		t.Fatal("plan mode read-only tool classification changed")
+	}
+	planFilter := wrapToolFilterForPlanMode(nil, false, models.ChatModePlan)
+	if !planFilter("read_file") || planFilter("write_file") {
+		t.Fatal("plan filter should allow read-only tools only")
+	}
+	baseFilter := wrapToolFilterForPlanMode(func(name string) bool { return name == "read_file" }, false, models.ChatModePlan)
+	if !baseFilter("read_file") || baseFilter("grep_search") {
+		t.Fatal("plan filter should compose with base filter")
+	}
+	unchangedFilter := wrapToolFilterForPlanMode(func(string) bool { return true }, true, models.ChatModePlan)
+	if !unchangedFilter("bash") {
+		t.Fatal("task follow-up should keep base filter")
+	}
+
+	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{
+		{Name: " write_task ", Description: " write ", Access: llmcontracts.RuntimeToolAccessWrite, Parameters: json.RawMessage(`{"type":"object"}`)},
+		{Name: "read_task", Description: "read", Access: llmcontracts.RuntimeToolAccessRead},
+		{Name: "   ", Description: "ignored"},
+	}}
+	openAITools := runtimeOpenAITools(rt)
+	if len(openAITools) != 2 || openAITools[0].Name != "write_task" || openAITools[0].Description != "write" {
+		t.Fatalf("unexpected OpenAI tools: %#v", openAITools)
+	}
+	if runtimeOpenAITools(nil) != nil {
+		t.Fatal("nil runtime tools should produce no OpenAI tools")
+	}
+	accessMap := runtimeToolAccessMap(rt)
+	if access, ok := runtimeToolAccess(accessMap, " WRITE_TASK "); !ok || access != llmcontracts.RuntimeToolAccessWrite {
+		t.Fatalf("write_task access = %q %v", access, ok)
+	}
+	if access, ok := runtimeToolAccess(accessMap, "read_task"); !ok || access != llmcontracts.RuntimeToolAccessRead {
+		t.Fatalf("read_task access = %q %v", access, ok)
+	}
+	if _, ok := runtimeToolAccess(nil, "read_task"); ok {
+		t.Fatal("nil access map should not resolve tools")
+	}
+
+	baseExec := func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
+		return "base:" + name, false, nil
+	}
+	runtimeExec := composeRuntimeToolExecutor(baseExec, &llmcontracts.RuntimeTools{Executor: func(_ context.Context, name string, _ json.RawMessage) (string, bool, bool, error) {
+		if name == "handled" {
+			return "runtime handled", true, false, nil
+		}
+		return "", false, false, nil
+	}})
+	out, isErr, err := runtimeExec(context.Background(), "handled", nil)
+	if out != "runtime handled" || isErr || err != nil {
+		t.Fatalf("runtime handled output=%q isErr=%v err=%v", out, isErr, err)
+	}
+	out, isErr, err = runtimeExec(context.Background(), "fallback", nil)
+	if out != "base:fallback" || isErr || err != nil {
+		t.Fatalf("fallback output=%q isErr=%v err=%v", out, isErr, err)
+	}
+	missingExec := composeRuntimeToolExecutor(nil, &llmcontracts.RuntimeTools{Executor: func(context.Context, string, json.RawMessage) (string, bool, bool, error) {
+		return "", false, false, nil
+	}})
+	_, isErr, err = missingExec(context.Background(), "missing", nil)
+	if !isErr || err == nil || !strings.Contains(err.Error(), "not available") {
+		t.Fatalf("missing executor isErr=%v err=%v", isErr, err)
+	}
+	plainExec := composeRuntimeToolExecutor(baseExec, nil)
+	out, _, err = plainExec(context.Background(), "plain", nil)
+	if out != "base:plain" || err != nil {
+		t.Fatalf("plain executor output=%q err=%v", out, err)
+	}
+
+	readWriteRuntime := &llmcontracts.RuntimeTools{Definitions: rt.Definitions, Filter: func(name string) (bool, bool) {
+		return name != "write_task", true
+	}}
+	planRuntimeFilter := composeRuntimeToolFilter(func(name string) bool { return name == "read_file" }, readWriteRuntime, false, models.ChatModePlan)
+	if !planRuntimeFilter("read_task") || planRuntimeFilter("write_task") || !planRuntimeFilter("read_file") || planRuntimeFilter("bash") {
+		t.Fatal("plan runtime filter allowed unexpected tools")
+	}
+	orchestrateFilter := composeRuntimeToolFilter(nil, readWriteRuntime, false, models.ChatModeOrchestrate)
+	if !orchestrateFilter("read_task") || orchestrateFilter("write_task") || orchestrateFilter("read_file") {
+		t.Fatal("orchestrate filter should allow handled runtime tools only")
+	}
+	followupFilter := composeRuntimeToolFilter(func(name string) bool { return name == "bash" }, &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "runtime_task"}}, SkipDefaultTools: true}, true, models.ChatModeOrchestrate)
+	if followupFilter("bash") || !followupFilter("runtime_task") {
+		t.Fatal("follow-up filter should honor SkipDefaultTools while allowing runtime names")
+	}
+}
+
 func TestCallCompletionsStreamingTaskWithRuntimeActionsUsesToolModePrompt(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
