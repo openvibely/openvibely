@@ -169,6 +169,62 @@ func TestCreateProject_LocalPathDisabled(t *testing.T) {
 	}
 }
 
+func TestCreateProject_WhitespaceOnlyName_Rejected(t *testing.T) {
+	tc := NewTestContext(t)
+
+	before, err := tc.handler.projectSvc.List(context.Background())
+	if err != nil {
+		t.Fatalf("listing projects failed: %v", err)
+	}
+
+	rec := tc.HTTP().Post("/projects").WithForm(url.Values{
+		"name":        {"   "},
+		"repo_source": {"local"},
+		"repo_path":   {""},
+	}).Execute()
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for whitespace-only name, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	after, err := tc.handler.projectSvc.List(context.Background())
+	if err != nil {
+		t.Fatalf("listing projects failed: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("expected no project to be created, before=%d after=%d", len(before), len(after))
+	}
+}
+
+func TestCreateProject_TrimsSurroundingWhitespaceInName(t *testing.T) {
+	tc := NewTestContext(t)
+
+	rec := tc.HTTP().Post("/projects").WithForm(url.Values{
+		"name":        {"  Client Work  "},
+		"repo_source": {"local"},
+		"repo_path":   {""},
+	}).Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	projects, err := tc.handler.projectSvc.List(context.Background())
+	if err != nil {
+		t.Fatalf("listing projects failed: %v", err)
+	}
+	found := false
+	for _, p := range projects {
+		if p.Name == "Client Work" {
+			found = true
+		}
+		if p.Name == "  Client Work  " {
+			t.Fatalf("project name was persisted with surrounding whitespace: %q", p.Name)
+		}
+	}
+	if !found {
+		t.Fatalf("expected a project named %q, got %+v", "Client Work", projects)
+	}
+}
+
 // ---- UpdateProject ----
 
 func TestUpdateProject_NotFound(t *testing.T) {
@@ -209,6 +265,50 @@ func TestUpdateProject_Success_Redirect(t *testing.T) {
 	}).Execute()
 	if rec.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateProject_WhitespaceOnlyName_Rejected(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Keep This Name").Build()
+
+	rec := tc.HTTP().Put("/projects/" + project.ID).WithForm(url.Values{
+		"name":        {"   "},
+		"repo_source": {"local"},
+		"repo_path":   {""},
+	}).Execute()
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for whitespace-only rename, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	reloaded, err := tc.handler.projectSvc.GetByID(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("reloading project failed: %v", err)
+	}
+	if reloaded == nil || reloaded.Name != "Keep This Name" {
+		t.Fatalf("expected name to be preserved, got %+v", reloaded)
+	}
+}
+
+func TestUpdateProject_TrimsSurroundingWhitespaceInName(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Original Name").Build()
+
+	rec := tc.HTTP().Put("/projects/" + project.ID).WithForm(url.Values{
+		"name":        {"  Renamed Project  "},
+		"repo_source": {"local"},
+		"repo_path":   {""},
+	}).Execute()
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	reloaded, err := tc.handler.projectSvc.GetByID(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("reloading project failed: %v", err)
+	}
+	if reloaded == nil || reloaded.Name != "Renamed Project" {
+		t.Fatalf("expected trimmed name %q, got %+v", "Renamed Project", reloaded)
 	}
 }
 
@@ -430,6 +530,37 @@ func TestParseProjectFormSettings_NormalizesCommonFieldsAndSourceValidation(t *t
 	}
 	if !settings.PreserveLegacyLocalProject {
 		t.Fatal("expected legacy local preservation marker")
+	}
+}
+
+func TestParseProjectFormSettings_TrimsNameAndRejectsBlank(t *testing.T) {
+	tc := NewTestContext(t)
+
+	trimForm := url.Values{}
+	trimForm.Set("name", "  Client Work  ")
+	trimForm.Set("repo_source", "local")
+	trimReq := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(trimForm.Encode()))
+	trimReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	settings, err := parseProjectFormSettings(tc.echo.NewContext(trimReq, httptest.NewRecorder()), projectFormSettingsOptions{
+		LocalRepoPathEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("expected trimmed name to pass, got %v", err)
+	}
+	if settings.Name != "Client Work" {
+		t.Fatalf("expected trimmed name %q, got %q", "Client Work", settings.Name)
+	}
+
+	blankForm := url.Values{}
+	blankForm.Set("name", "   ")
+	blankForm.Set("repo_source", "local")
+	blankReq := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(blankForm.Encode()))
+	blankReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	_, err = parseProjectFormSettings(tc.echo.NewContext(blankReq, httptest.NewRecorder()), projectFormSettingsOptions{
+		LocalRepoPathEnabled: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "Project name is required") {
+		t.Fatalf("expected blank-name validation error, got %v", err)
 	}
 }
 

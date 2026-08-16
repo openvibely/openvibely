@@ -102,11 +102,14 @@ type projectFormSettingsOptions struct {
 
 func parseProjectFormSettings(c echo.Context, opts projectFormSettingsOptions) (projectFormSettings, error) {
 	settings := projectFormSettings{
-		Name:        c.FormValue("name"),
+		Name:        strings.TrimSpace(c.FormValue("name")),
 		Description: c.FormValue("description"),
 		RepoSource:  normalizeRepoSource(c.FormValue("repo_source"), c.FormValue("repo_url")),
 		RepoPath:    normalizeRepoPathInput(c.FormValue("repo_path")),
 		RepoURL:     strings.TrimSpace(c.FormValue("repo_url")),
+	}
+	if settings.Name == "" {
+		return settings, errors.New("Project name is required")
 	}
 	settings.PreserveLegacyLocalProject = !opts.LocalRepoPathEnabled && settings.RepoSource == "local" && opts.CurrentProject != nil && opts.CurrentProject.RepoURL == ""
 	if settings.RepoSource == "local" && !opts.LocalRepoPathEnabled && !settings.PreserveLegacyLocalProject {
