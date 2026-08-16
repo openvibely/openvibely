@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,6 +15,12 @@ import (
 )
 
 func setupProjectTestHandler(t *testing.T) (*Handler, *service.ProjectService) {
+	t.Helper()
+	h, projectSvc, _ := setupProjectTestHandlerWithDB(t)
+	return h, projectSvc
+}
+
+func setupProjectTestHandlerWithDB(t *testing.T) (*Handler, *service.ProjectService, *sql.DB) {
 	t.Helper()
 	db := testutil.NewTestDB(t)
 
@@ -36,7 +43,7 @@ func setupProjectTestHandler(t *testing.T) (*Handler, *service.ProjectService) {
 
 	h := New(projectSvc, taskSvc, llmSvc, workerSvc, schedulerSvc, nil, nil, nil, llmConfigRepo, taskRepo, scheduleRepo, execRepo, workerRepo, attachmentRepo, chatAttachmentRepo, projectRepo, settingsRepo, nil, nil)
 
-	return h, projectSvc
+	return h, projectSvc, db
 }
 
 func TestGetCurrentProjectID_WithValidID(t *testing.T) {
@@ -96,6 +103,37 @@ func TestGetCurrentProjectID_EmptyFallsBackToFirst(t *testing.T) {
 	firstID := ""
 	if len(projects) > 0 {
 		firstID = projects[0].ID
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/alerts", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	got, err := h.getCurrentProjectID(c)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != firstID {
+		t.Errorf("got %q, want %q", got, firstID)
+	}
+}
+
+func TestGetCurrentProjectID_EmptyFallbackUsesSelectorProjection(t *testing.T) {
+	h, projectSvc, db := setupProjectTestHandlerWithDB(t)
+	ctx := context.Background()
+
+	projects, err := projectSvc.ListSelectorOptions(ctx)
+	if err != nil {
+		t.Fatalf("list selector options: %v", err)
+	}
+	if len(projects) == 0 {
+		t.Fatal("expected seeded default project")
+	}
+	firstID := projects[0].ID
+
+	if _, err := db.ExecContext(ctx, `UPDATE projects SET created_at = 'not-a-timestamp', updated_at = 'not-a-timestamp' WHERE id = ?`, firstID); err != nil {
+		t.Fatalf("poison full-detail-only timestamp columns: %v", err)
 	}
 
 	e := echo.New()

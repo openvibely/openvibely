@@ -472,7 +472,7 @@ func (h *Handler) SetAgentLibraryMaintenanceService(svc *service.AgentLibraryMai
 
 // getCurrentProjectID resolves the current project ID from the query param.
 // If project_id is provided and valid, it uses GetByID to verify it exists.
-// Otherwise it falls back to listing all projects and using the first one.
+// Otherwise it falls back to the first compact selector option.
 func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 	ctx := c.Request().Context()
 	projectID := c.QueryParam("project_id")
@@ -499,7 +499,7 @@ func (h *Handler) getCurrentProjectID(c echo.Context) (string, error) {
 			}
 		}
 	}
-	projects, err := h.projectSvc.List(ctx)
+	projects, err := h.projectSvc.ListSelectorOptions(ctx)
 	if err != nil {
 		return "", err
 	}
