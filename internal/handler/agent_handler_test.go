@@ -2944,3 +2944,39 @@ func TestHandler_ListAgents_DeleteUsesDurableDeleteRequest(t *testing.T) {
 		}
 	}
 }
+
+func TestParseMCPServersFromSettingsFilePreservesNestedRuntimeFields(t *testing.T) {
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "settings.json")
+	data := `{
+  "mcpServers": {
+    "runtime-http": {
+      "type": "http",
+      "command": "node",
+      "args": ["server.js"],
+      "url": "https://example.test/mcp",
+      "env": {"TOKEN": "secret"},
+      "headers": {"Authorization": "Bearer secret"}
+    }
+  }
+}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	servers, err := parseMCPServersFromSettingsFile(path)
+	if err != nil {
+		t.Fatalf("parseMCPServersFromSettingsFile: %v", err)
+	}
+	want := []models.MCPServerConfig{{
+		Name:    "runtime-http",
+		Type:    "http",
+		Command: []string{"node", "server.js"},
+		URL:     "https://example.test/mcp",
+		Env:     map[string]string{"TOKEN": "secret"},
+		Headers: map[string]string{"Authorization": "Bearer secret"},
+	}}
+	if !reflect.DeepEqual(servers, want) {
+		t.Fatalf("servers = %#v, want %#v", servers, want)
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/mcpconfig"
 	"github.com/openvibely/openvibely/internal/models"
 	mcpclient "github.com/openvibely/openvibely/pkg/mcp_client"
 )
@@ -718,46 +719,17 @@ func loadPluginMCPServers(pluginDir string) []models.MCPServerConfig {
 	if err != nil {
 		return nil
 	}
-
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(data, &root); err != nil {
+	servers, err := mcpconfig.ParseServers(data, mcpconfig.ParseOptions{
+		AllowDirectServers: true,
+		InferType:          true,
+		MapValueTransform:  interpolateEnvRef,
+	})
+	if err != nil {
 		return nil
 	}
 
-	serverRaw := root
-	if mcpServersRaw, ok := root["mcpServers"]; ok {
-		var nested map[string]json.RawMessage
-		if err := json.Unmarshal(mcpServersRaw, &nested); err == nil {
-			serverRaw = nested
-		}
-	}
-
-	out := make([]models.MCPServerConfig, 0, len(serverRaw))
-	for name, raw := range serverRaw {
-		var cfg map[string]interface{}
-		if err := json.Unmarshal(raw, &cfg); err != nil {
-			continue
-		}
-		server := models.MCPServerConfig{
-			Name:    strings.TrimSpace(name),
-			Type:    strings.TrimSpace(asString(cfg["type"])),
-			URL:     strings.TrimSpace(asString(cfg["url"])),
-			Env:     stringMap(cfg["env"]),
-			Headers: stringMap(cfg["headers"]),
-		}
-		server.Env = interpolateMapEnv(server.Env)
-		server.Headers = interpolateMapEnv(server.Headers)
-
-		command := commandParts(cfg["command"])
-		command = append(command, commandParts(cfg["args"])...)
-		server.Command = command
-		if server.Type == "" {
-			if server.URL != "" {
-				server.Type = "http"
-			} else {
-				server.Type = "stdio"
-			}
-		}
+	out := make([]models.MCPServerConfig, 0, len(servers))
+	for _, server := range servers {
 		if server.Name == "" {
 			continue
 		}
@@ -1618,52 +1590,6 @@ func asString(v interface{}) string {
 		return s
 	}
 	return ""
-}
-
-func stringMap(v interface{}) map[string]string {
-	out := map[string]string{}
-	m, ok := v.(map[string]interface{})
-	if !ok {
-		return out
-	}
-	for k, vv := range m {
-		if s, ok := vv.(string); ok {
-			trimmedKey := strings.TrimSpace(k)
-			if trimmedKey != "" {
-				out[trimmedKey] = strings.TrimSpace(s)
-			}
-		}
-	}
-	return out
-}
-
-func commandParts(v interface{}) []string {
-	var parts []string
-	switch vv := v.(type) {
-	case string:
-		vv = strings.TrimSpace(vv)
-		if vv != "" {
-			parts = append(parts, vv)
-		}
-	case []interface{}:
-		for _, item := range vv {
-			if s, ok := item.(string); ok {
-				s = strings.TrimSpace(s)
-				if s != "" {
-					parts = append(parts, s)
-				}
-			}
-		}
-	}
-	return parts
-}
-
-func interpolateMapEnv(m map[string]string) map[string]string {
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = interpolateEnvRef(v)
-	}
-	return out
 }
 
 func interpolateEnvRef(input string) string {

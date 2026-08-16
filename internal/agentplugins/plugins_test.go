@@ -703,3 +703,35 @@ func TestMergeAgentWithRuntimeDeduplicatesSkillsAndServers(t *testing.T) {
 		t.Fatalf("nil runtime clone = %#v", clone)
 	}
 }
+
+func TestLoadPluginMCPServersPreservesNestedRuntimeFields(t *testing.T) {
+	tmp := t.TempDir()
+	data := `{
+  "mcpServers": {
+    "runtime-http": {
+      "type": "http",
+      "command": "node",
+      "args": ["server.js"],
+      "url": "https://example.test/mcp",
+      "env": {"TOKEN": "secret"},
+      "headers": {"Authorization": "Bearer secret"}
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(tmp, ".mcp.json"), []byte(data), 0o644); err != nil {
+		t.Fatalf("write .mcp.json: %v", err)
+	}
+
+	servers := loadPluginMCPServers(tmp)
+	want := []models.MCPServerConfig{{
+		Name:    "runtime-http",
+		Type:    "http",
+		Command: []string{"node", "server.js"},
+		URL:     "https://example.test/mcp",
+		Env:     map[string]string{"TOKEN": "secret"},
+		Headers: map[string]string{"Authorization": "Bearer secret"},
+	}}
+	if !reflect.DeepEqual(servers, want) {
+		t.Fatalf("servers = %#v, want %#v", servers, want)
+	}
+}
