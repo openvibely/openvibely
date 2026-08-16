@@ -2,9 +2,9 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-08-15
-source: update_memory
-source_id: ae4bd808d91d68ea8225eea706d02803:24963894da2e1de6
+updated: 2026-08-16
+source: consolidation
+source_id: memory_consolidation_2026_08_16
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -24,7 +24,7 @@ Authorization, concurrency, and runtime facts:
 - Ordinary Chat and non-scheduled Task runtimes retain optional `project_id` equality assertions and `read` filtering.
 - `create_alert` preserves the legacy operational-alert contract: title is required, type defaults to `custom`, and message, severity, operational type, and same-project `task_id` remain optional. Operational alerts use `decision=not_required` and `processing=not_applicable` rather than entering approval workflow.
 - `create_notification` creates a pending project-scoped actionable notification, binds source-task identity from the persisted caller task, accepts structured metadata, and retains optional project-scoped idempotency-key support for backend/direct callers; the model-facing runtime tool schema and handler do not advertise, decode, validate, store, or dedupe on hidden `idempotency_key` input.
-- `idempotency_key` is optional low-level notification support, not a Native SDLC finder contract. Native SDLC maintained prompts, embedded templates, bootstrap skills, and user guide direct finders to inspect existing Automation notifications first, hydrate similar candidates with `get_alert` when needed, skip already-covered findings, and call `create_notification` without `idempotency_key` for new findings. Automation-bound notification creation no longer fails solely because the key is missing. Hidden runtime-supplied keys are ignored, so repeated model/runtime `create_notification` calls with the same hidden key create independent notifications with no stored key. Keep the optional stored field available for backend/direct callers that want project-scoped idempotent creation.
+- `idempotency_key` is optional low-level notification support, not a Native SDLC finder contract. Native SDLC finders use existing-notification inspection and optional `get_alert` hydration before `create_notification`; canonical duplicate-prevention behavior lives in `automation_graphs.md`. Automation-bound notification creation no longer fails solely because the key is missing. Hidden runtime-supplied keys are ignored, while the optional stored field remains available for backend/direct callers that want project-scoped idempotent creation.
 - Initial tasks, scheduled tasks, ordinary task-thread follow-ups, ordinary web/API Chat, Slack, Telegram, Discord, and Email expose `create_notification` when the selected provider/auth path supports runtime tools. Dispatch derives project and trusted source-task identity from persisted execution context.
 - Ordinary Chat exposes the full notification lifecycle in Orchestrate mode and only read operations such as `list_alerts` and `get_alert` in Plan mode. Runtime-tool-incapable provider/auth paths receive no notification tools and no bracket-marker fallback.
 - The structured runtime surface covers stable filtered/paginated listing, detail, atomic claim, atomic implementation-task creation/linkage, explicit linkage, processing completion/failure, and claim release/retry.

@@ -256,3 +256,11 @@ always_use:
 ## openvibely_sdlc_finder_deduplication_workflow
 
 [OpenVibely SDLC Finder Deduplication Workflow](openvibely_sdlc_finder_deduplication_workflow/SKILL.md) — Keep GitHub and Native SDLC Automation finder loops from recreating already-reported work.
+
+## openvibely_scoped_file_tools_workflow
+
+[OpenVibely Scoped File Tools Workflow](openvibely_scoped_file_tools_workflow/SKILL.md) — Implement and audit OpenVibely scoped file runtime path resolution, permission checks, and containment protections.
+
+## openvibely_task_create_edit_workflow
+
+[OpenVibely Task Create/Edit Workflow](openvibely_task_create_edit_workflow/SKILL.md) — Implement and audit OpenVibely task creation, edit, runtime create_task, and duplicate-title behavior.
