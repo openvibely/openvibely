@@ -709,7 +709,7 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\"><!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) --><div id=\"task-thread-messages\" class=\"flex-1 overflow-y-auto py-4 mb-4 space-y-6 min-h-0\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "\"><!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) --><div id=\"task-thread-messages\" class=\"flex-1 overflow-y-auto py-4 space-y-6 min-h-0\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

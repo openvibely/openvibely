@@ -2829,7 +2829,7 @@ func ChatInputForm(config ChatInputFormConfig) templ.Component {
 			templ_7745c5c3_Var145 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "<div class=\"chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4\"><form id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 168, "<div class=\"chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2\"><form id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
