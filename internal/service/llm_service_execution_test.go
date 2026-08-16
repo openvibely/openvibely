@@ -3863,6 +3863,7 @@ type fakeGitHubIssueRuntimeProvider struct {
 	getIssueFn           func(context.Context, *GitHubRepoRef, int) (*GitHubIssue, error)
 	findPRFn             func(context.Context, *GitHubRepoRef, int) (*GitHubPullRequest, error)
 	addLabelsFn          func(context.Context, *GitHubRepoRef, int, []string) error
+	closeIssueFn         func(context.Context, *GitHubRepoRef, int) error
 	listMyIssuesFn       func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	listCreatedIssuesFn  func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error)
 	listAssignedIssuesFn func(context.Context, *GitHubRepoRef, string) ([]GitHubIssue, error)
@@ -4054,6 +4055,20 @@ func (f *fakeGitHubIssueRuntimeProvider) AddLabelsToIssue(ctx context.Context, r
 	return nil
 }
 
+func (f *fakeGitHubIssueRuntimeProvider) CloseIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) error {
+	if f.closeIssueFn != nil {
+		return f.closeIssueFn(ctx, repo, issueNumber)
+	}
+	f.issueMu.Lock()
+	issue, ok := f.issues[issueNumber]
+	if ok {
+		issue.State = "closed"
+		f.issues[issueNumber] = issue
+	}
+	f.issueMu.Unlock()
+	return nil
+}
+
 func (f *fakeGitHubIssueRuntimeProvider) GlobalAPIEndpoint(_ context.Context) string {
 	return f.globalAPIEndpoint
 }
@@ -4184,7 +4199,7 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		t.Fatalf("create task: %v", err)
 	}
 
-	var createdRepo, commentedRepo, labeledRepo string
+	var createdRepo, commentedRepo, labeledRepo, closedRepo string
 	var replacementReq GitHubReplaceBranchHeadRequest
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*GitHubRepoRef, error) {
@@ -4236,6 +4251,13 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 			}
 			return nil
 		},
+		closeIssueFn: func(_ context.Context, repo *GitHubRepoRef, issueNumber int) error {
+			closedRepo = repo.FullName
+			if issueNumber != 9 {
+				t.Fatalf("unexpected runtime close input issue=%d", issueNumber)
+			}
+			return nil
+		},
 		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
 			switch number {
 			case 202:
@@ -4263,7 +4285,7 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 		ThreadInputRepo:      threadInputRepo,
 		GitHub:               provider,
 	})
-	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
+	for _, name := range []string{"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if rt == nil || !rt.HasDefinition(name) {
 			t.Fatalf("expected %s in default GitHub runtime definitions for task runs, got %#v", name, rt)
 		}
@@ -4317,6 +4339,13 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	}
 	if labeledRepo != "example/other" || !strings.Contains(out, `"labels":["approved"]`) {
 		t.Fatalf("expected explicit repo_url label output repo=%q out=%s", labeledRepo, out)
+	}
+	out, handled, isErr, err = rt.Executor(ctx, "github_close_issue", []byte(`{"issue_number":9,"repo_url":"https://github.com/example/other"}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("expected explicit repo_url close success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
+	}
+	if closedRepo != "example/other" || !strings.Contains(out, `"state":"closed"`) {
+		t.Fatalf("expected explicit repo_url close output repo=%q out=%s", closedRepo, out)
 	}
 
 	_, handled, isErr, err = rt.Executor(ctx, "github_add_issue_labels", []byte(`{"issue_number":77,"labels":["openvibely:bug"]}`))
@@ -4543,7 +4572,7 @@ func TestLLMServiceExecuteTaskWithAgentExposesBootstrapToolsToInitialRuns(t *tes
 	if rt == nil {
 		t.Fatal("expected runtime tools on provider request")
 	}
-	for _, name := range []string{"list_tasks", "create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
+	for _, name := range []string{"list_tasks", "create_task", "set_task_goal", "get_task_goal", "schedule_task", "modify_schedule", "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks"} {
 		if !rt.HasDefinition(name) {
 			t.Fatalf("expected %s on initial task run, got %#v", name, rt.Definitions)
 		}

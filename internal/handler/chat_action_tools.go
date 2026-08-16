@@ -325,6 +325,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"github_add_issue_labels": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubAddIssueLabelsTool(ctx, params.ProjectID, input)
 		},
+		"github_close_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeGitHubCloseIssueTool(ctx, params.ProjectID, input)
+		},
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGitHubOpenPullRequestTool(ctx, params, input)
 		},
@@ -559,6 +562,10 @@ func (h *Handler) executeGitHubCommentOnIssueTool(ctx context.Context, projectID
 
 func (h *Handler) executeGitHubAddIssueLabelsTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
 	return h.githubIssueActionCore(projectID).ExecuteAddIssueLabels(ctx, input)
+}
+
+func (h *Handler) executeGitHubCloseIssueTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	return h.githubIssueActionCore(projectID).ExecuteCloseIssue(ctx, input)
 }
 
 func (h *Handler) executeGitHubForwardPRFeedbackToTasksTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
@@ -1177,15 +1184,15 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"github_list_assigned_issues_with_prs":   true,
 		"github_comment_on_issue":                true,
 		"github_add_issue_labels":                true,
-		"github_open_pull_request":               true,
-		"github_replace_pull_request_branch":     true,
-		"github_forward_pr_feedback_to_tasks":    true,
-		"set_task_goal":                          true,
-		"clear_task_goal":                        true,
-		"get_task_goal":                          true,
-		"pause_task_goal":                        true,
-		"resume_task_goal":                       true,
-		"list_capabilities":                      true,
+		"github_close_issue":                     true,
+		"github_open_pull_request":               true, "github_replace_pull_request_branch": true,
+		"github_forward_pr_feedback_to_tasks": true,
+		"set_task_goal":                       true,
+		"clear_task_goal":                     true,
+		"get_task_goal":                       true,
+		"pause_task_goal":                     true,
+		"resume_task_goal":                    true,
+		"list_capabilities":                   true,
 	}
 	for _, tool := range explicitlyGrantedTaskThreadRuntimeTools(agentDef) {
 		allowed[tool] = true

@@ -51,7 +51,7 @@ func TestFilterTaskThreadRuntimeToolDefs_GoalStatusToolsRequireExplicitGrant(t *
 	if !ungranted["create_task"] || !ungranted["execute_tasks"] || !ungranted["schedule_task"] || !ungranted["modify_schedule"] {
 		t.Fatalf("task agents should get visible task creation/execution and schedule bootstrap tools by default: %+v", ungranted)
 	}
-	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
+	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_close_issue"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
 		t.Fatalf("task agents should get GitHub issue tools by default: %+v", ungranted)
 	}
 	if ungranted["memory_view"] {
@@ -132,6 +132,7 @@ func TestFilterTaskThreadRuntimeToolDefs_HaveWebHandlers(t *testing.T) {
 		"github_list_my_assigned_issues",
 		"github_list_assigned_issues",
 		"github_list_assigned_issues_with_prs",
+		"github_close_issue",
 		"github_open_pull_request",
 		"github_replace_pull_request_branch",
 		"github_forward_pr_feedback_to_tasks",
@@ -173,7 +174,7 @@ func TestFilterTaskThreadCapabilitySummaries_GoalStatusToolsRequireExplicitGrant
 	if !ungranted["send_message"] {
 		t.Fatalf("task agents should advertise send_message by default: %+v", ungranted)
 	}
-	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
+	if !ungranted["github_get_issue"] || !ungranted["github_get_project_inbox"] || !ungranted["github_is_actor_authorized"] || !ungranted["github_list_my_assigned_issues"] || !ungranted["github_list_assigned_issues"] || !ungranted["github_close_issue"] || !ungranted["github_open_pull_request"] || !ungranted["github_replace_pull_request_branch"] || !ungranted["github_forward_pr_feedback_to_tasks"] {
 		t.Fatalf("task agents should advertise GitHub issue tools by default: %+v", ungranted)
 	}
 

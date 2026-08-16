@@ -39,6 +39,7 @@ type GitHubIssueActionProvider interface {
 	ListAssignedIssuesWithPullRequests(ctx context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error)
 	CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error
+	CloseIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) error
 }
 
 type GitHubIssueAuthorizationStore interface {
@@ -288,6 +289,17 @@ func (c *GitHubIssueActionCore) ExecuteAddIssueLabels(ctx context.Context, input
 		return "", err
 	}
 	return githubIssueActionJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "labels": req.Labels})
+}
+
+func (c *GitHubIssueActionCore) ExecuteCloseIssue(ctx context.Context, input json.RawMessage) (string, error) {
+	req, repo, err := c.requestAndRepo(ctx, input, nil)
+	if err != nil {
+		return "", err
+	}
+	if err := c.provider.CloseIssue(ctx, repo, req.IssueNumber); err != nil {
+		return "", err
+	}
+	return githubIssueActionJSON(map[string]any{"ok": true, "issue_number": req.IssueNumber, "state": "closed"})
 }
 
 func githubIssueActionJSON(payload map[string]any) (string, error) {

@@ -37,6 +37,7 @@ type GitHubIssueRuntimeProvider interface {
 	ListPullRequestFeedback(ctx context.Context, repo *GitHubRepoRef, prNumber int) ([]GitHubPullRequestFeedback, error)
 	CommentOnIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, bodyText string) error
 	AddLabelsToIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int, labels []string) error
+	CloseIssue(ctx context.Context, repo *GitHubRepoRef, issueNumber int) error
 	GlobalAPIEndpoint(ctx context.Context) string
 }
 
@@ -303,6 +304,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 		"github_list_assigned_issues_with_prs": core.ExecuteListAssignedIssuesWithPRs,
 		"github_comment_on_issue":              core.ExecuteCommentOnIssue,
 		"github_add_issue_labels":              core.ExecuteAddIssueLabels,
+		"github_close_issue":                   core.ExecuteCloseIssue,
 		"github_open_pull_request": func(ctx context.Context, input json.RawMessage) (string, error) {
 			if opts.TaskPullRequestRepo == nil {
 				return "", fmt.Errorf("task pull request repository unavailable")

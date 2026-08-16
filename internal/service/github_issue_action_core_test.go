@@ -17,6 +17,7 @@ type fakeGitHubIssueActionProvider struct {
 	commentBody    string
 	labelNumber    int
 	labels         []string
+	closeNumber    int
 }
 
 func (f *fakeGitHubIssueActionProvider) GetIssue(_ context.Context, _ *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {
@@ -41,6 +42,10 @@ func (f *fakeGitHubIssueActionProvider) CommentOnIssue(_ context.Context, _ *Git
 }
 func (f *fakeGitHubIssueActionProvider) AddLabelsToIssue(_ context.Context, _ *GitHubRepoRef, issueNumber int, labels []string) error {
 	f.labelNumber, f.labels = issueNumber, labels
+	return nil
+}
+func (f *fakeGitHubIssueActionProvider) CloseIssue(_ context.Context, _ *GitHubRepoRef, issueNumber int) error {
+	f.closeNumber = issueNumber
 	return nil
 }
 
@@ -128,8 +133,12 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 	if err != nil || out != `{"issue_number":8,"labels":["bug"],"ok":true}` || provider.labelNumber != 8 || len(provider.labels) != 1 || provider.labels[0] != "bug" {
 		t.Fatalf("labels output=%q request=%d/%v err=%v", out, provider.labelNumber, provider.labels, err)
 	}
+	out, err = core.ExecuteCloseIssue(ctx, json.RawMessage(`{"issue_number":8,"repo_url":"close"}`))
+	if err != nil || out != `{"issue_number":8,"ok":true,"state":"closed"}` || provider.closeNumber != 8 {
+		t.Fatalf("close output=%q request=%d err=%v", out, provider.closeNumber, err)
+	}
 
-	wantResolved := []string{"get", "my-assigned", "assigned", "created", "assigned-with-prs", "comment", "labels"}
+	wantResolved := []string{"get", "my-assigned", "assigned", "created", "assigned-with-prs", "comment", "labels", "close"}
 	if !reflect.DeepEqual(resolved, wantResolved) {
 		t.Fatalf("resolved repositories=%v, want %v", resolved, wantResolved)
 	}

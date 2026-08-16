@@ -209,5 +209,4 @@ var AllAgentTools = []string{
 	"memory_view",
 	"send_message",
 	"create_alert", "create_notification", "list_alerts", "get_alert", "claim_alert", "create_alert_implementation_task", "link_alert_implementation_task", "complete_alert_processing", "fail_alert_processing", "release_alert_claim",
-	"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
-	"send_to_task", "set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked"}
+	"github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks", "send_to_task", "set_task_goal", "clear_task_goal", "get_task_goal", "pause_task_goal", "resume_task_goal", "mark_task_goal_achieved", "report_task_goal_blocked"}
