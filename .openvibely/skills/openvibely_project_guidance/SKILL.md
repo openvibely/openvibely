@@ -34,8 +34,8 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - Never run `DROP TABLE` on production tables except in goose migrations.
 - Never run `DELETE FROM` without a `WHERE` clause on production tables.
 - Never change `busy_timeout`, `MaxOpenConns`, or `_loc=UTC` in `internal/database/database.go`.
-- Never write tests that hit real LLM APIs or spawn CLI subprocesses. Use `models.ProviderTest` with `SetLLMCaller(testutil.NewMockLLMCaller())`.
-- Strip `CLAUDECODE` from the environment when spawning Claude CLI subprocesses.
+- Never write tests that hit real LLM APIs. Use `models.ProviderTest` with `SetLLMCaller(testutil.NewMockLLMCaller())`; retired OpenAI/Anthropic model CLI auth should be covered as unsupported legacy state without spawning subprocesses.
+- Do not reintroduce OpenAI/Anthropic model CLI subprocess transports; `AuthMethodCLI` is legacy data compatibility only.
 - Never persist or log GitHub App installation access tokens, GitHub PATs, private-key material, OAuth tokens, API keys, or webhook secrets. Mint operation tokens per operation and keep token use in process.
 - Do not print raw prompts, streamed model tokens, provider payloads, OAuth/API-key data, or other content-carrying LLM data at info level. In high-frequency streaming paths, especially `internal/llm/stream.Writer`, do not call logging methods per chunk in normal code; leave raw stream `Debugf` instrumentation commented out and only temporarily uncomment it for a debugging session. For lower-frequency raw stream diagnostics outside hot chunk loops, use `internal/applog.Debugf` gated by `OPENVIBELY_LOG_LEVEL=debug`.
 - Server-side git commands that may contact remotes must run non-interactively and use the same GitHub operation-token environment injection as clone/push paths.
@@ -135,7 +135,7 @@ go test ./internal/... -count=1 -timeout 60s  # Focused/internal tests; use the 
 - When a repository transaction runs on a dedicated connection, do not commit and then call a repository read through `*sql.DB` while that connection is still held. Single-connection tests can deadlock waiting for the same connection; assemble the result with transaction-scoped queries before commit, or release the connection before the follow-up read.
 - When adding columns, update every SELECT that scans the struct, not only `GetByID` or list methods.
 - Task SELECT mappings must include all current task columns, including follow-up, worktree, merge, lineage, origin, and agent-definition fields.
-- Valid CHECK values include agent provider `anthropic`, `openai`, `ollama`, `test`; auth method `cli`, `oauth`, `api_key`; task status `pending`, `queued`, `running`, `completed`, `failed`, `cancelled`, `blocked`; task merge status `''`, `pending`, `merged`, `failed`, `conflict`; schedule repeat type `once`, `seconds`, `minutes`, `hours`, `daily`, `weekly`, `monthly`.
+- Valid CHECK values include agent provider `anthropic`, `openai`, `ollama`, `test`; auth method `cli` (legacy only), `oauth`, `api_key`; task status `pending`, `queued`, `running`, `completed`, `failed`, `cancelled`, `blocked`; task merge status `''`, `pending`, `merged`, `failed`, `conflict`; schedule repeat type `once`, `seconds`, `minutes`, `hours`, `daily`, `weekly`, `monthly`.
 - `models.Agent` and the `agents` table do not include a `color` field. Do not add it back.
 - `projects` includes both `repo_path` and `repo_url`; keep model and repository CRUD mappings symmetric.
 - SQLite table recreation migrations must use `-- +goose NO TRANSACTION`, disable and reenable foreign keys, recreate all indexes, and preserve CHECK constraints.
