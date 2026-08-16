@@ -5,8 +5,9 @@ auditable team instead of juggling disconnected chat sessions.
 
 The long-term goal is a self-hosted command center where one project-aware
 conversation can plan work, split it into tasks, run specialized agents in
-parallel, review their changes, learn from the results, and keep unfinished
-goals moving without losing human control.
+parallel, connect those tasks into automations, review their changes, learn
+from the results, and keep unfinished goals moving without losing human
+control.
 
 Agents do the work. Humans stay in command.
 
@@ -19,9 +20,12 @@ That means:
 
 - A user can describe an outcome once, then watch the system turn it into
   reviewable, executable work.
-- Each task has a visible lifecycle: prompt, model, agent, logs, thread,
-  attachments, changed files, review comments, schedules, goals, memory, and
-  skill usage.
+- Work can be modeled at the right level: one task, a swarm of tasks, a
+  scheduled follow-up, or an automation graph that ties triggers, agents,
+  tasks, approvals, GitHub actions, and outcomes together.
+- Each task and automation has a visible lifecycle: prompt, model, agent, logs,
+  thread, attachments, changed files, review comments, schedules, goals,
+  memory, skill usage, graph state, validation, provenance, and approvals.
 - Work happens in isolated, inspectable branches or worktrees so AI output is
   never a hidden mutation.
 - Chat remains the coordination surface for the whole project, while task
@@ -45,6 +49,7 @@ orchestrated, inspectable, repeatable, and improvable.
 The product should help a team answer:
 
 - What are we trying to accomplish?
+- Which workflow is responsible for moving it forward?
 - Which agents are working on it?
 - What changed?
 - Why did it change?
@@ -67,12 +72,23 @@ execution history, reviewable output, and clear status. A task should be small
 enough to inspect and steer, but rich enough to carry the context an agent needs
 to make real progress.
 
+### Automations Are The Unit Of Repeatable Orchestration
+
+Automations should let teams turn recurring or multi-step development workflows
+into explicit, project-scoped graphs. A graph can connect schedules, tasks,
+agents, approvals, GitHub handoffs, alerts, and outcomes, but it should compile
+into the same inspectable resources the rest of OpenVibely uses. Automations
+should be declarative enough to review, diff, template, and regenerate from a
+description without silently changing running resources. They are not a second
+executor or a shortcut around review; they are a higher-level way to make the
+existing lifecycle repeatable, visible, and easier to improve.
+
 ### Autonomy Must Stay Reviewable
 
 OpenVibely should automate the boring and repetitive parts of software work, but
-not hide them. Automated execution, scheduled work, task chaining, goal loops,
-memory updates, and skill improvements should leave evidence that users can
-inspect, question, undo, or refine.
+not hide them. Automated execution, automation graphs, scheduled work, task
+chaining, goal loops, memory updates, and skill improvements should leave
+evidence that users can inspect, question, undo, or refine.
 
 ### Local Ownership Is A Feature
 
@@ -105,8 +121,8 @@ from successful tasks while keeping those skills visible and editable.
 
 Slack, Telegram, GitHub, webhooks, the REST API, and future channels should make
 OpenVibely easier to use from where teams already operate. Integrations should
-create and coordinate real project work rather than becoming separate products
-with separate sources of truth.
+create and coordinate real project work, including automation triggers and
+handoffs, rather than becoming separate products with separate sources of truth.
 
 ### The UI Should Favor Operational Clarity
 
@@ -121,6 +137,8 @@ OpenVibely should not become:
 
 - A black-box autonomous developer that changes code without review.
 - A thin chat wrapper with no durable task, diff, memory, or scheduling model.
+- A generic no-code automation builder disconnected from code, agents, review,
+  provenance, and project memory.
 - A hosted-only SaaS that requires teams to give up ownership of their runtime
   state.
 - A single-provider product where model choice is locked into one vendor.
@@ -133,10 +151,14 @@ The product should keep deepening the loop that already defines it:
 
 1. A user describes a goal in Chat.
 2. OpenVibely turns the goal into concrete tasks.
-3. Agents execute those tasks with the right model, skills, memory, and tools.
-4. The user reviews diffs, threads, logs, and lifecycle evidence.
-5. Goal loops, schedules, and integrations keep useful work moving.
-6. Memory Curator and Skill Curator preserve what should improve the next run.
+3. When the work should repeat or coordinate multiple handoffs, OpenVibely turns
+   the plan into an automation graph.
+4. Agents execute the graph's tasks with the right model, skills, memory, and
+   tools.
+5. The user reviews diffs, threads, logs, graph state, approvals, and lifecycle
+   evidence.
+6. Goal loops, schedules, automations, and integrations keep useful work moving.
+7. Memory Curator and Skill Curator preserve what should improve the next run.
 
 Near-term product decisions should strengthen that loop. Features are most
 valuable when they make work easier to orchestrate, safer to review, clearer to
