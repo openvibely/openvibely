@@ -460,6 +460,77 @@ func TestGitHubServiceLowLevelHelpers(t *testing.T) {
 	}
 }
 
+func TestGitHubServiceConnectionStatusConnectCallbackAndDisconnect(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, " ghp_token "))
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingPATUserLogin, "octocat"))
+	patSvc := NewGitHubService(settingsRepo, "", "", "", "")
+	status, err := patSvc.GetConnectionStatus(ctx)
+	requireNoError(t, err)
+	if !status.Configured || !status.Connected || !status.HasPAT || status.AuthMode != GitHubAuthModePAT || status.AccountLogin != "octocat" || status.AccountType != "User" {
+		t.Fatalf("unexpected PAT status: %+v", status)
+	}
+	if _, err := patSvc.ConnectURL(ctx); err == nil || !strings.Contains(err.Error(), "Advanced mode") {
+		t.Fatalf("expected PAT connect URL to reject app flow, got %v", err)
+	}
+	requireNoError(t, patSvc.Disconnect(ctx))
+	status, err = patSvc.GetConnectionStatus(ctx)
+	requireNoError(t, err)
+	if status.Connected || status.HasPAT || status.AccountLogin != "" {
+		t.Fatalf("expected PAT disconnect to clear token/login, got %+v", status)
+	}
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	requireNoError(t, err)
+	privateKeyPEM := string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)}))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/app/installations/12345" {
+			t.Fatalf("unexpected GitHub API path %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
+			t.Fatalf("missing app JWT auth header %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"account":{"login":"openvibely","type":"Organization"}}`))
+	}))
+	defer server.Close()
+
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModeApp))
+	appSvc := NewGitHubService(settingsRepo, "42", "openvibely-app", privateKeyPEM, "")
+	appSvc.apiBaseURL = server.URL
+	connectURL, err := appSvc.ConnectURL(ctx)
+	requireNoError(t, err)
+	if connectURL != "https://github.com/apps/openvibely-app/installations/new" {
+		t.Fatalf("unexpected connect URL %q", connectURL)
+	}
+	if err := appSvc.HandleInstallCallback(ctx, "not-a-number"); err == nil || !strings.Contains(err.Error(), "invalid installation id") {
+		t.Fatalf("expected invalid installation id error, got %v", err)
+	}
+	requireNoError(t, appSvc.HandleInstallCallback(ctx, "12345"))
+	status, err = appSvc.GetConnectionStatus(ctx)
+	requireNoError(t, err)
+	if !status.Configured || !status.Connected || status.InstallationID != "12345" || status.AccountLogin != "openvibely" || status.AccountType != "Organization" {
+		t.Fatalf("unexpected app status after install: %+v", status)
+	}
+	requireNoError(t, appSvc.Disconnect(ctx))
+	status, err = appSvc.GetConnectionStatus(ctx)
+	requireNoError(t, err)
+	if status.Connected || status.InstallationID != "" || status.AccountLogin != "" || status.AccountType != "" {
+		t.Fatalf("expected app disconnect to clear installation metadata, got %+v", status)
+	}
+}
+
+func requireNoError(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCloneProjectRepo_NoPATFallsBackToLocalGitCLI(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
