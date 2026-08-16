@@ -362,29 +362,21 @@ func (h *Handler) HandleWebhookCreate(c echo.Context) error {
 		}
 	}
 
-	name := strings.TrimSpace(c.FormValue("name"))
-	if name == "" {
-		name = "New Webhook"
+	form := parseWebhookEndpointForm(c)
+	w := &models.WebhookEndpoint{ProjectID: projectID}
+	applyWebhookEndpointForm(w, form)
+	if w.Name == "" {
+		w.Name = "New Webhook"
 	}
-
-	w := &models.WebhookEndpoint{
-		ProjectID:          projectID,
-		Name:               name,
-		Enabled:            true,
-		SystemInstructions: strings.TrimSpace(c.FormValue("system_instructions")),
-		TitleTemplate:      strings.TrimSpace(c.FormValue("title_template")),
-		PromptTemplate:     strings.TrimSpace(c.FormValue("prompt_template")),
-		DefaultPriority:    parseIntClamped(c.FormValue("default_priority"), 1, 4),
-	}
+	w.Enabled = true
 
 	if err := h.webhookRepo.Create(c.Request().Context(), w); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create webhook: "+err.Error())
 	}
 
 	// Save agent assignments
-	agentIDs := parseWebhookAgentIDs(c)
-	if len(agentIDs) > 0 {
-		_ = h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, agentIDs)
+	if len(form.AgentIDs) > 0 {
+		_ = h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, form.AgentIDs)
 	}
 
 	if isHTMX(c) {
@@ -407,23 +399,15 @@ func (h *Handler) HandleWebhookUpdate(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "webhook not found")
 	}
 
-	name := strings.TrimSpace(c.FormValue("name"))
-	if name != "" {
-		w.Name = name
-	}
-	w.Enabled = c.FormValue("enabled") == "true" || c.FormValue("enabled") == "1" || c.FormValue("enabled") == "on"
-	w.SystemInstructions = strings.TrimSpace(c.FormValue("system_instructions"))
-	w.TitleTemplate = strings.TrimSpace(c.FormValue("title_template"))
-	w.PromptTemplate = strings.TrimSpace(c.FormValue("prompt_template"))
-	w.DefaultPriority = parseIntClamped(c.FormValue("default_priority"), 1, 4)
+	form := parseWebhookEndpointForm(c)
+	applyWebhookEndpointForm(w, form)
 
 	if err := h.webhookRepo.Update(c.Request().Context(), w); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update webhook")
 	}
 
 	// Update agent assignments
-	agentIDs := parseWebhookAgentIDs(c)
-	_ = h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, agentIDs)
+	_ = h.webhookRepo.SetEndpointAgents(c.Request().Context(), w.ID, form.AgentIDs)
 
 	if isHTMX(c) {
 		return triggerChannelsRefresh(c)
@@ -486,6 +470,39 @@ func (h *Handler) HandleWebhookTest(c echo.Context) error {
 		return c.HTML(http.StatusOK, `<div class="flex items-center gap-2 text-success"><span>Test task created!</span></div>`)
 	}
 	return c.JSON(http.StatusAccepted, map[string]string{"task_id": task.ID})
+}
+
+type webhookEndpointForm struct {
+	Name               string
+	Enabled            bool
+	SystemInstructions string
+	TitleTemplate      string
+	PromptTemplate     string
+	DefaultPriority    int
+	AgentIDs           []string
+}
+
+func parseWebhookEndpointForm(c echo.Context) webhookEndpointForm {
+	return webhookEndpointForm{
+		Name:               strings.TrimSpace(c.FormValue("name")),
+		Enabled:            c.FormValue("enabled") == "true" || c.FormValue("enabled") == "1" || c.FormValue("enabled") == "on",
+		SystemInstructions: strings.TrimSpace(c.FormValue("system_instructions")),
+		TitleTemplate:      strings.TrimSpace(c.FormValue("title_template")),
+		PromptTemplate:     strings.TrimSpace(c.FormValue("prompt_template")),
+		DefaultPriority:    parseIntClamped(c.FormValue("default_priority"), 1, 4),
+		AgentIDs:           parseWebhookAgentIDs(c),
+	}
+}
+
+func applyWebhookEndpointForm(w *models.WebhookEndpoint, form webhookEndpointForm) {
+	if form.Name != "" {
+		w.Name = form.Name
+	}
+	w.Enabled = form.Enabled
+	w.SystemInstructions = form.SystemInstructions
+	w.TitleTemplate = form.TitleTemplate
+	w.PromptTemplate = form.PromptTemplate
+	w.DefaultPriority = form.DefaultPriority
 }
 
 func parseWebhookAgentIDs(c echo.Context) []string {
