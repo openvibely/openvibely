@@ -504,6 +504,58 @@ func mediaTypeFromExtension(filename string) string {
 	return "text/plain"
 }
 
+type chatAttachmentModelContextFile struct {
+	FileName  string
+	FilePath  string
+	MediaType string
+	FileSize  int64
+}
+
+type chatAttachmentModelContextOptions struct {
+	IgnoreReadErrors bool
+}
+
+func buildChatAttachmentModelContext(files []chatAttachmentModelContextFile, opts chatAttachmentModelContextOptions) (string, []models.Attachment, error) {
+	var attachmentContents []string
+	var imageAttachments []models.Attachment
+
+	for _, file := range files {
+		mediaType := file.MediaType
+		if mediaType == "" {
+			mediaType = mediaTypeFromExtension(file.FileName)
+		}
+
+		if isImageFile(file.FileName) {
+			imageAttachments = append(imageAttachments, models.Attachment{
+				FileName:  file.FileName,
+				FilePath:  file.FilePath,
+				MediaType: mediaType,
+				FileSize:  file.FileSize,
+			})
+			continue
+		}
+
+		if file.FileSize <= maxTextAttachmentSize {
+			content, err := os.ReadFile(file.FilePath)
+			if err != nil {
+				if opts.IgnoreReadErrors {
+					continue
+				}
+				return "", nil, fmt.Errorf("reading file %s: %w", file.FilePath, err)
+			}
+			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.FileName, string(content)))
+		} else {
+			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.FileName, file.FileSize))
+		}
+	}
+
+	textContext := ""
+	if len(attachmentContents) > 0 {
+		textContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
+	}
+	return textContext, imageAttachments, nil
+}
+
 // processAttachments moves uploaded files from pending directory to execution directory,
 // creates database records, and returns text context and image attachments separately.
 // Image files are returned as models.Attachment for multimodal API handling instead of
@@ -546,8 +598,7 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 		return "", nil, nil, fmt.Errorf("creating execution directory: %w", err)
 	}
 
-	var attachmentContents []string
-	var imageAttachments []models.Attachment
+	var contextFiles []chatAttachmentModelContextFile
 	var chatAttachments []models.ChatAttachment
 	var staged []attachmentPublication
 	rollback := func() {
@@ -588,31 +639,24 @@ func (h *Handler) processAttachmentsWithReturn(ctx context.Context, sessionID, e
 		staged = append(staged, attachmentPublication{id: attachment.ID, path: destPath})
 		chatAttachments = append(chatAttachments, *attachment)
 
-		if isImageFile(file.Name()) {
-			imageAttachments = append(imageAttachments, models.Attachment{
-				FileName: file.Name(), FilePath: destPath, MediaType: mediaType, FileSize: info.Size(),
-			})
-		} else if info.Size() <= maxTextAttachmentSize {
-			content, readErr := os.ReadFile(destPath)
-			if readErr != nil {
-				rollback()
-				return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-read session=%s source=%s execution=%s destination=%s: %w", sessionID, srcPath, execID, destPath, readErr)
-			}
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.Name(), string(content)))
-		} else {
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.Name(), info.Size()))
-		}
+		contextFiles = append(contextFiles, chatAttachmentModelContextFile{
+			FileName:  file.Name(),
+			FilePath:  destPath,
+			MediaType: mediaType,
+			FileSize:  info.Size(),
+		})
+	}
+
+	textContext, imageAttachments, err := buildChatAttachmentModelContext(contextFiles, chatAttachmentModelContextOptions{})
+	if err != nil {
+		rollback()
+		return "", nil, nil, fmt.Errorf("attachment lifecycle stage=session-read session=%s execution=%s: %w", sessionID, execID, err)
 	}
 
 	if err := os.RemoveAll(pendingDir); err != nil {
 		applog.Infof("[handler] attachment lifecycle stage=session-cleanup session=%s execution=%s source=%s error=%v", sessionID, execID, pendingDir, err)
 	}
 	applog.Infof("[handler] attachment lifecycle stage=session-committed session=%s execution=%s attachments=%d", sessionID, execID, len(chatAttachments))
-
-	var textContext string
-	if len(attachmentContents) > 0 {
-		textContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
-	}
 
 	return textContext, imageAttachments, chatAttachments, nil
 }
@@ -626,8 +670,7 @@ func (h *Handler) previewPendingAttachments(sessionID string) (string, []models.
 	if err != nil {
 		return "", nil, fmt.Errorf("reading pending directory: %w", err)
 	}
-	var attachmentContents []string
-	var imageAttachments []models.Attachment
+	var contextFiles []chatAttachmentModelContextFile
 	for _, file := range files {
 		if file.IsDir() {
 			continue
@@ -637,29 +680,14 @@ func (h *Handler) previewPendingAttachments(sessionID string) (string, []models.
 		if err != nil {
 			return "", nil, fmt.Errorf("getting file info %s: %w", file.Name(), err)
 		}
-		mediaType := mediaTypeFromExtension(file.Name())
-		if isImageFile(file.Name()) {
-			imageAttachments = append(imageAttachments, models.Attachment{
-				FileName:  file.Name(),
-				FilePath:  path,
-				MediaType: mediaType,
-				FileSize:  info.Size(),
-			})
-		} else if info.Size() <= maxTextAttachmentSize {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return "", nil, fmt.Errorf("reading file %s: %w", file.Name(), err)
-			}
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", file.Name(), string(content)))
-		} else {
-			attachmentContents = append(attachmentContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", file.Name(), info.Size()))
-		}
+		contextFiles = append(contextFiles, chatAttachmentModelContextFile{
+			FileName:  file.Name(),
+			FilePath:  path,
+			MediaType: mediaTypeFromExtension(file.Name()),
+			FileSize:  info.Size(),
+		})
 	}
-	var textContext string
-	if len(attachmentContents) > 0 {
-		textContext = "\n\n--- Attached Files ---\n" + strings.Join(attachmentContents, "")
-	}
-	return textContext, imageAttachments, nil
+	return buildChatAttachmentModelContext(contextFiles, chatAttachmentModelContextOptions{})
 }
 
 func (h *Handler) ClearChat(c echo.Context) error {
