@@ -2358,6 +2358,54 @@ func TestMigration145RetiresGitHubIssueMailboxOwnershipOnly(t *testing.T) {
 	}
 }
 
+func TestMigration147SkipsStaleGitHubIssueTaskProvenanceResources(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "github-issue-task-provenance-stale-resource-147.db"))
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 146); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('project-147', 'Migration 147', '', '');
+		INSERT INTO automations (id, project_id, stable_key, name, automation_type, lifecycle_state, published_version_id)
+			VALUES ('automation-147', 'project-147', 'automation-147', 'Automation 147', 'custom', 'active', 'version-147');
+		INSERT INTO automation_versions (id, project_id, automation_id, version, state, source, adapter_key)
+			VALUES ('version-147', 'project-147', 'automation-147', 1, 'published', 'manual', 'github_sdlc');
+		INSERT INTO automation_nodes (id, project_id, automation_id, version_id, node_key, name, node_type, role)
+			VALUES ('implementation-node-147', 'project-147', 'automation-147', 'version-147', 'implementation', 'Implementation', 'agent_task', 'implementation');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt)
+			VALUES ('live-task-147', 'project-147', 'Live task', 'active', 2, 'pending', 'live');
+		INSERT INTO automation_work_items (id, project_id, automation_id, origin_version_id, work_item_key)
+			VALUES ('live-work-147', 'project-147', 'automation-147', 'version-147', 'live-work-147'),
+				('stale-work-147', 'project-147', 'automation-147', 'version-147', 'stale-work-147');
+		INSERT INTO automation_activities (id, project_id, automation_id, version_id, node_id, work_item_id, activity_key, activity_type, status)
+			VALUES ('live-activity-147', 'project-147', 'automation-147', 'version-147', 'implementation-node-147', 'live-work-147', 'work-item:live-work-147:implementation-task', 'create_task', 'completed'),
+				('stale-activity-147', 'project-147', 'automation-147', 'version-147', 'implementation-node-147', 'stale-work-147', 'work-item:stale-work-147:implementation-task', 'create_task', 'completed');
+		INSERT INTO automation_activity_resources (activity_id, resource_type, resource_id, relation)
+			VALUES ('live-activity-147', 'task', 'live-task-147', 'child'),
+				('live-activity-147', 'github_issue', 'github:openvibely/openvibely:issue:147', 'subject'),
+				('stale-activity-147', 'task', 'deleted-task-147', 'child'),
+				('stale-activity-147', 'github_issue', 'github:openvibely/openvibely:issue:148', 'subject');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 147); err != nil {
+		t.Fatalf("migration 147 should skip stale deleted task resources: %v", err)
+	}
+	var live, stale int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_github_issue_task_provenance WHERE task_id = 'live-task-147'`).Scan(&live); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM automation_github_issue_task_provenance WHERE task_id = 'deleted-task-147'`).Scan(&stale); err != nil {
+		t.Fatal(err)
+	}
+	if live != 1 || stale != 0 {
+		t.Fatalf("migration 147 provenance counts: live=%d stale=%d, want live=1 stale=0", live, stale)
+	}
+}
+
 func TestMigration146SimplifiesNativeAlertMailboxOwnership(t *testing.T) {
 	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "simplify-native-alert-mailbox-ownership-146.db"))
 	goose.SetBaseFS(migrations.FS)
