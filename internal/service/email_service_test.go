@@ -59,6 +59,73 @@ func TestEmailInboundReceiptHandoffIsAtomicAndIdempotent(t *testing.T) {
 	assert.Equal(t, 1, persistCalls, "a receipt retry must not repeat durable work")
 }
 
+type countingEmailInboundReceiptStore struct {
+	inner            emailInboundReceiptStore
+	existsCalls      int
+	recordCalls      int
+	withHandoffCalls int
+}
+
+func (s *countingEmailInboundReceiptStore) Exists(ctx context.Context, mailboxAddress, messageKey string) (bool, error) {
+	s.existsCalls++
+	return s.inner.Exists(ctx, mailboxAddress, messageKey)
+}
+
+func (s *countingEmailInboundReceiptStore) Record(ctx context.Context, mailboxAddress, messageKey string) error {
+	s.recordCalls++
+	return s.inner.Record(ctx, mailboxAddress, messageKey)
+}
+
+func (s *countingEmailInboundReceiptStore) WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(repository.SQLExecutor) error) (bool, error) {
+	s.withHandoffCalls++
+	return s.inner.WithHandoff(ctx, mailboxAddress, messageKey, persist)
+}
+
+type emailPollReceiptTestHarness struct {
+	ctx                  context.Context
+	svc                  *EmailService
+	project              *models.Project
+	agent                *models.LLMConfig
+	taskRepo             *repository.TaskRepo
+	execRepo             *repository.ExecutionRepo
+	threadInputRepo      *repository.ThreadInputRepo
+	emailTaskContextRepo *repository.EmailTaskContextRepo
+	receipts             *countingEmailInboundReceiptStore
+}
+
+func newEmailPollReceiptTestHarness(t *testing.T) *emailPollReceiptTestHarness {
+	t.Helper()
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	threadInputRepo := repository.NewThreadInputRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	emailTaskContextRepo := repository.NewEmailTaskContextRepo(db)
+	emailSenderProjectRepo := repository.NewEmailSenderProjectRepo(db)
+	project := &models.Project{Name: "Email Receipt Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "alice@example.com", AddedBy: "test"}))
+	require.NoError(t, emailSenderProjectRepo.SetSenderProject(ctx, "alice@example.com", project.ID))
+	agent := &models.LLMConfig{Name: "Email Receipt Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
+
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	llmSvc.SetLLMCaller(testutil.NewMockLLMCaller())
+	svc := NewEmailService(settingsRepo, projectRepo, llmConfigRepo, taskRepo, execRepo, repository.NewScheduleRepo(db), NewTaskService(taskRepo, attachmentRepo, nil), llmSvc, nil, emailAuthRepo, emailTaskContextRepo)
+	svc.SetEmailSenderProjectRepo(emailSenderProjectRepo)
+	svc.SetThreadInputRepo(threadInputRepo)
+	svc.SetChannelChatRunner(func(context.Context, ChannelChatRunRequest) {})
+	receipts := &countingEmailInboundReceiptStore{inner: repository.NewEmailInboundReceiptRepo(db)}
+	svc.emailInboundReceiptStore = receipts
+	return &emailPollReceiptTestHarness{ctx: ctx, svc: svc, project: project, agent: agent, taskRepo: taskRepo, execRepo: execRepo, threadInputRepo: threadInputRepo, emailTaskContextRepo: emailTaskContextRepo, receipts: receipts}
+}
+
 func TestEmailPollOnceDoesNotDeduplicateDistinctIdenticalMessagesWithoutMessageID(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	client := newFakeEmailIMAPClient(
@@ -104,6 +171,59 @@ func TestEmailPollOnceDoesNotRepeatDurableHandoffAfterStoreFailure(t *testing.T)
 	newService().pollOnce(context.Background(), cfg)
 	assert.Equal(t, []uint32{1}, client.seenIDs())
 	assert.Equal(t, 1, processed)
+}
+
+func TestEmailPollOnceSkipsPostSuccessRecordAfterFirstTurnWithHandoff(t *testing.T) {
+	h := newEmailPollReceiptTestHarness(t)
+	client := newFakeEmailIMAPClient(testIMAPMessageWithBody(1, "first", "alice@example.com", "start a new chat"))
+	client.storeFailures = 1
+	h.svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+
+	h.svc.pollOnce(h.ctx, cfg)
+
+	assert.Empty(t, client.seenIDs(), "store failure leaves the handed-off message unread for acknowledgement retry")
+	assert.Equal(t, 1, h.receipts.existsCalls)
+	assert.Equal(t, 1, h.receipts.withHandoffCalls)
+	assert.Zero(t, h.receipts.recordCalls, "successful WithHandoff must not be followed by a redundant Record")
+	tasks, err := h.taskRepo.ListByProject(h.ctx, h.project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+
+	h.svc.pollOnce(h.ctx, cfg)
+
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, 2, h.receipts.existsCalls)
+	assert.Equal(t, 1, h.receipts.withHandoffCalls, "receipt recovery must not repeat durable first-turn work")
+	assert.Zero(t, h.receipts.recordCalls)
+	tasks, err = h.taskRepo.ListByProject(h.ctx, h.project.ID, "")
+	require.NoError(t, err)
+	assert.Len(t, tasks, 1)
+}
+
+func TestEmailPollOnceSkipsPostSuccessRecordAfterQueuedWithHandoff(t *testing.T) {
+	h := newEmailPollReceiptTestHarness(t)
+	rootMessageID := "<queue-root@example.com>"
+	sessionKey := EmailSessionKey("alice@example.com", rootMessageID, "", "", "Queue thread")
+	agentID := h.agent.ID
+	activeTask := &models.Task{ProjectID: h.project.ID, Title: "Queue thread", Prompt: "root", Category: models.CategoryChat, Status: models.StatusRunning, CreatedVia: models.TaskOriginEmail, AgentID: &agentID}
+	require.NoError(t, h.taskRepo.Create(h.ctx, activeTask))
+	require.NoError(t, h.emailTaskContextRepo.Upsert(h.ctx, &models.EmailTaskContext{TaskID: activeTask.ID, EmailFrom: "alice@example.com", EmailMessageID: rootMessageID, EmailSubject: "Queue thread", EmailSessionKey: sessionKey}))
+	activeExec := &models.Execution{TaskID: activeTask.ID, AgentConfigID: h.agent.ID, Status: models.ExecRunning, PromptSent: "root"}
+	require.NoError(t, h.execRepo.Create(h.ctx, activeExec))
+	client := newFakeEmailIMAPClient(testIMAPReplyWithBody(1, "Queue thread", "alice@example.com", rootMessageID, "queued follow-up"))
+	h.svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	h.svc.pollOnce(h.ctx, EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"})
+
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, 1, h.receipts.existsCalls)
+	assert.Equal(t, 1, h.receipts.withHandoffCalls)
+	assert.Zero(t, h.receipts.recordCalls, "successful queued WithHandoff must not be followed by a redundant Record")
+	inputs, err := h.threadInputRepo.ListPendingForChat(h.ctx, h.project.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Contains(t, inputs[0].Content, "queued follow-up")
 }
 
 func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
