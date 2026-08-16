@@ -126,6 +126,13 @@ window.addEventListener('DOMContentLoaded', function() {
     var edgeY = axis === 'y' ? (forward ? containerRect.bottom - 4 : containerRect.top + 4) : Math.max(containerRect.top + 8, Math.min(containerRect.bottom - 8, cardRect.top + 12));
     var startX = cardRect.left + Math.min(12, cardRect.width / 2);
     var startY = cardRect.top + Math.min(12, cardRect.height / 2);
+    if (Math.hypot(edgeX - startX, edgeY - startY) < 4) {
+      if (axis === 'y') {
+        edgeY = startY + 8 <= containerRect.bottom - 8 ? startY + 8 : startY - 8;
+      } else {
+        edgeX = startX + 8 <= containerRect.right - 8 ? startX + 8 : startX - 8;
+      }
+    }
     if (card.hasAttribute('draggable')) fail(label + ': card must use pointer-driven dragging, not native HTML drag');
     if (getComputedStyle(card).cursor !== 'grab') fail(label + ': idle cursor should be grab');
     card.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, cancelable:true, pointerId:pointerId, pointerType:'mouse', button:0, buttons:1, clientX:startX, clientY:startY}));
