@@ -667,6 +667,52 @@ func TestCloneProjectRepoWithEndpoint_ScopesPATToEnterpriseHost(t *testing.T) {
 	}
 }
 
+func TestRecloneProjectRepoWithEndpointReplacesManagedCheckout(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ctx := context.Background()
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+	requireNoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "pat"))
+	root := t.TempDir()
+	current := filepath.Join(root, "old-managed")
+	requireNoError(t, os.MkdirAll(current, 0o755))
+	requireNoError(t, os.WriteFile(filepath.Join(current, "old.txt"), []byte("old"), 0o644))
+	dest := filepath.Join(root, "project-reclone")
+	requireNoError(t, os.MkdirAll(dest, 0o755))
+	requireNoError(t, os.WriteFile(filepath.Join(dest, "stale.txt"), []byte("stale"), 0o644))
+
+	svc := NewGitHubService(settingsRepo, "", "", "", root)
+	svc.nowFn = func() time.Time { return time.Unix(123, 456) }
+	var cloneDest string
+	svc.runGit = func(_ context.Context, _ string, _ []string, args ...string) ([]byte, error) {
+		if len(args) != 3 || args[0] != "clone" {
+			t.Fatalf("expected git clone, got %v", args)
+		}
+		cloneDest = args[2]
+		requireNoError(t, os.MkdirAll(cloneDest, 0o755))
+		requireNoError(t, os.WriteFile(filepath.Join(cloneDest, "fresh.txt"), []byte("fresh"), 0o644))
+		return nil, nil
+	}
+
+	newPath, normalizedURL, err := svc.RecloneProjectRepoWithEndpoint(ctx, "project-reclone", current, "https://github.example.com/acme/widgets", "https://github.example.com/api/v3")
+	requireNoError(t, err)
+	if newPath != dest || normalizedURL != "https://github.example.com/acme/widgets" {
+		t.Fatalf("newPath=%q normalizedURL=%q", newPath, normalizedURL)
+	}
+	if cloneDest == "" || !strings.Contains(cloneDest, filepath.Join(root, ".tmp")) {
+		t.Fatalf("expected clone into temporary root, got %q", cloneDest)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "fresh.txt")); err != nil {
+		t.Fatalf("expected fresh checkout at destination: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatalf("expected stale checkout to be replaced, err=%v", err)
+	}
+	if _, err := os.Stat(current); !os.IsNotExist(err) {
+		t.Fatalf("expected old managed checkout to be removed, err=%v", err)
+	}
+}
+
 func TestCloneProjectRepo_LocalGitFallbackFailureIncludesGitFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
