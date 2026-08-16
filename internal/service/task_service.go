@@ -16,6 +16,8 @@ import (
 )
 
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
+var ErrTaskTitleRequired = errors.New("task title is required")
+var ErrTaskPromptRequired = errors.New("task prompt is required")
 
 type TaskService struct {
 	repo                              *repository.TaskRepo
@@ -178,7 +180,22 @@ func (s *TaskService) SubmitSavedAutomationTask(task models.Task) {
 	s.workerSvc.Submit(task)
 }
 
+func normalizeTaskTitleAndPrompt(t *models.Task) error {
+	t.Title = strings.TrimSpace(t.Title)
+	t.Prompt = strings.TrimSpace(t.Prompt)
+	if t.Title == "" {
+		return ErrTaskTitleRequired
+	}
+	if t.Prompt == "" {
+		return ErrTaskPromptRequired
+	}
+	return nil
+}
+
 func (s *TaskService) CreateWithGoal(ctx context.Context, t *models.Task, objective string) error {
+	if err := normalizeTaskTitleAndPrompt(t); err != nil {
+		return err
+	}
 	if t.Status == "" {
 		t.Status = models.StatusPending
 	}
@@ -223,6 +240,9 @@ func (s *TaskService) CreateWithGoal(ctx context.Context, t *models.Task, object
 }
 
 func (s *TaskService) Update(ctx context.Context, t *models.Task) error {
+	if err := normalizeTaskTitleAndPrompt(t); err != nil {
+		return err
+	}
 	applog.Infof("[task-svc] Update id=%s title=%q category=%s", t.ID, t.Title, t.Category)
 	if err := s.repo.Update(ctx, t); err != nil {
 		if errors.Is(err, repository.ErrDuplicateTask) {

@@ -1059,6 +1059,70 @@ func TestHandler_CreateTask_DuplicateTitle(t *testing.T) {
 	assertContains(t, rec2, "task with this name already exists")
 }
 
+func TestHandler_CreateTask_NormalizesWhitespaceAndDetectsDuplicateTitle(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	form := url.Values{}
+	form.Set("title", " Fix checkout ")
+	form.Set("category", "backlog")
+	form.Set("priority", "2")
+	form.Set("prompt", " investigate checkout ")
+	rec := postForm(e, "/tasks?project_id=default", form)
+	assertCode(t, rec, http.StatusOK)
+
+	tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	assert.Equal(t, "Fix checkout", tasks[0].Title)
+	assert.Equal(t, "investigate checkout", tasks[0].Prompt)
+
+	duplicate := url.Values{}
+	duplicate.Set("title", " Fix checkout ")
+	duplicate.Set("category", "backlog")
+	duplicate.Set("priority", "2")
+	duplicate.Set("prompt", "different prompt")
+	dupRec := postForm(e, "/tasks?project_id=default", duplicate)
+	assertCode(t, dupRec, http.StatusConflict)
+	assertContains(t, dupRec, "task with this name already exists")
+
+	tasksAfterDuplicate, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.Len(t, tasksAfterDuplicate, 1)
+	assert.Equal(t, "Fix checkout", tasksAfterDuplicate[0].Title)
+}
+
+func TestHandler_CreateTask_RejectsWhitespaceOnlyTitlePrompt(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		title      string
+		prompt     string
+		wantStatus int
+		wantBody   string
+	}{
+		{name: "title", title: " \t\n ", prompt: "valid prompt", wantStatus: http.StatusBadRequest, wantBody: "Task title is required"},
+		{name: "prompt", title: "Valid title", prompt: " \t\n ", wantStatus: http.StatusBadRequest, wantBody: "Task prompt is required"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			form := url.Values{}
+			form.Set("title", tt.title)
+			form.Set("category", "backlog")
+			form.Set("priority", "2")
+			form.Set("prompt", tt.prompt)
+
+			rec := postForm(e, "/tasks?project_id=default", form)
+			assertCode(t, rec, tt.wantStatus)
+			assertContains(t, rec, tt.wantBody)
+
+			tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+			require.NoError(t, err)
+			assert.Empty(t, tasks)
+		})
+	}
+}
+
 func TestHandler_DeleteModel_HTMX(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -1881,6 +1945,65 @@ func TestHandler_UpdateTask(t *testing.T) {
 	if updated.Category != models.CategoryActive {
 		t.Errorf("expected category 'active', got %q", updated.Category)
 	}
+}
+
+func TestHandler_UpdateTask_NormalizesWhitespaceAndRejectsBlankFields(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	createTask(t, h, "default", "Existing title", func(tk *models.Task) { tk.Category = models.CategoryBacklog })
+	target := createTask(t, h, "default", "Original title", func(tk *models.Task) { tk.Category = models.CategoryBacklog })
+
+	form := url.Values{}
+	form.Set("title", " Trimmed title ")
+	form.Set("category", "backlog")
+	form.Set("priority", "2")
+	form.Set("prompt", " updated prompt ")
+	rec := htmxPut(e, "/tasks/"+target.ID, form)
+	assertCode(t, rec, http.StatusOK)
+	updated, err := h.taskSvc.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, "Trimmed title", updated.Title)
+	assert.Equal(t, "updated prompt", updated.Prompt)
+
+	duplicate := url.Values{}
+	duplicate.Set("title", " Existing title ")
+	duplicate.Set("category", "backlog")
+	duplicate.Set("priority", "2")
+	duplicate.Set("prompt", "duplicate prompt")
+	dupRec := htmxPut(e, "/tasks/"+target.ID, duplicate)
+	assertCode(t, dupRec, http.StatusConflict)
+	assertContains(t, dupRec, "task with this name already exists")
+	afterDuplicate, err := h.taskSvc.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Trimmed title", afterDuplicate.Title)
+	assert.Equal(t, "updated prompt", afterDuplicate.Prompt)
+
+	blankTitle := url.Values{}
+	blankTitle.Set("title", " \t\n ")
+	blankTitle.Set("category", "backlog")
+	blankTitle.Set("priority", "2")
+	blankTitle.Set("prompt", "still valid")
+	blankTitleRec := htmxPut(e, "/tasks/"+target.ID, blankTitle)
+	assertCode(t, blankTitleRec, http.StatusBadRequest)
+	assertContains(t, blankTitleRec, "Task title is required")
+	afterBlankTitle, err := h.taskSvc.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Trimmed title", afterBlankTitle.Title)
+	assert.Equal(t, "updated prompt", afterBlankTitle.Prompt)
+
+	blankPrompt := url.Values{}
+	blankPrompt.Set("title", "Still valid")
+	blankPrompt.Set("category", "backlog")
+	blankPrompt.Set("priority", "2")
+	blankPrompt.Set("prompt", " \t\n ")
+	blankPromptRec := htmxPut(e, "/tasks/"+target.ID, blankPrompt)
+	assertCode(t, blankPromptRec, http.StatusBadRequest)
+	assertContains(t, blankPromptRec, "Task prompt is required")
+	afterBlankPrompt, err := h.taskSvc.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Trimmed title", afterBlankPrompt.Title)
+	assert.Equal(t, "updated prompt", afterBlankPrompt.Prompt)
 }
 
 func TestHandler_UpdateTask_DetailCategoryTransitionsRefreshCompletedAt(t *testing.T) {

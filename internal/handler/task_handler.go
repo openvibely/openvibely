@@ -317,6 +317,17 @@ func isSwarmTaskForm(c echo.Context) bool {
 	return v == "on" || v == "true" || v == "1"
 }
 
+func taskRequiredFieldHTTPError(err error) *echo.HTTPError {
+	switch {
+	case errors.Is(err, service.ErrTaskTitleRequired):
+		return echo.NewHTTPError(http.StatusBadRequest, "Task title is required")
+	case errors.Is(err, service.ErrTaskPromptRequired):
+		return echo.NewHTTPError(http.StatusBadRequest, "Task prompt is required")
+	default:
+		return nil
+	}
+}
+
 func (h *Handler) CreateTask(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 	priority, _ := strconv.Atoi(c.FormValue("priority"))
@@ -383,6 +394,9 @@ func (h *Handler) CreateTask(c echo.Context) error {
 			if errors.Is(err, service.ErrDuplicateTask) {
 				return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
 			}
+			if httpErr := taskRequiredFieldHTTPError(err); httpErr != nil {
+				return httpErr
+			}
 			return err
 		}
 		*t = *parent
@@ -390,6 +404,9 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		if errors.Is(err, service.ErrDuplicateTask) {
 			applog.Infof("[handler] CreateTask duplicate title=%q", t.Title)
 			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
+		}
+		if httpErr := taskRequiredFieldHTTPError(err); httpErr != nil {
+			return httpErr
 		}
 		applog.Infof("[handler] CreateTask error: %v", err)
 		return err
@@ -1204,6 +1221,9 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 		if errors.Is(err, service.ErrDuplicateTask) {
 			applog.Infof("[handler] UpdateTask duplicate title=%q", task.Title)
 			return echo.NewHTTPError(http.StatusConflict, "A task with this name already exists in this project")
+		}
+		if httpErr := taskRequiredFieldHTTPError(err); httpErr != nil {
+			return httpErr
 		}
 		applog.Infof("[handler] UpdateTask error: %v", err)
 		return err

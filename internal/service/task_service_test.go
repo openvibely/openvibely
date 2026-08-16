@@ -141,6 +141,118 @@ func TestTaskService_Create_DefaultsStatus(t *testing.T) {
 	}
 }
 
+func TestTaskService_Create_NormalizesTitlePromptAndDuplicateCheck(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	first := &models.Task{
+		ProjectID: "default",
+		Title:     " Fix checkout ",
+		Prompt:    " investigate checkout ",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}
+	require.NoError(t, svc.Create(ctx, first))
+	stored, err := taskRepo.GetByID(ctx, first.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, "Fix checkout", stored.Title)
+	assert.Equal(t, "investigate checkout", stored.Prompt)
+
+	duplicate := &models.Task{
+		ProjectID: "default",
+		Title:     " Fix checkout ",
+		Prompt:    "different prompt",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}
+	require.ErrorIs(t, svc.Create(ctx, duplicate), ErrDuplicateTask)
+
+	tasks, err := taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	matches := 0
+	for _, task := range tasks {
+		if task.Title == "Fix checkout" {
+			matches++
+		}
+	}
+	assert.Equal(t, 1, matches)
+}
+
+func TestTaskService_CreateAndUpdateRejectNormalizedBlankTitlePrompt(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	for _, tt := range []struct {
+		name string
+		task models.Task
+		want error
+	}{
+		{name: "blank title", task: models.Task{ProjectID: "default", Title: " \t\n ", Prompt: "prompt"}, want: ErrTaskTitleRequired},
+		{name: "blank prompt", task: models.Task{ProjectID: "default", Title: "Title", Prompt: " \t\n "}, want: ErrTaskPromptRequired},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			task := tt.task
+			require.ErrorIs(t, svc.Create(ctx, &task), tt.want)
+		})
+	}
+
+	storedAfterCreateFailures, err := taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	assert.Empty(t, storedAfterCreateFailures)
+
+	task := &models.Task{ProjectID: "default", Title: "Valid task", Prompt: "valid prompt", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, svc.Create(ctx, task))
+
+	task.Title = "   "
+	task.Prompt = "still valid"
+	require.ErrorIs(t, svc.Update(ctx, task), ErrTaskTitleRequired)
+	afterBlankTitle, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Valid task", afterBlankTitle.Title)
+	assert.Equal(t, "valid prompt", afterBlankTitle.Prompt)
+
+	task.Title = "Valid task"
+	task.Prompt = "   "
+	require.ErrorIs(t, svc.Update(ctx, task), ErrTaskPromptRequired)
+	afterBlankPrompt, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Valid task", afterBlankPrompt.Title)
+	assert.Equal(t, "valid prompt", afterBlankPrompt.Prompt)
+}
+
+func TestTaskService_Update_NormalizesTitlePromptAndDuplicateCheck(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	existing := &models.Task{ProjectID: "default", Title: "Existing title", Prompt: "existing prompt", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, svc.Create(ctx, existing))
+	target := &models.Task{ProjectID: "default", Title: "Original title", Prompt: "original prompt", Category: models.CategoryBacklog, Status: models.StatusPending}
+	require.NoError(t, svc.Create(ctx, target))
+
+	target.Title = " Trimmed update "
+	target.Prompt = " updated prompt "
+	require.NoError(t, svc.Update(ctx, target))
+	updated, err := taskRepo.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Trimmed update", updated.Title)
+	assert.Equal(t, "updated prompt", updated.Prompt)
+
+	updated.Title = " Existing title "
+	updated.Prompt = " conflict prompt "
+	require.ErrorIs(t, svc.Update(ctx, updated), ErrDuplicateTask)
+	afterConflict, err := taskRepo.GetByID(ctx, target.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Trimmed update", afterConflict.Title)
+	assert.Equal(t, "updated prompt", afterConflict.Prompt)
+}
+
 func TestTaskService_Create_ActiveAutoSubmits(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

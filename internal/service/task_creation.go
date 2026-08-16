@@ -116,6 +116,8 @@ func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskC
 	var failed []string
 
 	for requestIndex, req := range requests {
+		req.Title = strings.TrimSpace(req.Title)
+		req.Prompt = strings.TrimSpace(req.Prompt)
 		selectedAgentID, selectionInfo := selectTaskCreationAgent(req, availableAgents)
 		if req.AgentID == "" && len(availableAgents) == 1 {
 			applog.Infof("[task-creation] only one agent available, using %s", selectedAgentID)

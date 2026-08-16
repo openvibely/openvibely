@@ -32,6 +32,7 @@ func TestCreateSchedule_TimezoneHandling(t *testing.T) {
 		ProjectID: project.ID,
 		Category:  models.CategoryActive,
 		Status:    models.StatusPending,
+		Prompt:    "run scheduled work",
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("Failed to create test task: %v", err)
@@ -114,6 +115,7 @@ func TestWeeklySchedule_PreservesDayOfWeek(t *testing.T) {
 		ProjectID: project.ID,
 		Category:  models.CategoryScheduled,
 		Status:    models.StatusPending,
+		Prompt:    "run scheduled work",
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("Failed to create task: %v", err)
@@ -218,6 +220,7 @@ func TestUpdateSchedule_WeeklyTimezoneRoundTrip(t *testing.T) {
 		ProjectID: project.ID,
 		Category:  models.CategoryScheduled,
 		Status:    models.StatusPending,
+		Prompt:    "run scheduled work",
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("Failed to create task: %v", err)
@@ -321,6 +324,7 @@ func TestCreateSchedule_PastDateRecurring(t *testing.T) {
 		ProjectID: project.ID,
 		Category:  models.CategoryScheduled,
 		Status:    models.StatusPending,
+		Prompt:    "run scheduled work",
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("Failed to create task: %v", err)
@@ -392,6 +396,7 @@ func TestUpdateSchedule_PastDateRecurring(t *testing.T) {
 		ProjectID: project.ID,
 		Category:  models.CategoryScheduled,
 		Status:    models.StatusPending,
+		Prompt:    "run scheduled work",
 	}
 	if err := h.taskSvc.Create(ctx, task); err != nil {
 		t.Fatalf("Failed to create task: %v", err)
