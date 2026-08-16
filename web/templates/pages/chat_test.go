@@ -58,7 +58,7 @@ func TestChatContent_RestoresSmartScrollAcrossNavigationAndHistory(t *testing.T)
 		t.Fatalf("global Chat transcript and composer must share project-scoped send intent, got %d markers", count)
 	}
 
-	if !strings.Contains(content, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="chat-messages" class="flex-1 min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6" style="visibility: hidden;" data-transcript-hydrating="true"`) {
 		t.Fatal("global Chat must hide its initial transcript until hydration and scroll restoration settle")
 	}
 	for _, required := range []string{
@@ -110,8 +110,8 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	content := buf.String()
 	required := []string{
 		`id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full"`,
-		`id="chat-messages" class="flex-1 min-h-0 overflow-y-auto py-4 mb-4 space-y-6"`,
-		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4"`,
+		`id="chat-messages" class="flex-1 min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6"`,
+		`class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6"`,
 		`class="chat-input-container rounded-xl p-4 relative min-w-0 max-w-full"`,
 		`class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden"`,
 		`class="flex items-center gap-2 flex-shrink-0"`,
@@ -124,8 +124,8 @@ func TestChatContent_MobileComposerStaysWithinViewport(t *testing.T) {
 	if strings.Contains(content, `id="chat-page-root" class="h-full flex flex-col min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("chat page root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
 	}
-	if strings.Contains(content, `sm:max-w-3xl`) || strings.Contains(content, `sm:mx-auto`) || strings.Contains(content, `px-3 pt-2 pb-4`) {
-		t.Fatal("chat page composer must not add desktop side gaps or mobile right-side empty space")
+	if strings.Contains(content, `sm:max-w-3xl`) || strings.Contains(content, `sm:mx-auto`) || strings.Contains(content, `px-3 pt-2 pb-4`) || strings.Contains(content, `pt-2 pb-4`) {
+		t.Fatal("chat page composer must not add desktop side gaps, mobile right-side empty space, or extra vertical gutters")
 	}
 	if strings.Contains(content, `-mr-[29px]`) || strings.Contains(content, `-mr-[18px]`) {
 		t.Fatal("chat message panes must not use fixed right-margin scrollbar compensation because it still leaves bubbles visually shorter than the input in real browsers")
