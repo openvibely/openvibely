@@ -105,17 +105,14 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-skill-handle={ skill.Handle }
 						data-skill-name={ skill.Name }
-						data-skill-description={ skill.Description }
-						data-skill-scope={ skill.Scope }
-						data-skill-source={ skill.Source }
-						data-skill-content={ skill.Content }
-						data-skill-files={ strings.Join(skill.Files, "\n") }
-						data-skill-enabled={ func() string { if skill.Enabled { return "true" } else { return "false" } }() }
-						data-skill-always-use={ func() string { if skill.AlwaysUse { return "true" } else { return "false" } }() }
-						data-search-card
-						data-skill-scroll-anchor={ skill.Handle }
-						data-search-text={ skillSearchText(skill) }
-						tabindex="-1"
+							data-skill-description={ skill.Description }
+							data-skill-scope={ skill.Scope }
+							data-skill-source={ skill.Source }
+							data-skill-enabled={ func() string { if skill.Enabled { return "true" } else { return "false" } }() }
+							data-skill-always-use={ func() string { if skill.AlwaysUse { return "true" } else { return "false" } }() }
+							data-search-card
+							data-skill-scroll-anchor={ skill.Handle }
+							data-search-text={ skillSearchText(skill) }						tabindex="-1"
 						onclick="editSkillFromData(this)"
 					>
 						<div class="card-body relative">
@@ -277,9 +274,9 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 			</form>
 		</dialog>
 			<script>
-				var deleteSkillHandle = '';
-				var deleteSkillScope = 'project';
-
+					var deleteSkillHandle = '';
+					var deleteSkillScope = 'project';
+					var skillDetailRequestGeneration = 0;
 				function defaultSkillTemplate(handle, name, scope, description) {				handle = (handle || 'openvibely_database_migration_workflow').trim();
 				name = (name || 'OpenVibely Database Migration Workflow').trim();
 				scope = (scope || 'project').trim();
@@ -502,6 +499,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 			}
 
 			function openNewSkillModal() {
+				skillDetailRequestGeneration++;
 				var form = document.getElementById('skill_form');
 				form.dataset.mode = 'create';
 				form.dataset.originalHandle = '';
@@ -514,9 +512,11 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				document.getElementById('skill_scope').value = 'project';
 				document.getElementById('skill_name').value = 'OpenVibely Database Migration Workflow';
 				document.getElementById('skill_description').value = 'Manage OpenVibely goose schema migrations, consolidation, and validation safely.';
+				document.getElementById('skill_body').disabled = false;
 				document.getElementById('skill_body').value = defaultSkillTemplate('', '', '', '');
 				document.getElementById('skill_enabled').checked = true;
 				document.getElementById('skill_always_use').checked = false;
+				document.getElementById('skill_submit_btn').disabled = false;
 				renderSkillPackageFiles('');
 				setSkillModalError('');
 				skill_modal.showModal();
@@ -533,24 +533,54 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 			function editSkillFromData(card) {
 				if (!card) return;
 				var form = document.getElementById('skill_form');
+				var handle = card.dataset.skillHandle || '';
+				var scope = card.dataset.skillScope || 'project';
+				var requestGeneration = ++skillDetailRequestGeneration;
 				form.dataset.mode = 'edit';
-				form.dataset.originalHandle = card.dataset.skillHandle || '';
+				form.dataset.originalHandle = handle;
 				form.dataset.templateEdited = 'true';
 				var alwaysUse = card.dataset.skillAlwaysUse === 'true';
 				form.dataset.originalAlwaysUse = alwaysUse ? 'true' : 'false';
 				document.getElementById('skill_modal_title').textContent = 'Edit Skill';
-				document.getElementById('skill_handle').value = card.dataset.skillHandle || '';
+				document.getElementById('skill_handle').value = handle;
 				document.getElementById('skill_handle').disabled = true;
-				document.getElementById('skill_scope').value = card.dataset.skillScope || 'project';
+				document.getElementById('skill_scope').value = scope;
 				document.getElementById('skill_scope').disabled = true;
 				document.getElementById('skill_name').value = card.dataset.skillName || '';
 				document.getElementById('skill_description').value = card.dataset.skillDescription || '';
-				document.getElementById('skill_body').value = card.dataset.skillContent || '';
+				document.getElementById('skill_body').disabled = true;
+				document.getElementById('skill_body').value = 'Loading skill body...';
 				document.getElementById('skill_enabled').checked = card.dataset.skillEnabled !== 'false';
 				document.getElementById('skill_always_use').checked = alwaysUse;
-				renderSkillPackageFiles(card.dataset.skillFiles || '');
+				document.getElementById('skill_submit_btn').disabled = true;
+				renderSkillPackageFiles('');
 				setSkillModalError('');
 				skill_modal.showModal();
+				fetch('/skills/' + encodeURIComponent(handle) + '/details?scope=' + encodeURIComponent(scope) + currentSkillsProjectQuery().replace(/^\?/, '&'), {
+					method: 'GET',
+					headers: {'Accept': 'application/json'}
+				}).then(function(resp) {
+					if (!resp.ok) {
+						return resp.text().then(function(text) { throw new Error(text || 'Failed to load skill details.'); });
+					}
+					return resp.json();
+				}).then(function(detail) {
+					if (requestGeneration !== skillDetailRequestGeneration || form.dataset.mode !== 'edit' || form.dataset.originalHandle !== handle || document.getElementById('skill_scope').value !== scope) return;
+					document.getElementById('skill_handle').value = detail.handle || handle;
+					document.getElementById('skill_name').value = detail.name || '';
+					document.getElementById('skill_description').value = detail.description || '';
+					document.getElementById('skill_body').value = detail.content || '';
+					document.getElementById('skill_body').disabled = false;
+					document.getElementById('skill_enabled').checked = detail.enabled !== false;
+					document.getElementById('skill_always_use').checked = detail.always_use === true;
+					form.dataset.originalAlwaysUse = detail.always_use === true ? 'true' : 'false';
+					renderSkillPackageFiles((detail.files || []).join('\n'));
+					document.getElementById('skill_submit_btn').disabled = false;
+				}).catch(function(err) {
+					if (requestGeneration !== skillDetailRequestGeneration || form.dataset.mode !== 'edit' || form.dataset.originalHandle !== handle) return;
+					document.getElementById('skill_body').value = '';
+					setSkillModalError(err.message || 'Failed to load skill details.');
+				});
 			}
 
 				function deleteSkill(button) {
