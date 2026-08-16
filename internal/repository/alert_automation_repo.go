@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -70,6 +71,93 @@ func alertHandoffNodeIDs(ctx context.Context, exec SQLExecutor, projectID, autom
 		return "", "", "", false, err
 	}
 	return notificationNode, approvalNode, inboxNode, true, nil
+}
+
+func effectiveAlertCreationAutomationContext(ctx context.Context, exec SQLExecutor, alert *models.Alert, automationContext models.AutomationContext) (models.AutomationContext, error) {
+	if alert == nil || automationContext.ProjectID != alert.ProjectID || len(automationContext.Bindings) == 0 {
+		return automationContext, nil
+	}
+	var taskContext models.AutomationContext
+	var loadedTaskContext bool
+	effective := models.AutomationContext{ProjectID: automationContext.ProjectID}
+	for _, binding := range automationContext.Bindings {
+		authorized, err := alertCreationBindingAuthorized(ctx, exec, alert.ProjectID, binding)
+		if err != nil {
+			return models.AutomationContext{}, err
+		}
+		if authorized {
+			effective.Bindings = append(effective.Bindings, binding)
+			continue
+		}
+		if alert.SourceTaskID == nil || strings.TrimSpace(*alert.SourceTaskID) == "" {
+			continue
+		}
+		if !loadedTaskContext {
+			var err error
+			taskContext, err = contextForTaskWithExecutor(ctx, exec, alert.ProjectID, strings.TrimSpace(*alert.SourceTaskID))
+			if err != nil {
+				return models.AutomationContext{}, err
+			}
+			loadedTaskContext = true
+		}
+		repaired, ok, err := currentAlertCreationBindingForAutomation(ctx, exec, alert.ProjectID, taskContext, binding.AutomationID)
+		if err != nil {
+			return models.AutomationContext{}, err
+		}
+		if ok {
+			effective.Bindings = append(effective.Bindings, repaired)
+		}
+	}
+	if len(effective.Bindings) == 0 {
+		return models.AutomationContext{}, fmt.Errorf("create_notification is not authorized by the caller's current active Automation graph")
+	}
+	return effective, nil
+}
+
+func currentAlertCreationBindingForAutomation(ctx context.Context, exec SQLExecutor, projectID string, taskContext models.AutomationContext, automationID string) (models.AutomationBinding, bool, error) {
+	for _, binding := range taskContext.Bindings {
+		if binding.AutomationID != automationID {
+			continue
+		}
+		authorized, err := alertCreationBindingAuthorized(ctx, exec, projectID, binding)
+		if err != nil {
+			return models.AutomationBinding{}, false, err
+		}
+		if authorized {
+			return binding, true, nil
+		}
+	}
+	return models.AutomationBinding{}, false, nil
+}
+
+func alertCreationBindingAuthorized(ctx context.Context, exec SQLExecutor, projectID string, binding models.AutomationBinding) (bool, error) {
+	var adapterKey string
+	if err := exec.QueryRowContext(ctx, `SELECT adapter_key FROM automation_versions
+		WHERE id = ? AND automation_id = ? AND project_id = ?`, binding.VersionID, binding.AutomationID, projectID).Scan(&adapterKey); errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
+	switch adapterKey {
+	case "native_sdlc":
+		notificationNode, err := automationTargetNodeIDByRole(ctx, exec, projectID, binding.AutomationID, binding.VersionID, binding.NodeID, "create_notification")
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		_, err = automationTargetNodeIDByRole(ctx, exec, projectID, binding.AutomationID, binding.VersionID, notificationNode, "native_approval")
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return err == nil, err
+	case "custom":
+		_, _, _, found, err := alertHandoffNodeIDs(ctx, exec, projectID, binding.AutomationID, binding.VersionID, binding.NodeID)
+		return found, err
+	default:
+		return false, nil
+	}
 }
 
 func applyAlertAutomationProvenance(ctx context.Context, exec SQLExecutor, alert *models.Alert, automationContext models.AutomationContext) error {

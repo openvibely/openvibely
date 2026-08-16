@@ -125,6 +125,11 @@ func (r *AlertRepo) CreateIdempotent(ctx context.Context, a *models.Alert) (*mod
 	var created *models.Alert
 	err := r.withImmediateAlertMutation(ctx, func(conn *sql.Conn) error {
 		if hasAutomationContext {
+			effectiveContext, err := effectiveAlertCreationAutomationContext(ctx, conn, a, automationContext)
+			if err != nil {
+				return err
+			}
+			automationContext = effectiveContext
 			if err := applyAlertAutomationProvenance(ctx, conn, a, automationContext); err != nil {
 				return err
 			}

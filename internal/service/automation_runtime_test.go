@@ -3876,6 +3876,39 @@ func TestAutomationRuntimeNativeInboxUsesConfiguredImplementationGoal(t *testing
 	require.Equal(t, configuredGoal, goal.Objective)
 }
 
+func TestAutomationRuntimeNativeNotificationCreationRepairsStaleProducerBindingAfterTemplateUpdate(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Native stale producer notification")
+	ctx := context.Background()
+	candidate, err := h.drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	first, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+
+	alertRepo := repository.NewAlertRepo(h.db)
+	alertRepo.SetAutomationRepo(h.automationRepo)
+	alertSvc := NewAlertService(alertRepo, nil)
+	producer := automationNodeByKey(t, first.Definition, "vision_suggestions")
+	producerTaskID := automationResourceID(t, first.Definition, "vision_suggestions", "task")
+	staleCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
+		AutomationID: first.Definition.Automation.ID, VersionID: first.Definition.Version.ID, NodeID: producer.ID, InvocationID: "running-before-template-update",
+	}}})
+
+	candidate.Description = "Updated while a scheduled finder run is still executing."
+	second, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, AutomationID: first.Definition.Automation.ID, Source: "template", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	require.NotEqual(t, first.Definition.Version.ID, second.Definition.Version.ID)
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_versions WHERE id = ?`, first.Definition.Version.ID))
+
+	alert, err := alertSvc.CreateActionable(staleCtx, &models.Alert{ProjectID: h.project.ID, Type: "product_suggestion", Title: "Stale Native finder result", SourceTaskID: &producerTaskID})
+	require.NoError(t, err)
+	require.NotNil(t, alert)
+	currentProducer := automationNodeByKey(t, second.Definition, "vision_suggestions")
+	currentNotification := automationNodeByKey(t, second.Definition, "notification")
+	currentApproval := automationNodeByKey(t, second.Definition, "approval")
+	requireAlertCreatedWaitingProjection(t, h.db, h.project.ID, second.Definition.Automation.ID, second.Definition.Version.ID, alert.ID, currentProducer.ID, currentNotification.ID, currentApproval.ID)
+	require.Zero(t, countRows(t, h.db, `SELECT COUNT(*) FROM automation_work_items WHERE origin_version_id = ?`, first.Definition.Version.ID))
+}
+
 func TestAutomationRuntimeNativeNotificationCreationReusesIdempotencyKeyAfterGraphReplacement(t *testing.T) {
 	h := newAutomationSaveHarness(t, "Native producer idempotency replacement")
 	ctx := context.Background()
