@@ -10,7 +10,8 @@ import (
 func TestConfigureDetachedHelperCreatesIndependentProcess(t *testing.T) {
 	cmd := exec.Command("cmd.exe", "/c", "exit", "0")
 	configureDetachedHelper(cmd)
-	if cmd.SysProcAttr == nil || cmd.SysProcAttr.CreationFlags&(createNewProcessGroup|detachedProcess) != createNewProcessGroup|detachedProcess {
+	want := uint32(createNewProcessGroup | detachedProcess | createBreakawayFromJob)
+	if cmd.SysProcAttr == nil || cmd.SysProcAttr.CreationFlags&want != want {
 		t.Fatalf("detached helper attributes = %#v", cmd.SysProcAttr)
 	}
 }

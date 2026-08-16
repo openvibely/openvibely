@@ -8,10 +8,11 @@ import (
 )
 
 const (
-	createNewProcessGroup = 0x00000200
-	detachedProcess       = 0x00000008
+	createNewProcessGroup  = 0x00000200
+	detachedProcess        = 0x00000008
+	createBreakawayFromJob = 0x01000000
 )
 
 func configureDetachedHelper(cmd *exec.Cmd) {
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess, HideWindow: true}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: createNewProcessGroup | detachedProcess | createBreakawayFromJob, HideWindow: true}
 }
