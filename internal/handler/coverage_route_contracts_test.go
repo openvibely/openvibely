@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/lifecycle"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -410,6 +415,234 @@ func TestChatActionReadHelpersUseRepositories(t *testing.T) {
 	require.Contains(t, tc.handler.executeGetAlert(ctx, project.ID, []byte(`{"alert_id":"missing"}`)), "not found")
 	require.Contains(t, tc.handler.executeGetAlert(ctx, project.ID, []byte(`{}`)), "requires alert_id")
 	require.Contains(t, (&Handler{}).executeGetAlert(ctx, project.ID, []byte(`{"alert_id":"`+alert.ID+`"}`)), "Alert service not available")
+}
+
+func TestChatActionRuntimeBuildersFiltersAndLineageHelpers(t *testing.T) {
+	h := &Handler{}
+	webRuntime := h.buildChatActionToolRuntime(streamingResponseParams{}, nil)
+	require.True(t, runtimeToolDefinitionsInclude(webRuntime, "create_task"))
+	require.False(t, runtimeToolDefinitionsInclude(webRuntime, "not_a_tool"))
+	require.False(t, runtimeToolDefinitionsInclude(nil, "create_task"))
+
+	apiRuntime := h.buildAPIChatActionToolRuntime(streamingResponseParams{ChatMode: models.ChatModePlan}, nil)
+	require.NotEmpty(t, apiRuntime.Definitions)
+	defs := chatActionToolDefinitions()
+	require.NotEmpty(t, defs)
+	fromDefs := h.buildChatActionToolRuntimeFromDefs(streamingResponseParams{}, nil, defs[:1], models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	require.Len(t, fromDefs.Definitions, 1)
+	lifecycleRuntime := h.buildLifecycleChatActionToolRuntimeFromDefs(streamingResponseParams{}, nil, defs[:1], models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	require.Len(t, lifecycleRuntime.Definitions, 1)
+
+	collector := newChatActionSummaryCollector()
+	collector.addCreated("created\nTask One [TASK_ID:t1]\n- Task One [TASK_ID:t1]")
+	collector.addEdited("Task One [TASK_EDITED:t1]")
+	out := collector.appendToOutput("base")
+	require.Contains(t, out, "Created 1 task(s)")
+	require.Contains(t, out, "Edited 1 task(s)")
+	require.Equal(t, out, collector.appendToOutput(out))
+	require.Equal(t, "base", (*chatActionSummaryCollector)(nil).appendToOutput("base"))
+
+	allowed := taskThreadAllowedRuntimeToolNames(&models.Agent{Tools: []string{" send_message ", "mark_task_goal_achieved", "report_task_goal_blocked", "ignored"}})
+	for _, name := range []string{"send_message", "memory_view", "mark_task_goal_achieved", "report_task_goal_blocked"} {
+		if name == "memory_view" {
+			require.False(t, allowed[name])
+			continue
+		}
+		require.True(t, allowed[name], name)
+	}
+	threadDefs := filterTaskThreadRuntimeToolDefs(defs, &models.Agent{Tools: []string{"send_message", "mark_task_goal_achieved"}}, true)
+	threadRuntime := &llmcontracts.RuntimeTools{Definitions: threadDefs}
+	require.True(t, runtimeToolDefinitionsInclude(threadRuntime, "memory_view"))
+	require.True(t, runtimeToolDefinitionsInclude(threadRuntime, "mark_task_goal_achieved"))
+	goalDefs := filterGoalAgentRuntimeToolDefs(defs)
+	goalRuntime := &llmcontracts.RuntimeTools{Definitions: goalDefs}
+	require.True(t, runtimeToolDefinitionsInclude(goalRuntime, "get_task_goal"))
+	require.False(t, runtimeToolDefinitionsInclude(goalRuntime, "create_task"))
+
+	summaries := []chatcontrol.ActionSummary{
+		{Name: "create_task", Domain: "tasks", Description: "Create", Access: "write"},
+		{Name: "get_model", Domain: "models", Description: "Read"},
+		{Name: "memory_view", Domain: "memory", Description: "Read memory"},
+		{Name: "mark_task_goal_achieved", Domain: "goal", Description: "Goal"},
+	}
+	filteredThread := filterTaskThreadCapabilitySummaries(summaries, &models.Agent{Tools: []string{"mark_task_goal_achieved"}}, true)
+	require.Len(t, filteredThread, 3)
+	filteredAssigned := filterAssignedAgentCapabilitySummaries(summaries, &models.Agent{})
+	require.Len(t, filteredAssigned, len(summaries))
+	require.JSONEq(t, `{"ok":true}`, mustGithubToolJSON(t, map[string]any{"ok": true}))
+
+	require.NoError(t, requireGoalStatusToolGrant(lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{SystemKind: models.AgentSystemKindGoal}), streamingResponseParams{}, "mark_task_goal_achieved"))
+	require.NoError(t, requireGoalStatusToolGrant(lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{Tools: []string{"report_task_goal_blocked"}}), streamingResponseParams{}, "report_task_goal_blocked"))
+	require.Error(t, requireGoalStatusToolGrant(lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{Tools: []string{"other"}}), streamingResponseParams{}, "report_task_goal_blocked"))
+	require.NoError(t, requireGoalStatusToolGrant(context.Background(), streamingResponseParams{AgentDefinition: &models.Agent{Tools: []string{"mark_task_goal_achieved"}}}, "mark_task_goal_achieved"))
+	require.Error(t, requireGoalStatusToolGrant(context.Background(), streamingResponseParams{}, "mark_task_goal_achieved"))
+
+	origin, agent := sanitizeSendToTaskLineage(lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{SystemKind: models.AgentSystemKindGoal}), "slack", "requested", streamingResponseParams{})
+	require.Equal(t, models.TaskOriginSystemAgent, origin)
+	require.Equal(t, models.AgentSystemKindGoal, agent)
+	origin, agent = sanitizeSendToTaskLineage(context.Background(), "", "", streamingResponseParams{RuntimeOrigin: models.TaskOriginSystemAgent, RuntimeOriginAgent: "planner"})
+	require.Equal(t, models.TaskOriginSystemAgent, origin)
+	require.Equal(t, "planner", agent)
+	origin, agent = sanitizeSendToTaskLineage(context.Background(), models.TaskOriginEmail, "ignored", streamingResponseParams{})
+	require.Equal(t, models.TaskOriginEmail, origin)
+	require.Empty(t, agent)
+	origin, agent = sanitizeSendToTaskLineage(context.Background(), "unknown", "ignored", streamingResponseParams{})
+	require.Equal(t, models.TaskOriginWeb, origin)
+	require.Empty(t, agent)
+
+	require.False(t, lifecycleHookHasNonCancellationExecutionError("context canceled"))
+	require.True(t, lifecycleHookHasNonCancellationExecutionError("provider failed"))
+	require.False(t, lifecycleHookMayContinueFromCancelledSource(lifecycle.HookAgent{TaskID: "source", ExecutionError: "task canceled"}, "source"))
+	require.True(t, lifecycleHookMayContinueFromCancelledSource(lifecycle.HookAgent{TaskID: "source", ExecutionError: "provider failed"}, "source"))
+}
+
+func mustGithubToolJSON(t *testing.T, payload map[string]any) string {
+	t.Helper()
+	out, err := githubToolJSON(payload)
+	require.NoError(t, err)
+	return out
+}
+
+func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Runtime Executor Coverage").Build()
+	task := tc.CreateTask(project.ID).WithTitle("Runtime executor task").WithCategory(models.CategoryBacklog).Build()
+	tc.handler.SetGitHubAuthRepo(repository.NewGitHubAuthRepo(tc.db))
+	model := tc.CreateLLMConfig().WithName("Executor Model").WithProvider(models.ProviderOpenAI).WithModel("gpt-test").WithAPIKey("key").Build()
+	model.IsDefault = true
+	require.NoError(t, tc.llmConfigRepo.Update(ctx, model))
+
+	collector := newChatActionSummaryCollector()
+	rt := tc.handler.buildChatActionToolRuntime(streamingResponseParams{ExecID: "runtime-executor", ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, collector)
+	exec := func(name string, input string) (string, bool, bool, error) {
+		return rt.Executor(ctx, name, json.RawMessage(input))
+	}
+
+	for _, call := range []struct {
+		name      string
+		input     string
+		want      string
+		wantError bool
+	}{
+		{name: "get_chat_mode", input: `{}`, want: "Current chat mode"},
+		{name: "set_chat_mode", input: `{"mode":"plan"}`, want: "Chat mode set to plan"},
+		{name: "list_capabilities", input: `{}`, want: "Available capabilities"},
+		{name: "list_personalities", input: `{}`, want: "Available Personalities"},
+		{name: "get_personality", input: `{}`, want: "Current personality"},
+		{name: "set_personality", input: `{"personality":"no_nonsense_pro"}`, want: "Personality changed"},
+		{name: "list_models", input: `{}`, want: "Executor Model"},
+		{name: "get_model", input: `{"model_id":"` + model.ID + `"}`, want: "Executor Model"},
+		{name: "list_agents", input: `{}`, want: "Configured Agents"},
+		{name: "view_settings", input: `{}`, want: "App Settings"},
+		{name: "project_info", input: `{}`, want: "Runtime Executor Coverage"},
+		{name: "get_current_project", input: `{}`, want: "Current project"},
+		{name: "list_projects", input: `{}`, want: "Runtime Executor Coverage"},
+		{name: "switch_project", input: `{"project":"Runtime Executor Coverage"}`, want: "Switched to project"},
+		{name: "create_task", input: `{"title":"Created by runtime executor","prompt":"test prompt","category":"backlog"}`, want: "Created by runtime executor"},
+		{name: "edit_task", input: `{"id":"` + task.ID + `","title":"Runtime executor task edited"}`, want: "Runtime executor task edited"},
+		{name: "execute_tasks", input: `{"task_id":"missing"}`, want: "Failed:"},
+		{name: "schedule_task", input: `{"task_id":"current","time":"09:45"}`, want: "Scheduled task"},
+		{name: "modify_schedule", input: `{"task_id":"current","enabled":false}`, want: "Updated schedule"},
+		{name: "delete_schedule", input: `{"task_id":"current"}`, want: "Deleted schedule"},
+		{name: "send_message", input: `{"target":"slack:#general","message":"hi"}`, wantError: true},
+		{name: "github_create_issue", input: `{"title":"Issue"}`, wantError: true},
+		{name: "github_get_issue", input: `{"issue_number":1}`, wantError: true},
+		{name: "github_get_project_inbox", input: `{}`, want: `"ok":true`},
+		{name: "github_is_actor_authorized", input: `{"github_login":"octocat"}`, want: `"authorized":false`},
+		{name: "github_list_my_assigned_issues", input: `{}`, wantError: true},
+		{name: "github_list_existing_automation_issues", input: `{}`, wantError: true},
+		{name: "github_list_assigned_issues", input: `{"assignee":"octocat"}`, wantError: true},
+		{name: "github_list_assigned_issues_with_prs", input: `{"assignee":"octocat"}`, wantError: true},
+		{name: "github_comment_on_issue", input: `{"issue_number":1,"body":"comment"}`, wantError: true},
+		{name: "github_add_issue_labels", input: `{"issue_number":1,"labels":["bug"]}`, wantError: true},
+		{name: "github_close_issue", input: `{"issue_number":1}`, wantError: true},
+		{name: "github_open_pull_request", input: `{"task_id":"current"}`, wantError: true},
+		{name: "github_replace_pull_request_branch", input: `{"task_id":"current","expected_head_sha":"0123456789012345678901234567890123456789","confirm_history_rewrite":true}`, wantError: true},
+		{name: "github_forward_pr_feedback_to_tasks", input: `{}`, wantError: true},
+	} {
+		t.Run(call.name, func(t *testing.T) {
+			out, handled, isErr, err := exec(call.name, call.input)
+			require.True(t, handled)
+			if call.wantError {
+				require.True(t, isErr, out)
+				if err == nil {
+					require.NotEmpty(t, out)
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.False(t, isErr, out)
+			require.Contains(t, out, call.want)
+		})
+	}
+
+	summary := collector.appendToOutput("")
+	require.Contains(t, summary, "Created")
+	require.Contains(t, summary, "Edited")
+}
+
+func TestTaskFormAndAgentSelectionHelpers(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Agent helper project").Build()
+	otherProject := tc.CreateProject().WithName("Other helper project").Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.SetAgentRepo(agentRepo)
+
+	archivedAt := time.Now()
+	agents := []models.Agent{
+		{Name: "Global selectable", Key: "global-selectable", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Project selectable", Key: "project-selectable", Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Other project", Key: "other-project", Scope: models.AgentScopeProject, ProjectID: otherProject.ID, Enabled: true, SelectableAsPrimary: true},
+		{Name: "Disabled", Key: "disabled", Scope: models.AgentScopeGlobal, Enabled: false, SelectableAsPrimary: true},
+		{Name: "Not primary", Key: "not-primary", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false},
+		{Name: "Archived status", Key: "archived-status", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true, GeneratedStatus: models.AgentStatusArchived},
+		{Name: "Archived timestamp", Key: "archived-time", Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: true, ArchivedAt: &archivedAt},
+	}
+	for i := range agents {
+		require.NoError(t, agentRepo.Create(ctx, &agents[i]))
+	}
+
+	selected := selectableTaskAgentDefinitions(agents)
+	require.Len(t, selected, 3)
+	forProject := selectableTaskAgentDefinitionsForProject(agents, project.ID)
+	require.Len(t, forProject, 2)
+	currentOther := agents[2].ID
+	formAgents := tc.handler.listTaskFormAgentDefinitions(ctx, project.ID, &currentOther)
+	require.NotContains(t, agentIDs(formAgents), currentOther)
+	require.Contains(t, agentIDs(formAgents), agents[0].ID)
+	require.Contains(t, agentIDs(formAgents), agents[1].ID)
+	currentProject := agents[1].ID
+	formAgents = tc.handler.listTaskFormAgentDefinitions(ctx, project.ID, &currentProject)
+	require.Contains(t, agentIDs(formAgents), currentProject)
+	resolved, err := tc.handler.resolvePrimaryAgentDefinition(ctx, project.ID, agents[1].ID)
+	require.NoError(t, err)
+	require.Equal(t, agents[1].ID, *resolved)
+	_, err = tc.handler.resolvePrimaryAgentDefinition(ctx, project.ID, agents[2].ID)
+	require.Error(t, err)
+
+	formContext := func(values url.Values) echo.Context {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(values.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		require.NoError(t, req.ParseForm())
+		return tc.echo.NewContext(req, httptest.NewRecorder())
+	}
+	require.True(t, formBoolEnabled(formContext(url.Values{}), "missing", true))
+	require.False(t, formBoolEnabled(formContext(url.Values{"flag": {"off", "false"}}), "flag", true))
+	require.True(t, formBoolEnabled(formContext(url.Values{"flag": {"off", "yes"}}), "flag", false))
+	require.False(t, swarmMergerEnabledFormValue(formContext(url.Values{"swarm_merger_enabled": {"false"}, "swarm_integrator_enabled": {"true"}})))
+	require.True(t, swarmMergerEnabledFormValue(formContext(url.Values{"swarm_integrator_enabled": {"on"}})))
+	require.True(t, isValidCompletedSort("completed_desc"))
+	require.False(t, isValidCompletedSort("created_desc"))
+}
+
+func agentIDs(agents []models.Agent) []string {
+	ids := make([]string, 0, len(agents))
+	for _, agent := range agents {
+		ids = append(ids, agent.ID)
+	}
+	return ids
 }
 
 func requestWithAccept(tc *TestContext, method, path, accept, body string) *httptest.ResponseRecorder {
