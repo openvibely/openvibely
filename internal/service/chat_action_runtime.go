@@ -1174,7 +1174,7 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 			if err := requireService(); err != nil {
 				return "", err
 			}
-			if err := opts.AlertSvc.RequireAutomationInboxOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
+			if err := opts.AlertSvc.RequireAutomationNotificationOwnership(ctx, opts.ProjectID, req.AlertID); err != nil {
 				return "", err
 			}
 			a, err := opts.AlertSvc.GetByID(ctx, opts.ProjectID, req.AlertID)

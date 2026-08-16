@@ -242,15 +242,19 @@ func (r *AlertRepo) NativeInboxBindings(ctx context.Context, automationContext m
 	return bindings, nil
 }
 
-func (r *AlertRepo) AlertOwnedByAutomationInbox(ctx context.Context, projectID, alertID string, bindings []models.AutomationBinding) (bool, error) {
+func (r *AlertRepo) AlertOwnedByAutomation(ctx context.Context, projectID, alertID string, bindings []models.AutomationBinding) (bool, error) {
 	for _, binding := range bindings {
+		automationID := strings.TrimSpace(binding.AutomationID)
+		if automationID == "" {
+			continue
+		}
 		var owned bool
 		if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(
-				SELECT 1
-				FROM automation_artifact_mailbox_owners owner
-				WHERE owner.project_id = ? AND owner.automation_id = ?
-					AND owner.artifact_type = 'alert' AND owner.artifact_id = ?
-			)`, projectID, binding.AutomationID, alertID).Scan(&owned); err != nil {
+					SELECT 1
+					FROM automation_artifact_mailbox_owners owner
+					WHERE owner.project_id = ? AND owner.automation_id = ?
+						AND owner.artifact_type = 'alert' AND owner.artifact_id = ?
+				)`, projectID, automationID, alertID).Scan(&owned); err != nil {
 			return false, err
 		}
 		if owned {

@@ -627,7 +627,7 @@ func TestTaskControlRuntimeOmitsImplementationTaskToolsForLoopAuditor(t *testing
 	}
 }
 
-func TestTaskControlRuntimeNativeFinderUsesCompactNotificationDiscoveryOnly(t *testing.T) {
+func TestTaskControlRuntimeScheduledAutomationTaskRemainsGenericAndExposesExistingNotificationDiscovery(t *testing.T) {
 	finder := models.Task{
 		ProjectID:  "project",
 		Category:   models.CategoryScheduled,
@@ -636,10 +636,10 @@ func TestTaskControlRuntimeNativeFinderUsesCompactNotificationDiscoveryOnly(t *t
 
 	runtime := (&LLMService{}).taskControlRuntimeTools(finder)
 	require.NotNil(t, runtime)
-	for _, tool := range []string{"create_notification", "list_existing_automation_notifications", "get_alert"} {
-		require.Truef(t, runtime.HasDefinition(tool), "Native finder must expose %s", tool)
-	}
 	for _, tool := range []string{
+		"create_notification",
+		"list_existing_automation_notifications",
+		"get_alert",
 		"list_alerts",
 		"list_tasks",
 		"list_capabilities",
@@ -648,7 +648,7 @@ func TestTaskControlRuntimeNativeFinderUsesCompactNotificationDiscoveryOnly(t *t
 		"create_alert_implementation_task",
 		"execute_tasks",
 	} {
-		require.Falsef(t, runtime.HasDefinition(tool), "Native finder must not expose broad/inbox tool %s", tool)
+		require.Truef(t, runtime.HasDefinition(tool), "scheduled Automation task must retain generic tool %s", tool)
 	}
 }
 

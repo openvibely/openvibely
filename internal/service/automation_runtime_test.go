@@ -3981,9 +3981,10 @@ func TestAutomationRuntimeNativeExistingNotificationListScopesToAutomationOwners
 	producerCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{{
 		AutomationID: definition.Definition.Automation.ID, VersionID: definition.Definition.Version.ID, NodeID: producer.ID,
 	}}})
-	owned, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Owned Native existing notification", Message: "already covered", IdempotencyKey: "native-existing-owned"})
+	owned, err := alertSvc.CreateActionable(producerCtx, &models.Alert{ProjectID: h.project.ID, Type: "suggestion", Title: "Owned Native existing notification", Message: "already covered", Body: "detailed duplicate context", IdempotencyKey: "native-existing-owned"})
 	require.NoError(t, err)
-	require.NoError(t, alertSvc.Create(ctx, &models.Alert{ProjectID: h.project.ID, Type: models.AlertCustom, Title: "Unowned alert", Message: "should not appear", Severity: models.SeverityInfo}))
+	unowned := &models.Alert{ProjectID: h.project.ID, Type: models.AlertCustom, Title: "Unowned alert", Message: "should not appear", Severity: models.SeverityInfo}
+	require.NoError(t, alertSvc.Create(ctx, unowned))
 
 	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: h.project.ID, AlertSvc: alertSvc})
 	output, err := handlers["list_existing_automation_notifications"](producerCtx, json.RawMessage(`{"limit":10}`))
@@ -3993,10 +3994,17 @@ func TestAutomationRuntimeNativeExistingNotificationListScopesToAutomationOwners
 	require.Contains(t, output, `"decision_state"`)
 	require.Contains(t, output, `"processing_state"`)
 	require.NotContains(t, output, "already covered")
+	require.NotContains(t, output, "detailed duplicate context")
 	require.NotContains(t, output, "native-existing-owned")
 	require.NotContains(t, output, `"message"`)
 	require.NotContains(t, output, `"idempotency_key"`)
 	require.NotContains(t, output, "Unowned alert")
+
+	detail, err := handlers["get_alert"](producerCtx, json.RawMessage(`{"alert_id":"`+owned.ID+`"}`))
+	require.NoError(t, err)
+	require.Contains(t, detail, "detailed duplicate context")
+	_, err = handlers["get_alert"](producerCtx, json.RawMessage(`{"alert_id":"`+unowned.ID+`"}`))
+	require.ErrorContains(t, err, "notification is not owned by this Automation")
 }
 
 func TestAutomationRuntimeNativeInboxOwnershipSurvivesCompatibleAutomationUpdate(t *testing.T) {
@@ -4243,7 +4251,7 @@ func TestAutomationRuntimeCustomNativeInboxRequiresSameAutomationOwnership(t *te
 
 	for _, target := range []*models.Alert{secondAlert, forgedAlert} {
 		output, err = handlers["get_alert"](inboxCtx, json.RawMessage(`{"alert_id":"`+target.ID+`"}`))
-		require.ErrorContains(t, err, "not owned by this Automation inbox")
+		require.ErrorContains(t, err, "not owned by this Automation")
 		require.NotContains(t, err.Error(), target.ID)
 		require.NotContains(t, err.Error(), target.Body)
 		require.NotContains(t, err.Error(), target.Metadata["private_metadata"])

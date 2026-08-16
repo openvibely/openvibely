@@ -314,22 +314,6 @@ func (s *LLMService) AutomationBootstrapRuntimeTools(ctx context.Context, task m
 	return s.automationBootstrapRuntimeTools(ctx, task)
 }
 
-func nativeSDLCFinderRuntimeTask(task models.Task) bool {
-	if task.Category != models.CategoryScheduled {
-		return false
-	}
-	_, nodeKey, ok := automationCreatedViaNode(task.CreatedVia)
-	if !ok {
-		return false
-	}
-	switch nodeKey {
-	case "vision_suggestions", "bug_finder", "optimization_finder", "redundancy_finder":
-		return true
-	default:
-		return false
-	}
-}
-
 func (s *LLMService) automationBootstrapRuntimeTools(ctx context.Context, task models.Task) *llmcontracts.RuntimeTools {
 	if s == nil || s.automationRegistrationSvc == nil || strings.TrimSpace(task.ProjectID) == "" {
 		return nil
@@ -416,13 +400,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		"release_alert_claim":                    true,
 		"list_capabilities":                      true,
 	}
-	if nativeSDLCFinderRuntimeTask(task) {
-		allowed = map[string]bool{
-			"create_notification":                    true,
-			"list_existing_automation_notifications": true,
-			"get_alert":                              true,
-		}
-	} else if strings.HasPrefix(task.CreatedVia, "automation:") && strings.HasSuffix(task.CreatedVia, ":auditor") {
+	if strings.HasPrefix(task.CreatedVia, "automation:") && strings.HasSuffix(task.CreatedVia, ":auditor") {
 		delete(allowed, "create_task")
 		delete(allowed, "create_swarm_task")
 		delete(allowed, "execute_tasks")

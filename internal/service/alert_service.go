@@ -149,6 +149,24 @@ func (s *AlertService) ListExistingAutomationNotificationSummariesForRuntime(ctx
 	return s.alertRepo.ListFilteredSummaries(ctx, projectID, filter)
 }
 
+func (s *AlertService) RequireAutomationNotificationOwnership(ctx context.Context, projectID, alertID string) error {
+	automationContext, automationBound := AutomationContextFromContext(ctx)
+	if !automationBound {
+		return nil
+	}
+	if automationContext.ProjectID != projectID {
+		return fmt.Errorf("alert Automation project mismatch")
+	}
+	owned, err := s.alertRepo.AlertOwnedByAutomation(ctx, projectID, alertID, automationContext.Bindings)
+	if err != nil {
+		return err
+	}
+	if !owned {
+		return fmt.Errorf("notification is not owned by this Automation")
+	}
+	return nil
+}
+
 func (s *AlertService) RequireAutomationInboxOwnership(ctx context.Context, projectID, alertID string) error {
 	automationContext, automationBound := AutomationContextFromContext(ctx)
 	if !automationBound {
@@ -161,7 +179,7 @@ func (s *AlertService) RequireAutomationInboxOwnership(ctx context.Context, proj
 	if err != nil {
 		return err
 	}
-	owned, err := s.alertRepo.AlertOwnedByAutomationInbox(ctx, projectID, alertID, bindings)
+	owned, err := s.alertRepo.AlertOwnedByAutomation(ctx, projectID, alertID, bindings)
 	if err != nil {
 		return err
 	}
