@@ -355,25 +355,9 @@ func TestTaskCard_HasMobileSafeActionsAndReadableText(t *testing.T) {
 		t.Fatalf("render task card: %v", err)
 	}
 	body := buf.String()
-	cardStart := strings.Index(body, `id="task-task-1"`)
-	if cardStart == -1 {
-		t.Fatalf("expected rendered task card root, got %s", body)
-	}
-	cardEnd := strings.Index(body[cardStart:], `>`)
-	if cardEnd == -1 {
-		t.Fatalf("expected rendered task card opening tag, got %s", body)
-	}
-	cardTag := body[cardStart : cardStart+cardEnd]
-	if !strings.Contains(cardTag, "overflow-visible") {
-		t.Fatalf("task card root must allow kebab menus to render outside card bounds, got %s", cardTag)
-	}
-	if strings.Contains(cardTag, "overflow-hidden") {
-		t.Fatalf("task card root must not clip kebab menus with overflow-hidden, got %s", cardTag)
-	}
-
 	for _, want := range []string{
 		"min-w-0",
-		"overflow-visible",
+		"overflow-hidden",
 		"min-h-11",
 		"h-11",
 		"w-11",

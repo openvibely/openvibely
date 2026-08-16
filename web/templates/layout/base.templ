@@ -2687,39 +2687,6 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				focusedBeforeClick = document.activeElement;
 			}, true);
 
-			function closestDropdownScrollBoundary(element) {
-				let current = element ? element.parentElement : null;
-				while (current && current !== document.body) {
-					const styles = getComputedStyle(current);
-					const overflowY = styles.overflowY;
-					if ((overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'hidden') && current.clientHeight > 0) return current;
-					current = current.parentElement;
-				}
-				return null;
-			}
-
-			function positionDropdownForViewport(label) {
-				const dropdown = label && label.closest ? label.closest('.dropdown') : null;
-				if (!dropdown) return;
-				if (!dropdown.dataset.originalDropdownTop) dropdown.dataset.originalDropdownTop = dropdown.classList.contains('dropdown-top') ? 'true' : 'false';
-				const content = dropdown.querySelector('.dropdown-content');
-				if (!content) return;
-				const labelRect = label.getBoundingClientRect();
-				const boundary = closestDropdownScrollBoundary(dropdown);
-				const boundaryRect = boundary ? boundary.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
-				const visibleTop = Math.max(0, boundaryRect.top);
-				const visibleBottom = Math.min(window.innerHeight, boundaryRect.bottom);
-				const menuHeight = Math.min(content.scrollHeight || content.getBoundingClientRect().height || 0, window.innerHeight - 16);
-				const roomBelow = visibleBottom - labelRect.bottom;
-				const roomAbove = labelRect.top - visibleTop;
-				const shouldOpenUp = menuHeight > 0 && roomBelow < menuHeight && roomAbove > roomBelow;
-				if (shouldOpenUp) {
-					dropdown.classList.add('dropdown-top');
-				} else if (dropdown.dataset.originalDropdownTop !== 'true') {
-					dropdown.classList.remove('dropdown-top');
-				}
-			}
-
 			function handleDropdownToggle(event) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
@@ -2729,10 +2696,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					// Dropdown was already open, close it
 					event.preventDefault();
 					label.blur();
-					return;
 				}
-				// Otherwise, let the default focus behavior open the dropdown, then place it in the visible viewport/scrollport.
-				requestAnimationFrame(function() { positionDropdownForViewport(label); });
+				// Otherwise, let the default focus behavior open the dropdown
 			}
 
 				function handleTaskSelect(event) {
