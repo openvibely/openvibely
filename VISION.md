@@ -117,6 +117,14 @@ Skills are how completed work becomes future leverage. The system should learn
 reusable workflows, domain habits, review checklists, and operational runbooks
 from successful tasks while keeping those skills visible and editable.
 
+### Insights Should Turn Activity Into Judgment
+
+As projects accumulate tasks, schedules, automations, agents, model usage,
+failures, costs, memories, and skills, OpenVibely should help teams see the
+shape of that activity. Insights should expose trends, health signals, upcoming
+work, reflections, and learning quality so teams can decide what to trust, tune,
+pause, prune, or invest in next.
+
 ### Integrations Should Bring Work To The System
 
 Slack, Telegram, GitHub, webhooks, the REST API, and future channels should make
@@ -158,7 +166,8 @@ The product should keep deepening the loop that already defines it:
 5. The user reviews diffs, threads, logs, graph state, approvals, and lifecycle
    evidence.
 6. Goal loops, schedules, automations, and integrations keep useful work moving.
-7. Memory Curator and Skill Curator preserve what should improve the next run.
+7. Insights reveal trends, costs, failures, upcoming work, and learning quality.
+8. Memory Curator and Skill Curator preserve what should improve the next run.
 
 Near-term product decisions should strengthen that loop. Features are most
 valuable when they make work easier to orchestrate, safer to review, clearer to
