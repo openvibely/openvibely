@@ -2,9 +2,9 @@
 name: testing_coverage_and_performance
 type: project
 created: 2026-06-07
-updated: 2026-08-16
+updated: 2026-08-15
 source: update_memory
-source_id: 13e73a7510ce02d1540d8bec24b46855:f691b5ce30c7f689
+source_id: orphaned_surface_cleanup_2026_08_15
 confidence: high
 title: Testing Coverage and Performance
 ---
@@ -16,7 +16,6 @@ Coverage direction:
 - `internal/service/llm_service.go` needs controlled LLM caller mocks to avoid flaky tests.
 - Generated templ `*_templ.go` files are excluded from coverage summaries while template tests still run.
 - Prefer broad behavioral coverage over granular tests around already-covered code. Avoid blanket `t.Parallel()` around shared database setup.
-- As of 2026-08-16, the Codecov API for `main` still reported `64.03%` line coverage (`48,971 / 76,475`). For Codecov-targeted coverage work, do not estimate from Go cover-profile statement percentages or local filtered denominators alone; compare local covered line ranges against Codecov's API `line_coverage` entries and use Codecov's own `lines` denominator. The coverage-increase branch was rebased linearly onto current `origin/main` and pushed to remote head `34303952` on 2026-08-16 after additional coverage for GitHub service PR/issue paths, chat runtime executor tools, OpenAI/Anthropic runtime-tool helpers, OpenAI direct response attachments/usage parsing, and skill analytics runtime instrumentation. `TMPDIR=/private/tmp go build ./cmd/server` and `TMPDIR=/private/tmp make test-cover` passed on that committed state with filtered Go statement coverage of `76.9%`. Immediately after the push, the branch Codecov report still pointed at older commit `29e3fa0b` with `53,444 / 76,879 = 69.51%`; do not treat the coverage goal as audit-cleared until Codecov uploads a hosted report for `34303952` and that report is at least 70%.
 - Shared mutable handler databases are unsuitable because tests mutate global/default/list state. `NewTestDB` uses an immutable serialized SQLite template to create fresh isolated in-memory fixtures while preserving UTC location, foreign keys, busy timeout, `MaxOpenConns(1)`, migrated schema, seed data, cleanup, and default-agent behavior.
 - Direct runtime-tool/action tests should exercise project ownership, authorization, pagination, mode restrictions, malformed JSON, and provider-tool-incapable paths.
 
@@ -51,7 +50,6 @@ Known bounded-projection history and current gaps:
 - Open gap `#345`: Skills Analytics aggregate queries over `skill_analytics_events` use computed local-time buckets and temp B-trees; acceptance should add a covering expression/generated-bucket indexing strategy and query-plan regressions while preserving local-time semantics.
 - Open gap `#565`: Skill Analytics API enabled-skill discovery (`GET /api/analytics/skills`) calls full `AgentRepo.List` even though it only needs compact agent identity/catalog fields for agent-owned skill catalog discovery. Benchmark evidence from the same full hydration path showed about `43 ms` and `38.95 MB/op` for 1,000 production-shaped agents versus about `0.97 ms` and `183 KB/op` for a compact projection comparator; acceptance should preserve the dashboard response contract, project scoping, enabled-skill semantics, and full hydration only for detail/edit paths.
 - Open gap `#572`: Agents plugin state refresh (`/agents/plugins/state`) rereads marketplace manifests/install caches and reparses installed-plugin `.mcp.json` data on New/Edit Agent modal opens. Synthetic production-shaped evidence showed roughly `10-13 ms` and `7.9 MB` per discovery call for 4,000 catalog entries, plus about `2.8 ms` and `0.79 MB` for runtime mapping over 100 installed plugins. Acceptance should cache or incrementally refresh local plugin discovery/state while preserving modal state correctness after install/update/remove, project scoping, runtime MCP server mapping semantics, and full detail/runtime behavior.
-- Open gap `#594`: agent-owned skills editing eagerly calls `/agents/:id/skills` when opening an agent edit modal and the endpoint reads/parses every `SKILL.md`, rebuilds catalog/router indexes, and returns full editable skill bodies before the user selects a skill. Acceptance should use compact skill summaries plus lazy single-skill body hydration while preserving project/global scoping, enabled/edit metadata, route registration semantics, save behavior, stale-response guards, and measurable before/after request count, bytes, allocations, and latency evidence.
 - Open gap `#350`: task board refreshes through `ListBoardByProjectWithCategorySorts` still select/parse full `chain_config` and `swarm_config` blobs for every card even though rendered cards need compact chain/swarm metadata.
 - Open gap `#355`: Execution Analytics aggregate queries over execution history use date/hour grouping or ordering not covered by current indexes; acceptance should remove temp grouping/ordering sorts while preserving local-time bucket and project-scoping semantics.
 - Open gap `#358`: GitHub PR feedback forwarding re-fetches all historical comments/reviews/review comments for every open task PR on unchanged scheduled runs, then filters duplicates after materializing pages.
@@ -86,7 +84,7 @@ Validation conventions:
 - Prefer `make test`, `make test-cover`, or `go test ./... -count=1 -timeout 120s` for authoritative full validation. Raw 60-second full-suite runs can time out under load.
 - Use readiness polling instead of fixed sleeps. Timing-sensitive tests may use `testing.Short()` guards.
 - Distinguish repeatable touched-scope regressions from environmental failures such as desktop/config PATH, macOS Wails linker warnings, SQLite locks, date-sensitive schedules, and plugin marketplace network timeouts.
-- `TMPDIR=/private/tmp` is the established macOS fallback when default-temp behavior destabilizes validation, including plugin cloning hangs and broad-suite `internal/update` flakes such as `TestBinaryHelperStopsFailedSuccessorBeforeRollback` missing `successor.pid`. If the exact failing test/package passes independently and the full suite passes with `TMPDIR=/private/tmp`, treat the default-temp failure as environmental rather than a touched-scope regression.
+- `TMPDIR=/private/tmp` is the established fallback when default-temp plugin cloning hangs.
 - Real-browser coverage is required when correctness depends on HTMX history/restoration, streaming offsets, transcript scrolling/hydration, drafts, pending attachments, stale-response races, live-refresh ordering, drag/drop, keyboard shortcuts, or other DOM timing. Handler HTML inspection alone is insufficient.
 - Browser performance fixtures should run over localhost HTTP rather than `file://`, and harnesses should expose an explicit DOM pass/fail marker because headless Chrome may leave its parent process alive.
 - External HTTP retry tests inject clock/backoff hooks so retries run without real sleeps; provider-specific tests cover classification, replay safety, metadata preservation, shared logical-turn stream retries, HTTP 429 handling, setup-failure connection retry lanes, and intentional append-only visible output after a failed partial stream retry.
