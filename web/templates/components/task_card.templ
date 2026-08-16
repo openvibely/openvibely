@@ -250,7 +250,7 @@ func swarmSummary(task models.Task) string {
 templ TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
 	<div
 		id={ fmt.Sprintf("task-%s", task.ID) }
-		class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all mb-2 cursor-grab active:cursor-grabbing drag-cursor-surface relative min-w-0 overflow-hidden"
+		class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all mb-2 cursor-grab active:cursor-grabbing drag-cursor-surface relative min-w-0 overflow-visible"
 		data-task-id={ task.ID }
 		data-task-status={ string(task.Status) }
 		data-task-category={ string(task.Category) }
