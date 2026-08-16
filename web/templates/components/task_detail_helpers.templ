@@ -341,7 +341,7 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 		<!-- Chat messages area — matches /chat layout (min/max height, padding, spacing) -->
 			<div
 				id="task-thread-messages"
-				class="flex-1 overflow-y-auto pt-4 pb-0 space-y-6 min-h-0"
+				class="flex-1 overflow-y-auto pt-4 pb-1 space-y-6 min-h-0"
 				if preservedExecIDs == nil {
 					style="visibility: hidden;"
 					data-transcript-hydrating="true"
