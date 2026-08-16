@@ -325,6 +325,7 @@ func TestNativeAutonomousSDLCDocsAlignWithBootstrapSkill(t *testing.T) {
 		"commonly hourly",
 		"must not create implementation tasks or modify code",
 		"list_existing_automation_notifications",
+		"next_offset",
 		"get_alert",
 		"skip covered candidates",
 		"at most one new notification",
