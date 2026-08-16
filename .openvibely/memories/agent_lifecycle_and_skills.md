@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-08-16
+updated: 2026-08-14
 source: update_memory
-source_id: b7c9379e44953e311937b3be0d95ee92:859c0602e7117ae4
+source_id: b300a40908e1f0b835d6ead0aa77fd99:66eaedc38857555d
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -18,7 +18,7 @@ Agent and catalog facts:
 - Agents are global by default and reusable across projects. Project-scoped agents/skills live under `<project_root>/.openvibely/agents/...`; global agents live under the app/config agents root.
 - The on-disk per-agent `SKILLS.md` declaration is authoritative for agent skills, lifecycle hooks, task loading, tool permissions, enabled/disabled state, and declarations. Declaration import/sync must preserve `agent.enabled: false`; missing enabled metadata defaults to enabled, and archived generated agents remain disabled.
 - Deleting filesystem-backed non-protected agents must remove the database row, the corresponding `agents/<key>/` directory, and the `## <key>` section from `agents/AGENTS.md`; otherwise declaration sync can rematerialize the agent from `SKILLS.md`, stale metadata can be restored, and deleted agents can remain in catalog/LLM context. Protected system agents remain non-deletable and should surface disabled delete UI plus backend rejection.
-- Project-scoped agent create/update/delete and related agent-specific UI/API requests must preserve or recover project context. Resolved issue `#576`: the New Agent modal posts create requests through `withCurrentProject('/agents')`, so project-scoped creation from `/agents?project_id=<current>` resolves that project before any stale selected-project preference; regression coverage asserts ProjectB-over-stale-ProjectA persistence and materialization. Backend cleanup/materialization should prefer the agent's persisted `ProjectID` when resolving the project skill root, and frontend agent-specific URLs should carry the active `project_id` query.
+- Project-scoped agent create/update/delete and related agent-specific UI/API requests must preserve or recover project context. Backend cleanup/materialization should prefer the agent's persisted `ProjectID` when resolving the project skill root, and frontend agent-specific URLs should carry the active `project_id` query.
 - Standalone skills are filesystem-backed packages. `<root>/skills/SKILLS.md` headings are canonical handles and match `<root>/skills/<handle>/SKILL.md`.
 - An indexed standalone skill is unusable unless the matching package body exists in the checkout the running app loads; creating the package only inside an isolated task worktree leaves the main catalog pointing at a dead path.
 - Bundled-skill startup sync overwrites the embedded `SKILL.md` and merges the bundled index, but does not prune extra support files already present in the installed global package. A global skill may therefore retain `references/` or `templates/` added by an earlier import, update, or Skill Curator operation even when the current repository built-in package ships only `SKILL.md`; a fresh installation from that repository will not receive those absent support files.
@@ -29,7 +29,7 @@ Agent and catalog facts:
 - Standalone top-level `always_use` metadata is catalog control data and does not appear in model-visible `<available_skills>` rendering.
 - Generated/native OpenVibely declarations include explicit `kind` frontmatter. Explicit skill import surfaces should materialize packages through shared normalization into `<root>/skills/<handle>/SKILL.md` and update `<root>/skills/SKILLS.md`; `skill_import` follows the central importer, while the browser `/skills/import` upload handler has a known duplication/drift gap (#446) because it separately normalizes package declarations and writes support files with a broader accepted package-file policy than the product text and central importer.
 - Skill import normalization guarantees YAML frontmatter with at least `name`, `description`, `kind: skill`, and `enabled: true`; it supports raw Markdown bodies, common top-level `name`/`description` packages, and existing OpenVibely declarations without wholesale clobbering valid fields.
-- Standalone skill saves and agent-owned skill saves are both active user-facing skills-management paths. Their browser-dialog request-to-declaration conversion is centralized in the shared `normalizeSkillDialogDeclaration` helper before persistence through the importer, while standalone saves still reject agent-root/`agent.key` declarations and agent-owned saves still rely on scoped importer validation for mismatched `agent.key`.
+- Standalone skill saves and agent-owned skill saves are both active user-facing skills-management paths and currently duplicate dialog-body-to-skill-declaration normalization before persistence through the importer; issue `#464` proposes consolidating that request-to-declaration conversion in a shared helper.
 - `skill_import` is treated as a skill-library write capability alongside `skill_manage`; grant it to write-authorized skill/curation agents rather than ordinary task turns.
 
 Project guidance facts:

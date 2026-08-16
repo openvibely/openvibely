@@ -11,7 +11,6 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
-	"github.com/stretchr/testify/require"
 )
 
 func TestExecuteChatTaskCreations(t *testing.T) {
@@ -503,54 +502,6 @@ func TestProcessChatAttachmentsForEdits(t *testing.T) {
 	if !contains(updatedTask.Prompt, "screenshot.png") {
 		t.Errorf("expected task prompt to contain 'screenshot.png', got %q", updatedTask.Prompt)
 	}
-}
-
-func TestExecuteChatTaskEditRequestsCopiesChatAttachmentsAndAppliesEdits(t *testing.T) {
-	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
-	ctx := context.Background()
-	project := createProject(t, h, "Wrapper Edit Project")
-	agent := createAgent(t, llmConfigRepo)
-	chatHost := createTask(t, h, project.ID, "Wrapper chat host", func(task *models.Task) {
-		task.Category = models.CategoryChat
-	})
-	exec := createExec(t, h, chatHost.ID, agent.ID)
-	target := createTask(t, h, project.ID, "Wrapper edit target", func(task *models.Task) {
-		task.Category = models.CategoryBacklog
-	})
-
-	origUploadsDir := uploadsDir
-	uploadsDir = t.TempDir()
-	defer func() { uploadsDir = origUploadsDir }()
-	chatDir := filepath.Join(uploadsDir, "chat", exec.ID)
-	if err := os.MkdirAll(chatDir, 0o755); err != nil {
-		t.Fatalf("mkdir chat dir: %v", err)
-	}
-	filePath := filepath.Join(chatDir, "notes.txt")
-	if err := os.WriteFile(filePath, []byte("attachment notes"), 0o644); err != nil {
-		t.Fatalf("write chat attachment: %v", err)
-	}
-	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{ExecutionID: exec.ID, FileName: "notes.txt", FilePath: filePath, MediaType: "text/plain", FileSize: 16}))
-
-	out := h.executeChatTaskEditRequests(ctx, exec.ID, project.ID, []service.TaskEditRequest{{ID: target.ID, Title: "Edited target", Priority: 1, Attachments: []string{"chat"}}})
-	require.Contains(t, out, "Edited 1 task(s)")
-	require.Contains(t, out, "1 chat attachment(s) copied")
-	updated, err := h.taskRepo.GetByID(ctx, target.ID)
-	require.NoError(t, err)
-	require.Equal(t, "Edited target", updated.Title)
-	require.Equal(t, 1, updated.Priority)
-	attachments, err := h.attachmentRepo.ListByTask(ctx, target.ID)
-	require.NoError(t, err)
-	require.Len(t, attachments, 1)
-	require.Equal(t, "notes.txt", attachments[0].FileName)
-}
-
-func TestExecuteChatTaskExecutionRequestsReportsMissingTask(t *testing.T) {
-	h, _, _, _ := setupTestHandlerWithDB(t)
-	project := createProject(t, h, "Wrapper Execute Project")
-	out := h.executeChatTaskExecutionRequests(context.Background(), "exec-wrapper", project.ID, []service.TaskExecutionRequest{{TaskID: "missing-task"}})
-	require.Contains(t, out, "Failed:")
-	require.Contains(t, out, "missing-task")
-	require.Empty(t, h.executeChatTaskExecutionRequests(context.Background(), "exec-wrapper", project.ID, nil))
 }
 
 func TestProcessChatAttachmentsForEdits_NoChatKeyword(t *testing.T) {

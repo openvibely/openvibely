@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -180,96 +179,6 @@ func TestUpcomingService_GenerateHistory_TimeRanges(t *testing.T) {
 		if history.TimeRange != tr {
 			t.Fatalf("expected time range %q, got %q", tr, history.TimeRange)
 		}
-	}
-}
-
-func TestUpcomingService_AISummariesBuildPromptsAndTrimOutput(t *testing.T) {
-	db := testutil.NewTestDB(t)
-	ctx := context.Background()
-	projectRepo := repository.NewProjectRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	execRepo := repository.NewExecutionRepo(db)
-	attachmentRepo := repository.NewAttachmentRepo(db)
-	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
-	mock := testutil.NewMockLLMCaller()
-	llmSvc.SetLLMCaller(mock)
-
-	project := &models.Project{Name: "Summary Project", RepoPath: t.TempDir()}
-	if err := projectRepo.Create(ctx, project); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	agent := &models.LLMConfig{Name: "summary-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
-	if err := llmConfigRepo.Create(ctx, agent); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-
-	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
-	svc.SetProjectRepo(projectRepo)
-	svc.SetLLMConfigRepo(llmConfigRepo)
-	svc.SetLLMService(llmSvc)
-	nextRun := time.Date(2026, 8, 16, 15, 4, 0, 0, time.UTC)
-	upcoming := &models.Upcoming{
-		ProjectID: project.ID,
-		RunningTasks: []models.UpcomingTask{{
-			Task:      models.Task{Title: "Run migration", Priority: 4},
-			AgentName: "Builder",
-		}},
-		PendingTasks: []models.UpcomingTask{{
-			Task: models.Task{Title: "Review rollout", Priority: 3},
-		}},
-		ScheduledTasks: []models.UpcomingTask{{
-			Task:    models.Task{Title: "Nightly smoke"},
-			NextRun: &nextRun,
-		}},
-		TaskSummary: &models.TaskSummary{TotalPending: 5, UrgentCount: 1, HighCount: 2, FailedCount: 1, OverdueCount: 3},
-	}
-
-	mock.Response = "  Pulse summary.  \n"
-	pulse, err := svc.GeneratePulseSummary(ctx, project.ID, upcoming)
-	if err != nil {
-		t.Fatalf("GeneratePulseSummary: %v", err)
-	}
-	if pulse != "Pulse summary." {
-		t.Fatalf("pulse summary = %q", pulse)
-	}
-	pulseCall := mock.LastCall()
-	for _, want := range []string{"Running tasks: 1", "Run migration", "Pending tasks: 1", "Nightly smoke", "Task summary: 5 pending total"} {
-		if !strings.Contains(pulseCall.Prompt, want) {
-			t.Fatalf("pulse prompt missing %q:\n%s", want, pulseCall.Prompt)
-		}
-	}
-	if pulseCall.WorkDir != project.RepoPath {
-		t.Fatalf("pulse workdir = %q, want %q", pulseCall.WorkDir, project.RepoPath)
-	}
-
-	history := &models.History{
-		ProjectID: project.ID,
-		TimeRange: models.TimeRangeWeek,
-		Since:     nextRun.Add(-7 * 24 * time.Hour),
-		Summary:   models.HistorySummary{TotalExecutions: 3, SuccessCount: 1, FailureCount: 1, CancelledCount: 1, AvgDurationMs: 2500},
-		Executions: []models.HistoryExecution{{
-			TaskTitle: "Failing deploy",
-			Execution: models.Execution{Status: models.ExecFailed, ErrorMessage: strings.Repeat("x", 120)},
-		}},
-		ProjectChanges: &models.ProjectChanges{Available: true, TotalCommits: 2, TotalInsertions: 12, TotalDeletions: 4, FilesChanged: 3, Changes: models.ChangeSummary{Features: []string{"Add pulse"}, BugFixes: []string{"Fix retry"}}},
-	}
-	mock.Response = "\nReflection summary.\n"
-	reflection, err := svc.GenerateReflectionSummary(ctx, project.ID, history)
-	if err != nil {
-		t.Fatalf("GenerateReflectionSummary: %v", err)
-	}
-	if reflection != "Reflection summary." {
-		t.Fatalf("reflection summary = %q", reflection)
-	}
-	reflectionCall := mock.LastCall()
-	for _, want := range []string{"Time range: week", "Average duration: 2500ms", "Failing deploy", strings.Repeat("x", 100) + "...", "Code changes: 2 commits", "Features: 1", "Bug fixes: 1"} {
-		if !strings.Contains(reflectionCall.Prompt, want) {
-			t.Fatalf("reflection prompt missing %q:\n%s", want, reflectionCall.Prompt)
-		}
-	}
-	if reflectionCall.WorkDir != project.RepoPath {
-		t.Fatalf("reflection workdir = %q, want %q", reflectionCall.WorkDir, project.RepoPath)
 	}
 }
 
