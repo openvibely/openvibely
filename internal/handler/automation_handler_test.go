@@ -1759,6 +1759,45 @@ func TestAutomationChatSaveYAMLPersistsThroughCompilerPipeline(t *testing.T) {
 	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
 }
 
+func TestAutomationChatSaveYAMLRejectsCandidateIdentityFieldsWithoutSideEffects(t *testing.T) {
+	for _, field := range []string{"automation_id", "version_id", "candidate", "candidate_json", "token_id"} {
+		t.Run(field, func(t *testing.T) {
+			tc := NewTestContext(t)
+			ctx := context.Background()
+			project := tc.CreateProject().WithName("Automation YAML Chat identity").Build()
+			automationRepo := repository.NewAutomationRepo(tc.db)
+			registry := service.NewAutomationAdapterRegistry()
+			drafts := service.NewAutomationDraftService(automationRepo, registry)
+			planner := service.NewAutomationSaveValidator(registry, drafts)
+			compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
+			tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+			tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+			candidate := automationChatCustomApprovalCandidate(t, drafts)
+			yamlDocument, err := service.EncodeAutomationDraftYAML(candidate)
+			require.NoError(t, err)
+			payload := map[string]any{"source": "yaml", "automation_yaml": yamlDocument, field: "raw-identity"}
+			if field == "candidate" {
+				payload[field] = candidate
+			}
+			raw, err := json.Marshal(payload)
+			require.NoError(t, err)
+			params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+			runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+			output, handled, isError, err := runtime.Executor(ctx, "save_automation", raw)
+			require.NoError(t, err)
+			require.True(t, handled)
+			require.False(t, isError, output)
+			require.Contains(t, output, `"active":false`)
+			require.Contains(t, output, "unsupported_candidate_identity")
+			require.Contains(t, output, field)
+			require.Zero(t, tableCountHandler(t, tc, "automations"))
+			require.Zero(t, tableCountHandler(t, tc, "tasks"))
+			require.Zero(t, tableCountHandler(t, tc, "schedules"))
+		})
+	}
+}
+
 func TestAutomationChatSaveYAMLRejectsInvalidDefinitionsWithoutSideEffects(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -1887,11 +1926,17 @@ func TestAutomationChatSaveRejectsCandidateIdentity(t *testing.T) {
 	require.NoError(t, tc.taskRepo.Create(ctx, &chatTask))
 	planExecution := models.Execution{TaskID: chatTask.ID, Status: models.ExecRunning, PromptSent: "plan it"}
 	require.NoError(t, tc.execRepo.Create(ctx, &planExecution))
+	initialTasks := tableCountHandler(t, tc, "tasks")
 
-	_, err = tc.handler.executeAutomationSaveAction(ctx, streamingResponseParams{ProjectID: project.ID, TaskID: chatTask.ID, ExecID: planExecution.ID},
+	output, err := tc.handler.executeAutomationSaveAction(ctx, streamingResponseParams{ProjectID: project.ID, TaskID: chatTask.ID, ExecID: planExecution.ID},
 		json.RawMessage(fmt.Sprintf(`{"source":"candidate","candidate":%s}`, raw)))
-	require.ErrorContains(t, err, "template, describe, blank, or yaml")
+	require.NoError(t, err)
+	require.Contains(t, output, `"active":false`)
+	require.Contains(t, output, "unsupported_candidate_identity")
+	require.Contains(t, output, "candidate")
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
+	require.Equal(t, initialTasks, tableCountHandler(t, tc, "tasks"))
+	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 }
 
 func TestAutomationDescribeFailureIsVisibleAndPreservesInput(t *testing.T) {

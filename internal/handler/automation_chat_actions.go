@@ -43,6 +43,9 @@ func (h *Handler) executeAutomationSaveAction(ctx context.Context, params stream
 	if err := chatcontrol.DecodeRuntimeToolInput(input, &request); err != nil {
 		return "", err
 	}
+	if field, ok := automationSaveRawCandidateIdentityField(input); ok {
+		return automationValidationResultForChat("unsupported_candidate_identity", fmt.Sprintf("raw Automation candidate identity/version field %q is not supported; submit only the canonical Automation YAML document format", field))
+	}
 	var candidate models.AutomationDraftCandidate
 	var source string
 	switch request.Source {
@@ -142,6 +145,22 @@ func automationSavePlanDisplayName(name string) string {
 		return name
 	}
 	return name[:marker]
+}
+
+func automationSaveRawCandidateIdentityField(input json.RawMessage) (string, bool) {
+	if strings.TrimSpace(string(input)) == "" {
+		return "", false
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(input, &raw); err != nil {
+		return "", false
+	}
+	for _, field := range []string{"candidate", "candidate_json", "automation_id", "version_id", "plan_revision", "token_id", "confirming_user_input_id"} {
+		if _, ok := raw[field]; ok {
+			return field, true
+		}
+	}
+	return "", false
 }
 
 func automationValidationResultForChat(code, message string) (string, error) {
