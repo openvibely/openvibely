@@ -28,10 +28,10 @@ func TestExecutionRepo_GetSuccessFailureRates(t *testing.T) {
 
 	// Create an agent config
 	agent := &models.LLMConfig{
-		Name:        "Test Agent",
-		Provider:    "anthropic",
-		Model:       "claude-3-5-sonnet-20241022",
-		IsDefault:   true,
+		Name:      "Test Agent",
+		Provider:  "anthropic",
+		Model:     "claude-3-5-sonnet-20241022",
+		IsDefault: true,
 	}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatal(err)
@@ -124,10 +124,10 @@ func TestExecutionRepo_GetAvgExecutionTimeByTask(t *testing.T) {
 
 	// Create an agent config
 	agent := &models.LLMConfig{
-		Name:        "Test Agent",
-		Provider:    "anthropic",
-		Model:       "claude-3-5-sonnet-20241022",
-		IsDefault:   true,
+		Name:      "Test Agent",
+		Provider:  "anthropic",
+		Model:     "claude-3-5-sonnet-20241022",
+		IsDefault: true,
 	}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatal(err)
@@ -238,10 +238,10 @@ func TestExecutionRepo_GetExecutionTrendsByHour(t *testing.T) {
 
 	// Create an agent config
 	agent := &models.LLMConfig{
-		Name:        "Test Agent",
-		Provider:    "anthropic",
-		Model:       "claude-3-5-sonnet-20241022",
-		IsDefault:   true,
+		Name:      "Test Agent",
+		Provider:  "anthropic",
+		Model:     "claude-3-5-sonnet-20241022",
+		IsDefault: true,
 	}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatal(err)
@@ -311,10 +311,10 @@ func TestExecutionRepo_GetMostFrequentTasks(t *testing.T) {
 
 	// Create an agent config
 	agent := &models.LLMConfig{
-		Name:        "Test Agent",
-		Provider:    "anthropic",
-		Model:       "claude-3-5-sonnet-20241022",
-		IsDefault:   true,
+		Name:      "Test Agent",
+		Provider:  "anthropic",
+		Model:     "claude-3-5-sonnet-20241022",
+		IsDefault: true,
 	}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatal(err)
@@ -410,10 +410,10 @@ func TestExecutionRepo_GetFailedTaskPatterns(t *testing.T) {
 
 	// Create an agent config
 	agent := &models.LLMConfig{
-		Name:        "Test Agent",
-		Provider:    "anthropic",
-		Model:       "claude-3-5-sonnet-20241022",
-		IsDefault:   true,
+		Name:      "Test Agent",
+		Provider:  "anthropic",
+		Model:     "claude-3-5-sonnet-20241022",
+		IsDefault: true,
 	}
 	if err := agentRepo.Create(ctx, agent); err != nil {
 		t.Fatal(err)
@@ -492,6 +492,123 @@ func TestExecutionRepo_GetFailedTaskPatterns(t *testing.T) {
 	}
 	if pattern.LastError != "Test error" {
 		t.Errorf("Expected LastError='Test error', got '%s'", pattern.LastError)
+	}
+}
+
+func TestFailedTaskPatterns_SharedTaskLevelLatestErrorSemantics(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	execRepo := NewExecutionRepo(db)
+	insightsRepo := NewInsightsRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	projectRepo := NewProjectRepo(db)
+	agentRepo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	project := &models.Project{Name: "Shared Failure Patterns", RepoPath: "/shared-failures"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	otherProject := &models.Project{Name: "Other Failure Patterns", RepoPath: "/other-failures"}
+	if err := projectRepo.Create(ctx, otherProject); err != nil {
+		t.Fatalf("create other project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "Failure Agent", Provider: models.ProviderTest, Model: "test-model"}
+	if err := agentRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	makeTask := func(projectID, title string) *models.Task {
+		t.Helper()
+		task := &models.Task{ProjectID: projectID, Title: title, Prompt: "prompt", Category: models.CategoryActive, Status: models.StatusPending, Priority: 2}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %q: %v", title, err)
+		}
+		return task
+	}
+	createFailure := func(task *models.Task, errMsg, startedAt string) {
+		t.Helper()
+		exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "prompt"}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatalf("create failed execution for %s: %v", task.Title, err)
+		}
+		if err := execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", errMsg, 0, 0); err != nil {
+			t.Fatalf("complete failed execution for %s: %v", task.Title, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at = ? WHERE id = ?`, startedAt, exec.ID); err != nil {
+			t.Fatalf("set started_at for %s: %v", task.Title, err)
+		}
+	}
+
+	taskA := makeTask(project.ID, "Flaky task A")
+	for _, errMsg := range []string{"old error A", "middle error A", "latest tie error A"} {
+		createFailure(taskA, errMsg, "2026-01-03T10:00:00Z")
+	}
+	taskB := makeTask(project.ID, "Flaky task B")
+	createFailure(taskB, "old error B", "2026-01-02T10:00:00Z")
+	createFailure(taskB, "latest error B", "2026-01-02T11:00:00Z")
+	taskC := makeTask(project.ID, "Rare fail C")
+	createFailure(taskC, "only once C", "2026-01-01T10:00:00Z")
+
+	otherTask := makeTask(otherProject.ID, "Other project noisy task")
+	for i := 0; i < 5; i++ {
+		createFailure(otherTask, "other project error", "2026-01-04T10:00:00Z")
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	analyticsPatterns, err := execRepo.GetFailedTaskPatterns(ctx, project.ID, 10)
+	if err != nil {
+		t.Fatalf("analytics GetFailedTaskPatterns: %v", err)
+	}
+	insightPatterns, err := insightsRepo.GetFailedTaskPatterns(ctx, project.ID, 2)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("insights GetFailedTaskPatterns: %v", err)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 2 {
+		t.Fatalf("recorded statements: got %d, want 2: %#v", len(statements), statements)
+	}
+	if statements[0] != statements[1] {
+		t.Fatalf("analytics and insights used different failed-task-pattern SQL\nanalytics: %s\ninsights: %s", statements[0], statements[1])
+	}
+
+	if len(analyticsPatterns) != 3 {
+		t.Fatalf("analytics patterns: got %d, want 3: %#v", len(analyticsPatterns), analyticsPatterns)
+	}
+	if analyticsPatterns[0].TaskID != taskA.ID || analyticsPatterns[0].TaskTitle != taskA.Title || analyticsPatterns[0].FailureCount != 3 {
+		t.Fatalf("first analytics pattern = %#v, want task A with 3 failures", analyticsPatterns[0])
+	}
+	if analyticsPatterns[0].LastError != "latest tie error A" {
+		t.Fatalf("task A latest error: got %q, want latest tie error A", analyticsPatterns[0].LastError)
+	}
+	if _, err := time.Parse(time.RFC3339, analyticsPatterns[0].LastFailedAt); err != nil {
+		t.Fatalf("analytics LastFailedAt %q is not RFC3339: %v", analyticsPatterns[0].LastFailedAt, err)
+	}
+	if analyticsPatterns[1].TaskID != taskB.ID || analyticsPatterns[1].FailureCount != 2 || analyticsPatterns[1].LastError != "latest error B" {
+		t.Fatalf("second analytics pattern = %#v, want task B with latest error", analyticsPatterns[1])
+	}
+	if analyticsPatterns[2].TaskID != taskC.ID || analyticsPatterns[2].FailureCount != 1 {
+		t.Fatalf("third analytics pattern = %#v, want below-threshold task C", analyticsPatterns[2])
+	}
+
+	if len(insightPatterns) != 2 {
+		t.Fatalf("insight patterns: got %d, want 2: %#v", len(insightPatterns), insightPatterns)
+	}
+	for i, insightPattern := range insightPatterns {
+		analyticsPattern := analyticsPatterns[i]
+		if insightPattern.Title != analyticsPattern.TaskTitle || insightPattern.FailCount != analyticsPattern.FailureCount || insightPattern.LastError != analyticsPattern.LastError {
+			t.Fatalf("insight pattern %d = %#v, want analytics projection %#v", i, insightPattern, analyticsPattern)
+		}
+	}
+
+	limitedPatterns, err := execRepo.GetFailedTaskPatterns(ctx, project.ID, 2)
+	if err != nil {
+		t.Fatalf("analytics limited GetFailedTaskPatterns: %v", err)
+	}
+	if len(limitedPatterns) != 2 || limitedPatterns[0].TaskID != taskA.ID || limitedPatterns[1].TaskID != taskB.ID {
+		t.Fatalf("limited analytics patterns = %#v, want task A then task B", limitedPatterns)
 	}
 }
 

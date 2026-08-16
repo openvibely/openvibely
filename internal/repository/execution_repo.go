@@ -1290,6 +1290,7 @@ func (r *ExecutionRepo) GetMostFrequentTasks(ctx context.Context, projectID stri
 }
 
 // FailedTaskPattern represents failed task pattern
+// returned by the Analytics API.
 type FailedTaskPattern struct {
 	TaskID       string
 	TaskTitle    string
@@ -1298,33 +1299,76 @@ type FailedTaskPattern struct {
 	LastFailedAt string
 }
 
-// GetFailedTaskPatterns returns tasks with failure patterns
-func (r *ExecutionRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, limit int) ([]FailedTaskPattern, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT
-			t.id,
-			t.title,
-			COUNT(*) as failure_count,
-			e.error_message as last_error,
-			strftime('%Y-%m-%dT%H:%M:%SZ', MAX(e.started_at)) as last_failed_at
+type failedTaskPatternProjection struct {
+	TaskID       string
+	TaskTitle    string
+	FailureCount int
+	LastError    string
+	LastFailedAt string
+}
+
+const failedTaskPatternsQuery = `
+	WITH failed_executions AS (
+		SELECT
+			t.id AS task_id,
+			t.title AS task_title,
+			e.error_message AS latest_error,
+			e.started_at AS latest_started_at,
+			COUNT(*) OVER (PARTITION BY t.id) AS failure_count,
+			ROW_NUMBER() OVER (PARTITION BY t.id ORDER BY e.started_at DESC, e.rowid DESC) AS rn
 		FROM executions e
 		JOIN tasks t ON t.id = e.task_id
 		WHERE t.project_id = ? AND e.status = 'failed'
-		GROUP BY t.id, t.title, e.error_message
-		ORDER BY failure_count DESC, last_failed_at DESC
-		LIMIT ?`, projectID, limit)
+	)
+	SELECT
+		task_id,
+		task_title,
+		failure_count,
+		COALESCE(latest_error, '') AS last_error,
+		strftime('%Y-%m-%dT%H:%M:%SZ', latest_started_at) AS last_failed_at
+	FROM failed_executions
+	WHERE rn = 1 AND failure_count >= ?
+	ORDER BY failure_count DESC, latest_started_at DESC, task_id ASC
+	LIMIT ?`
+
+func queryFailedTaskPatterns(ctx context.Context, db *sql.DB, projectID string, minFailures, limit int) ([]failedTaskPatternProjection, error) {
+	if minFailures < 1 {
+		minFailures = 1
+	}
+
+	rows, err := db.QueryContext(ctx, failedTaskPatternsQuery, projectID, minFailures, limit)
 	if err != nil {
 		return nil, fmt.Errorf("getting failed task patterns: %w", err)
 	}
 	defer rows.Close()
 
-	patterns := []FailedTaskPattern{}
+	patterns := []failedTaskPatternProjection{}
 	for rows.Next() {
-		var pattern FailedTaskPattern
+		var pattern failedTaskPatternProjection
 		if err := rows.Scan(&pattern.TaskID, &pattern.TaskTitle, &pattern.FailureCount, &pattern.LastError, &pattern.LastFailedAt); err != nil {
 			return nil, fmt.Errorf("scanning failed task pattern: %w", err)
 		}
 		patterns = append(patterns, pattern)
 	}
 	return patterns, rows.Err()
+}
+
+// GetFailedTaskPatterns returns task-level failure patterns for Analytics.
+func (r *ExecutionRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, limit int) ([]FailedTaskPattern, error) {
+	rows, err := queryFailedTaskPatterns(ctx, r.db, projectID, 1, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	patterns := make([]FailedTaskPattern, 0, len(rows))
+	for _, row := range rows {
+		patterns = append(patterns, FailedTaskPattern{
+			TaskID:       row.TaskID,
+			TaskTitle:    row.TaskTitle,
+			FailureCount: row.FailureCount,
+			LastError:    row.LastError,
+			LastFailedAt: row.LastFailedAt,
+		})
+	}
+	return patterns, nil
 }

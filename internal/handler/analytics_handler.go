@@ -409,7 +409,7 @@ func (h *Handler) GetMostFrequentTasks(c echo.Context) error {
 
 // GetFailedTaskPatterns returns tasks with failure patterns
 // @Summary Get failed task patterns
-// @Description Returns tasks with repeated failures, grouped by last observed error.
+// @Description Returns task-level failure patterns with the latest observed error.
 // @Tags analytics
 // @Produce json
 // @Param project_id query string false "Project ID filter"

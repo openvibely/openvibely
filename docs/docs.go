@@ -193,7 +193,7 @@ const docTemplate = `{
         },
         "/api/analytics/failed-task-patterns": {
             "get": {
-                "description": "Returns tasks with repeated failures, grouped by last observed error.",
+                "description": "Returns task-level failure patterns with the latest observed error.",
                 "produces": [
                     "application/json"
                 ],
