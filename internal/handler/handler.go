@@ -688,6 +688,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/skills", h.ListSkills)
 	e.POST("/skills", h.CreateSkill)
 	e.POST("/skills/import", h.ImportSkillPackage)
+	e.GET("/skills/:skill/details", h.GetSkillDetail)
 	e.PUT("/skills/:skill", h.UpdateSkill)
 	e.POST("/skills/:skill/enabled", h.SetSkillEnabled)
 	e.POST("/skills/:skill/always_use", h.SetSkillAlwaysUse)

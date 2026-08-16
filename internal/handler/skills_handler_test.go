@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -187,11 +189,11 @@ func TestSkillsModalDisablesScopeWhenEditing(t *testing.T) {
 	}
 }
 
-func TestSkillsPageEditModalIncludesPackageFileList(t *testing.T) {
+func TestSkillsPageEditModalLazyLoadsPackageFileList(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	root := t.TempDir()
 	h.SetAgentSkillRoot(root)
-	writeStandaloneSkill(t, root, "global_review", "Global Review", "global description", "global")
+	writeStandaloneSkillWithBody(t, root, "global_review", "Global Review", "global description", "global", "Use this skill when details are opened.")
 	refPath := filepath.Join(root, "skills", "global_review", "references", "notes.md")
 	if err := os.MkdirAll(filepath.Dir(refPath), 0o755); err != nil {
 		t.Fatalf("mkdir support dir: %v", err)
@@ -200,18 +202,43 @@ func TestSkillsPageEditModalIncludesPackageFileList(t *testing.T) {
 		t.Fatalf("write support file: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/skills", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
+	listReq := httptest.NewRequest(http.MethodGet, "/skills", nil)
+	listRec := httptest.NewRecorder()
+	e.ServeHTTP(listRec, listReq)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", listRec.Code, listRec.Body.String())
 	}
-	body := rec.Body.String()
-	for _, want := range []string{`data-skill-files="references/notes.md"`, `id="skill_files"`, `Package files`} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("expected body to contain %q", want)
+	listBody := listRec.Body.String()
+	for _, unwanted := range []string{`data-skill-content=`, `data-skill-files=`, `references/notes.md`, `Use this skill when details are opened.`} {
+		if strings.Contains(listBody, unwanted) {
+			t.Fatalf("expected list body not to contain lazy detail value %q", unwanted)
 		}
+	}
+	for _, want := range []string{`id="skill_files"`, `Package files`, `/details?scope=`} {
+		if !strings.Contains(listBody, want) {
+			t.Fatalf("expected list body to contain %q", want)
+		}
+	}
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/skills/global_review/details?scope=global", nil)
+	detailRec := httptest.NewRecorder()
+	e.ServeHTTP(detailRec, detailReq)
+	if detailRec.Code != http.StatusOK {
+		t.Fatalf("expected detail 200, got %d: %s", detailRec.Code, detailRec.Body.String())
+	}
+	var detail skillDetailResponse
+	if err := json.Unmarshal(detailRec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if detail.Handle != "global_review" || detail.Scope != "global" || detail.Name != "Global Review" || !detail.Enabled {
+		t.Fatalf("unexpected detail metadata: %+v", detail)
+	}
+	if !strings.Contains(detail.Content, "Use this skill when details are opened.") {
+		t.Fatalf("expected detail content to include skill body, got %q", detail.Content)
+	}
+	if len(detail.Files) != 1 || detail.Files[0] != "references/notes.md" {
+		t.Fatalf("expected detail support files, got %v", detail.Files)
 	}
 }
 
@@ -381,6 +408,75 @@ A skill for creating new skills and iteratively improving them.
 	}
 	if !strings.Contains(rec.Body.String(), "skill-creator") {
 		t.Fatalf("expected response to include imported standard skill card")
+	}
+}
+
+func TestSkillDetailLoadsProjectOverrideForSelectedScope(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	globalRoot := t.TempDir()
+	projectRepoPath := t.TempDir()
+	h.SetAgentSkillRoot(globalRoot)
+	project := createProject(t, h, "Skills Override Project")
+	project.RepoPath = projectRepoPath
+	if err := h.projectRepo.Update(context.Background(), project); err != nil {
+		t.Fatalf("update project repo path: %v", err)
+	}
+	projectRoot := filepath.Join(projectRepoPath, ".openvibely")
+	writeStandaloneSkillWithBody(t, globalRoot, "shared_skill", "Global Shared", "global description", "global", "global body")
+	writeStandaloneSkillWithBody(t, projectRoot, "shared_skill", "Project Shared", "project description", "project", "project override body")
+
+	req := httptest.NewRequest(http.MethodGet, "/skills/shared_skill/details?scope=project&project_id="+project.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var detail skillDetailResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	if detail.Scope != "project" || detail.Name != "Project Shared" || detail.Description != "project description" {
+		t.Fatalf("expected project override metadata, got %+v", detail)
+	}
+	if !strings.Contains(detail.Content, "project override body") || strings.Contains(detail.Content, "global body") {
+		t.Fatalf("expected project override body only, got %q", detail.Content)
+	}
+}
+
+func TestSkillsListLargeCatalogOmitsBodiesAndReducesResponseAndAllocations(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	root := t.TempDir()
+	h.SetAgentSkillRoot(root)
+	const skillCount = 200
+	largeBody := strings.Repeat("large-body-marker ", 32*1024/len("large-body-marker ")+1)
+	for i := 0; i < skillCount; i++ {
+		handle := fmt.Sprintf("large_skill_%03d", i)
+		writeStandaloneSkillWithBody(t, root, handle, "Large Skill "+handle, "large description", "global", largeBody)
+		for _, rel := range []string{"references/notes.md", "templates/example.md", "scripts/run.sh"} {
+			path := filepath.Join(root, "skills", handle, filepath.FromSlash(rel))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatalf("mkdir support file: %v", err)
+			}
+			if err := os.WriteFile(path, []byte("support"), 0o644); err != nil {
+				t.Fatalf("write support file: %v", err)
+			}
+		}
+	}
+
+	currentHTML := serveSkillsHTMX(t, e)
+	legacyHTML := legacyLargeSkillsListHTML(t, root)
+	if strings.Contains(currentHTML, "large-body-marker") || strings.Contains(currentHTML, "references/notes.md") || strings.Contains(currentHTML, `data-skill-content=`) || strings.Contains(currentHTML, `data-skill-files=`) {
+		t.Fatalf("compact list response contains lazy detail data")
+	}
+	if got, limit := len(currentHTML), len(legacyHTML)/10; got >= limit {
+		t.Fatalf("expected compact response bytes to be at least 90%% lower than legacy, got current=%d legacy=%d", got, len(legacyHTML))
+	}
+
+	currentAlloc := measuredAllocBytes(func() { _ = serveSkillsHTMX(t, e) })
+	legacyAlloc := measuredAllocBytes(func() { _ = legacyLargeSkillsListHTML(t, root) })
+	if currentAlloc*10 >= legacyAlloc*3 {
+		t.Fatalf("expected compact list allocations to be at least 70%% lower than legacy, got current=%d legacy=%d", currentAlloc, legacyAlloc)
 	}
 }
 
@@ -978,7 +1074,90 @@ func TestSkillsPageShowsAlwaysUseBadgeForMarkedSkills(t *testing.T) {
 	}
 }
 
+func serveSkillsHTMX(t *testing.T, e http.Handler) string {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/skills", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected skills HTMX 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	return rec.Body.String()
+}
+
+func measuredAllocBytes(fn func()) uint64 {
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	fn()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	return after.TotalAlloc - before.TotalAlloc
+}
+
+func legacyLargeSkillsListHTML(t *testing.T, root string) string {
+	t.Helper()
+	catalog, err := agentskills.BuildCatalogAll("skills-page-legacy", root, "")
+	if err != nil {
+		t.Fatalf("legacy catalog: %v", err)
+	}
+	var b strings.Builder
+	b.WriteString(`<div id="skills-container">`)
+	for _, entry := range catalog.Entries() {
+		data, err := os.ReadFile(entry.AbsolutePath)
+		if err != nil {
+			t.Fatalf("legacy read skill: %v", err)
+		}
+		content := string(data)
+		name := entry.Skill
+		description := ""
+		enabled := true
+		archived := false
+		if decl, body, parseErr := agentlibrary.ParseDeclaration(content); parseErr == nil && decl != nil {
+			name = firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, entry.Skill)
+			description = firstNonEmpty(decl.Skill.Description, decl.Routing.Description)
+			archived = decl.Skill.Archived
+			enabled = decl.Skill.Enabled == nil || *decl.Skill.Enabled
+			if rendered, renderErr := agentlibrary.RenderSkillMarkdown(decl, body); renderErr == nil {
+				content = rendered
+			}
+		}
+		files := listStandaloneSkillPackageFiles(entry.AbsolutePath)
+		b.WriteString(`<div data-skill-handle="`)
+		b.WriteString(entry.Handle)
+		b.WriteString(`" data-skill-name="`)
+		b.WriteString(name)
+		b.WriteString(`" data-skill-description="`)
+		b.WriteString(description)
+		b.WriteString(`" data-skill-scope="global" data-skill-source="global" data-skill-content="`)
+		b.WriteString(content)
+		b.WriteString(`" data-skill-files="`)
+		b.WriteString(strings.Join(files, "\n"))
+		b.WriteString(`" data-skill-enabled="`)
+		if enabled {
+			b.WriteString(`true`)
+		} else {
+			b.WriteString(`false`)
+		}
+		b.WriteString(`" data-skill-archived="`)
+		if archived {
+			b.WriteString(`true`)
+		} else {
+			b.WriteString(`false`)
+		}
+		b.WriteString(`"></div>`)
+	}
+	b.WriteString(`</div>`)
+	return b.String()
+}
+
 func writeStandaloneSkill(t *testing.T, root, handle, name, description, scope string) {
+	t.Helper()
+	writeStandaloneSkillWithBody(t, root, handle, name, description, scope, "Use this skill when appropriate.")
+}
+
+func writeStandaloneSkillWithBody(t *testing.T, root, handle, name, description, scope, body string) {
 	t.Helper()
 	decl := &agentlibrary.SkillDeclaration{
 		Kind:    "openvibely.agent_skill",
@@ -991,7 +1170,7 @@ func writeStandaloneSkill(t *testing.T, root, handle, name, description, scope s
 		},
 	}
 	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: root, Project: root}, nil)
-	if _, err := importer.WriteSkill(context.Background(), decl, "Use this skill when appropriate."); err != nil {
+	if _, err := importer.WriteSkill(context.Background(), decl, body); err != nil {
 		t.Fatalf("write skill %s: %v", handle, err)
 	}
 }

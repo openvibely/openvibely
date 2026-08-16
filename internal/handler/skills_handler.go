@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentskills"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/pages"
+	"gopkg.in/yaml.v3"
 )
 
 type skillAlwaysUseRequest struct {
@@ -62,6 +64,19 @@ type skillSaveRequest struct {
 	Enabled     *bool  `json:"enabled"`
 }
 
+type skillDetailResponse struct {
+	Handle      string   `json:"handle"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Scope       string   `json:"scope"`
+	Source      string   `json:"source"`
+	Content     string   `json:"content"`
+	Files       []string `json:"files"`
+	Archived    bool     `json:"archived"`
+	Enabled     bool     `json:"enabled"`
+	AlwaysUse   bool     `json:"always_use"`
+}
+
 func (h *Handler) ListSkills(c echo.Context) error {
 	skills, err := h.listStandaloneSkills(c)
 	if err != nil {
@@ -74,6 +89,52 @@ func (h *Handler) ListSkills(c echo.Context) error {
 	currentProjectID, _ := h.getCurrentProjectID(c)
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	return render(c, http.StatusOK, pages.Skills(projects, currentProjectID, skills, canManage))
+}
+
+func (h *Handler) GetSkillDetail(c echo.Context) error {
+	handle := strings.TrimSpace(c.Param("skill"))
+	if !validDialogSkillKey(handle) {
+		return echo.NewHTTPError(http.StatusBadRequest, "skill handle must be a slug")
+	}
+	scope := h.dialogStandaloneSkillScope(c, c.QueryParam("scope"))
+	root, err := h.rootForDialogScope(c, scope)
+	if err != nil {
+		return err
+	}
+	skillPath := filepath.Join(root, "skills", handle, "SKILL.md")
+	data, err := os.ReadFile(skillPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return echo.NewHTTPError(http.StatusNotFound, "skill not found at selected scope")
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	decl, body, err := agentlibrary.ParseDeclaration(string(data))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	content, err := agentlibrary.RenderSkillMarkdown(decl, body)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	resp := skillDetailResponse{
+		Handle:      handle,
+		Name:        firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, handle),
+		Description: firstNonEmpty(decl.Skill.Description, decl.Routing.Description),
+		Scope:       scope,
+		Source:      scope,
+		Content:     content,
+		Files:       listStandaloneSkillPackageFiles(skillPath),
+		Archived:    decl.Skill.Archived,
+		Enabled:     decl.Skill.Enabled == nil || *decl.Skill.Enabled,
+	}
+	switch scope {
+	case "global":
+		resp.AlwaysUse = alwaysUseSet(h.agentSkillRoot)[handle]
+	default:
+		resp.AlwaysUse = alwaysUseSet(h.currentProjectSkillRoot(c))[handle]
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 func (h *Handler) CreateSkill(c echo.Context) error {
@@ -527,11 +588,11 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 	for _, entry := range catalog.Entries() {
 		scope := h.scopeForStandaloneSkillPath(c, entry.AbsolutePath)
 		card := pages.SkillCard{
-			Handle: entry.Handle,
-			Name:   entry.Skill,
-			Scope:  scope,
-			Source: string(entry.Source),
-			Files:  listStandaloneSkillPackageFiles(entry.AbsolutePath),
+			Handle:  entry.Handle,
+			Name:    entry.Skill,
+			Scope:   scope,
+			Source:  string(entry.Source),
+			Enabled: true, // default to enabled when frontmatter is absent
 		}
 		// Populate AlwaysUse from the appropriate root's index.
 		switch scope {
@@ -540,16 +601,11 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 		default: // project
 			card.AlwaysUse = projectAlwaysUse[entry.Handle]
 		}
-		card.Enabled = true // default to enabled when frontmatter is absent
-		if data, readErr := os.ReadFile(entry.AbsolutePath); readErr == nil {
-			card.Content = string(data)
-			if decl, body, parseErr := agentlibrary.ParseDeclaration(string(data)); parseErr == nil && decl != nil {
-				card.Name = firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, entry.Skill)
-				card.Description = firstNonEmpty(decl.Skill.Description, decl.Routing.Description)
-				card.Archived = decl.Skill.Archived
-				card.Enabled = decl.Skill.Enabled == nil || *decl.Skill.Enabled
-				card.Content, _ = agentlibrary.RenderSkillMarkdown(decl, body)
-			}
+		if decl, ok := readStandaloneSkillFrontmatter(entry.AbsolutePath); ok && decl != nil {
+			card.Name = firstDialogNonEmpty(decl.Skill.Name, decl.Skill.Key, entry.Skill)
+			card.Description = firstNonEmpty(decl.Skill.Description, decl.Routing.Description)
+			card.Archived = decl.Skill.Archived
+			card.Enabled = decl.Skill.Enabled == nil || *decl.Skill.Enabled
 		}
 		out = append(out, card)
 	}
@@ -560,6 +616,41 @@ func (h *Handler) listStandaloneSkills(c echo.Context) ([]pages.SkillCard, error
 		return out[i].Handle < out[j].Handle
 	})
 	return out, nil
+}
+
+const standaloneSkillFrontmatterReadLimit = 64 * 1024
+
+func readStandaloneSkillFrontmatter(path string) (*agentlibrary.SkillDeclaration, bool) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	first, err := reader.ReadString('\n')
+	if err != nil && first == "" {
+		return nil, false
+	}
+	if strings.TrimSpace(first) != "---" {
+		return nil, false
+	}
+	var front strings.Builder
+	for front.Len() <= standaloneSkillFrontmatterReadLimit {
+		line, readErr := reader.ReadString('\n')
+		if strings.TrimSpace(line) == "---" {
+			var decl agentlibrary.SkillDeclaration
+			if err := yaml.Unmarshal([]byte(front.String()), &decl); err != nil {
+				return nil, false
+			}
+			return &decl, true
+		}
+		front.WriteString(line)
+		if readErr != nil {
+			return nil, false
+		}
+	}
+	return nil, false
 }
 
 // alwaysUseSet reads the SKILLS.md always_use list for root and returns a set
