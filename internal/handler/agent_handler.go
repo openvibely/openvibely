@@ -19,6 +19,7 @@ import (
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/httpretry"
+	"github.com/openvibely/openvibely/internal/mcpconfig"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/util"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -108,12 +109,22 @@ func normalizeMCPServers(servers []models.MCPServerConfig) []models.MCPServerCon
 				env[k] = v
 			}
 		}
+		headers := map[string]string{}
+		for k, v := range server.Headers {
+			k = strings.TrimSpace(k)
+			v = strings.TrimSpace(v)
+			if k != "" {
+				headers[k] = v
+			}
+		}
 
 		normalized = append(normalized, models.MCPServerConfig{
 			Name:    name,
+			Type:    strings.TrimSpace(server.Type),
 			Command: cmd,
 			URL:     strings.TrimSpace(server.URL),
 			Env:     env,
+			Headers: headers,
 		})
 		seen[key] = struct{}{}
 	}
@@ -152,75 +163,10 @@ func parseMCPServersFromSettingsFile(path string) ([]models.MCPServerConfig, err
 	if err != nil {
 		return nil, err
 	}
-
-	var root struct {
-		MCPServers map[string]json.RawMessage `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(data, &root); err != nil {
+	servers, err := mcpconfig.ParseNestedServers(data, mcpconfig.ParseOptions{})
+	if err != nil {
 		return nil, err
 	}
-
-	servers := make([]models.MCPServerConfig, 0, len(root.MCPServers))
-	for name, raw := range root.MCPServers {
-		var payload map[string]interface{}
-		if err := json.Unmarshal(raw, &payload); err != nil {
-			continue
-		}
-
-		var command []string
-		if cmdValue, ok := payload["command"]; ok {
-			switch cmd := cmdValue.(type) {
-			case string:
-				cmd = strings.TrimSpace(cmd)
-				if cmd != "" {
-					command = append(command, cmd)
-				}
-			case []interface{}:
-				for _, item := range cmd {
-					if value, ok := item.(string); ok {
-						value = strings.TrimSpace(value)
-						if value != "" {
-							command = append(command, value)
-						}
-					}
-				}
-			}
-		}
-		if argsValue, ok := payload["args"]; ok {
-			if args, ok := argsValue.([]interface{}); ok {
-				for _, item := range args {
-					if value, ok := item.(string); ok {
-						value = strings.TrimSpace(value)
-						if value != "" {
-							command = append(command, value)
-						}
-					}
-				}
-			}
-		}
-
-		env := map[string]string{}
-		if envValue, ok := payload["env"]; ok {
-			if envMap, ok := envValue.(map[string]interface{}); ok {
-				for k, v := range envMap {
-					if str, ok := v.(string); ok {
-						env[strings.TrimSpace(k)] = strings.TrimSpace(str)
-					}
-				}
-			}
-		}
-
-		server := models.MCPServerConfig{
-			Name:    strings.TrimSpace(name),
-			Command: command,
-			Env:     env,
-		}
-		if urlValue, ok := payload["url"].(string); ok {
-			server.URL = strings.TrimSpace(urlValue)
-		}
-		servers = append(servers, server)
-	}
-
 	return normalizeMCPServers(servers), nil
 }
 
