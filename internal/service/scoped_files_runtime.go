@@ -202,26 +202,33 @@ func (s *scopedFilesToolSession) scopedPath(rel string, allowRoot bool, need sco
 		return "", "", nil, fmt.Errorf("scoped files: path escapes scope: %s", rel)
 	}
 
-	// Explicit scope routing: "<label>/<path>" picks a specific scope. The
-	// label must match a configured scope.directory value (which for extras
-	// is the Label and for normal scopes is the relative directory itself).
-	if idx := strings.Index(clean, "/"); idx > 0 {
-		prefix := clean[:idx]
-		rest := clean[idx+1:]
-		for i := range s.scopes {
-			scope := &s.scopes[i]
-			if scope.directory != prefix {
-				continue
-			}
-			if !scope.hasPermissions(need) {
-				return "", "", nil, fmt.Errorf("scoped files: scope %q does not permit %s", prefix, rel)
-			}
-			abs := filepath.Join(scope.absoluteDir, filepath.FromSlash(rest))
-			if err := memory.AssertPathWithin(scope.absoluteDir, abs); err != nil {
-				return "", "", nil, fmt.Errorf("scoped files: path escapes scope %q", prefix)
-			}
-			return abs, rest, scope, nil
+	// Explicit scope routing: "<scope_directory>/<path>" picks a specific
+	// scope. Match the longest configured scope directory prefix so nested
+	// scopes such as "configs/secrets" win over parent scopes such as
+	// "configs" before falling back to first permitted scope behavior.
+	var explicitScope *scopedFilesScope
+	var explicitRest string
+	for i := range s.scopes {
+		scope := &s.scopes[i]
+		rest, ok := explicitScopeRest(clean, scope.directory, allowRoot)
+		if !ok {
+			continue
 		}
+		if explicitScope != nil && len(scope.directory) <= len(explicitScope.directory) {
+			continue
+		}
+		explicitScope = scope
+		explicitRest = rest
+	}
+	if explicitScope != nil {
+		if !explicitScope.hasPermissions(need) {
+			return "", "", nil, fmt.Errorf("scoped files: scope %q does not permit %s", explicitScope.directory, rel)
+		}
+		abs := filepath.Join(explicitScope.absoluteDir, filepath.FromSlash(explicitRest))
+		if err := memory.AssertPathWithin(explicitScope.absoluteDir, abs); err != nil {
+			return "", "", nil, fmt.Errorf("scoped files: path escapes scope %q", explicitScope.directory)
+		}
+		return abs, explicitRest, explicitScope, nil
 	}
 
 	for i := range s.scopes {
@@ -236,6 +243,20 @@ func (s *scopedFilesToolSession) scopedPath(rel string, allowRoot bool, need sco
 		return abs, clean, scope, nil
 	}
 	return "", "", nil, fmt.Errorf("scoped files: no configured scope permits %s", rel)
+}
+
+func explicitScopeRest(clean, scopeDirectory string, allowRoot bool) (string, bool) {
+	if clean == scopeDirectory {
+		if !allowRoot {
+			return "", false
+		}
+		return ".", true
+	}
+	prefix := scopeDirectory + "/"
+	if !strings.HasPrefix(clean, prefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(clean, prefix), true
 }
 
 func (s *scopedFilesToolSession) scopeForRoot(need scopedFilesPermissionSet) (*scopedFilesScope, error) {
