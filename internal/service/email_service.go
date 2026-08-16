@@ -532,16 +532,16 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 				continue
 			}
 		}
-		handled := false
+		result := emailIncomingProcessResult{}
 		if s.processIncomingMessageFn != nil {
-			handled = s.ProcessIncoming(ctx, fetched.Message)
+			result.handled = s.ProcessIncoming(ctx, fetched.Message)
 		} else {
-			handled = s.processIncomingMessage(ctx, fetched.Message, mailboxIdentity, messageKey)
+			result = s.processIncomingMessage(ctx, fetched.Message, mailboxIdentity, messageKey)
 		}
-		if !handled {
+		if !result.handled {
 			continue
 		}
-		if s.emailInboundReceiptStore != nil {
+		if s.emailInboundReceiptStore != nil && !result.receiptRecorded {
 			if err := s.emailInboundReceiptStore.Record(ctx, mailboxIdentity, messageKey); err != nil {
 				applog.Infof("[email] record receipt for message %d failed: %v", fetched.ID, err)
 			}
@@ -765,36 +765,42 @@ func firstNonEmpty(a, b string) string {
 	return strings.TrimSpace(b)
 }
 
+type emailIncomingProcessResult struct {
+	handled         bool
+	receiptRecorded bool
+}
+
 func (s *EmailService) ProcessIncoming(ctx context.Context, msg EmailInboundMessage) bool {
 	if s.processIncomingMessageFn != nil {
 		return s.processIncomingMessageFn(ctx, msg)
 	}
-	return s.processIncomingMessage(ctx, msg, "", "")
+	return s.processIncomingMessage(ctx, msg, "", "").handled
 }
 
-func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey string) bool {
+func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInboundMessage, mailboxIdentity, messageKey string) emailIncomingProcessResult {
 	if isIgnoredEmail(msg, s.getConfiguredAddress(ctx)) ||
 		(strings.TrimSpace(msg.Body) == "" && len(msg.Attachments) == 0) {
-		return true
+		return emailIncomingProcessResult{handled: true}
 	}
 	if s.taskRepo == nil || s.execRepo == nil || s.llmConfigRepo == nil || s.llmSvc == nil || s.taskSvc == nil || s.projectRepo == nil {
 		applog.Infof("[email] incoming message deferred: service dependencies are not fully configured")
-		return false
+		return emailIncomingProcessResult{}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), emailProcessTimeout)
 	defer cancel()
 	projectID, authorized, err := s.resolveAuthorizedProjectForInbound(ctx, msg.FromAddress)
 	if err != nil {
 		applog.Infof("[email] project authorization lookup failed for sender=%s: %v", redactEmail(msg.FromAddress), err)
-		return false
+		return emailIncomingProcessResult{}
 	}
 	if !authorized || projectID == "" {
 		applog.Infof("[email] unauthorized or no project for sender=%s", redactEmail(msg.FromAddress))
-		return true
+		return emailIncomingProcessResult{handled: true}
 	}
 	prompt := BuildEmailPrompt(msg)
 	sessionKey := EmailSessionKey(msg.FromAddress, msg.MessageID, msg.References, msg.InReplyTo, msg.Subject)
 	handedOff := false
+	receiptRecorded := false
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform:              "email",
 		ProjectID:             projectID,
@@ -837,9 +843,13 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 			if s.emailInboundReceiptStore == nil || mailboxIdentity == "" || messageKey == "" {
 				return false, s.threadInputRepo.CreateQueued(ctx, input)
 			}
-			return s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(exec repository.SQLExecutor) error {
+			alreadyHandedOff, err := s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(exec repository.SQLExecutor) error {
 				return s.threadInputRepo.CreateQueuedWithExecutor(ctx, exec, input)
 			})
+			if err == nil {
+				receiptRecorded = true
+			}
+			return alreadyHandedOff, err
 		},
 		OnAttachmentDownloadFailed: func(context.Context, string) { applog.Infof("[email] attachment processing failed") },
 		OnAttachmentStoreFailed:    func(context.Context, string) { applog.Infof("[email] attachment staging failed") },
@@ -854,9 +864,13 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 				if s.emailInboundReceiptStore == nil || mailboxIdentity == "" || messageKey == "" {
 					return false, s.execRepo.Create(ctx, execution)
 				}
-				return s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(exec repository.SQLExecutor) error {
+				alreadyHandedOff, err := s.emailInboundReceiptStore.WithHandoff(ctx, mailboxIdentity, messageKey, func(exec repository.SQLExecutor) error {
 					return s.execRepo.CreateWithExecutor(ctx, exec, execution)
 				})
+				if err == nil {
+					receiptRecorded = true
+				}
+				return alreadyHandedOff, err
 			},
 			RuntimeTools:    s.buildEmailActionToolRuntime(projectID, msg.FromAddress),
 			LinkAttachments: s.linkAttachmentsToExecution,
@@ -876,7 +890,7 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 			FilterChatHistory: filterEmailChatHistory,
 		},
 	})
-	return handedOff
+	return emailIncomingProcessResult{handled: handedOff, receiptRecorded: receiptRecorded}
 }
 
 // emailUploadsDir returns the configured uploads root, defaulting to "uploads"
