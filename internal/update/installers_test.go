@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -685,12 +684,18 @@ func TestBinaryInstallerPassesRelaunchContextOutsideCommandLineAndDurableState(t
 			if strings.Contains(strings.Join(cmd.Args, "\x00"), secret) {
 				t.Fatal("original arguments leaked into helper command line")
 			}
-			var metadata binaryRelaunchMetadata
-			if err := json.NewDecoder(cmd.Stdin).Decode(&metadata); err != nil {
+			cfg, err := ParseBinaryHelperArgs(cmd.Args[2:])
+			if err != nil {
 				return err
 			}
-			if strings.Join(metadata.Arguments, "\x00") != strings.Join([]string{current, "--credential", secret}, "\x00") || metadata.WorkingDirectory != root {
-				t.Fatalf("relaunch metadata = %#v", metadata)
+			if cfg.RelaunchMetadataPath == "" {
+				t.Fatal("helper command omitted relaunch metadata path")
+			}
+			if err := LoadBinaryHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg); err != nil {
+				return err
+			}
+			if strings.Join(cfg.Arguments, "\x00") != strings.Join([]string{current, "--credential", secret}, "\x00") || cfg.WorkingDirectory != root {
+				t.Fatalf("relaunch metadata = %#v", cfg)
 			}
 			return nil
 		},

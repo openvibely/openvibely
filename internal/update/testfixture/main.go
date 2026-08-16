@@ -105,7 +105,11 @@ func exitAfterHealthChecks() *int {
 func runUpdateHelper() {
 	cfg, err := update.ParseBinaryHelperArgs(os.Args[2:])
 	if err == nil {
-		err = update.LoadBinaryHelperRelaunch(os.Stdin, &cfg)
+		if cfg.RelaunchMetadataPath != "" {
+			err = update.LoadBinaryHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
+		} else {
+			err = update.LoadBinaryHelperRelaunch(os.Stdin, &cfg)
+		}
 	}
 	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
 		milliseconds, parseErr := strconv.Atoi(value)

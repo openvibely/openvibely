@@ -22,6 +22,7 @@ type BinaryHelperConfig struct {
 	HealthURL, ExpectedVersion     string
 	PreviousVersion, OutcomeID     string
 	RunningVersion                 string
+	RelaunchMetadataPath           string
 	Recovery                       bool
 	Arguments                      []string
 	WorkingDirectory               string
@@ -67,6 +68,9 @@ func binaryHelperRecoveryReadyPath(current string) string {
 }
 func binaryHelperRecoveryClaimPath(current string) string {
 	return current + ".openvibely-recovery-claim.json"
+}
+func binaryHelperRelaunchMetadataPath(current string) string {
+	return current + ".openvibely-relaunch.json"
 }
 func binaryHelperTransitionLeasePath(staged LocalStagedUpdate) string {
 	digest := sha256.Sum256([]byte(staged.OutcomeID))
@@ -978,11 +982,25 @@ func LoadBinaryHelperRelaunch(reader io.Reader, cfg *BinaryHelperConfig) error {
 	return nil
 }
 
+func LoadBinaryHelperRelaunchFile(path string, cfg *BinaryHelperConfig) error {
+	if path == "" || cfg == nil {
+		return errors.New("binary helper relaunch metadata path is unavailable")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open binary helper relaunch metadata: %w", err)
+	}
+	defer os.Remove(path)
+	defer file.Close()
+	return LoadBinaryHelperRelaunch(file, cfg)
+}
+
 func ParseBinaryHelperArgs(args []string) (BinaryHelperConfig, error) {
 	allowed := map[string]bool{
 		"--parent-pid": true, "--current": true, "--staged": true, "--backup": true,
 		"--health-url": true, "--expected-version": true, "--previous-version": true,
 		"--outcome-id": true, "--running-version": true, "--recovery": true,
+		"--relaunch-metadata": true,
 	}
 	values := map[string]string{}
 	for len(args) > 0 {
@@ -1002,7 +1020,7 @@ func ParseBinaryHelperArgs(args []string) (BinaryHelperConfig, error) {
 	if err != nil {
 		return BinaryHelperConfig{}, errors.New("invalid parent PID")
 	}
-	cfg := BinaryHelperConfig{ParentPID: pid, Current: values["--current"], Staged: values["--staged"], Backup: values["--backup"], HealthURL: values["--health-url"], ExpectedVersion: values["--expected-version"], PreviousVersion: values["--previous-version"], OutcomeID: values["--outcome-id"], RunningVersion: values["--running-version"], Recovery: values["--recovery"] == "true"}
+	cfg := BinaryHelperConfig{ParentPID: pid, Current: values["--current"], Staged: values["--staged"], Backup: values["--backup"], HealthURL: values["--health-url"], ExpectedVersion: values["--expected-version"], PreviousVersion: values["--previous-version"], OutcomeID: values["--outcome-id"], RunningVersion: values["--running-version"], RelaunchMetadataPath: values["--relaunch-metadata"], Recovery: values["--recovery"] == "true"}
 	if values["--recovery"] != "" && values["--recovery"] != "true" {
 		return BinaryHelperConfig{}, errors.New("invalid recovery mode")
 	}
@@ -1016,6 +1034,9 @@ func ParseBinaryHelperArgs(args []string) (BinaryHelperConfig, error) {
 		if !filepath.IsAbs(path) {
 			return BinaryHelperConfig{}, errors.New("update-helper paths must be absolute")
 		}
+	}
+	if cfg.RelaunchMetadataPath != "" && !filepath.IsAbs(cfg.RelaunchMetadataPath) {
+		return BinaryHelperConfig{}, errors.New("update-helper relaunch metadata path must be absolute")
 	}
 	return cfg, nil
 }

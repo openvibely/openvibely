@@ -49,7 +49,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "update-helper" {
 		cfg, err := update.ParseBinaryHelperArgs(os.Args[2:])
 		if err == nil {
-			err = update.LoadBinaryHelperRelaunch(os.Stdin, &cfg)
+			if cfg.RelaunchMetadataPath != "" {
+				err = update.LoadBinaryHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
+			} else {
+				err = update.LoadBinaryHelperRelaunch(os.Stdin, &cfg)
+			}
 		}
 		applyUpdateIntegrationTimeouts(&cfg)
 		if err == nil {

@@ -966,20 +966,24 @@ func (i *BinaryInstaller) Apply(ctx context.Context, value any) error {
 		_ = os.Remove(helperPath)
 		return fmt.Errorf("persist binary helper preparation: %w", err)
 	}
-	helperArgs := []string{"update-helper", "--parent-pid", fmt.Sprint(os.Getpid()), "--current", staged.InstallPath, "--staged", staged.ArtifactPath, "--backup", staged.BackupPath, "--health-url", i.HealthURL, "--expected-version", staged.Version, "--previous-version", staged.PreviousVersion, "--outcome-id", staged.OutcomeID}
-	cmd := exec.Command(helperPath, helperArgs...)
-	configureDetachedHelper(cmd)
 	metadata, err := json.Marshal(binaryRelaunchMetadata{Arguments: append([]string(nil), i.Arguments...), WorkingDirectory: i.WorkingDirectory})
 	if err != nil {
 		return fmt.Errorf("encode binary helper relaunch metadata: %w", err)
 	}
-	cmd.Stdin = bytes.NewReader(metadata)
+	metadataPath := binaryHelperRelaunchMetadataPath(staged.InstallPath)
+	if err := atomicWriteState(metadataPath, metadata); err != nil {
+		return fmt.Errorf("persist binary helper relaunch metadata: %w", err)
+	}
+	helperArgs := []string{"update-helper", "--parent-pid", fmt.Sprint(os.Getpid()), "--current", staged.InstallPath, "--staged", staged.ArtifactPath, "--backup", staged.BackupPath, "--health-url", i.HealthURL, "--expected-version", staged.Version, "--previous-version", staged.PreviousVersion, "--outcome-id", staged.OutcomeID, "--relaunch-metadata", metadataPath}
+	cmd := exec.Command(helperPath, helperArgs...)
+	configureDetachedHelper(cmd)
 	start := i.StartHelper
 	if start == nil {
 		start = func(cmd *exec.Cmd) error { return cmd.Start() }
 	}
 	if err := startDetachedHelper(cmd, start); err != nil {
 		_ = os.Remove(helperPath)
+		_ = os.Remove(metadataPath)
 		_ = removeBinaryHelperOutcome(staged)
 		return err
 	}
@@ -988,6 +992,7 @@ func (i *BinaryInstaller) Apply(ctx context.Context, value any) error {
 		await = waitForBinaryHelperHandoff
 	}
 	if err := await(ctx, staged); err != nil {
+		_ = os.Remove(metadataPath)
 		return fmt.Errorf("confirm binary helper handoff: %w", err)
 	}
 	i.Shutdown()
@@ -1010,19 +1015,23 @@ func (i *BinaryInstaller) RecoverBinaryRestart(ctx context.Context, staged Local
 		return fmt.Errorf("prepare binary recovery helper: %w", err)
 	}
 	_ = os.Remove(binaryHelperRecoveryReadyPath(staged.InstallPath))
-	helperArgs := []string{"update-helper", "--parent-pid", fmt.Sprint(os.Getpid()), "--current", staged.InstallPath, "--staged", staged.ArtifactPath, "--backup", staged.BackupPath, "--health-url", i.HealthURL, "--expected-version", staged.Version, "--previous-version", staged.PreviousVersion, "--outcome-id", staged.OutcomeID, "--recovery", "true", "--running-version", i.Current.Version}
-	cmd := exec.Command(helperPath, helperArgs...)
-	configureDetachedHelper(cmd)
 	metadata, err := json.Marshal(binaryRelaunchMetadata{Arguments: append([]string(nil), i.Arguments...), WorkingDirectory: i.WorkingDirectory})
 	if err != nil {
 		return fmt.Errorf("encode binary recovery relaunch metadata: %w", err)
 	}
-	cmd.Stdin = bytes.NewReader(metadata)
+	metadataPath := binaryHelperRelaunchMetadataPath(staged.InstallPath)
+	if err := atomicWriteState(metadataPath, metadata); err != nil {
+		return fmt.Errorf("persist binary recovery relaunch metadata: %w", err)
+	}
+	helperArgs := []string{"update-helper", "--parent-pid", fmt.Sprint(os.Getpid()), "--current", staged.InstallPath, "--staged", staged.ArtifactPath, "--backup", staged.BackupPath, "--health-url", i.HealthURL, "--expected-version", staged.Version, "--previous-version", staged.PreviousVersion, "--outcome-id", staged.OutcomeID, "--recovery", "true", "--running-version", i.Current.Version, "--relaunch-metadata", metadataPath}
+	cmd := exec.Command(helperPath, helperArgs...)
+	configureDetachedHelper(cmd)
 	start := i.StartHelper
 	if start == nil {
 		start = func(cmd *exec.Cmd) error { return cmd.Start() }
 	}
 	if err := startDetachedHelper(cmd, start); err != nil {
+		_ = os.Remove(metadataPath)
 		return fmt.Errorf("start binary recovery helper: %w", err)
 	}
 	if ctx == nil {
