@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -133,6 +135,52 @@ func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 	followupFilter := composeRuntimeToolFilter(func(name string) bool { return name == "bash" }, &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "runtime_task"}}, SkipDefaultTools: true}, true, models.ChatModeOrchestrate)
 	if followupFilter("bash") || !followupFilter("runtime_task") {
 		t.Fatal("follow-up filter should honor SkipDefaultTools while allowing runtime names")
+	}
+}
+
+func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
+	attachmentPath := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(attachmentPath, []byte("coverage notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path=%q want /v1/responses", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Fatalf("unexpected authorization header %q", r.Header.Get("Authorization"))
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"gpt-test","output":[{"content":[{"type":"output_text","text":"direct result"}]}],"usage":{"input_tokens":12,"output_tokens":5,"input_tokens_details":{"cached_tokens":3},"output_tokens_details":{"reasoning_tokens":2}}}`))
+	}))
+	defer srv.Close()
+
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	adapter := New(nil, nil, nil)
+	text, usage, err := adapter.CallDirect(context.Background(), "Summarize", []models.Attachment{{FileName: "notes.txt", FilePath: attachmentPath, MediaType: "text/plain"}}, models.LLMConfig{Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "high"}, "", "project instructions", false, false, false)
+	if err != nil {
+		t.Fatalf("CallDirect: %v", err)
+	}
+	if text != "direct result" || usage.InputTokens != 12 || usage.OutputTokens != 5 || usage.CachedInputTokens != 3 || usage.ReasoningTokens != 2 {
+		t.Fatalf("unexpected response text=%q usage=%+v", text, usage)
+	}
+	if gotBody["model"] != "gpt-test" || gotBody["max_output_tokens"] == nil || gotBody["instructions"] == nil {
+		t.Fatalf("request missing expected fields: %#v", gotBody)
+	}
+	input, ok := gotBody["input"].([]any)
+	if !ok || len(input) == 0 {
+		t.Fatalf("request missing input items: %#v", gotBody["input"])
+	}
+	encodedInput, _ := json.Marshal(input)
+	if !strings.Contains(string(encodedInput), "Attached files") || !strings.Contains(string(encodedInput), "notes.txt") {
+		t.Fatalf("input missing attachment prompt context: %s", encodedInput)
 	}
 }
 
