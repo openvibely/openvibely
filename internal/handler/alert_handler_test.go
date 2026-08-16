@@ -66,9 +66,29 @@ func TestHandler_RejectAlertAndActionableVisibilityAreProjectScoped(t *testing.T
 	projectListRec := httptest.NewRecorder()
 	require.NoError(t, h.ListAlerts(e.NewContext(projectListReq, projectListRec)))
 	require.Contains(t, projectListRec.Body.String(), alert.Title)
-	require.Contains(t, projectListRec.Body.String(), alert.Body)
+	// The list fragment must not embed the full body; it is lazily loaded per alert.
+	require.NotContains(t, projectListRec.Body.String(), alert.Body)
+	require.Contains(t, projectListRec.Body.String(), "/alerts/"+alert.ID+"/details")
 	require.Contains(t, projectListRec.Body.String(), ">Approve<")
 	require.Contains(t, projectListRec.Body.String(), ">Reject<")
+
+	// The lazy detail fragment returns the full body scoped to the current project.
+	detailReq := httptest.NewRequest(http.MethodGet, "/alerts/"+alert.ID+"/details?project_id="+project.ID, nil)
+	detailRec := httptest.NewRecorder()
+	detailCtx := e.NewContext(detailReq, detailRec)
+	detailCtx.SetParamNames("id")
+	detailCtx.SetParamValues(alert.ID)
+	require.NoError(t, h.GetAlertDetail(detailCtx))
+	require.Equal(t, http.StatusOK, detailRec.Code)
+	require.Contains(t, detailRec.Body.String(), alert.Body)
+
+	// Project isolation: a foreign project must not be able to load the detail.
+	foreignDetailReq := httptest.NewRequest(http.MethodGet, "/alerts/"+alert.ID+"/details?project_id="+foreign.ID, nil)
+	foreignDetailRec := httptest.NewRecorder()
+	foreignDetailCtx := e.NewContext(foreignDetailReq, foreignDetailRec)
+	foreignDetailCtx.SetParamNames("id")
+	foreignDetailCtx.SetParamValues(alert.ID)
+	require.Error(t, h.GetAlertDetail(foreignDetailCtx))
 
 	foreignRejectReq := httptest.NewRequest(http.MethodPost, "/alerts/"+alert.ID+"/reject?project_id="+foreign.ID, nil)
 	foreignRejectRec := httptest.NewRecorder()

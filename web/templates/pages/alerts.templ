@@ -8,17 +8,17 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
-templ Alerts(projects []models.Project, currentProjectID string, alerts []models.Alert, unreadCount int) {
+templ Alerts(projects []models.Project, currentProjectID string, alerts []models.AlertSummary, unreadCount int) {
 	@layout.Base("Alerts", projects, currentProjectID) {
 		@alertsContent(alerts, currentProjectID, unreadCount)
 	}
 }
 
-templ AlertsContent(alerts []models.Alert, currentProjectID string, unreadCount int) {
+templ AlertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int) {
 	@alertsContent(alerts, currentProjectID, unreadCount)
 }
 
-templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount int) {
+templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unreadCount int) {
 	<div id="alerts-container" class="h-full overflow-y-auto overflow-x-hidden max-w-full min-w-0" data-search-container>
 		<div id="alerts-content"
 			hx-get={ fmt.Sprintf("/alerts?project_id=%s", currentProjectID) }
@@ -158,10 +158,28 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 			window.openVibelySystemUpdatePoll = setInterval(refreshSystemUpdateCard, 1000);
 			window.addEventListener('pagehide', function() { clearInterval(window.openVibelySystemUpdatePoll); }, {once: true});
 
+			function loadAlertDetail(details) {
+				if (!details || !details.open) return;
+				var container = details.querySelector('[data-alert-detail-container]');
+				if (!container || container.dataset.alertDetailState === 'loaded' || container.dataset.alertDetailState === 'loading') return;
+				var url = details.dataset.alertDetailUrl || '';
+				if (!url) return;
+				container.dataset.alertDetailState = 'loading';
+				fetch(url, {headers: {'Accept': 'text/html'}}).then(function(response) {
+					if (!response.ok) throw new Error('detail request failed');
+					return response.text();
+				}).then(function(html) {
+					container.innerHTML = html;
+					container.dataset.alertDetailState = 'loaded';
+				}).catch(function() {
+					container.dataset.alertDetailState = '';
+					container.innerHTML = '<p class="text-sm text-error">Could not load detail. Close and reopen to retry.</p>';
+				});
+			}
 			function copyAlertDetails(button) {
 				if (!button) return;
-				var details = button.closest('details');
-				var copyText = details && details.querySelector('[data-alert-copy-text]');
+				var scope = button.closest('[data-alert-detail-loaded]') || button.closest('details') || button.parentElement;
+				var copyText = scope && scope.querySelector('[data-alert-copy-text]');
 				var text = copyText ? copyText.textContent : '';
 				var defaultLabel = button.dataset.defaultLabel || 'Copy body';
 				var feedback = button.querySelector('[data-alert-copy-feedback]');
@@ -331,8 +349,11 @@ templ alertsContent(alerts []models.Alert, currentProjectID string, unreadCount 
 	</script>
 }
 
-func alertSearchText(alert models.Alert) string {
-	return alert.Title + " " + alert.Message + " " + alert.Body + " " + string(alert.Severity) + " " + string(alert.DecisionState) + " " + string(alert.ProcessingState) + " " + alert.Source + " " + alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM")
+// alertSearchText intentionally excludes the full body and metadata so the
+// list DOM stays bounded. Full body/metadata search would require an explicit
+// server-side detail search path.
+func alertSearchText(alert models.AlertSummary) string {
+	return alert.Title + " " + alert.Message + " " + string(alert.Severity) + " " + string(alert.DecisionState) + " " + string(alert.ProcessingState) + " " + alert.Source + " " + alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM")
 }
 
 func alertMetadataJSON(alert models.Alert) string {
@@ -343,14 +364,66 @@ func alertMetadataJSON(alert models.Alert) string {
 	return string(data)
 }
 
-func alertInspectLabel(alert models.Alert) string {
+func alertSummaryInspectLabel(alert models.AlertSummary) string {
 	if alert.DecisionState == models.AlertDecisionNotRequired {
 		return "alert"
 	}
 	return "notification"
 }
 
-templ alertRow(alert models.Alert, currentProjectID string) {
+func alertDetailInspectLabel(alert models.Alert) string {
+	if alert.DecisionState == models.AlertDecisionNotRequired {
+		return "alert"
+	}
+	return "notification"
+}
+
+// AlertDetail is the lazily loaded inspect fragment for a single notification.
+// It is the only alerts surface that renders the full body and structured
+// metadata, and it is fetched per-alert when a user opens the inspect panel.
+templ AlertDetail(alert models.Alert) {
+	@alertDetailBody(alert)
+}
+
+templ alertDetailBody(alert models.Alert) {
+	if alert.Body == "" && alertMetadataJSON(alert) == "" {
+		<p class="text-sm opacity-60">No additional detail.</p>
+	} else {
+		<div class={ "relative min-w-0 max-w-full", templ.KV("min-h-6 pr-8", alert.Body != "") } data-alert-detail-loaded>
+			if alert.Body != "" {
+				<p class="whitespace-pre-wrap break-words text-sm">{ alert.Body }</p>
+			}
+			if alertMetadataJSON(alert) != "" {
+				<pre class={ "max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded bg-base-300 p-2 text-xs", templ.KV("mt-3", alert.Body != "") }>{ alertMetadataJSON(alert) }</pre>
+			}
+			if alert.Body != "" {
+				<pre class="hidden" data-alert-copy-text aria-hidden="true">{ alert.Body }</pre>
+				<button
+					type="button"
+					class="btn btn-xs btn-ghost btn-square absolute right-0 top-0"
+					data-alert-copy
+					data-default-label="Copy body"
+					title="Copy body"
+					aria-label={ "Copy inspected " + alertDetailInspectLabel(alert) + " body" }
+					onclick="copyAlertDetails(this)"
+				>
+					<svg data-alert-copy-icon xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+					</svg>
+					<svg data-alert-copy-success-icon xmlns="http://www.w3.org/2000/svg" class="hidden h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+					</svg>
+					<svg data-alert-copy-error-icon xmlns="http://www.w3.org/2000/svg" class="hidden h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+					</svg>
+					<span data-alert-copy-feedback class="sr-only" aria-live="polite">Copy body</span>
+				</button>
+			}
+		</div>
+	}
+}
+
+templ alertRow(alert models.AlertSummary, currentProjectID string) {
 	<div
 		id={ "alert-" + alert.ID }
 		data-alert-id={ alert.ID }
@@ -399,42 +472,17 @@ templ alertRow(alert models.Alert, currentProjectID string) {
 					if alert.Message != "" {
 						<p class="text-sm opacity-60 mt-1 break-words [overflow-wrap:anywhere]">{ alert.Message }</p>
 					}
-					if alert.Body != "" || alertMetadataJSON(alert) != "" {
-						<details class="mt-3 rounded-box bg-base-200/50 p-3" onclick="event.stopPropagation()">
-							<summary class="cursor-pointer text-sm font-medium">Inspect { alertInspectLabel(alert) }</summary>
-							<div class={ "relative mt-3 min-w-0 max-w-full", templ.KV("min-h-6 pr-8", alert.Body != "") }>
-								if alert.Body != "" {
-									<p class="whitespace-pre-wrap break-words text-sm">{ alert.Body }</p>
-								}
-								if alertMetadataJSON(alert) != "" {
-									<pre class={ "max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded bg-base-300 p-2 text-xs", templ.KV("mt-3", alert.Body != "") }>{ alertMetadataJSON(alert) }</pre>
-								}
-								if alert.Body != "" {
-									<pre class="hidden" data-alert-copy-text aria-hidden="true">{ alert.Body }</pre>
-									<button
-										type="button"
-										class="btn btn-xs btn-ghost btn-square absolute right-0 top-0"
-										data-alert-copy
-										data-default-label="Copy body"
-										title="Copy body"
-										aria-label={ "Copy inspected " + alertInspectLabel(alert) + " body" }
-										onclick="copyAlertDetails(this)"
-									>
-										<svg data-alert-copy-icon xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
-										</svg>
-										<svg data-alert-copy-success-icon xmlns="http://www.w3.org/2000/svg" class="hidden h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-										</svg>
-										<svg data-alert-copy-error-icon xmlns="http://www.w3.org/2000/svg" class="hidden h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-										</svg>
-										<span data-alert-copy-feedback class="sr-only" aria-live="polite">Copy body</span>
-									</button>
-								}
-							</div>
-						</details>
-					}
+					<details
+						class="mt-3 rounded-box bg-base-200/50 p-3"
+						onclick="event.stopPropagation()"
+						ontoggle="loadAlertDetail(this)"
+						data-alert-detail-url={ fmt.Sprintf("/alerts/%s/details?project_id=%s", alert.ID, currentProjectID) }
+					>
+						<summary class="cursor-pointer text-sm font-medium">Inspect { alertSummaryInspectLabel(alert) }</summary>
+						<div class="mt-3 min-w-0 max-w-full" data-alert-detail-container>
+							<p class="text-sm opacity-60" data-alert-detail-placeholder>Loading detail…</p>
+						</div>
+					</details>
 					<div class="mt-2 text-xs opacity-60 break-words">
 						<span>Source: { alert.Source }</span>
 						<span class="mx-1">·</span>
