@@ -181,6 +181,83 @@ func TestTabVisibilityManager_DoesNotTreatBlurOrFocusAsTranscriptRefresh(t *test
 	}
 }
 
+func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Base: %v", err)
+	}
+	html := buf.String()
+	start := strings.Index(html, "let focusedBeforeClick")
+	end := strings.Index(html[start:], "function handleTaskSelect(event)")
+	if start < 0 || end < 0 {
+		t.Fatal("base layout must define shared dropdown positioning before task-card click handling")
+	}
+	dropdownScript := html[start : start+end]
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the rendered dropdown positioning script")
+	}
+	script := `
+	const listeners = {};
+	global.window = { innerHeight: 320 };
+	global.document = {
+	  body: { name: 'body' },
+	  activeElement: null,
+	  addEventListener: function(name, handler) { listeners[name] = handler; }
+	};
+	global.requestAnimationFrame = function(callback) { callback(); };
+	global.getComputedStyle = function(element) { return element.styles || { overflowY: 'visible' }; };
+	function makeClassList(initial) {
+	  const values = new Set(initial || []);
+	  return {
+	    add: function(value) { values.add(value); },
+	    remove: function(value) { values.delete(value); },
+	    contains: function(value) { return values.has(value); },
+	    toString: function() { return Array.from(values).sort().join(' '); }
+	  };
+	}
+	function makeDropdown(labelTop, labelBottom, menuHeight) {
+	  const boundary = {
+	    parentElement: document.body,
+	    clientHeight: 240,
+	    styles: { overflowY: 'auto' },
+	    getBoundingClientRect: function() { return { top: 40, bottom: 280 }; }
+	  };
+	  const content = {
+	    scrollHeight: menuHeight,
+	    getBoundingClientRect: function() { return { height: menuHeight }; }
+	  };
+	  const dropdown = {
+	    parentElement: boundary,
+	    dataset: {},
+	    classList: makeClassList(['dropdown', 'dropdown-end']),
+	    querySelector: function(selector) { return selector === '.dropdown-content' ? content : null; }
+	  };
+	  const label = {
+	    parentElement: dropdown,
+	    blur: function() { this.blurred = true; },
+	    closest: function(selector) { return selector === '.dropdown' ? dropdown : null; },
+	    getBoundingClientRect: function() { return { top: labelTop, bottom: labelBottom }; }
+	  };
+	  return { dropdown: dropdown, label: label };
+	}
+	` + dropdownScript + `
+	const bottom = makeDropdown(230, 254, 100);
+	handleDropdownToggle({ currentTarget: bottom.label, stopPropagation: function() {} });
+	if (!bottom.dropdown.classList.contains('dropdown-top')) throw new Error('near-bottom dropdown did not open upward: ' + bottom.dropdown.classList.toString());
+	const roomy = makeDropdown(80, 104, 100);
+	handleDropdownToggle({ currentTarget: roomy.label, stopPropagation: function() {} });
+	if (roomy.dropdown.classList.contains('dropdown-top')) throw new Error('roomy dropdown should stay downward: ' + roomy.dropdown.classList.toString());
+	const originalTop = makeDropdown(80, 104, 40);
+	originalTop.dropdown.classList.add('dropdown-top');
+	handleDropdownToggle({ currentTarget: originalTop.label, stopPropagation: function() {} });
+	if (!originalTop.dropdown.classList.contains('dropdown-top')) throw new Error('original dropdown-top class should be preserved');
+	`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("rendered dropdown positioning script failed: %v\n%s", err, output)
+	}
+}
+
 func TestChatMarkdownRendererUsesSharedCodeRangesAndEscapesRawHTML(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
