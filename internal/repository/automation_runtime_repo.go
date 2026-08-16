@@ -2724,17 +2724,22 @@ func (r *AutomationRepo) ListExecutionProjectionRepairs(ctx context.Context, lim
 		limit = 100
 	}
 	rows, err := r.db.QueryContext(ctx, `SELECT DISTINCT t.project_id, e.id, e.status, e.error_message
-		FROM executions e JOIN tasks t ON t.id = e.task_id
-		JOIN automation_activity_resources ar ON ar.resource_type = 'execution' AND ar.resource_id = e.id
-		JOIN automation_activities a ON a.id = ar.activity_id
-		WHERE a.activity_type IN ('task_execution','thread_input_execution')
-			AND (a.status <> e.status OR (e.status IN ('completed','failed','cancelled') AND a.completed_at IS NULL)
-				OR (e.status IN ('completed','failed','cancelled') AND a.work_item_id IS NOT NULL AND EXISTS (
-					SELECT 1 FROM automation_work_item_positions p WHERE p.work_item_id = a.work_item_id AND p.node_id = a.node_id)
+			FROM executions e JOIN tasks t ON t.id = e.task_id
+			JOIN automation_activity_resources ar ON ar.resource_type = 'execution' AND ar.resource_id = e.id
+			JOIN automation_activities a ON a.id = ar.activity_id
+			JOIN automation_versions v ON v.id = a.version_id AND v.automation_id = a.automation_id AND v.project_id = a.project_id
+			JOIN automation_nodes n ON n.id = a.node_id AND n.version_id = a.version_id AND n.automation_id = a.automation_id AND n.project_id = a.project_id
+			WHERE a.activity_type IN ('task_execution','thread_input_execution')
+				AND (a.status <> e.status OR (e.status IN ('completed','failed','cancelled') AND a.completed_at IS NULL)
+					OR (e.status IN ('completed','failed','cancelled') AND a.work_item_id IS NOT NULL AND EXISTS (
+						SELECT 1 FROM automation_work_item_positions p WHERE p.work_item_id = a.work_item_id AND p.node_id = a.node_id)
 					AND NOT EXISTS (
 						SELECT 1 FROM automation_transitions tr
 						WHERE tr.automation_id = a.automation_id AND tr.version_id = a.version_id
-						AND tr.event_key = 'execution:' || e.id || ':terminal:' || e.status)))
+						AND tr.event_key = 'execution:' || e.id || ':terminal:' || e.status)
+					AND (e.status IN ('failed','cancelled')
+						OR (e.status = 'completed' AND v.adapter_key = 'custom')
+						OR (e.status = 'completed' AND v.adapter_key = 'native_sdlc' AND n.node_key = 'implementation'))))
 			ORDER BY e.started_at, e.id LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
