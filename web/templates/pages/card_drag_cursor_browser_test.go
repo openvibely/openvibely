@@ -100,11 +100,6 @@ window.addEventListener('DOMContentLoaded', function() {
       if (containerSelector === '#kanban-board') {
         container.style.display = 'block';
         Array.from(container.children).forEach(function(column) { column.style.minHeight = '240px'; });
-      } else if (containerSelector === '#schedule-timeline-container') {
-        container.style.flex = '0 0 ' + viewportHeight + 'px';
-        container.querySelectorAll('.schedule-grid-row').forEach(function(row) { row.style.minHeight = '36px'; });
-        container.querySelectorAll('.schedule-time-label').forEach(function(label) { label.style.minHeight = '36px'; });
-        container.querySelectorAll('.drop-zone[data-hour]').forEach(function(zone) { zone.style.minHeight = '36px'; });
       }
     } else {
       container.style.width = '320px';
@@ -113,19 +108,13 @@ window.addEventListener('DOMContentLoaded', function() {
     }
     card.scrollIntoView({block:'center', inline:'center'});
     await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    if (axis === 'y' && container.contains(card)) {
-      var beforeCardRect = card.getBoundingClientRect();
-      var beforeContainerRect = container.getBoundingClientRect();
-      container.scrollTop += beforeCardRect.top - beforeContainerRect.top - (container.clientHeight / 2) + Math.min(beforeCardRect.height / 2, 12);
-      await new Promise(function(resolve) { requestAnimationFrame(function() { requestAnimationFrame(resolve); }); });
-    }
     var cardRect = card.getBoundingClientRect();
     var containerRect = container.getBoundingClientRect();
     var targetRect = target.getBoundingClientRect();
     var targetIsOffscreen = axis === 'y'
       ? (targetRect.bottom <= containerRect.top || targetRect.top >= containerRect.bottom)
       : (targetRect.right <= containerRect.left || targetRect.left >= containerRect.right);
-    if (!targetIsOffscreen) fail(label + ': target must begin outside the scroll viewport; container=' + JSON.stringify({top: containerRect.top, bottom: containerRect.bottom, height: containerRect.height, scrollTop: container.scrollTop, scrollHeight: container.scrollHeight}) + ' target=' + JSON.stringify({top: targetRect.top, bottom: targetRect.bottom, height: targetRect.height}));
+    if (!targetIsOffscreen) fail(label + ': target must begin outside the scroll viewport');
     var forward = axis === 'y' ? targetRect.top >= containerRect.bottom : targetRect.left >= containerRect.right;
     var edgeX = axis === 'x' ? (forward ? containerRect.right - 4 : containerRect.left + 4) : Math.max(containerRect.left + 8, Math.min(containerRect.right - 8, cardRect.left + 12));
     var edgeY = axis === 'y' ? (forward ? containerRect.bottom - 4 : containerRect.top + 4) : Math.max(containerRect.top + 8, Math.min(containerRect.bottom - 8, cardRect.top + 12));
