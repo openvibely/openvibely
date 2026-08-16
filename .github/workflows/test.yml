@@ -136,7 +136,7 @@ jobs:
       - name: Run all tests with coverage
         env:
           OPENVIBELY_SKIP_BROWSER_PERF: "1"
-        run: go test ./... -count=1 -timeout 240s -coverprofile=coverage.txt
+        run: go test ./... -count=1 -timeout 240s -coverpkg=./... -coverprofile=coverage.txt
 
       - name: Run browser performance regression
         run: go test ./web/templates/components -run '^TestLargeToolOutputHydrationIsLazyAndStatefulInChrome$' -count=1 -timeout 60s
