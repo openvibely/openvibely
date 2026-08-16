@@ -474,57 +474,59 @@ func buildCommentMap(comments []models.ReviewComment) map[string][]models.Review
 	return m
 }
 
+type reviewLineTarget struct {
+	LineNumber int
+	LineType   string
+	CanComment bool
+}
+
+// reviewTargetForDiffLine maps a visible diff line to the persisted review-comment target.
+func reviewTargetForDiffLine(line DiffLine) reviewLineTarget {
+	target := reviewLineTarget{
+		LineNumber: line.NewNum,
+		LineType:   "new",
+	}
+	if line.Type == "del" {
+		target.LineNumber = line.OldNum
+		target.LineType = "old"
+	} else if line.Type == "ctx" {
+		target.LineType = "ctx"
+	}
+	target.CanComment = target.LineNumber != 0
+	return target
+}
+
+func (target reviewLineTarget) commentKey(filePath string) string {
+	return commentKey(filePath, target.LineNumber, target.LineType)
+}
+
 // lineHasComment checks if a specific line has review comments
 func lineHasComment(commentMap map[string][]models.ReviewComment, filePath string, line DiffLine) bool {
-	lineNum := line.NewNum
-	lt := "new"
-	if line.Type == "del" {
-		lineNum = line.OldNum
-		lt = "old"
-	} else if line.Type == "ctx" {
-		lt = "ctx"
-	}
-	if lineNum == 0 {
+	target := reviewTargetForDiffLine(line)
+	if !target.CanComment {
 		return false
 	}
-	_, ok := commentMap[commentKey(filePath, lineNum, lt)]
+	_, ok := commentMap[target.commentKey(filePath)]
 	return ok
 }
 
 // getLineComments returns comments for a specific line
 func getLineComments(commentMap map[string][]models.ReviewComment, filePath string, line DiffLine) []models.ReviewComment {
-	lineNum := line.NewNum
-	lt := "new"
-	if line.Type == "del" {
-		lineNum = line.OldNum
-		lt = "old"
-	} else if line.Type == "ctx" {
-		lt = "ctx"
-	}
-	if lineNum == 0 {
+	target := reviewTargetForDiffLine(line)
+	if !target.CanComment {
 		return nil
 	}
-	return commentMap[commentKey(filePath, lineNum, lt)]
+	return commentMap[target.commentKey(filePath)]
 }
 
 // lineTypeForDiff maps diff line type to review line type
 func lineTypeForDiff(diffType string) string {
-	switch diffType {
-	case "del":
-		return "old"
-	case "ctx":
-		return "ctx"
-	default:
-		return "new"
-	}
+	return reviewTargetForDiffLine(DiffLine{Type: diffType, OldNum: 1, NewNum: 1}).LineType
 }
 
 // lineNumForReview returns the appropriate line number for a review comment
 func lineNumForReview(line DiffLine) int {
-	if line.Type == "del" {
-		return line.OldNum
-	}
-	return line.NewNum
+	return reviewTargetForDiffLine(line).LineNumber
 }
 
 templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, reviewComments []models.ReviewComment, initialView string) {
@@ -1636,6 +1638,35 @@ templ diffFileEmptyBody(f DiffFile) {
 	</div>
 }
 
+templ reviewInlineCommentRow(comment models.ReviewComment, filePath string, target reviewLineTarget, layout string) {
+	<tr
+		class="review-inline-comment"
+		data-comment-id={ comment.ID }
+		data-file-path={ filePath }
+		data-line-num={ fmt.Sprintf("%d", target.LineNumber) }
+		data-line-type={ target.LineType }
+		data-review-layout={ layout }
+	>
+		if layout == "split" {
+			<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
+			<td class="diff-line-content px-3 py-0 border-r border-base-300 bg-base-200"></td>
+			<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
+		} else {
+			<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
+			<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
+		}
+		<td class="p-0 bg-warning/15">
+			<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
+				<span class="review-inline-comment-bar"></span>
+				<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
+					<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+				</button>
+				<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
+			</div>
+		</td>
+	</tr>
+}
+
 templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID string, commentMap map[string][]models.ReviewComment) {
 	<div id={ fmt.Sprintf("diff-file-%d", idx) } class="diff-file-card card bg-base-100 border border-base-300 scroll-mt-2">
 		@diffFileHeader(f, idx, defaultExpanded, false)
@@ -1681,26 +1712,7 @@ templ inlineDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID
 								</tr>
 								if lineHasComment(commentMap, f.Path, line) {
 									for _, comment := range getLineComments(commentMap, f.Path, line) {
-										<tr
-											class="review-inline-comment"
-											data-comment-id={ comment.ID }
-											data-file-path={ f.Path }
-											data-line-num={ fmt.Sprintf("%d", lineNumForReview(line)) }
-											data-line-type={ lineTypeForDiff(line.Type) }
-											data-review-layout="inline"
-										>
-											<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
-											<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>
-											<td class="p-0 bg-warning/15">
-												<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
-													<span class="review-inline-comment-bar"></span>
-													<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
-														<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-													</button>
-													<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
-												</div>
-											</td>
-										</tr>
+										@reviewInlineCommentRow(comment, f.Path, reviewTargetForDiffLine(line), "inline")
 									}
 								}
 							}
@@ -2251,27 +2263,7 @@ templ splitDiffFileWithReview(f DiffFile, idx int, defaultExpanded bool, taskID 
 								</tr>
 								if pair.Right.Type != "empty" && lineHasComment(commentMap, f.Path, pair.Right) {
 									for _, comment := range getLineComments(commentMap, f.Path, pair.Right) {
-										<tr
-											class="review-inline-comment"
-											data-comment-id={ comment.ID }
-											data-file-path={ f.Path }
-											data-line-num={ fmt.Sprintf("%d", lineNumForReview(pair.Right)) }
-											data-line-type={ lineTypeForDiff(pair.Right.Type) }
-											data-review-layout="split"
-										>
-											<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
-											<td class="diff-line-content px-3 py-0 border-r border-base-300 bg-base-200"></td>
-											<td class="diff-line-num px-2 py-0 border-r border-base-300 bg-base-200"></td>
-											<td class="p-0 bg-warning/15">
-												<div class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id={ comment.ID } onclick="startEditReviewComment(event)">
-													<span class="review-inline-comment-bar"></span>
-													<button type="button" class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment">
-														<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-													</button>
-													<p class="review-comment-text whitespace-pre-wrap break-words">{ comment.CommentText }</p>
-												</div>
-											</td>
-										</tr>
+										@reviewInlineCommentRow(comment, f.Path, reviewTargetForDiffLine(pair.Right), "split")
 									}
 								}
 							}

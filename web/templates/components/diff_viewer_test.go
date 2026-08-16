@@ -1608,6 +1608,107 @@ func TestBuildDiffRenderMetas_MaxFiles300(t *testing.T) {
 	}
 }
 
+func TestReviewTargetForDiffLineSharedLookupMetadata(t *testing.T) {
+	commentMap := buildCommentMap([]models.ReviewComment{
+		{ID: "new-comment", FilePath: "main.go", LineNumber: 4, LineType: "new", CommentText: "new line"},
+		{ID: "old-comment", FilePath: "main.go", LineNumber: 2, LineType: "old", CommentText: "old line"},
+		{ID: "ctx-comment", FilePath: "main.go", LineNumber: 1, LineType: "ctx", CommentText: "context line"},
+	})
+
+	tests := []struct {
+		name       string
+		line       DiffLine
+		lineNumber int
+		lineType   string
+		commentID  string
+		canComment bool
+	}{
+		{name: "added", line: DiffLine{Type: "add", NewNum: 4}, lineNumber: 4, lineType: "new", commentID: "new-comment", canComment: true},
+		{name: "deleted", line: DiffLine{Type: "del", OldNum: 2}, lineNumber: 2, lineType: "old", commentID: "old-comment", canComment: true},
+		{name: "context", line: DiffLine{Type: "ctx", OldNum: 1, NewNum: 1}, lineNumber: 1, lineType: "ctx", commentID: "ctx-comment", canComment: true},
+		{name: "empty", line: DiffLine{Type: "empty"}, lineNumber: 0, lineType: "new", canComment: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			target := reviewTargetForDiffLine(tt.line)
+			if target.LineNumber != tt.lineNumber || target.LineType != tt.lineType || target.CanComment != tt.canComment {
+				t.Fatalf("target = %+v, want line=%d type=%q canComment=%v", target, tt.lineNumber, tt.lineType, tt.canComment)
+			}
+			if got := lineNumForReview(tt.line); got != tt.lineNumber {
+				t.Fatalf("lineNumForReview = %d, want %d", got, tt.lineNumber)
+			}
+			if got := lineTypeForDiff(tt.line.Type); got != tt.lineType {
+				t.Fatalf("lineTypeForDiff = %q, want %q", got, tt.lineType)
+			}
+
+			comments := getLineComments(commentMap, "main.go", tt.line)
+			if !tt.canComment {
+				if lineHasComment(commentMap, "main.go", tt.line) || comments != nil {
+					t.Fatal("non-commentable line should not resolve comments")
+				}
+				return
+			}
+			if !lineHasComment(commentMap, "main.go", tt.line) {
+				t.Fatal("expected shared lookup to find comment")
+			}
+			if len(comments) != 1 || comments[0].ID != tt.commentID {
+				t.Fatalf("comments = %+v, want %s", comments, tt.commentID)
+			}
+		})
+	}
+}
+
+func TestDiffViewerWithReview_RendersSharedReviewCommentRows(t *testing.T) {
+	diff := `diff --git a/main.go b/main.go
+--- a/main.go
++++ b/main.go
+@@ -1,3 +1,4 @@
+ package main
+-func old() {}
++func new() {}
++func added() {}
+ var x = 1
+`
+	comments := []models.ReviewComment{
+		{ID: "add-comment", TaskID: "task123", FilePath: "main.go", LineNumber: 3, LineType: "new", CommentText: "added line note"},
+		{ID: "ctx-comment", TaskID: "task123", FilePath: "main.go", LineNumber: 1, LineType: "ctx", CommentText: "context line note"},
+		{ID: "old-comment", TaskID: "task123", FilePath: "main.go", LineNumber: 2, LineType: "old", CommentText: "deleted line note"},
+	}
+
+	var buf bytes.Buffer
+	if err := DiffViewerWithReviewView(diff, "task123", comments, "inline").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	body := buf.String()
+
+	for _, fragment := range []string{
+		`class="review-inline-comment" data-comment-id="add-comment" data-file-path="main.go" data-line-num="3" data-line-type="new" data-review-layout="inline"`,
+		`class="review-inline-comment" data-comment-id="add-comment" data-file-path="main.go" data-line-num="3" data-line-type="new" data-review-layout="split"`,
+		`class="review-inline-comment" data-comment-id="ctx-comment" data-file-path="main.go" data-line-num="1" data-line-type="ctx" data-review-layout="inline"`,
+		`class="review-inline-comment" data-comment-id="ctx-comment" data-file-path="main.go" data-line-num="1" data-line-type="ctx" data-review-layout="split"`,
+		`class="review-inline-comment" data-comment-id="old-comment" data-file-path="main.go" data-line-num="2" data-line-type="old" data-review-layout="inline"`,
+		`class="review-inline-comment-box p-2 pl-3 pr-8 text-xs cursor-text" data-comment-id="add-comment" onclick="startEditReviewComment(event)"`,
+		`class="btn btn-circle btn-ghost btn-xs review-delete-btn" onclick="deleteReviewComment(event)" aria-label="Delete review comment"`,
+		`class="review-comment-text whitespace-pre-wrap break-words">added line note</p>`,
+		`<td class="diff-line-num px-2 py-0 w-12 border-r border-base-300 bg-base-200"></td>`,
+		`<td class="diff-line-content px-3 py-0 border-r border-base-300 bg-base-200"></td>`,
+	} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("expected rendered review comment fragment %q", fragment)
+		}
+	}
+	if strings.Count(body, `data-comment-id="add-comment"`) < 4 {
+		t.Fatalf("expected add comment row and editable box in both layouts, body contained %d add-comment ids", strings.Count(body, `data-comment-id="add-comment"`))
+	}
+	if strings.Count(body, `class="diff-add-comment-btn"`) < 2 {
+		t.Fatalf("expected add-comment buttons in both inline and split layouts")
+	}
+	if !strings.Contains(body, `Submit Review`) || !strings.Contains(body, `id="review-toolbar"`) {
+		t.Fatal("expected submit-review toolbar state to remain rendered")
+	}
+}
+
 func TestDiffViewerWithReview_LargeFileRendersLoadDiffButton(t *testing.T) {
 	diff := "diff --git a/big.txt b/big.txt\n--- a/big.txt\n+++ b/big.txt\n@@ -0,0 +1,1000 @@\n" + strings.Repeat("+line\n", autoLoadFileDiffLines+20)
 
