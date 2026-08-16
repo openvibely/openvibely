@@ -3,8 +3,8 @@ name: automation_graphs
 type: project
 created: 2026-07-18
 updated: 2026-08-16
-source: consolidation
-source_id: memory_consolidation_2026_08_16
+source: update_memory
+source_id: b300a40908e1f0b835d6ead0aa77fd99:8f2fe96011a6cffa
 confidence: high
 title: Automation Graphs
 ---
@@ -98,6 +98,7 @@ Current gaps and incidents to remember:
 - Gap `#490`: Automation Live detail should use compact `automation_live_activity_states` keyed by `(project_id, automation_id, version_id, node_id, state_key)` instead of ranking full `automation_activities` history during page render. Preserve activity insert/update projection maintenance, migration backfill, active invocation fallback, pending thread-input bindings, work-item positions, recent completion cutoff, state priority, `github_inbox`/`native_inbox` active-position exclusion, and query-plan coverage. Verify live PR/main state before treating prior implementation as shipped.
 - Resolved Automation Live display-state gap: node display state prioritizes `failed > blocked > running > waiting_human > recently_completed`, so active running work is labeled Running even when waiting items remain visible in counts.
 - Open gap `#387`: newly added custom Automation Schedule/Task nodes omit `skills` and `source_files` config defaults, so Details view does not show Skills or Source files selectors unless users hand-edit YAML first.
+- Open gap `#611`: Chat can preview/save generated or template/description/blank Automation candidates, but cannot save an exact user-provided Automation YAML definition through the same strict preview/save pipeline already available in the browser builder.
 - Stale-origin GitHub SDLC implementation tasks can publish PRs after graph replacement only when durable graph-independent issue-task provenance proves the Automation-created task/source-issue relationship. Review-node causal bindings can still block PR publication if authorization fails to distinguish implementation-to-open-PR policy from review-node bindings.
 - Describe-generated and existing custom Automation snapshots require explicit Edit/Save or recreation to receive corrected generated prompts. Already-created Backlog tasks are not retroactively started and require manual execution.
 - Stale-version repair coverage should include queued input bindings and dependent child work items so they are removed before deleting a stale parent work item.

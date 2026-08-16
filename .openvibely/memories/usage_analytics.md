@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-08-10
-source: consolidation
-source_id: memory_consolidation_2026_08_11
+updated: 2026-08-16
+source: update_memory
+source_id: 345b3bca39c84d8dea769440b66df876:729815eda82b7e62
 confidence: high
 title: Usage Analytics
 ---
@@ -39,6 +39,7 @@ Analytics surface facts:
 - `/analytics` includes local task/execution/productivity analytics, LLM usage/account-limit views, and Skill Curator analytics.
 - Project memory recall effectiveness and downstream follow-through are not currently inspectable alongside skill analytics; an Analytics addition is proposed in `openvibely/openvibely#85`.
 - Known Insights dashboard gap tracked in [GitHub #272](https://github.com/openvibely/openvibely/issues/272): accepting an Insight on the dashboard only flips its status to "accepted" but never creates or links a follow-up task, despite `Insight.TaskID` and `AcceptInsight`/`LinkTask` already existing as dead code in the service layer.
+- GitHub issue [#610](https://github.com/openvibely/openvibely/issues/610) tracks duplicated failed-task-pattern repository logic: `/api/analytics/failed-task-patterns` uses `ExecutionRepo.GetFailedTaskPatterns`, while Insights uses `InsightsRepo.GetFailedTaskPatterns` for bug-pattern detection, optimization detection, and health-check prompt generation. The intended consolidation is a shared query/projection boundary that preserves Analytics project-scoped API behavior and Insights-specific consumers instead of keeping divergent SQL interpretations of the same failure-pattern concept.
 - `/api/analytics/usage` backs the Analytics page usage section; `/api/analytics/skills` backs Skill Curator Analytics.
 - The Analytics page sends the selected/current project ID to every local analytics endpoint it fetches, and the visible project label is tied to that same project ID.
 - Local Analytics sections are project-scoped when labeled with the selected project: model usage filters `llm_usage_events.project_id`; Skill Curator analytics filters `skill_analytics_events.project_id`; task/execution/productivity analytics and failed-task patterns filter through `tasks.project_id`.

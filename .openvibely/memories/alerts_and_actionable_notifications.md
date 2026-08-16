@@ -4,7 +4,7 @@ type: project
 created: 2026-07-15
 updated: 2026-08-16
 source: update_memory
-source_id: 13e73a7510ce02d1540d8bec24b46855:6ede25d1142e8deb
+source_id: a990ccd47db94c6c46e420a05742f403:aa6ead87c8deb642
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -39,6 +39,7 @@ Authorization, concurrency, and runtime facts:
 - Generated/compiled Native inbox guidance requires calls without `project_id` or `read`, forbids project-ID discovery or reuse, executes the exact linked Backlog Task, and completes processing only after execution starts. Scheduled runtime enforcement removes those fields from provider-visible schema and discards injected values.
 - If Native creation, linkage, or execution fails, the inbox records failed processing rather than reporting completion; claim release remains valid only before any task is linked.
 - Open gap `#352`: `complete_alert_processing` can currently mark an approved notification completed from a merely claimed state without requiring a linked implementation task. Fix should enforce linked-task/valid processing-state preconditions and add regression coverage for unlinked completion attempts.
+- Open gap `#612`: Automation-bound tasks that are not Native Inbox nodes can call `list_alerts` and receive project-wide notification summaries because `ListFilteredSummariesForRuntime` treats zero Native Inbox bindings as an unscoped project list. Fix should fail closed or return no rows for non-inbox Automation contexts and add regression coverage for an Automation-bound task with no Native Inbox role.
 - Slack, Telegram, and Discord first-turn channel runtimes are constructed only after the channel Chat task is persisted, so channel lifecycle handlers receive trusted caller identity. Email uses the generic executor with its persisted Chat task.
 - All alert lifecycle mutations publish the existing project-scoped alert invalidation event, including claim, release, explicit linkage, atomic task creation, completion, failure, read, and delete operations.
 - Alert approval, claim, release, implementation-link, implementation-task creation, processing, idempotent creation, and Automation rebind mutations use shared immediate-transaction scaffolding in the alert repository. Mutation-specific SQL, validation, projection helper calls, and error messages remain local to each method. Automation invalidations publish only after successful commit and connection release.
