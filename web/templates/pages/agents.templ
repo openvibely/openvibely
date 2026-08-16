@@ -1344,9 +1344,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 			activeAgentID = '';
 			document.getElementById('agent_modal_title').textContent = 'New Agent';
 			const form = document.getElementById('agent_form');
-			form.action = '/agents';
+			form.action = withCurrentProject('/agents');
 			form.method = 'post';
-			form.setAttribute('hx-post', '/agents');
+			form.setAttribute('hx-post', withCurrentProject('/agents'));
 			form.setAttribute('hx-target', '#agents-container');
 			form.setAttribute('hx-swap', 'outerHTML');
 			form.removeAttribute('hx-put');

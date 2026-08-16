@@ -78,6 +78,47 @@ func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
 	}
 }
 
+func TestHandler_ListAgents_NewAgentModalPreservesCurrentProject(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+
+	projectA := &models.Project{Name: "Stored Project A", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Viewed Project B", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	if err := h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, projectA.ID); err != nil {
+		t.Fatalf("set selected project preference: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/agents?project_id="+url.QueryEscape(projectB.ID), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	body := rec.Body.String()
+	for _, want := range []string{
+		`function withCurrentProject(url)`,
+		`form.action = withCurrentProject('/agents');`,
+		`form.setAttribute('hx-post', withCurrentProject('/agents'));`,
+		`form.action = withCurrentProject('/agents/' + id);`,
+		`fetch(withCurrentProject('/agents/' + encodeURIComponent(id))`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected New/Edit/Delete agent paths to preserve current project with %q", want)
+		}
+	}
+	if strings.Contains(body, `form.action = '/agents';`) || strings.Contains(body, `form.setAttribute('hx-post', '/agents');`) {
+		t.Fatal("expected New Agent form to avoid posting to /agents without current project context")
+	}
+}
+
 func TestHandler_ListAgents_IncludesGenerateUI(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))
@@ -2732,6 +2773,83 @@ func TestHandler_UpdateAgent_PersistsDisabledAdvancedFields(t *testing.T) {
 	}
 	if len(stored.SourceRefs) != 1 || stored.SourceRefs[0] != "https://after.example.test" {
 		t.Fatalf("source refs not updated: %+v", stored.SourceRefs)
+	}
+}
+
+func TestHandler_CreateAgent_ProjectScopedUsesExplicitURLProjectOverStoredSelection(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+
+	globalRoot := t.TempDir()
+	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	maintenanceSvc.SetAgentsRootPath(globalRoot)
+
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(globalRoot)
+	h.SetAgentLibraryMaintenanceService(maintenanceSvc)
+
+	proj1RepoDir := t.TempDir()
+	proj1 := &models.Project{Name: "Stored Project A", RepoPath: proj1RepoDir}
+	if err := h.projectSvc.Create(t.Context(), proj1); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	proj2RepoDir := t.TempDir()
+	proj2 := &models.Project{Name: "Viewed Project B", RepoPath: proj2RepoDir}
+	if err := h.projectSvc.Create(t.Context(), proj2); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	if err := h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, proj1.ID); err != nil {
+		t.Fatalf("set selected project preference: %v", err)
+	}
+
+	form := url.Values{}
+	form.Set("name", "Project B Browser Agent")
+	form.Set("description", "created from the Project B agents page")
+	form.Set("system_prompt", "work in project B")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("key", "project_b_browser_agent")
+	form.Set("scope", "project")
+	form.Set("selectable_as_primary", "true")
+	form.Set("enabled", "true")
+	form.Set("permission_defaults_json", `{}`)
+	form.Set("source_refs_json", `[]`)
+
+	rec := performAgentDialogRequest(t, e, http.MethodPost, "/agents?project_id="+url.QueryEscape(proj2.ID), form)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := agentRepo.GetByKey(t.Context(), "project_b_browser_agent")
+	if err != nil {
+		t.Fatalf("load saved agent: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("expected saved project-scoped agent")
+	}
+	if stored.Scope != models.AgentScopeProject || stored.ProjectID != proj2.ID {
+		t.Fatalf("expected Project B scoped agent, got scope=%q project_id=%q want %q", stored.Scope, stored.ProjectID, proj2.ID)
+	}
+
+	proj2AgentPath := filepath.Join(proj2RepoDir, ".openvibely", "agents", "project_b_browser_agent", "SKILLS.md")
+	data, err := os.ReadFile(proj2AgentPath)
+	if err != nil {
+		t.Fatalf("read Project B agent declaration: %v", err)
+	}
+	if !strings.Contains(string(data), `project_id: `+proj2.ID) {
+		t.Fatalf("expected Project B project_id in declaration, got:\n%s", data)
+	}
+	proj1AgentDir := filepath.Join(proj1RepoDir, ".openvibely", "agents", "project_b_browser_agent")
+	if _, err := os.Stat(proj1AgentDir); !os.IsNotExist(err) {
+		t.Fatalf("expected Project A to stay untouched, stat err=%v", err)
 	}
 }
 
