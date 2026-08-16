@@ -174,8 +174,6 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 			config["goal"] = ""
 			config["category"] = string(models.CategoryBacklog)
 			config["priority"] = 2
-			config["skills"] = []string{}
-			config["source_files"] = []string{}
 			config["model_config_id"] = automationDefaultModelConfigID
 			if adapter.Key == AutomationAdapterGitHubSDLC && node.Role == "implementation" {
 				config["category"] = string(models.CategoryActive)
@@ -284,13 +282,8 @@ func (s *AutomationDraftService) NormalizeCandidate(candidate models.AutomationD
 				node.Config["agent_ref"] = strings.TrimSpace(text)
 			}
 		}
-		for _, field := range []string{"skills", "source_files"} {
-			if value, exists := node.Config[field]; exists {
-				if values, valid := draftStringSlice(value); valid {
-					node.Config[field] = normalizeDraftReferences(values)
-				}
-			}
-		}
+		delete(node.Config, "skills")
+		delete(node.Config, "source_files")
 		if canonical, exists := adapterNodes[node.Key]; exists && node.Position == nil {
 			node.Position = &models.AutomationDraftPoint{X: canonical.X, Y: canonical.Y}
 		}
@@ -1385,7 +1378,7 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 	usesModelConfiguration := usesTaskConfiguration || adapter.Key == AutomationAdapterNativeSDLC && canonical.Role == "implementation"
 	usesGoalConfiguration := usesModelConfiguration
 	if usesTaskConfiguration {
-		for _, key := range []string{"prompt", "category", "priority", "agent_ref", "skills", "source_files"} {
+		for _, key := range []string{"prompt", "category", "priority", "agent_ref"} {
 			allowed[key] = true
 		}
 	}
@@ -1483,27 +1476,6 @@ func validateAutomationTaskReferenceShape(node models.AutomationDraftNode) []mod
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "model_config_id", Message: "Model selection must use a supported configured model."})
 		}
 	}
-	for _, field := range []struct {
-		key  string
-		code string
-		name string
-	}{{"skills", "skill_ref", "Skill"}, {"source_files", "source_file", "Source file"}} {
-		value, exists := node.Config[field.key]
-		if !exists {
-			continue
-		}
-		values, ok := draftStringSlice(value)
-		if !ok || len(values) > 20 {
-			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: field.code, Message: field.name + " selection must be a bounded list of supported references."})
-			continue
-		}
-		for _, value := range values {
-			if strings.TrimSpace(value) == "" || len(value) > 240 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: field.code, Message: field.name + " selection contains an unsupported reference."})
-				break
-			}
-		}
-	}
 	return issues
 }
 
@@ -1523,14 +1495,6 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 	for _, model := range snapshot.Models {
 		modelsByID[model.ID] = true
 	}
-	skills := make(map[string]bool, len(snapshot.Skills))
-	for _, skill := range snapshot.Skills {
-		skills[skill.ID] = true
-	}
-	sourceFiles := make(map[string]bool, len(snapshot.SourceFiles))
-	for _, sourceFile := range snapshot.SourceFiles {
-		sourceFiles[sourceFile] = true
-	}
 	for _, node := range candidate.Nodes {
 		if node.Type != models.AutomationNodeAgentTask && node.Type != models.AutomationNodeTrigger {
 			continue
@@ -1543,20 +1507,6 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 		}
 		if modelConfigID != "" && !modelsByID[modelConfigID] {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "model_config_id", Message: "Model selection is unavailable in this project."})
-		}
-		if selected, ok := draftStringSlice(node.Config["skills"]); ok {
-			for _, skill := range normalizeDraftReferences(selected) {
-				if !skills[skill] || agentRef == "" || !strings.HasPrefix(skill, agentRef+":") {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "skill_ref", Message: "Skill selection is unavailable for the selected Agent in this project."})
-				}
-			}
-		}
-		if selected, ok := draftStringSlice(node.Config["source_files"]); ok {
-			for _, sourceFile := range normalizeDraftReferences(selected) {
-				if !sourceFiles[sourceFile] {
-					issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "source_file", Message: "Source file selection is unavailable in this project."})
-				}
-			}
 		}
 	}
 	sortAutomationValidationIssues(issues)
@@ -1572,12 +1522,6 @@ func (s *AutomationDraftService) validateCandidateForProject(ctx context.Context
 			}
 			if ref, _ := node.Config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
 				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection cannot be resolved because project capabilities are unavailable."})
-			}
-			if values, ok := draftStringSlice(node.Config["skills"]); ok && len(normalizeDraftReferences(values)) > 0 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "skill_ref", Message: "Skill selection cannot be resolved because project capabilities are unavailable."})
-			}
-			if values, ok := draftStringSlice(node.Config["source_files"]); ok && len(normalizeDraftReferences(values)) > 0 {
-				issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "source_file", Message: "Source file selection cannot be resolved because project capabilities are unavailable."})
 			}
 		}
 		sortAutomationValidationIssues(issues)

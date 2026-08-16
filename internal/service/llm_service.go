@@ -560,14 +560,6 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 	if modelContext := strings.TrimSpace(request.Prompt); modelContext != "" && modelContext != prompt {
 		prompt += "\n\nIssue-specific context:\n" + modelContext
 	}
-	skills, _ := draftStringSlice(config["skills"])
-	if len(skills) > 0 {
-		prompt += "\n\nConfigured Agent skills:\n- " + strings.Join(automationSkillNames(normalizeDraftReferences(skills)), "\n- ")
-	}
-	sourceFiles, _ := draftStringSlice(config["source_files"])
-	if len(sourceFiles) > 0 {
-		prompt += "\n\nFocus source files:\n- " + strings.Join(normalizeDraftReferences(sourceFiles), "\n- ")
-	}
 	for _, binding := range automationContext.Bindings {
 		if binding.VersionID != selectedNode.VersionID || binding.AutomationID != selectedNode.AutomationID {
 			continue

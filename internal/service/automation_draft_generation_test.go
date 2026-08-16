@@ -112,8 +112,6 @@ func TestAutomationDescriptionPromptExposesOnlyExecutableCustomCapabilities(t *t
 	snapshot.SupportedNodeTypes = []models.AutomationNodeType{models.AutomationNodeCondition, models.AutomationNodeAgentTask}
 	snapshot.SupportedRoles = []string{"implementation", "task", "vision_driver"}
 	snapshot.Agents = []models.AutomationCapabilityRef{{ID: "market-reader", Name: "Market Reader", Capabilities: []string{"WebSearch", "Read"}}}
-	snapshot.Skills = []models.AutomationCapabilityRef{{ID: "market-reader:private", Name: "Private skill"}}
-	snapshot.SourceFiles = []string{"SECRET.md"}
 	snapshot.ReusableResources = []models.AutomationCapabilityRef{{ID: "existing-task-id", Name: "Existing task"}}
 	snapshot.Integrations = map[string]models.AutomationIntegrationCapability{"native": {Configured: true}, "github": {Configured: false}}
 

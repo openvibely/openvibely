@@ -323,16 +323,6 @@ func automationNodeTaskConfiguration(candidate models.AutomationDraftCandidate, 
 func automationCompiledTaskPrompt(candidate models.AutomationDraftCandidate, node models.AutomationDraftNode) string {
 	prompt, _ := node.Config["prompt"].(string)
 	prompt = strings.TrimSpace(prompt)
-	skills, _ := draftStringSlice(node.Config["skills"])
-	sourceFiles, _ := draftStringSlice(node.Config["source_files"])
-	skills = normalizeDraftReferences(skills)
-	sourceFiles = normalizeDraftReferences(sourceFiles)
-	if len(skills) > 0 {
-		prompt += "\n\nConfigured Agent skills:\n- " + strings.Join(automationSkillNames(skills), "\n- ")
-	}
-	if len(sourceFiles) > 0 {
-		prompt += "\n\nFocus source files:\n- " + strings.Join(sourceFiles, "\n- ")
-	}
 	if node.Type == models.AutomationNodeTrigger {
 		if _, child := customAutomationTaskNeighbors(candidate, node.Key); child != nil {
 			prompt += "\n\nConnected Task handoff:\nDo not create or schedule the connected downstream Task yourself. OpenVibely activates it automatically after this task completes successfully."

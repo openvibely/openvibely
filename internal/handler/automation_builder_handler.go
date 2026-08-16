@@ -346,16 +346,6 @@ func applyAutomationDraftFormValues(c echo.Context, candidate *models.Automation
 			if value, exists := automationDraftFormValue(c, prefix+"agent_ref"); exists {
 				node.Config["agent_ref"] = strings.TrimSpace(value)
 			}
-			if _, supportsSkills := node.Config["skills"]; supportsSkills {
-				if values, exists := automationDraftFormValues(c, prefix+"skills"); exists {
-					node.Config["skills"] = values
-				}
-			}
-			if _, supportsSourceFiles := node.Config["source_files"]; supportsSourceFiles {
-				if values, exists := automationDraftFormValues(c, prefix+"source_files"); exists {
-					node.Config["source_files"] = values
-				}
-			}
 		}
 		if _, ok := node.Config["model_config_id"]; ok {
 			if value, exists := automationDraftFormValue(c, prefix+"model_config_id"); exists {
@@ -442,24 +432,6 @@ func automationDraftFormValue(c echo.Context, key string) (string, bool) {
 		return "", false
 	}
 	return values[0], true
-}
-
-func automationDraftFormValues(c echo.Context, key string) ([]string, bool) {
-	if err := c.Request().ParseForm(); err != nil {
-		return nil, false
-	}
-	values, ok := c.Request().Form[key]
-	if !ok {
-		return nil, false
-	}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			out = append(out, value)
-		}
-	}
-	return out, true
 }
 
 func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models.AutomationDraftCandidate) error {

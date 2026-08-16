@@ -4,7 +4,6 @@ import (
 	"context"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -692,7 +691,7 @@ func TestCustomAutomationValidatesComposableTaskHandoffsAndRejectsUnsupportedJoi
 			augmentedAgent.Nodes[i].Config = map[string]any{"prompt": "Research the request.", "category": "backlog", "priority": 2, "skills": []any{"researcher:review"}, "source_files": []any{"README.md"}}
 		}
 	}
-	require.Contains(t, issueCodes(svc.ValidateCandidate(augmentedAgent)), "unknown_config", "ordinary Agent Task nodes must reject Agent-only Skills and Source files")
+	require.Contains(t, issueCodes(svc.ValidateCandidate(augmentedAgent)), "unknown_config", "ordinary Agent Task nodes must reject deprecated skill and source-file config")
 
 	branch := candidate
 	branch.Nodes = append(append([]models.AutomationDraftNode(nil), candidate.Nodes...), models.AutomationDraftNode{
@@ -969,9 +968,6 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(db)
 	project := automationTestProject(t, projectRepo, "Reference project")
-	project.RepoPath = t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(project.RepoPath, "VISION.md"), []byte("vision"), 0o600))
-	require.NoError(t, projectRepo.Update(ctx, &project))
 	other := automationTestProject(t, projectRepo, "Other reference project")
 	agentRepo := repository.NewAgentRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
@@ -987,7 +983,6 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	snapshot, err := capabilities.Build(ctx, project.ID)
 	require.NoError(t, err)
 	require.Contains(t, snapshot.Agents, models.AutomationCapabilityRef{ID: "project_architect", Name: "Project Architect"})
-	require.Contains(t, snapshot.Skills, models.AutomationCapabilityRef{ID: "project_architect:project-guidance", Name: "project-guidance"})
 
 	svc := NewAutomationDraftService(repository.NewAutomationRepo(db), NewAutomationAdapterRegistry())
 	svc.SetCapabilitySnapshotBuilder(capabilities)
@@ -995,23 +990,25 @@ func TestAutomationTaskReferencesResolveInsideSelectedProject(t *testing.T) {
 	require.NoError(t, err)
 	driverIndex := automationDraftNodeIndexByKey(t, candidate, "vision_driver")
 	candidate.Nodes[driverIndex].Config["agent_ref"] = "project_architect"
-	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:project-guidance"}
-	candidate.Nodes[driverIndex].Config["source_files"] = []any{"VISION.md"}
 	require.Empty(t, svc.ValidateCandidateWithCapabilities(candidate, snapshot))
 
+	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:project-guidance"}
+	candidate.Nodes[driverIndex].Config["source_files"] = []any{"VISION.md"}
+	normalized, err := svc.NormalizeCandidate(candidate)
+	require.NoError(t, err)
+	normalizedDriver := automationDraftNodeByKey(t, normalized, "vision_driver")
+	require.NotContains(t, normalizedDriver.Config, "skills")
+	require.NotContains(t, normalizedDriver.Config, "source_files")
+	require.Empty(t, svc.ValidateCandidateWithCapabilities(normalized, snapshot))
+
 	candidate.Nodes[driverIndex].Config["agent_ref"] = "foreign_architect"
+	delete(candidate.Nodes[driverIndex].Config, "skills")
+	delete(candidate.Nodes[driverIndex].Config, "source_files")
 	issues := svc.ValidateCandidateWithCapabilities(candidate, snapshot)
 	require.Contains(t, issueCodes(issues), "agent_ref")
 	preview, err := svc.PreviewCandidate(ctx, project.ID, candidate, nil)
 	require.NoError(t, err)
 	require.Contains(t, issueCodes(preview.ValidationErrors), "agent_ref", "unresolved references must remain visible without being guessed")
-
-	candidate.Nodes[driverIndex].Config["agent_ref"] = "project_architect"
-	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:missing"}
-	require.Contains(t, issueCodes(svc.ValidateCandidateWithCapabilities(candidate, snapshot)), "skill_ref")
-	candidate.Nodes[driverIndex].Config["skills"] = []any{"project_architect:project-guidance"}
-	candidate.Nodes[driverIndex].Config["source_files"] = []any{"missing.md"}
-	require.Contains(t, issueCodes(svc.ValidateCandidateWithCapabilities(candidate, snapshot)), "source_file")
 }
 
 func TestAutomationDraftServiceRejectsArbitraryTopologyAndUnsafeConfiguration(t *testing.T) {

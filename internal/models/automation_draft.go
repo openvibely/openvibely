@@ -90,9 +90,7 @@ type AutomationCapabilitySnapshot struct {
 	SupportedRoles     []string                                   `json:"supported_roles"`
 	Agents             []AutomationCapabilityRef                  `json:"agents"`
 	Models             []AutomationCapabilityRef                  `json:"models"`
-	Skills             []AutomationCapabilityRef                  `json:"skills"`
 	Integrations       map[string]AutomationIntegrationCapability `json:"integrations"`
-	SourceFiles        []string                                   `json:"source_files"`
 	ReusableResources  []AutomationCapabilityRef                  `json:"reusable_resources"`
 	SafetyBoundaries   map[string]bool                            `json:"safety_boundaries"`
 }

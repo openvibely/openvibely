@@ -34,8 +34,6 @@ nodes:
         repeat_interval: 1
         repeat_type: daily
         run_at: "09:00"
-        skills: []
-        source_files: []
         target_node_key: vision_suggestions
       position:
         x: 0
@@ -72,8 +70,6 @@ nodes:
         repeat_interval: 1
         repeat_type: daily
         run_at: "09:00"
-        skills: []
-        source_files: []
         target_node_key: bug_finder
       position:
         x: 0
@@ -110,8 +106,6 @@ nodes:
         repeat_interval: 1
         repeat_type: daily
         run_at: "09:00"
-        skills: []
-        source_files: []
         target_node_key: optimization_finder
       position:
         x: 0
@@ -148,8 +142,6 @@ nodes:
         repeat_interval: 1
         repeat_type: daily
         run_at: "09:00"
-        skills: []
-        source_files: []
         target_node_key: redundancy_finder
       position:
         x: 0
@@ -195,8 +187,6 @@ nodes:
         repeat_interval: 1
         repeat_type: daily
         run_at: "10:00"
-        skills: []
-        source_files: []
         target_node_key: inbox
       position:
         x: 660

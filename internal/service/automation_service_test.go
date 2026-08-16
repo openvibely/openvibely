@@ -32,8 +32,8 @@ func (r automationEnterpriseRepoResolver) GlobalAPIEndpoint(context.Context) str
 }
 
 func TestCurrentAutomationTemplateRevisionTracksMaintainedTemplateChanges(t *testing.T) {
-	require.Equal(t, 8, CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC))
-	require.Equal(t, 6, CurrentAutomationTemplateRevision(AutomationAdapterGitHubSDLC))
+	require.Equal(t, 9, CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC))
+	require.Equal(t, 7, CurrentAutomationTemplateRevision(AutomationAdapterGitHubSDLC))
 	require.Zero(t, CurrentAutomationTemplateRevision(AutomationAdapterCustom))
 }
 

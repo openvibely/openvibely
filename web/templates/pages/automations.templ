@@ -924,18 +924,7 @@ templ automationBuilderDetailsPanel(page models.AutomationBuilderPage, currentPr
 											<option value={ agent.ID } selected?={ automationDraftStringConfig(node, "agent_ref") == agent.ID }>{ agent.Name }</option>
 										}
 									</select></label>
-									@automationTaskModelSelector(node, page.Capabilities.Models)								if automationDraftHasConfig(node, "skills") || automationDraftHasConfig(node, "source_files") {
-									<label class="form-control"><span class="label-text">Skills</span><input type="hidden" name={ "node_" + node.Key + "_skills" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_skills" } multiple>
-										for _, skill := range page.Capabilities.Skills {
-											<option value={ skill.ID } selected?={ automationDraftStringSliceContains(node, "skills", skill.ID) }>{ skill.Name }</option>
-										}
-									</select></label>
-									<label class="form-control"><span class="label-text">Source files</span><input type="hidden" name={ "node_" + node.Key + "_source_files" } value=""/><select class="select select-bordered min-h-24" name={ "node_" + node.Key + "_source_files" } multiple>
-										for _, sourceFile := range page.Capabilities.SourceFiles {
-											<option value={ sourceFile } selected?={ automationDraftStringSliceContains(node, "source_files", sourceFile) }>{ sourceFile }</option>
-										}
-									</select></label>
-								}
+										@automationTaskModelSelector(node, page.Capabilities.Models)
 							</div>
 							<div class="mt-3 grid grid-cols-2 gap-3">
 								if page.Result.Candidate.AdapterKey == "github_sdlc" && node.Role == "implementation" {
@@ -2088,7 +2077,6 @@ func automationDraftSupportsModel(node models.AutomationDraftNode) bool {
 func automationDraftStringConfig(node models.AutomationDraftNode, key string) string { value, _ := node.Config[key].(string); return value }
 func automationDraftModelConfigIsDefault(node models.AutomationDraftNode) bool { value := strings.TrimSpace(automationDraftStringConfig(node, "model_config_id")); return value == "" || value == "default" }
 func automationDraftStringSliceConfig(node models.AutomationDraftNode, key string) string { values := []string{}; switch configured := node.Config[key].(type) { case []string: values = append(values, configured...); case []any: for _, value := range configured { if text, ok := value.(string); ok { values = append(values, text) } } }; return strings.Join(values, ", ") }
-func automationDraftStringSliceContains(node models.AutomationDraftNode, key, expected string) bool { switch values := node.Config[key].(type) { case []string: for _, value := range values { if value == expected { return true } }; case []any: for _, value := range values { if text, ok := value.(string); ok && text == expected { return true } } }; return false }
 func automationDraftIntConfig(node models.AutomationDraftNode, key string) int { switch value := node.Config[key].(type) { case int: return value; case float64: return int(value); case json.Number: parsed, _ := value.Int64(); return int(parsed) }; return 0 }
 func automationDraftBoolConfig(node models.AutomationDraftNode, key string) bool { value, _ := node.Config[key].(bool); return value }
 func automationDraftHasNode(nodes []models.AutomationDraftNode, key string) bool { for _, node := range nodes { if node.Key == key { return true } }; return false }
