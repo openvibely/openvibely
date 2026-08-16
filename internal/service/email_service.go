@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/hex"
@@ -220,7 +221,7 @@ type EmailService struct {
 	ctx                      context.Context
 	cancel                   context.CancelFunc
 	connectIMAP              func(ctx context.Context, cfg EmailRuntimeConfig) (emailIMAPClient, error)
-	sendMail                 func(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, inReplyTo, references string) error
+	sendMail                 func(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, messageID, inReplyTo, references string) error
 	configLoader             func(context.Context) (EmailRuntimeConfig, error)
 	processIncomingMessageFn func(context.Context, EmailInboundMessage) bool
 }
@@ -793,7 +794,11 @@ func (s *EmailService) processIncomingMessage(ctx context.Context, msg EmailInbo
 		return true
 	}
 	prompt := BuildEmailPrompt(msg)
-	sessionKey := EmailSessionKey(msg.FromAddress, msg.MessageID, msg.References, msg.InReplyTo, msg.Subject)
+	sessionKey, err := s.resolveEmailSessionKey(ctx, projectID, msg)
+	if err != nil {
+		applog.Infof("[email] session resolution failed for sender=%s: %v", redactEmail(msg.FromAddress), err)
+		return false
+	}
 	handedOff := false
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform:              "email",
@@ -1102,6 +1107,21 @@ func BuildEmailPrompt(msg EmailInboundMessage) string {
 	return fmt.Sprintf("[Email from: %s]\n[Subject: %s]\n\n%s", from, strings.TrimSpace(msg.Subject), strings.TrimSpace(msg.Body))
 }
 
+func (s *EmailService) resolveEmailSessionKey(ctx context.Context, projectID string, msg EmailInboundMessage) (string, error) {
+	if len(emailReferenceIDs(msg.References)) == 0 && s.emailTaskContextRepo != nil {
+		if inReplyTo := normalizeEmailMessageID(msg.InReplyTo); inReplyTo != "" {
+			sessionKey, err := s.emailTaskContextRepo.ResolveOutboundMessageSessionKey(ctx, projectID, msg.FromAddress, inReplyTo)
+			if err != nil {
+				return "", err
+			}
+			if sessionKey != "" {
+				return sessionKey, nil
+			}
+		}
+	}
+	return EmailSessionKey(msg.FromAddress, msg.MessageID, msg.References, msg.InReplyTo, msg.Subject), nil
+}
+
 func EmailSessionKey(sender, messageID, references, inReplyTo, subject string) string {
 	sender = repository.NormalizeEmailAddress(sender)
 	var root string
@@ -1142,7 +1162,7 @@ func (s *EmailService) SendTaskCompletionToThread(ctx context.Context, to, inbou
 		return
 	}
 	body := buildEmailCompletionBody(taskTitle, output, errMsg)
-	if err := s.sendReply(ctx, cfg, to, subject, body, inboundMessageID, appendEmailReference(references, inboundMessageID)); err != nil {
+	if err := s.sendReply(ctx, cfg, to, subject, body, inboundMessageID, appendEmailReference(references, inboundMessageID), "", ""); err != nil {
 		applog.Infof("[email] send thread reply failed: %v", err)
 	}
 }
@@ -1160,7 +1180,7 @@ func (s *EmailService) SendChatResponse(ctx context.Context, task models.Task, o
 		return
 	}
 	body := buildEmailChatBody(output, errMsg)
-	if err := s.sendReply(ctx, cfg, etc.EmailFrom, etc.EmailSubject, body, etc.EmailMessageID, appendEmailReference(etc.EmailReferences, etc.EmailMessageID)); err != nil {
+	if err := s.sendReply(ctx, cfg, etc.EmailFrom, etc.EmailSubject, body, etc.EmailMessageID, appendEmailReference(etc.EmailReferences, etc.EmailMessageID), task.ProjectID, etc.EmailSessionKey); err != nil {
 		applog.Infof("[email] send chat response failed task=%s: %v", task.ID, err)
 	}
 }
@@ -1183,16 +1203,28 @@ func (s *EmailService) SendTaskCompletionNotification(ctx context.Context, task 
 		return
 	}
 	body := buildEmailCompletionBody(task.Title, output, errMsg)
-	if err := s.sendReply(ctx, cfg, etc.EmailFrom, etc.EmailSubject, body, etc.EmailMessageID, appendEmailReference(etc.EmailReferences, etc.EmailMessageID)); err != nil {
+	if err := s.sendReply(ctx, cfg, etc.EmailFrom, etc.EmailSubject, body, etc.EmailMessageID, appendEmailReference(etc.EmailReferences, etc.EmailMessageID), task.ProjectID, etc.EmailSessionKey); err != nil {
 		applog.Infof("[email] send task notification failed task=%s: %v", task.ID, err)
 	}
 }
 
-func (s *EmailService) sendReply(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, inReplyTo, references string) error {
+func (s *EmailService) sendReply(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, inReplyTo, references, projectID, sessionKey string) error {
 	if !cfg.Configured() {
 		return fmt.Errorf("email channel is not fully configured")
 	}
-	return s.sendMail(ctx, cfg, to, replySubject(subject), body, inReplyTo, references)
+	messageID, err := generateOutboundEmailMessageID(cfg.Address)
+	if err != nil {
+		return err
+	}
+	if err := s.sendMail(ctx, cfg, to, replySubject(subject), body, messageID, inReplyTo, references); err != nil {
+		return err
+	}
+	if s.emailTaskContextRepo != nil && strings.TrimSpace(projectID) != "" && strings.TrimSpace(sessionKey) != "" {
+		if err := s.emailTaskContextRepo.RecordOutboundMessageRef(ctx, projectID, to, messageID, sessionKey); err != nil {
+			applog.Infof("[email] record outbound reply reference failed: %v", err)
+		}
+	}
+	return nil
 }
 
 func (s *EmailService) sendNewEmail(ctx context.Context, to, subject, body string) error {
@@ -1203,7 +1235,7 @@ func (s *EmailService) sendNewEmail(ctx context.Context, to, subject, body strin
 	if !cfg.Configured() {
 		return fmt.Errorf("email channel is not fully configured")
 	}
-	return s.sendMail(ctx, cfg, to, defaultOutboundEmailSubject(subject), body, "", "")
+	return s.sendMail(ctx, cfg, to, defaultOutboundEmailSubject(subject), body, "", "", "")
 }
 
 func (s *EmailService) SendOutboundMessage(ctx context.Context, to, subject, body string) SendMessageResult {
@@ -1369,7 +1401,43 @@ func joinedEmailReferenceLength(ids []string) int {
 	return length
 }
 
-func defaultEmailSendMail(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, inReplyTo, references string) error {
+func generateOutboundEmailMessageID(from string) (string, error) {
+	domain := "openvibely.local"
+	if addr, err := netmail.ParseAddress(strings.TrimSpace(from)); err == nil && addr != nil {
+		if parts := strings.Split(addr.Address, "@"); len(parts) == 2 {
+			cleaned := sanitizeEmailMessageIDDomain(parts[1])
+			if cleaned != "" {
+				domain = cleaned
+			}
+		}
+	}
+	var randomBytes [12]byte
+	if _, err := rand.Read(randomBytes[:]); err != nil {
+		return "", fmt.Errorf("generating outbound email message id: %w", err)
+	}
+	messageID := fmt.Sprintf("<openvibely.%d.%s@%s>", time.Now().UnixNano(), hex.EncodeToString(randomBytes[:]), domain)
+	if !validEmailMessageID(messageID) {
+		return "", fmt.Errorf("generated invalid outbound email message id")
+	}
+	return messageID, nil
+}
+
+func sanitizeEmailMessageIDDomain(domain string) string {
+	domain = strings.TrimSpace(strings.ToLower(domain))
+	var b strings.Builder
+	for _, r := range domain {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '-' {
+			b.WriteRune(r)
+		}
+	}
+	domain = strings.Trim(b.String(), ".-")
+	if domain == "" {
+		return ""
+	}
+	return domain
+}
+
+func defaultEmailSendMail(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, messageID, inReplyTo, references string) error {
 	var buf bytes.Buffer
 	from := mailAddress(cfg.Address)
 	toAddr := mailAddress(to)
@@ -1378,6 +1446,9 @@ func defaultEmailSendMail(ctx context.Context, cfg EmailRuntimeConfig, to, subje
 		if v := headers[key]; v != "" {
 			fmt.Fprintf(&buf, "%s: %s\r\n", key, v)
 		}
+	}
+	if messageID = normalizeEmailMessageID(messageID); messageID != "" {
+		writeFoldedEmailMessageIDHeader(&buf, "Message-ID", []string{messageID})
 	}
 	if inReplyTo = normalizeEmailMessageID(inReplyTo); inReplyTo != "" {
 		writeFoldedEmailMessageIDHeader(&buf, "In-Reply-To", []string{inReplyTo})

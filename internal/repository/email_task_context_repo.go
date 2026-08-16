@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
 )
@@ -59,4 +60,45 @@ func (r *EmailTaskContextRepo) GetByTaskID(ctx context.Context, taskID string) (
 
 func (r *EmailTaskContextRepo) DeleteByTaskID(ctx context.Context, taskID string) error {
 	return deleteByTaskID(ctx, r.db, "email_task_context", taskID, "email task context")
+}
+
+func (r *EmailTaskContextRepo) RecordOutboundMessageRef(ctx context.Context, projectID, sender, outboundMessageID, sessionKey string) error {
+	projectID = strings.TrimSpace(projectID)
+	sender = NormalizeEmailAddress(sender)
+	outboundMessageID = strings.TrimSpace(outboundMessageID)
+	sessionKey = strings.TrimSpace(sessionKey)
+	if projectID == "" || sender == "" || outboundMessageID == "" || sessionKey == "" {
+		return fmt.Errorf("project, sender, outbound message id, and session key are required")
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO email_outbound_message_refs (project_id, email_from, outbound_message_id, email_session_key)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(project_id, email_from, outbound_message_id) DO UPDATE SET
+			email_session_key = excluded.email_session_key`, projectID, sender, outboundMessageID, sessionKey)
+	if err != nil {
+		return fmt.Errorf("recording email outbound message reference: %w", err)
+	}
+	return nil
+}
+
+func (r *EmailTaskContextRepo) ResolveOutboundMessageSessionKey(ctx context.Context, projectID, sender, outboundMessageID string) (string, error) {
+	projectID = strings.TrimSpace(projectID)
+	sender = NormalizeEmailAddress(sender)
+	outboundMessageID = strings.TrimSpace(outboundMessageID)
+	if projectID == "" || sender == "" || outboundMessageID == "" {
+		return "", nil
+	}
+	var sessionKey string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT email_session_key
+		FROM email_outbound_message_refs
+		WHERE project_id = ? AND email_from = ? AND outbound_message_id = ?
+		LIMIT 1`, projectID, sender, outboundMessageID).Scan(&sessionKey)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolving email outbound message reference: %w", err)
+	}
+	return sessionKey, nil
 }
