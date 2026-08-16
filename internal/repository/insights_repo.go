@@ -298,49 +298,27 @@ func (r *InsightsRepo) DeleteKnowledge(ctx context.Context, id string) error {
 
 // --- Aggregate queries for analysis ---
 
-func (r *InsightsRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, minFailures int) ([]struct {
-	Title      string
-	FailCount  int
-	LastError  string
-}, error) {
-	rows, err := r.db.QueryContext(ctx, `
-		WITH latest_errors AS (
-			SELECT e.task_id, e.error_message,
-				ROW_NUMBER() OVER (PARTITION BY e.task_id ORDER BY e.started_at DESC, e.rowid DESC) as rn
-			FROM executions e
-			WHERE e.status = 'failed'
-		)
-		SELECT t.title, COUNT(*) as fail_count, COALESCE(le.error_message, '') as last_error
-		FROM tasks t
-		JOIN executions e ON e.task_id = t.id
-		LEFT JOIN latest_errors le ON le.task_id = t.id AND le.rn = 1
-		WHERE t.project_id = ? AND e.status = 'failed'
-		GROUP BY t.id
-		HAVING fail_count >= ?
-		ORDER BY fail_count DESC`, projectID, minFailures,
-	)
+type InsightFailedTaskPattern struct {
+	Title     string
+	FailCount int
+	LastError string
+}
+
+func (r *InsightsRepo) GetFailedTaskPatterns(ctx context.Context, projectID string, minFailures int) ([]InsightFailedTaskPattern, error) {
+	rows, err := queryFailedTaskPatterns(ctx, r.db, projectID, minFailures, -1)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
-	var results []struct {
-		Title     string
-		FailCount int
-		LastError string
+	results := make([]InsightFailedTaskPattern, 0, len(rows))
+	for _, row := range rows {
+		results = append(results, InsightFailedTaskPattern{
+			Title:     row.TaskTitle,
+			FailCount: row.FailureCount,
+			LastError: row.LastError,
+		})
 	}
-	for rows.Next() {
-		var r struct {
-			Title     string
-			FailCount int
-			LastError string
-		}
-		if err := rows.Scan(&r.Title, &r.FailCount, &r.LastError); err != nil {
-			return nil, err
-		}
-		results = append(results, r)
-	}
-	return results, rows.Err()
+	return results, nil
 }
 
 func (r *InsightsRepo) GetCompletedBugFixes(ctx context.Context, projectID string, limit int) ([]models.Task, error) {

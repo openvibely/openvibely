@@ -2357,6 +2357,162 @@ func performAgentDialogRequest(t *testing.T, e *echo.Echo, method, target string
 	return rec
 }
 
+func agentNameValidationForm(name string) url.Values {
+	form := url.Values{}
+	form.Set("name", name)
+	form.Set("description", "agent name validation")
+	form.Set("system_prompt", "work")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("enabled", "true")
+	form.Set("selectable_as_primary", "true")
+	return form
+}
+
+func TestHandler_CreateAgent_RejectsBlankAndDuplicateSelectableNames(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	blank := agentNameValidationForm("   \t  ")
+	rec := performAgentDialogRequest(t, e, http.MethodPost, "/agents", blank)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected blank name status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "agent name is required") {
+		t.Fatalf("expected controlled blank-name validation error, got %s", rec.Body.String())
+	}
+
+	agents, err := agentRepo.List(t.Context())
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	for _, agent := range agents {
+		if agent.SystemKind == "" {
+			t.Fatalf("blank-name create persisted user agent: %+v", agent)
+		}
+	}
+
+	create := agentNameValidationForm(" Reviewer ")
+	rec = performAgentDialogRequest(t, e, http.MethodPost, "/agents", create)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected trimmed create status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	stored, err := agentRepo.GetUniqueSelectableByName(t.Context(), "Reviewer")
+	if err != nil {
+		t.Fatalf("resolve created reviewer: %v", err)
+	}
+	if stored == nil || stored.Name != "Reviewer" {
+		t.Fatalf("expected trimmed stored Reviewer, got %+v", stored)
+	}
+
+	dup := agentNameValidationForm(" reviewer ")
+	rec = performAgentDialogRequest(t, e, http.MethodPost, "/agents", dup)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected duplicate name status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(strings.ToLower(rec.Body.String()), "already exists") {
+		t.Fatalf("expected duplicate-name validation error, got %s", rec.Body.String())
+	}
+	matches, err := agentRepo.ListSelectableByName(t.Context(), "Reviewer")
+	if err != nil {
+		t.Fatalf("list reviewer matches: %v", err)
+	}
+	if len(matches) != 1 || matches[0].ID != stored.ID {
+		t.Fatalf("duplicate create changed selectable reviewer rows: %+v", matches)
+	}
+}
+
+func TestHandler_UpdateAgent_RejectsBlankAndDuplicateSelectableNamesWithoutMutating(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	reviewer := &models.Agent{Name: "Reviewer", Key: "reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	other := &models.Agent{Name: "Other", Key: "other", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(t.Context(), reviewer); err != nil {
+		t.Fatalf("create reviewer: %v", err)
+	}
+	if err := agentRepo.Create(t.Context(), other); err != nil {
+		t.Fatalf("create other: %v", err)
+	}
+
+	blank := agentNameValidationForm("   ")
+	rec := performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+other.ID, blank)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected blank update status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	reloaded, err := agentRepo.GetByID(t.Context(), other.ID)
+	if err != nil {
+		t.Fatalf("reload after blank update: %v", err)
+	}
+	if reloaded.Name != "Other" {
+		t.Fatalf("blank update mutated name to %q", reloaded.Name)
+	}
+
+	dup := agentNameValidationForm(" REVIEWER ")
+	rec = performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+other.ID, dup)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected duplicate update status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	reloaded, err = agentRepo.GetByID(t.Context(), other.ID)
+	if err != nil {
+		t.Fatalf("reload after duplicate update: %v", err)
+	}
+	if reloaded.Name != "Other" {
+		t.Fatalf("duplicate update mutated name to %q", reloaded.Name)
+	}
+
+	trimmed := agentNameValidationForm(" Other Updated ")
+	rec = performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+other.ID, trimmed)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected trimmed update status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	reloaded, err = agentRepo.GetByID(t.Context(), other.ID)
+	if err != nil {
+		t.Fatalf("reload after trimmed update: %v", err)
+	}
+	if reloaded.Name != "Other Updated" {
+		t.Fatalf("expected trimmed update name, got %q", reloaded.Name)
+	}
+}
+
+func TestHandler_AgentNameValidation_AllowsDisabledAndNonPrimaryDuplicates(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	primary := &models.Agent{Name: "Reviewer", Key: "reviewer", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(t.Context(), primary); err != nil {
+		t.Fatalf("create primary reviewer: %v", err)
+	}
+
+	disabled := agentNameValidationForm(" reviewer ")
+	disabled.Set("enabled", "false")
+	rec := performAgentDialogRequest(t, e, http.MethodPost, "/agents", disabled)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected disabled duplicate create status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	nonPrimary := agentNameValidationForm(" REVIEWER ")
+	nonPrimary.Set("selectable_as_primary", "false")
+	rec = performAgentDialogRequest(t, e, http.MethodPost, "/agents", nonPrimary)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected non-primary duplicate create status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	matches, err := agentRepo.ListSelectableByName(t.Context(), "Reviewer")
+	if err != nil {
+		t.Fatalf("list selectable reviewer matches: %v", err)
+	}
+	if len(matches) != 1 || matches[0].ID != primary.ID {
+		t.Fatalf("disabled/non-primary duplicates should not affect selectable name resolution: %+v", matches)
+	}
+}
+
 func TestHandler_AgentsPage_AdvancedTabsAreReachableAndSubmitted(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))

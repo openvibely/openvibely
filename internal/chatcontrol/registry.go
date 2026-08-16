@@ -784,13 +784,13 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "save_automation",
-		Description:  "Generate, validate, and atomically save a custom or maintained-template Automation from the user's request using the same capabilities and Save pipeline as the visual builder. Use this when the user asks to create or save an Automation; the successful tool result includes its Live URL. Do not ask for a separate save confirmation.",
+		Description:  "Generate, validate, and atomically save a custom or maintained-template Automation from the user's request or an exact canonical Automation YAML document using the same capabilities and Save pipeline as the visual builder. Use source=\"yaml\" with automation_yaml when the user provides reviewed Automation YAML. Use this when the user asks to create or save an Automation; the successful tool result includes its Live URL. Do not ask for a separate save confirmation.",
 		Domain:       DomainAutomations,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     webAPISurfaces(),
-		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000}},"required":["source"],"additionalProperties":false}`),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank","yaml"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000},"automation_yaml":{"type":"string","description":"Canonical Automation YAML document to save when source is yaml.","minLength":1,"maxLength":65536}},"required":["source"],"additionalProperties":false}`),
 	},
 
 	// --- Chat domain ---

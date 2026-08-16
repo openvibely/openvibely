@@ -17,9 +17,10 @@ type automationPreviewActionInput struct {
 }
 
 type automationSaveActionInput struct {
-	Source      string `json:"source"`
-	TemplateKey string `json:"template_key"`
-	Description string `json:"description"`
+	Source         string `json:"source"`
+	TemplateKey    string `json:"template_key"`
+	Description    string `json:"description"`
+	AutomationYAML string `json:"automation_yaml"`
 }
 
 func (h *Handler) executeAutomationPreviewAction(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
@@ -41,6 +42,9 @@ func (h *Handler) executeAutomationSaveAction(ctx context.Context, params stream
 	var request automationSaveActionInput
 	if err := chatcontrol.DecodeRuntimeToolInput(input, &request); err != nil {
 		return "", err
+	}
+	if field, ok := automationSaveRawCandidateIdentityField(input); ok {
+		return automationValidationResultForChat("unsupported_candidate_identity", fmt.Sprintf("raw Automation candidate identity/version field %q is not supported; submit only the canonical Automation YAML document format", field))
 	}
 	var candidate models.AutomationDraftCandidate
 	var source string
@@ -66,8 +70,15 @@ func (h *Handler) executeAutomationSaveAction(ctx context.Context, params stream
 		}
 		candidate = preview.Candidate
 		source = "manual"
+	case "yaml":
+		var err error
+		candidate, err = service.DecodeAutomationDraftYAML([]byte(request.AutomationYAML))
+		if err != nil {
+			return automationValidationResultForChat("invalid_yaml", err.Error())
+		}
+		source = "manual"
 	default:
-		return "", errors.New("automation source must be template, describe, or blank")
+		return "", errors.New("automation source must be template, describe, blank, or yaml")
 	}
 	plan, candidate, err := h.automationCompiler.PreviewSave(ctx, params.ProjectID, candidate)
 	if err != nil {
@@ -134,6 +145,29 @@ func automationSavePlanDisplayName(name string) string {
 		return name
 	}
 	return name[:marker]
+}
+
+func automationSaveRawCandidateIdentityField(input json.RawMessage) (string, bool) {
+	if strings.TrimSpace(string(input)) == "" {
+		return "", false
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(input, &raw); err != nil {
+		return "", false
+	}
+	for _, field := range []string{"candidate", "candidate_json", "automation_id", "version_id", "plan_revision", "token_id", "confirming_user_input_id"} {
+		if _, ok := raw[field]; ok {
+			return field, true
+		}
+	}
+	return "", false
+}
+
+func automationValidationResultForChat(code, message string) (string, error) {
+	return marshalAutomationActionResult(map[string]any{
+		"validation_errors": []models.AutomationValidationIssue{{Code: code, Message: message}},
+		"active":            false,
+	})
 }
 
 func marshalAutomationActionResult(value any) (string, error) {

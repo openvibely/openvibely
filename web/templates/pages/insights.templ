@@ -240,133 +240,180 @@ templ KnowledgeList(entries []models.KnowledgeEntry) {
 	}
 }
 
-templ HealthCheckCard(project *models.Project, latest *models.HealthCheck, history []models.HealthCheck) {
+type gradeReportMetric struct {
+	Label      string
+	Value      string
+	ValueClass string
+}
+
+type gradeHistoryChip struct {
+	Grade string
+	Date  string
+}
+
+templ gradeReportCard(title string, subtitle string, postURL string, targetID string, spinnerID string, hasLatest bool, refreshLabel string, initialLabel string, emptyCopy string) {
 	<div class="card bg-base-100 shadow-lg border-2 border-primary/20">
 		<div class="card-body">
 			<div class="flex justify-between items-center mb-4">
 				<div>
-					<h3 class="card-title text-xl">Project Management</h3>
-					<p class="text-sm opacity-60">AI-powered project health evaluation</p>
+					<h3 class="card-title text-xl">{ title }</h3>
+					<p class="text-sm opacity-60">{ subtitle }</p>
 				</div>
 				<button
 					class="btn btn-primary"
-					hx-post={ fmt.Sprintf("/insights/health-check?project_id=%s", project.ID) }
-					hx-target="#health-check-content"
+					hx-post={ postURL }
+					hx-target={ "#" + targetID }
 					hx-swap="innerHTML"
-					hx-indicator="#health-check-spinner"
+					hx-indicator={ "#" + spinnerID }
 				>
-					<span id="health-check-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
-					if latest != nil {
-						Refresh Analysis
+					<span id={ spinnerID } class="loading loading-spinner loading-xs htmx-indicator"></span>
+					if hasLatest {
+						{ refreshLabel }
 					} else {
-						Evaluate My Project
+						{ initialLabel }
 					}
 				</button>
 			</div>
-			<div id="health-check-content">
-				if latest != nil {
-					@HealthCheckDisplay(latest, history)
+			<div id={ targetID }>
+				if hasLatest {
+					{ children... }
 				} else {
-					<div class="text-center py-8">
-						<div class="text-5xl mb-4 opacity-20">?</div>
-						<p class="opacity-60">Click "Evaluate My Project" to get your personalized project health grade and feedback.</p>
-					</div>
+					@gradeReportEmptyState(emptyCopy)
 				}
 			</div>
 		</div>
 	</div>
 }
 
-templ HealthCheckDisplay(hc *models.HealthCheck, history []models.HealthCheck) {
-	<div class="space-y-6">
-		<!-- Grade and Quick Stats -->
-		<div class="flex flex-col md:flex-row gap-6">
-			<!-- Grade Display -->
-			<div class="flex flex-col items-center justify-center min-w-[140px]">
-				<div class={ "text-6xl font-black", gradeColorClass(hc.Grade) }>
-					{ hc.Grade }
-				</div>
-				<div class="text-sm opacity-60 mt-1">Project Grade</div>
-				<div class="text-xs opacity-40 mt-1">{ hc.CreatedAt.Local().Format("Jan 2, 2006") }</div>
+templ gradeReportEmptyState(copy string) {
+	<div class="text-center py-8">
+		<div class="text-5xl mb-4 opacity-20">?</div>
+		<p class="opacity-60">{ copy }</p>
+	</div>
+}
+
+templ gradeReportDisplay(grade string, gradeLabel string, createdDate string, metrics []gradeReportMetric) {
+	<div class="flex flex-col md:flex-row gap-6">
+		<div class="flex flex-col items-center justify-center min-w-[140px]">
+			<div class={ "text-6xl font-black", gradeColorClass(grade) }>
+				{ grade }
 			</div>
-			<!-- Quick Metrics -->
-			<div class="stats stats-vertical md:stats-horizontal shadow-sm flex-1">
-				<div class="stat py-2 px-4">
-					<div class="stat-title text-xs">Tasks</div>
-					<div class="stat-value text-lg">{ fmt.Sprintf("%d", hc.TasksTotal) }</div>
-				</div>
-				<div class="stat py-2 px-4">
-					<div class="stat-title text-xs">Completed</div>
-					<div class="stat-value text-lg text-success">{ fmt.Sprintf("%d", hc.TasksCompleted) }</div>
-				</div>
-				<div class="stat py-2 px-4">
-					<div class="stat-title text-xs">Failed</div>
-					<div class="stat-value text-lg text-error">{ fmt.Sprintf("%d", hc.TasksFailed) }</div>
-				</div>
-				<div class="stat py-2 px-4">
-					<div class="stat-title text-xs">Backlog</div>
-					<div class="stat-value text-lg">{ fmt.Sprintf("%d", hc.BacklogSize) }</div>
-				</div>
-				<div class="stat py-2 px-4">
-					<div class="stat-title text-xs">Completion</div>
-					<div class="stat-value text-lg">{ fmt.Sprintf("%.0f%%", hc.AvgCompletionPct) }</div>
-				</div>
-			</div>
+			<div class="text-sm opacity-60 mt-1">{ gradeLabel }</div>
+			<div class="text-xs opacity-40 mt-1">{ createdDate }</div>
 		</div>
-		<!-- Strengths -->
-		<div class="bg-success/10 rounded-lg p-4">
-			<h4 class="font-bold text-success mb-2 flex items-center gap-2">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-					<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-				</svg>
-				What You're Doing Well
-			</h4>
-			<div class="text-sm whitespace-pre-wrap">{ hc.Strengths }</div>
-		</div>
-		<!-- Areas to Improve -->
-		<div class="bg-warning/10 rounded-lg p-4">
-			<h4 class="font-bold text-warning mb-2 flex items-center gap-2">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-					<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
-				</svg>
-				Areas to Improve
-			</h4>
-			<div class="text-sm whitespace-pre-wrap">{ hc.Improvements }</div>
-		</div>
-		<!-- Overall Assessment -->
-		<div class="bg-base-200 rounded-lg p-4">
-			<h4 class="font-bold mb-2 flex items-center gap-2">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-					<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
-				</svg>
-				Overall Assessment
-			</h4>
-			<div class="text-sm whitespace-pre-wrap">{ hc.Assessment }</div>
-		</div>
-		<!-- How to Improve -->
-		<div class="bg-info/10 rounded-lg p-4">
-			<h4 class="font-bold text-info mb-2 flex items-center gap-2">
-				<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-					<path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z"></path>
-				</svg>
-				How to Improve Your Grade
-			</h4>
-			<div class="text-sm whitespace-pre-wrap">{ hc.HowToImprove }</div>
-		</div>
-		<!-- Grade History -->
-		if len(history) > 1 {
-			<div class="mt-4">
-				<h4 class="font-bold mb-2 text-sm">Grade History</h4>
-				<div class="flex gap-2 flex-wrap">
-					for _, h := range history {
-						<div class="flex flex-col items-center bg-base-200 rounded-lg px-3 py-2 min-w-[60px]">
-							<span class={ "font-bold text-lg", gradeColorClass(h.Grade) }>{ h.Grade }</span>
-							<span class="text-xs opacity-50">{ h.CreatedAt.Local().Format("Jan 2") }</span>
-						</div>
-					}
-				</div>
+		@gradeReportMetrics(metrics)
+	</div>
+}
+
+templ gradeReportMetrics(metrics []gradeReportMetric) {
+	<div class="stats stats-vertical md:stats-horizontal shadow-sm flex-1">
+		for _, metric := range metrics {
+			<div class="stat py-2 px-4">
+				<div class="stat-title text-xs">{ metric.Label }</div>
+				<div class={ "stat-value text-lg", metric.ValueClass }>{ metric.Value }</div>
 			</div>
 		}
+	</div>
+}
+
+templ gradeReportSection(tone string, title string, body string) {
+	<div class={ gradeReportSectionClass(tone) }>
+		<h4 class={ gradeReportSectionTitleClass(tone) }>
+			@gradeReportSectionIcon(tone)
+			{ title }
+		</h4>
+		<div class="text-sm whitespace-pre-wrap">{ body }</div>
+		{ children... }
+	</div>
+}
+
+templ gradeReportSectionIcon(tone string) {
+	switch tone {
+		case "success":
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+				<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+			</svg>
+		case "warning":
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+				<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+			</svg>
+		case "info":
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+				<path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z"></path>
+			</svg>
+		default:
+			<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+				<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
+			</svg>
+	}
+}
+
+templ gradeReportHistory(chips []gradeHistoryChip) {
+	if len(chips) > 1 {
+		<div class="mt-4">
+			<h4 class="font-bold mb-2 text-sm">Grade History</h4>
+			<div class="flex gap-2 flex-wrap">
+				for _, chip := range chips {
+					<div class="flex flex-col items-center bg-base-200 rounded-lg px-3 py-2 min-w-[60px]">
+						<span class={ "font-bold text-lg", gradeColorClass(chip.Grade) }>{ chip.Grade }</span>
+						<span class="text-xs opacity-50">{ chip.Date }</span>
+					</div>
+				}
+			</div>
+		</div>
+	}
+}
+
+func gradeReportSectionClass(tone string) string {
+	switch tone {
+	case "success":
+		return "bg-success/10 rounded-lg p-4"
+	case "warning":
+		return "bg-warning/10 rounded-lg p-4"
+	case "info":
+		return "bg-info/10 rounded-lg p-4"
+	default:
+		return "bg-base-200 rounded-lg p-4"
+	}
+}
+
+func gradeReportSectionTitleClass(tone string) string {
+	switch tone {
+	case "success":
+		return "font-bold text-success mb-2 flex items-center gap-2"
+	case "warning":
+		return "font-bold text-warning mb-2 flex items-center gap-2"
+	case "info":
+		return "font-bold text-info mb-2 flex items-center gap-2"
+	default:
+		return "font-bold mb-2 flex items-center gap-2"
+	}
+}
+
+templ HealthCheckCard(project *models.Project, latest *models.HealthCheck, history []models.HealthCheck) {
+	@gradeReportCard(
+		"Project Management",
+		"AI-powered project health evaluation",
+		fmt.Sprintf("/insights/health-check?project_id=%s", project.ID),
+		"health-check-content",
+		"health-check-spinner",
+		latest != nil,
+		"Refresh Analysis",
+		"Evaluate My Project",
+		"Click \"Evaluate My Project\" to get your personalized project health grade and feedback.",
+	) {
+		@HealthCheckDisplay(latest, history)
+	}
+}
+
+templ HealthCheckDisplay(hc *models.HealthCheck, history []models.HealthCheck) {
+	<div class="space-y-6">
+		@gradeReportDisplay(hc.Grade, "Project Grade", hc.CreatedAt.Local().Format("Jan 2, 2006"), healthCheckMetrics(hc))
+		@gradeReportSection("success", "What You're Doing Well", hc.Strengths)
+		@gradeReportSection("warning", "Areas to Improve", hc.Improvements)
+		@gradeReportSection("base", "Overall Assessment", hc.Assessment)
+		@gradeReportSection("info", "How to Improve Your Grade", hc.HowToImprove)
+		@gradeReportHistory(healthCheckHistoryChips(history))
 	</div>
 }
 
@@ -378,6 +425,24 @@ templ HealthCheckResult(hc *models.HealthCheck, err error, history ...models.Hea
 	} else if hc != nil {
 		@HealthCheckDisplay(hc, history)
 	}
+}
+
+func healthCheckMetrics(hc *models.HealthCheck) []gradeReportMetric {
+	return []gradeReportMetric{
+		{Label: "Tasks", Value: fmt.Sprintf("%d", hc.TasksTotal)},
+		{Label: "Completed", Value: fmt.Sprintf("%d", hc.TasksCompleted), ValueClass: "text-success"},
+		{Label: "Failed", Value: fmt.Sprintf("%d", hc.TasksFailed), ValueClass: "text-error"},
+		{Label: "Backlog", Value: fmt.Sprintf("%d", hc.BacklogSize)},
+		{Label: "Completion", Value: fmt.Sprintf("%.0f%%", hc.AvgCompletionPct)},
+	}
+}
+
+func healthCheckHistoryChips(history []models.HealthCheck) []gradeHistoryChip {
+	chips := make([]gradeHistoryChip, 0, len(history))
+	for _, h := range history {
+		chips = append(chips, gradeHistoryChip{Grade: h.Grade, Date: h.CreatedAt.Local().Format("Jan 2")})
+	}
+	return chips
 }
 
 func gradeColorClass(grade string) string {
@@ -399,143 +464,62 @@ func gradeColorClass(grade string) string {
 
 // IdeaGradeCard renders the idea grading section with consistent styling.
 templ IdeaGradeCard(projectID string, latest *models.IdeaGrade, gradeHistory []models.IdeaGrade) {
-	<div class="card bg-base-100 shadow-lg border-2 border-primary/20">
-		<div class="card-body">
-			<div class="flex justify-between items-center mb-4">
-				<div>
-					<h3 class="card-title text-xl">Ideas</h3>
-					<p class="text-sm opacity-60">AI evaluation of your task quality and clarity</p>
-				</div>
-				<button
-					class="btn btn-primary"
-					hx-post={ fmt.Sprintf("/history/grade-ideas?project_id=%s", projectID) }
-					hx-target="#idea-grade-content"
-					hx-swap="innerHTML"
-					hx-indicator="#idea-grade-spinner"
-				>
-					<span id="idea-grade-spinner" class="loading loading-spinner loading-xs htmx-indicator"></span>
-					if latest != nil {
-						Refresh Analysis
-					} else {
-						Grade My Ideas
-					}
-				</button>
-			</div>
-			<div id="idea-grade-content">
-				if latest != nil {
-					@IdeaGradeDisplay(latest, gradeHistory)
-				} else {
-					<div class="text-center py-8">
-						<div class="text-5xl mb-4 opacity-20">?</div>
-						<p class="opacity-60">Click "Grade My Ideas" to get an AI evaluation of your task quality and clarity.</p>
-					</div>
-				}
-			</div>
-		</div>
-	</div>
+	@gradeReportCard(
+		"Ideas",
+		"AI evaluation of your task quality and clarity",
+		fmt.Sprintf("/history/grade-ideas?project_id=%s", projectID),
+		"idea-grade-content",
+		"idea-grade-spinner",
+		latest != nil,
+		"Refresh Analysis",
+		"Grade My Ideas",
+		"Click \"Grade My Ideas\" to get an AI evaluation of your task quality and clarity.",
+	) {
+		@IdeaGradeDisplay(latest, gradeHistory)
+	}
 }
 
 templ IdeaGradeDisplay(ig *models.IdeaGrade, history []models.IdeaGrade) {
 	<div class="space-y-6">
-		<!-- Grade and Quick Stats -->
-		<div class="flex flex-col md:flex-row gap-6">
-			<!-- Grade Display -->
-			<div class="flex flex-col items-center justify-center min-w-[140px]">
-				<div class={ "text-6xl font-black", gradeColorClass(ig.Grade) }>
-					{ ig.Grade }
-				</div>
-				<div class="text-sm opacity-60 mt-1">Idea Quality</div>
-				<div class="text-xs opacity-40 mt-1">{ ig.CreatedAt.Local().Format("Jan 2, 2006") }</div>
-			</div>
-			<!-- Quick Metrics -->
-			<div class="stats stats-vertical md:stats-horizontal shadow-sm flex-1">
-				<div class="stat py-2 px-4">
-					<div class="stat-title text-xs">Tasks Evaluated</div>
-					<div class="stat-value text-lg">{ fmt.Sprintf("%d", ig.TasksEvaluated) }</div>
-				</div>
-				<div class="stat py-2 px-4">
-					<div class="stat-title text-xs">Clarity</div>
-					<div class="stat-value text-lg">{ fmt.Sprintf("%.0f%%", ig.ClarityScore) }</div>
-				</div>
-				<div class="stat py-2 px-4">
-					<div class="stat-title text-xs">Ambition</div>
-					<div class="stat-value text-lg">{ fmt.Sprintf("%.0f%%", ig.AmbitionScore) }</div>
-				</div>
-				<div class="stat py-2 px-4">
-					<div class="stat-title text-xs">Follow-Through</div>
-					<div class="stat-value text-lg">{ fmt.Sprintf("%.0f%%", ig.FollowThrough) }</div>
-				</div>
-			</div>
-		</div>
-		<!-- What You're Doing Well -->
+		@gradeReportDisplay(ig.Grade, "Idea Quality", ig.CreatedAt.Local().Format("Jan 2, 2006"), ideaGradeMetrics(ig))
 		if ig.Strengths != "" {
-			<div class="bg-success/10 rounded-lg p-4">
-				<h4 class="font-bold text-success mb-2 flex items-center gap-2">
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-						<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-					</svg>
-					What You're Doing Well
-				</h4>
-				<div class="text-sm whitespace-pre-wrap">{ ig.Strengths }</div>
-			</div>
+			@gradeReportSection("success", "What You're Doing Well", ig.Strengths)
 		}
-		<!-- Areas to Improve -->
 		if ig.Improvements != "" {
-			<div class="bg-warning/10 rounded-lg p-4">
-				<h4 class="font-bold text-warning mb-2 flex items-center gap-2">
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-						<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
-					</svg>
-					Areas to Improve
-				</h4>
-				<div class="text-sm whitespace-pre-wrap">{ ig.Improvements }</div>
-			</div>
+			@gradeReportSection("warning", "Areas to Improve", ig.Improvements)
 		}
-		<!-- Overall Assessment -->
 		if ig.Summary != "" {
-			<div class="bg-base-200 rounded-lg p-4">
-				<h4 class="font-bold mb-2 flex items-center gap-2">
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-						<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
-					</svg>
-					Overall Assessment
-				</h4>
-				<div class="text-sm whitespace-pre-wrap">{ ig.Summary }</div>
-			</div>
+			@gradeReportSection("base", "Overall Assessment", ig.Summary)
 		}
-		<!-- How to Improve Your Grade -->
 		if ig.HowToNextGrade != "" {
-			<div class="bg-info/10 rounded-lg p-4">
-				<h4 class="font-bold text-info mb-2 flex items-center gap-2">
-					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-						<path d="M10.394 2.08a1 1 0 00-.788 0l-7 3a1 1 0 000 1.84L5.25 8.051a.999.999 0 01.356-.257l4-1.714a1 1 0 11.788 1.838L7.667 9.088l1.94.831a1 1 0 00.787 0l7-3a1 1 0 000-1.838l-7-3zM3.31 9.397L5 10.12v4.102a8.969 8.969 0 00-1.05-.174 1 1 0 01-.89-.89 11.115 11.115 0 01.25-3.762zM9.3 16.573A9.026 9.026 0 007 14.935v-3.957l1.818.78a3 3 0 002.364 0l5.508-2.361a11.026 11.026 0 01.25 3.762 1 1 0 01-.89.89 8.968 8.968 0 00-5.35 2.524 1 1 0 01-1.4 0zM6 18a1 1 0 001-1v-2.065a8.935 8.935 0 00-2-.712V17a1 1 0 001 1z"></path>
-					</svg>
-					How to Improve Your Grade
-				</h4>
-				<div class="text-sm whitespace-pre-wrap">{ ig.HowToNextGrade }</div>
+			@gradeReportSection("info", "How to Improve Your Grade", ig.HowToNextGrade) {
 				if ig.NextGrade != "" {
 					<div class="mt-2 text-sm">
 						<span class="opacity-60">Target grade:</span>
 						<span class={ "font-bold ml-1", gradeColorClass(ig.NextGrade) }>{ ig.NextGrade }</span>
 					</div>
 				}
-			</div>
+			}
 		}
-		<!-- Grade History -->
-		if len(history) > 1 {
-			<div class="mt-4">
-				<h4 class="font-bold mb-2 text-sm">Grade History</h4>
-				<div class="flex gap-2 flex-wrap">
-					for _, h := range history {
-						<div class="flex flex-col items-center bg-base-200 rounded-lg px-3 py-2 min-w-[60px]">
-							<span class={ "font-bold text-lg", gradeColorClass(h.Grade) }>{ h.Grade }</span>
-							<span class="text-xs opacity-50">{ h.CreatedAt.Local().Format("Jan 2") }</span>
-						</div>
-					}
-				</div>
-			</div>
-		}
+		@gradeReportHistory(ideaGradeHistoryChips(history))
 	</div>
+}
+
+func ideaGradeMetrics(ig *models.IdeaGrade) []gradeReportMetric {
+	return []gradeReportMetric{
+		{Label: "Tasks Evaluated", Value: fmt.Sprintf("%d", ig.TasksEvaluated)},
+		{Label: "Clarity", Value: fmt.Sprintf("%.0f%%", ig.ClarityScore)},
+		{Label: "Ambition", Value: fmt.Sprintf("%.0f%%", ig.AmbitionScore)},
+		{Label: "Follow-Through", Value: fmt.Sprintf("%.0f%%", ig.FollowThrough)},
+	}
+}
+
+func ideaGradeHistoryChips(history []models.IdeaGrade) []gradeHistoryChip {
+	chips := make([]gradeHistoryChip, 0, len(history))
+	for _, h := range history {
+		chips = append(chips, gradeHistoryChip{Grade: h.Grade, Date: h.CreatedAt.Local().Format("Jan 2")})
+	}
+	return chips
 }
 
 // IdeaGradeResult renders the result of a grade-ideas POST (swapped into #idea-grade-content).
