@@ -560,6 +560,11 @@ templ ChatBubbleStreaming(role, execID, messagesContainerID, pausePollingTargetI
 									return;
 								}
 								renderScheduled = false;
+								if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent') && String(container._authoritativeTerminalContent || '') !== renderText) {
+									textBuffer = String(container._authoritativeTerminalContent || '');
+									renderBufferedOutput(true, false);
+									return;
+								}
 								lastRenderedSourceLength = sourceLength;
 								lastRenderFinishedAt = Date.now();
 								// Auto-scroll only if the viewport was pinned before this render grew the DOM.
@@ -1048,6 +1053,11 @@ templ ChatStreamingResumeInitScript() {
 								return;
 							}
 							renderScheduled = false;
+							if (Object.prototype.hasOwnProperty.call(container, '_authoritativeTerminalContent') && String(container._authoritativeTerminalContent || '') !== renderText) {
+								cumulativeContent = String(container._authoritativeTerminalContent || '');
+								renderCumulativeContent(true, false);
+								return;
+							}
 							lastRenderedSourceLength = sourceLength;
 							lastRenderFinishedAt = Date.now();
 							if (shouldScroll) {

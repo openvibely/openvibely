@@ -745,10 +745,8 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						if (typeof completedOutput === 'string') {
 							if (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);
 							else streamContainer.setAttribute('data-raw-content', completedOutput);
-							if (window._chatStreamInProgress) {
-								streamContainer._authoritativeTerminalContent = completedOutput;
-								streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
-							}
+							streamContainer._authoritativeTerminalContent = completedOutput;
+							streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
 						}
 						if (typeof completedOutput === 'string' && completedOutput !== '') {
 							if (window.renderStreamingContent) {

@@ -1087,10 +1087,8 @@ templ TaskThreadLiveEventsScript(taskID string) {
 								if (streamContainer && typeof completedOutput === 'string') {
 									if (window.setChatRawContent) window.setChatRawContent(streamContainer, completedOutput);
 									else streamContainer.setAttribute('data-raw-content', completedOutput);
-									if (window._taskThreadStreamingActive) {
-										streamContainer._authoritativeTerminalContent = completedOutput;
-										streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
-									}
+									streamContainer._authoritativeTerminalContent = completedOutput;
+									streamContainer.setAttribute('data-authoritative-terminal-content', 'true');
 								}
 								if (streamContainer && typeof completedOutput === 'string' && completedOutput !== '') {
 									if (window.renderStreamingContent) {
