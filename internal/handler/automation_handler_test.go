@@ -1727,6 +1727,118 @@ func TestAutomationChatExplicitSavePersistsInSingleToolCall(t *testing.T) {
 	}
 }
 
+func TestAutomationChatSaveYAMLPersistsThroughCompilerPipeline(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation YAML Chat save").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	planner := service.NewAutomationSaveValidator(registry, drafts)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+
+	candidate := automationChatCustomApprovalCandidate(t, drafts)
+	yamlDocument, err := service.EncodeAutomationDraftYAML(candidate)
+	require.NoError(t, err)
+	payload, err := json.Marshal(map[string]string{"source": "yaml", "automation_yaml": yamlDocument})
+	require.NoError(t, err)
+	params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+	output, handled, isError, err := runtime.Executor(ctx, "save_automation", payload)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isError, output)
+	require.Contains(t, output, `"active":true`)
+	require.Contains(t, output, `"status":"active"`)
+	require.Contains(t, output, `"url":"/automations/`)
+	require.Equal(t, 1, tableCountHandler(t, tc, "automations"))
+	require.Equal(t, 2, tableCountHandler(t, tc, "tasks"))
+	require.Equal(t, 1, tableCountHandler(t, tc, "schedules"))
+}
+
+func TestAutomationChatSaveYAMLRejectsInvalidDefinitionsWithoutSideEffects(t *testing.T) {
+	tests := []struct {
+		name        string
+		yaml        func(t *testing.T, drafts *service.AutomationDraftService) string
+		wantCode    string
+		wantMessage string
+	}{
+		{
+			name: "malformed YAML",
+			yaml: func(t *testing.T, drafts *service.AutomationDraftService) string {
+				return "schema_version: 1\nname: duplicate\nname: duplicate\n"
+			},
+			wantCode:    "invalid_yaml",
+			wantMessage: "duplicate key",
+		},
+		{
+			name: "unsafe YAML alias",
+			yaml: func(t *testing.T, drafts *service.AutomationDraftService) string {
+				return "schema_version: 1\nname: anchored\ndescription: ''\nautomation_type: custom\nadapter_key: custom\nnodes: &nodes []\nedges: *nodes\n"
+			},
+			wantCode:    "invalid_yaml",
+			wantMessage: "aliases and anchors are not supported",
+		},
+		{
+			name: "unsupported YAML topology",
+			yaml: func(t *testing.T, drafts *service.AutomationDraftService) string {
+				candidate := automationChatCustomApprovalCandidate(t, drafts)
+				candidate.Edges = append(candidate.Edges, models.AutomationDraftEdge{Key: "rejected_morning", From: "rejected", To: "morning", FromPort: "right", ToPort: "left", Condition: map[string]any{}})
+				document, err := service.EncodeAutomationDraftYAML(candidate)
+				require.NoError(t, err)
+				return document
+			},
+			wantCode:    "unsupported_handoff",
+			wantMessage: "supported OpenVibely capability handoff",
+		},
+		{
+			name: "invalid project capability reference",
+			yaml: func(t *testing.T, drafts *service.AutomationDraftService) string {
+				candidate := automationChatCustomApprovalCandidate(t, drafts)
+				candidate.Nodes[1].Config["agent_ref"] = "missing-agent"
+				document, err := service.EncodeAutomationDraftYAML(candidate)
+				require.NoError(t, err)
+				return document
+			},
+			wantCode:    "agent_ref",
+			wantMessage: "Agent selection is unavailable in this project",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			ctx := context.Background()
+			project := tc.CreateProject().WithName("Automation YAML Chat invalid").Build()
+			automationRepo := repository.NewAutomationRepo(tc.db)
+			registry := service.NewAutomationAdapterRegistry()
+			drafts := service.NewAutomationDraftService(automationRepo, registry)
+			planner := service.NewAutomationSaveValidator(registry, drafts)
+			compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
+			tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+			tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+			payload, err := json.Marshal(map[string]string{"source": "yaml", "automation_yaml": test.yaml(t, drafts)})
+			require.NoError(t, err)
+			params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+			runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+
+			output, handled, isError, err := runtime.Executor(ctx, "save_automation", payload)
+			require.NoError(t, err)
+			require.True(t, handled)
+			require.False(t, isError, output)
+			require.Contains(t, output, `"active":false`)
+			require.Contains(t, output, test.wantCode)
+			require.Contains(t, output, test.wantMessage)
+			require.Zero(t, tableCountHandler(t, tc, "automations"))
+			require.Zero(t, tableCountHandler(t, tc, "tasks"))
+			require.Zero(t, tableCountHandler(t, tc, "schedules"))
+		})
+	}
+}
+
 func TestAutomationChatAndWebCreationHaveNoDraftSurfaceBeforeSave(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Automation save surfaces").Build()
@@ -1778,7 +1890,7 @@ func TestAutomationChatSaveRejectsCandidateIdentity(t *testing.T) {
 
 	_, err = tc.handler.executeAutomationSaveAction(ctx, streamingResponseParams{ProjectID: project.ID, TaskID: chatTask.ID, ExecID: planExecution.ID},
 		json.RawMessage(fmt.Sprintf(`{"source":"candidate","candidate":%s}`, raw)))
-	require.ErrorContains(t, err, "template, describe, or blank")
+	require.ErrorContains(t, err, "template, describe, blank, or yaml")
 	require.Zero(t, tableCountHandler(t, tc, "automations"))
 }
 
