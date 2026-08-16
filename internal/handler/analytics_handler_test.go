@@ -5,12 +5,17 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 // --- Analytics page ---
@@ -310,4 +315,214 @@ func TestParseSkillAnalyticsFilter_YearRange(t *testing.T) {
 	if filter.GroupBy != "week" {
 		t.Errorf("expected group_by=week, got %q", filter.GroupBy)
 	}
+}
+
+func TestGetSkillAnalyticsUsesCompactAgentCatalogProjectionAndPreservesEnabledSkills(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		t.Fatalf("clear agents: %v", err)
+	}
+
+	projectRepo := repository.NewProjectRepo(db)
+	agentRepo := repository.NewAgentRepo(db)
+	skillAnalyticsRepo := repository.NewSkillAnalyticsRepo(db)
+	globalRoot := filepath.Join(t.TempDir(), "global")
+	projectARepo := filepath.Join(t.TempDir(), "project-a")
+	projectBRepo := filepath.Join(t.TempDir(), "project-b")
+	projectA := &models.Project{Name: "Project A", RepoPath: projectARepo}
+	projectB := &models.Project{Name: "Project B", RepoPath: projectBRepo}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	projectARoot := filepath.Join(projectARepo, ".openvibely")
+	projectBRoot := filepath.Join(projectBRepo, ".openvibely")
+
+	writeStandaloneSkillForAnalyticsTest(t, globalRoot, "global_only", true, false)
+	writeStandaloneSkillForAnalyticsTest(t, projectARoot, "project_only", true, true)
+	writeAgentSkillForAnalyticsTest(t, globalRoot, "global_agent", "global_agent_skill", true)
+	writeAgentSkillForAnalyticsTest(t, projectARoot, "project_agent", "project_agent_skill", true)
+	writeAgentSkillForAnalyticsTest(t, projectARoot, "duplicate_a", "shared_agent_skill", true)
+	writeAgentSkillForAnalyticsTest(t, projectARoot, "duplicate_b", "shared_agent_skill", true)
+	writeAgentSkillForAnalyticsTest(t, projectARoot, "disabled_agent", "disabled_agent_skill", false)
+	writeAgentSkillForAnalyticsTest(t, projectBRoot, "other_agent", "other_project_agent_skill", true)
+	writeAgentSkillForAnalyticsTest(t, projectARoot, "archived_agent", "archived_agent_skill", true)
+	writeAgentSkillForAnalyticsTest(t, projectARoot, "bad/key", "invalid_key_skill", true)
+
+	createAnalyticsAgent(t, agentRepo, "Global Agent", "global_agent", "")
+	createAnalyticsAgent(t, agentRepo, "Project Agent", "project_agent", projectA.ID)
+	createAnalyticsAgent(t, agentRepo, "Duplicate A", "duplicate_a", projectA.ID)
+	createAnalyticsAgent(t, agentRepo, "Duplicate B", "duplicate_b", projectA.ID)
+	createAnalyticsAgent(t, agentRepo, "Disabled Agent", "disabled_agent", projectA.ID)
+	createAnalyticsAgent(t, agentRepo, "Blank Key", "", projectA.ID)
+	createAnalyticsAgent(t, agentRepo, "Invalid Key", "bad/key", projectA.ID)
+	createAnalyticsAgent(t, agentRepo, "Other Project Agent", "other_agent", projectB.ID)
+	archived := createAnalyticsAgent(t, agentRepo, "Archived Agent", "archived_agent", projectA.ID)
+	archived.GeneratedStatus = models.AgentStatusArchived
+	if err := agentRepo.Update(ctx, archived); err != nil {
+		t.Fatalf("archive agent: %v", err)
+	}
+
+	h := &Handler{
+		projectRepo:        projectRepo,
+		agentRepo:          agentRepo,
+		skillAnalyticsRepo: skillAnalyticsRepo,
+		agentSkillRoot:     globalRoot,
+	}
+	e := echo.New()
+	e.GET("/api/analytics/skills", h.GetSkillAnalytics)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodGet, "/api/analytics/skills?project_id="+projectA.ID+"&range=all", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GetSkillAnalytics status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var dashboard models.SkillAnalyticsDashboard
+	if err := json.Unmarshal(rec.Body.Bytes(), &dashboard); err != nil {
+		t.Fatalf("decode skill analytics dashboard: %v", err)
+	}
+	underusedByHandle := map[string][]models.UnderusedSkillMetric{}
+	for _, metric := range dashboard.Underused {
+		underusedByHandle[metric.SkillHandle] = append(underusedByHandle[metric.SkillHandle], metric)
+	}
+	for _, handle := range []string{"global_only", "project_only", "global_agent_skill", "project_agent_skill", "shared_agent_skill"} {
+		if len(underusedByHandle[handle]) == 0 {
+			t.Fatalf("underused output missing enabled skill %q; got handles %v", handle, sortedSkillAnalyticsHandles(underusedByHandle))
+		}
+	}
+	if got := len(underusedByHandle["shared_agent_skill"]); got != 1 {
+		t.Fatalf("duplicate agent-owned skill handle rows = %d, want 1", got)
+	}
+	projectOnly := underusedByHandle["project_only"][0]
+	if projectOnly.SkillScope != models.SkillScopeProject || !projectOnly.AlwaysUse || !projectOnly.Enabled {
+		t.Fatalf("project skill metric = %+v, want project scope, always use, enabled", projectOnly)
+	}
+	for _, handle := range []string{"disabled_agent_skill", "other_project_agent_skill", "archived_agent_skill", "invalid_key_skill"} {
+		if len(underusedByHandle[handle]) != 0 {
+			t.Fatalf("underused output included excluded skill %q: %+v", handle, underusedByHandle[handle])
+		}
+	}
+
+	var agentStatements []string
+	for _, stmt := range counter.Statements() {
+		if strings.Contains(strings.ToLower(stmt), "from agents") {
+			agentStatements = append(agentStatements, stmt)
+		}
+	}
+	if len(agentStatements) != 1 {
+		t.Fatalf("agent statements = %#v, want exactly one compact enabled-skill lookup", agentStatements)
+	}
+	stmt := strings.ToLower(agentStatements[0])
+	projection := strings.Split(stmt, "from agents")[0]
+	for _, required := range []string{"select id", "coalesce(key, '')", "project_id"} {
+		if !strings.Contains(projection, required) {
+			t.Fatalf("analytics agent projection = %q, want %q in %s", projection, required, agentStatements[0])
+		}
+	}
+	for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("analytics enabled-skill lookup selected forbidden column %q: %s", forbidden, agentStatements[0])
+		}
+	}
+}
+
+func writeStandaloneSkillForAnalyticsTest(t *testing.T, root, handle string, enabled, alwaysUse bool) {
+	t.Helper()
+	indexPath := filepath.Join(root, "skills", "SKILLS.md")
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatalf("create standalone skill index dir: %v", err)
+	}
+	index := ""
+	if alwaysUse {
+		index = "---\nalways_use:\n  - " + handle + "\n---\n\n"
+	}
+	index += "## " + handle + "\n"
+	if err := os.WriteFile(indexPath, []byte(index), 0o644); err != nil {
+		t.Fatalf("write standalone skill index: %v", err)
+	}
+	skillDir := filepath.Join(root, "skills", handle)
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("create standalone skill dir: %v", err)
+	}
+	body := analyticsSkillBody(handle, enabled)
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write standalone skill body: %v", err)
+	}
+}
+
+func writeAgentSkillForAnalyticsTest(t *testing.T, root, agentKey, handle string, enabled bool) {
+	t.Helper()
+	indexPath := filepath.Join(root, "agents", agentKey, "SKILLS.md")
+	if err := os.MkdirAll(filepath.Dir(indexPath), 0o755); err != nil {
+		t.Fatalf("create agent skill index dir: %v", err)
+	}
+	if err := os.WriteFile(indexPath, []byte("## "+agentKey+"/"+handle+"\n"), 0o644); err != nil {
+		t.Fatalf("write agent skill index: %v", err)
+	}
+	skillDir := filepath.Join(root, "agents", agentKey, "skills", handle)
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatalf("create agent skill dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(analyticsSkillBody(handle, enabled)), 0o644); err != nil {
+		t.Fatalf("write agent skill body: %v", err)
+	}
+}
+
+func analyticsSkillBody(handle string, enabled bool) string {
+	return "---\nskill:\n  key: " + handle + "\n  enabled: " + map[bool]string{true: "true", false: "false"}[enabled] + "\n---\n\n# " + handle + "\n"
+}
+
+func createAnalyticsAgent(t *testing.T, repo *repository.AgentRepo, name, key, projectID string) *models.Agent {
+	t.Helper()
+	agent := &models.Agent{
+		Name:         name,
+		Description:  "analytics skill catalog fixture",
+		SystemPrompt: strings.Repeat("large analytics prompt ", 256),
+		Model:        "inherit",
+		Tools:        []string{"Read", models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{
+			Directory:   "src",
+			Permissions: []string{"read", "write"},
+		}}},
+		Plugins: []string{"github@marketplace"},
+		MCPServers: []models.MCPServerConfig{{
+			Name:    "playwright",
+			Command: []string{"npx", "server"},
+		}},
+		Skills: []models.SkillConfig{{
+			Name:    "legacy",
+			Content: strings.Repeat("legacy body ", 128),
+		}},
+		Key:                 key,
+		ProjectID:           projectID,
+		PermissionDefaults:  models.AgentPermissionDefaults{ReadAgents: true, ReadSkills: true},
+		ModelDefaults:       models.AgentModelDefaults{Model: "gpt-5"},
+		SourceRefs:          []string{"agents/fixture/SKILLS.md"},
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if projectID != "" {
+		agent.Scope = models.AgentScopeProject
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		t.Fatalf("create analytics agent %q: %v", name, err)
+	}
+	return agent
+}
+
+func sortedSkillAnalyticsHandles(metrics map[string][]models.UnderusedSkillMetric) []string {
+	handles := make([]string, 0, len(metrics))
+	for handle := range metrics {
+		handles = append(handles, handle)
+	}
+	sort.Strings(handles)
+	return handles
 }

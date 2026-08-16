@@ -150,7 +150,7 @@ func (h *Handler) enabledSkillsForAnalytics(c echo.Context) []repository.Enabled
 		}
 	}
 	if h.agentRepo != nil {
-		agents, err := h.agentRepo.List(c.Request().Context())
+		agents, err := h.agentRepo.ListSkillCatalogRefs(c.Request().Context())
 		if err == nil {
 			seen := map[string]bool{}
 			for _, agent := range agents {

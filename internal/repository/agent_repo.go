@@ -43,6 +43,14 @@ type AgentPickerOption struct {
 	Name string
 }
 
+// AgentSkillCatalogRef is the compact projection needed to discover agent-owned
+// skill catalogs without hydrating prompt/config/plugin/skill JSON fields.
+type AgentSkillCatalogRef struct {
+	ID        string
+	Key       string
+	ProjectID string
+}
+
 func scanAgent(row interface{ Scan(dest ...any) error }) (*models.Agent, error) {
 	var a models.Agent
 	var (
@@ -204,6 +212,32 @@ func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]AgentPickerOption,
 		options = append(options, option)
 	}
 	return options, rows.Err()
+}
+
+func (r *AgentRepo) ListSkillCatalogRefs(ctx context.Context) ([]AgentSkillCatalogRef, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, COALESCE(key, ''), project_id
+		FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing agent skill catalog refs: %w", err)
+	}
+	defer rows.Close()
+
+	var refs []AgentSkillCatalogRef
+	for rows.Next() {
+		var ref AgentSkillCatalogRef
+		var projectID sql.NullString
+		if err := rows.Scan(&ref.ID, &ref.Key, &projectID); err != nil {
+			return nil, fmt.Errorf("scanning agent skill catalog ref: %w", err)
+		}
+		if projectID.Valid {
+			ref.ProjectID = projectID.String
+		}
+		refs = append(refs, ref)
+	}
+	return refs, rows.Err()
 }
 
 func (r *AgentRepo) ListSelectableForProject(ctx context.Context, projectID string, limit int) ([]models.Agent, error) {
