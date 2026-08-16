@@ -18,6 +18,7 @@ type fakeGitHubIssueActionProvider struct {
 	labelNumber    int
 	labels         []string
 	closeNumber    int
+	createdIssues  []GitHubIssue
 }
 
 func (f *fakeGitHubIssueActionProvider) GetIssue(_ context.Context, _ *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {
@@ -28,6 +29,9 @@ func (f *fakeGitHubIssueActionProvider) ListAuthenticatedAssignedIssues(_ contex
 	return &GitHubAuthenticatedUser{Login: "Me"}, []GitHubIssue{{Number: 1}}, nil
 }
 func (f *fakeGitHubIssueActionProvider) ListAuthenticatedCreatedIssues(_ context.Context, _ *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+	if f.createdIssues != nil {
+		return &GitHubAuthenticatedUser{Login: "Me"}, f.createdIssues, nil
+	}
 	return &GitHubAuthenticatedUser{Login: "Me"}, []GitHubIssue{{Number: 9, URL: "https://github.com/owner/repo/issues/9", Title: "Existing issue", Body: "Detailed existing issue body", State: "open", UserLogin: "Me", Labels: []string{"bug"}}}, nil
 }
 func (f *fakeGitHubIssueActionProvider) ListAssignedIssues(_ context.Context, _ *GitHubRepoRef, _ string) ([]GitHubIssue, error) {
@@ -141,6 +145,57 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 	wantResolved := []string{"get", "my-assigned", "assigned", "created", "assigned-with-prs", "comment", "labels", "close"}
 	if !reflect.DeepEqual(resolved, wantResolved) {
 		t.Fatalf("resolved repositories=%v, want %v", resolved, wantResolved)
+	}
+}
+
+func TestGitHubIssueActionCoreListExistingAutomationIssuesPaginatesCallerVisibleResults(t *testing.T) {
+	provider := &fakeGitHubIssueActionProvider{createdIssues: []GitHubIssue{
+		{Number: 1, Title: "Newest issue", State: "open", UserLogin: "Me"},
+		{Number: 2, Title: "Middle issue", State: "closed", UserLogin: "Me"},
+		{Number: 3, Title: "Oldest issue", State: "open", UserLogin: "Me"},
+	}}
+	core := NewGitHubIssueActionCore(provider, fakeGitHubIssueAuthorizationStore{}, "project-1",
+		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
+		func(context.Context, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{FullName: "owner/repo"}, nil
+		})
+	ctx := context.Background()
+
+	first, err := core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"limit":2}`))
+	if err != nil {
+		t.Fatalf("first page err=%v output=%q", err, first)
+	}
+	for _, want := range []string{`"returned":2`, `"total":3`, `"offset":0`, `"next_offset":2`, `"truncated":true`, `"title":"Newest issue"`, `"title":"Middle issue"`} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("first page missing %s: %q", want, first)
+		}
+	}
+	if strings.Contains(first, `"title":"Oldest issue"`) {
+		t.Fatalf("first page included second-page issue: %q", first)
+	}
+
+	second, err := core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"limit":2,"offset":2}`))
+	if err != nil {
+		t.Fatalf("second page err=%v output=%q", err, second)
+	}
+	for _, want := range []string{`"returned":1`, `"total":3`, `"offset":2`, `"next_offset":0`, `"truncated":false`, `"title":"Oldest issue"`} {
+		if !strings.Contains(second, want) {
+			t.Fatalf("second page missing %s: %q", want, second)
+		}
+	}
+
+	empty, err := core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"limit":2,"offset":4}`))
+	if err != nil {
+		t.Fatalf("empty page err=%v output=%q", err, empty)
+	}
+	for _, want := range []string{`"issues":[]`, `"returned":0`, `"total":3`, `"offset":4`, `"next_offset":0`, `"truncated":false`} {
+		if !strings.Contains(empty, want) {
+			t.Fatalf("empty page missing %s: %q", want, empty)
+		}
+	}
+
+	if _, err := core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"offset":-1}`)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+		t.Fatalf("negative offset error=%v, want validation error", err)
 	}
 }
 

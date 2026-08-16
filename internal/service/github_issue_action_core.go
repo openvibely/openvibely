@@ -29,6 +29,7 @@ type GitHubIssueActionRequest struct {
 	ExpectedHeadSHA       string   `json:"expected_head_sha"`
 	ConfirmHistoryRewrite bool     `json:"confirm_history_rewrite"`
 	Limit                 int      `json:"limit"`
+	Offset                int      `json:"offset"`
 }
 
 type GitHubIssueActionProvider interface {
@@ -173,26 +174,34 @@ func (c *GitHubIssueActionCore) ExecuteListExistingAutomationIssues(ctx context.
 	if limit == 0 {
 		limit = 50
 	}
-	if limit < 1 || limit > 100 {
-		return "", fmt.Errorf("limit must be 1-100")
+	if limit < 1 || limit > 100 || req.Offset < 0 {
+		return "", fmt.Errorf("limit must be 1-100 and offset must be non-negative")
 	}
 	user, issues, err := c.provider.ListAuthenticatedCreatedIssues(ctx, repo)
 	if err != nil {
 		return "", err
 	}
-	summaries := compactExistingGitHubIssues(issues, limit)
+	summaries := compactExistingGitHubIssues(issues, limit, req.Offset)
+	nextOffset := 0
+	if req.Offset+len(summaries) < len(issues) {
+		nextOffset = req.Offset + len(summaries)
+	}
 	return githubIssueActionJSON(map[string]any{
 		"ok": true, "account": user, "repository": repo.FullName,
-		"issues": summaries, "returned": len(summaries), "total": len(issues), "truncated": len(issues) > len(summaries),
+		"issues": summaries, "returned": len(summaries), "total": len(issues), "offset": req.Offset, "next_offset": nextOffset, "truncated": nextOffset > 0,
 	})
 }
 
-func compactExistingGitHubIssues(issues []GitHubIssue, limit int) []map[string]any {
-	if limit > len(issues) {
-		limit = len(issues)
+func compactExistingGitHubIssues(issues []GitHubIssue, limit, offset int) []map[string]any {
+	if offset >= len(issues) {
+		return []map[string]any{}
 	}
-	summaries := make([]map[string]any, 0, limit)
-	for _, issue := range issues[:limit] {
+	end := offset + limit
+	if end > len(issues) {
+		end = len(issues)
+	}
+	summaries := make([]map[string]any, 0, end-offset)
+	for _, issue := range issues[offset:end] {
 		summaries = append(summaries, map[string]any{
 			"number":     issue.Number,
 			"url":        issue.URL,
