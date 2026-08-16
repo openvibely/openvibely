@@ -65,6 +65,107 @@ func BenchmarkLLMConfigRepoListFullVsCardsLargeCustomProviders(b *testing.B) {
 			}
 		}
 	})
+	b.Run("picker_projection", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListPickerOptions(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) < 50 {
+				b.Fatalf("expected production-shaped fixture, got %d configs", len(configs))
+			}
+		}
+	})
+}
+
+func TestLLMConfigRepo_ListPickerOptionsUsesBoundedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	largeBody := strings.Repeat("x", 1024*1024)
+	alpha := &models.LLMConfig{
+		Name: "Alpha Custom", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "alpha-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client",
+		BaseURL: "https://example.com/v1/", Transport: "chat_completions", PresetSlug: "custom",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, alpha); err != nil {
+		t.Fatal(err)
+	}
+	zuluDefault := &models.LLMConfig{
+		Name: "Zulu Default", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+		Model: "zulu-model", APIKey: "secret-key", IsDefault: true,
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, zuluDefault); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := repo.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter.Reset()
+	counter.SetEnabled(true)
+	picker, err := repo.ListPickerOptions(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(picker) != len(full) {
+		t.Fatalf("picker len = %d, full len = %d", len(picker), len(full))
+	}
+	for i := range full {
+		if picker[i].ID != full[i].ID || picker[i].Name != full[i].Name || picker[i].Model != full[i].Model {
+			t.Fatalf("picker[%d] = %#v, full[%d] = %#v", i, picker[i], i, full[i])
+		}
+	}
+
+	byID := make(map[string]models.LLMConfig, len(picker))
+	for _, option := range picker {
+		byID[option.ID] = option
+	}
+	custom := byID[alpha.ID]
+	if custom.Name != "Alpha Custom" || custom.Model != "alpha-model" {
+		t.Fatalf("picker label fields not preserved: %#v", custom)
+	}
+	if custom.Provider != "" || custom.APIKey != "" || custom.OAuthAccessToken != "" || custom.OAuthRefreshToken != "" ||
+		custom.OAuthClientSecret != "" || custom.BaseURL != "" || custom.ExtraHeadersJSON != "" || custom.ExtraBodyJSON != "" ||
+		custom.CustomAuthConfigJSON != "" || custom.CustomAuthStateJSON != "" || custom.MixtureConfigJSON != "" {
+		t.Fatalf("picker materialized execution/edit-only fields: %#v", custom)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact picker query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, model") {
+		t.Fatalf("picker projection = %q, want id/name/model in %s", projection, statements[0])
+	}
+	for _, forbidden := range []string{"provider", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("picker query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("picker query must preserve default/name ordering: %s", statements[0])
+	}
+
+	fullCustom, err := repo.GetByID(ctx, alpha.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fullCustom == nil || fullCustom.APIKey != "secret-key" || fullCustom.OAuthAccessToken != "secret-token" || fullCustom.ExtraBodyJSON != largeBody || fullCustom.CustomAuthStateJSON == "" || fullCustom.MixtureConfigJSON == "" {
+		t.Fatalf("full detail path lost provider fields: %#v", fullCustom)
+	}
 }
 
 func TestLLMConfigRepo_ListCardsUsesBoundedProjection(t *testing.T) {

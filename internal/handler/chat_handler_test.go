@@ -20,6 +20,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -97,6 +98,93 @@ func TestHandler_Chat_HTMX(t *testing.T) {
 	// HTMX response should not contain full page structure
 	if strings.Contains(body, "<!DOCTYPE html>") {
 		t.Error("HTMX response should not contain full page structure")
+	}
+}
+
+func TestHandler_ChatRenderRoutesUseCompactModelPickerProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	projects, err := h.projectSvc.List(ctx)
+	if err != nil || len(projects) == 0 {
+		t.Fatalf("list projects: %v", err)
+	}
+	projectID := projects[0].ID
+
+	largePayload := strings.Repeat("large-edit-only-json", 4096)
+	largeCustom := &models.LLMConfig{
+		Name: "Large Custom Provider", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "custom-model", APIKey: "secret-api-key", OAuthAccessToken: "secret-oauth-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client", BaseURL: "https://example.com/v1/",
+		Transport: "chat_completions", PresetSlug: "custom", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largePayload, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largePayload + `"}`,
+		IsDefault: true,
+	}
+	if err := llmConfigRepo.Create(ctx, largeCustom); err != nil {
+		t.Fatalf("create large custom provider: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	chatRec := htmxGet(e, "/chat?project_id="+projectID)
+	counter.SetEnabled(false)
+	assertCode(t, chatRec, http.StatusOK)
+	chatBody := chatRec.Body.String()
+	for _, expected := range []string{"Auto", "Default", "Large Custom Provider", "custom-model"} {
+		if !strings.Contains(chatBody, expected) {
+			t.Fatalf("GET /chat response missing %q: %s", expected, chatBody)
+		}
+	}
+	assertNotContains(t, chatRec, largePayload)
+	assertNotContains(t, chatRec, "secret-api-key")
+	assertChatModelPickerQuery(t, counter.Statements())
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	clearRec := htmxDelete(e, "/chat/history?project_id="+projectID)
+	counter.SetEnabled(false)
+	assertCode(t, clearRec, http.StatusOK)
+	clearBody := clearRec.Body.String()
+	for _, expected := range []string{"Auto", "Default", "Large Custom Provider", "custom-model"} {
+		if !strings.Contains(clearBody, expected) {
+			t.Fatalf("DELETE /chat/history response missing %q: %s", expected, clearBody)
+		}
+	}
+	assertNotContains(t, clearRec, largePayload)
+	assertNotContains(t, clearRec, "secret-api-key")
+	assertChatModelPickerQuery(t, counter.Statements())
+
+	full, err := llmConfigRepo.GetByID(ctx, largeCustom.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full == nil || full.APIKey != "secret-api-key" || full.OAuthAccessToken != "secret-oauth-token" || full.ExtraBodyJSON != largePayload || full.CustomAuthStateJSON == "" {
+		t.Fatalf("execution/detail model read lost full provider fields: %#v", full)
+	}
+}
+
+func assertChatModelPickerQuery(t *testing.T, statements []string) {
+	t.Helper()
+	var pickerStatements []string
+	for _, statement := range statements {
+		normalized := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
+			pickerStatements = append(pickerStatements, normalized)
+		}
+	}
+	if len(pickerStatements) != 1 {
+		t.Fatalf("expected exactly one Chat model-picker query, got %d in statements: %q", len(pickerStatements), statements)
+	}
+	picker := pickerStatements[0]
+	projection := strings.Split(strings.ToLower(picker), " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, model") {
+		t.Fatalf("Chat picker query does not use id/name/model projection: %s", picker)
+	}
+	for _, forbidden := range []string{"provider", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("Chat picker query selected forbidden column %q: %s", forbidden, picker)
+		}
 	}
 }
 

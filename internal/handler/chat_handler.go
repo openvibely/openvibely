@@ -35,9 +35,9 @@ func (h *Handler) Chat(c echo.Context) error {
 	isHTMX := isHTMX(c)
 	applog.Debugf("[handler] Chat requested htmx=%v", isHTMX)
 
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
+	agents, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
 	if err != nil {
-		applog.Infof("[handler] Chat error listing agents: %v", err)
+		applog.Infof("[handler] Chat error listing model picker options: %v", err)
 		return err
 	}
 
@@ -691,9 +691,9 @@ func (h *Handler) ClearChat(c echo.Context) error {
 	applog.Infof("[handler] ClearChat deleted %d chat tasks", count)
 
 	// Return updated chat content
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
+	agents, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
 	if err != nil {
-		applog.Infof("[handler] ClearChat error listing agents: %v", err)
+		applog.Infof("[handler] ClearChat error listing model picker options: %v", err)
 		return err
 	}
 

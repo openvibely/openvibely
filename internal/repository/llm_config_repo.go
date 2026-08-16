@@ -24,12 +24,17 @@ const llmConfigColumns = `id, name, provider, model, reasoning_effort, api_key, 
 // edit-only endpoint settings, request JSON, custom-auth JSON, and full mixture
 // JSON are deliberately excluded from the initial response path.
 const llmConfigCardColumns = `id, name, provider, model, reasoning_effort,
-	CASE WHEN api_key != '' THEN 1 ELSE 0 END, temperature, is_default, auth_method,
-	CASE WHEN oauth_access_token != '' THEN 1 ELSE 0 END, oauth_expires_at,
-	max_workers, worker_timeout, substr(ollama_base_url, 1, 512), substr(base_url, 1, 512),
-	CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.agent_config_id'), ''), 1, 128) ELSE '' END,
-	CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.label'), ''), 1, 256) ELSE '' END,
-	CASE WHEN json_valid(mixture_config_json) AND json_type(mixture_config_json, '$.reference_models') = 'array' THEN json_array_length(mixture_config_json, '$.reference_models') ELSE 0 END`
+		CASE WHEN api_key != '' THEN 1 ELSE 0 END, temperature, is_default, auth_method,
+		CASE WHEN oauth_access_token != '' THEN 1 ELSE 0 END, oauth_expires_at,
+		max_workers, worker_timeout, substr(ollama_base_url, 1, 512), substr(base_url, 1, 512),
+		CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.agent_config_id'), ''), 1, 128) ELSE '' END,
+		CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.label'), ''), 1, 256) ELSE '' END,
+		CASE WHEN json_valid(mixture_config_json) AND json_type(mixture_config_json, '$.reference_models') = 'array' THEN json_array_length(mixture_config_json, '$.reference_models') ELSE 0 END`
+
+// llmConfigPickerColumns is the render-only Chat model picker projection.
+// It deliberately excludes provider identity, credentials, endpoint settings,
+// request JSON, custom-auth state, worker fields, and mixture definitions.
+const llmConfigPickerColumns = `id, name, model`
 
 func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig) error {
 	return row.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.ReasoningEffort, &a.APIKey,
@@ -69,7 +74,7 @@ func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
 func (r *LLMConfigRepo) ListCards(ctx context.Context) ([]models.LLMConfig, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+llmConfigCardColumns+`
-				 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+					 FROM agent_configs ORDER BY is_default DESC, name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing model cards: %w", err)
 	}
@@ -94,6 +99,29 @@ func (r *LLMConfigRepo) ListCards(ctx context.Context) ([]models.LLMConfig, erro
 		}
 		if hasOAuthKey {
 			a.OAuthAccessToken = "present"
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
+}
+
+// ListPickerOptions returns only the fields needed to render model picker labels.
+// The returned LLMConfig values are intentionally incomplete and must not be used
+// for provider execution, model editing, default resolution, or persistence.
+func (r *LLMConfigRepo) ListPickerOptions(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+llmConfigPickerColumns+`
+					 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing model picker options: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var a models.LLMConfig
+		if err := rows.Scan(&a.ID, &a.Name, &a.Model); err != nil {
+			return nil, fmt.Errorf("scanning model picker option: %w", err)
 		}
 		configs = append(configs, a)
 	}
