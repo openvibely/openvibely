@@ -2,10 +2,28 @@ package update
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestAtomicWriteStateOverwritesExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	if err := atomicWriteState(path, []byte(`{"state":"first"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWriteState(path, []byte(`{"state":"second"}`)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != `{"state":"second"}` {
+		t.Fatalf("state file = %s", data)
+	}
+}
 
 func TestDrainClosesAdmissionBeforeSnapshotAndRequiresQuietInterval(t *testing.T) {
 	now := time.Unix(1000, 0)

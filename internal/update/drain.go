@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -215,11 +216,23 @@ func atomicWriteState(path string, data []byte) error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := replaceStateFile(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
 	return nil
+}
+
+func replaceStateFile(tmp, path string) error {
+	if err := os.Rename(tmp, path); err == nil {
+		return nil
+	} else if runtime.GOOS != "windows" {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func (m *DrainManager) persistLocked() error {
