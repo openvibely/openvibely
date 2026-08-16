@@ -1135,7 +1135,7 @@ func TestChatInputForm_MobileControlsStayContained(t *testing.T) {
 	}
 
 	content := buf.String()
-	gutterClass := `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-3"`
+	gutterClass := `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6"`
 	if !strings.Contains(content, gutterClass) {
 		t.Fatalf("chat composer should render inside a full-width shadow gutter with a persistent top gap and without artificial side padding or desktop caps; missing %q", gutterClass)
 	}
@@ -3862,7 +3862,7 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `-mr-[29px]`) || strings.Contains(content, `-mr-[18px]`) {
 		t.Fatal("task thread messages must not use fixed right-margin scrollbar compensation because it leaves bubbles visually shorter than the input in real browsers")
 	}
-	if !strings.Contains(content, `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-3"`) {
+	if !strings.Contains(content, `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-6"`) {
 		t.Fatal("task thread composer must use a full-width shadow gutter with only the shared persistent top gap")
 	}
 	if strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full sm:max-w-3xl`) || strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4 px-3`) || strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4`) {
