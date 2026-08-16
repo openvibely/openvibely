@@ -232,9 +232,15 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 		if err != nil {
 			return nil, err
 		}
-		var agentID *string
+		var agentDefinitionID *string
 		if agent != nil {
-			agentID = &agent.ID
+			agentDefinitionID = &agent.ID
+		}
+		modelConfigID, _ := node.Config["model_config_id"].(string)
+		modelConfigID = strings.TrimSpace(modelConfigID)
+		var agentID *string
+		if modelConfigID != "" {
+			agentID = &modelConfigID
 		}
 		goal, _ := node.Config["goal"].(string)
 		taskWrite := repository.AutomationSaveTask{
@@ -244,7 +250,8 @@ func (c *AutomationCompiler) Save(ctx context.Context, request AutomationSaveReq
 			Goal:              strings.TrimSpace(goal),
 			Category:          category,
 			Priority:          priority,
-			AgentDefinitionID: agentID,
+			AgentID:           agentID,
+			AgentDefinitionID: agentDefinitionID,
 		}
 		if existing := existingResources[node.Key+"\x00task"]; existing.ResourceID != "" {
 			taskWrite.ExistingTaskID = existing.ResourceID

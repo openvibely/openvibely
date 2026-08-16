@@ -48,9 +48,9 @@ type AutomationAdapterRegistry struct{ adapters map[string]AutomationAdapter }
 func CurrentAutomationTemplateRevision(adapterKey string) int {
 	switch adapterKey {
 	case AutomationAdapterNativeSDLC:
-		return 6
+		return 7
 	case AutomationAdapterGitHubSDLC:
-		return 4
+		return 5
 	default:
 		return 0
 	}

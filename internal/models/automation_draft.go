@@ -89,6 +89,7 @@ type AutomationCapabilitySnapshot struct {
 	SupportedNodeTypes []AutomationNodeType                       `json:"supported_node_types"`
 	SupportedRoles     []string                                   `json:"supported_roles"`
 	Agents             []AutomationCapabilityRef                  `json:"agents"`
+	Models             []AutomationCapabilityRef                  `json:"models"`
 	Skills             []AutomationCapabilityRef                  `json:"skills"`
 	Integrations       map[string]AutomationIntegrationCapability `json:"integrations"`
 	SourceFiles        []string                                   `json:"source_files"`

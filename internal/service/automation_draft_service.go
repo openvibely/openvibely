@@ -165,6 +165,7 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 			config["priority"] = 2
 			config["skills"] = []string{}
 			config["source_files"] = []string{}
+			config["model_config_id"] = ""
 			if adapter.Key == AutomationAdapterGitHubSDLC && node.Role == "implementation" {
 				config["category"] = string(models.CategoryActive)
 			}
@@ -188,6 +189,7 @@ func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[str
 		}
 		if adapter.Key == AutomationAdapterNativeSDLC && node.Role == "implementation" {
 			config["goal"] = ""
+			config["model_config_id"] = ""
 		}
 		switch node.Role {
 		case "create_notification":
@@ -839,7 +841,7 @@ func customAutomationNativeImplementation(candidate models.AutomationDraftCandid
 		return false
 	}
 	for key := range node.Config {
-		if key != "goal" {
+		if key != "goal" && key != "model_config_id" {
 			return false
 		}
 	}
@@ -1199,12 +1201,12 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 	switch node.Type {
 	case models.AutomationNodeAgentTask:
 		if node.Role == "implementation" {
-			allowed = map[string]bool{"goal": true}
+			allowed = map[string]bool{"goal": true, "model_config_id": true}
 		} else {
-			allowed = map[string]bool{"prompt": true, "goal": true, "category": true, "priority": true, "agent_ref": true}
+			allowed = map[string]bool{"prompt": true, "goal": true, "category": true, "priority": true, "agent_ref": true, "model_config_id": true}
 		}
 	case models.AutomationNodeTrigger:
-		allowed = map[string]bool{"prompt": true, "goal": true, "category": true, "priority": true, "agent_ref": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true, "clear_context_on_start": true}
+		allowed = map[string]bool{"prompt": true, "goal": true, "category": true, "priority": true, "agent_ref": true, "model_config_id": true, "run_at": true, "repeat_type": true, "repeat_interval": true, "enabled": true, "clear_context_on_start": true}
 	case models.AutomationNodeAction:
 		switch node.Role {
 		case "create_notification":
@@ -1258,6 +1260,9 @@ func validateCustomAutomationNodeConfig(node models.AutomationDraftNode) []model
 		if !priorityOK || priority < 1 || priority > 4 {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "priority", Message: "Task priority must be between 1 and 4."})
 		}
+		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
+	}
+	if node.Type == models.AutomationNodeAgentTask && node.Role == "implementation" {
 		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
 	}
 	if node.Type == models.AutomationNodeTrigger {
@@ -1366,7 +1371,8 @@ func validateAutomationHumanGateConfig(node models.AutomationDraftNode, role str
 func validateAutomationNodeConfig(adapter AutomationAdapter, canonical AutomationAdapterNode, node models.AutomationDraftNode) []models.AutomationValidationIssue {
 	allowed := map[string]bool{}
 	usesTaskConfiguration := automationMaintainedNodeUsesTaskConfiguration(adapter, canonical)
-	usesGoalConfiguration := usesTaskConfiguration || adapter.Key == AutomationAdapterNativeSDLC && canonical.Role == "implementation"
+	usesModelConfiguration := usesTaskConfiguration || adapter.Key == AutomationAdapterNativeSDLC && canonical.Role == "implementation"
+	usesGoalConfiguration := usesModelConfiguration
 	if usesTaskConfiguration {
 		for _, key := range []string{"prompt", "category", "priority", "agent_ref", "skills", "source_files"} {
 			allowed[key] = true
@@ -1374,6 +1380,9 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 	}
 	if usesGoalConfiguration {
 		allowed["goal"] = true
+	}
+	if usesModelConfiguration {
+		allowed["model_config_id"] = true
 	}
 	if canonical.AllowedResources["schedule"] {
 		for _, key := range []string{"target_node_key", "run_at", "repeat_type", "repeat_interval", "enabled", "clear_context_on_start"} {
@@ -1423,6 +1432,9 @@ func validateAutomationNodeConfig(adapter AutomationAdapter, canonical Automatio
 		}
 		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
 	}
+	if usesModelConfiguration && !usesTaskConfiguration {
+		issues = append(issues, validateAutomationTaskReferenceShape(node)...)
+	}
 	if usesGoalConfiguration {
 		if goal, present := node.Config["goal"]; present {
 			if text, ok := goal.(string); !ok || len(strings.TrimSpace(text)) > MaxTaskGoalLength {
@@ -1452,6 +1464,12 @@ func validateAutomationTaskReferenceShape(node models.AutomationDraftNode) []mod
 		ref, ok := value.(string)
 		if !ok || len(strings.TrimSpace(ref)) > 200 {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection must use a supported project Agent reference."})
+		}
+	}
+	if value, exists := node.Config["model_config_id"]; exists {
+		ref, ok := value.(string)
+		if !ok || len(strings.TrimSpace(ref)) > 200 {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "model_config_id", Message: "Model selection must use a supported configured model."})
 		}
 	}
 	for _, field := range []struct {
@@ -1490,6 +1508,10 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 	for _, agent := range snapshot.Agents {
 		agents[agent.ID] = true
 	}
+	modelsByID := make(map[string]bool, len(snapshot.Models))
+	for _, model := range snapshot.Models {
+		modelsByID[model.ID] = true
+	}
 	skills := make(map[string]bool, len(snapshot.Skills))
 	for _, skill := range snapshot.Skills {
 		skills[skill.ID] = true
@@ -1504,8 +1526,13 @@ func (s *AutomationDraftService) ValidateCandidateWithCapabilities(candidate mod
 		}
 		agentRef, _ := node.Config["agent_ref"].(string)
 		agentRef = strings.TrimSpace(agentRef)
+		modelConfigID, _ := node.Config["model_config_id"].(string)
+		modelConfigID = strings.TrimSpace(modelConfigID)
 		if agentRef != "" && !agents[agentRef] {
 			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "agent_ref", Message: "Agent selection is unavailable in this project."})
+		}
+		if modelConfigID != "" && !modelsByID[modelConfigID] {
+			issues = append(issues, models.AutomationValidationIssue{NodeKey: node.Key, Code: "model_config_id", Message: "Model selection is unavailable in this project."})
 		}
 		if selected, ok := draftStringSlice(node.Config["skills"]); ok {
 			for _, skill := range normalizeDraftReferences(selected) {
@@ -1566,6 +1593,10 @@ func sortAutomationValidationIssues(issues []models.AutomationValidationIssue) {
 }
 
 func unsafeAutomationConfigValue(key string, value any) bool {
+	if key == "model_config_id" {
+		text, ok := value.(string)
+		return !ok || len(strings.TrimSpace(text)) > 200
+	}
 	if strings.Contains(strings.ToLower(key), "url") || strings.Contains(strings.ToLower(key), "sql") || strings.Contains(strings.ToLower(key), "code") || strings.Contains(strings.ToLower(key), "tool") || strings.HasSuffix(strings.ToLower(key), "_id") {
 		return true
 	}

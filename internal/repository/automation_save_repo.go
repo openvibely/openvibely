@@ -41,6 +41,7 @@ type AutomationSaveTask struct {
 	Goal              string
 	Category          models.TaskCategory
 	Priority          int
+	AgentID           *string
 	AgentDefinitionID *string
 	ApplyTopology     bool
 	ParentNodeKey     string
@@ -244,7 +245,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 			continue
 		}
 		task := &models.Task{ProjectID: in.ProjectID, Title: write.Title, Prompt: write.Prompt, Category: models.CategoryBacklog,
-			Priority: write.Priority, Status: models.StatusPending, AgentDefinitionID: write.AgentDefinitionID,
+			Priority: write.Priority, Status: models.StatusPending, AgentID: write.AgentID, AgentDefinitionID: write.AgentDefinitionID,
 			CreatedVia: AutomationCompilerTaskCreatedVia(in.AutomationID, write.NodeKey)}
 		if err := taskRepo.createWithExecutor(ctx, conn, task); err != nil {
 			return nil, nil, fmt.Errorf("creating task for node %q: %w", write.NodeKey, err)
@@ -285,8 +286,8 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 				chainConfig = string(encoded)
 			}
 		}
-		query := `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP`
-		args := []any{write.Title, write.Prompt, category, write.Priority, write.AgentDefinitionID}
+		query := `UPDATE tasks SET title = ?, prompt = ?, category = ?, priority = ?, agent_id = ?, agent_definition_id = ?, updated_at = CURRENT_TIMESTAMP`
+		args := []any{write.Title, write.Prompt, category, write.Priority, write.AgentID, write.AgentDefinitionID}
 		if write.ApplyTopology {
 			query += `, parent_task_id = ?, chain_config = ?, status = CASE WHEN status IN ('running','queued') THEN status ELSE ? END`
 			args = append(args, parentID, chainConfig, status)
@@ -324,7 +325,7 @@ func (r *AutomationRepo) SaveCurrentGraph(ctx context.Context, in AutomationSave
 		}
 		if automation.LifecycleState == models.AutomationActive && storedCategory == models.CategoryActive && storedStatus == models.StatusPending && !storedParentID.Valid {
 			runnable = append(runnable, models.Task{ID: taskID, ProjectID: in.ProjectID, Title: write.Title, Prompt: write.Prompt,
-				Category: storedCategory, Priority: write.Priority, Status: storedStatus, AgentDefinitionID: write.AgentDefinitionID,
+				Category: storedCategory, Priority: write.Priority, Status: storedStatus, AgentID: write.AgentID, AgentDefinitionID: write.AgentDefinitionID,
 				ChainConfig: chainConfig})
 		}
 	}

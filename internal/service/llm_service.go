@@ -595,6 +595,9 @@ func (s *LLMService) prepareAutomationTaskCreation(ctx context.Context, projectI
 	request.Category = category
 	priority, _ := draftInt(config["priority"])
 	request.Priority = priority
+	if modelConfigID, _ := config["model_config_id"].(string); strings.TrimSpace(modelConfigID) != "" {
+		request.AgentID = strings.TrimSpace(modelConfigID)
+	}
 	if ref, _ := config["agent_ref"].(string); strings.TrimSpace(ref) != "" {
 		agent, err := resolveAutomationAgent(ctx, s.agentRepo, projectID, ref)
 		if err != nil {
@@ -618,6 +621,7 @@ func (s *LLMService) prepareAutomationAlertImplementationTask(ctx context.Contex
 		return nil
 	}
 	configuredGoal := ""
+	configuredModelConfigID := ""
 	for _, binding := range automationContext.Bindings {
 		implementation, err := s.automationRepo.GetConnectedNodeByRole(ctx, projectID, binding.AutomationID, binding.VersionID, binding.NodeID, "implementation", true)
 		if err != nil {
@@ -638,16 +642,26 @@ func (s *LLMService) prepareAutomationAlertImplementationTask(ctx context.Contex
 			return fmt.Errorf("decoding Native implementation task configuration: %w", err)
 		}
 		goal := automationConfigGoal(config)
-		if goal == "" {
-			continue
+		if goal != "" {
+			if configuredGoal != "" && configuredGoal != goal {
+				return errors.New("Automation bindings have conflicting Native implementation task goals")
+			}
+			configuredGoal = goal
 		}
-		if configuredGoal != "" && configuredGoal != goal {
-			return errors.New("Automation bindings have conflicting Native implementation task goals")
+		modelConfigID, _ := config["model_config_id"].(string)
+		modelConfigID = strings.TrimSpace(modelConfigID)
+		if modelConfigID != "" {
+			if configuredModelConfigID != "" && configuredModelConfigID != modelConfigID {
+				return errors.New("Automation bindings have conflicting Native implementation task models")
+			}
+			configuredModelConfigID = modelConfigID
 		}
-		configuredGoal = goal
 	}
 	if configuredGoal != "" {
 		input.Goal = configuredGoal
+	}
+	if configuredModelConfigID != "" {
+		input.AgentID = configuredModelConfigID
 	}
 	return nil
 }

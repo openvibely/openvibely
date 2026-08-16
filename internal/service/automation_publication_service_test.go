@@ -51,6 +51,39 @@ func newAutomationSaveHarness(t *testing.T, name string) automationSaveHarness {
 		lifecycle: NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)}
 }
 
+func TestAutomationSaveStoresSelectedModelForTaskExecution(t *testing.T) {
+	h := newAutomationSaveHarness(t, "Selected model execution")
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(h.db)
+	selectedModel := models.LLMConfig{Name: "Selected automation model", Provider: models.ProviderTest, Model: "selected-model"}
+	require.NoError(t, llmConfigRepo.Create(ctx, &selectedModel))
+	capabilities := NewAutomationCapabilitySnapshotBuilder(repository.NewProjectRepo(h.db), nil, nil, nil)
+	capabilities.SetLLMConfigRepository(llmConfigRepo)
+	h.drafts.SetCapabilitySnapshotBuilder(capabilities)
+
+	candidate := customTaskOnlyCandidate("Selected model execution", "Run with the selected model.", models.CategoryActive)
+	candidate.Nodes[0].Config["model_config_id"] = selectedModel.ID
+	recorder := &recordingAutomationTaskService{TaskService: NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), nil)}
+	compiler := NewAutomationCompiler(h.automationRepo, recorder, h.taskRepo, h.scheduleRepo, NewAutomationSaveValidator(NewAutomationAdapterRegistry(), h.drafts))
+
+	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+	require.NoError(t, err)
+	taskID := automationResourceID(t, saved.Definition, "root", "task")
+	stored, err := h.taskRepo.GetByID(ctx, taskID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.AgentID)
+	require.Equal(t, selectedModel.ID, *stored.AgentID)
+	require.Len(t, recorder.submitted, 1)
+	require.NotNil(t, recorder.submitted[0].AgentID)
+	require.Equal(t, selectedModel.ID, *recorder.submitted[0].AgentID)
+
+	claim, claimed, err := h.taskRepo.ClaimTaskForDispatch(ctx, taskID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NotNil(t, claim.Task.AgentID)
+	require.Equal(t, selectedModel.ID, *claim.Task.AgentID)
+}
+
 func seedExistingVisionDriverAutomation(t *testing.T, h automationSaveHarness) (*models.AutomationDefinition, models.AutomationDraftCandidate) {
 	t.Helper()
 	ctx := context.Background()

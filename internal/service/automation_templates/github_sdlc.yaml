@@ -14,6 +14,7 @@ nodes:
         enabled: true
         goal: ""
         priority: 2
+        model_config_id: ""
         prompt: |-
             Review the configured project vision/source files and identify small, reviewable feature gaps.
 
@@ -47,6 +48,7 @@ nodes:
         enabled: true
         goal: ""
         priority: 2
+        model_config_id: ""
         prompt: |-
             You are the Bug Finder. Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
 
@@ -84,6 +86,7 @@ nodes:
         enabled: true
         goal: ""
         priority: 2
+        model_config_id: ""
         prompt: |-
             You are the Optimization Finder. Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
 
@@ -121,6 +124,7 @@ nodes:
         enabled: true
         goal: ""
         priority: 2
+        model_config_id: ""
         prompt: |-
             You are the Redundancy Finder. Choose one focused project component or workflow to inspect this run. Vary the component over time instead of repeatedly auditing the same files.
 
@@ -177,6 +181,7 @@ nodes:
         enabled: true
         goal: ""
         priority: 2
+        model_config_id: ""
         prompt: |-
             Check GitHub for implementation mailbox work and PR review feedback for this project.
 
@@ -210,6 +215,7 @@ nodes:
         category: active
         goal: ""
         priority: 2
+        model_config_id: ""
         prompt: |-
             Implement the assigned GitHub issue in the current project.
 

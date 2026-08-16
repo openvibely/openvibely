@@ -615,10 +615,15 @@ func (r *AlertRepo) CreateImplementationTask(ctx context.Context, projectID, ale
 		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(display_order), -1) + 1 FROM tasks WHERE project_id = ? AND category = 'backlog'`, projectID).Scan(&displayOrder); err != nil {
 			return err
 		}
+		agentID := strings.TrimSpace(input.AgentID)
+		var agentIDValue any
+		if agentID != "" {
+			agentIDValue = agentID
+		}
 		if err := conn.QueryRowContext(ctx, `INSERT INTO tasks
-			(project_id, title, category, priority, status, prompt, tag, display_order, created_via)
-			VALUES (?, ?, 'backlog', ?, 'pending', ?, ?, ?, ?)
-			RETURNING id`, projectID, strings.TrimSpace(input.Title), input.Priority, input.Prompt, input.Tag, displayOrder, models.TaskOriginSystemAgent).Scan(&taskID); err != nil {
+				(project_id, title, category, priority, status, prompt, tag, agent_id, display_order, created_via)
+				VALUES (?, ?, 'backlog', ?, 'pending', ?, ?, ?, ?, ?)
+				RETURNING id`, projectID, strings.TrimSpace(input.Title), input.Priority, input.Prompt, input.Tag, agentIDValue, displayOrder, models.TaskOriginSystemAgent).Scan(&taskID); err != nil {
 			return fmt.Errorf("creating implementation task: %w", err)
 		}
 		if goal := strings.TrimSpace(input.Goal); goal != "" {

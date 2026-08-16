@@ -21,6 +21,7 @@ type AutomationCapabilitySnapshotBuilder struct {
 	settingsRepo     *repository.SettingsRepo
 	githubAuthRepo   *repository.GitHubAuthRepo
 	githubConnection automationGitHubConnectionProvider
+	llmConfigRepo    *repository.LLMConfigRepo
 }
 
 func NewAutomationCapabilitySnapshotBuilder(projectRepo *repository.ProjectRepo, agentRepo *repository.AgentRepo, taskRepo *repository.TaskRepo, settingsRepo *repository.SettingsRepo) *AutomationCapabilitySnapshotBuilder {
@@ -33,6 +34,10 @@ func (b *AutomationCapabilitySnapshotBuilder) SetGitHubAuthRepository(githubAuth
 
 func (b *AutomationCapabilitySnapshotBuilder) SetGitHubConnectionProvider(provider automationGitHubConnectionProvider) {
 	b.githubConnection = provider
+}
+
+func (b *AutomationCapabilitySnapshotBuilder) SetLLMConfigRepository(llmConfigRepo *repository.LLMConfigRepo) {
+	b.llmConfigRepo = llmConfigRepo
 }
 
 func (b *AutomationCapabilitySnapshotBuilder) Build(ctx context.Context, projectID string) (models.AutomationCapabilitySnapshot, error) {
@@ -86,6 +91,22 @@ func (b *AutomationCapabilitySnapshotBuilder) Build(ctx context.Context, project
 			}
 		}
 	}
+	if b.llmConfigRepo != nil {
+		configs, listErr := b.llmConfigRepo.ListPickerOptions(ctx)
+		if listErr != nil {
+			return snapshot, listErr
+		}
+		for _, cfg := range configs {
+			if len(snapshot.Models) >= automationCapabilityLimit {
+				break
+			}
+			name := strings.TrimSpace(cfg.Name)
+			if name == "" {
+				name = cfg.ID
+			}
+			snapshot.Models = append(snapshot.Models, models.AutomationCapabilityRef{ID: cfg.ID, Name: name, Capabilities: []string{strings.TrimSpace(cfg.Model)}})
+		}
+	}
 	if b.taskRepo != nil {
 		tasks, listErr := b.taskRepo.ListAutomationReusableTasks(ctx, projectID, automationCapabilityLimit)
 		if listErr != nil {
@@ -98,6 +119,7 @@ func (b *AutomationCapabilitySnapshotBuilder) Build(ctx context.Context, project
 	snapshot.SourceFiles = boundedAutomationSourceFiles(project.RepoPath)
 	sort.Slice(snapshot.Agents, func(i, j int) bool { return capabilityRefLess(snapshot.Agents[i], snapshot.Agents[j]) })
 	sort.Slice(snapshot.Skills, func(i, j int) bool { return capabilityRefLess(snapshot.Skills[i], snapshot.Skills[j]) })
+	sort.Slice(snapshot.Models, func(i, j int) bool { return capabilityRefLess(snapshot.Models[i], snapshot.Models[j]) })
 	sort.Slice(snapshot.ReusableResources, func(i, j int) bool {
 		return capabilityRefLess(snapshot.ReusableResources[i], snapshot.ReusableResources[j])
 	})

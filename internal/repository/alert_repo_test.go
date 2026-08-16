@@ -332,8 +332,12 @@ func TestAlertRepo_ClaimCreatesImplementationTaskIdempotently(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var selectedModelID string
+	if err := db.QueryRowContext(ctx, `SELECT id FROM agent_configs ORDER BY is_default DESC, name ASC LIMIT 1`).Scan(&selectedModelID); err != nil {
+		t.Fatal(err)
+	}
 	first, err := repo.CreateImplementationTask(ctx, project.ID, a.ID, "scheduled-task", models.AlertImplementationTaskInput{
-		Title: "Implement alert suggestion", Prompt: "Implement the reviewed suggestion.", Priority: 2, Tag: models.TagFeature,
+		Title: "Implement alert suggestion", Prompt: "Implement the reviewed suggestion.", Priority: 2, Tag: models.TagFeature, AgentID: selectedModelID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -346,6 +350,9 @@ func TestAlertRepo_ClaimCreatesImplementationTaskIdempotently(t *testing.T) {
 	}
 	if first.ID != second.ID {
 		t.Fatalf("idempotent task IDs differ: %s != %s", first.ID, second.ID)
+	}
+	if first.AgentID == nil || *first.AgentID != selectedModelID {
+		t.Fatalf("implementation task agent_id = %v, want %s", first.AgentID, selectedModelID)
 	}
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE project_id = ? AND id = ?`, project.ID, first.ID).Scan(&count); err != nil {

@@ -680,6 +680,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	settingsRepo := repository.NewSettingsRepo(db)
 	automationDraftSvc := service.NewAutomationDraftService(automationRepo, automationRegistry)
 	automationCapabilitySvc := service.NewAutomationCapabilitySnapshotBuilder(projectRepo, agentRepo, taskRepo, settingsRepo)
+	automationCapabilitySvc.SetLLMConfigRepository(llmConfigRepo)
 	automationDraftSvc.SetCapabilitySnapshotBuilder(automationCapabilitySvc)
 	automationSaveValidator := service.NewAutomationSaveValidator(automationRegistry, automationDraftSvc)
 	automationSaveValidator.SetAgentRepository(agentRepo)

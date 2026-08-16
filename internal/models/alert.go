@@ -123,4 +123,5 @@ type AlertImplementationTaskInput struct {
 	Goal     string  `json:"goal"`
 	Priority int     `json:"priority"`
 	Tag      TaskTag `json:"tag"`
+	AgentID  string  `json:"agent_id,omitempty"`
 }
