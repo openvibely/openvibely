@@ -259,7 +259,9 @@ func TestNativeSDLCTemplateUsesAutomationOwnedPromptsMatchingBootstrapContract(t
 	visionPrompt, _ := automationDraftNodeByKey(t, candidate, "vision_suggestions").Config["prompt"].(string)
 	require.Contains(t, visionPrompt, "Choose one focused project component or workflow")
 	require.Contains(t, visionPrompt, "Vary the component over time")
-	require.Contains(t, visionPrompt, "project vision or source-of-truth files")
+	require.Contains(t, visionPrompt, "VISION.md")
+	require.Contains(t, visionPrompt, "read it before choosing the finding")
+	require.Contains(t, visionPrompt, "project vision, or other source-of-truth files")
 	require.Contains(t, visionPrompt, "create_notification")
 	require.NotContains(t, visionPrompt, "idempotency_key")
 	require.Contains(t, visionPrompt, "list_existing_automation_notifications")
@@ -417,6 +419,8 @@ func TestGitHubSDLCTemplateAcceptsBrowserSubmittedActionSettings(t *testing.T) {
 }
 
 func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *testing.T) {
+	require.Contains(t, githubSDLCOfferingManagerPrompt, "VISION.md")
+	require.Contains(t, githubSDLCOfferingManagerPrompt, "read it before choosing the finding")
 	require.Contains(t, githubSDLCDevInboxPrompt, "or from a GitHub remote in its local checkout when that URL is blank")
 	require.NotContains(t, githubSDLCDevInboxPrompt, "restricted to the selected project's explicit repository URL")
 	require.Contains(t, githubSDLCDevInboxPrompt, "category=active")

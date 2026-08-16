@@ -41,7 +41,7 @@ const githubSDLCImplementationPrompt = `Implement the assigned GitHub issue in t
 
 Read the issue and relevant project context, make the focused code or documentation changes needed to satisfy its acceptance criteria, and run the relevant build and tests. Keep the work tied to the source issue and use github_open_pull_request to open or reuse the reviewable pull request when implementation is complete. Supply pr_body with a concise factual Markdown summary of the changes and validation, followed by Closes #<source issue number>. Do not include task IDs, product or automation boilerplate, or process narration. Do not approve or merge the pull request, release, or deploy on a human's behalf.`
 
-const githubSDLCOfferingManagerPrompt = `Review the configured project vision/source files and identify small, reviewable feature gaps.
+const githubSDLCOfferingManagerPrompt = `First check whether root VISION.md exists; if it does, read it before choosing the finding. Review VISION.md, configured project vision, or other source-of-truth files and identify small, reviewable feature gaps.
 
 Open GitHub suggestion issues only. Use ` + "`" + `github_create_issue` + "`" + ` with the unprefixed labels ` + "`" + `suggestion` + "`" + ` and ` + "`" + `feature` + "`" + `. Do not create implementation tasks and do not modify code.` + githubSDLCReadableIssueInstructions + `
 
