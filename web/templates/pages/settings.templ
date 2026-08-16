@@ -1265,7 +1265,12 @@ templ settingsContent(view ChannelsSettingsView) {
 	<!-- Webhook available agents data for JavaScript -->
 	<div id="webhook_agents_data" data-agents={ agentsJSON(view.AgentPickerOptions) } style="display:none"></div>
 
-		<style>
+	<style>
+		.dropdown-content {
+			display: none;
+		}			.dropdown-content.show {
+				display: block;
+			}
 			/* Keep password toggle button fixed inside input across press/focus states */
 			.password-toggle-btn:active,
 			.password-toggle-btn:focus,
@@ -1464,6 +1469,28 @@ templ settingsContent(view ChannelsSettingsView) {
 				button.setAttribute('aria-pressed', 'false');
 			}
 
+			function handleDropdownToggle(event) {
+				event.stopPropagation();
+				const dropdown = event.currentTarget.parentElement;
+				const menu = dropdown.querySelector('ul');
+				const wasOpen = menu.classList.contains('show');
+				
+				closeAllDropdownMenus();
+				
+				// Toggle this dropdown
+				if (!wasOpen) {
+					menu.classList.add('show');
+					// Close when clicking outside
+					setTimeout(() => {
+						document.addEventListener('click', function closeDropdown(e) {
+							if (!dropdown.contains(e.target)) {
+								menu.classList.remove('show');
+								document.removeEventListener('click', closeDropdown);
+							}
+						});
+					}, 0);
+				}
+			}
 
 			function toggleSecretTextareaVisibility(textareaId, button) {
 				const textarea = document.getElementById(textareaId);
@@ -1719,12 +1746,9 @@ templ settingsContent(view ChannelsSettingsView) {
 					openEmailConfigModal();
 				}
 			}
-				function closeAllDropdownMenus() {
-					document.querySelectorAll('.dropdown ul').forEach(m => m.classList.remove('show'));
-					document.querySelectorAll('.dropdown :focus').forEach(el => {
-						if (typeof el.blur === 'function') el.blur();
-					});
-				}
+			function closeAllDropdownMenus() {
+				document.querySelectorAll('.dropdown ul').forEach(m => m.classList.remove('show'));
+			}
 
 			function openTelegramChannelFromMenu(event) {
 				if (event) event.stopPropagation();
