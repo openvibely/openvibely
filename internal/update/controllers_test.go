@@ -1726,7 +1726,10 @@ func TestHostedLostReadinessResponseReplaysClaimAndUsesAuthoritativeLease(t *tes
 	if err := drain.SetPersistence(filepath.Join(root, "drain.json")); err != nil {
 		t.Fatal(err)
 	}
-	status, err := drain.BeginDrain(DrainRequest{Lease: 80 * time.Millisecond})
+	// The pre-claim lease only bounds coordinator startup; once the readiness
+	// claim begins, ownership keeps the drain closed while responses are lost.
+	// Leave enough startup headroom for heavily loaded CI runners.
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
