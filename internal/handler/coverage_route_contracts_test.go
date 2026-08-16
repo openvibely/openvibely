@@ -12,6 +12,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -320,6 +321,95 @@ func TestGetAgentJSONReturnsAgentOrNotFound(t *testing.T) {
 
 	missing := tc.HTTP().Get("/agents/missing/json").Execute()
 	require.Equal(t, http.StatusNotFound, missing.Code)
+}
+
+func TestChatRuntimeSummaryHelpersUseRepositoriesAndPersistAlertActions(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Runtime Summary Project").Build()
+	limited := 3
+	project.MaxWorkers = &limited
+	require.NoError(t, tc.projectRepo.Update(ctx, project))
+	task := tc.CreateTask(project.ID).WithTitle("Active runtime task").WithCategory(models.CategoryActive).Build()
+	require.NoError(t, tc.workerRepo.SetMaxWorkers(ctx, 7))
+	model := tc.CreateLLMConfig().WithName("Runtime Model").WithProvider(models.ProviderOpenAI).WithModel("gpt-test").WithAPIKey("key").Build()
+	model.MaxWorkers = 2
+	model.WorkerTimeout = 45
+	require.NoError(t, tc.llmConfigRepo.Update(ctx, model))
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.SetAgentRepo(agentRepo)
+	require.NoError(t, agentRepo.Create(ctx, &models.Agent{Name: "Runtime Agent", Key: "runtime-agent", Description: "Does runtime work", Model: "gpt-test", Skills: []models.SkillConfig{{Name: "Audit"}}, MCPServers: []models.MCPServerConfig{{Name: "tools", Command: []string{"node"}}}, Scope: models.AgentScopeProject}))
+	require.NoError(t, tc.settingsRepo.Set(ctx, "personality", "direct"))
+
+	personalities := tc.handler.executeListPersonalities(ctx)
+	require.Contains(t, personalities, "Available Personalities")
+	require.Contains(t, personalities, "Current personality: **direct**")
+	require.Contains(t, tc.handler.executeSetPersonality(ctx, service.SetPersonalityRequest{Personality: "no_nonsense_pro"}), "Personality changed")
+	require.Contains(t, tc.handler.executeSetPersonality(ctx, service.SetPersonalityRequest{Personality: "does-not-exist"}), "Unknown personality")
+
+	modelsOut := tc.handler.executeListModels(ctx)
+	require.Contains(t, modelsOut, "Runtime Model")
+	require.Contains(t, modelsOut, "max_workers: 2")
+	require.Contains(t, tc.handler.executeListAgents(ctx), "Runtime Agent")
+	settingsOut := tc.handler.executeViewSettings(ctx)
+	require.Contains(t, settingsOut, "Global max workers:** 7")
+	require.Contains(t, settingsOut, "Runtime Model")
+	require.Contains(t, settingsOut, "max_workers=2")
+	require.Contains(t, tc.handler.executeProjectInfo(ctx, project.ID), "Total tasks:** 1")
+	require.Contains(t, tc.handler.executeListProjects(ctx, project.ID), "Runtime Summary Project")
+
+	missingAlerts := (&Handler{}).executeListAlerts(ctx, project.ID)
+	require.Contains(t, missingAlerts, "Alert service not available")
+	createOut := tc.handler.executeCreateAlertRequests(ctx, project.ID, []service.CreateAlertRequest{
+		{Title: "Runtime warning", Message: "needs attention", Severity: "warning", Type: "task_needs_followup", TaskID: task.ID},
+		{Title: "Bad severity", Severity: "severe"},
+		{Title: "Bad type", Type: "incident"},
+	})
+	require.Contains(t, createOut, "Created alert")
+	require.Contains(t, createOut, "Invalid severity")
+	require.Contains(t, createOut, "Invalid alert type")
+	alerts, err := tc.alertRepo.ListByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	listOut := tc.handler.executeListAlerts(ctx, project.ID)
+	require.Contains(t, listOut, "Runtime warning")
+	require.Contains(t, listOut, "unread")
+	toggleOut := tc.handler.executeToggleAlertRequests(ctx, project.ID, []service.ToggleAlertRequest{{AlertID: alerts[0].ID}, {AlertID: "missing"}})
+	require.Contains(t, toggleOut, "Marked alert")
+	require.Contains(t, toggleOut, "Error marking alert")
+	deleteOut := tc.handler.executeDeleteAlertRequests(ctx, project.ID, []service.DeleteAlertRequest{{AlertID: alerts[0].ID}, {AlertID: "missing"}})
+	require.Contains(t, deleteOut, "Deleted alert")
+	require.Contains(t, deleteOut, "Error deleting alert")
+}
+
+func TestChatActionReadHelpersUseRepositories(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Action Helper Project").Build()
+	project.Description = "action helper description"
+	project.RepoPath = t.TempDir()
+	require.NoError(t, tc.projectRepo.Update(ctx, project))
+	model := tc.CreateLLMConfig().WithName("Action Model").WithProvider(models.ProviderAnthropic).WithModel("claude-test").WithAPIKey("key").Build()
+	model.MaxWorkers = 4
+	require.NoError(t, tc.llmConfigRepo.Update(ctx, model))
+	alert := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityError, Title: "Action alert", Message: "inspect me"}
+	require.NoError(t, tc.alertRepo.Create(ctx, alert))
+
+	require.Contains(t, tc.handler.executeGetPersonality(ctx), "default")
+	require.NoError(t, tc.settingsRepo.Set(ctx, "personality", "detailed"))
+	require.Contains(t, tc.handler.executeGetPersonality(ctx), "detailed")
+	require.Contains(t, tc.handler.executeGetModel(ctx, []byte(`{"model_id":"`+model.ID+`"}`)), "Action Model")
+	require.Contains(t, tc.handler.executeGetModel(ctx, []byte(`{"name":"action model"}`)), "max_workers: 4")
+	require.Contains(t, tc.handler.executeGetModel(ctx, []byte(`{"model_id":"missing"}`)), "not found")
+	require.Contains(t, tc.handler.executeGetModel(ctx, []byte(`{"model_id":`)), "Invalid input")
+	require.Contains(t, tc.handler.executeGetCurrentProject(ctx, project.ID), "action helper description")
+	require.Contains(t, tc.handler.executeSwitchProject(ctx, project.ID, []byte(`{"project":"`+project.Name+`"}`)), "Switched to project")
+	require.Contains(t, tc.handler.executeSwitchProject(ctx, project.ID, []byte(`{"project":"missing"}`)), "Available projects")
+	require.Contains(t, tc.handler.executeSwitchProject(ctx, project.ID, []byte(`{}`)), "requires a project")
+	require.Contains(t, tc.handler.executeGetAlert(ctx, project.ID, []byte(`{"alert_id":"`+alert.ID+`"}`)), "Action alert")
+	require.Contains(t, tc.handler.executeGetAlert(ctx, project.ID, []byte(`{"alert_id":"missing"}`)), "not found")
+	require.Contains(t, tc.handler.executeGetAlert(ctx, project.ID, []byte(`{}`)), "requires alert_id")
+	require.Contains(t, (&Handler{}).executeGetAlert(ctx, project.ID, []byte(`{"alert_id":"`+alert.ID+`"}`)), "Alert service not available")
 }
 
 func requestWithAccept(tc *TestContext, method, path, accept, body string) *httptest.ResponseRecorder {

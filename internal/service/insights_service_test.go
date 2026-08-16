@@ -242,6 +242,187 @@ func TestInsightsService_RunAnalysisCreatesReportAcrossDetectors(t *testing.T) {
 	}
 }
 
+func TestInsightsService_GenerateProactiveSuggestionsParsesAndDeduplicates(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	insightsRepo := repository.NewInsightsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), repository.NewAttachmentRepo(db))
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = `[{"title":"Split deployment checks","description":"Deployment work is failing often.","suggestion":"Split smoke tests from release steps.","impact":"Faster diagnosis","severity":"high","confidence":0.95},{"title":"Document retry limits","description":"Retries are implicit.","suggestion":"Write down retry boundaries.","impact":"Fewer duplicate side effects","severity":"medium","confidence":2}]`
+	llmSvc.SetLLMCaller(mock)
+
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	svc.SetLLMService(llmSvc)
+	project := &models.Project{Name: "Proactive Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "suggestion-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	insights, err := svc.generateProactiveSuggestions(ctx, project, 3, 2, 1, 4)
+	if err != nil {
+		t.Fatalf("generateProactiveSuggestions: %v", err)
+	}
+	if len(insights) != 2 {
+		t.Fatalf("insights len=%d, want 2", len(insights))
+	}
+	if insights[0].Type != models.InsightProactiveSuggestion || insights[0].Severity != models.InsightSeverityHigh || insights[0].Confidence != 0.95 {
+		t.Fatalf("unexpected first suggestion: %#v", insights[0])
+	}
+	if insights[1].Confidence != 0.5 {
+		t.Fatalf("out-of-range confidence should default to 0.5, got %#v", insights[1])
+	}
+
+	again, err := svc.generateProactiveSuggestions(ctx, project, 3, 2, 1, 4)
+	if err != nil {
+		t.Fatalf("generateProactiveSuggestions duplicate: %v", err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("duplicate suggestions should be skipped, got %#v", again)
+	}
+}
+
+func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	insightsRepo := repository.NewInsightsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	llmSvc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, repository.NewScheduleRepo(db), attachmentRepo)
+	mock := testutil.NewMockLLMCaller()
+	llmSvc.SetLLMCaller(mock)
+
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+	svc.SetLLMService(llmSvc)
+
+	project := &models.Project{Name: "AI Insights Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "insights-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		status := models.StatusCompleted
+		category := models.CategoryCompleted
+		tag := models.TagBug
+		if i == 3 {
+			status = models.StatusFailed
+			category = models.CategoryActive
+			tag = models.TagFeature
+		}
+		if i == 4 {
+			status = models.StatusPending
+			category = models.CategoryBacklog
+			tag = models.TagFeature
+		}
+		task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("AI insight task %d", i), Prompt: strings.Repeat("meaningful task prompt ", 12), Category: category, Status: status, Priority: i%5 + 1, Tag: tag, AgentID: &agent.ID}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create task %d: %v", i, err)
+		}
+		if status == models.StatusCompleted {
+			exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: task.Prompt}
+			if err := execRepo.Create(ctx, exec); err != nil {
+				t.Fatalf("create exec %d: %v", i, err)
+			}
+			if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "implemented", "", 12, 6); err != nil {
+				t.Fatalf("complete exec %d: %v", i, err)
+			}
+		}
+	}
+
+	mock.Response = `{"grade":"B+","strengths":"consistent delivery","improvements":"trim backlog","assessment":"healthy and improving","how_to_improve":"ship smaller slices"}`
+	health, err := svc.RunHealthCheck(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("RunHealthCheck: %v", err)
+	}
+	if health.Grade != "B+" || health.TasksTotal != 5 || health.TasksCompleted != 3 || health.TasksFailed != 1 || health.BacklogSize != 1 {
+		t.Fatalf("unexpected health check: %#v", health)
+	}
+	latestHealth, err := svc.GetLatestHealthCheck(ctx, project.ID)
+	if err != nil || latestHealth == nil || latestHealth.ID != health.ID {
+		t.Fatalf("latest health = %#v err=%v, want %s", latestHealth, err, health.ID)
+	}
+	healthHistory, err := svc.ListHealthChecks(ctx, project.ID, 10)
+	if err != nil || len(healthHistory) != 1 {
+		t.Fatalf("health history len=%d err=%v", len(healthHistory), err)
+	}
+
+	mock.Response = `{"grade":"B","next_grade":"B+","summary":"clear enough","strengths":"specific bug fixes","improvements":"more strategy","how_to_next_grade":"connect related work","clarity_score":80,"ambition_score":70,"follow_through":60,"diversity_score":75,"strategy_score":65}`
+	grade, err := svc.GradeIdeas(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("GradeIdeas: %v", err)
+	}
+	if grade.Grade != "B" || grade.NextGrade != "B+" || grade.TasksEvaluated != 5 || grade.ClarityScore != 80 {
+		t.Fatalf("unexpected idea grade: %#v", grade)
+	}
+	latestGrade, err := svc.GetLatestIdeaGrade(ctx, project.ID)
+	if err != nil || latestGrade == nil || latestGrade.ID != grade.ID {
+		t.Fatalf("latest grade = %#v err=%v, want %s", latestGrade, err, grade.ID)
+	}
+	gradeHistory, err := svc.ListIdeaGrades(ctx, project.ID, 10)
+	if err != nil || len(gradeHistory) != 1 {
+		t.Fatalf("grade history len=%d err=%v", len(gradeHistory), err)
+	}
+
+	mock.Response = `[{"topic":"Retry policy","content":"Retries were bounded to avoid duplicate side effects.","tags":["retries","reliability"]},{"topic":"Attachment validation","content":"Files are sniffed before routing to vision models.","tags":["attachments","safety"]}]`
+	knowledge, err := svc.ExtractKnowledge(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ExtractKnowledge: %v", err)
+	}
+	if len(knowledge) != 2 {
+		t.Fatalf("knowledge len=%d, want 2", len(knowledge))
+	}
+	tags, err := knowledge[0].ParseTags()
+	if err != nil || len(tags) == 0 {
+		t.Fatalf("knowledge tags=%v err=%v", tags, err)
+	}
+	found, err := svc.SearchKnowledge(ctx, project.ID, "Retries")
+	if err != nil || len(found) != 1 || found[0].Topic != "Retry policy" {
+		t.Fatalf("SearchKnowledge returned %#v err=%v", found, err)
+	}
+	if err := svc.DeleteKnowledge(ctx, found[0].ID); err != nil {
+		t.Fatalf("DeleteKnowledge: %v", err)
+	}
+	found, err = svc.SearchKnowledge(ctx, project.ID, "Retries")
+	if err != nil || len(found) != 0 {
+		t.Fatalf("knowledge should be deleted, got %#v err=%v", found, err)
+	}
+
+	manual := &models.Insight{ProjectID: project.ID, Type: models.InsightOptimization, Severity: models.InsightSeverityLow, Status: models.InsightStatusNew, Title: "Trim slow startup", Evidence: "{}", Confidence: 0.7}
+	if err := insightsRepo.CreateInsight(ctx, manual); err != nil {
+		t.Fatalf("create manual insight: %v", err)
+	}
+	gotInsight, err := svc.GetInsight(ctx, manual.ID)
+	if err != nil || gotInsight == nil || gotInsight.Title != manual.Title {
+		t.Fatalf("GetInsight = %#v err=%v", gotInsight, err)
+	}
+	byType, err := svc.ListByType(ctx, project.ID, models.InsightOptimization)
+	if err != nil || len(byType) != 1 {
+		t.Fatalf("ListByType len=%d err=%v", len(byType), err)
+	}
+	if err := svc.DeleteInsight(ctx, manual.ID); err != nil {
+		t.Fatalf("DeleteInsight: %v", err)
+	}
+	reports, err := svc.ListReports(ctx, project.ID, 10)
+	if err != nil || len(reports) != 0 {
+		t.Fatalf("ListReports len=%d err=%v", len(reports), err)
+	}
+}
+
 func TestInsightsService_UpdateAndAcceptInsight(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
