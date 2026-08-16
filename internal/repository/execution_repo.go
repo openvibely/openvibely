@@ -209,6 +209,28 @@ func (r *ExecutionRepo) CreateWithExecutor(ctx context.Context, exec SQLExecutor
 	return nil
 }
 
+func (r *ExecutionRepo) MarkRunning(ctx context.Context, id string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE executions
+		 SET status = ?, started_at = datetime('now'), completed_at = NULL
+		 WHERE id = ? AND status IN (?, ?)`,
+		models.ExecRunning, id, models.ExecQueued, models.ExecRunning)
+	if err != nil {
+		return fmt.Errorf("marking execution running: %w", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("marking execution running rows affected: %w", err)
+	}
+	if changed == 0 {
+		return fmt.Errorf("execution is not queued/running: %s", id)
+	}
+	return nil
+}
+
 // CreateDirectTaskFollowupOrQueue atomically either starts a direct follow-up or
 // appends it to the task's durable FIFO queue when another run owns admission.
 // The task status is the ordinary-worker claim before its execution row exists;
@@ -250,6 +272,7 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 		if e.IsFollowup {
 			isFollowup = 1
 		}
+		e.Status = models.ExecQueued
 		if err := dbexec.QueryRowContext(ctx, `INSERT INTO executions
 			(id, task_id, agent_config_id, status, prompt_sent, is_followup, starts_new_context)
 			VALUES (lower(hex(randomblob(16))), ?, NULLIF(?, ''), ?, ?, ?, ?)

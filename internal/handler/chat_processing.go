@@ -284,6 +284,12 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 	var ctx context.Context
 	var cancel context.CancelFunc
 	runtimeCancelRegistered := false
+	preRuntimeCtx := func() context.Context {
+		if ctx != nil {
+			return ctx
+		}
+		return context.Background()
+	}
 	startRuntimeCancellation := func() {
 		if ctx != nil {
 			return
@@ -366,10 +372,16 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		defer h.workerSvc.ReleaseModelSlot(agentConfigID)
 		applog.Infof("[handler] processStreamingResponse exec=%s acquired project + model slots for %s", params.ExecID, agentConfigID)
+		if err := h.execRepo.MarkRunning(preRuntimeCtx(), params.ExecID); err != nil {
+			applog.Infof("[handler] processStreamingResponse exec=%s failed to mark execution running: %v", params.ExecID, err)
+			h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), 0, params.ChannelReply)
+			h.finalizeStreamingTurn(params, "")
+			return
+		}
 		startRuntimeCancellation()
 
 		// Transition task from "queued" to "running" now that worker slots are acquired
-		if task, err := h.taskRepo.GetByID(ctx, params.TaskID); err == nil && task != nil {
+		if task, err := h.taskRepo.GetByID(preRuntimeCtx(), params.TaskID); err == nil && task != nil {
 			if task.Status == models.StatusCancelled {
 				applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled while waiting for worker slots", params.ExecID, params.TaskID)
 				completeCancelledBeforeModel()
@@ -377,7 +389,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			}
 			if task.Status == models.StatusQueued {
 				applog.Infof("[handler] processStreamingResponse exec=%s task=%s transitioning from queued to running", params.ExecID, params.TaskID)
-				if err := h.taskRepo.UpdateStatus(ctx, params.TaskID, models.StatusRunning); err != nil {
+				if err := h.taskRepo.UpdateStatus(preRuntimeCtx(), params.TaskID, models.StatusRunning); err != nil {
 					applog.Infof("[handler] processStreamingResponse exec=%s task=%s failed to update status to running: %v", params.ExecID, params.TaskID, err)
 				}
 			}
@@ -386,6 +398,18 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled before model preparation: %v", params.ExecID, params.TaskID, ctx.Err())
 			completeCancelledBeforeModel()
 			return
+		}
+	} else if params.IsTaskFollowup {
+		if err := h.execRepo.MarkRunning(preRuntimeCtx(), params.ExecID); err != nil {
+			applog.Infof("[handler] processStreamingResponse exec=%s failed to mark execution running without worker service: %v", params.ExecID, err)
+			h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), 0, params.ChannelReply)
+			h.finalizeStreamingTurn(params, "")
+			return
+		}
+		if task, err := h.taskRepo.GetByID(preRuntimeCtx(), params.TaskID); err == nil && task != nil && task.Status == models.StatusQueued {
+			if err := h.taskRepo.UpdateStatus(preRuntimeCtx(), params.TaskID, models.StatusRunning); err != nil {
+				applog.Infof("[handler] processStreamingResponse exec=%s task=%s failed to update status to running without worker service: %v", params.ExecID, params.TaskID, err)
+			}
 		}
 	}
 
@@ -1622,7 +1646,7 @@ func (h *Handler) retryFailedTaskThreadExecution(ctx context.Context, taskID str
 	exec := &models.Execution{
 		TaskID:        taskID,
 		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
+		Status:        models.ExecQueued,
 		PromptSent:    failed.PromptSent,
 		IsFollowup:    true,
 	}
@@ -1757,7 +1781,7 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 	exec := &models.Execution{
 		TaskID:        input.TaskID,
 		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
+		Status:        models.ExecQueued,
 		PromptSent:    input.Content,
 		IsFollowup:    true,
 	}
@@ -3822,7 +3846,7 @@ func (h *Handler) admitTaskFollowup(ctx context.Context, req taskFollowupAdmissi
 	exec := &models.Execution{
 		TaskID:        task.ID,
 		AgentConfigID: req.Agent.ID,
-		Status:        models.ExecRunning,
+		Status:        models.ExecQueued,
 		PromptSent:    req.Message,
 		IsFollowup:    true,
 	}

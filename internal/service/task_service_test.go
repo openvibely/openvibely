@@ -263,6 +263,11 @@ func TestTaskService_UpdateStatus_RunningActiveResumesGoalPausedByUserStop(t *te
 
 	require.NoError(t, svc.UpdateStatus(ctx, task.ID, models.StatusRunning))
 
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.StatusPending, updated.Status, "running requests must wait for worker admission")
+
 	resumed, err := goalSvc.GetGoal(ctx, task.ID)
 	require.NoError(t, err)
 	require.NotNil(t, resumed)
@@ -667,15 +672,15 @@ func TestTaskService_UpdateCategory_FailedFollowupRetryCreatesOneExecutionAfterA
 	execs, err = execRepo.ListByTaskChronological(ctx, task.ID)
 	require.NoError(t, err)
 	require.Len(t, execs, 2)
-	running := 0
+	queued := 0
 	for _, exec := range execs {
-		if exec.Status == models.ExecRunning {
-			running++
+		if exec.Status == models.ExecQueued {
+			queued++
 			assert.Equal(t, failed.PromptSent, exec.PromptSent)
 			assert.True(t, exec.IsFollowup)
 		}
 	}
-	assert.Equal(t, 1, running, "retry must create exactly one running follow-up execution")
+	assert.Equal(t, 1, queued, "retry must create exactly one queued follow-up execution")
 	select {
 	case submitted := <-workerSvc.Submitted():
 		t.Fatalf("original task was submitted during failed follow-up retry: %s", submitted.ID)

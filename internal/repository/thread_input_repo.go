@@ -775,6 +775,7 @@ func (r *ThreadInputRepo) ClaimQueuedForTaskExecution(ctx context.Context, input
 		if exec.IsFollowup {
 			isFollowup = 1
 		}
+		exec.Status = models.ExecQueued
 		if err := dbexec.QueryRowContext(ctx, `
 					INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, is_followup)
 					VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?)

@@ -2003,7 +2003,7 @@ func TestHandler_InitialTaskTurnQueuesFollowupBeforeFirstOutputAndPromotes(t *te
 	promotedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryActive, promotedTask.Category)
-	require.Equal(t, models.StatusQueued, promotedTask.Status)
+	require.Equal(t, models.StatusRunning, promotedTask.Status)
 
 	stored, err := h.threadInputRepo.GetByID(ctx, queued.ID)
 	require.NoError(t, err)
@@ -2491,8 +2491,8 @@ func TestHandler_PromoteQueuedTaskThreadInput_PromotesAfterWorkerCompletion(t *t
 	}
 	updatedTask, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
-	if updatedTask.Status != models.StatusQueued || updatedTask.Category != models.CategoryActive {
-		t.Fatalf("expected promoted task active/queued, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
+	if updatedTask.Status != models.StatusRunning || updatedTask.Category != models.CategoryActive {
+		t.Fatalf("expected promoted task active/running, got status=%s category=%s", updatedTask.Status, updatedTask.Category)
 	}
 }
 

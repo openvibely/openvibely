@@ -475,7 +475,7 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 		}
 		return formatErr("Error selecting agent for task %q: %v", task.Title, err)
 	}
-	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: opts.Message, IsFollowup: true}
+	exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecQueued, PromptSent: opts.Message, IsFollowup: true}
 	if opts.ExecRepo == nil {
 		return formatErr("Error creating follow-up execution for %q: execution repository not configured", task.Title)
 	}

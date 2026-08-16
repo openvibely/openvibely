@@ -284,6 +284,12 @@ func TestThreadInputRepo_ClaimQueuedForTaskExecutionRetargetsRemainingQueuedGuar
 	if storedSecond == nil || storedSecond.RunExecutionID != promoted.ID {
 		t.Fatalf("remaining queued task input guard = %#v, want promoted exec %s", storedSecond, promoted.ID)
 	}
+	if _, err := repo.ConvertQueuedToSteering(ctx, second.ID, promoted.ID, promoted.ID); err == nil {
+		t.Fatalf("remaining queued task input should not steer before promoted execution is running")
+	}
+	if err := execRepo.MarkRunning(ctx, promoted.ID); err != nil {
+		t.Fatalf("mark promoted execution running: %v", err)
+	}
 	if _, err := repo.ConvertQueuedToSteering(ctx, second.ID, promoted.ID, promoted.ID); err != nil {
 		t.Fatalf("remaining queued task input should steer against promoted turn: %v", err)
 	}
@@ -1092,8 +1098,8 @@ func TestExecutionRepo_CreateDirectTaskFollowupReactivatesSwarmChildBeforeRecove
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if stored.Status != models.ExecRunning {
-		t.Fatalf("expected active swarm child follow-up execution to remain running, got %s (error=%q)", stored.Status, stored.ErrorMessage)
+	if stored.Status != models.ExecQueued {
+		t.Fatalf("expected active swarm child follow-up execution to wait queued, got %s (error=%q)", stored.Status, stored.ErrorMessage)
 	}
 	updatedChild, err := taskRepo.GetByID(ctx, child.ID)
 	if err != nil {
@@ -1431,8 +1437,18 @@ func TestExecutionRepo_TaskFollowupAdmissionConcurrentDirectStartsExactlyOnce(t 
 		t.Fatalf("expected exactly one direct admission winner, got %d", startedCount)
 	}
 	execs, err := execRepo.ListByTaskChronological(ctx, task.ID)
-	if err != nil || len(execs) != 1 || execs[0].Status != models.ExecRunning {
-		t.Fatalf("expected one running direct execution, got %#v err=%v", execs, err)
+	if err != nil || len(execs) != 1 || execs[0].Status != models.ExecQueued {
+		t.Fatalf("expected one queued direct execution, got %#v err=%v", execs, err)
+	}
+	if err := execRepo.MarkRunning(ctx, execs[0].ID); err != nil {
+		t.Fatalf("mark direct execution running: %v", err)
+	}
+	promoted, err := execRepo.GetByID(ctx, execs[0].ID)
+	if err != nil {
+		t.Fatalf("get promoted execution: %v", err)
+	}
+	if promoted.Status != models.ExecRunning {
+		t.Fatalf("expected promoted direct execution to be running, got %s", promoted.Status)
 	}
 	pending, err := NewThreadInputRepo(db).ListPendingForTask(ctx, task.ID)
 	if err != nil || len(pending) != submissions-1 {

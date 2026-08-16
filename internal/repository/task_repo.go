@@ -1176,7 +1176,7 @@ func (r *TaskRepo) ListActivePending(ctx context.Context) ([]models.Task, error)
 		`SELECT `+taskSelectColumns+`
 		 FROM tasks WHERE category = 'active' AND status = 'pending'
 		 AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
-		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		 AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status IN ('queued', 'running'))
 		 AND NOT `+taskThreadInputOwnsAdmissionPredicate+`
 		 ORDER BY priority DESC, display_order ASC, created_at ASC`)
 	if err != nil {
@@ -1235,7 +1235,7 @@ func (r *TaskRepo) ReclaimStaleQueuedTask(ctx context.Context, id string, staleD
 		SET status = 'pending', updated_at = datetime('now')
 		WHERE id = ? AND category = 'active' AND status = 'queued' AND updated_at < ?
 		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
-		  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status = 'running')
+		  AND NOT EXISTS (SELECT 1 FROM executions e WHERE e.task_id = tasks.id AND e.status IN ('queued', 'running'))
 		  AND NOT EXISTS (SELECT 1 FROM thread_inputs i
 		                  WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending')`, id, cutoff)
 	if err != nil {

@@ -5,6 +5,7 @@ import "time"
 type ExecutionStatus string
 
 const (
+	ExecQueued    ExecutionStatus = "queued"
 	ExecRunning   ExecutionStatus = "running"
 	ExecCompleted ExecutionStatus = "completed"
 	ExecFailed    ExecutionStatus = "failed"

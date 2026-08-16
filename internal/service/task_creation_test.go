@@ -95,6 +95,58 @@ func TestExecuteTaskCreationsWithIndexedReturn_PreservesRequestIndexAfterFailure
 	}
 }
 
+func TestExecuteTaskCreations_ActiveTaskWaitsForWorkerAdmissionAtCapacity(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+
+	maxWorkers := 1
+	project := &models.Project{Name: "Runtime Tool Capacity Project", MaxWorkers: &maxWorkers}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	workerSvc := NewWorkerService(nil, 1, projectRepo)
+	workerSvc.SetTaskRepo(taskRepo)
+	workerSvc.Start(ctx)
+	defer workerSvc.Stop()
+	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
+
+	if !workerSvc.TryAcquireProjectSlot(project.ID) {
+		t.Fatal("expected setup to saturate project/global capacity")
+	}
+	defer workerSvc.ReleaseProjectSlot(project.ID)
+
+	created, summary := ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{{
+		Title:    "Runtime-created active task",
+		Prompt:   "Do work after capacity frees",
+		Category: string(models.CategoryActive),
+		Priority: 2,
+	}}, project.ID, taskSvc)
+	if len(created) != 1 {
+		t.Fatalf("created len=%d summary=%s", len(created), summary)
+	}
+
+	stored, err := taskRepo.GetByID(ctx, created[0].ID)
+	if err != nil {
+		t.Fatalf("load created task: %v", err)
+	}
+	if stored == nil {
+		t.Fatal("created task missing")
+	}
+	if stored.Category != models.CategoryActive {
+		t.Fatalf("category=%s, want active", stored.Category)
+	}
+	if stored.Status != models.StatusPending {
+		t.Fatalf("status=%s, want pending until worker admission", stored.Status)
+	}
+	if got := workerSvc.TotalRunning(); got != 1 {
+		t.Fatalf("total running=%d, want only saturated setup slot", got)
+	}
+}
+
 func TestExecuteTaskCreations_Empty(t *testing.T) {
 	summary := ExecuteTaskCreations(context.Background(), nil, "proj1", nil)
 	if summary != "" {

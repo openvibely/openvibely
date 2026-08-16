@@ -275,6 +275,11 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	if task == nil {
 		return nil
 	}
+	if category == models.CategoryActive && previousTask != nil && previousTask.Category == models.CategoryActive &&
+		(previousTask.Status == models.StatusPending || previousTask.Status == models.StatusQueued || previousTask.Status == models.StatusRunning) {
+		applog.Infof("[task-svc] UpdateCategory active no-op id=%s status=%s", id, previousTask.Status)
+		return nil
+	}
 
 	// If moved AWAY from Active while running or queued, cancel the execution
 	// to release the project concurrency slot or abort the queued wait.
@@ -355,11 +360,15 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 
 func (s *TaskService) UpdateStatus(ctx context.Context, id string, status models.TaskStatus) error {
 	applog.Infof("[task-svc] UpdateStatus id=%s -> %s", id, status)
+	if status == models.StatusRunning {
+		applog.Infof("[task-svc] UpdateStatus routing running request through worker admission id=%s", id)
+		return s.RunTask(ctx, id)
+	}
 	if err := s.repo.UpdateStatus(ctx, id, status); err != nil {
 		applog.Infof("[task-svc] UpdateStatus error: %v", err)
 		return err
 	}
-	if status == models.StatusPending || status == models.StatusRunning {
+	if status == models.StatusPending {
 		task, err := s.repo.GetByID(ctx, id)
 		if err != nil {
 			applog.Infof("[task-svc] UpdateStatus error fetching task: %v", err)

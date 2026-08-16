@@ -2329,8 +2329,8 @@ func TestHandler_UpdateTaskStatus_DragDrop(t *testing.T) {
 	assertContains(t, rec, "kanban-board")
 
 	updated, _ := h.taskSvc.GetByID(ctx, task.ID)
-	if updated.Status != models.StatusRunning {
-		t.Errorf("expected status 'running', got %q", updated.Status)
+	if updated.Status != models.StatusPending {
+		t.Errorf("expected status 'pending' until worker admission, got %q", updated.Status)
 	}
 }
 
@@ -2351,8 +2351,8 @@ func TestHandler_UpdateTaskStatus_MovesToRunning(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 
 	updated, _ := tc.handler.taskSvc.GetByID(ctx, task.ID)
-	if updated.Status != models.StatusRunning {
-		t.Errorf("expected status 'running', got %q", updated.Status)
+	if updated.Status != models.StatusPending {
+		t.Errorf("expected status 'pending' until worker admission, got %q", updated.Status)
 	}
 	resumed, err := tc.handler.taskGoalSvc.GetGoal(ctx, task.ID)
 	require.NoError(t, err)
@@ -2360,6 +2360,34 @@ func TestHandler_UpdateTaskStatus_MovesToRunning(t *testing.T) {
 	assert.Equal(t, goal.GoalID, resumed.GoalID)
 	assert.Equal(t, models.TaskGoalStatusActive, resumed.Status)
 	assert.Equal(t, "resumed by user", resumed.Reason)
+}
+
+func TestHandler_UpdateTaskStatus_RunningDoesNotBypassWorkerCapacity(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	maxWorkers := 1
+	project := &models.Project{Name: "Status Admission Project", MaxWorkers: &maxWorkers}
+	require.NoError(t, h.projectSvc.Create(ctx, project))
+	h.workerSvc.SetProjectRepo(h.projectRepo)
+
+	task := createTask(t, h, project.ID, "Capacity-gated status task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+	})
+
+	require.True(t, h.workerSvc.TryAcquireProjectSlot(project.ID), "test setup should saturate project capacity")
+	defer h.workerSvc.ReleaseProjectSlot(project.ID)
+
+	form := url.Values{}
+	form.Set("status", "running")
+	rec := htmxPatch(e, "/tasks/"+task.ID+"/status", form)
+	assertCode(t, rec, http.StatusOK)
+
+	updated, _ := h.taskSvc.GetByID(ctx, task.ID)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.CategoryActive, updated.Category)
+	assert.Equal(t, models.StatusPending, updated.Status, "In Progress must wait for worker admission")
+	assert.Equal(t, 1, h.workerSvc.TotalRunning(), "status move must not acquire an extra slot beyond capacity")
 }
 
 func TestHandler_DeleteAllTasksByCategory(t *testing.T) {
