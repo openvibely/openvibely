@@ -22,13 +22,21 @@ func TestStartDetachedHelperRetriesWithoutBreakaway(t *testing.T) {
 	cmd := exec.Command("cmd.exe", "/c", "exit", "0")
 	configureDetachedHelper(cmd)
 	var attempts int
+	var first *exec.Cmd
 	err := startDetachedHelper(cmd, func(command *exec.Cmd) error {
 		attempts++
 		if attempts == 1 {
+			first = command
 			if command.SysProcAttr == nil || command.SysProcAttr.CreationFlags&createBreakawayFromJob == 0 {
 				t.Fatalf("first attempt did not request breakaway: %#v", command.SysProcAttr)
 			}
 			return errors.New("breakaway denied")
+		}
+		if command == first {
+			t.Fatal("retry reused the command from the failed start")
+		}
+		if strings.Join(command.Args, "\x00") != strings.Join(cmd.Args, "\x00") {
+			t.Fatalf("retry arguments = %#v, want %#v", command.Args, cmd.Args)
 		}
 		if command.SysProcAttr == nil || command.SysProcAttr.CreationFlags&createBreakawayFromJob != 0 {
 			t.Fatalf("retry still requested breakaway: %#v", command.SysProcAttr)
@@ -40,6 +48,9 @@ func TestStartDetachedHelperRetriesWithoutBreakaway(t *testing.T) {
 	}
 	if attempts != 2 {
 		t.Fatalf("attempts = %d, want 2", attempts)
+	}
+	if cmd.SysProcAttr.CreationFlags&createBreakawayFromJob == 0 {
+		t.Fatal("retry mutated the failed command's process attributes")
 	}
 }
 

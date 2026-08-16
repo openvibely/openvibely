@@ -241,14 +241,36 @@ func startDetachedHelper(cmd *exec.Cmd, start func(*exec.Cmd) error) error {
 		start = func(command *exec.Cmd) error { return command.Start() }
 	}
 	if err := start(cmd); err != nil {
-		if !relaxDetachedHelperBreakaway(cmd) {
+		retry := cloneHelperCommand(cmd)
+		if !relaxDetachedHelperBreakaway(retry) {
 			return err
 		}
-		if retryErr := start(cmd); retryErr != nil {
+		if retryErr := start(retry); retryErr != nil {
 			return errors.Join(err, retryErr)
 		}
 	}
 	return nil
+}
+
+func cloneHelperCommand(cmd *exec.Cmd) *exec.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	retry := &exec.Cmd{
+		Path:       cmd.Path,
+		Args:       append([]string(nil), cmd.Args...),
+		Env:        append([]string(nil), cmd.Env...),
+		Dir:        cmd.Dir,
+		Stdin:      cmd.Stdin,
+		Stdout:     cmd.Stdout,
+		Stderr:     cmd.Stderr,
+		ExtraFiles: append([]*os.File(nil), cmd.ExtraFiles...),
+	}
+	if cmd.SysProcAttr != nil {
+		attributes := *cmd.SysProcAttr
+		retry.SysProcAttr = &attributes
+	}
+	return retry
 }
 
 func (i *WailsInstaller) Apply(ctx context.Context, value any) error {

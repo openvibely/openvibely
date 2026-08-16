@@ -118,7 +118,7 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		t.Fatalf("accept update HTTP %d\n%s", resp.StatusCode, readLogs())
 	}
 	if err := waitForCommandExit(cmd, time.Minute); err != nil {
-		t.Fatalf("current app exit after handoff: %v\n%s", err, readLogs())
+		t.Fatalf("current app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describeBinaryHelperState(current), readLogs())
 	}
 	if wantState == StateSucceeded {
 		waitForHealthVersion(t, baseURL, releaseVersion)
@@ -318,6 +318,46 @@ func waitForCommandExit(cmd *exec.Cmd, timeout time.Duration) error {
 	case <-timer.C:
 		return fmt.Errorf("timed out after %s waiting for process %d to exit", timeout, cmd.Process.Pid)
 	}
+}
+
+func readUpdateSnapshot(baseURL string) string {
+	resp, err := http.Get(baseURL + "/api/system/update")
+	if err != nil {
+		return err.Error()
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if err != nil {
+		return fmt.Sprintf("HTTP %d: %v", resp.StatusCode, err)
+	}
+	return fmt.Sprintf("HTTP %d: %s", resp.StatusCode, body)
+}
+
+func describeBinaryHelperState(current string) string {
+	paths := []string{
+		binaryHelperPreparedPath(current),
+		binaryHelperOutcomePath(current),
+		binaryHelperAuthorizedPath(current),
+		binaryHelperCancelledPath(current),
+		binaryHelperRelaunchMetadataPath(current),
+		packagedUpdateHelperPath(current),
+	}
+	var state strings.Builder
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			fmt.Fprintf(&state, "%s: %v\n", filepath.Base(path), err)
+			continue
+		}
+		fmt.Fprintf(&state, "%s: %d bytes", filepath.Base(path), info.Size())
+		if strings.HasSuffix(path, ".json") && path != binaryHelperRelaunchMetadataPath(current) {
+			if data, readErr := os.ReadFile(path); readErr == nil {
+				fmt.Fprintf(&state, " %s", data)
+			}
+		}
+		state.WriteByte('\n')
+	}
+	return state.String()
 }
 
 func buildGoCommand(t *testing.T, pkg, output string, values map[string]string) {
