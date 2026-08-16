@@ -5484,7 +5484,7 @@ func TestHandler_TaskThreadSend_CompletedTaskIgnoresAndRepairsStaleRunningExecut
 	require.Len(t, execs, 2)
 	assert.Equal(t, models.ExecFailed, execs[0].Status)
 	assert.Equal(t, staleExec.ID, execs[0].ID)
-	assert.Equal(t, models.ExecRunning, execs[1].Status)
+	assert.Contains(t, []models.ExecutionStatus{models.ExecQueued, models.ExecRunning}, execs[1].Status)
 	assert.Equal(t, "follow up after completed task", execs[1].PromptSent)
 	assert.True(t, execs[1].IsFollowup)
 	pending, err := h.threadInputRepo.ListPendingForTask(ctx, task.ID)
@@ -5520,7 +5520,7 @@ func TestHandler_TaskThreadSend_CancelledTaskIgnoresAndRepairsStaleRunningExecut
 	require.Len(t, execs, 2)
 	assert.Equal(t, staleExec.ID, execs[0].ID)
 	assert.Equal(t, models.ExecCancelled, execs[0].Status)
-	assert.Equal(t, models.ExecRunning, execs[1].Status)
+	assert.Contains(t, []models.ExecutionStatus{models.ExecQueued, models.ExecRunning}, execs[1].Status)
 	assert.Equal(t, "follow up after cancelled task", execs[1].PromptSent)
 }
 

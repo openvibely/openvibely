@@ -318,7 +318,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to create upload directory"})
 		}
 
-		var textContents []string
+		var contextFiles []chatAttachmentModelContextFile
 		for _, sf := range savedFiles {
 			filename := filepath.Base(sf.header.Filename)
 			// Generate unique filename to avoid collisions
@@ -371,31 +371,20 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 
 			attachmentURLs = append(attachmentURLs, fmt.Sprintf("/chat/attachments/%s/download", chatAtt.ID))
 
-			// Categorize for AI processing
-			if isImageFile(filename) {
-				imageAttachments = append(imageAttachments, models.Attachment{
-					FileName:  filename,
-					FilePath:  destPath,
-					MediaType: mediaType,
-					FileSize:  sf.header.Size,
-				})
-			} else {
-				info, _ := os.Stat(destPath)
-				if info != nil && info.Size() <= maxTextAttachmentSize {
-					content, readErr := os.ReadFile(destPath)
-					if readErr == nil {
-						textContents = append(textContents, fmt.Sprintf("\nFile: %s\n```\n%s\n```\n", filename, string(content)))
-					}
-				} else {
-					textContents = append(textContents, fmt.Sprintf("\nFile: %s (attached, %d bytes - too large to include inline)\n", filename, sf.header.Size))
-				}
-			}
+			contextFiles = append(contextFiles, chatAttachmentModelContextFile{
+				FileName:  filename,
+				FilePath:  destPath,
+				MediaType: mediaType,
+				FileSize:  sf.header.Size,
+			})
 
 			applog.Infof("[handler] APIChatMessage saved attachment file=%s size=%d", filename, sf.header.Size)
 		}
 
-		if len(textContents) > 0 {
-			attachmentContext = "\n\n--- Attached Files ---\n" + strings.Join(textContents, "")
+		var contextErr error
+		attachmentContext, imageAttachments, contextErr = buildChatAttachmentModelContext(contextFiles, chatAttachmentModelContextOptions{IgnoreReadErrors: true})
+		if contextErr != nil {
+			applog.Infof("[handler] APIChatMessage error building attachment context: %v", contextErr)
 		}
 	}
 

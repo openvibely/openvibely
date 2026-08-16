@@ -2557,6 +2557,68 @@ func TestMediaTypeFromExtension(t *testing.T) {
 	}
 }
 
+func TestBuildChatAttachmentModelContextMatchesPendingPreviewAndAPISavedFiles(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+
+	tmpDir := t.TempDir()
+	oldUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	defer func() { uploadsDir = oldUploadsDir }()
+
+	sessionID := "equivalent-context-session"
+	pendingDir := filepath.Join(tmpDir, "chat", "pending", sessionID)
+	apiDir := filepath.Join(tmpDir, "chat", "api-exec")
+	require.NoError(t, os.MkdirAll(pendingDir, 0755))
+	require.NoError(t, os.MkdirAll(apiDir, 0755))
+
+	notesContent := []byte("remember this note")
+	largeContent := []byte(strings.Repeat("x", maxTextAttachmentSize+1))
+	imageContent := []byte{0x89, 0x50, 0x4e, 0x47}
+	files := []struct {
+		name    string
+		content []byte
+	}{
+		{name: "large.txt", content: largeContent},
+		{name: "notes.txt", content: notesContent},
+		{name: "screen.png", content: imageContent},
+	}
+
+	var apiFiles []chatAttachmentModelContextFile
+	for _, file := range files {
+		pendingPath := filepath.Join(pendingDir, file.name)
+		apiPath := filepath.Join(apiDir, file.name)
+		require.NoError(t, os.WriteFile(pendingPath, file.content, 0644))
+		require.NoError(t, os.WriteFile(apiPath, file.content, 0644))
+		apiFiles = append(apiFiles, chatAttachmentModelContextFile{
+			FileName: file.name,
+			FilePath: apiPath,
+			FileSize: int64(len(file.content)),
+		})
+	}
+
+	pendingText, pendingImages, err := h.previewPendingAttachments(sessionID)
+	require.NoError(t, err)
+	apiText, apiImages, err := buildChatAttachmentModelContext(apiFiles, chatAttachmentModelContextOptions{})
+	require.NoError(t, err)
+
+	assert.Equal(t, pendingText, apiText)
+	assert.Contains(t, pendingText, "--- Attached Files ---")
+	assert.Contains(t, pendingText, "File: notes.txt")
+	assert.Contains(t, pendingText, string(notesContent))
+	assert.Contains(t, pendingText, "File: large.txt (attached")
+	assert.Contains(t, pendingText, "too large to include inline")
+	assert.NotContains(t, pendingText, "screen.png")
+	assert.NotContains(t, pendingText, string(largeContent[:50]))
+
+	require.Len(t, pendingImages, 1)
+	require.Len(t, apiImages, 1)
+	assert.Equal(t, pendingImages[0].FileName, apiImages[0].FileName)
+	assert.Equal(t, pendingImages[0].MediaType, apiImages[0].MediaType)
+	assert.Equal(t, pendingImages[0].FileSize, apiImages[0].FileSize)
+	assert.Equal(t, filepath.Join(pendingDir, "screen.png"), pendingImages[0].FilePath)
+	assert.Equal(t, filepath.Join(apiDir, "screen.png"), apiImages[0].FilePath)
+}
+
 func TestProcessAttachments_ImageFilesReturnedAsSeparateAttachments(t *testing.T) {
 	h, _, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
