@@ -594,47 +594,17 @@ func (h *Handler) writeStandaloneSkillFromDialog(c echo.Context, req skillSaveRe
 			return nil, echo.NewHTTPError(http.StatusInternalServerError, statErr.Error())
 		}
 	}
-	body := strings.TrimSpace(req.Body)
-	var decl *agentlibrary.SkillDeclaration
-	if strings.HasPrefix(body, "---") {
-		parsed, parsedBody, parseErr := agentlibrary.ParseDeclaration(body)
-		if parseErr != nil {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, parseErr.Error())
-		}
-		if parsed.IsAgentRootDeclaration() || strings.TrimSpace(parsed.Agent.Key) != "" {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, "standalone skills must not set agent.key")
-		}
-		if parsed.Skill.Key != handle {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, "body frontmatter skill.key must match handle")
-		}
-		decl = parsed
-		body = parsedBody
-	} else {
-		decl = &agentlibrary.SkillDeclaration{
-			Kind:    "openvibely.agent_skill",
-			Version: 1,
-			Skill: agentlibrary.SkillBlock{
-				Key: handle,
-				// Enabled left nil: absence = enabled, keeps frontmatter clean
-			},
-		}
-	}
-	decl.Agent.Key = ""
-	decl.Skill.Key = handle
-	decl.Skill.Scope = scope
-	decl.Skill.Name = strings.TrimSpace(req.Name)
-	if decl.Skill.Name == "" && !strings.HasPrefix(strings.TrimSpace(req.Body), "---") {
-		decl.Skill.Name = handle
-	}
-	decl.Skill.Description = strings.TrimSpace(req.Description)
-	if req.Enabled != nil {
-		if !*req.Enabled {
-			// Explicitly disable — write enabled: false
-			decl.Skill.Enabled = req.Enabled
-		} else {
-			// Enabled (default) — use nil so omitempty keeps frontmatter clean
-			decl.Skill.Enabled = nil
-		}
+	decl, body, err := normalizeSkillDialogDeclaration(skillDialogNormalizationRequest{
+		Handle:               handle,
+		Scope:                scope,
+		Name:                 req.Name,
+		Description:          req.Description,
+		Body:                 req.Body,
+		Enabled:              req.Enabled,
+		RejectAgentOwnership: true,
+	})
+	if err != nil {
+		return nil, err
 	}
 	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: h.currentProjectSkillRoot(c)}, nil)
 	res, err := importer.WriteSkill(c.Request().Context(), decl, body)
