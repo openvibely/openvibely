@@ -3850,7 +3850,7 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `id="task-thread-view" class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("task thread root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
 	}
-	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-1 space-y-6 min-h-0"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0"`) {
 		t.Fatal("task thread messages pane should avoid stacking an outer bottom margin above the composer")
 	}
 	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-0 mb-4`) {
@@ -4470,7 +4470,7 @@ func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testi
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-1 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
 		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
 	}
 	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {

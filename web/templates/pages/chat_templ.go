@@ -296,14 +296,14 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-target=\"closest #chat-page-root\" hx-swap=\"outerHTML\" class=\"text-error\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg> Clear Chat</button></li></ul></div></div><!-- Chat Messages Container --><div id=\"chat-messages\" class=\"flex-1 min-h-0 overflow-y-auto pt-4 pb-1 space-y-6\" style=\"visibility: hidden;\" data-transcript-hydrating=\"true\" data-window-limit=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" hx-target=\"closest #chat-page-root\" hx-swap=\"outerHTML\" class=\"text-error\"><svg xmlns=\"http://www.w3.org/2000/svg\" class=\"h-4 w-4\" fill=\"none\" viewBox=\"0 0 24 24\" stroke=\"currentColor\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16\"></path></svg> Clear Chat</button></li></ul></div></div><!-- Chat Messages Container --><div id=\"chat-messages\" class=\"flex-1 min-h-0 overflow-y-auto pt-4 pb-4 -mb-3 space-y-6\" style=\"visibility: hidden;\" data-transcript-hydrating=\"true\" data-window-limit=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("%d", windowLimit))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 100, Col: 196}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 100, Col: 202}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 		if templ_7745c5c3_Err != nil {
@@ -316,7 +316,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 		var templ_7745c5c3_Var14 string
 		templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.ResolveAttributeValue("/chat?project_id=" + currentProjectID + "&limit=" + fmt.Sprintf("%d", windowLimit))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 100, Col: 306}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 100, Col: 312}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var14)
 		if templ_7745c5c3_Err != nil {
@@ -329,7 +329,7 @@ func ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, curr
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.ResolveAttributeValue(currentProjectID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 100, Col: 352}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/chat.templ`, Line: 100, Col: 358}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var15)
 		if templ_7745c5c3_Err != nil {
