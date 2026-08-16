@@ -12,7 +12,7 @@ import (
 func (h *Handler) ProactiveInsights(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if projectID == "" && len(projects) > 0 {
 		projectID = projects[0].ID
 	}
@@ -198,4 +198,3 @@ func (h *Handler) DeleteKnowledgeEntry(c echo.Context) error {
 	}
 	return c.String(http.StatusOK, "")
 }
-

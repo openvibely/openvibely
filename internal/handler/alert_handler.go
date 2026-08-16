@@ -39,7 +39,7 @@ func (h *Handler) ListAlerts(c echo.Context) error {
 	if isHTMX {
 		return render(c, http.StatusOK, pages.AlertsContent(alerts, currentProjectID, unreadCount))
 	}
-	projects, _ := h.projectSvc.List(ctx)
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
 	return render(c, http.StatusOK, pages.Alerts(projects, currentProjectID, alerts, unreadCount))
 }
 

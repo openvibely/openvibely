@@ -510,7 +510,7 @@ func (h *Handler) DeleteProject(c echo.Context) error {
 	applog.Infof("[handler] DeleteProject success id=%s", projectID)
 
 	// Find the default project to redirect to
-	projects, _ := h.projectSvc.List(ctx)
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
 	redirectID := ""
 	if len(projects) > 0 {
 		redirectID = projects[0].ID
@@ -528,7 +528,7 @@ func (h *Handler) ViewSchedule(c echo.Context) error {
 	isHTMX := isHTMX(c)
 	applog.Infof("[handler] ViewSchedule requested for project_id=%s htmx=%v", projectID, isHTMX)
 
-	projects, err := h.projectSvc.List(c.Request().Context())
+	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if err != nil {
 		applog.Infof("[handler] ViewSchedule error listing projects: %v", err)
 		return err

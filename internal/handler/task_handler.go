@@ -287,8 +287,11 @@ func (h *Handler) ListTasks(c echo.Context) error {
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 	}
 
-	// For full page and main-content swaps, default to first project
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	// For full page and main-content swaps, default to first project.
+	// The Tasks shell renders only the sidebar selector and the current project's
+	// id, so the compact selector projection is sufficient; the full current
+	// project is loaded via GetByID below.
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if projectID == "" && len(projects) > 0 {
 		projectID = projects[0].ID
 	}
@@ -624,7 +627,7 @@ func (h *Handler) GetTask(c echo.Context) error {
 	}
 
 	// Full page load: wrap in layout
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	return render(c, http.StatusOK, pages.TaskDetailPage(projects, data.task, data.taskGoal, data.executions, data.schedules, data.agents, data.agentDefs, data.attachments, defaultTab, data.reviewComments))
 }
 

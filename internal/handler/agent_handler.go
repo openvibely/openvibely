@@ -1517,7 +1517,7 @@ func (h *Handler) ListAgents(c echo.Context) error {
 	}
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	return render(c, http.StatusOK, pages.Agents(projects, currentProjectID, agents, modelOptions))
 }
 

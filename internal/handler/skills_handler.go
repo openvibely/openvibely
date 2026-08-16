@@ -72,7 +72,7 @@ func (h *Handler) ListSkills(c echo.Context) error {
 		return render(c, http.StatusOK, pages.SkillsContent(skills, canManage))
 	}
 	currentProjectID, _ := h.getCurrentProjectID(c)
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	return render(c, http.StatusOK, pages.Skills(projects, currentProjectID, skills, canManage))
 }
 

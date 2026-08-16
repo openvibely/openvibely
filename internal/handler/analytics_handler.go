@@ -22,8 +22,10 @@ func (h *Handler) Analytics(c echo.Context) error {
 
 	projectID := c.QueryParam("project_id")
 
-	// For HTMX requests, we still need to get projects for the current project lookup
-	projects, err := h.projectSvc.List(c.Request().Context())
+	// For HTMX requests, we still need to get projects for the current project lookup.
+	// The analytics shell only renders the sidebar selector and the current project's
+	// id/name, so the compact selector projection is sufficient here.
+	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if err != nil {
 		applog.Infof("[handler] Analytics error listing projects: %v", err)
 		return err

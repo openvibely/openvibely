@@ -71,7 +71,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 
 	// Get projects for sidebar
-	projects, err := h.projectSvc.List(c.Request().Context())
+	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load projects")
 	}
@@ -379,7 +379,7 @@ func (h *Handler) handleAppSettings(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
 
 	// Get projects for sidebar
-	projects, err := h.projectSvc.List(c.Request().Context())
+	projects, err := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load projects")
 	}

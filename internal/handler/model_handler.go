@@ -56,7 +56,7 @@ func (h *Handler) ListModels(c echo.Context) error {
 	}
 
 	currentProjectID, _ := h.getCurrentProjectID(c)
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 
 	return render(c, http.StatusOK, pages.Models(projects, currentProjectID, agents, modelWorkerStats, h.desktopMode))
 }

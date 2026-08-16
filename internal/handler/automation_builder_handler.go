@@ -97,7 +97,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 			if listErr != nil {
 				return listErr
 			}
-			projects, _ := h.projectSvc.List(ctx)
+			projects, _ := h.projectSvc.ListSelectorOptions(ctx)
 			return render(c, http.StatusUnprocessableEntity, pages.AutomationsDescribeFailure(projects, projectID, cards, description, message))
 		}
 		return err
@@ -799,6 +799,6 @@ func (h *Handler) renderAutomationBuilder(c echo.Context, page models.Automation
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationBuilderContent(page, projectID))
 	}
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	return render(c, http.StatusOK, pages.AutomationBuilder(projects, projectID, page))
 }

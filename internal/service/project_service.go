@@ -22,6 +22,13 @@ func (s *ProjectService) List(ctx context.Context) ([]models.Project, error) {
 	return s.repo.List(ctx)
 }
 
+// ListSelectorOptions returns a compact project projection (id, name,
+// is_default) for shared page-shell selector rendering and current-project
+// fallback. Callers that need full project records must use List or GetByID.
+func (s *ProjectService) ListSelectorOptions(ctx context.Context) ([]models.Project, error) {
+	return s.repo.ListSelectorOptions(ctx)
+}
+
 func (s *ProjectService) GetByID(ctx context.Context, id string) (*models.Project, error) {
 	return s.repo.GetByID(ctx, id)
 }

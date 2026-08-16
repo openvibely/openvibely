@@ -607,7 +607,7 @@ func (h *Handler) GetExecution(c echo.Context) error {
 	}
 
 	task, _ := h.taskSvc.GetByID(c.Request().Context(), exec.TaskID)
-	projects, _ := h.projectSvc.List(c.Request().Context())
+	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 
 	applog.Infof("[handler] GetExecution id=%s status=%s tokens=%d duration=%dms",
 		id, exec.Status, exec.TokensUsed, exec.DurationMs)

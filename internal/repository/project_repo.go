@@ -36,6 +36,37 @@ func (r *ProjectRepo) List(ctx context.Context) ([]models.Project, error) {
 	return projects, rows.Err()
 }
 
+// ListSelectorOptions returns a compact projection for the shared sidebar
+// project selector and current-project fallback. It selects only id, name, and
+// is_default — the fields the shared app shell renders and the fallback path
+// reads — and deliberately omits description, repo_path, repo_url,
+// default_agent_config_id, max_workers, created_at, and updated_at so ordinary
+// full-page navigation does not copy unbounded project text it never displays.
+//
+// Ordering matches List (default project first, then name ascending) with an
+// explicit id tie-breaker so equal project names are deterministic. The
+// idx_projects_selector_order covering index lets SQLite satisfy this order
+// without a temp B-tree sort or table lookup.
+func (r *ProjectRepo) ListSelectorOptions(ctx context.Context) ([]models.Project, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, name, is_default
+		 FROM projects ORDER BY is_default DESC, name ASC, id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing project selector options: %w", err)
+	}
+	defer rows.Close()
+
+	var projects []models.Project
+	for rows.Next() {
+		var p models.Project
+		if err := rows.Scan(&p.ID, &p.Name, &p.IsDefault); err != nil {
+			return nil, fmt.Errorf("scanning project selector option: %w", err)
+		}
+		projects = append(projects, p)
+	}
+	return projects, rows.Err()
+}
+
 func (r *ProjectRepo) GetByID(ctx context.Context, id string) (*models.Project, error) {
 	var p models.Project
 	err := r.db.QueryRowContext(ctx,

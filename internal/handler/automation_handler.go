@@ -58,7 +58,7 @@ func (h *Handler) ListAutomations(c echo.Context) error {
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationsContent(cards, projectID))
 	}
-	projects, _ := h.projectSvc.List(ctx)
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
 	return render(c, http.StatusOK, pages.Automations(projects, projectID, cards))
 }
 
@@ -96,7 +96,7 @@ func (h *Handler) GetAutomationLive(c echo.Context) error {
 	if isHTMX(c) {
 		return render(c, http.StatusOK, pages.AutomationLiveContent(*graph, projectID, deleteAvailable))
 	}
-	projects, _ := h.projectSvc.List(ctx)
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
 	return render(c, http.StatusOK, pages.AutomationLive(projects, projectID, *graph, deleteAvailable))
 }
 
