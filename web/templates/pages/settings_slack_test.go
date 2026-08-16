@@ -51,6 +51,32 @@ func TestSettingsContent_RendersSlackMenuCardAndModal(t *testing.T) {
 		t.Fatal("expected manual token fallback guidance in modal")
 	}
 }
+func TestSettingsContent_DoesNotOverrideSharedDropdownToggle(t *testing.T) {
+	var buf bytes.Buffer
+	view := defaultChannelsSettingsView("default")
+	view.HasSlackChannel = true
+	if err := SettingsContent(view).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, `onclick="handleDropdownToggle(event)"`) {
+		t.Fatal("settings menus should keep using the shared dropdown toggle handler")
+	}
+	for _, forbidden := range []string{
+		"function handleDropdownToggle(event)",
+		".dropdown-content.show",
+		".dropdown-content {\n\t\t\t\tdisplay: none;",
+	} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("settings content must not override shared dropdown behavior with %q", forbidden)
+		}
+	}
+	if !strings.Contains(out, "document.querySelectorAll('.dropdown :focus')") {
+		t.Fatal("settings close helper should close shared focus-driven dropdowns")
+	}
+}
+
 func TestSettingsContent_RendersDiscordCardIconAcrossGatewayStates(t *testing.T) {
 	tests := []struct {
 		name               string
