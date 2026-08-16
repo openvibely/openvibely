@@ -202,13 +202,14 @@ func TestWebRuntimeToolsUseSharedInputDecoder(t *testing.T) {
 
 func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     json.RawMessage
-		wantError string
+		name            string
+		input           json.RawMessage
+		wantError       string
+		wantStoredTitle string
 	}{
 		{name: "empty", input: nil, wantError: "create_task requires title and prompt"},
 		{name: "whitespace", input: json.RawMessage(" \n\t "), wantError: "create_task requires title and prompt"},
-		{name: "valid", input: json.RawMessage(`{"title":"Decoded task","prompt":"Create this task","category":"backlog"}`)},
+		{name: "valid", input: json.RawMessage(`{"title":" Decoded task ","prompt":" Create this task ","category":"backlog"}`), wantStoredTitle: "Decoded task"},
 		{name: "malformed", input: json.RawMessage(`{"title":`), wantError: "invalid tool input JSON:"},
 	}
 
@@ -233,6 +234,12 @@ func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Contains(t, out, "Decoded task")
+			if tt.wantStoredTitle != "" {
+				tasks, listErr := h.taskRepo.ListByProject(context.Background(), project.ID, "")
+				require.NoError(t, listErr)
+				require.Len(t, tasks, 1)
+				require.Equal(t, tt.wantStoredTitle, tasks[0].Title)
+			}
 		})
 	}
 }
