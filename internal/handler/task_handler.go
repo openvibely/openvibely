@@ -1994,101 +1994,50 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 		}
 	}
 
-	activeExec, activeErr := h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
-	if activeErr != nil {
-		applog.Infof("[handler] TaskThreadSend active execution check failed task=%s: %v", taskID, activeErr)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
-	}
-	queueBehindFirstTurn, queueStateErr := h.taskHasStartingFirstTurn(c.Request().Context(), task)
-	if queueStateErr != nil {
-		applog.Infof("[handler] TaskThreadSend first-turn state check failed task=%s: %v", taskID, queueStateErr)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
-	}
-	if activeExec == nil && !queueBehindFirstTurn {
-		activeExec, activeErr = h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
-		if activeErr != nil {
-			applog.Infof("[handler] TaskThreadSend active execution recheck failed task=%s: %v", taskID, activeErr)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
-		}
-	}
-	if activeExec != nil || queueBehindFirstTurn {
-		if h.threadInputRepo == nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
-		}
-		runExecutionID := ""
-		if activeExec != nil {
-			runExecutionID = activeExec.ID
-		}
-		queued := &models.ThreadInput{
-			Scope:               models.ThreadInputScopeTask,
-			ProjectID:           task.ProjectID,
-			TaskID:              taskID,
-			RunExecutionID:      runExecutionID,
-			AgentConfigID:       agent.ID,
-			InputMode:           models.ThreadInputModeQueued,
-			InputStatus:         models.ThreadInputPending,
-			Content:             message,
-			Source:              models.TaskOriginWeb,
-			AttachmentSessionID: sessionID,
-		}
-		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
-			applog.Infof("[handler] TaskThreadSend error creating queued input: %v", err)
-			if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
-				applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s: %v", sessionID, cleanupErr)
-			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
-		}
-		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(c.Request().Context(), queued); err != nil {
-			applog.Infof("[handler] TaskThreadSend task=%s input=%s active execution bind skipped: %v", taskID, queued.ID, err)
-		}
-		if shouldPromote, promoteErr := h.shouldPromotePreExecutionQueuedInput(c.Request().Context(), task, queued); promoteErr != nil {
-			applog.Infof("[handler] TaskThreadSend task=%s input=%s promotion recheck skipped: %v", taskID, queued.ID, promoteErr)
-		} else if shouldPromote {
-			go h.PromoteQueuedTaskThreadInput(taskID)
-		}
-		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != "", taskID))
-	}
-	exec := &models.Execution{
-		TaskID:        taskID,
-		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
-		PromptSent:    message,
-		IsFollowup:    true,
-	}
-	queued := &models.ThreadInput{
-		Scope:               models.ThreadInputScopeTask,
-		ProjectID:           task.ProjectID,
-		TaskID:              taskID,
-		AgentConfigID:       agent.ID,
-		InputMode:           models.ThreadInputModeQueued,
-		InputStatus:         models.ThreadInputPending,
-		Content:             message,
+	admission, err := h.admitTaskFollowup(c.Request().Context(), taskFollowupAdmissionRequest{
+		Task:                task,
+		Agent:               agent,
+		Message:             message,
 		Source:              models.TaskOriginWeb,
 		AttachmentSessionID: sessionID,
-	}
-	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(c.Request().Context(), exec, queued)
+		LogPrefix:           "TaskThreadSend",
+	})
 	if err != nil {
-		applog.Infof("[handler] TaskThreadSend error admitting execution: %v", err)
-		if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
-			applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s after admission failure: %v", sessionID, cleanupErr)
+		if admissionErr, ok := err.(*taskFollowupAdmissionError); ok {
+			switch admissionErr.Op {
+			case taskFollowupAdmissionOpActiveCheck:
+				applog.Infof("[handler] TaskThreadSend active execution check failed task=%s: %v", taskID, admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
+			case taskFollowupAdmissionOpFirstTurnCheck:
+				applog.Infof("[handler] TaskThreadSend first-turn state check failed task=%s: %v", taskID, admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
+			case taskFollowupAdmissionOpQueueUnavailable:
+				return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+			case taskFollowupAdmissionOpQueueCreate:
+				applog.Infof("[handler] TaskThreadSend error creating queued input: %v", admissionErr.Err)
+				if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+					applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s: %v", sessionID, cleanupErr)
+				}
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue follow-up")
+			case taskFollowupAdmissionOpDirectAdmission:
+				applog.Infof("[handler] TaskThreadSend error admitting execution: %v", admissionErr.Err)
+				if cleanupErr := h.cleanupUnpublishedPendingAttachmentSession(c.Request().Context(), sessionID); cleanupErr != nil {
+					applog.Infof("[handler] TaskThreadSend error cleaning unpublished attachment session %s after admission failure: %v", sessionID, cleanupErr)
+				}
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
+			case taskFollowupAdmissionOpSwarmChildRouting:
+				applog.Infof("[handler] TaskThreadSend swarm child follow-up routing failed task=%s: %v", taskID, admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
+			}
 		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
 	}
-	if !started {
-		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(c.Request().Context(), queued); err != nil {
-			applog.Infof("[handler] TaskThreadSend task=%s input=%s active execution bind skipped: %v", taskID, queued.ID, err)
-		}
-		go h.PromoteQueuedTaskThreadInput(taskID)
+	if admission.Queued != nil {
+		queued := admission.Queued
 		return render(c, http.StatusOK, components.ChatQueuedInputRowOOBForTask(queued.ID, message, fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, queued.ID), queued.AttachmentSessionID != "", taskID))
 	}
-	if h.workerSvc != nil {
-		h.workerSvc.ClearCancellationRequested(taskID)
-	}
-	if err := h.applySwarmChildFollowupStart(c.Request().Context(), task, message); err != nil {
-		applog.Infof("[handler] TaskThreadSend swarm child follow-up routing failed task=%s: %v", taskID, err)
-		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, err.Error(), 0)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
-	}
+	exec := admission.Execution
+	task = admission.Task
 
 	applog.Infof("[handler] TaskThreadSend created followup exec=%s for task=%s agent=%s status=%s", exec.ID, taskID, agent.Name, exec.Status)
 	// Handle file attachments if present (same as ChatSend)
@@ -2107,13 +2056,6 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 
 	h.resumeUserStoppedGoalForManualStart(c.Request().Context(), taskID, models.TaskOriginWeb, "")
 	h.reactivateAchievedGoalForManualFollowup(c.Request().Context(), taskID, models.TaskOriginWeb, "")
-
-	// CreateDirectTaskFollowup reactivated the task atomically before exposing the
-	// running execution, so no stale-recovery sweep can observe a terminal task
-	// owning a live follow-up. Refresh the local task copy used by the goroutine.
-	if updatedTask, getErr := h.taskRepo.GetByID(c.Request().Context(), taskID); getErr == nil && updatedTask != nil {
-		task = updatedTask
-	}
 
 	// Spawn LLM processing goroutine (acquires per-model worker slot in processStreamingResponse).
 	// DeferHistoryLoad=true moves the full ListByTaskChronological scan, agent-definition

@@ -149,96 +149,48 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 		}
 	}
 
-	activeExec, activeErr := h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
-	if activeErr != nil {
-		applog.Infof("[handler] SubmitReview active execution check failed task=%s: %v", taskID, activeErr)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
-	}
-	queueBehindFirstTurn, queueStateErr := h.taskHasStartingFirstTurn(c.Request().Context(), task)
-	if queueStateErr != nil {
-		applog.Infof("[handler] SubmitReview first-turn state check failed task=%s: %v", taskID, queueStateErr)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
-	}
-	if activeExec == nil && !queueBehindFirstTurn {
-		activeExec, activeErr = h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
-		if activeErr != nil {
-			applog.Infof("[handler] SubmitReview active execution recheck failed task=%s: %v", taskID, activeErr)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
-		}
-	}
-	if activeExec != nil || queueBehindFirstTurn {
-		if h.threadInputRepo == nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
-		}
-		runExecutionID := ""
-		if activeExec != nil {
-			runExecutionID = activeExec.ID
-		}
-		queued := &models.ThreadInput{
-			Scope:          models.ThreadInputScopeTask,
-			ProjectID:      task.ProjectID,
-			TaskID:         taskID,
-			RunExecutionID: runExecutionID,
-			AgentConfigID:  agent.ID,
-			InputMode:      models.ThreadInputModeQueued,
-			InputStatus:    models.ThreadInputPending,
-			Content:        reviewMessage,
-			Source:         models.TaskOriginWeb,
-		}
-		if err := h.threadInputRepo.CreateQueued(c.Request().Context(), queued); err != nil {
-			applog.Infof("[handler] SubmitReview error creating queued input: %v", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue review follow-up")
-		}
-		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(c.Request().Context(), queued); err != nil {
-			applog.Infof("[handler] SubmitReview task=%s input=%s active execution bind skipped: %v", taskID, queued.ID, err)
-		}
-		if shouldPromote, promoteErr := h.shouldPromotePreExecutionQueuedInput(c.Request().Context(), task, queued); promoteErr != nil {
-			applog.Infof("[handler] SubmitReview task=%s input=%s promotion recheck skipped: %v", taskID, queued.ID, promoteErr)
-		} else if shouldPromote {
-			go h.PromoteQueuedTaskThreadInput(taskID)
-		}
-		if err := h.reviewCommentRepo.DeleteByTask(c.Request().Context(), taskID); err != nil {
-			applog.Infof("[handler] SubmitReview error clearing comments: %v", err)
-		}
-		c.Response().Header().Set("HX-Redirect", fmt.Sprintf("/tasks/%s?tab=chat", taskID))
-		return c.NoContent(http.StatusOK)
-	}
-
-	// Create execution record for the review follow-up
-	exec := &models.Execution{
-		TaskID:        taskID,
-		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
-		PromptSent:    reviewMessage,
-		IsFollowup:    true,
-	}
-	queued := &models.ThreadInput{AgentConfigID: agent.ID, Content: reviewMessage, Source: models.TaskOriginWeb}
-	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(c.Request().Context(), exec, queued)
+	admission, err := h.admitTaskFollowup(c.Request().Context(), taskFollowupAdmissionRequest{
+		Task:      task,
+		Agent:     agent,
+		Message:   reviewMessage,
+		Source:    models.TaskOriginWeb,
+		LogPrefix: "SubmitReview",
+	})
 	if err != nil {
-		applog.Infof("[handler] SubmitReview error admitting execution: %v", err)
+		if admissionErr, ok := err.(*taskFollowupAdmissionError); ok {
+			switch admissionErr.Op {
+			case taskFollowupAdmissionOpActiveCheck:
+				applog.Infof("[handler] SubmitReview active execution check failed task=%s: %v", taskID, admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active task turn")
+			case taskFollowupAdmissionOpFirstTurnCheck:
+				applog.Infof("[handler] SubmitReview first-turn state check failed task=%s: %v", taskID, admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to check task queue")
+			case taskFollowupAdmissionOpQueueUnavailable:
+				return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
+			case taskFollowupAdmissionOpQueueCreate:
+				applog.Infof("[handler] SubmitReview error creating queued input: %v", admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to queue review follow-up")
+			case taskFollowupAdmissionOpDirectAdmission:
+				applog.Infof("[handler] SubmitReview error admitting execution: %v", admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
+			case taskFollowupAdmissionOpSwarmChildRouting:
+				applog.Infof("[handler] SubmitReview swarm child follow-up routing failed task=%s: %v", taskID, admissionErr.Err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
+			}
+		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to admit execution")
 	}
-	if !started {
+	if admission.Queued != nil {
 		if err := h.reviewCommentRepo.DeleteByTask(c.Request().Context(), taskID); err != nil {
 			applog.Infof("[handler] SubmitReview error clearing comments: %v", err)
 		}
-		go h.PromoteQueuedTaskThreadInput(taskID)
 		c.Response().Header().Set("HX-Redirect", fmt.Sprintf("/tasks/%s?tab=chat", taskID))
 		return c.NoContent(http.StatusOK)
 	}
-	if h.workerSvc != nil {
-		h.workerSvc.ClearCancellationRequested(taskID)
-	}
-	if err := h.applySwarmChildFollowupStart(c.Request().Context(), task, reviewMessage); err != nil {
-		applog.Infof("[handler] SubmitReview swarm child follow-up routing failed task=%s: %v", taskID, err)
-		h.completeWithFailure(c.Request().Context(), exec.ID, taskID, err.Error(), 0)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
-	}
 
+	exec := admission.Execution
+	task = admission.Task
 	applog.Infof("[handler] SubmitReview created review exec=%s for task=%s with %d comments", exec.ID, taskID, len(comments))
-	if updatedTask, getErr := h.taskRepo.GetByID(c.Request().Context(), taskID); getErr == nil && updatedTask != nil {
-		task = updatedTask
-	}
 
 	// Build system context and spawn LLM processing
 	h.resumeUserStoppedGoalForManualStart(c.Request().Context(), taskID, models.TaskOriginWeb, "")

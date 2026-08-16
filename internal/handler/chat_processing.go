@@ -3713,6 +3713,164 @@ func (h *Handler) shouldPromotePreExecutionQueuedInput(ctx context.Context, task
 	return true, nil
 }
 
+type taskFollowupAdmissionOp string
+
+const (
+	taskFollowupAdmissionOpActiveCheck       taskFollowupAdmissionOp = "active_check"
+	taskFollowupAdmissionOpFirstTurnCheck    taskFollowupAdmissionOp = "first_turn_check"
+	taskFollowupAdmissionOpQueueUnavailable  taskFollowupAdmissionOp = "queue_unavailable"
+	taskFollowupAdmissionOpQueueCreate       taskFollowupAdmissionOp = "queue_create"
+	taskFollowupAdmissionOpBind              taskFollowupAdmissionOp = "bind"
+	taskFollowupAdmissionOpPromotionCheck    taskFollowupAdmissionOp = "promotion_check"
+	taskFollowupAdmissionOpDirectAdmission   taskFollowupAdmissionOp = "direct_admission"
+	taskFollowupAdmissionOpSwarmChildRouting taskFollowupAdmissionOp = "swarm_child_routing"
+)
+
+type taskFollowupAdmissionError struct {
+	Op  taskFollowupAdmissionOp
+	Err error
+}
+
+func (e *taskFollowupAdmissionError) Error() string {
+	if e == nil || e.Err == nil {
+		return "task follow-up admission failed"
+	}
+	return e.Err.Error()
+}
+
+func (e *taskFollowupAdmissionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+type taskFollowupAdmissionRequest struct {
+	Task                *models.Task
+	Agent               *models.LLMConfig
+	Message             string
+	Source              string
+	AttachmentSessionID string
+	LogPrefix           string
+	FatalQueueCareError bool
+}
+
+type taskFollowupAdmissionResult struct {
+	Execution *models.Execution
+	Queued    *models.ThreadInput
+	Task      *models.Task
+}
+
+func (h *Handler) admitTaskFollowup(ctx context.Context, req taskFollowupAdmissionRequest) (*taskFollowupAdmissionResult, error) {
+	if req.Task == nil {
+		return nil, fmt.Errorf("task is required")
+	}
+	if req.Agent == nil {
+		return nil, fmt.Errorf("agent is required")
+	}
+	if req.Source == "" {
+		req.Source = models.TaskOriginWeb
+	}
+	logPrefix := req.LogPrefix
+	if logPrefix == "" {
+		logPrefix = "admitTaskFollowup"
+	}
+	task := req.Task
+	activeExec, err := h.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+	if err != nil {
+		return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpActiveCheck, Err: err}
+	}
+	queueBehindFirstTurn, err := h.taskHasStartingFirstTurn(ctx, task)
+	if err != nil {
+		return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpFirstTurnCheck, Err: err}
+	}
+	if activeExec == nil && !queueBehindFirstTurn {
+		activeExec, err = h.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
+		if err != nil {
+			return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpActiveCheck, Err: err}
+		}
+	}
+	if activeExec != nil || queueBehindFirstTurn {
+		if h.threadInputRepo == nil {
+			return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpQueueUnavailable, Err: fmt.Errorf("thread input queue is unavailable")}
+		}
+		runExecutionID := ""
+		if activeExec != nil {
+			runExecutionID = activeExec.ID
+		}
+		queued := h.buildTaskFollowupQueuedInput(task, req.Agent.ID, req.Message, req.Source, req.AttachmentSessionID, runExecutionID)
+		if err := h.threadInputRepo.CreateQueued(ctx, queued); err != nil {
+			return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpQueueCreate, Err: err}
+		}
+		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(ctx, queued); err != nil {
+			if req.FatalQueueCareError {
+				return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpBind, Err: err}
+			}
+			applog.Infof("[handler] %s task=%s input=%s active execution bind skipped: %v", logPrefix, task.ID, queued.ID, err)
+		}
+		if shouldPromote, promoteErr := h.shouldPromotePreExecutionQueuedInput(ctx, task, queued); promoteErr != nil {
+			if req.FatalQueueCareError {
+				return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpPromotionCheck, Err: promoteErr}
+			}
+			applog.Infof("[handler] %s task=%s input=%s promotion recheck skipped: %v", logPrefix, task.ID, queued.ID, promoteErr)
+		} else if shouldPromote {
+			go h.PromoteQueuedTaskThreadInput(task.ID)
+		}
+		return &taskFollowupAdmissionResult{Queued: queued, Task: task}, nil
+	}
+
+	exec := &models.Execution{
+		TaskID:        task.ID,
+		AgentConfigID: req.Agent.ID,
+		Status:        models.ExecRunning,
+		PromptSent:    req.Message,
+		IsFollowup:    true,
+	}
+	queued := h.buildTaskFollowupQueuedInput(task, req.Agent.ID, req.Message, req.Source, req.AttachmentSessionID, "")
+	started, err := h.execRepo.CreateDirectTaskFollowupOrQueue(ctx, exec, queued)
+	if err != nil {
+		return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpDirectAdmission, Err: err}
+	}
+	if !started {
+		if err := h.bindQueuedTaskInputToActiveExecutionIfAvailable(ctx, queued); err != nil {
+			if req.FatalQueueCareError {
+				return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpBind, Err: err}
+			}
+			applog.Infof("[handler] %s task=%s input=%s active execution bind skipped: %v", logPrefix, task.ID, queued.ID, err)
+		}
+		go h.PromoteQueuedTaskThreadInput(task.ID)
+		return &taskFollowupAdmissionResult{Queued: queued, Task: task}, nil
+	}
+	if h.workerSvc != nil {
+		h.workerSvc.ClearCancellationRequested(task.ID)
+	}
+	if err := h.applySwarmChildFollowupStart(ctx, task, req.Message); err != nil {
+		h.completeWithFailure(ctx, exec.ID, task.ID, err.Error(), 0)
+		return nil, &taskFollowupAdmissionError{Op: taskFollowupAdmissionOpSwarmChildRouting, Err: err}
+	}
+	if h.taskRepo != nil {
+		if updatedTask, getErr := h.taskRepo.GetByID(ctx, task.ID); getErr == nil && updatedTask != nil {
+			task = updatedTask
+		}
+	}
+	return &taskFollowupAdmissionResult{Execution: exec, Task: task}, nil
+}
+
+func (h *Handler) buildTaskFollowupQueuedInput(task *models.Task, agentID, message, source, attachmentSessionID, runExecutionID string) *models.ThreadInput {
+	return &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           task.ProjectID,
+		TaskID:              task.ID,
+		RunExecutionID:      runExecutionID,
+		AgentConfigID:       agentID,
+		InputMode:           models.ThreadInputModeQueued,
+		InputStatus:         models.ThreadInputPending,
+		Content:             message,
+		Source:              source,
+		AttachmentSessionID: attachmentSessionID,
+	}
+}
+
 func (h *Handler) enqueueTaskThreadInput(ctx context.Context, taskID, message, origin, originAgent string, channelReply ...service.ChannelReplyContext) (*models.ThreadInput, error) {
 	if h.threadInputRepo == nil {
 		return nil, fmt.Errorf("thread input queue is unavailable")
