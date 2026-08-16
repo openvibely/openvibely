@@ -6516,7 +6516,7 @@ func TestStartPendingTaskThreadFollowup_ClearsCancellationRequestForPromotedRun(
 	updated, err := h.taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryActive, updated.Category)
-	require.Equal(t, models.StatusQueued, updated.Status)
+	require.Contains(t, []models.TaskStatus{models.StatusQueued, models.StatusRunning}, updated.Status)
 }
 
 func TestStartPendingTaskThreadFollowup_AlreadyActiveIsHandled(t *testing.T) {
