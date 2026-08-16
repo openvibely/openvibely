@@ -223,39 +223,15 @@ func (h *Handler) writeAgentOwnedSkillFromDialog(c echo.Context, agent *models.A
 			return nil, echo.NewHTTPError(http.StatusInternalServerError, statErr.Error())
 		}
 	}
-	body := strings.TrimSpace(req.Body)
-	var decl *agentlibrary.SkillDeclaration
-	if strings.HasPrefix(body, "---") {
-		parsed, parsedBody, parseErr := agentlibrary.ParseDeclaration(body)
-		if parseErr != nil {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, parseErr.Error())
-		}
-		if parsed.Skill.Key != handle {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, "body frontmatter skill.key must match handle")
-		}
-		decl = parsed
-		body = parsedBody
-	} else {
-		enabled := true
-		decl = &agentlibrary.SkillDeclaration{
-			Kind:    "openvibely.agent_skill",
-			Version: 1,
-			Skill: agentlibrary.SkillBlock{
-				Key:         handle,
-				Name:        firstDialogNonEmpty(strings.TrimSpace(req.Name), handle),
-				Description: strings.TrimSpace(req.Description),
-				Enabled:     &enabled,
-			},
-		}
-	}
-	decl.Agent.Key = ""
-	decl.Skill.Key = handle
-	decl.Skill.Scope = scope
-	if strings.TrimSpace(req.Name) != "" {
-		decl.Skill.Name = strings.TrimSpace(req.Name)
-	}
-	if strings.TrimSpace(req.Description) != "" {
-		decl.Skill.Description = strings.TrimSpace(req.Description)
+	decl, body, err := normalizeSkillDialogDeclaration(skillDialogNormalizationRequest{
+		Handle:      handle,
+		Scope:       scope,
+		Name:        req.Name,
+		Description: req.Description,
+		Body:        req.Body,
+	})
+	if err != nil {
+		return nil, err
 	}
 	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: h.currentProjectSkillRoot(c)}, agentlibrary.NewRepoApplier(h.agentRepo, h.lifecycleRepo))
 	res, err := importer.WriteAgentOwnedSkill(c.Request().Context(), scope, agentStableKey(agent), decl, body)
@@ -263,6 +239,63 @@ func (h *Handler) writeAgentOwnedSkillFromDialog(c echo.Context, agent *models.A
 		return res, echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	return res, nil
+}
+
+type skillDialogNormalizationRequest struct {
+	Handle               string
+	Scope                string
+	Name                 string
+	Description          string
+	Body                 string
+	Enabled              *bool
+	RejectAgentOwnership bool
+}
+
+func normalizeSkillDialogDeclaration(req skillDialogNormalizationRequest) (*agentlibrary.SkillDeclaration, string, error) {
+	body := strings.TrimSpace(req.Body)
+	parsedFrontmatter := strings.HasPrefix(body, "---")
+	var decl *agentlibrary.SkillDeclaration
+	if parsedFrontmatter {
+		parsed, parsedBody, parseErr := agentlibrary.ParseDeclaration(body)
+		if parseErr != nil {
+			return nil, "", echo.NewHTTPError(http.StatusBadRequest, parseErr.Error())
+		}
+		if req.RejectAgentOwnership && (parsed.IsAgentRootDeclaration() || strings.TrimSpace(parsed.Agent.Key) != "") {
+			return nil, "", echo.NewHTTPError(http.StatusBadRequest, "standalone skills must not set agent.key")
+		}
+		if parsed.Skill.Key != req.Handle {
+			return nil, "", echo.NewHTTPError(http.StatusBadRequest, "body frontmatter skill.key must match handle")
+		}
+		decl = parsed
+		body = parsedBody
+	} else {
+		decl = &agentlibrary.SkillDeclaration{
+			Kind:    "openvibely.agent_skill",
+			Version: 1,
+			Skill: agentlibrary.SkillBlock{
+				Key: req.Handle,
+				// Enabled left nil: absence = enabled, keeps frontmatter clean.
+			},
+		}
+	}
+	if req.RejectAgentOwnership {
+		decl.Agent.Key = ""
+	}
+	decl.Skill.Key = req.Handle
+	decl.Skill.Scope = req.Scope
+	decl.Skill.Name = strings.TrimSpace(req.Name)
+	if decl.Skill.Name == "" && !parsedFrontmatter {
+		decl.Skill.Name = req.Handle
+	}
+	decl.Skill.Description = strings.TrimSpace(req.Description)
+	if req.Enabled != nil {
+		if !*req.Enabled {
+			decl.Skill.Enabled = req.Enabled
+		} else {
+			decl.Skill.Enabled = nil
+		}
+	}
+	return decl, body, nil
 }
 
 func (h *Handler) agentFromParam(c echo.Context) (*models.Agent, error) {

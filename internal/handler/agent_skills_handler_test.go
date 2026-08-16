@@ -204,6 +204,143 @@ func TestHandler_CreateAgentOwnedSkill_WritesIndexedSkill(t *testing.T) {
 	}
 }
 
+func TestHandler_CreateAgentOwnedSkill_RawBodyUsesSharedMetadataNormalization(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
+	if err := repo.Create(t.Context(), agent); err != nil {
+		t.Fatal(err)
+	}
+	repoPath := t.TempDir()
+	projectRoot := filepath.Join(repoPath, ".openvibely")
+	project := &models.Project{Name: "Project", RepoPath: repoPath}
+	if err := projectRepo.Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{agentRepo: repo, projectRepo: projectRepo, agentSkillRoot: t.TempDir()}
+	body, _ := json.Marshal(agentSkillSaveRequest{Handle: "raw_notes", Scope: "project", Body: "Plain body."})
+	rec := performAgentSkillsRequest(t, h.CreateAgentOwnedSkill, http.MethodPost, "/agents/"+agent.ID+"/skills?project_id="+project.ID, body, agent.ID, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	data, err := os.ReadFile(filepath.Join(projectRoot, "agents", "reviewer", "skills", "raw_notes", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !containsAll(content, "key: raw_notes", "name: raw_notes", "Plain body.") {
+		t.Fatalf("skill file missing normalized raw-body metadata: %s", content)
+	}
+	for _, unwanted := range []string{"enabled:", "description:"} {
+		if strings.Contains(content, unwanted) {
+			t.Fatalf("raw-body metadata should stay clean, found %q in:\n%s", unwanted, content)
+		}
+	}
+}
+
+func TestHandler_UpdateAgentOwnedSkill_ClearsFrontmatterMetadata(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
+	if err := repo.Create(t.Context(), agent); err != nil {
+		t.Fatal(err)
+	}
+	repoPath := t.TempDir()
+	projectRoot := filepath.Join(repoPath, ".openvibely")
+	project := &models.Project{Name: "Project", RepoPath: repoPath}
+	if err := projectRepo.Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+	imp := agentlibrary.NewImporter(agentlibrary.SkillRoots{Project: projectRoot}, nil)
+	if _, err := imp.WriteAgentOwnedSkill(t.Context(), "project", agent.Key, &agentlibrary.SkillDeclaration{Kind: "openvibely.agent_skill", Version: 1, Skill: agentlibrary.SkillBlock{Key: "review_migrations", Name: "Old Name", Description: "Old description"}}, "Old body"); err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{agentRepo: repo, projectRepo: projectRepo, agentSkillRoot: t.TempDir()}
+	payload := agentSkillSaveRequest{
+		Handle: "review_migrations",
+		Scope:  "project",
+		Body:   "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n    key: review_migrations\n    name: Old Name\n    description: Old description\n---\n\nUpdated body.",
+	}
+	body, _ := json.Marshal(payload)
+	rec := performAgentSkillsRequest(t, h.UpdateAgentOwnedSkill, http.MethodPut, "/agents/"+agent.ID+"/skills/review_migrations?project_id="+project.ID, body, agent.ID, "review_migrations")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	data, err := os.ReadFile(filepath.Join(projectRoot, "agents", "reviewer", "skills", "review_migrations", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if strings.Contains(content, "Old Name") || strings.Contains(content, "Old description") {
+		t.Fatalf("expected cleared metadata not to remain in frontmatter; got\n%s", content)
+	}
+	if !strings.Contains(content, "Updated body.") {
+		t.Fatalf("expected updated body to remain; got\n%s", content)
+	}
+}
+
+func TestHandler_UpdateAgentOwnedSkill_RejectsFrontmatterSkillKeyMismatch(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
+	if err := repo.Create(t.Context(), agent); err != nil {
+		t.Fatal(err)
+	}
+	repoPath := t.TempDir()
+	projectRoot := filepath.Join(repoPath, ".openvibely")
+	project := &models.Project{Name: "Project", RepoPath: repoPath}
+	if err := projectRepo.Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+	imp := agentlibrary.NewImporter(agentlibrary.SkillRoots{Project: projectRoot}, nil)
+	if _, err := imp.WriteAgentOwnedSkill(t.Context(), "project", agent.Key, &agentlibrary.SkillDeclaration{Kind: "openvibely.agent_skill", Version: 1, Skill: agentlibrary.SkillBlock{Key: "review_migrations"}}, "Body"); err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{agentRepo: repo, projectRepo: projectRepo, agentSkillRoot: t.TempDir()}
+	payload := agentSkillSaveRequest{Handle: "review_migrations", Scope: "project", Body: "---\nkind: openvibely.agent_skill\nversion: 1\nskill:\n    key: wrong_skill\n---\n\nBody"}
+	body, _ := json.Marshal(payload)
+	rec := performAgentSkillsRequest(t, h.UpdateAgentOwnedSkill, http.MethodPut, "/agents/"+agent.ID+"/skills/review_migrations?project_id="+project.ID, body, agent.ID, "review_migrations")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "body frontmatter skill.key must match handle") {
+		t.Fatalf("expected skill.key mismatch error, got %s", rec.Body.String())
+	}
+}
+
+func TestHandler_UpdateAgentOwnedSkill_RejectsMismatchedFrontmatterAgentKey(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewAgentRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, Enabled: true}
+	if err := repo.Create(t.Context(), agent); err != nil {
+		t.Fatal(err)
+	}
+	repoPath := t.TempDir()
+	projectRoot := filepath.Join(repoPath, ".openvibely")
+	project := &models.Project{Name: "Project", RepoPath: repoPath}
+	if err := projectRepo.Create(t.Context(), project); err != nil {
+		t.Fatal(err)
+	}
+	imp := agentlibrary.NewImporter(agentlibrary.SkillRoots{Project: projectRoot}, nil)
+	if _, err := imp.WriteAgentOwnedSkill(t.Context(), "project", agent.Key, &agentlibrary.SkillDeclaration{Kind: "openvibely.agent_skill", Version: 1, Skill: agentlibrary.SkillBlock{Key: "review_migrations"}}, "Body"); err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{agentRepo: repo, projectRepo: projectRepo, agentSkillRoot: t.TempDir()}
+	payload := agentSkillSaveRequest{Handle: "review_migrations", Scope: "project", Body: "---\nkind: openvibely.agent_skill\nversion: 1\nagent:\n    key: other_agent\nskill:\n    key: review_migrations\n---\n\nBody"}
+	body, _ := json.Marshal(payload)
+	rec := performAgentSkillsRequest(t, h.UpdateAgentOwnedSkill, http.MethodPut, "/agents/"+agent.ID+"/skills/review_migrations?project_id="+project.ID, body, agent.ID, "review_migrations")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "does not match scoped agent") {
+		t.Fatalf("expected scoped importer agent.key mismatch error, got %s", rec.Body.String())
+	}
+}
+
 func TestHandler_ArchiveAgentOwnedSkill_MarksFrontmatterArchived(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewAgentRepo(db)
