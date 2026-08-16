@@ -1161,6 +1161,12 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 	require.Equal(t, project.ID, created.ProjectID)
 	require.Equal(t, models.SwarmRoleParent, created.SwarmRole)
 	require.Equal(t, models.StatusBlocked, created.Status)
+	require.Equal(t, 2, created.Priority)
+	require.Equal(t, models.TagNone, created.Tag)
+	cfg, err := models.ParseSwarmConfig(created.SwarmConfig)
+	require.NoError(t, err)
+	require.True(t, cfg.ReviewerEnabled)
+	require.True(t, cfg.MergerEnabled)
 	foreignTasks, err := taskRepo.ListByProject(ctx, foreignProject.ID, "")
 	require.NoError(t, err)
 	require.Empty(t, foreignTasks)
@@ -1168,6 +1174,84 @@ func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *
 	planner, err := taskRepo.FindSwarmChildByRole(ctx, created.ID, models.SwarmRolePlanner)
 	require.NoError(t, err)
 	require.Nil(t, planner)
+}
+
+func TestBuildChannelTaskActionHandlersCreateSwarmTaskPersistsMetadata(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Channel Swarm Metadata"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	foreignProject := &models.Project{Name: "Foreign Channel Swarm Metadata"}
+	require.NoError(t, projectRepo.Create(ctx, foreignProject))
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	modelConfig := &models.LLMConfig{Name: "Channel Swarm Model", Provider: models.ProviderTest, Model: "claude-sonnet-4-5", MaxTokens: 4096}
+	require.NoError(t, llmConfigRepo.Create(ctx, modelConfig))
+	agentRepo := repository.NewAgentRepo(db)
+	agentDef := &models.Agent{Name: "Channel Swarm Agent", Key: "channel-swarm-agent", Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agentDef))
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	taskSvc.SetAgentRepo(agentRepo)
+	swarmSvc := NewSwarmService(taskSvc, taskRepo, nil, nil)
+	taskSvc.SetSwarmService(swarmSvc)
+	reviewerEnabled := false
+	mergerEnabled := false
+	var callbackTaskIDs []string
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
+		ProjectID: project.ID,
+		TaskSvc:   taskSvc,
+		SwarmSvc:  swarmSvc,
+		OnTasksCreated: func(_ context.Context, _ []TaskCreationRequest, tasks []models.Task) error {
+			for _, task := range tasks {
+				callbackTaskIDs = append(callbackTaskIDs, task.ID)
+			}
+			return nil
+		},
+	})
+	payload, err := json.Marshal(channelCreateSwarmTaskInput{
+		Title:             "Channel metadata swarm",
+		Prompt:            "Split this channel bug",
+		Goal:              "Channel tests pass",
+		ProjectID:         foreignProject.ID,
+		Category:          string(models.CategoryBacklog),
+		Priority:          4,
+		AgentID:           modelConfig.ID,
+		Agent:             agentDef.Name,
+		Tag:               string(models.TagFeature),
+		ReviewerEnabled:   &reviewerEnabled,
+		MergerEnabled:     &mergerEnabled,
+		MergeTargetBranch: "integration/channel",
+	})
+	require.NoError(t, err)
+
+	summary, err := handlers["create_swarm_task"](ctx, payload)
+	require.NoError(t, err)
+	require.Contains(t, summary, "Created swarm task: Channel metadata swarm")
+	require.Len(t, callbackTaskIDs, 1)
+	created, err := taskRepo.GetByID(ctx, callbackTaskIDs[0])
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, project.ID, created.ProjectID)
+	require.Equal(t, models.CategoryBacklog, created.Category)
+	require.Equal(t, 4, created.Priority)
+	require.Equal(t, models.TagFeature, created.Tag)
+	require.NotNil(t, created.AgentID)
+	require.Equal(t, modelConfig.ID, *created.AgentID)
+	require.NotNil(t, created.AgentDefinitionID)
+	require.Equal(t, agentDef.ID, *created.AgentDefinitionID)
+	require.Equal(t, "integration/channel", created.MergeTargetBranch)
+	cfg, err := models.ParseSwarmConfig(created.SwarmConfig)
+	require.NoError(t, err)
+	require.False(t, cfg.ReviewerEnabled)
+	require.False(t, cfg.MergerEnabled)
+	goal, err := repository.NewTaskGoalRepo(db).GetByTaskID(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, goal)
+	require.Equal(t, "Channel tests pass", goal.Objective)
+	foreignTasks, err := taskRepo.ListByProject(ctx, foreignProject.ID, "")
+	require.NoError(t, err)
+	require.Empty(t, foreignTasks)
 }
 
 func TestChannelListAgentsResultUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {

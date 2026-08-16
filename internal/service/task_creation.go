@@ -212,6 +212,10 @@ func ExecuteTaskCreationsWithIndexedReturn(ctx context.Context, requests []TaskC
 	return createdResults, summary.String()
 }
 
+func ResolveTaskCreationAgentDefinition(ctx context.Context, req TaskCreationRequest, projectID string, taskSvc *TaskService) (string, error) {
+	return resolveTaskCreationAgentDefinition(ctx, req, projectID, taskSvc)
+}
+
 func resolveTaskCreationAgentDefinition(ctx context.Context, req TaskCreationRequest, projectID string, taskSvc *TaskService) (string, error) {
 	requestedName := strings.TrimSpace(req.Agent)
 	requestedID := strings.TrimSpace(req.AgentDefinitionID)

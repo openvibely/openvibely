@@ -753,6 +753,47 @@ func TestRegistry_CreateTaskSchemaDistinguishesAgentDefinitionFromModelConfig(t 
 	}
 }
 
+func TestRegistry_CreateSwarmTaskSchemaIncludesMetadataOptions(t *testing.T) {
+	def := Get("create_swarm_task")
+	if def == nil {
+		t.Fatal("missing create_swarm_task")
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("invalid Parameters JSON: %v", err)
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("missing properties in create_swarm_task schema")
+	}
+	for _, name := range []string{"goal", "priority", "agent_id", "agent_definition_id", "agent", "tag", "reviewer_enabled", "merger_enabled", "merge_target_branch"} {
+		if _, exists := props[name]; !exists {
+			t.Fatalf("create_swarm_task schema missing %q", name)
+		}
+	}
+	priority, ok := props["priority"].(map[string]any)
+	if !ok || priority["minimum"] != float64(1) || priority["maximum"] != float64(4) {
+		t.Fatalf("priority schema should be bounded 1..4, got %#v", props["priority"])
+	}
+	tag, ok := props["tag"].(map[string]any)
+	if !ok {
+		t.Fatal("missing tag schema")
+	}
+	enum, ok := tag["enum"].([]any)
+	if !ok || len(enum) != 2 || enum[0] != "bug" || enum[1] != "feature" {
+		t.Fatalf("tag schema should advertise bug/feature, got %#v", tag["enum"])
+	}
+	agentID, ok := props["agent_id"].(map[string]any)
+	if !ok {
+		t.Fatal("missing agent_id property")
+	}
+	agentIDDesc, _ := agentID["description"].(string)
+	if !strings.Contains(agentIDDesc, "Internal model config ID") || !strings.Contains(agentIDDesc, "Do not use for Agent definitions") {
+		t.Fatalf("agent_id description should explain model config separation, got %q", agentIDDesc)
+	}
+}
+
 func TestRegistry_CreateTaskDescriptionMentionsChaining(t *testing.T) {
 	def := Get("create_task")
 	if def == nil {

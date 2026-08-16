@@ -649,6 +649,67 @@ func TestCreateSwarmTaskRuntimeTool_BacklogCategoryDefersPlanner(t *testing.T) {
 	}
 }
 
+func TestCreateSwarmTaskRuntimeTool_PersistsGoalTriageReviewAndAssignments(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Swarm Tool Metadata Project")
+	modelConfig := createAgent(t, llmConfigRepo, func(c *models.LLMConfig) {
+		c.Name = "Explicit Swarm Model"
+		c.IsDefault = false
+	})
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	agentDef := &models.Agent{Name: "Swarm Reviewer", Key: "swarm-reviewer", Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agentDef))
+
+	handlers := h.chatActionHandlers(streamingResponseParams{ExecID: "exec-swarm-metadata", ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	createHandler := handlers["create_swarm_task"]
+	if createHandler == nil {
+		t.Fatal("create_swarm_task handler missing")
+	}
+	payload, err := json.Marshal(map[string]any{
+		"title":               "Metadata swarm",
+		"prompt":              "Split this bug fix",
+		"category":            "backlog",
+		"goal":                "All tests pass",
+		"priority":            4,
+		"tag":                 "bug",
+		"agent_id":            modelConfig.ID,
+		"agent":               agentDef.Name,
+		"reviewer_enabled":    false,
+		"merger_enabled":      false,
+		"merge_target_branch": "release/next",
+	})
+	require.NoError(t, err)
+
+	out, err := createHandler(ctx, payload)
+	require.NoError(t, err)
+	ids := extractTaskIDsFromOutput(out)
+	require.Len(t, ids, 1)
+	parent, err := h.taskRepo.GetByID(ctx, ids[0])
+	require.NoError(t, err)
+	require.NotNil(t, parent)
+	require.Equal(t, models.CategoryBacklog, parent.Category)
+	require.Equal(t, 4, parent.Priority)
+	require.Equal(t, models.TagBug, parent.Tag)
+	require.NotNil(t, parent.AgentID)
+	require.Equal(t, modelConfig.ID, *parent.AgentID)
+	require.NotNil(t, parent.AgentDefinitionID)
+	require.Equal(t, agentDef.ID, *parent.AgentDefinitionID)
+	require.Equal(t, "release/next", parent.MergeTargetBranch)
+	cfg, err := models.ParseSwarmConfig(parent.SwarmConfig)
+	require.NoError(t, err)
+	require.False(t, cfg.ReviewerEnabled)
+	require.False(t, cfg.MergerEnabled)
+	goal, err := repository.NewTaskGoalRepo(db).GetByTaskID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, goal)
+	require.Equal(t, "All tests pass", goal.Objective)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.Nil(t, planner)
+}
+
 func TestCreateSwarmTaskRuntimeTool_ChannelSurfaceUsesActiveProject(t *testing.T) {
 	h, _, _, _ := setupTestHandlerWithDB(t)
 	authorizedProject := createProject(t, h, "Email Authorized Swarm Project")

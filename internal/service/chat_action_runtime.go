@@ -72,13 +72,22 @@ type channelTaskActionHandlerOptions struct {
 // channelCreateSwarmTaskInput mirrors the canonical create_swarm_task runtime
 // tool schema for channel surfaces.
 type channelCreateSwarmTaskInput struct {
-	Title            string `json:"title"`
-	Prompt           string `json:"prompt"`
-	ProjectID        string `json:"project_id"`
-	Category         string `json:"category"`
-	MaxWorkers       int    `json:"max_workers"`
-	WorkerIsolation  string `json:"worker_isolation"`
-	StartImmediately *bool  `json:"start_immediately"`
+	Title             string `json:"title"`
+	Prompt            string `json:"prompt"`
+	Goal              string `json:"goal"`
+	ProjectID         string `json:"project_id"`
+	Category          string `json:"category"`
+	Priority          int    `json:"priority"`
+	AgentID           string `json:"agent_id"`
+	AgentDefinitionID string `json:"agent_definition_id"`
+	Agent             string `json:"agent"`
+	Tag               string `json:"tag"`
+	MaxWorkers        int    `json:"max_workers"`
+	WorkerIsolation   string `json:"worker_isolation"`
+	ReviewerEnabled   *bool  `json:"reviewer_enabled"`
+	MergerEnabled     *bool  `json:"merger_enabled"`
+	StartImmediately  *bool  `json:"start_immediately"`
+	MergeTargetBranch string `json:"merge_target_branch"`
 }
 
 type channelGoalActionHandlerOptions struct {
@@ -229,17 +238,57 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			if strings.EqualFold(strings.TrimSpace(req.Category), string(models.CategoryBacklog)) {
 				category = models.CategoryBacklog
 			}
+			priority := req.Priority
+			if priority == 0 {
+				priority = 2
+			}
+			if priority < 1 || priority > 4 {
+				return "", fmt.Errorf("create_swarm_task: priority must be between 1 and 4")
+			}
+			tag := models.TaskTag(strings.TrimSpace(req.Tag))
+			switch tag {
+			case models.TagNone, models.TagFeature, models.TagBug:
+			default:
+				return "", fmt.Errorf("create_swarm_task: tag must be bug or feature")
+			}
+			reviewerEnabled := true
+			if req.ReviewerEnabled != nil {
+				reviewerEnabled = *req.ReviewerEnabled
+			}
+			mergerEnabled := true
+			if req.MergerEnabled != nil {
+				mergerEnabled = *req.MergerEnabled
+			}
+			var agentID *string
+			if trimmed := strings.TrimSpace(req.AgentID); trimmed != "" {
+				agentID = &trimmed
+			}
+			var agentDefinitionID *string
+			if strings.TrimSpace(req.AgentDefinitionID) != "" || strings.TrimSpace(req.Agent) != "" {
+				resolved, err := resolveTaskCreationAgentDefinition(ctx, TaskCreationRequest{AgentDefinitionID: req.AgentDefinitionID, Agent: req.Agent}, projectID, opts.TaskSvc)
+				if err != nil {
+					return "", fmt.Errorf("create_swarm_task: %w", err)
+				}
+				if resolved != "" {
+					agentDefinitionID = &resolved
+				}
+			}
 			parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{
-				ProjectID:        projectID,
-				Title:            req.Title,
-				Prompt:           req.Prompt,
-				Category:         category,
-				Priority:         2,
-				MaxWorkers:       req.MaxWorkers,
-				WorkerIsolation:  req.WorkerIsolation,
-				ReviewerEnabled:  true,
-				MergerEnabled:    true,
-				StartImmediately: req.StartImmediately,
+				ProjectID:         projectID,
+				Title:             req.Title,
+				Prompt:            req.Prompt,
+				Goal:              req.Goal,
+				Category:          category,
+				Priority:          priority,
+				AgentID:           agentID,
+				AgentDefinitionID: agentDefinitionID,
+				Tag:               tag,
+				MaxWorkers:        req.MaxWorkers,
+				WorkerIsolation:   req.WorkerIsolation,
+				ReviewerEnabled:   reviewerEnabled,
+				MergerEnabled:     mergerEnabled,
+				StartImmediately:  req.StartImmediately,
+				MergeTargetBranch: req.MergeTargetBranch,
 			})
 			if err != nil {
 				return "", err
