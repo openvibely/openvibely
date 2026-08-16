@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -304,6 +306,318 @@ func TestHandler_SetBacklogSort_HTMXRouteRendersSortedBoard(t *testing.T) {
 	}
 }
 
+func TestHandler_TaskBoardMutationRefreshAssemblyIsCentralized(t *testing.T) {
+	source, err := os.ReadFile("task_handler.go")
+	if err != nil {
+		t.Fatalf("read task handler source: %v", err)
+	}
+	body := string(source)
+	helperBody := handlerFunctionBody(t, body, "renderTaskBoardRefresh")
+	for _, required := range []string{"getSortPreferences(c)", "ListBoardByProjectWithCategorySorts", "llmConfigRepo.List", "renderKanbanBoard"} {
+		if !strings.Contains(helperBody, required) {
+			t.Fatalf("renderTaskBoardRefresh missing %q", required)
+		}
+	}
+
+	for _, handlerName := range []string{
+		"CreateTask",
+		"DeleteTask",
+		"CancelTask",
+		"UpdateTaskCategory",
+		"MoveCompletedActiveToCompleted",
+		"UpdateTaskStatus",
+		"BatchUpdateTaskCategory",
+		"DeleteAllCompletedTasks",
+		"DeleteAllBacklogTasks",
+		"ActivateAllBacklogTasks",
+		"ReorderTask",
+		"ExecuteBacklogTasks",
+		"SetBacklogSort",
+		"SetCompletedSort",
+	} {
+		handlerBody := handlerFunctionBody(t, body, handlerName)
+		if strings.Contains(handlerBody, "ListBoardByProjectWithCategorySorts") {
+			t.Fatalf("%s must delegate board listing to renderTaskBoardRefresh", handlerName)
+		}
+		if !strings.Contains(handlerBody, "renderTaskBoardRefresh") {
+			t.Fatalf("%s must use renderTaskBoardRefresh for task-board HTMX refreshes", handlerName)
+		}
+	}
+}
+
+func TestHandler_TaskBoardHTMXMutationRoutesReturnKanbanRefresh(t *testing.T) {
+	tests := []struct {
+		name       string
+		seed       func(*TestContext) string
+		request    func(*TestContext, string) *httptest.ResponseRecorder
+		want       []string
+		wantAbsent []string
+	}{
+		{
+			name: "create",
+			request: func(tc *TestContext, _ string) *httptest.ResponseRecorder {
+				return tc.HTMX().Post("/tasks?project_id=default").WithForm(url.Values{
+					"title":    {"Created Refresh Task"},
+					"prompt":   {"created prompt"},
+					"category": {string(models.CategoryBacklog)},
+					"priority": {"2"},
+				}).Execute()
+			},
+			want: []string{"Created Refresh Task"},
+		},
+		{
+			name: "delete",
+			seed: func(tc *TestContext) string {
+				deleted := tc.CreateTask("default").WithTitle("Deleted Refresh Task").WithCategory(models.CategoryBacklog).Build()
+				tc.CreateTask("default").WithTitle("Remaining Refresh Task").WithCategory(models.CategoryBacklog).Build()
+				return deleted.ID
+			},
+			request: func(tc *TestContext, id string) *httptest.ResponseRecorder {
+				return tc.HTMX().Delete("/tasks/" + id).Execute()
+			},
+			want:       []string{"Remaining Refresh Task"},
+			wantAbsent: []string{"Deleted Refresh Task"},
+		},
+		{
+			name: "move category",
+			seed: func(tc *TestContext) string {
+				return tc.CreateTask("default").WithTitle("Moved Refresh Task").WithCategory(models.CategoryActive).Build().ID
+			},
+			request: func(tc *TestContext, id string) *httptest.ResponseRecorder {
+				return tc.HTMX().Patch("/tasks/" + id + "/category").WithForm(url.Values{"category": {string(models.CategoryBacklog)}}).Execute()
+			},
+			want: []string{"Moved Refresh Task", `data-category="backlog"`},
+		},
+		{
+			name: "status",
+			seed: func(tc *TestContext) string {
+				return tc.CreateTask("default").WithTitle("Status Refresh Task").WithCategory(models.CategoryActive).Build().ID
+			},
+			request: func(tc *TestContext, id string) *httptest.ResponseRecorder {
+				return tc.HTMX().Patch("/tasks/" + id + "/status").WithForm(url.Values{"status": {string(models.StatusCancelled)}}).Execute()
+			},
+			want: []string{"Status Refresh Task"},
+		},
+		{
+			name: "reorder",
+			seed: func(tc *TestContext) string {
+				return tc.CreateTask("default").WithTitle("Reordered Refresh Task").WithCategory(models.CategoryBacklog).Build().ID
+			},
+			request: func(tc *TestContext, id string) *httptest.ResponseRecorder {
+				return tc.HTMX().Patch("/tasks/" + id + "/reorder").WithForm(url.Values{"position": {"1"}}).Execute()
+			},
+			want: []string{"Reordered Refresh Task"},
+		},
+		{
+			name: "batch category",
+			seed: func(tc *TestContext) string {
+				first := tc.CreateTask("default").WithTitle("Batch Refresh One").WithCategory(models.CategoryActive).Build()
+				second := tc.CreateTask("default").WithTitle("Batch Refresh Two").WithCategory(models.CategoryActive).Build()
+				return first.ID + "," + second.ID
+			},
+			request: func(tc *TestContext, ids string) *httptest.ResponseRecorder {
+				return tc.HTMX().Patch("/tasks/batch-category").WithForm(url.Values{
+					"project_id": {"default"},
+					"task_ids":   {ids},
+					"category":   {string(models.CategoryBacklog)},
+				}).Execute()
+			},
+			want: []string{"Batch Refresh One", "Batch Refresh Two", `data-category="backlog"`},
+		},
+		{
+			name: "delete completed bulk",
+			seed: func(tc *TestContext) string {
+				tc.CreateTask("default").WithTitle("Completed Bulk Removed").WithCategory(models.CategoryCompleted).WithStatus(models.StatusCompleted).Build()
+				tc.CreateTask("default").WithTitle("Active Bulk Survivor").WithCategory(models.CategoryActive).Build()
+				return ""
+			},
+			request: func(tc *TestContext, _ string) *httptest.ResponseRecorder {
+				return tc.HTMX().Delete("/tasks/completed?project_id=default").Execute()
+			},
+			want:       []string{"Active Bulk Survivor"},
+			wantAbsent: []string{"Completed Bulk Removed"},
+		},
+		{
+			name: "activate backlog bulk",
+			seed: func(tc *TestContext) string {
+				tc.CreateTask("default").WithTitle("Activated Bulk Refresh").WithCategory(models.CategoryBacklog).Build()
+				return ""
+			},
+			request: func(tc *TestContext, _ string) *httptest.ResponseRecorder {
+				return tc.HTMX().Post("/tasks/backlog/activate?project_id=default").Execute()
+			},
+			want: []string{"Activated Bulk Refresh", `data-category="active"`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			var id string
+			if tt.seed != nil {
+				id = tt.seed(tc)
+			}
+			rec := tt.request(tc, id)
+			assertKanbanBoardRefresh(t, rec)
+			body := rec.Body.String()
+			for _, want := range tt.want {
+				if !strings.Contains(body, want) {
+					t.Fatalf("response missing %q: %s", want, body)
+				}
+			}
+			for _, absent := range tt.wantAbsent {
+				if strings.Contains(body, absent) {
+					t.Fatalf("response unexpectedly contained %q: %s", absent, body)
+				}
+			}
+		})
+	}
+}
+
+func TestHandler_TaskBoardSortRoutesRenderSelectedSortImmediatelyOverStaleCookies(t *testing.T) {
+	tests := []struct {
+		name         string
+		path         string
+		activeMarker string
+		cookieName   string
+		cookieSort   string
+		wantOrder    []string
+	}{
+		{
+			name:         "backlog sort",
+			path:         "/tasks/backlog/sort?project_id=default&sort=title_asc",
+			activeMarker: "/tasks/backlog/sort?project_id=default&amp;sort=title_asc",
+			cookieName:   backlogSortCookieName,
+			cookieSort:   "title_desc",
+			wantOrder:    []string{"Alpha Immediate Backlog", "Zulu Immediate Backlog"},
+		},
+		{
+			name:         "completed sort",
+			path:         "/tasks/completed/sort?project_id=default&sort=title_asc",
+			activeMarker: "/tasks/completed/sort?project_id=default&amp;sort=title_asc",
+			cookieName:   completedSortCookieName,
+			cookieSort:   "title_desc",
+			wantOrder:    []string{"Alpha Immediate Completed", "Zulu Immediate Completed"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			if tt.cookieName == backlogSortCookieName {
+				tc.CreateTask("default").WithTitle("Zulu Immediate Backlog").WithCategory(models.CategoryBacklog).Build()
+				tc.CreateTask("default").WithTitle("Alpha Immediate Backlog").WithCategory(models.CategoryBacklog).Build()
+			} else {
+				tc.CreateTask("default").WithTitle("Zulu Immediate Completed").WithCategory(models.CategoryCompleted).WithStatus(models.StatusCompleted).Build()
+				tc.CreateTask("default").WithTitle("Alpha Immediate Completed").WithCategory(models.CategoryCompleted).WithStatus(models.StatusCompleted).Build()
+			}
+
+			req := httptest.NewRequest(http.MethodPost, tt.path, nil)
+			req.Header.Set("HX-Request", "true")
+			req.AddCookie(&http.Cookie{Name: tt.cookieName, Value: tt.cookieSort})
+			rec := httptest.NewRecorder()
+			tc.echo.ServeHTTP(rec, req)
+
+			assertKanbanBoardRefresh(t, rec)
+			body := rec.Body.String()
+			assertTaskOrder(t, body, tt.wantOrder...)
+			assertSortControlActive(t, body, tt.activeMarker)
+		})
+	}
+}
+
+func TestHandler_CancelTaskComposerStopReturnsOnlyComposerActionOOB(t *testing.T) {
+	tc := NewTestContext(t)
+	task := tc.CreateTask("default").WithTitle("Composer Stop Refresh Guard").WithCategory(models.CategoryActive).WithStatus(models.StatusRunning).Build()
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/cancel?composer_stop=1").Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cancel composer stop status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="task-thread-form-primary-action"`) || !strings.Contains(body, `hx-swap-oob="outerHTML"`) {
+		t.Fatalf("expected composer action OOB fragment, got %s", body)
+	}
+	if strings.Contains(body, `id="kanban-board"`) {
+		t.Fatalf("composer stop must not refresh the full kanban board: %s", body)
+	}
+}
+
+func TestHandler_TaskBoardMutationRefreshListErrorsAreSurfacedConsistently(t *testing.T) {
+	tests := []struct {
+		name    string
+		request func(*TestContext) *httptest.ResponseRecorder
+	}{
+		{
+			name: "create",
+			request: func(tc *TestContext) *httptest.ResponseRecorder {
+				return tc.HTMX().Post("/tasks?project_id=default").WithForm(url.Values{
+					"title":    {"Create Before Board Error"},
+					"prompt":   {"prompt"},
+					"category": {string(models.CategoryBacklog)},
+					"priority": {"2"},
+				}).Execute()
+			},
+		},
+		{
+			name: "delete",
+			request: func(tc *TestContext) *httptest.ResponseRecorder {
+				victim := tc.CreateTask("default").WithTitle("Delete Before Board Error").WithCategory(models.CategoryBacklog).Build()
+				return tc.HTMX().Delete("/tasks/" + victim.ID).Execute()
+			},
+		},
+		{
+			name: "move category",
+			request: func(tc *TestContext) *httptest.ResponseRecorder {
+				moving := tc.CreateTask("default").WithTitle("Move Before Board Error").WithCategory(models.CategoryActive).Build()
+				return tc.HTMX().Patch("/tasks/" + moving.ID + "/category").WithForm(url.Values{"category": {string(models.CategoryBacklog)}}).Execute()
+			},
+		},
+		{
+			name: "sort",
+			request: func(tc *TestContext) *httptest.ResponseRecorder {
+				return tc.HTMX().Post("/tasks/backlog/sort?project_id=default&sort=title_asc").Execute()
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			seedForcedBoardListingError(t, tc)
+			rec := tt.request(tc)
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("expected forced board listing error to return 500, got %d body=%s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandler_TaskBoardRefreshNonHTMXAndNoContentResponsesRemainUnchanged(t *testing.T) {
+	t.Run("delete redirects outside htmx", func(t *testing.T) {
+		tc := NewTestContext(t)
+		task := tc.CreateTask("default").WithTitle("Native Delete Redirect").WithCategory(models.CategoryBacklog).Build()
+		rec := tc.HTTP().Delete("/tasks/" + task.ID).Execute()
+		if rec.Code != http.StatusSeeOther {
+			t.Fatalf("delete status = %d, body=%s", rec.Code, rec.Body.String())
+		}
+		if location := rec.Header().Get("Location"); location != "/tasks?project_id=default" {
+			t.Fatalf("delete redirect Location = %q", location)
+		}
+	})
+
+	t.Run("status returns no content outside htmx", func(t *testing.T) {
+		tc := NewTestContext(t)
+		task := tc.CreateTask("default").WithTitle("Native Status No Content").WithCategory(models.CategoryBacklog).Build()
+		rec := tc.HTTP().Patch("/tasks/" + task.ID + "/status").WithForm(url.Values{"status": {string(models.StatusBlocked)}}).Execute()
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status code = %d, body=%s", rec.Code, rec.Body.String())
+		}
+		if rec.Body.Len() != 0 {
+			t.Fatalf("expected empty no-content body, got %s", rec.Body.String())
+		}
+	})
+}
+
 func assertSortControlActive(t *testing.T, body string, sortQuery string) {
 	t.Helper()
 	start := strings.Index(body, sortQuery)
@@ -316,6 +630,55 @@ func assertSortControlActive(t *testing.T, body string, sortQuery string) {
 	}
 	if control := body[start : start+end]; !strings.Contains(control, `class="text-sm min-h-11 active font-semibold"`) {
 		t.Fatalf("sort control %q is not rendered active: %s", sortQuery, control)
+	}
+}
+
+func assertKanbanBoardRefresh(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := strings.TrimSpace(rec.Body.String())
+	if !strings.HasPrefix(body, `<div id="kanban-board"`) {
+		t.Fatalf("expected response to start with kanban board, got %s", rec.Body.String())
+	}
+}
+
+func handlerFunctionBody(t *testing.T, source, name string) string {
+	t.Helper()
+	marker := "func (h *Handler) " + name + "("
+	start := strings.Index(source, marker)
+	if start == -1 {
+		t.Fatalf("handler function %s not found", name)
+	}
+	next := strings.Index(source[start+len(marker):], "\nfunc ")
+	if next == -1 {
+		return source[start:]
+	}
+	return source[start : start+len(marker)+next]
+}
+
+func seedForcedBoardListingError(t *testing.T, tc *TestContext) {
+	t.Helper()
+	poison := &models.Task{
+		ProjectID: "default",
+		Title:     "Forced Board Listing Error",
+		Category:  models.CategoryActive,
+		Status:    models.StatusFailed,
+		Prompt:    "forces ListBoardByProjectWithCategorySorts normalization to fail",
+	}
+	if err := tc.taskRepo.Create(context.Background(), poison); err != nil {
+		t.Fatalf("create poison task: %v", err)
+	}
+	trigger := fmt.Sprintf(`
+		CREATE TRIGGER fail_board_refresh_normalize_%s
+		BEFORE UPDATE OF category ON tasks
+		WHEN OLD.id = %q AND NEW.category = 'backlog'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced board list error');
+		END;`, strings.ReplaceAll(poison.ID, "-", "_"), poison.ID)
+	if _, err := tc.db.ExecContext(context.Background(), trigger); err != nil {
+		t.Fatalf("create board listing failure trigger: %v", err)
 	}
 }
 
