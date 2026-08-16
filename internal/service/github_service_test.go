@@ -1320,6 +1320,145 @@ func TestPaginatedGitHubGetReturnsSecondPageAPIErrorWithoutPartialResults(t *tes
 	}
 }
 
+func TestGitHubServicePullRequestAndIssueHTTPActions(t *testing.T) {
+	ctx := context.Background()
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.RequestURI())
+		if strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+			t.Fatalf("missing authorization header for %s", r.URL.RequestURI())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls/7":
+			_, _ = w.Write([]byte(`{"number":7,"html_url":"https://github.com/acme/widgets/pull/7","state":"open","merged":true,"head":{"ref":"feature","sha":"abc123","repo":{"full_name":"acme/widgets"}}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls":
+			if r.URL.Query().Get("state") != "all" || r.URL.Query().Get("head") != "acme:feature" {
+				t.Fatalf("unexpected pull list query %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`[{"number":6,"html_url":"https://github.com/acme/widgets/pull/6","state":"closed","head":{"ref":"feature","sha":"old","repo":{"full_name":"acme/widgets"}}},{"number":8,"html_url":"https://github.com/acme/widgets/pull/8","state":"open","head":{"ref":"feature","sha":"new","repo":{"full_name":"acme/widgets"}}}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/pulls":
+			var payload map[string]any
+			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			if payload["title"] != "Open coverage PR" || payload["head"] != "feature" || payload["base"] != "main" || payload["draft"] != true {
+				t.Fatalf("unexpected create pull payload %#v", payload)
+			}
+			_, _ = w.Write([]byte(`{"number":9,"html_url":"https://github.com/acme/widgets/pull/9","state":"open","head":{"ref":"feature","sha":"created","repo":{"full_name":"acme/widgets"}}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/issues":
+			var payload map[string]any
+			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			if payload["title"] != "Write coverage notes" || payload["body"] != "body" {
+				t.Fatalf("unexpected create issue payload %#v", payload)
+			}
+			labels, _ := payload["labels"].([]any)
+			assignees, _ := payload["assignees"].([]any)
+			if len(labels) != 2 || len(assignees) != 1 {
+				t.Fatalf("expected cleaned labels and assignees, got %#v", payload)
+			}
+			_, _ = w.Write([]byte(`{"number":10,"html_url":"https://github.com/acme/widgets/issues/10","title":"Write coverage notes","body":"body","state":"open","user":{"login":"octo"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"},{"name":"approved"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/issues/10":
+			_, _ = w.Write([]byte(`{"number":10,"html_url":"https://github.com/acme/widgets/issues/10","title":"Write coverage notes","body":"body","state":"open","user":{"login":"octo"},"assignees":[{"login":"dev-bot"}],"labels":[{"name":"bug"}]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/issues/10/comments":
+			var payload map[string]string
+			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			if payload["body"] != "coverage comment" {
+				t.Fatalf("unexpected comment payload %#v", payload)
+			}
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/widgets/issues/10/labels":
+			var payload map[string][]string
+			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			if len(payload["labels"]) != 2 || payload["labels"][0] != "bug" || payload["labels"][1] != "approved" {
+				t.Fatalf("unexpected labels payload %#v", payload)
+			}
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/issues/9/comments":
+			_, _ = w.Write([]byte(`[{"id":101,"node_id":"IC_kw","html_url":"https://github.com/acme/widgets/pull/9#issuecomment-101","body":"issue feedback","created_at":"2026-08-16T00:00:01Z","user":{"login":"reviewer","type":"User"}}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls/9/reviews":
+			_, _ = w.Write([]byte(`[{"id":202,"node_id":"PRR_kw","html_url":"https://github.com/acme/widgets/pull/9#pullrequestreview-202","body":"approved with comment","state":"APPROVED","submitted_at":"2026-08-16T00:00:02Z","user":{"login":"maintainer","type":"User"}},{"id":203,"node_id":"empty","html_url":"https://github.com/acme/widgets/pull/9#pullrequestreview-203","body":"","state":"","submitted_at":"2026-08-16T00:00:03Z","user":{"login":"bot","type":"Bot"}}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/widgets/pulls/9/comments":
+			_, _ = w.Write([]byte(`[{"id":303,"node_id":"PRRC_kw","html_url":"https://github.com/acme/widgets/pull/9#discussion_r303","body":"line feedback","path":"internal/service/github_service.go","line":42,"created_at":"2026-08-16T00:00:03Z","user":{"login":"reviewer","type":"User"}}]`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/acme/widgets/issues/11":
+			var payload map[string]string
+			requireNoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			if payload["state"] != "closed" {
+				t.Fatalf("unexpected close issue payload %#v", payload)
+			}
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Fatalf("unexpected GitHub API request %s %s", r.Method, r.URL.RequestURI())
+		}
+	}))
+	defer server.Close()
+
+	svc := newPATGitHubService(t, server.URL)
+	repo := &GitHubRepoRef{Owner: "acme", Name: "widgets"}
+	pr, err := svc.GetPullRequest(ctx, repo, 7)
+	requireNoError(t, err)
+	if pr.Number != 7 || !pr.Merged || pr.HeadRef != "feature" || pr.HeadSHA != "abc123" {
+		t.Fatalf("unexpected pull request: %+v", pr)
+	}
+	found, err := svc.FindPullRequestByBranch(ctx, repo, " feature ")
+	requireNoError(t, err)
+	if found == nil || found.Number != 8 || found.HeadSHA != "new" {
+		t.Fatalf("expected open PR to be selected, got %+v", found)
+	}
+	created, err := svc.CreatePullRequest(ctx, repo, GitHubCreatePullRequestRequest{Title: "Open coverage PR", Head: "feature", Base: "main", Body: "body", Draft: true})
+	requireNoError(t, err)
+	if created.Number != 9 || created.HeadSHA != "created" {
+		t.Fatalf("unexpected created PR: %+v", created)
+	}
+	issue, err := svc.CreateIssue(ctx, repo, GitHubCreateIssueRequest{Title: " Write coverage notes ", Body: "body", Labels: []string{"bug", "", "approved", "bug"}, Assignees: []string{"dev-bot", "dev-bot", ""}})
+	requireNoError(t, err)
+	if issue.Number != 10 || issue.Title != "Write coverage notes" || len(issue.Labels) != 2 || len(issue.Assignees) != 1 {
+		t.Fatalf("unexpected created issue: %+v", issue)
+	}
+	gotIssue, err := svc.GetIssue(ctx, repo, 10)
+	requireNoError(t, err)
+	if gotIssue.Number != 10 || gotIssue.UserLogin != "octo" || len(gotIssue.Labels) != 1 {
+		t.Fatalf("unexpected fetched issue: %+v", gotIssue)
+	}
+	requireNoError(t, svc.CommentOnIssue(ctx, repo, 10, " coverage comment "))
+	requireNoError(t, svc.AddLabelsToIssue(ctx, repo, 10, []string{"bug", "approved", "bug"}))
+	feedback, err := svc.ListPullRequestFeedback(ctx, repo, 9)
+	requireNoError(t, err)
+	if len(feedback) != 3 || feedback[0].Kind != "issue_comment" || feedback[1].Kind != "review" || feedback[2].Path != "internal/service/github_service.go" {
+		t.Fatalf("unexpected feedback ordering/content: %+v", feedback)
+	}
+	requireNoError(t, svc.CloseIssue(ctx, repo, 11))
+	if len(seen) != 11 {
+		t.Fatalf("expected eleven API requests, got %d: %v", len(seen), seen)
+	}
+
+	if _, err := svc.GetPullRequest(ctx, nil, 7); err == nil {
+		t.Fatal("expected nil repo GetPullRequest error")
+	}
+	if _, err := svc.GetIssue(ctx, repo, 0); err == nil {
+		t.Fatal("expected invalid GetIssue error")
+	}
+	if _, err := svc.CreateIssue(ctx, repo, GitHubCreateIssueRequest{}); err == nil {
+		t.Fatal("expected missing title CreateIssue error")
+	}
+	if err := svc.CommentOnIssue(ctx, repo, 10, " "); err == nil {
+		t.Fatal("expected empty CommentOnIssue error")
+	}
+	if err := svc.AddLabelsToIssue(ctx, repo, 10, []string{"openvibely:internal"}); err == nil {
+		t.Fatal("expected reserved label prefix error")
+	}
+	if _, err := svc.ListPullRequestFeedback(ctx, repo, 0); err == nil {
+		t.Fatal("expected invalid ListPullRequestFeedback error")
+	}
+	if _, err := svc.FindPullRequestByBranch(ctx, repo, " "); err == nil {
+		t.Fatal("expected empty branch FindPullRequestByBranch error")
+	}
+	if _, err := svc.CreatePullRequest(ctx, repo, GitHubCreatePullRequestRequest{}); err == nil {
+		t.Fatal("expected incomplete CreatePullRequest error")
+	}
+	if err := svc.CloseIssue(ctx, repo, 0); err == nil {
+		t.Fatal("expected invalid CloseIssue error")
+	}
+}
+
 func newPATGitHubService(t *testing.T, apiBaseURL string) *GitHubService {
 	t.Helper()
 	settingsRepo := repository.NewSettingsRepo(testutil.NewTestDB(t))

@@ -512,6 +512,8 @@ func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) 
 	model := tc.CreateLLMConfig().WithName("Executor Model").WithProvider(models.ProviderOpenAI).WithModel("gpt-test").WithAPIKey("key").Build()
 	model.IsDefault = true
 	require.NoError(t, tc.llmConfigRepo.Update(ctx, model))
+	alert := &models.Alert{ProjectID: project.ID, Type: models.AlertCustom, Severity: models.SeverityInfo, Title: "Executor alert", Message: "runtime alert"}
+	require.NoError(t, tc.alertRepo.Create(ctx, alert))
 
 	collector := newChatActionSummaryCollector()
 	rt := tc.handler.buildChatActionToolRuntime(streamingResponseParams{ExecID: "runtime-executor", ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, collector)
@@ -539,12 +541,24 @@ func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) 
 		{name: "get_current_project", input: `{}`, want: "Current project"},
 		{name: "list_projects", input: `{}`, want: "Runtime Executor Coverage"},
 		{name: "switch_project", input: `{"project":"Runtime Executor Coverage"}`, want: "Switched to project"},
+		{name: "list_tasks", input: `{}`, want: `"ok":true`},
 		{name: "create_task", input: `{"title":"Created by runtime executor","prompt":"test prompt","category":"backlog"}`, want: "Created by runtime executor"},
 		{name: "edit_task", input: `{"id":"` + task.ID + `","title":"Runtime executor task edited"}`, want: "Runtime executor task edited"},
 		{name: "execute_tasks", input: `{"task_id":"missing"}`, want: "Failed:"},
 		{name: "schedule_task", input: `{"task_id":"current","time":"09:45"}`, want: "Scheduled task"},
+		{name: "list_schedules", input: `{}`, want: `"ok":true`},
 		{name: "modify_schedule", input: `{"task_id":"current","enabled":false}`, want: "Updated schedule"},
 		{name: "delete_schedule", input: `{"task_id":"current"}`, want: "Deleted schedule"},
+		{name: "get_alert", input: `{"alert_id":"` + alert.ID + `"}`, want: "Executor alert"},
+		{name: "list_alerts", input: `{}`, want: `"notifications"`},
+		{name: "create_alert", input: `{"title":"Executor created alert","message":"created"}`, want: `"alert"`},
+		{name: "toggle_alert", input: `{"alert_id":"` + alert.ID + `"}`, want: "Marked alert"},
+		{name: "delete_alert", input: `{"alert_id":"` + alert.ID + `"}`, want: "Deleted alert"},
+		{name: "set_task_goal", input: `{"task_id":"current","goal":"Finish coverage"}`, want: `"ok":true`},
+		{name: "get_task_goal", input: `{"task_id":"current"}`, want: "Finish coverage"},
+		{name: "pause_task_goal", input: `{"task_id":"current"}`, want: `"ok":true`},
+		{name: "resume_task_goal", input: `{"task_id":"current"}`, want: `"ok":true`},
+		{name: "clear_task_goal", input: `{"task_id":"current"}`, want: `"ok":true`},
 		{name: "send_message", input: `{"target":"slack:#general","message":"hi"}`, wantError: true},
 		{name: "github_create_issue", input: `{"title":"Issue"}`, wantError: true},
 		{name: "github_get_issue", input: `{"issue_number":1}`, wantError: true},
