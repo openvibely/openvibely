@@ -1135,9 +1135,9 @@ func TestChatInputForm_MobileControlsStayContained(t *testing.T) {
 	}
 
 	content := buf.String()
-	gutterClass := `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2"`
+	gutterClass := `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-3"`
 	if !strings.Contains(content, gutterClass) {
-		t.Fatalf("chat composer should render inside a full-width shadow gutter without artificial side padding or desktop caps; missing %q", gutterClass)
+		t.Fatalf("chat composer should render inside a full-width shadow gutter with a persistent top gap and without artificial side padding or desktop caps; missing %q", gutterClass)
 	}
 	if strings.Contains(content, `sm:max-w-3xl`) || strings.Contains(content, `sm:mx-auto`) || strings.Contains(content, `px-3 pt-2 pb-4`) || strings.Contains(content, `pt-2 pb-4`) {
 		t.Fatal("chat composer gutter must not add desktop side gaps or mobile right-side empty space")
@@ -3850,10 +3850,10 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `id="task-thread-view" class="flex flex-col flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden"`) {
 		t.Fatal("task thread root must not clip the composer shadow; horizontal containment belongs on the messages pane and inner controls")
 	}
-	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto py-4 space-y-6 min-h-0"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-0 space-y-6 min-h-0"`) {
 		t.Fatal("task thread messages pane should avoid stacking an outer bottom margin above the composer")
 	}
-	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto py-4 mb-4`) {
+	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-0 mb-4`) {
 		t.Fatal("task thread messages pane must not add a second vertical gap before the composer")
 	}
 	if strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto overflow-x-hidden`) {
@@ -3862,8 +3862,8 @@ func TestTaskThreadView_ContainsHorizontalOverflowOnMobile(t *testing.T) {
 	if strings.Contains(content, `-mr-[29px]`) || strings.Contains(content, `-mr-[18px]`) {
 		t.Fatal("task thread messages must not use fixed right-margin scrollbar compensation because it leaves bubbles visually shorter than the input in real browsers")
 	}
-	if !strings.Contains(content, `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-2"`) {
-		t.Fatal("task thread composer must use a full-width shadow gutter with only the shared top gap")
+	if !strings.Contains(content, `class="chat-input-shadow-gutter w-full min-w-0 max-w-full mt-3"`) {
+		t.Fatal("task thread composer must use a full-width shadow gutter with only the shared persistent top gap")
 	}
 	if strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full sm:max-w-3xl`) || strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4 px-3`) || strings.Contains(content, `chat-input-shadow-gutter w-full min-w-0 max-w-full pt-2 pb-4`) {
 		t.Fatal("task thread composer gutter must not add artificial side gaps or extra vertical spacing")
@@ -4470,7 +4470,7 @@ func TestTaskThreadView_HidesInitialTranscriptUntilRenderBarrierSettles(t *testi
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto py-4 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
+	if !strings.Contains(content, `id="task-thread-messages" class="flex-1 overflow-y-auto pt-4 pb-0 space-y-6 min-h-0" style="visibility: hidden;" data-transcript-hydrating="true"`) {
 		t.Fatal("task thread must keep the server-rendered transcript hidden during coordinated initial hydration")
 	}
 	if !strings.Contains(content, "window.restoreChatTranscriptScroll({") || !strings.Contains(content, "_finishTaskThreadRenderScroll(chatMessages, Promise.all(initialRenderPromises))") {
