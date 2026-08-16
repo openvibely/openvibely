@@ -63,6 +63,31 @@ func (wtc *webhookTestContext) createAgent(t *testing.T, name string) *models.Ag
 	return a
 }
 
+func (wtc *webhookTestContext) endpointAgentIDs(t *testing.T, endpointID string) []string {
+	t.Helper()
+	assigned, err := wtc.webhookRepo.GetEndpointAgents(context.Background(), endpointID)
+	if err != nil {
+		t.Fatalf("GetEndpointAgents: %v", err)
+	}
+	ids := make([]string, 0, len(assigned))
+	for _, assignment := range assigned {
+		ids = append(ids, assignment.AgentDefinitionID)
+	}
+	return ids
+}
+
+func expectStringSlice(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("got %d values %#v, want %d values %#v", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("value %d = %q in %#v, want %q in %#v", i, got[i], got, want[i], want)
+		}
+	}
+}
+
 func (wtc *webhookTestContext) expectSubmittedTasks(t *testing.T, count int) []models.Task {
 	t.Helper()
 	if wtc.handler.workerSvc == nil {
@@ -458,15 +483,122 @@ func TestWebhookCRUD_CreateViaForm(t *testing.T) {
 	if webhooks[0].Name != "My Webhook" {
 		t.Errorf("name = %q, want My Webhook", webhooks[0].Name)
 	}
-	assigned, err := wtc.webhookRepo.GetEndpointAgents(context.Background(), webhooks[0].ID)
+	expectStringSlice(t, wtc.endpointAgentIDs(t, webhooks[0].ID), []string{agent1.ID, agent2.ID})
+}
+
+func TestWebhookCRUD_CreateAndUpdateNormalizeEditableFieldsAndAgents(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Form Parity").Build()
+	agent1 := wtc.createAgent(t, "Agent One")
+	agent2 := wtc.createAgent(t, "Agent Two")
+	agent3 := wtc.createAgent(t, "Agent Three")
+
+	createForm := url.Values{
+		"project_id":          {project.ID},
+		"name":                {"  Created Hook  "},
+		"system_instructions": {"  Created system  "},
+		"default_priority":    {"4"},
+		"title_template":      {"  Created {{summary}}  "},
+		"prompt_template":     {"  Created prompt  "},
+		"agent_ids":           {agent1.ID + "," + agent2.ID, agent2.ID + "," + agent3.ID},
+	}
+	createReq := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create: expected 201, got %d; body=%s", createRec.Code, createRec.Body.String())
+	}
+
+	webhooks, err := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
 	if err != nil {
-		t.Fatalf("GetEndpointAgents: %v", err)
+		t.Fatalf("ListByProject: %v", err)
 	}
-	if len(assigned) != 2 {
-		t.Fatalf("expected 2 assigned agents, got %d", len(assigned))
+	if len(webhooks) != 1 {
+		t.Fatalf("expected 1 webhook, got %d", len(webhooks))
 	}
-	if assigned[0].AgentDefinitionID != agent1.ID || assigned[1].AgentDefinitionID != agent2.ID {
-		t.Fatalf("unexpected agent assignment order: %#v", assigned)
+	created := webhooks[0]
+	if created.Name != "Created Hook" || !created.Enabled || created.SystemInstructions != "Created system" || created.TitleTemplate != "Created {{summary}}" || created.PromptTemplate != "Created prompt" || created.DefaultPriority != 4 {
+		t.Fatalf("created webhook fields were not normalized/persisted: %#v", created)
+	}
+	if created.PathToken == "" || created.Secret == "" {
+		t.Fatalf("created webhook missing generated token/secret: %#v", created)
+	}
+	expectStringSlice(t, wtc.endpointAgentIDs(t, created.ID), []string{agent1.ID, agent2.ID, agent3.ID})
+
+	updateForm := url.Values{
+		"name":                {"  Updated Hook  "},
+		"system_instructions": {"  Updated system  "},
+		"default_priority":    {"3"},
+		"title_template":      {"  Updated {{event_type}}  "},
+		"prompt_template":     {"  Updated prompt  "},
+		"agent_ids":           {agent3.ID + "," + agent1.ID},
+	}
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+created.ID, strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updateRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update: expected 200, got %d; body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	updated, err := wtc.webhookRepo.GetByID(context.Background(), created.ID)
+	if err != nil || updated == nil {
+		t.Fatalf("GetByID after update: %v", err)
+	}
+	if updated.Name != "Updated Hook" || updated.Enabled || updated.SystemInstructions != "Updated system" || updated.TitleTemplate != "Updated {{event_type}}" || updated.PromptTemplate != "Updated prompt" || updated.DefaultPriority != 3 {
+		t.Fatalf("updated webhook fields were not normalized/persisted: %#v", updated)
+	}
+	if updated.PathToken != created.PathToken || updated.Secret != created.Secret {
+		t.Fatalf("update changed generated token/secret: before=%#v after=%#v", created, updated)
+	}
+	expectStringSlice(t, wtc.endpointAgentIDs(t, updated.ID), []string{agent3.ID, agent1.ID})
+}
+
+func TestWebhookCRUD_BlankNameLifecycleBehavior(t *testing.T) {
+	wtc := newWebhookTestContext(t)
+	project := wtc.CreateProject().WithName("WH Blank Names").Build()
+
+	createForm := url.Values{
+		"project_id": {project.ID},
+		"name":       {"   "},
+	}
+	createReq := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(createForm.Encode()))
+	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create blank name: expected 201, got %d; body=%s", createRec.Code, createRec.Body.String())
+	}
+	webhooks, err := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("ListByProject: %v", err)
+	}
+	if len(webhooks) != 1 {
+		t.Fatalf("expected 1 webhook, got %d", len(webhooks))
+	}
+	if webhooks[0].Name != "New Webhook" {
+		t.Fatalf("blank create name = %q, want New Webhook", webhooks[0].Name)
+	}
+
+	existing := wtc.createEndpoint(t, project.ID, "Keep Existing Name", true)
+	updateForm := url.Values{
+		"name":             {"   "},
+		"default_priority": {"2"},
+	}
+	updateReq := httptest.NewRequest("PUT", "/channels/webhooks/"+existing.ID, strings.NewReader(updateForm.Encode()))
+	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	updateRec := httptest.NewRecorder()
+	wtc.echo.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update blank name: expected 200, got %d; body=%s", updateRec.Code, updateRec.Body.String())
+	}
+	updated, err := wtc.webhookRepo.GetByID(context.Background(), existing.ID)
+	if err != nil || updated == nil {
+		t.Fatalf("GetByID after blank name update: %v", err)
+	}
+	if updated.Name != "Keep Existing Name" {
+		t.Fatalf("blank update name = %q, want existing name preserved", updated.Name)
 	}
 }
 
@@ -576,6 +708,9 @@ func TestWebhookCRUD_BlankDefaultPriorityDoesNotProduceLegacyZero(t *testing.T) 
 	}
 	if updated.DefaultPriority == 0 {
 		t.Fatalf("blank default_priority on update resolved to legacy no-badge 0")
+	}
+	if updated.DefaultPriority != 1 {
+		t.Errorf("blank default_priority on update = %d, want the sane default (1, Low)", updated.DefaultPriority)
 	}
 }
 
