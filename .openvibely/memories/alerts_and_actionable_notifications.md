@@ -3,8 +3,8 @@ name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
 updated: 2026-08-16
-source: consolidation
-source_id: memory_consolidation_2026_08_16
+source: update_memory
+source_id: 13e73a7510ce02d1540d8bec24b46855:6ede25d1142e8deb
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -61,5 +61,6 @@ Product surfaces:
 - Notification bodies should start with a short nontechnical `## Summary` section followed by technical evidence and implementation detail, matching Automation content standards and reviewable-autonomy scanability goals.
 - Alerts/notification UI should make pending approval summaries easy to scan without requiring users to expand technical detail first; body/detail expansion remains useful for full evidence, metadata, and copy actions.
 - Runtime alert listing (`#396`) should use compact alert summary projections for list paths, exclude `body` and `metadata_json` from summaries, preserve filters/project isolation/Automation inbox scoping/ordering/limit-offset/`next_offset`, and keep `get_alert` as full detail hydration. Verify live main/PR state before treating any prior implementation as shipped.
+- Open gap `#605`: the browser Alerts page still loads and renders full notification bodies and metadata inline for initial list renders and HTMX mutation refreshes. This is distinct from runtime listing `#396` and ordering/index `#127`; acceptance should use compact list/card rows plus lazy/detail hydration or an equivalent UX-compatible approach while preserving inspect/copy controls, metadata visibility, project filtering, approvals, read/delete mutations, live refresh, and HTMX scroll/focus behavior.
 - Maintained Automation prompts are point-in-time snapshots. Existing saved Native/GitHub inbox Automations must be explicitly Edit/Saved or recreated after deploying corrected defaults; already-created Backlog tasks are not retroactively started and require manual execution.
 - The model, migration, authorization boundaries, tool contracts, lease recovery, and schedule configuration are documented in `docs/openvibely-native-autonomous-sdlc-user-guide.md`.

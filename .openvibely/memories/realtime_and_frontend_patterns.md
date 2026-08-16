@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-14
+updated: 2026-08-16
 source: update_memory
-source_id: 0a28ba117ce6bb47cb7c292e4fe808cc:a5aeba951dbfbabc
+source_id: 1bc75ebe302837a3727e20cb10283ccb:6eedc6d3382e7164
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -71,7 +71,7 @@ HTMX navigation, refresh, and scroll contracts:
 - Known review navigation gaps: `openvibely/openvibely#365` notes that dedicated execution detail pages exist but Task Thread and Reflection review surfaces do not expose visible links to them, so users cannot easily inspect per-run metadata from normal review flows; `#380` proposes making execution-detail pages clearer audit/review landing pages, especially when users arrive from history or Automation resource links.
 - Forced task-thread fragment refreshes must close tracked per-exec EventSources before replacement, but revision no-op checks must run before cleanup.
 - Older-history pagination captures scroll intent revision and rechecks after hydration. Stale anchor restoration is cancelled if a send or newer user scroll changed intent.
-- Known duplication gaps: task-thread scroll-state helpers (`#38`), terminal UI/composer reconciliation (`#55`), live-event queued row construction (`#59`), task-thread post-swap hydration (`#65`), schedule repeat-interval controllers (`#47`), and Task Templates browser post-mutation dashboard refresh/rendering (`#551`). Issue `#551` covers duplicated reload/render tails across create, update, delete, and favorite template mutation handlers; consolidate only the common dashboard refresh fragment while preserving mutation-specific writes, errors, redirects, and tests.
+- Known duplication gaps: task-thread scroll-state helpers (`#38`), terminal UI/composer reconciliation (`#55`), live-event queued row construction (`#59`), task-thread post-swap hydration (`#65`), schedule repeat-interval controllers (`#47`), Task Templates browser post-mutation dashboard refresh/rendering (`#551`), and Insights dashboard health/idea grade rendering (`#603`). Issue `#551` covers duplicated reload/render tails across create, update, delete, and favorite template mutation handlers; consolidate only the common dashboard refresh fragment while preserving mutation-specific writes, errors, redirects, and tests. Issue `#603` covers duplicated grade-panel/card layout, section blocks, action shells, and history-chip rendering between the active Insights health check and idea grade dashboard UI; consolidate the shared presentation scaffold while preserving workflow-specific data, actions, copy, routes, and regression coverage.
 - Task detail HTMX refresh assembly is centralized as of PR `#403`: `GetTask` fragments, task edit saves, chain-config saves, and schedule create/update/toggle refreshes share one task-detail content loader/renderer with canonical chronological execution ordering; full-page `GetTask` still wraps `TaskDetailPage` and route-specific selected tabs are preserved.
 - Task-board mutation/sort HTMX refresh assembly is centralized in a private handler helper as of PR `#399`: preserve route-specific validation, mutations, logging, non-HTMX redirects, and `CancelTask?composer_stop=1`, while reusing shared sort-cookie handling, board reload, model-config loading, kanban rendering, and reload-error handling for board refreshes.
 
@@ -109,7 +109,7 @@ Responsive and shared UI contracts:
 
 Models, Channels, and card-search UI:
 - Models initial render uses compact `agent_configs` card projections excluding secrets/tokens/client secrets/request JSON/custom auth/full mixture JSON. Edit fetches one authorized full record; modal hydration uses request-generation and returned-ID guards.
-- Personality settings initial render uses compact custom-personality card projections and bounded prompt previews; list card/search attributes must not contain full custom prompt bodies. Opening Edit lazy-loads one full custom personality or preset/override detail through the JSON detail endpoint, with request-generation/stale-response guards while preserving card search and HTMX section refresh behavior.
+- Personality settings initial render uses compact custom-personality card projections and bounded prompt previews; list card/search attributes must not contain full custom prompt bodies. Opening Edit lazy-loads one full custom personality or preset/override detail through the JSON detail endpoint, with request-generation/stale-response guards while preserving card search and HTMX section refresh behavior. Card rendering is centralized through `builtInPersonalityCard` and `customPersonalityCard` for both selected and non-selected positions; `PersonalitySection` owns ordering selected, Base, built-in, and custom cards, and the Base card remains separate unless deliberately extracted later.
 - Lazy edit modals for compact cards must not allow Save to submit placeholder or blank edit-only fields before detail hydration succeeds. Use loading/disabled/error states with stale-response guards so failed or slow detail fetches cannot overwrite persisted secrets, prompts, templates, instructions, or assignments with defaults.
 - Reused secret modals must reset unsaved edits and revealed secrets before reopening across Models, GitHub, Slack, Telegram, Discord, Email, and inbound webhooks.
 - Project-scoped settings pages preserve active project through `project_id`; Models create/edit, set-default, delete, delete-with-reassign, and OAuth paths derive URLs from the live project selector before fallback to URL query. OAuth pending state persists ProjectID.

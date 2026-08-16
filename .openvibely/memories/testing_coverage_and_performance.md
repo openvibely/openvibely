@@ -4,7 +4,7 @@ type: project
 created: 2026-06-07
 updated: 2026-08-16
 source: update_memory
-source_id: 5b8e2c5d52632475a83d8e7530366676:04363208089aa9fe
+source_id: 13e73a7510ce02d1540d8bec24b46855:6ede25d1142e8deb
 confidence: high
 title: Testing Coverage and Performance
 ---
@@ -59,6 +59,7 @@ Known bounded-projection history and current gaps:
 - Open gap `#364`: Agents page list/render embeds full editable agent bodies in every card. Acceptance should use compact card projections plus lazy edit-detail hydration while preserving edit modal behavior, authorization/project scoping, search semantics, and lifecycle/Automation capability data.
 - Runtime `list_agents` (`#416`) should use compact summary projections for web Chat and channel actions while preserving output compatibility, archived exclusion, ordering, project scoping, and full hydration for edit/detail paths. Verify live PR/main state before treating prior local work as shipped.
 - Runtime alert listing (`#396`) should use compact alert summary projections for JSON/text/channel `list_alerts`, omitting `body` and `metadata_json` while preserving filtering, pagination, project isolation, and full detail via `get_alert`. Verify live PR/main state before treating prior work as shipped.
+- Open gap `#605`: browser Alerts page refresh/rendering still uses full alert rows with inline bodies and metadata for list and HTMX mutation refreshes. Benchmark evidence from `BenchmarkAlertRuntimeListProjectionResponse` showed the full alert-row path around `8.15 ms/op` and `18.4 MB/op` for 50 large notifications versus compact summaries around `0.21 ms/op` and `143 KB/op`; acceptance should preserve Alerts UX and use browser-specific measurement of response size, latency, allocations, and interaction behavior.
 - Runtime `list_schedules` discovery (`#412`) uses/should use an ordered schedule discovery index for no-filter first-page requests while preserving filters, pagination, nil-`next_run` ordering, and runtime JSON fields. Verify live publication state before claiming completion.
 - Channels Settings webhook cards (`#422`) should use compact card projections plus lazy edit-detail hydration; preserve hydration guards, project scoping, card fields, and migration-number uniqueness. Verify live checks/main state before claiming completion.
 - Open gap `#457`: Task Changes/code-review rendering rebuilds the same review-comment map inside both inline and split per-file diff loops and lacks an order-covering list index. Acceptance should build the map once per render, add/order-cover list queries where appropriate, and preserve inline/split placement plus refresh behavior.
