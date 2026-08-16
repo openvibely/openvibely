@@ -1245,7 +1245,14 @@ func automationNodeByKeyHandler(nodes []models.AutomationNode, key string) *mode
 
 func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.T) {
 	tc := NewTestContext(t)
+	ctx := context.Background()
+	projectDefault := createAgent(t, tc.llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Project default automation model"
+		a.IsDefault = false
+	})
 	project := tc.CreateProject().WithName("GitHub template without setup").Build()
+	project.DefaultAgentConfigID = &projectDefault.ID
+	require.NoError(t, tc.projectRepo.Update(ctx, project))
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
@@ -1253,6 +1260,7 @@ func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.
 	githubAuthRepo := repository.NewGitHubAuthRepo(tc.db)
 	validator.SetCapabilityDependencies(tc.projectRepo, tc.settingsRepo, githubAuthRepo)
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	capabilities.SetLLMConfigRepository(tc.llmConfigRepo)
 	capabilities.SetGitHubAuthRepository(githubAuthRepo)
 	drafts.SetCapabilitySnapshotBuilder(capabilities)
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
@@ -1264,6 +1272,14 @@ func TestAutomationGitHubTemplateSaveExplainsUnavailableProjectSetup(t *testing.
 	require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
 	require.NotContains(t, preview.Body.String(), "required_capabilities")
 	candidate := automationCandidateFromResponse(t, preview)
+	for _, node := range candidate.Nodes {
+		if node.Type == models.AutomationNodeTrigger || node.Type == models.AutomationNodeAgentTask {
+			if _, hasPrompt := node.Config["prompt"]; hasPrompt || node.Role == "implementation" {
+				modelConfigID, _ := node.Config["model_config_id"].(string)
+				require.Equal(t, projectDefault.ID, modelConfigID, "node %s should default to project model", node.Key)
+			}
+		}
+	}
 
 	saved := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
 		"project_id": {project.ID}, "builder_source": {"template"},
@@ -1472,6 +1488,7 @@ func TestAutomationBuilderWebSaveIsBrowserLocalUntilAtomicSaveAndProjectScoped(t
 		Enabled: true, SelectableAsPrimary: true, Skills: []models.SkillConfig{{Name: "project-guidance", Description: "Guide", Content: "safe"}}}
 	require.NoError(t, agentRepo.Create(context.Background(), &architect))
 	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, agentRepo, tc.taskRepo, tc.settingsRepo)
+	capabilities.SetLLMConfigRepository(tc.llmConfigRepo)
 	drafts.SetCapabilitySnapshotBuilder(capabilities)
 	planner.SetAgentRepository(agentRepo)
 	compiler.SetAgentRepository(agentRepo)

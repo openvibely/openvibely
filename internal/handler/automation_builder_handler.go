@@ -56,6 +56,9 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 		switch source {
 		case "template":
 			candidate, err = h.automationDraftSvc.CreationTemplateCandidate(strings.TrimSpace(c.FormValue("template_key")))
+			if err == nil {
+				h.applyAutomationTemplateDefaultModel(ctx, projectID, &candidate)
+			}
 		case "blank":
 			candidate, err = h.automationDraftSvc.BlankCandidate("")
 		case "describe":
@@ -124,6 +127,41 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 	return h.saveAutomationBuilderCandidate(c, projectID, page, false)
 }
 
+func (h *Handler) applyAutomationTemplateDefaultModel(ctx context.Context, projectID string, candidate *models.AutomationDraftCandidate) {
+	if h == nil || candidate == nil {
+		return
+	}
+	modelID := ""
+	if h.projectRepo != nil && strings.TrimSpace(projectID) != "" {
+		if project, err := h.projectRepo.GetByID(ctx, projectID); err == nil && project != nil && project.DefaultAgentConfigID != nil {
+			modelID = strings.TrimSpace(*project.DefaultAgentConfigID)
+		}
+	}
+	if modelID == "" && h.llmConfigRepo != nil {
+		if model, err := h.llmConfigRepo.GetDefault(ctx); err == nil && model != nil {
+			modelID = strings.TrimSpace(model.ID)
+		}
+	}
+	if modelID == "" {
+		return
+	}
+	for i := range candidate.Nodes {
+		node := &candidate.Nodes[i]
+		if node.Type != models.AutomationNodeTrigger && node.Type != models.AutomationNodeAgentTask {
+			continue
+		}
+		if node.Config == nil {
+			node.Config = map[string]any{}
+		}
+		if existing, ok := node.Config["model_config_id"].(string); ok && strings.TrimSpace(existing) != "" {
+			continue
+		}
+		if _, hasPrompt := node.Config["prompt"]; hasPrompt || node.Role == "implementation" {
+			node.Config["model_config_id"] = modelID
+		}
+	}
+}
+
 func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 	if h.automationDraftSvc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "automation builder unavailable")
@@ -154,6 +192,7 @@ func (h *Handler) EditAutomationBuilder(c echo.Context) error {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		h.applyAutomationTemplateDefaultModel(ctx, projectID, &candidate)
 		candidate.Name = opened.Candidate.Name
 	} else if rawYAML, yamlSubmitted := automationDraftFormValue(c, "automation_yaml"); yamlSubmitted || strings.TrimSpace(c.FormValue("candidate_json")) != "" {
 		candidate, err = decodeAutomationBuilderCandidate(c)

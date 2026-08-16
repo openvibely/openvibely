@@ -55,6 +55,7 @@ func (h *Handler) executeAutomationSaveAction(ctx context.Context, params stream
 		if err != nil {
 			return "", err
 		}
+		h.applyAutomationTemplateDefaultModel(ctx, params.ProjectID, &candidate)
 		source = "template"
 	case "blank":
 		var err error
