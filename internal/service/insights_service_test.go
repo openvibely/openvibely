@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -138,6 +140,105 @@ func TestInsightsService_DetectBugPatterns(t *testing.T) {
 	}
 	if len(insights2) != 0 {
 		t.Errorf("expected 0 duplicates, got %d", len(insights2))
+	}
+}
+
+func TestInsightsService_RunAnalysisCreatesReportAcrossDetectors(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	insightsRepo := repository.NewInsightsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	svc := NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
+
+	project := &models.Project{Name: "Run Analysis Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "analysis-agent", Provider: models.ProviderTest, Model: "test-model", IsDefault: true}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	failingTask := &models.Task{ProjectID: project.ID, Title: "Deploy regression", Prompt: "deploy", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentID: &agent.ID}
+	if err := taskRepo.Create(ctx, failingTask); err != nil {
+		t.Fatalf("create failing task: %v", err)
+	}
+	for i := 0; i < 11; i++ {
+		exec := &models.Execution{TaskID: failingTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "deploy"}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatalf("create failed exec: %v", err)
+		}
+		if err := execRepo.Complete(ctx, exec.ID, models.ExecFailed, "", "deploy timeout", 0, 0); err != nil {
+			t.Fatalf("complete failed exec: %v", err)
+		}
+	}
+
+	for i := 0; i < 6; i++ {
+		task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("Bug fix %d", i), Prompt: "fix", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, Tag: models.TagBug}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create bug task: %v", err)
+		}
+	}
+	for i := 0; i < 4; i++ {
+		task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("Stale active %d", i), Prompt: "finish", Category: models.CategoryActive, Status: models.StatusPending, Priority: 2}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create stale task: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE tasks SET created_at = datetime('now', '-96 hours') WHERE id = ?`, task.ID); err != nil {
+			t.Fatalf("age stale task: %v", err)
+		}
+	}
+	for i := 0; i < 4; i++ {
+		task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("Slow task %d", i), Prompt: "slow", Category: models.CategoryCompleted, Status: models.StatusCompleted, Priority: 2, AgentID: &agent.ID}
+		if err := taskRepo.Create(ctx, task); err != nil {
+			t.Fatalf("create slow task: %v", err)
+		}
+		exec := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "slow"}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatalf("create slow exec: %v", err)
+		}
+		if err := execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "done", "", 0, 0); err != nil {
+			t.Fatalf("complete slow exec: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE executions SET started_at = datetime('now', '-10 minutes'), completed_at = datetime('now') WHERE id = ?`, exec.ID); err != nil {
+			t.Fatalf("slow exec timestamps: %v", err)
+		}
+	}
+
+	report, err := svc.RunAnalysis(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("RunAnalysis: %v", err)
+	}
+	if report.ID == "" || report.Summary == "" || report.AnalysisLog == "" {
+		t.Fatalf("report missing expected fields: %#v", report)
+	}
+	for _, want := range []string{"Bug patterns: found 1", "Incomplete features: found 2", "Tech debt: found 1", "Optimizations: found 1"} {
+		if !strings.Contains(report.AnalysisLog, want) {
+			t.Fatalf("analysis log missing %q:\n%s", want, report.AnalysisLog)
+		}
+	}
+	ids, err := report.ParseInsightIDs()
+	if err != nil {
+		t.Fatalf("ParseInsightIDs: %v", err)
+	}
+	if len(ids) != 5 {
+		t.Fatalf("expected five detector insights, got %d (%v)", len(ids), ids)
+	}
+
+	duplicateReport, err := svc.RunAnalysis(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("RunAnalysis duplicate: %v", err)
+	}
+	duplicateIDs, err := duplicateReport.ParseInsightIDs()
+	if err != nil {
+		t.Fatalf("ParseInsightIDs duplicate: %v", err)
+	}
+	if len(duplicateIDs) != 0 {
+		t.Fatalf("duplicate analysis should not create duplicate insights: %v", duplicateIDs)
 	}
 }
 
