@@ -1263,6 +1263,36 @@ func TestAutomationRuntimeReconcilesTerminalExecutionProjectionAfterCrash(t *tes
 	require.Zero(t, positions, "stale completed terminal positions must be pruned from live counts")
 }
 
+func TestAutomationRuntimeDoesNotRepairCompletedReviewExecutionPosition(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	openPR := automationNodeByKey(t, fixture.definition, "open_pr")
+	review := automationNodeByKey(t, fixture.definition, "review")
+	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: review.ID}
+	item, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "review:item", ActivityKey: "review:handoff", ActivityType: "handoff", ActivityStatus: models.AutomationActivityCompleted,
+		EventKey: "review:waiting", FromNodeID: openPR.ID, ToNodeID: review.ID, Transition: models.AutomationTransitionWaiting,
+	})
+	require.NoError(t, err)
+	binding.WorkItemID = item.ID
+	execution := models.Execution{TaskID: fixture.task.ID, Status: models.ExecRunning, PromptSent: "review helper"}
+	execRepo := repository.NewExecutionRepo(fixture.repo.DB())
+	require.NoError(t, execRepo.Create(ctx, &execution))
+	_, _, err = fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		ActivityKey: "execution:" + execution.ID + ":review", ActivityType: "task_execution", ActivityStatus: models.AutomationActivityCompleted,
+		Resources: []models.AutomationActivityResource{{ResourceType: "execution", ResourceID: execution.ID}},
+	})
+	require.NoError(t, err)
+	_, err = fixture.repo.DB().Exec(`UPDATE executions SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?`, execution.ID)
+	require.NoError(t, err)
+
+	repairs, err := fixture.repo.ListExecutionProjectionRepairs(ctx, 100)
+	require.NoError(t, err)
+	require.Empty(t, repairs, "completed review-node executions should not be terminalized by projection repair")
+}
+
 func TestAutomationRuntimeSkippedOccurrenceAndProjectionIdempotency(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()

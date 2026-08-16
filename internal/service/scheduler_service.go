@@ -166,9 +166,9 @@ func (s *SchedulerService) checkDueTasks(ctx context.Context) {
 			continue
 		}
 		if task == nil {
-			applog.Infof("[scheduler] checkDueTasks disabling orphaned schedule=%s missing_task=%s", sched.ID, sched.TaskID)
-			if err := s.scheduleRepo.DisableOrphan(ctx, sched.ID, sched.TaskID); err != nil {
-				applog.Infof("[scheduler] checkDueTasks error disabling orphaned schedule %s: %v", sched.ID, err)
+			applog.Infof("[scheduler] checkDueTasks deleting orphaned schedule=%s missing_task=%s", sched.ID, sched.TaskID)
+			if err := s.scheduleRepo.DeleteOrphan(ctx, sched.ID, sched.TaskID); err != nil {
+				applog.Infof("[scheduler] checkDueTasks error deleting orphaned schedule %s: %v", sched.ID, err)
 			}
 			continue
 		}

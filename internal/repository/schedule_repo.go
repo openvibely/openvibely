@@ -298,13 +298,13 @@ func (r *ScheduleRepo) ToggleEnabled(ctx context.Context, id string, enabled boo
 	return nil
 }
 
-func (r *ScheduleRepo) DisableOrphan(ctx context.Context, id, taskID string) error {
+func (r *ScheduleRepo) DeleteOrphan(ctx context.Context, id, taskID string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE schedules SET enabled = 0, next_run = NULL, updated_at = datetime('now')
+		`DELETE FROM schedules
 		 WHERE id = ? AND task_id = ? AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = schedules.task_id)`,
 		id, taskID)
 	if err != nil {
-		return fmt.Errorf("disabling orphan schedule: %w", err)
+		return fmt.Errorf("deleting orphan schedule: %w", err)
 	}
 	return nil
 }

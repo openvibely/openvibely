@@ -4,7 +4,7 @@ type: feedback
 created: 2026-05-11
 updated: 2026-08-15
 source: update_memory
-source_id: ae4bd808d91d68ea8225eea706d02803:5c44d78fa51f67fa
+source_id: ae4bd808d91d68ea8225eea706d02803:0a41fa08678156e3
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -26,7 +26,7 @@ User interaction preferences:
 - When diagnosing autonomous integration loops or system-owned schedules, do not manually forward, wake, patch, or otherwise push one live object through as a substitute for fixing the product path. The user wants the implementation to work properly end-to-end; validation should prove the scheduled/tool/runtime behavior works without ad hoc live intervention unless the user explicitly asks for a one-off operational action.
 - When the user has already explicitly requested an outbound action such as sending an email/message, attempt the available configured/runtime mechanism instead of asking for redundant confirmation; if no viable send path exists, report the completed work and the send limitation clearly.
 - Prefer plain, direct explanations over jargon-heavy phrasing; if the user asks for “no word salad,” respond with a terse concrete summary and one or two representative examples rather than audit-style detail. For user-facing UI/docs copy, avoid internal tool-name or architecture jargon unless it is clearly marked as advanced/reference text.
-- When discussing GitHub/Native SDLC duplicate prevention, do not frame the answer around `idempotency_key`; lead with user-visible behavior such as listing existing bot-created issues/notifications, comparing candidates, inspecting likely matches, skipping covered findings, continuing the search, and reporting no new finding when appropriate. Do not cite unrelated lifecycle hook or agent-config mutation idempotency as part of the SDLC answer; mention generic `idempotency_key` uses only when needed to explain why the field remains outside SDLC finder prompts.
+- When discussing GitHub/Native SDLC duplicate prevention, do not frame the answer around `idempotency_key`; lead with user-visible behavior such as listing existing bot-created issues/notifications, comparing candidates, inspecting only likely matches, skipping covered findings, continuing the search, and reporting no new finding when appropriate. Address token-cost concerns by emphasizing compact listings, bounded detail hydration, and at most one new finding per run rather than suggesting every full issue/notification body is read. Do not cite unrelated lifecycle hook or agent-config mutation idempotency as part of the SDLC answer; mention generic `idempotency_key` uses only when needed to explain why the field remains outside SDLC finder prompts.
 - Bug explanations should include the causal chain, concrete failure mode, and exact affected path when the user asks for detail.
 - Summaries should be concrete: cite specific files, symbols, handlers, tests, behavior affected, verification performed, and whether a real git diff exists when available.
 - If a user challenges why there is no diff after a claimed coding change, inspect branch pointers, status, reflog, and file contents, then plainly correct any prior summary based on non-persisted or stale output.
