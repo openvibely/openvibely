@@ -67,6 +67,60 @@ func TestCommitTaskWorktreeChangesRecordsProducedCommitStat(t *testing.T) {
 	}
 }
 
+func TestHandlePostExecutionRecordsProducedCommitStat(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	project := &models.Project{Name: "Post Execution Stats", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{
+		ProjectID:      project.ID,
+		Title:          "Record post-execution commit",
+		Category:       models.CategoryActive,
+		Status:         models.StatusRunning,
+		WorktreePath:   repoDir,
+		WorktreeBranch: "main",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	execModel := &models.Execution{TaskID: task.ID, Status: models.ExecRunning, PromptSent: "post execution change"}
+	if err := execRepo.Create(ctx, execModel); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	completedAt := time.Date(2026, 8, 17, 15, 45, 0, 0, time.UTC)
+	execModel.CompletedAt = &completedAt
+
+	if err := os.WriteFile(filepath.Join(repoDir, "post_execution.go"), []byte("package postexecution\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	llmSvc := &LLMService{execRepo: execRepo, taskCommitStatRepo: statRepo}
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, repository.NewSettingsRepo(db))
+	worktreeSvc.SetLLMService(llmSvc)
+	worktreeSvc.HandlePostExecution(ctx, task, execModel, repoDir)
+
+	stats, err := statRepo.ListProducedCommitStats(ctx, project.ID, completedAt.Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("list stats: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("stats count = %d, want 1", len(stats))
+	}
+	if stats[0].ExecutionID == nil || *stats[0].ExecutionID != execModel.ID {
+		t.Fatalf("execution_id = %v, want %s", stats[0].ExecutionID, execModel.ID)
+	}
+	if stats[0].ChangedFilesJSON != `["post_execution.go"]` {
+		t.Fatalf("changed files = %s, want post_execution.go", stats[0].ChangedFilesJSON)
+	}
+}
+
 func TestTaskCommitStatUpsertDoesNotDoubleCountDuplicateCommit(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

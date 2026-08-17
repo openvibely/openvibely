@@ -1632,7 +1632,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Commit, merge, and update worktree status only for the managed worktree
 	// established for this execution, never from retained task metadata alone.
 	if managedWorktree && s.worktreeSvc != nil && repoDir != "" {
-		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, repoDir)
+		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, exec, repoDir)
 	}
 
 	// Check for follow-up marker (task still completed, but alert created)

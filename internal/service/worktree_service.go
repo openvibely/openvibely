@@ -2086,7 +2086,7 @@ func IsBranchDivergedFromTarget(repoDir string, branchName string, targetBranch 
 
 // HandlePostExecution handles worktree operations after task execution completes.
 // Called by the LLM service after a task finishes successfully.
-func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models.Task, repoDir string) {
+func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models.Task, execModel *models.Execution, repoDir string) {
 	if task.WorktreePath == "" || task.WorktreeBranch == "" {
 		return
 	}
@@ -2102,8 +2102,14 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 		commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, *task.AgentID, commitCtx)
 	}
 	msg := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
-	if err := CommitWorktreeChanges(task.WorktreePath, msg); err != nil {
-		applog.Infof("[worktree] error committing changes for task %s: %v", task.ID, err)
+	var commitErr error
+	if ws.llmSvc != nil {
+		commitErr = ws.llmSvc.CommitTaskWorktreeChanges(ctx, task, execModel, task.WorktreePath, msg)
+	} else {
+		commitErr = CommitWorktreeChanges(task.WorktreePath, msg)
+	}
+	if commitErr != nil {
+		applog.Infof("[worktree] error committing changes for task %s: %v", task.ID, commitErr)
 		if ws.taskRepo != nil {
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 		}
