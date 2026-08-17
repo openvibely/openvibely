@@ -10,6 +10,69 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+// BenchmarkListRecentExecutions measures per-op allocations with 100 executions
+// each carrying a ~50 KB output payload. The truncated SELECT introduced in
+// issue #627 should reduce B/op by at least 5× compared to fetching full text.
+func BenchmarkListRecentExecutions(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	upcomingRepo := NewUpcomingRepo(db)
+	projectRepo := NewProjectRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	agentRepo := NewLLMConfigRepo(db)
+	execRepo := NewExecutionRepo(db)
+
+	project := &models.Project{Name: "bench-project", RepoPath: "/tmp/bench"}
+	if err := projectRepo.Create(context.Background(), project); err != nil {
+		b.Fatalf("creating project: %v", err)
+	}
+	agent := &models.LLMConfig{Name: "BenchAgent", Provider: models.ProviderAnthropic, Model: "claude-sonnet-4-20250514"}
+	if err := agentRepo.Create(context.Background(), agent); err != nil {
+		b.Fatalf("creating agent: %v", err)
+	}
+
+	// 50 KB output payload — representative of real execution output sizes.
+	largeOutput := strings.Repeat("x", 50*1024)
+
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Bench Task",
+		Category:  models.CategoryCompleted,
+		Status:    models.StatusCompleted,
+	}
+	if err := taskRepo.Create(context.Background(), task); err != nil {
+		b.Fatalf("creating task: %v", err)
+	}
+
+	for i := 0; i < 100; i++ {
+		exec := &models.Execution{
+			TaskID:        task.ID,
+			AgentConfigID: agent.ID,
+			Status:        models.ExecRunning,
+			PromptSent:    strings.Repeat("p", 10*1024),
+		}
+		if err := execRepo.Create(context.Background(), exec); err != nil {
+			b.Fatalf("creating execution: %v", err)
+		}
+		if err := execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, largeOutput, "", 100, 5000); err != nil {
+			b.Fatalf("completing execution: %v", err)
+		}
+	}
+
+	since := time.Now().UTC().Add(-1 * time.Hour)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		results, err := upcomingRepo.ListRecentExecutions(context.Background(), project.ID, since)
+		if err != nil {
+			b.Fatalf("ListRecentExecutions: %v", err)
+		}
+		if len(results) != 100 {
+			b.Fatalf("expected 100 executions, got %d", len(results))
+		}
+		_ = results
+	}
+}
+
 func createTestAgent(t *testing.T, llmConfigRepo *LLMConfigRepo) models.LLMConfig {
 	t.Helper()
 	a := &models.LLMConfig{
