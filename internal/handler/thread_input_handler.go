@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -58,6 +59,42 @@ func (h *Handler) publishThreadInputCancelledEvent(input *models.ThreadInput) {
 	}
 }
 
+// convertQueuedInputToSteering contains the shared logic for both steer handlers:
+// expected-turn-ID guard, ConvertQueuedToSteering call, all three error-type branches,
+// and nil-steering guard. Callers supply a findActiveExecution callback that resolves
+// the surface-specific active execution (chat vs. task thread).
+func (h *Handler) convertQueuedInputToSteering(
+	ctx context.Context,
+	input *models.ThreadInput,
+	findActiveExecution func() (*models.Execution, error),
+) (*models.ThreadInput, error) {
+	active, err := findActiveExecution()
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
+	}
+	if active == nil {
+		return nil, echo.NewHTTPError(http.StatusConflict, "no active response to steer")
+	}
+	expectedTurnID := input.RunExecutionID
+	if expectedTurnID == "" {
+		return nil, echo.NewHTTPError(http.StatusConflict, "queued input is missing its active turn guard; refresh and queue the message again")
+	}
+	steering, err := h.threadInputRepo.ConvertQueuedToSteering(ctx, input.ID, active.ID, expectedTurnID)
+	if err != nil {
+		if errors.Is(err, repository.ErrInputNotPending) {
+			return nil, echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
+		}
+		if errors.Is(err, repository.ErrNoActiveTurn) || errors.Is(err, repository.ErrActiveTurnChanged) {
+			return nil, echo.NewHTTPError(http.StatusConflict, "active turn changed; refresh and queue the message instead")
+		}
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "failed to convert queued input")
+	}
+	if steering == nil {
+		return nil, echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
+	}
+	return steering, nil
+}
+
 func (h *Handler) ChatQueuedInputSteer(c echo.Context) error {
 	inputID := c.Param("inputId")
 	if inputID == "" {
@@ -73,29 +110,12 @@ func (h *Handler) ChatQueuedInputSteer(c echo.Context) error {
 	if input == nil || input.InputStatus != models.ThreadInputPending || input.InputMode != models.ThreadInputModeQueued {
 		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
 	}
-	active, err := h.execRepo.FindLatestActiveChatExecution(c.Request().Context(), input.ProjectID)
+	ctx := c.Request().Context()
+	steering, err := h.convertQueuedInputToSteering(ctx, input, func() (*models.Execution, error) {
+		return h.execRepo.FindLatestActiveChatExecution(ctx, input.ProjectID)
+	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
-	}
-	if active == nil {
-		return echo.NewHTTPError(http.StatusConflict, "no active response to steer")
-	}
-	expectedTurnID := input.RunExecutionID
-	if expectedTurnID == "" {
-		return echo.NewHTTPError(http.StatusConflict, "queued input is missing its active turn guard; refresh and queue the message again")
-	}
-	steering, err := h.threadInputRepo.ConvertQueuedToSteering(c.Request().Context(), input.ID, active.ID, expectedTurnID)
-	if err != nil {
-		if errors.Is(err, repository.ErrInputNotPending) {
-			return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
-		}
-		if errors.Is(err, repository.ErrNoActiveTurn) || errors.Is(err, repository.ErrActiveTurnChanged) {
-			return echo.NewHTTPError(http.StatusConflict, "active turn changed; refresh and queue the message instead")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to convert queued input")
-	}
-	if steering == nil {
-		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
+		return err
 	}
 	if h.chatBroadcaster != nil {
 		h.chatBroadcaster.Publish(events.ChatEvent{
@@ -127,29 +147,12 @@ func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
 	if input == nil || input.TaskID != taskID || input.InputStatus != models.ThreadInputPending || input.InputMode != models.ThreadInputModeQueued {
 		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
 	}
-	active, err := h.execRepo.FindActiveTaskExecution(c.Request().Context(), taskID, "")
+	ctx := c.Request().Context()
+	steering, err := h.convertQueuedInputToSteering(ctx, input, func() (*models.Execution, error) {
+		return h.execRepo.FindActiveTaskExecution(ctx, taskID, "")
+	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check active response")
-	}
-	if active == nil {
-		return echo.NewHTTPError(http.StatusConflict, "no active response to steer")
-	}
-	expectedTurnID := input.RunExecutionID
-	if expectedTurnID == "" {
-		return echo.NewHTTPError(http.StatusConflict, "queued input is missing its active turn guard; refresh and queue the message again")
-	}
-	steering, err := h.threadInputRepo.ConvertQueuedToSteering(c.Request().Context(), input.ID, active.ID, expectedTurnID)
-	if err != nil {
-		if errors.Is(err, repository.ErrInputNotPending) {
-			return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
-		}
-		if errors.Is(err, repository.ErrNoActiveTurn) || errors.Is(err, repository.ErrActiveTurnChanged) {
-			return echo.NewHTTPError(http.StatusConflict, "active turn changed; refresh and queue the message instead")
-		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to convert queued input")
-	}
-	if steering == nil {
-		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
+		return err
 	}
 	if h.broadcaster != nil {
 		h.broadcaster.Publish(events.TaskEvent{
