@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-16
+updated: 2026-08-17
 source: update_memory
-source_id: daily_model_release_check_issue_609_2026_08_16
+source_id: daily_model_release_check_no_new_issues_2026_08_17
 confidence: high
 title: Provider Architecture
 ---
@@ -34,6 +34,7 @@ Provider/model selection facts:
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not the provider/model.
 - Known execution-evidence gap tracked in `openvibely/openvibely#128`: the actual per-run model identity is stored but is not shown in task-thread execution history. The proposed slice exposes that existing identity per execution without changing model-selection behavior.
 - OpenAI supports Responses API and Completions API. OpenAI Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
+- `gpt-5.3-codex` was released to the Responses API on 2026-02-24 (confirmed in OpenAI changelog). It predates the current daily-model-audit window and has not yet been evaluated for an OpenVibely model-support gap; treat as a candidate for a future bounded audit or implementation ticket.
 - OpenAI supports `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; `gpt-5.6-sol` is the default for empty or unknown first-party OpenAI model selections. All three use a 1,050,000-token context window, have a 128,000-token maximum output, support `none`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning, and default to `medium`.
 - GitHub issue #602 (filed 2026-08-16) tracks first-party OpenAI GPT-5.6 Cyber / Daybreak Red support. Official release evidence names `gpt-5.6-cyber` with API alias `gpt-daybreak-red`; current OpenAI adapter/model matching is hard-coded around Sol/Terra/Luna, so this model is not automatically getting GPT-5.6 defaults or Responses Lite behavior.
 - GitHub issue #609 (filed 2026-08-16) tracks first-party OpenAI Daybreak Blue alias support. Official release evidence names the `daybreak-blue-latest` API model/alias as a separately provisioned defensive-cyber model surface that aliases to `gpt-5.6-sol`; current unknown-model normalization would collapse an attempted `gpt-daybreak-blue`/Daybreak Blue selection to `gpt-5.6-sol`, losing the approved-access alias distinction.
@@ -101,6 +102,7 @@ OAuth and model-specific facts:
 - Anthropic OAuth refresh failures with provider `invalid_grant` are permanent reauthorization failures: mark model config `oauth_needs_reauth`, surface `needs_reauth`/“Re-auth Required,” and clear the flag after successful refresh.
 - Claude Opus 5 (`claude-opus-5`) is a supported Anthropic model ID. It has a 1M context window, supports up to 128k output tokens, and uses adaptive thinking rather than fixed `budget_tokens`. Native Anthropic API/OAuth requests pass a configured, model-supported effort as `output_config.effort`; unsupported model/effort combinations are cleared when saved and omitted defensively when requests are serialized so older models such as Claude Sonnet 4.5 are not sent an invalid effort parameter.
 - Claude Sonnet 5 is already supported across Anthropic model selection, request transforms, output limits, effort handling, documentation, and provider tests.
+- Claude Haiku 4.5 (`claude-haiku-4-5`) is confirmed in Anthropic's current model lineup (as of 2026-08-17 audit). Treat as a supported selectable model consistent with other Haiku-family entries.
 - Claude Fable 5 (`claude-fable-5`) and Claude Mythos 5 (`claude-mythos-5`) are supported Anthropic model IDs and should remain selectable where Anthropic model options are listed. They should not be preselected, recommended, or first-position defaults for new Anthropic model configs; use a broadly stable Anthropic default. They default to a 1M context window, support up to 128k output tokens, require adaptive thinking without fixed `budget_tokens`, do not return raw thinking blocks, and can return HTTP 200 refusal responses that should surface as unsuccessful/refusal results.
 - As of 2026-08-05, Anthropic retired Claude Opus 4.1 (`claude-opus-4-1-20250805`). `internal/llm/anthropic/adapter.go` still pattern-matches `claude-opus-4-1`; this is stale/dead code worth a future cleanup ticket, not a new-model-support gap.
 

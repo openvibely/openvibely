@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-08-16
+updated: 2026-08-17
 source: update_memory
-source_id: 345b3bca39c84d8dea769440b66df876:729815eda82b7e62
+source_id: ae4bd808d91d68ea8225eea706d02803:b93277270397fee2
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -24,6 +24,7 @@ User interaction preferences:
 - Treat explicit audit exclusions as equally hard scope boundaries. In particular, when the user excludes managed memory, do not inspect, cite, reconcile, or use managed or tracked memory as audit evidence; audit only the requested repository/publication artifacts. When the user says to ignore or “forget” a PR/publication state during an audit, scope the audit to the requested implementation or repository evidence and do not block the audit verdict on PR status, diff, or issue-publication gaps.
 - Do not delegate tasks or create child-agent work. This prohibition applies especially to memory updates; use only direct capabilities available in the current task and report a capability blocker when direct work is unavailable.
 - When diagnosing autonomous integration loops or system-owned schedules, do not manually forward, wake, patch, or otherwise push one live object through as a substitute for fixing the product path. The user wants the implementation to work properly end-to-end; validation should prove the scheduled/tool/runtime behavior works without ad hoc live intervention unless the user explicitly asks for a one-off operational action.
+- Do not introduce role/task-type-specific runtime tool scoping for Automation-owned scheduled tasks (e.g., narrowing a finder scheduled task to a small hand-picked tool subset). Automation-owned tasks are meant to remain ordinary, generic OpenVibely tasks with the normal shared tool surface. If a needed tool is missing for a task category, add it to the shared allow-list; if a tool is too permissive for a given caller, tighten the underlying service-layer authorization check (e.g., split read-only ownership checks from mutation ownership checks) rather than narrowing which tools that task category can see. (2026-08-17 correction after a same-day narrowed-finder-tool-surface fix was reverted for violating this.)
 - When the user has already explicitly requested an outbound action such as sending an email/message, attempt the available configured/runtime mechanism instead of asking for redundant confirmation; if no viable send path exists, report the completed work and the send limitation clearly.
 - Prefer plain, direct explanations over jargon-heavy phrasing; if the user asks for “no word salad,” respond with a terse concrete summary and one or two representative examples rather than audit-style detail. For user-facing UI/docs copy, avoid internal tool-name or architecture jargon unless it is clearly marked as advanced/reference text.
 - When discussing GitHub/Native SDLC duplicate prevention, do not frame the answer around `idempotency_key`; lead with user-visible behavior such as listing existing bot-created issues/notifications, comparing candidates, inspecting only likely matches, skipping covered findings, continuing the search, and reporting no new finding when appropriate. Address token-cost concerns by emphasizing compact listings, bounded detail hydration, and at most one new finding per run rather than suggesting every full issue/notification body is read. Do not cite unrelated lifecycle hook or agent-config mutation idempotency as part of the SDLC answer; mention generic `idempotency_key` uses only when needed to explain why the field remains outside SDLC finder prompts.

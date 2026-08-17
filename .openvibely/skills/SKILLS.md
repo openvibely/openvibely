@@ -264,3 +264,7 @@ always_use:
 ## openvibely_task_create_edit_workflow
 
 [OpenVibely Task Create/Edit Workflow](openvibely_task_create_edit_workflow/SKILL.md) — Implement and audit OpenVibely task creation, edit, runtime create_task, and duplicate-title behavior.
+
+## openvibely_reflection_metrics_workflow
+
+[OpenVibely Reflection Metrics Workflow](openvibely_reflection_metrics_workflow/SKILL.md) — Implement and audit OpenVibely Reflection produced-commit stats recording, DB-first aggregation, and git fallback safely.

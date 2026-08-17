@@ -2,9 +2,9 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-08-16
+updated: 2026-08-25
 source: update_memory
-source_id: a990ccd47db94c6c46e420a05742f403:aa6ead87c8deb642
+source_id: 9815d9064030ce0b5d14648de080d6e2:6a01935a4204c5eb
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -35,7 +35,7 @@ Authorization, concurrency, and runtime facts:
 - Because linkage removes rows from the `implementation_task_linked=false` result set, maintained and custom prompts must collect every stable paginated page before any claim, linkage, or processing mutation; advancing offsets after page mutation can skip eligible notifications.
 - Task-thread runtimes, including scheduled inbox runs, expose the project-scoped `execute_tasks` action required by Native inbox flow.
 - Native Automation notification eligibility is Automation-owned: durable ownership is effectively `project_id + automation_id + alert_id`, and a current active same-project Native inbox for that Automation supplies live processing authority.
-- Maintained and custom generated prompts tell the created Task that it is already the linked implementer, must directly edit the repository, add/update tests, and validate the change, and must not create/search for another implementation Task, rerun notification intake, or call `get_alert`.
+- Maintained and custom generated prompts tell the created Task that it is already the linked implementer, must directly edit the repository, add/update tests, and validate the change, and must not create/search for another implementation Task, rerun notification intake, or call `get_alert`. The inbox model freely writes sections such as `## Repository` into the prompt using `project.RepoPath` from project-info tool results; `create_alert_implementation_task` stores the prompt verbatim and does not generate or rewrite that block. When tasks receive a worktree path after creation, the prompt's embedded repo path can reference the main checkout instead of the worktree, which is the second root cause of the worktree sandbox escape incident documented in `worktree_and_lineage.md`.
 - Generated/compiled Native inbox guidance requires calls without `project_id` or `read`, forbids project-ID discovery or reuse, executes the exact linked Backlog Task, and completes processing only after execution starts. Scheduled runtime enforcement removes those fields from provider-visible schema and discards injected values.
 - If Native creation, linkage, or execution fails, the inbox records failed processing rather than reporting completion; claim release remains valid only before any task is linked.
 - Open gap `#352`: `complete_alert_processing` can currently mark an approved notification completed from a merely claimed state without requiring a linked implementation task. Fix should enforce linked-task/valid processing-state preconditions and add regression coverage for unlinked completion attempts.
@@ -62,6 +62,6 @@ Product surfaces:
 - Notification bodies should start with a short nontechnical `## Summary` section followed by technical evidence and implementation detail, matching Automation content standards and reviewable-autonomy scanability goals.
 - Alerts/notification UI should make pending approval summaries easy to scan without requiring users to expand technical detail first; body/detail expansion remains useful for full evidence, metadata, and copy actions.
 - Runtime alert listing (`#396`) should use compact alert summary projections for list paths, exclude `body` and `metadata_json` from summaries, preserve filters/project isolation/Automation inbox scoping/ordering/limit-offset/`next_offset`, and keep `get_alert` as full detail hydration. Verify live main/PR state before treating any prior implementation as shipped.
-- Open gap `#605`: the browser Alerts page still loads and renders full notification bodies and metadata inline for initial list renders and HTMX mutation refreshes. This is distinct from runtime listing `#396` and ordering/index `#127`; acceptance should use compact list/card rows plus lazy/detail hydration or an equivalent UX-compatible approach while preserving inspect/copy controls, metadata visibility, project filtering, approvals, read/delete mutations, live refresh, and HTMX scroll/focus behavior.
+- Issue `#605` / PR `#619` implements lazy browser Alerts detail hydration: initial `GET /alerts` and HTMX mutation refreshes render `AlertSummary` rows and omit `body`/`metadata_json`, while `GET /alerts/:id/details` loads one project-scoped full alert detail with body, metadata, and the exact-body copy control. Preserve project filtering, unread count, newest-first 100-row list behavior, approval/rejection/dismiss/read/delete actions, implementation-task links, live refresh, card-search bounding, and HTMX scroll/focus/viewport preservation. A 2026-08-16 audit-only review of local commit `9f479998` found no material bugs, regressions, or missing requirements. Verify live PR/main state before treating this as merged or shipped.
 - Maintained Automation prompts are point-in-time snapshots. Existing saved Native/GitHub inbox Automations must be explicitly Edit/Saved or recreated after deploying corrected defaults; already-created Backlog tasks are not retroactively started and require manual execution.
 - The model, migration, authorization boundaries, tool contracts, lease recovery, and schedule configuration are documented in `docs/openvibely-native-autonomous-sdlc-user-guide.md`.

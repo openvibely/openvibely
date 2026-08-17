@@ -4,7 +4,7 @@ type: project
 created: 2026-05-24
 updated: 2026-08-16
 source: update_memory
-source_id: a990ccd47db94c6c46e420a05742f403:c0d45b1f00424d4a
+source_id: 78c534dfdaff36151434a1ec5e025f32:0dd659914db20175
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -19,7 +19,7 @@ Agent and catalog facts:
 - The on-disk per-agent `SKILLS.md` declaration is authoritative for agent skills, lifecycle hooks, task loading, tool permissions, enabled/disabled state, and declarations. Declaration import/sync must preserve `agent.enabled: false`; missing enabled metadata defaults to enabled, and archived generated agents remain disabled.
 - Deleting filesystem-backed non-protected agents must remove the database row, the corresponding `agents/<key>/` directory, and the `## <key>` section from `agents/AGENTS.md`; otherwise declaration sync can rematerialize the agent from `SKILLS.md`, stale metadata can be restored, and deleted agents can remain in catalog/LLM context. Protected system agents remain non-deletable and should surface disabled delete UI plus backend rejection.
 - Project-scoped agent create/update/delete and related agent-specific UI/API requests must preserve or recover project context. Resolved issue `#576`: the New Agent modal posts create requests through `withCurrentProject('/agents')`, so project-scoped creation from `/agents?project_id=<current>` resolves that project before any stale selected-project preference; regression coverage asserts ProjectB-over-stale-ProjectA persistence and materialization. Backend cleanup/materialization should prefer the agent's persisted `ProjectID` when resolving the project skill root, and frontend agent-specific URLs should carry the active `project_id` query.
-- Open issue `#606`: agent create/edit currently allows duplicate or blank-looking enabled/selectable names; later task creation by agent name can fail as ambiguous because name-based resolution requires exactly one enabled selectable match. Fixes should normalize/validate display names consistently across browser create/update and the resolver while preserving legitimate project/global scoping behavior.
+- Resolved issue `#606` / PR `#616`: agent create/update normalizes visible names by trimming surrounding whitespace, rejects blank-looking names with controlled validation errors, and rejects normalized case-insensitive duplicate names among enabled agents that are selectable as primary. Disabled or non-primary duplicate names remain allowed. Name-based task creation resolves a single enabled/selectable legacy row whose stored name has surrounding whitespace, while genuinely ambiguous pre-existing normalized duplicates remain rejected.
 - Standalone skills are filesystem-backed packages. `<root>/skills/SKILLS.md` headings are canonical handles and match `<root>/skills/<handle>/SKILL.md`.
 - An indexed standalone skill is unusable unless the matching package body exists in the checkout the running app loads; creating the package only inside an isolated task worktree leaves the main catalog pointing at a dead path.
 - Bundled-skill startup sync overwrites the embedded `SKILL.md` and merges the bundled index, but does not prune extra support files already present in the installed global package. A global skill may therefore retain `references/` or `templates/` added by an earlier import, update, or Skill Curator operation even when the current repository built-in package ships only `SKILL.md`; a fresh installation from that repository will not receive those absent support files.

@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-08-16
+updated: 2026-08-29
 source: update_memory
-source_id: 5b8e2c5d52632475a83d8e7530366676:b07d4c56ad01a4c8
+source_id: b21e900f5ea2a08b3639bc818f1cddc4:1732a421a2b62973
 confidence: high
 title: Integrations and Channels
 ---
@@ -17,12 +17,14 @@ Generic inbound webhooks:
 - Webhook delivery and Settings `Test` should share the private webhook task create/assign/submit operation, including duplicate-title retry behavior, ordered primary-agent assignment, task-agent assignment persistence, and worker submission. Inbound authentication/parsing and UI response rendering remain separate.
 - Issue `#568` / PR `#583`: inbound webhook create/update Settings saves share handler-level form normalization for `name`, `enabled`, `system_instructions`, `default_priority`, prompt templates, and ordered `agent_ids`. Preserve create-only project resolution/default blank name/enabled state/token-secret generation and update-only endpoint loading/blank-name preservation/checkbox-enabled behavior. Verify live GitHub/main state before treating stored implementation notes as merged or closed.
 - Inbound webhook Settings compact cards should keep sensitive/detail-only fields, prompts/templates, secrets, and agent assignments out of card attributes; Edit modals lazy-load one authorized full webhook detail and must disable Save until hydration succeeds.
+- Open webhook template substitution bug `#622`: `buildWebhookTaskTitle` and `buildWebhookTaskPrompt` use exact-match `strings.ReplaceAll` for `{{event_type}}`, `{{summary}}`, and `{{name}}`, so spaced variants like `{{ event_type }}` are never replaced and appear verbatim in created task titles and prompts. The identical defect was fixed in the Pattern Library (`PromptPattern.ApplyVariables`, issue `#453`, closed) but the webhook path was not updated. Existing webhook tests only use tight-form placeholders; regression coverage must add spaced-form variants.
 
 Shared channel direction:
 - Channel-origin Chat and task-thread behavior stays aligned with web/API lifecycle, queueing, steering, cancellation, task-goal, agent-resolution, selected-memory, and swarm child follow-up rules. Canonical task/thread semantics live in `chat_thread_system.md`; memory semantics live in `managed_memory.md`.
 - `internal/service/channel_chat_ingress.go` owns the reusable inbound Chat flow for Slack, Discord, Telegram, and Email, including attachment staging/linking, model selection after attachment classification, active-chat lookup/queue branching, first-turn task/execution creation, reply-context persistence, Chat Page broadcast, history assembly, runner invocation, and queued promotion.
 - Shared generic channel image validation, pending-session IDs, unique temp filenames, MIME sniffing, and decoder imports belong in neutral channel ingress code rather than channel-specific files.
 - `internal/service/chat_action_runtime.go` centralizes generic channel runtime handlers for task creation/edit/execution, task goals, task-thread viewing/sending, project/list utilities, schedule/personality/model utilities, completion, and shared alert/capability formatting.
+- Open duplication gap `#626` (filed 2026-08-28): the `PrepareTaskCreation` and `CreatePreparedTask` callback bodies passed to `buildChannelTaskActionHandlers` are byte-for-byte identical in `slack_service.go` (`slackActionHandlersForTask`, ~lines 1373–1384), `discord_service.go` (`discordActionHandlersForTask`, ~lines 684–694), and `telegram_service.go` (`telegramActionHandlersForTask`, ~lines 1261–1271). All three contain identical guard logic (`callerTaskID == "" || s.llmSvc == nil`), identical short-circuit return values, and identical forwarded calls to `prepareAutomationTaskCreation`/`createPreparedAutomationTask`. Proposed fix: a shared `buildAutomationTaskCreationCallbacks(callerTaskID, projectID string, llmSvc ...)` helper in `chat_action_runtime.go`; platform-specific `OnTasksCreated`, `ReplyContext`, and `FilterHistory` callbacks remain per-service.
 - Slack, Telegram, Discord, and Email own their `switch_project` authorization and active-project persistence callbacks. Slack, Discord, and Email use the shared channel runtime switch handler rather than Telegram-style direct `/project` commands.
 - Channel-provided runtime tools take precedence by name, then fall back to generic tools a partial channel runtime does not implement.
 - Runtime-tool-incapable provider/auth paths receive no channel action tools and no bracket-marker fallback.

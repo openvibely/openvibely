@@ -4,7 +4,7 @@ type: project
 created: 2026-06-03
 updated: 2026-08-16
 source: update_memory
-source_id: 345b3bca39c84d8dea769440b66df876:729815eda82b7e62
+source_id: d652b7345158547d3735088136d1c1d9:2cade9ab0c1498ce
 confidence: high
 title: Usage Analytics
 ---
@@ -39,7 +39,7 @@ Analytics surface facts:
 - `/analytics` includes local task/execution/productivity analytics, LLM usage/account-limit views, and Skill Curator analytics.
 - Project memory recall effectiveness and downstream follow-through are not currently inspectable alongside skill analytics; an Analytics addition is proposed in `openvibely/openvibely#85`.
 - Known Insights dashboard gap tracked in [GitHub #272](https://github.com/openvibely/openvibely/issues/272): accepting an Insight on the dashboard only flips its status to "accepted" but never creates or links a follow-up task, despite `Insight.TaskID` and `AcceptInsight`/`LinkTask` already existing as dead code in the service layer.
-- GitHub issue [#610](https://github.com/openvibely/openvibely/issues/610) tracks duplicated failed-task-pattern repository logic: `/api/analytics/failed-task-patterns` uses `ExecutionRepo.GetFailedTaskPatterns`, while Insights uses `InsightsRepo.GetFailedTaskPatterns` for bug-pattern detection, optimization detection, and health-check prompt generation. The intended consolidation is a shared query/projection boundary that preserves Analytics project-scoped API behavior and Insights-specific consumers instead of keeping divergent SQL interpretations of the same failure-pattern concept.
+- Issue `#610` / PR `#614` consolidates failed-task-pattern repository logic through a shared task-level/latest-error query/projection consumed by `ExecutionRepo.GetFailedTaskPatterns` for `/api/analytics/failed-task-patterns` and `InsightsRepo.GetFailedTaskPatterns` for recurring-failure, optimization, and health-check analysis. Analytics preserves project scoping, API limit behavior, and JSON fields (`TaskID`, `TaskTitle`, `FailureCount`, `LastError`, `LastFailedAt`) with minimum failures mapped to 1; Insights applies its minimum-failure threshold over the same shared rows. Regression coverage asserts both wrappers execute the same SQL and share task-level latest-error semantics. A separate audit-only review on 2026-08-16 found no material bugs, regressions, missing requirements, or publication issues and confirmed PR `#614` is open and linked to issue `#610`; verify live main/issue state before treating this as merged or shipped.
 - `/api/analytics/usage` backs the Analytics page usage section; `/api/analytics/skills` backs Skill Curator Analytics.
 - The Analytics page sends the selected/current project ID to every local analytics endpoint it fetches, and the visible project label is tied to that same project ID.
 - Local Analytics sections are project-scoped when labeled with the selected project: model usage filters `llm_usage_events.project_id`; Skill Curator analytics filters `skill_analytics_events.project_id`; task/execution/productivity analytics and failed-task patterns filter through `tasks.project_id`.
