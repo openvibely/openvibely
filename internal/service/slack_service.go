@@ -1365,23 +1365,18 @@ func (s *SlackService) slackActionHandlers(projectID string, actionCtx slackActi
 }
 
 func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string, actionCtx slackActionContext, collector *channelActionSummaryCollector) map[string]chatcontrol.RuntimeActionHandler {
+	var llmSvcForAutomation llmServiceForAutomation
+	if s.llmSvc != nil {
+		llmSvcForAutomation = s.llmSvc
+	}
+	prepareTaskCreation, createPreparedTask := buildAutomationTaskCreationCallbacks(callerTaskID, projectID, llmSvcForAutomation)
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
-		ProjectID:     projectID,
-		TaskSvc:       s.taskSvc,
-		LLMConfigRepo: s.llmConfigRepo,
-		Collector:     collector,
-		PrepareTaskCreation: func(ctx context.Context, request *TaskCreationRequest) error {
-			if callerTaskID == "" || s.llmSvc == nil {
-				return nil
-			}
-			return s.llmSvc.prepareAutomationTaskCreation(ctx, projectID, request)
-		},
-		CreatePreparedTask: func(ctx context.Context, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
-			if callerTaskID == "" || s.llmSvc == nil {
-				return nil, "", false, nil
-			}
-			return s.llmSvc.createPreparedAutomationTask(ctx, projectID, request, agents)
-		},
+		ProjectID:           projectID,
+		TaskSvc:             s.taskSvc,
+		LLMConfigRepo:       s.llmConfigRepo,
+		Collector:           collector,
+		PrepareTaskCreation: prepareTaskCreation,
+		CreatePreparedTask:  createPreparedTask,
 		OnTasksCreated: func(ctx context.Context, _ []TaskCreationRequest, createdTasks []models.Task) error {
 			for _, t := range createdTasks {
 				if s.taskRepo != nil {
