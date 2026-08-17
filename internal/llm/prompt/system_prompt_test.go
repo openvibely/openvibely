@@ -9,7 +9,7 @@ func TestBuildAgentSystemPrompt_IncludesWorktreeContextWhenProvided(t *testing.T
 	worktreePath := "/tmp/.worktrees/task_123"
 	got := BuildAgentSystemPrompt("", worktreePath)
 
-	if !strings.Contains(got, "You are operating in an isolated git worktree at "+worktreePath+".") {
+	if !strings.Contains(got, "You are operating in an isolated git worktree at "+worktreePath+". Treat this path as the repository root for this run.") {
 		t.Fatalf("expected worktree context in system prompt, got: %q", got)
 	}
 }
@@ -24,7 +24,7 @@ func TestBuildAgentSystemPrompt_OmitsWorktreeContextWhenNotProvided(t *testing.T
 func TestBuildWorktreeContextSentence(t *testing.T) {
 	worktreePath := "/tmp/.worktrees/task_abc"
 	got := BuildWorktreeContextSentence("  " + worktreePath + " ")
-	want := "You are operating in an isolated git worktree at " + worktreePath + "."
+	want := "You are operating in an isolated git worktree at " + worktreePath + ". Treat this path as the repository root for this run."
 	if got != want {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
