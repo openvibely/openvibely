@@ -61,6 +61,7 @@ type LLMService struct {
 	githubAuthRepo            *repository.GitHubAuthRepo
 	taskPullRequestRepo       *repository.TaskPullRequestRepo
 	githubPRFeedbackRepo      *repository.GitHubPRFeedbackRepo
+	taskCommitStatRepo        *repository.TaskCommitStatRepo
 	automationRegistrationSvc *AutomationRegistrationService
 	automationRepo            *repository.AutomationRepo
 	updateTracker             *update.WorkTracker
@@ -1963,7 +1964,7 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 	}
 	commitCtx.DiffSummary = s.SummarizeWorktreeCommitDiff(ctx, task.WorktreePath, agent, commitCtx)
 	commitMessage := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
-	if err := CommitWorktreeChanges(task.WorktreePath, commitMessage); err != nil {
+	if err := s.CommitTaskWorktreeChanges(ctx, task, exec, task.WorktreePath, commitMessage); err != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, worktreeBranch, err)
 	}
 
