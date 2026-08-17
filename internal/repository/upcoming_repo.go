@@ -107,18 +107,36 @@ func (r *UpcomingRepo) ListUpcomingScheduledTasks(ctx context.Context, projectID
 	return r.scanUpcomingTasks(rows)
 }
 
+// historyOutputPreviewLen is the maximum bytes of e.output fetched for the
+// Reflection/History page. The template renders at most 300 chars via
+// truncatePrompt, so selecting the full output column (50–500 KB) wastes
+// bandwidth and memory. SUBSTR always returns at most this many characters.
+const historyOutputPreviewLen = 400
+
+// historyErrorPreviewLen is the maximum bytes of e.error_message fetched.
+// The template renders at most 200 chars, so we cap at 250 to leave a margin.
+const historyErrorPreviewLen = 250
+
+// historyExecutionLimit caps results returned by ListRecentExecutions to avoid
+// multi-MB reads on high-volume projects.
+const historyExecutionLimit = 200
+
 // ListRecentExecutions returns executions completed within the given time range
 func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID string, since time.Time) ([]models.HistoryExecution, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output,
-			e.error_message, e.tokens_used, e.duration_ms, e.started_at, e.completed_at,
+		`SELECT e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status,
+			SUBSTR(e.output, 1, ?),
+			SUBSTR(e.error_message, 1, ?),
+			e.tokens_used, e.duration_ms, e.started_at, e.completed_at,
 			t.title as task_title,
 			COALESCE(ac.name, '') as agent_name
 		 FROM executions e
 		 JOIN tasks t ON t.id = e.task_id
 		 LEFT JOIN agent_configs ac ON ac.id = e.agent_config_id
 		 WHERE t.project_id = ? AND t.category != 'chat' AND e.started_at >= ?
-		 ORDER BY e.started_at DESC`, projectID, since)
+		 ORDER BY e.started_at DESC
+		 LIMIT ?`,
+		historyOutputPreviewLen, historyErrorPreviewLen, projectID, since, historyExecutionLimit)
 	if err != nil {
 		return nil, fmt.Errorf("listing recent executions: %w", err)
 	}
@@ -129,7 +147,7 @@ func (r *UpcomingRepo) ListRecentExecutions(ctx context.Context, projectID strin
 		var de models.HistoryExecution
 		if err := rows.Scan(
 			&de.Execution.ID, &de.Execution.TaskID, &de.Execution.AgentConfigID,
-			&de.Execution.Status, &de.Execution.PromptSent, &de.Execution.Output,
+			&de.Execution.Status, &de.Execution.Output,
 			&de.Execution.ErrorMessage, &de.Execution.TokensUsed, &de.Execution.DurationMs,
 			&de.Execution.StartedAt, &de.Execution.CompletedAt,
 			&de.TaskTitle, &de.AgentName,
