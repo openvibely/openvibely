@@ -58,6 +58,38 @@ type channelActionSummaryCollector struct {
 	editedLines  []string
 }
 
+// llmServiceForAutomation is the subset of LLMService used by automation task
+// creation callbacks so that the shared builder can be tested and called without
+// a concrete *LLMService dependency.
+type llmServiceForAutomation interface {
+	prepareAutomationTaskCreation(ctx context.Context, projectID string, request *TaskCreationRequest) error
+	createPreparedAutomationTask(ctx context.Context, projectID string, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error)
+}
+
+// buildAutomationTaskCreationCallbacks returns the PrepareTaskCreation and
+// CreatePreparedTask callbacks shared by Slack, Discord, and Telegram channel
+// action handlers. When callerTaskID is empty or llmSvc is nil the callbacks
+// are no-ops, preserving the short-circuit behaviour required for direct Chat
+// sessions.
+func buildAutomationTaskCreationCallbacks(callerTaskID, projectID string, llmSvc llmServiceForAutomation) (
+	func(context.Context, *TaskCreationRequest) error,
+	func(context.Context, TaskCreationRequest, []models.LLMConfig) ([]models.Task, string, bool, error),
+) {
+	prepare := func(ctx context.Context, request *TaskCreationRequest) error {
+		if callerTaskID == "" || llmSvc == nil {
+			return nil
+		}
+		return llmSvc.prepareAutomationTaskCreation(ctx, projectID, request)
+	}
+	create := func(ctx context.Context, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
+		if callerTaskID == "" || llmSvc == nil {
+			return nil, "", false, nil
+		}
+		return llmSvc.createPreparedAutomationTask(ctx, projectID, request, agents)
+	}
+	return prepare, create
+}
+
 type channelTaskActionHandlerOptions struct {
 	ProjectID           string
 	TaskSvc             *TaskService
