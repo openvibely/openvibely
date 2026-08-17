@@ -498,7 +498,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
 	agentRepo := repository.NewAgentRepo(db)
 	alertRepo := repository.NewAlertRepo(db)
-	taskCommitStatRepo := repository.NewTaskCommitStatRepo(db)
 	automationRepo := repository.NewAutomationRepo(db)
 	automationRepo.SetBroadcaster(broadcaster)
 	execRepo.SetAutomationRepo(automationRepo)
@@ -507,7 +506,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 
 	// Services
 	llmSvc := service.NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
-	llmSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
 	llmSvc.SetExecutionStreamHub(executionStreamHub)
 
 	maxWorkers, _ := workerRepo.GetMaxWorkers(context.Background())
@@ -649,7 +647,6 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	insightsSvc := service.NewInsightsService(insightsRepo, taskRepo, projectRepo, llmConfigRepo, execRepo)
 	insightsSvc.SetLLMService(llmSvc)
 	upcomingSvc.SetProjectRepo(projectRepo)
-	upcomingSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
 	upcomingSvc.SetLLMService(llmSvc)
 	upcomingSvc.SetLLMConfigRepo(llmConfigRepo)
 

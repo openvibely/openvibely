@@ -61,7 +61,6 @@ type LLMService struct {
 	githubAuthRepo            *repository.GitHubAuthRepo
 	taskPullRequestRepo       *repository.TaskPullRequestRepo
 	githubPRFeedbackRepo      *repository.GitHubPRFeedbackRepo
-	taskCommitStatRepo        *repository.TaskCommitStatRepo
 	automationRegistrationSvc *AutomationRegistrationService
 	automationRepo            *repository.AutomationRepo
 	updateTracker             *update.WorkTracker
@@ -1632,7 +1631,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Commit, merge, and update worktree status only for the managed worktree
 	// established for this execution, never from retained task metadata alone.
 	if managedWorktree && s.worktreeSvc != nil && repoDir != "" {
-		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, exec, repoDir)
+		s.worktreeSvc.HandlePostExecution(finalizeCtx, &task, repoDir)
 	}
 
 	// Check for follow-up marker (task still completed, but alert created)
@@ -1964,7 +1963,7 @@ func (s *LLMService) captureWorktreeDiffAfterExecution(ctx context.Context, exec
 	}
 	commitCtx.DiffSummary = s.SummarizeWorktreeCommitDiff(ctx, task.WorktreePath, agent, commitCtx)
 	commitMessage := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
-	if err := s.CommitTaskWorktreeChanges(ctx, task, exec, task.WorktreePath, commitMessage); err != nil {
+	if err := CommitWorktreeChanges(task.WorktreePath, commitMessage); err != nil {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent error committing worktree changes task=%s worktree=%s branch=%s: %v", task.ID, task.WorktreePath, worktreeBranch, err)
 	}
 

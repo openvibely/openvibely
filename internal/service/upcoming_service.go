@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -19,11 +18,10 @@ import (
 )
 
 type UpcomingService struct {
-	upcomingRepo       *repository.UpcomingRepo
-	projectRepo        *repository.ProjectRepo
-	taskCommitStatRepo *repository.TaskCommitStatRepo
-	llmSvc             *LLMService
-	llmConfigRepo      *repository.LLMConfigRepo
+	upcomingRepo  *repository.UpcomingRepo
+	projectRepo   *repository.ProjectRepo
+	llmSvc        *LLMService
+	llmConfigRepo *repository.LLMConfigRepo
 }
 
 func NewUpcomingService(upcomingRepo *repository.UpcomingRepo) *UpcomingService {
@@ -33,11 +31,6 @@ func NewUpcomingService(upcomingRepo *repository.UpcomingRepo) *UpcomingService 
 // SetProjectRepo sets the project repository for git change summaries
 func (s *UpcomingService) SetProjectRepo(projectRepo *repository.ProjectRepo) {
 	s.projectRepo = projectRepo
-}
-
-// SetTaskCommitStatRepo sets the task commit stat repository for Reflection git-work metrics.
-func (s *UpcomingService) SetTaskCommitStatRepo(taskCommitStatRepo *repository.TaskCommitStatRepo) {
-	s.taskCommitStatRepo = taskCommitStatRepo
 }
 
 // SetLLMService sets the LLM service for AI summary generation
@@ -112,18 +105,9 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 		return nil, err
 	}
 
+	// Fetch project changes from git
 	var projectChanges *models.ProjectChanges
-	if s.taskCommitStatRepo != nil {
-		stats, err := s.taskCommitStatRepo.ListProducedCommitStats(ctx, projectID, since)
-		if err != nil {
-			applog.Infof("[upcoming-svc] error listing task commit stats (non-fatal): %v", err)
-		} else if len(stats) > 0 {
-			projectChanges = buildProjectChangesFromTaskCommitStats(stats)
-		}
-	}
-
-	// Fall back to repository git history only for older data that predates task_commit_stats.
-	if projectChanges == nil && s.projectRepo != nil {
+	if s.projectRepo != nil {
 		project, err := s.projectRepo.GetByID(ctx, projectID)
 		if err != nil {
 			applog.Infof("[upcoming-svc] error getting project for git changes (non-fatal): %v", err)
@@ -164,57 +148,6 @@ func computeSince(now time.Time, timeRange models.TimeRange) time.Time {
 	default:
 		return now.Add(-24 * time.Hour)
 	}
-}
-
-func buildProjectChangesFromTaskCommitStats(stats []models.TaskCommitStat) *models.ProjectChanges {
-	commits := make([]models.GitCommit, 0, len(stats))
-	uniqueFiles := map[string]bool{}
-	for _, stat := range stats {
-		commits = append(commits, models.GitCommit{
-			Hash:         stat.CommitSHA,
-			ShortHash:    stat.ShortSHA,
-			Author:       stat.Author,
-			Date:         stat.ProducedAt,
-			Subject:      stat.Subject,
-			FilesChanged: stat.FilesChanged,
-			Insertions:   stat.Insertions,
-			Deletions:    stat.Deletions,
-		})
-		for _, file := range changedFilesFromStat(stat) {
-			if file != "" {
-				uniqueFiles[file] = true
-			}
-		}
-	}
-
-	pc := &models.ProjectChanges{
-		Available:    true,
-		TotalCommits: len(commits),
-		Commits:      commits,
-		Changes:      categorizeCommits(commits),
-	}
-	for _, stat := range stats {
-		pc.TotalInsertions += stat.Insertions
-		pc.TotalDeletions += stat.Deletions
-	}
-	pc.FilesChanged = len(uniqueFiles)
-
-	files := make([]string, 0, len(uniqueFiles))
-	for file := range uniqueFiles {
-		files = append(files, file)
-	}
-	sort.Strings(files)
-	pc.FileTypes = parseFileTypes(strings.Join(files, "\n"))
-
-	return pc
-}
-
-func changedFilesFromStat(stat models.TaskCommitStat) []string {
-	var files []string
-	if err := json.Unmarshal([]byte(stat.ChangedFilesJSON), &files); err != nil {
-		return nil
-	}
-	return files
 }
 
 // GeneratePulseSummary generates an AI summary of the current project state
@@ -356,10 +289,6 @@ Respond with ONLY the summary text, no formatting or labels.`, sb.String())
 	return strings.TrimSpace(output), nil
 }
 
-func formatGitSince(since time.Time) string {
-	return since.UTC().Format(time.RFC3339)
-}
-
 // getProjectChanges runs git commands against a project's repo to gather change data
 func (s *UpcomingService) getProjectChanges(repoPath string, since time.Time) (*models.ProjectChanges, error) {
 	// Verify this is a git repo
@@ -368,7 +297,7 @@ func (s *UpcomingService) getProjectChanges(repoPath string, since time.Time) (*
 		return nil, fmt.Errorf("resolving repo path: %w", err)
 	}
 
-	sinceStr := formatGitSince(since)
+	sinceStr := since.Format("2006-01-02T15:04:05")
 
 	// Get commit log with stats
 	cmd := exec.Command("git", "log",

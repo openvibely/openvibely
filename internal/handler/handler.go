@@ -196,14 +196,12 @@ func New(
 	var threadInputRepo *repository.ThreadInputRepo
 	var usageRepo *repository.UsageRepo
 	var skillAnalyticsRepo *repository.SkillAnalyticsRepo
-	var taskCommitStatRepo *repository.TaskCommitStatRepo
 	var usageAnalyticsSvc *service.UsageAnalyticsService
 	if execRepo != nil {
 		if db := execRepo.DB(); db != nil {
 			threadInputRepo = repository.NewThreadInputRepo(db)
 			usageRepo = repository.NewUsageRepo(db)
 			skillAnalyticsRepo = repository.NewSkillAnalyticsRepo(db)
-			taskCommitStatRepo = repository.NewTaskCommitStatRepo(db)
 			usageAnalyticsSvc = service.NewUsageAnalyticsService(usageRepo, llmConfigRepo)
 		}
 	}
@@ -214,12 +212,6 @@ func New(
 	}
 	if llmSvc != nil && skillAnalyticsRepo != nil {
 		llmSvc.SetSkillAnalyticsRepo(skillAnalyticsRepo)
-	}
-	if llmSvc != nil && taskCommitStatRepo != nil {
-		llmSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
-	}
-	if upcomingSvc != nil && taskCommitStatRepo != nil {
-		upcomingSvc.SetTaskCommitStatRepo(taskCommitStatRepo)
 	}
 	if workerSvc != nil && skillAnalyticsRepo != nil {
 		workerSvc.SetSkillAnalyticsRepo(skillAnalyticsRepo)
