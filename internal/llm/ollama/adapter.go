@@ -63,7 +63,7 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 
 	switch req.Operation {
 	case llmcontracts.OperationTask:
-		output, textOnly, tokens, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ProjectInstructions)
+		output, textOnly, tokens, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ProjectInstructions, workDir)
 		return llmcontracts.AgentResult{
 			Output:         output,
 			TextOnlyOutput: textOnly,
@@ -72,13 +72,13 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 
 	case llmcontracts.OperationStreaming:
 		if req.Followup || req.ChatHistory != nil || req.ChatMode == models.ChatModeOrchestrate || req.ChatMode == models.ChatModePlan {
-			output, tokens, err := a.callChat(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode)
+			output, tokens, err := a.callChat(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ChatHistory, req.ChatSystemContext, req.Followup, req.ChatMode, workDir)
 			return llmcontracts.AgentResult{
 				Output: output,
 				Usage:  llmusage.FromTotal(tokens),
 			}, err
 		}
-		output, textOnly, tokens, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ProjectInstructions)
+		output, textOnly, tokens, err := a.callStreaming(ctx, req.Message, req.Attachments, agent, req.ExecID, req.ProjectInstructions, workDir)
 		return llmcontracts.AgentResult{
 			Output:         output,
 			TextOnlyOutput: textOnly,
@@ -156,12 +156,13 @@ func (a *Adapter) callDirect(ctx context.Context, prompt string, attachments []m
 }
 
 // callChat calls the Ollama API for Chat and task follow-up requests.
-func (a *Adapter) callChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode) (string, int, error) {
+func (a *Adapter) callChat(ctx context.Context, message string, attachments []models.Attachment, agent models.LLMConfig, execID string, chatHistory []models.Execution, chatSystemContext string, isTaskFollowup bool, chatMode models.ChatMode, workDir string) (string, int, error) {
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callChat model=%s base_url=%s history=%d message_len=%d attachments=%d exec=%s isTaskFollowup=%v",
 		agent.Model, baseURL, len(chatHistory), len(message), len(attachments), execID, isTaskFollowup)
 
 	systemPromptStr := llmprompt.BuildChatSystemPrompt(isTaskFollowup, chatMode, chatSystemContext, false)
+	systemPromptStr = llmprompt.AppendWorktreeContextPrompt(systemPromptStr, workDir)
 	if chatMode == models.ChatModeOrchestrate {
 		systemPromptStr = llmprompt.ApplyChatActionToolMode(systemPromptStr, nil)
 	}
@@ -210,7 +211,7 @@ func (a *Adapter) callChat(ctx context.Context, message string, attachments []mo
 }
 
 // callStreaming calls Ollama with streaming for task execution.
-func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, projectInstructions string) (string, string, int, error) {
+func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, projectInstructions string, workDir string) (string, string, int, error) {
 	baseURL := agent.GetOllamaBaseURL()
 	applog.Infof("[ollama] callStreaming model=%s base_url=%s prompt_len=%d attachments=%d exec=%s", agent.Model, baseURL, len(prompt), len(attachments), execID)
 
@@ -218,7 +219,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 
 	var messages []chatMessage
 	// Inject system prompt with project instructions for task execution
-	systemPrompt := llmprompt.BuildAgentSystemPrompt(projectInstructions)
+	systemPrompt := llmprompt.BuildAgentSystemPrompt(projectInstructions, workDir)
 	messages = append(messages, chatMessage{Role: "system", Content: systemPrompt})
 
 	userMsg := chatMessage{Role: "user", Content: llmprompt.ApplyTaskCreationToolMode(prompt, nil)}
