@@ -18,11 +18,7 @@ func (h *Handler) hasConfiguredModels(c echo.Context) (bool, error) {
 	if h.llmConfigRepo == nil {
 		return false, fmt.Errorf("model repository is not configured")
 	}
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
-	if err != nil {
-		return false, err
-	}
-	return len(agents) > 0, nil
+	return h.llmConfigRepo.HasAny(c.Request().Context())
 }
 
 func setHTMXToast(c echo.Context, message, status string) {

@@ -75,6 +75,15 @@ func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
 	return configs, rows.Err()
 }
 
+func (r *LLMConfigRepo) HasAny(ctx context.Context) (bool, error) {
+	var exists bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM agent_configs)`).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("checking model configs exist: %w", err)
+	}
+	return exists, nil
+}
+
 // ListCards returns the bounded configuration needed to render the Models page.
 // Boolean credential-presence expressions are represented as non-secret
 // sentinels so existing card status helpers retain their semantics.
