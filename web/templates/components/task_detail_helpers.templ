@@ -107,6 +107,10 @@ func FormatElapsedTime(startedAt time.Time) string {
 	return formatDuration(ms)
 }
 
+func FormatDuration(ms int64) string {
+	return formatDuration(ms)
+}
+
 func parseChainConfigForDisplay(task *models.Task) models.ChainConfiguration {
 	config, err := task.ParseChainConfig()
 	if err != nil {

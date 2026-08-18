@@ -139,7 +139,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				<div class="card-body flex-1 flex flex-col min-h-0">
 					<!-- View Mode -->
 						<div id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1">
-							@TaskDetailMetrics(task, executions, agents, agentDefs)
+								@TaskDetailMetrics(task, taskExecutionMetricsFromExecutions(executions), agents, agentDefs)
 							@SwarmContextPanel(task)
 							@TaskPromptPanel(task)
 						@TaskGoalPanel(task.ID, goal)
@@ -1755,9 +1755,24 @@ templ TaskDetailActions(task *models.Task) {
 	</div>
 }
 
+func taskExecutionMetricsFromExecutions(executions []models.Execution) models.TaskExecutionMetrics {
+	var metrics models.TaskExecutionMetrics
+	if len(executions) > 0 {
+		started := executions[len(executions)-1].StartedAt
+		metrics.LatestStartedAt = &started
+	}
+	for i := len(executions) - 1; i >= 0; i-- {
+		if executions[i].DurationMs > 0 {
+			metrics.LatestDurationMs = executions[i].DurationMs
+			break
+		}
+	}
+	return metrics
+}
+
 // TaskDetailMetrics renders the status/category/tag/priority/model/agent metrics grid with polling.
 // Polls every 3s to keep status badges up to date when task state changes (e.g., via chat interaction).
-templ TaskDetailMetrics(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, agents []models.LLMConfig, agentDefs []models.Agent) {
 	<div
 		id="task-detail-metrics"
 		class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"
@@ -1801,14 +1816,14 @@ templ TaskDetailMetrics(task *models.Task, executions []models.Execution, agents
 			<span class="text-sm opacity-60">Agent:</span>
 			<span class="ml-2 badge badge-sm badge-outline">{ taskAgentLabel(task, agentDefs) }</span>
 		</div>
-		if task.Status == models.StatusRunning && len(executions) > 0 {
+		if task.Status == models.StatusRunning && metrics.LatestStartedAt != nil {
 			<div>
 				<span class="text-sm opacity-60">Elapsed:</span>
-				<span class="ml-2 badge badge-warning">{ components.FormatElapsedTime(executions[len(executions)-1].StartedAt) }</span>
+				<span class="ml-2 badge badge-warning">{ components.FormatElapsedTime(*metrics.LatestStartedAt) }</span>
 			</div>
 		}
-		if (task.Status == models.StatusCompleted || task.Status == models.StatusFailed) && len(executions) > 0 {
-			if dur := components.TaskLatestDuration(executions); dur != "" {
+		if (task.Status == models.StatusCompleted || task.Status == models.StatusFailed) && metrics.LatestDurationMs > 0 {
+			if dur := components.FormatDuration(metrics.LatestDurationMs); dur != "" {
 				<div>
 					<span class="text-sm opacity-60">Duration:</span>
 					<span class="ml-2 badge badge-sm badge-outline">{ dur }</span>

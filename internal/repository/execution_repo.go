@@ -47,6 +47,10 @@ const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_conf
 
 const taskExecutionHistoryPageSQL = `SELECT ` + executionSelectColumnsLight + ` FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`
 
+const taskExecutionMetricsSQL = `SELECT
+	(SELECT started_at FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1) AS latest_started_at,
+	COALESCE((SELECT duration_ms FROM executions WHERE task_id = ? AND duration_ms > 0 ORDER BY started_at DESC, rowid DESC LIMIT 1), 0) AS latest_duration_ms`
+
 func scanExecutionRow(scanner interface {
 	Scan(dest ...interface{}) error
 }) (models.Execution, error) {
@@ -82,6 +86,24 @@ func (r *ExecutionRepo) ListByTaskHistoryPage(ctx context.Context, taskID string
 	defer rows.Close()
 
 	return scanExecutionsNewestFirst(rows)
+}
+
+func (r *ExecutionRepo) GetTaskExecutionMetrics(ctx context.Context, taskID string) (models.TaskExecutionMetrics, error) {
+	var metrics models.TaskExecutionMetrics
+	var latestStarted sql.NullTime
+	var latestDuration sql.NullInt64
+	err := r.db.QueryRowContext(ctx, taskExecutionMetricsSQL, taskID, taskID).Scan(&latestStarted, &latestDuration)
+	if err != nil {
+		return metrics, fmt.Errorf("getting task execution metrics: %w", err)
+	}
+	if latestStarted.Valid {
+		started := latestStarted.Time
+		metrics.LatestStartedAt = &started
+	}
+	if latestDuration.Valid {
+		metrics.LatestDurationMs = latestDuration.Int64
+	}
+	return metrics, nil
 }
 
 func (r *ExecutionRepo) ListByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]models.Execution, error) {

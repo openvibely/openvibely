@@ -670,12 +670,15 @@ func (h *Handler) GetTaskDetailStatus(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
+	metrics, err := h.execRepo.GetTaskExecutionMetrics(c.Request().Context(), taskID)
+	if err != nil {
+		applog.Infof("[handler] GetTaskDetailStatus error loading execution metrics task=%s: %v", taskID, err)
+	}
 
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 
-	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, executions, agents, agentDefs))
+	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, metrics, agents, agentDefs))
 }
 
 // GetTaskDetailActions returns just the action buttons fragment (Run Now / Edit / Delete).
