@@ -339,7 +339,7 @@ func (r *ChannelMessageRouter) resolveTarget(ctx context.Context, projectID, raw
 			channelThreadID = strings.TrimSpace(channelID[idx+1:])
 			channelID = strings.TrimSpace(channelID[:idx])
 		}
-		if saved, err := r.targets.FindByTarget(ctx, projectID, platform, channelID, channelThreadID); err != nil {
+		if saved, err := r.targets.FindByTargetAndKind(ctx, projectID, platform, channelID, channelThreadID, "channel"); err != nil {
 			return resolvedMessageTarget{}, err
 		} else if saved != nil {
 			return fromStoredTarget(*saved), nil

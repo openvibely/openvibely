@@ -545,6 +545,44 @@ func TestChannelMessageRouter_DiscordChannelSyntaxSendsToChannel(t *testing.T) {
 	require.Empty(t, discord.userID, "discord:channel:<id> must not dispatch as a DM")
 }
 
+func TestChannelMessageRouter_DiscordChannelSyntaxDoesNotResolveSavedUserTarget(t *testing.T) {
+	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-user-only", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
+
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:channel:1518288288572641398", Message: "channel message"})
+	require.False(t, res.OK)
+	require.Contains(t, res.Error, "Explicit discord channel target is not saved")
+	require.Empty(t, discord.channelID, "user-only saved target must not satisfy discord:channel:<id>")
+	require.Empty(t, discord.userID, "discord:channel:<id> must not dispatch through a saved user-DM target")
+}
+
+func TestChannelMessageRouter_DiscordTypedTargetsRespectSavedTargetKind(t *testing.T) {
+	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, discord := setupChannelMessageRouterTest(t)
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-colliding-user", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "1518288288572641398"}))
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-colliding-channel", ProjectID: project.ID, Platform: "discord", TargetKind: "channel", TargetID: "1518288288572641398"}))
+	require.NoError(t, targetRepo.Upsert(ctx, models.ChannelTarget{ID: "discord-threaded-channel", ProjectID: project.ID, Platform: "discord", TargetKind: "channel", TargetID: "2518288288572641398", ThreadID: "987654321012345678"}))
+
+	res := router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:channel:1518288288572641398", Message: "channel message"})
+	require.True(t, res.OK, "discord:channel:<id> must resolve the saved channel target when user and channel IDs collide: %#v", res)
+	require.Equal(t, "1518288288572641398", discord.channelID)
+	require.Empty(t, discord.threadID)
+	require.Empty(t, discord.userID)
+
+	discord.channelID = ""
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:channel:2518288288572641398:987654321012345678", Message: "threaded channel message"})
+	require.True(t, res.OK, "discord:channel:<id>:<thread_id> must preserve saved thread handling: %#v", res)
+	require.Equal(t, "2518288288572641398", discord.channelID)
+	require.Equal(t, "987654321012345678", discord.threadID)
+	require.Empty(t, discord.userID)
+
+	discord.channelID = ""
+	discord.threadID = ""
+	res = router.Send(ctx, project.ID, SendMessageRequest{Target: "discord:user:1518288288572641398", Message: "dm message"})
+	require.True(t, res.OK, "discord:user:<id> must still resolve the saved user-DM target: %#v", res)
+	require.Equal(t, "1518288288572641398", discord.userID)
+	require.Empty(t, discord.channelID)
+}
+
 // TestChannelMessageRouter_UserDMSyntaxInvalidIDRejected verifies that malformed user IDs
 // with the platform:user:<id> syntax are rejected cleanly.
 func TestChannelMessageRouter_UserDMSyntaxInvalidIDRejected(t *testing.T) {
