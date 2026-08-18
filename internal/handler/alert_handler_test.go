@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -109,6 +110,135 @@ func TestHandler_RejectAlertAndActionableVisibilityAreProjectScoped(t *testing.T
 	stored, err := h.alertSvc.GetByID(context.Background(), project.ID, alert.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.AlertDecisionRejected, stored.DecisionState)
+}
+
+func TestHandler_AlertMutationHTMXRefreshContract(t *testing.T) {
+	performHTMXMutation := func(t *testing.T, e *echo.Echo, method, target, alertID string, invoke func(echo.Context) error) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, target, nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		if alertID != "" {
+			c.SetParamNames("id")
+			c.SetParamValues(alertID)
+		}
+		require.NoError(t, invoke(c))
+		assertCode(t, rec, http.StatusOK)
+		assertAlertUpdate(t, rec)
+		require.Contains(t, rec.Body.String(), `id="alerts-content"`)
+		return rec
+	}
+
+	t.Run("decision mutations refresh actionable notification controls", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			path  string
+			want  models.AlertDecisionState
+			apply func(echo.Context) error
+		}{
+			{name: "approve", path: "approve", want: models.AlertDecisionApproved},
+			{name: "reject", path: "reject", want: models.AlertDecisionRejected},
+			{name: "dismiss", path: "dismiss", want: models.AlertDecisionDismissed},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				h, e, _ := setupTestHandler(t)
+				project := createProject(t, h, "Decision Refresh Project")
+				alert := &models.Alert{
+					ProjectID:       project.ID,
+					Scope:           models.AlertScopeProject,
+					Type:            models.AlertType("suggestion"),
+					Severity:        models.SeverityInfo,
+					Title:           "Review " + tc.name,
+					Message:         "Needs a decision",
+					Source:          "test",
+					DecisionState:   models.AlertDecisionPending,
+					ProcessingState: models.AlertProcessingUnclaimed,
+				}
+				require.NoError(t, h.alertSvc.Create(context.Background(), alert))
+				switch tc.want {
+				case models.AlertDecisionApproved:
+					tc.apply = h.ApproveAlert
+				case models.AlertDecisionRejected:
+					tc.apply = h.RejectAlert
+				case models.AlertDecisionDismissed:
+					tc.apply = h.DismissAlert
+				}
+
+				rec := performHTMXMutation(t, e, http.MethodPost, "/alerts/"+alert.ID+"/"+tc.path+"?project_id="+project.ID, alert.ID, tc.apply)
+				assertContains(t, rec, alert.Title)
+				assertContains(t, rec, string(tc.want))
+				assertNotContains(t, rec, ">Approve<")
+				assertNotContains(t, rec, ">Reject<")
+
+				stored, err := h.alertSvc.GetByID(context.Background(), project.ID, alert.ID)
+				require.NoError(t, err)
+				require.Equal(t, tc.want, stored.DecisionState)
+			})
+		}
+	})
+
+	t.Run("mark single notification read refreshes visible read row", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		project := createProject(t, h, "Read Refresh Project")
+		alert := createAlert(t, h, project.ID, "Read remains visible")
+
+		rec := performHTMXMutation(t, e, http.MethodPost, "/alerts/"+alert.ID+"/read?project_id="+project.ID, alert.ID, h.MarkAlertRead)
+		assertContains(t, rec, alert.Title)
+		assertNotContains(t, rec, `title="Mark as read"`)
+		stored, err := h.alertSvc.GetByIDAdmin(context.Background(), alert.ID)
+		require.NoError(t, err)
+		require.True(t, stored.IsRead)
+	})
+
+	t.Run("mark all notifications read refreshes zero unread count", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		project := createProject(t, h, "Read All Refresh Project")
+		alert1 := createAlert(t, h, project.ID, "Read all one")
+		alert2 := createAlert(t, h, project.ID, "Read all two")
+
+		rec := performHTMXMutation(t, e, http.MethodPost, "/alerts/read-all?project_id="+project.ID, "", h.MarkAllAlertsRead)
+		assertContains(t, rec, alert1.Title)
+		assertContains(t, rec, alert2.Title)
+		assertNotContains(t, rec, "unread")
+		count, err := h.alertSvc.CountUnread(context.Background(), project.ID)
+		require.NoError(t, err)
+		require.Zero(t, count)
+	})
+
+	t.Run("delete one notification over htmx refreshes remaining list", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		project := createProject(t, h, "Delete Refresh Project")
+		deleted := createAlert(t, h, project.ID, "Delete me")
+		remaining := createAlert(t, h, project.ID, "Keep me")
+
+		rec := performHTMXMutation(t, e, http.MethodDelete, "/alerts/"+deleted.ID+"?project_id="+project.ID, deleted.ID, h.DeleteAlert)
+		assertNotContains(t, rec, deleted.Title)
+		assertContains(t, rec, remaining.Title)
+	})
+
+	t.Run("delete last notification over htmx refreshes empty state", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		project := createProject(t, h, "Delete Last Refresh Project")
+		alert := createAlert(t, h, project.ID, "Last alert")
+
+		rec := performHTMXMutation(t, e, http.MethodDelete, "/alerts/"+alert.ID+"?project_id="+project.ID, alert.ID, h.DeleteAlert)
+		assertNotContains(t, rec, alert.Title)
+		assertContains(t, rec, "No alerts. You're all clear!")
+	})
+
+	t.Run("delete all notifications refreshes empty state", func(t *testing.T) {
+		h, e, _ := setupTestHandler(t)
+		project := createProject(t, h, "Delete All Refresh Project")
+		createAlert(t, h, project.ID, "Delete all one")
+		createAlert(t, h, project.ID, "Delete all two")
+
+		rec := performHTMXMutation(t, e, http.MethodDelete, "/alerts?project_id="+project.ID, "", h.DeleteAllAlerts)
+		assertContains(t, rec, "No alerts. You're all clear!")
+		count, err := h.alertSvc.CountUnread(context.Background(), project.ID)
+		require.NoError(t, err)
+		require.Zero(t, count)
+	})
 }
 
 func TestHandler_IntegratedNotificationApprovalToImplementationTask(t *testing.T) {
