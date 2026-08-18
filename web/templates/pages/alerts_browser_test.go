@@ -152,6 +152,134 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 	}
 }
 
+func TestSystemUpdateSurfacesShareNormalizedSnapshotStateInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+
+	currentSnapshot := `{"current_version":"0.3.0","state":"available","distribution":"standalone","channel":"stable","manual":false,"staged":true,"release":{"metadata":{"version":"0.4.0","release_notes_url":"https://example.test/releases/0.4.0"},"target":{"image_ref":""},"apply_supported":true},"drain":{"active":{}}}`
+	snapshots := map[string]string{
+		"actionable":  currentSnapshot,
+		"succeeded":   `{"current_version":"0.4.0","state":"succeeded","distribution":"standalone","channel":"stable","manual":false,"staged":true,"release":{"metadata":{"version":"0.4.0"},"target":{"image_ref":""},"apply_supported":true},"drain":{"active":{}}}`,
+		"uptodate":    `{"current_version":"0.4.0","state":"available","distribution":"standalone","channel":"stable","manual":false,"staged":true,"release":{"metadata":{"version":"0.4.0"},"target":{"image_ref":""},"apply_supported":true},"drain":{"active":{}}}`,
+		"hosted":      `{"current_version":"0.3.0","state":"available","distribution":"hosted","channel":"stable","manual":false,"staged":false,"release":{"metadata":{"version":"0.4.1"},"target":{"image_ref":""},"apply_supported":true},"drain":{"active":{}}}`,
+		"unsupported": `{"current_version":"0.3.0","state":"available","distribution":"standalone","channel":"stable","manual":false,"staged":true,"release":{"metadata":{"version":"0.4.2"},"target":{"image_ref":""},"apply_supported":false},"drain":{"active":{}}}`,
+		"manualReady": `{"current_version":"0.3.0","state":"available","distribution":"docker","channel":"stable","manual":true,"staged":false,"release":{"metadata":{"version":"0.5.0"},"target":{"image_ref":"openvibely:0.5.0"},"apply_supported":true},"drain":{"active":{}}}`,
+		"manualBusy":  `{"current_version":"0.3.0","state":"waiting_for_idle","distribution":"docker","channel":"stable","manual":true,"staged":false,"release":{"metadata":{"version":"0.5.1"},"target":{"image_ref":"openvibely:0.5.1"},"apply_supported":true},"drain":{"active":{"task_executions":1,"chat_executions":2,"automation_activities":3}}}`,
+	}
+	var mu sync.Mutex
+
+	setSnapshot := func(name string) string {
+		mu.Lock()
+		defer mu.Unlock()
+		if snapshot, ok := snapshots[name]; ok {
+			currentSnapshot = snapshot
+		}
+		return currentSnapshot
+	}
+	getSnapshot := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return currentSnapshot
+	}
+
+	var rendered bytes.Buffer
+	if err := Alerts(nil, "project-update-browser", nil, 0).Render(context.Background(), &rendered); err != nil {
+		t.Fatalf("render Alerts page: %v", err)
+	}
+
+	runner := `<script>
+	window.addEventListener('DOMContentLoaded', function() {
+	  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+	  function fail(message) { throw new Error(message); }
+	  function hidden(id) { var el = document.getElementById(id); if (!el) fail('missing ' + id); return el.classList.contains('hidden'); }
+	  function visibleToast() { return document.querySelector('[data-system-update-toast]:not(.toast-dismiss)'); }
+	  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+	  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
+	  (async function() {
+	    localStorage.clear();
+	    if (window.openVibelySystemUpdatePoll) clearInterval(window.openVibelySystemUpdatePoll);
+	    if (window.openVibelySystemUpdateIndicatorPoll) clearInterval(window.openVibelySystemUpdateIndicatorPoll);
+	    if (typeof window.openVibelyNormalizeSystemUpdateSnapshot !== 'function') fail('missing shared system update normalizer');
+	    var cases = [
+	      {name:'actionable', hidden:false, actionable:true, card:true, accept:true, badge:true, toast:true, acceptText:'Update OpenVibely'},
+	      {name:'succeeded', hidden:true, actionable:false, card:false, accept:false, badge:false, toast:false},
+	      {name:'uptodate', hidden:true, actionable:false, card:false, accept:false, badge:false, toast:false},
+	      {name:'hosted', hidden:false, actionable:false, card:true, accept:false, badge:false, toast:false},
+	      {name:'unsupported', hidden:false, actionable:false, card:true, accept:false, badge:false, toast:false},
+	      {name:'manualBusy', hidden:false, actionable:false, card:true, accept:false, badge:false, toast:false, cancel:true},
+	      {name:'manualReady', hidden:false, actionable:true, card:true, accept:true, badge:true, toast:true, acceptText:'Prepare for update'}
+	    ];
+	    for (var i = 0; i < cases.length; i++) {
+	      var c = cases[i];
+	      var response = await fetch('/browser-scenario?name=' + encodeURIComponent(c.name), {method:'POST'});
+	      var snapshot = await response.json();
+	      var view = window.openVibelyNormalizeSystemUpdateSnapshot(snapshot);
+	      if (view.hidden !== c.hidden) fail(c.name + ' normalized hidden mismatch');
+	      if (view.actionable !== c.actionable) fail(c.name + ' normalized actionable mismatch');
+	      await refreshSystemUpdateCard();
+	      if (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(snapshot);
+	      await wait(40);
+	      if (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(snapshot);
+	      if (hidden('system-update-card') === c.card) fail(c.name + ' Alerts card visibility disagrees with normalized hidden state');
+	      if (!hidden('system-update-accept') !== c.accept && c.card) fail(c.name + ' Alerts accept visibility disagrees with normalized actionable state');
+	      if (!hidden('system-update-nav-badge') !== c.badge) fail(c.name + ' global badge visibility disagrees with normalized actionable state');
+	      if (!!visibleToast() !== c.toast) fail(c.name + ' global toast visibility disagrees with normalized actionable state');
+	      if (c.acceptText && document.getElementById('system-update-accept').textContent !== c.acceptText) fail(c.name + ' accept copy was not rendered from normalized state');
+	      if (c.cancel !== undefined && !hidden('system-update-cancel') !== c.cancel) fail(c.name + ' cancel visibility mismatch');
+	    }
+	    await report('pass', '');
+	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+	});
+	</script>`
+	page := strings.Replace(rendered.String(), "</head>", runner+"</head>", 1)
+
+	browserResult := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/system/update" && r.Method == http.MethodGet:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(getSnapshot()))
+		case r.URL.Path == "/browser-scenario" && r.Method == http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(setSnapshot(r.URL.Query().Get("name"))))
+		case r.URL.Path == "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "system-update-surfaces-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "system-update-surfaces-browser-profile"),
+		server.URL,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(15 * time.Second):
+		outcome = "fail:timed out waiting for browser result"
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("system update shared-state browser regression failed: %s\n%s", outcome, strings.TrimSpace(string(stderr)))
+	}
+}
+
 func TestAlertsLiveRefreshAndSingleDeletePreserveViewportInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))

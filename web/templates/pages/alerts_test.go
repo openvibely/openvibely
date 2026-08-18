@@ -16,9 +16,14 @@ func TestAlertsContent_SystemUpdateShowsExactDockerDigestAndLiveProgress(t *test
 		t.Fatal(err)
 	}
 	html := buf.String()
-	for _, required := range []string{"system-update-digest", "image_ref", "setInterval(refreshSystemUpdateCard, 1000)", "data.current_version === available", "data.distribution === 'hosted' || (data.state !== 'waiting_for_idle'", "window.openVibelyHandleSystemUpdateSnapshot(data)", "window.openVibelyHandleSystemUpdateSnapshot(null)"} {
+	for _, required := range []string{"system-update-digest", "view.imageRef", "setInterval(refreshSystemUpdateCard, 1000)", "window.openVibelyNormalizeSystemUpdateSnapshot(data)", "view.hidden", "view.showCancel", "window.openVibelyHandleSystemUpdateSnapshot(data)", "window.openVibelyHandleSystemUpdateSnapshot(null)"} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("system update UI missing %q", required)
+		}
+	}
+	for _, duplicatedRule := range []string{"data.current_version === available", "localPackagedReady", "data.release.apply_supported", "data.distribution === 'hosted' ||"} {
+		if strings.Contains(html, duplicatedRule) {
+			t.Fatalf("system update UI still duplicates normalized rule %q", duplicatedRule)
 		}
 	}
 }
@@ -33,7 +38,7 @@ func TestAlertsContent_SystemUpdateUsesSingleAcceptanceActionAndExplainsDrain(t 
 		`id="system-update-accept"`,
 		`Update OpenVibely`,
 		`The replacement is downloaded and verified before approval. After you accept, OpenVibely waits for active work to finish, restarts, validates the new version, and rolls back automatically if needed.`,
-		`data.staged`,
+		`view.actionable`,
 		`systemUpdateAction('apply')`,
 	} {
 		if !strings.Contains(html, required) {
