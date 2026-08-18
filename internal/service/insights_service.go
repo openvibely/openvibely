@@ -754,11 +754,6 @@ func (s *InsightsService) ListByType(ctx context.Context, projectID string, insi
 	return s.insightsRepo.ListByType(ctx, projectID, insightType, 50)
 }
 
-// SearchKnowledge searches the knowledge base
-func (s *InsightsService) SearchKnowledge(ctx context.Context, projectID, query string) ([]models.KnowledgeEntry, error) {
-	return s.insightsRepo.SearchKnowledge(ctx, projectID, query, 20)
-}
-
 // DeleteInsight removes an insight
 func (s *InsightsService) DeleteInsight(ctx context.Context, id string) error {
 	return s.insightsRepo.DeleteInsight(ctx, id)

@@ -890,7 +890,6 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.PATCH("/insights/:id/status", h.UpdateInsightStatus)
 	e.DELETE("/insights/:id", h.DeleteInsight)
 	e.GET("/insights/by-type", h.ListInsightsByType)
-	e.GET("/insights/knowledge/search", h.SearchInsightsKnowledge)
 	e.DELETE("/insights/knowledge/:id", h.DeleteKnowledgeEntry)
 	e.GET("/insights/reports", h.ListInsightReports)
 	e.POST("/insights/health-check", h.RunHealthCheck)

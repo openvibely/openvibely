@@ -106,23 +106,6 @@ func (h *Handler) DeleteInsight(c echo.Context) error {
 	return c.String(http.StatusOK, "")
 }
 
-// SearchInsightsKnowledge searches the knowledge base
-func (h *Handler) SearchInsightsKnowledge(c echo.Context) error {
-	projectID := c.QueryParam("project_id")
-	query := c.QueryParam("q")
-
-	if projectID == "" || h.insightsSvc == nil {
-		return c.String(http.StatusBadRequest, "missing params")
-	}
-
-	entries, err := h.insightsSvc.SearchKnowledge(c.Request().Context(), projectID, query)
-	if err != nil {
-		return c.String(http.StatusInternalServerError, err.Error())
-	}
-
-	return render(c, http.StatusOK, pages.KnowledgeList(entries))
-}
-
 // ListInsightsByType filters insights by type
 func (h *Handler) ListInsightsByType(c echo.Context) error {
 	projectID := c.QueryParam("project_id")

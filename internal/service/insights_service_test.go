@@ -390,16 +390,11 @@ func TestInsightsService_AIBackedWorkflowsPersistAndListResults(t *testing.T) {
 	if err != nil || len(tags) == 0 {
 		t.Fatalf("knowledge tags=%v err=%v", tags, err)
 	}
-	found, err := svc.SearchKnowledge(ctx, project.ID, "Retries")
-	if err != nil || len(found) != 1 || found[0].Topic != "Retry policy" {
-		t.Fatalf("SearchKnowledge returned %#v err=%v", found, err)
-	}
-	if err := svc.DeleteKnowledge(ctx, found[0].ID); err != nil {
+	if err := svc.DeleteKnowledge(ctx, knowledge[0].ID); err != nil {
 		t.Fatalf("DeleteKnowledge: %v", err)
 	}
-	found, err = svc.SearchKnowledge(ctx, project.ID, "Retries")
-	if err != nil || len(found) != 0 {
-		t.Fatalf("knowledge should be deleted, got %#v err=%v", found, err)
+	if deleted, err := insightsRepo.GetKnowledge(ctx, knowledge[0].ID); err != nil || deleted != nil {
+		t.Fatalf("knowledge should be deleted, got %#v err=%v", deleted, err)
 	}
 
 	manual := &models.Insight{ProjectID: project.ID, Type: models.InsightOptimization, Severity: models.InsightSeverityLow, Status: models.InsightStatusNew, Title: "Trim slow startup", Evidence: "{}", Confidence: 0.7}

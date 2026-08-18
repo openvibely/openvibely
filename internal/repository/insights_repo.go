@@ -268,29 +268,6 @@ func (r *InsightsRepo) ListKnowledge(ctx context.Context, projectID string, limi
 	return entries, rows.Err()
 }
 
-func (r *InsightsRepo) SearchKnowledge(ctx context.Context, projectID, query string, limit int) ([]models.KnowledgeEntry, error) {
-	pattern := "%" + query + "%"
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, project_id, topic, content, source, source_ref, tags, created_at, updated_at
-		FROM knowledge_entries WHERE project_id = ? AND (topic LIKE ? OR content LIKE ? OR tags LIKE ?)
-		ORDER BY created_at DESC LIMIT ?`, projectID, pattern, pattern, pattern, limit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var entries []models.KnowledgeEntry
-	for rows.Next() {
-		var k models.KnowledgeEntry
-		if err := rows.Scan(&k.ID, &k.ProjectID, &k.Topic, &k.Content, &k.Source, &k.SourceRef, &k.Tags, &k.CreatedAt, &k.UpdatedAt); err != nil {
-			return nil, err
-		}
-		entries = append(entries, k)
-	}
-	return entries, rows.Err()
-}
-
 func (r *InsightsRepo) DeleteKnowledge(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM knowledge_entries WHERE id = ?`, id)
 	return err

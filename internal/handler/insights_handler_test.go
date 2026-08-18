@@ -79,12 +79,6 @@ func TestListInsightsByType_NilService(t *testing.T) {
 	tc.Assert(rec).StatusCode(http.StatusBadRequest)
 }
 
-func TestSearchInsightsKnowledge_NilService(t *testing.T) {
-	tc := NewTestContext(t)
-	rec := tc.HTTP().Get("/insights/knowledge/search?project_id=proj-1&q=latency").Execute()
-	tc.Assert(rec).StatusCode(http.StatusBadRequest)
-}
-
 func TestListInsightReports_MissingParams(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/insights/reports").Execute()

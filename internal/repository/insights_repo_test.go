@@ -84,12 +84,12 @@ func TestInsightsRepo_ListByStatusAndType(t *testing.T) {
 		{"Optimization 1", models.InsightOptimization, models.InsightSeverityMedium, models.InsightStatusNew},
 	} {
 		i := &models.Insight{
-			ProjectID: project.ID,
-			Type:      tc.itype,
-			Severity:  tc.severity,
-			Status:    tc.status,
-			Title:     tc.title,
-			Evidence:  "{}",
+			ProjectID:  project.ID,
+			Type:       tc.itype,
+			Severity:   tc.severity,
+			Status:     tc.status,
+			Title:      tc.title,
+			Evidence:   "{}",
 			Confidence: 0.7,
 		}
 		if err := repo.CreateInsight(ctx, i); err != nil {
@@ -603,23 +603,6 @@ func TestInsightsRepo_Knowledge(t *testing.T) {
 	}
 	if got.Topic != entry.Topic {
 		t.Errorf("topic: got %q, want %q", got.Topic, entry.Topic)
-	}
-
-	// Search
-	results, err := repo.SearchKnowledge(ctx, project.ID, "SQLite", 10)
-	if err != nil {
-		t.Fatalf("search: %v", err)
-	}
-	if len(results) != 1 {
-		t.Errorf("search results: got %d, want 1", len(results))
-	}
-
-	results, err = repo.SearchKnowledge(ctx, project.ID, "nonexistent", 10)
-	if err != nil {
-		t.Fatalf("search: %v", err)
-	}
-	if len(results) != 0 {
-		t.Errorf("search results: got %d, want 0", len(results))
 	}
 
 	// Delete
