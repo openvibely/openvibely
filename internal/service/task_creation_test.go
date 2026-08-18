@@ -862,6 +862,239 @@ func TestExecuteTaskEdits_AgentAssignmentFromNil(t *testing.T) {
 	}
 }
 
+func TestExecuteTaskEdits_PrimaryAgentDefinitionByIDPreservesModelConfig(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := repository.NewAgentRepo(db)
+	taskSvc.SetAgentRepo(agentRepo)
+
+	project := &models.Project{Name: "Primary Agent Edit By ID"}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	modelRepo := repository.NewLLMConfigRepo(db)
+	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic"}
+	if err := modelRepo.Create(ctx, modelConfig); err != nil {
+		t.Fatalf("create model config: %v", err)
+	}
+	agentDef := &models.Agent{Name: "Reviewer", Key: "reviewer", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Task", Prompt: "Prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentID: &modelConfig.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, AgentDefinitionID: agentDef.ID}}, project.ID, taskSvc, nil, "")
+	if !strings.Contains(summary, "Edited 1 task(s)") || !strings.Contains(summary, "primary_agent") {
+		t.Fatalf("expected primary agent edit summary, got %q", summary)
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get updated task: %v", err)
+	}
+	if updated.AgentDefinitionID == nil || *updated.AgentDefinitionID != agentDef.ID {
+		t.Fatalf("primary agent = %v, want %s", updated.AgentDefinitionID, agentDef.ID)
+	}
+	if updated.AgentID == nil || *updated.AgentID != modelConfig.ID {
+		t.Fatalf("model config changed: got %v, want %s", updated.AgentID, modelConfig.ID)
+	}
+}
+
+func TestExecuteTaskEdits_PrimaryAgentDefinitionByName(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := repository.NewAgentRepo(db)
+	taskSvc.SetAgentRepo(agentRepo)
+
+	project := &models.Project{Name: "Primary Agent Edit By Name"}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agentDef := &models.Agent{Name: "Docs Reviewer", Key: "docs_reviewer", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Task", Prompt: "Prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, Agent: "Docs Reviewer"}}, project.ID, taskSvc, nil, "")
+	if !strings.Contains(summary, "Edited 1 task(s)") {
+		t.Fatalf("expected edit success, got %q", summary)
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get updated task: %v", err)
+	}
+	if updated.AgentDefinitionID == nil || *updated.AgentDefinitionID != agentDef.ID {
+		t.Fatalf("primary agent = %v, want %s", updated.AgentDefinitionID, agentDef.ID)
+	}
+}
+
+func TestExecuteTaskEdits_ClearPrimaryAgentDefinitionPreservesModelConfig(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := repository.NewAgentRepo(db)
+
+	project := &models.Project{Name: "Primary Agent Clear"}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	modelRepo := repository.NewLLMConfigRepo(db)
+	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic"}
+	if err := modelRepo.Create(ctx, modelConfig); err != nil {
+		t.Fatalf("create model config: %v", err)
+	}
+	primaryAgent := &models.Agent{Name: "Initial Reviewer", Key: "initial_reviewer", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(ctx, primaryAgent); err != nil {
+		t.Fatalf("create primary agent: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Task", Prompt: "Prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentID: &modelConfig.ID, AgentDefinitionID: &primaryAgent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, ClearAgentDefinition: true}}, project.ID, taskSvc, nil, "")
+	if !strings.Contains(summary, "Edited 1 task(s)") || !strings.Contains(summary, "primary_agent") {
+		t.Fatalf("expected clear edit summary, got %q", summary)
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get updated task: %v", err)
+	}
+	if updated.AgentDefinitionID != nil {
+		t.Fatalf("expected primary agent cleared, got %v", *updated.AgentDefinitionID)
+	}
+	if updated.AgentID == nil || *updated.AgentID != modelConfig.ID {
+		t.Fatalf("model config changed: got %v, want %s", updated.AgentID, modelConfig.ID)
+	}
+}
+
+func TestExecuteTaskEdits_PrimaryAgentDefinitionRejectsInvalidWithoutPartialEdit(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := repository.NewAgentRepo(db)
+	taskSvc.SetAgentRepo(agentRepo)
+
+	project := &models.Project{Name: "Primary Agent Invalid"}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agentDef := &models.Agent{Name: "Reviewer", Key: "reviewer", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	otherAgentDef := &models.Agent{Name: "Different Name", Key: "different_name", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(ctx, otherAgentDef); err != nil {
+		t.Fatalf("create other agent definition: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Original", Prompt: "Prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, Title: "Should Not Persist", AgentDefinitionID: agentDef.ID, Agent: "Different Name"}}, project.ID, taskSvc, nil, "")
+	if !strings.Contains(summary, "Failed to edit 1 task(s)") || !strings.Contains(summary, "does not match agent_definition_id") {
+		t.Fatalf("expected controlled mismatch failure, got %q", summary)
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get updated task: %v", err)
+	}
+	if updated.Title != "Original" || updated.AgentDefinitionID != nil {
+		t.Fatalf("invalid primary Agent edit persisted partial state: title=%q agent=%v", updated.Title, updated.AgentDefinitionID)
+	}
+}
+
+func TestExecuteTaskEdits_PrimaryAgentDefinitionRejectsCrossProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := repository.NewAgentRepo(db)
+	taskSvc.SetAgentRepo(agentRepo)
+	projectRepo := repository.NewProjectRepo(db)
+	projectA := &models.Project{Name: "Project A"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Project B"}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	foreignAgent := &models.Agent{Name: "Foreign Reviewer", Key: "foreign_reviewer", Scope: models.AgentScopeProject, ProjectID: projectB.ID, Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(ctx, foreignAgent); err != nil {
+		t.Fatalf("create foreign agent definition: %v", err)
+	}
+	task := &models.Task{ProjectID: projectA.ID, Title: "Task", Prompt: "Prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, AgentDefinitionID: foreignAgent.ID}}, projectA.ID, taskSvc, nil, "")
+	if !strings.Contains(summary, "Failed to edit 1 task(s)") || !strings.Contains(summary, "belongs to a different project") {
+		t.Fatalf("expected cross-project rejection, got %q", summary)
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get updated task: %v", err)
+	}
+	if updated.AgentDefinitionID != nil {
+		t.Fatalf("cross-project primary Agent persisted: %v", *updated.AgentDefinitionID)
+	}
+}
+
+func TestExecuteTaskEdits_AgentIDStillOnlyChangesModelConfig(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), NewWorkerService(nil, 0, nil))
+	agentRepo := repository.NewAgentRepo(db)
+	project := &models.Project{Name: "Model Config Only Edit"}
+	if err := repository.NewProjectRepo(db).Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	primaryAgent := &models.Agent{Name: "Primary Agent", Key: "primary_agent", Enabled: true, SelectableAsPrimary: true}
+	if err := agentRepo.Create(ctx, primaryAgent); err != nil {
+		t.Fatalf("create primary agent: %v", err)
+	}
+	modelRepo := repository.NewLLMConfigRepo(db)
+	modelConfig := &models.LLMConfig{Name: "Model Config 2", Provider: "anthropic"}
+	if err := modelRepo.Create(ctx, modelConfig); err != nil {
+		t.Fatalf("create model config: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Task", Prompt: "Prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentDefinitionID: &primaryAgent.ID}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, AgentID: modelConfig.ID}}, project.ID, taskSvc, nil, "")
+	if !strings.Contains(summary, "Edited 1 task(s)") {
+		t.Fatalf("expected model config edit success, got %q", summary)
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get updated task: %v", err)
+	}
+	if updated.AgentID == nil || *updated.AgentID != modelConfig.ID {
+		t.Fatalf("model config = %v, want %s", updated.AgentID, modelConfig.ID)
+	}
+	if updated.AgentDefinitionID == nil || *updated.AgentDefinitionID != primaryAgent.ID {
+		t.Fatalf("primary agent changed: got %v, want %s", updated.AgentDefinitionID, primaryAgent.ID)
+	}
+}
+
 func TestExecuteTaskEdits_InvalidCategory(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

@@ -266,16 +266,19 @@ func resolveTaskCreationAgentDefinition(ctx context.Context, req TaskCreationReq
 
 // TaskEditRequest represents a typed task edit action request.
 type TaskEditRequest struct {
-	ID            string                     `json:"id"`                        // Required: task ID to edit
-	Title         string                     `json:"title,omitempty"`           // Optional: new title
-	Prompt        string                     `json:"prompt,omitempty"`          // Optional: new prompt
-	Category      string                     `json:"category,omitempty"`        // Optional: new category
-	Priority      int                        `json:"priority,omitempty"`        // Optional: new priority (1-5)
-	Tag           string                     `json:"tag,omitempty"`             // Optional: new tag ("feature", "bug", "")
-	AgentID       string                     `json:"agent_id,omitempty"`        // Optional: new agent ID (empty = use default)
-	AgentConfigID string                     `json:"agent_config_id,omitempty"` // Optional: alias for agent_id (for compatibility)
-	Chain         *models.ChainConfiguration `json:"chain,omitempty"`           // Optional: chain config for sequential task execution
-	Attachments   []string                   `json:"attachments,omitempty"`     // Optional: file paths to attach to the task
+	ID                   string                     `json:"id"`                               // Required: task ID to edit
+	Title                string                     `json:"title,omitempty"`                  // Optional: new title
+	Prompt               string                     `json:"prompt,omitempty"`                 // Optional: new prompt
+	Category             string                     `json:"category,omitempty"`               // Optional: new category
+	Priority             int                        `json:"priority,omitempty"`               // Optional: new priority (1-4)
+	Tag                  string                     `json:"tag,omitempty"`                    // Optional: new tag ("feature", "bug", "")
+	AgentID              string                     `json:"agent_id,omitempty"`               // Optional: new model config ID (empty = leave unchanged)
+	AgentConfigID        string                     `json:"agent_config_id,omitempty"`        // Optional: alias for agent_id (for compatibility)
+	AgentDefinitionID    string                     `json:"agent_definition_id,omitempty"`    // Optional: known primary Agent definition ID
+	Agent                string                     `json:"agent,omitempty"`                  // Optional: exact primary Agent definition name
+	ClearAgentDefinition bool                       `json:"clear_agent_definition,omitempty"` // Optional: explicitly clear the primary Agent definition
+	Chain                *models.ChainConfiguration `json:"chain,omitempty"`                  // Optional: chain config for sequential task execution
+	Attachments          []string                   `json:"attachments,omitempty"`            // Optional: file paths to attach to the task
 }
 
 // ExecuteTaskEdits applies edits to existing tasks and returns a summary.
@@ -302,6 +305,24 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			applog.Infof("[task-edit] task %s belongs to different project", req.ID)
 			failed = append(failed, fmt.Sprintf("- \"%s\": belongs to different project", task.Title))
 			continue
+		}
+
+		primaryAgentDefinitionRequested := strings.TrimSpace(req.AgentDefinitionID) != "" || strings.TrimSpace(req.Agent) != "" || req.ClearAgentDefinition
+		resolvedAgentDefinitionID := ""
+		if primaryAgentDefinitionRequested {
+			if req.ClearAgentDefinition && (strings.TrimSpace(req.AgentDefinitionID) != "" || strings.TrimSpace(req.Agent) != "") {
+				failed = append(failed, fmt.Sprintf("- \"%s\": clear_agent_definition cannot be combined with agent_definition_id or agent", task.Title))
+				continue
+			}
+			if !req.ClearAgentDefinition {
+				var resolveErr error
+				resolvedAgentDefinitionID, resolveErr = resolveTaskCreationAgentDefinition(ctx, TaskCreationRequest{AgentDefinitionID: req.AgentDefinitionID, Agent: req.Agent}, projectID, taskSvc)
+				if resolveErr != nil {
+					applog.Infof("[task-edit] refusing invalid primary Agent assignment for task %s: %v", req.ID, resolveErr)
+					failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, resolveErr))
+					continue
+				}
+			}
 		}
 
 		// Apply only the fields that were specified
@@ -339,6 +360,21 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			if agentID != currentAgentID {
 				task.AgentID = &agentID
 				changes = append(changes, "agent")
+			}
+		}
+		if primaryAgentDefinitionRequested {
+			currentAgentDefinitionID := ""
+			if task.AgentDefinitionID != nil {
+				currentAgentDefinitionID = *task.AgentDefinitionID
+			}
+			if req.ClearAgentDefinition {
+				if currentAgentDefinitionID != "" {
+					task.AgentDefinitionID = nil
+					changes = append(changes, "primary_agent")
+				}
+			} else if resolvedAgentDefinitionID != currentAgentDefinitionID {
+				task.AgentDefinitionID = &resolvedAgentDefinitionID
+				changes = append(changes, "primary_agent")
 			}
 		}
 
