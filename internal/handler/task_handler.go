@@ -251,7 +251,7 @@ func (h *Handler) renderTaskBoardRefresh(c echo.Context, projectID string, adjus
 		applog.Infof("[handler] renderTaskBoardRefresh error listing tasks project=%s: %v", projectID, err)
 		return err
 	}
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
+	agents, err := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	if err != nil {
 		applog.Infof("[handler] renderTaskBoardRefresh error listing LLM configs project=%s: %v", projectID, err)
 		return err
@@ -283,7 +283,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 		}
 		tasks = service.AttachSwarmChildren(tasks)
 		applog.Infof("[handler] ListTasks found %d tasks", len(tasks))
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
+		agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 		return h.renderKanbanBoard(c, tasks, projectID, sortPrefs, agents)
 	}
 
@@ -305,7 +305,7 @@ func (h *Handler) ListTasks(c echo.Context) error {
 	applog.Infof("[handler] ListTasks found %d tasks", len(tasks))
 
 	project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, nil)
 
 	if isHTMX {
@@ -523,7 +523,7 @@ func (h *Handler) CreateTask(c echo.Context) error {
 		}
 		project, _ := h.projectSvc.GetByID(c.Request().Context(), projectID)
 		scheduledTasks, _ := h.taskSvc.GetTasksWithSchedulesByProject(c.Request().Context(), projectID)
-		agents, _ := h.llmConfigRepo.List(c.Request().Context())
+		agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 		agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), projectID, t.AgentDefinitionID)
 		weekOffset := 0
 		if weekParam := c.QueryParam("week"); weekParam != "" {
@@ -554,7 +554,7 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 
 	executions, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
 	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
-	agents, _ := h.llmConfigRepo.List(ctx)
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
 	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
 	agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
 	var reviewComments []models.ReviewComment
@@ -672,7 +672,7 @@ func (h *Handler) GetTaskDetailStatus(c echo.Context) error {
 
 	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
 
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 
 	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, executions, agents, agentDefs))
@@ -2195,7 +2195,7 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		executions = []models.Execution{}
 		hasEarlier = false
 	}
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 
 	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(c.Request().Context(), executions, "GetTaskThread")
 

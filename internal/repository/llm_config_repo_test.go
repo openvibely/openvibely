@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,152 @@ func BenchmarkLLMConfigRepoListFullVsCardsLargeCustomProviders(b *testing.B) {
 			}
 		}
 	})
+}
+
+// BenchmarkTaskBoardRefreshModelProjection asserts that the badge-projection
+// call site allocates at most 200 KB/op on a 50-model large-config fixture,
+// matching the acceptance criterion from GitHub issue #633.
+func BenchmarkTaskBoardRefreshModelProjection(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	largeBody := strings.Repeat("x", 64*1024)
+	for i := 0; i < 50; i++ {
+		cfg := &models.LLMConfig{
+			Name: fmt.Sprintf("Badge Bench Model %02d", i), Provider: models.ProviderOpenAICompatible,
+			AuthMethod: models.AuthMethodOAuth, Model: "custom-model", APIKey: "secret-key",
+			OAuthAccessToken: "secret-token", OAuthRefreshToken: "secret-refresh",
+			OAuthClientSecret: "secret-client", BaseURL: "https://example.com/v1/",
+			Transport: "chat_completions", PresetSlug: "custom",
+			ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+			CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+			MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+		}
+		if err := repo.Create(ctx, cfg); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// Verify no credential or large fields are materialized by the badge projection.
+	badges, err := repo.ListBadgeOptions(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, badge := range badges {
+		if badge.APIKey != "" || badge.OAuthAccessToken != "" || badge.OAuthRefreshToken != "" ||
+			badge.OAuthClientSecret != "" || badge.ExtraBodyJSON != "" ||
+			badge.CustomAuthConfigJSON != "" || badge.CustomAuthStateJSON != "" ||
+			badge.MixtureConfigJSON != "" {
+			b.Fatalf("badge projection materialized credential or large-body fields: %#v", badge)
+		}
+	}
+
+	const maxAllocsPerOp = 200 * 1024 // 200 KB
+	b.ReportAllocs()
+	b.ResetTimer()
+	var totalAllocs uint64
+	for i := 0; i < b.N; i++ {
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		before := ms.TotalAlloc
+		configs, err := repo.ListBadgeOptions(ctx)
+		runtime.ReadMemStats(&ms)
+		after := ms.TotalAlloc
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(configs) < 50 {
+			b.Fatalf("expected production-shaped fixture, got %d configs", len(configs))
+		}
+		totalAllocs += after - before
+	}
+	allocsPerOp := totalAllocs / uint64(b.N)
+	if allocsPerOp > maxAllocsPerOp {
+		b.Fatalf("badge projection allocated %d bytes/op, want <= %d", allocsPerOp, maxAllocsPerOp)
+	}
+}
+
+func TestLLMConfigRepo_ListBadgeOptionsUsesBoundedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	largeBody := strings.Repeat("x", 1024*1024)
+	alpha := &models.LLMConfig{
+		Name: "Badge Alpha", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "badge-alpha-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client",
+		BaseURL: "https://example.com/v1/", Transport: "chat_completions", PresetSlug: "custom",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, alpha); err != nil {
+		t.Fatal(err)
+	}
+	zuluDefault := &models.LLMConfig{
+		Name: "Badge Zulu Default", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+		Model: "badge-zulu-model", APIKey: "secret-key", IsDefault: true,
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, zuluDefault); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := repo.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter.Reset()
+	counter.SetEnabled(true)
+	badges, err := repo.ListBadgeOptions(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(badges) != len(full) {
+		t.Fatalf("badge len = %d, full len = %d", len(badges), len(full))
+	}
+	for i := range full {
+		if badges[i].ID != full[i].ID || badges[i].Name != full[i].Name ||
+			badges[i].Model != full[i].Model || badges[i].IsDefault != full[i].IsDefault {
+			t.Fatalf("badge[%d] = %#v, full[%d] = %#v", i, badges[i], i, full[i])
+		}
+	}
+
+	byID := make(map[string]models.LLMConfig, len(badges))
+	for _, b := range badges {
+		byID[b.ID] = b
+	}
+	customBadge := byID[alpha.ID]
+	if customBadge.Name != "Badge Alpha" || customBadge.Model != "badge-alpha-model" {
+		t.Fatalf("badge label fields not preserved: %#v", customBadge)
+	}
+	if customBadge.APIKey != "" || customBadge.OAuthAccessToken != "" || customBadge.OAuthRefreshToken != "" ||
+		customBadge.OAuthClientSecret != "" || customBadge.BaseURL != "" || customBadge.ExtraHeadersJSON != "" ||
+		customBadge.ExtraBodyJSON != "" || customBadge.CustomAuthConfigJSON != "" ||
+		customBadge.CustomAuthStateJSON != "" || customBadge.MixtureConfigJSON != "" {
+		t.Fatalf("badge projection materialized credential or large-body fields: %#v", customBadge)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact badge query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, model, is_default") {
+		t.Fatalf("badge projection = %q, want id/name/model/is_default in %s", projection, statements[0])
+	}
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("badge query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("badge query must preserve default/name ordering: %s", statements[0])
+	}
 }
 
 func TestLLMConfigRepo_ListPickerOptionsUsesBoundedProjection(t *testing.T) {
