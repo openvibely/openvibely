@@ -1,0 +1,41 @@
+package components
+
+import "github.com/openvibely/openvibely/internal/models"
+
+templ ExecutionStatusBadge(status models.ExecutionStatus, extraClasses string) {
+	<span class={ "badge", ExecutionStatusBadgeClass(status), extraClasses }>{ ExecutionStatusLabel(status) }</span>
+}
+
+func ExecutionStatusBadgeClass(status models.ExecutionStatus) string {
+	switch status {
+	case models.ExecCompleted:
+		return "badge-success"
+	case models.ExecFailed:
+		return "badge-error"
+	case models.ExecCancelled:
+		return "badge-warning"
+	case models.ExecRunning:
+		return "badge-primary"
+	case models.ExecQueued:
+		return "badge-ghost"
+	default:
+		return "badge-ghost"
+	}
+}
+
+func ExecutionStatusLabel(status models.ExecutionStatus) string {
+	switch status {
+	case models.ExecCompleted:
+		return "Success"
+	case models.ExecFailed:
+		return "Failed"
+	case models.ExecCancelled:
+		return "Cancelled"
+	case models.ExecRunning:
+		return "Running"
+	case models.ExecQueued:
+		return "Queued"
+	default:
+		return string(status)
+	}
+}
