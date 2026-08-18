@@ -850,10 +850,12 @@ func TestBinaryHelperLiveParentProcess(t *testing.T) {
 }
 
 func TestBinaryHelperAuthorizedParentExitFailurePublishesCancellation(t *testing.T) {
+	originalWaitForProcessExit := waitForProcessExit
+	t.Cleanup(func() { waitForProcessExit = originalWaitForProcessExit })
+
 	for _, test := range []struct {
 		name       string
 		cancelWait bool
-		mode       string
 		wantStarts int
 	}{
 		{name: "timeout", wantStarts: 1},
@@ -871,39 +873,33 @@ func TestBinaryHelperAuthorizedParentExitFailurePublishesCancellation(t *testing
 				t.Fatal(err)
 			}
 			staged := LocalStagedUpdate{ArtifactPath: stagedPath, InstallPath: current, BackupPath: backup, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"}
-			if err := writeBinaryHelperOutcome(staged, binaryOutcomePrepared); err != nil {
+			if err := writeBinaryHelperOutcome(staged, binaryOutcomePending); err != nil {
 				t.Fatal(err)
 			}
-
-			parent := exec.Command(os.Args[0], "-test.run=^TestBinaryHelperLiveParentProcess$")
-			parent.Env = append(os.Environ(), "OPENVIBELY_TEST_LIVE_PARENT=1")
-			if err := parent.Start(); err != nil {
+			if err := authorizeBinaryHelperHandoff(staged); err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() {
-				_ = parent.Process.Kill()
-				_ = parent.Wait()
-			})
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			go func() {
-				deadline := time.Now().Add(time.Second)
-				for time.Now().Before(deadline) {
-					outcome, err := readBinaryHelperOutcome(staged)
-					if err == nil && outcome.State == binaryOutcomePending {
-						if authorizeBinaryHelperHandoff(staged) == nil && test.cancelWait {
-							cancel()
-						}
-						return
-					}
-					time.Sleep(time.Millisecond)
+			waitForProcessExit = func(waitCtx context.Context, pid int, timeout time.Duration) error {
+				if pid != 99999999 {
+					t.Fatalf("parent PID = %d", pid)
 				}
-			}()
+				if timeout != 50*time.Millisecond {
+					t.Fatalf("wait timeout = %s", timeout)
+				}
+				if test.cancelWait {
+					cancel()
+					<-waitCtx.Done()
+					return waitCtx.Err()
+				}
+				return errors.New("timed out waiting for parent process to exit")
+			}
 
 			starts := 0
 			err := RunBinaryHelper(ctx, BinaryHelperConfig{
-				ParentPID: parent.Process.Pid, Current: current, Staged: stagedPath, Backup: backup, HealthURL: "http://127.0.0.1/health",
+				ParentPID: 99999999, Current: current, Staged: stagedPath, Backup: backup, HealthURL: "http://127.0.0.1/health",
 				ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1", WaitTimeout: 50 * time.Millisecond,
 				StartCommand: func(string, string) (func(context.Context) error, error) {
 					outcome, readErr := readBinaryHelperOutcome(staged)

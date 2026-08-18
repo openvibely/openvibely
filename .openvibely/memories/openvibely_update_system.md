@@ -2,9 +2,9 @@
 name: openvibely_update_system
 type: project
 created: 2026-08-02
-updated: 2026-08-12
+updated: 2026-08-18
 source: update_memory
-source_id: update_ux_toast_badge_2026_08_12
+source_id: issue_666_update_helper_handoff_duplication
 confidence: high
 title: OpenVibely Update System
 ---
@@ -21,6 +21,7 @@ Final shared flow:
 - Packaged local update offers are user-initiated UI, not automatic installation. Actionable releases surface as a sticky global purple update toast plus a separate Alerts nav `Update` badge; the ordinary unread-alert count remains independent.
 - Clicking the update toast body accepts and starts `POST /api/system/update/apply`, navigates to `/alerts`, and removes that toast. The close button only dismisses that release fingerprint.
 - `/api/system/update` remains the authority for status. After restart/success, `state=succeeded` or `current_version == available` clears the update card/badge and may show one normal auto-dismiss success toast keyed by release fingerprint.
+- Browser update surfaces share `window.openVibelyNormalizeSystemUpdateSnapshot(data)` for release/current-version/succeeded hidden-state decisions and for apply-supported/Hosted/Docker/manual/staged/available/failed actionability decisions. The global badge/toast path and Alerts system-update card should render from that normalized state while keeping their separate markup, copy, dismissal/localStorage behavior, buttons, and refresh cadence.
 
 Distribution contracts:
 - Standalone binary: copy the signed running executable and launch that copy as the updater helper. It waits for the original process to exit, atomically replaces the executable, and relaunches with the original arguments and working directory. Preserve arguments and working directory without putting secrets in command-line arguments or durable update state. Official macOS and Windows standalone artifacts are ZIP archives and Linux artifacts are TAR.GZ archives; after catalog and archive verification, staging accepts exactly one root-level regular `openvibely` or `openvibely.exe` member and publishes only the extracted executable.
@@ -29,6 +30,7 @@ Distribution contracts:
 - Hosted and Docker: retain externally controlled container replacement.
 - Manual Docker users approve an available update through `POST /api/system/update/apply`, which reaches `Coordinator.Accept`; this manual accepted path may drain active work and transition to `StateReady` without an installer or staged artifact because Docker replacement is externally controlled. Non-manual accepted updates still require a staged artifact before applying.
 - Platform-specific code is limited to detached helper creation, waiting for parent exit, atomic replacement, relaunch, and stopping a failed successor before rollback.
+- Open GitHub issue #666 tracks duplicated packaged-update helper handoff assembly across `WailsInstaller.startDesktopHelper`, `BinaryInstaller.Apply`, and `BinaryInstaller.RecoverBinaryRestart`: each repeats helper publication/copy, start, wait/shutdown, and cleanup wiring with only metadata transport and install-unit details differing.
 - Interrupted replacement must always leave a bootable executable, and startup reconciliation must settle durable state if the helper dies or power is lost.
 
 Obsolete standalone service-manager concepts must be removed directly because this work has not shipped: `OPENVIBELY_UPDATE_RESTART`, `OPENVIBELY_UPDATE_RESTART_TARGET`, restart mode/target state, manager-origin compatibility state, systemd and launchd commands, launchd labels and cleanup, service-manager lifecycle tests, and corresponding CI/docs. Do not add migrations or backward compatibility for those unreleased formats.

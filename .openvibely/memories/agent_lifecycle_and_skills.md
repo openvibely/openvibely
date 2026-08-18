@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-08-16
+updated: 2026-08-18
 source: update_memory
-source_id: 78c534dfdaff36151434a1ec5e025f32:0dd659914db20175
+source_id: 24a760f1e37ba19dc47135b9b2a47531:a4e610ac436b3932
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -13,6 +13,7 @@ OpenVibely lifecycle-agent and skill behavior is guided by the on-disk agent/ski
 
 Agent and catalog facts:
 - Built-in protected system agents include Skill Curator (`skill_curator`), Memory Curator (`memory_curator`), Goal Agent (`goal`), and Loop Agent (`loop`). Fresh-startup initialization must materialize them idempotently from bundled declarations.
+- Open duplication issue `#671`: `MemoryService.EnsureGlobalAgents` and `AgentLibraryMaintenanceService.EnsureGlobalAgents` both reconcile protected built-in agents, duplicating declaration-to-agent mapping, persisted field repair, and lifecycle-hook create/update loops for Memory Curator, Skill Curator, and Goal Agent.
 - Goal Agent ships under `internal/builtinskills/builtin/agents/goal/` with root `SKILLS.md` and `skills/evaluate_task_goal/SKILL.md`.
 - Loop Agent is a protected built-in lifecycle agent and runs after-complete only for tasks with dynamic-loop state enabled.
 - Agents are global by default and reusable across projects. Project-scoped agents/skills live under `<project_root>/.openvibely/agents/...`; global agents live under the app/config agents root.
@@ -31,6 +32,7 @@ Agent and catalog facts:
 - Generated/native OpenVibely declarations include explicit `kind` frontmatter. Explicit skill import surfaces should materialize packages through shared normalization into `<root>/skills/<handle>/SKILL.md` and update `<root>/skills/SKILLS.md`; `skill_import` follows the central importer, while the browser `/skills/import` upload handler has a known duplication/drift gap (#446) because it separately normalizes package declarations and writes support files with a broader accepted package-file policy than the product text and central importer.
 - Skill import normalization guarantees YAML frontmatter with at least `name`, `description`, `kind: skill`, and `enabled: true`; it supports raw Markdown bodies, common top-level `name`/`description` packages, and existing OpenVibely declarations without wholesale clobbering valid fields.
 - Standalone skill saves and agent-owned skill saves are both active user-facing skills-management paths. Their browser-dialog request-to-declaration conversion is centralized in the shared `normalizeSkillDialogDeclaration` helper before persistence through the importer, while standalone saves still reject agent-root/`agent.key` declarations and agent-owned saves still rely on scoped importer validation for mismatched `agent.key`.
+- Issue `#658` implementation direction / PR `#669` state (publication repaired 2026-08-18): standalone `skill_manage` and agent-owned `agent_skill_manage` support-file writes/removes keep separate path resolution, scope fallback/rejection, handle validation, and protection checks, while sharing importer helpers for destination directory creation, create/update detection, `scripts` executable mode, file writing/chmod, removal/not-found handling, changed paths, and created/updated/archived result labels. Regression coverage exercises the active agent-owned mutation-tool surface for executable script writes and archive-style remove results. PR `#669` was force-with-lease corrected so source branch and `refs/pull/669/head` both pointed at `c7b6c0e796a57eda4a521a04c7b2117367874711`, with merge-base equal to live `main` `05274740d426c8c5b96fa773b5e25cc6e513273c` and a three-dot diff limited to `internal/agentlibrary/importer.go` plus `internal/agentlibrary/mutation_tools_test.go`. Validation before publication repair passed `go build ./cmd/server`, `go test ./internal/agentlibrary -count=1 -timeout 60s`, and `go test ./internal/... -count=1 -timeout 120s`. Do not treat PR `#669` as clean, merged, or complete from this memory alone: the fix turn explicitly did not perform the required fresh audit-only review.
 - `skill_import` is treated as a skill-library write capability alongside `skill_manage`; grant it to write-authorized skill/curation agents rather than ordinary task turns.
 
 Project guidance facts:
