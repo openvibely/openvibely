@@ -372,20 +372,23 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			}
 		}
 
-		// Handle category change separately since it has side effects (auto-submit)
+		// Handle category change separately since it has lifecycle side effects.
+		categoryChanged := false
+		newCategory := task.Category
 		if req.Category != "" {
-			newCategory := models.TaskCategory(req.Category)
-			if newCategory != task.Category {
+			requestedCategory := models.TaskCategory(req.Category)
+			if requestedCategory != task.Category {
 				// Validate category
 				validCategory := false
 				for _, c := range models.SelectableCategories {
-					if newCategory == c {
+					if requestedCategory == c {
 						validCategory = true
 						break
 					}
 				}
 				if validCategory {
-					task.Category = newCategory
+					newCategory = requestedCategory
+					categoryChanged = true
 					changes = append(changes, "category")
 				} else {
 					applog.Infof("[task-edit] invalid category %q for task %s", req.Category, req.ID)
@@ -414,13 +417,28 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			continue
 		}
 
-		if err := taskSvc.Update(ctx, task); err != nil {
-			applog.Infof("[task-edit] error updating task %s: %v", req.ID, err)
-			failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, err))
-		} else {
-			applog.Infof("[task-edit] updated task %s fields=%v", req.ID, changes)
-			edited = append(edited, fmt.Sprintf("- \"%s\" (%s, updated: %s) [TASK_EDITED:%s]", task.Title, task.Category, strings.Join(changes, ", "), task.ID))
+		nonCategoryChanges := len(changes)
+		if categoryChanged {
+			nonCategoryChanges--
 		}
+		if nonCategoryChanges > 0 {
+			if err := taskSvc.Update(ctx, task); err != nil {
+				applog.Infof("[task-edit] error updating task %s: %v", req.ID, err)
+				failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, err))
+				continue
+			}
+		}
+		if categoryChanged {
+			if err := taskSvc.UpdateCategory(ctx, task.ID, newCategory); err != nil {
+				applog.Infof("[task-edit] error updating task category %s: %v", req.ID, err)
+				failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, err))
+				continue
+			}
+			task.Category = newCategory
+		}
+
+		applog.Infof("[task-edit] updated task %s fields=%v", req.ID, changes)
+		edited = append(edited, fmt.Sprintf("- \"%s\" (%s, updated: %s) [TASK_EDITED:%s]", task.Title, task.Category, strings.Join(changes, ", "), task.ID))
 	}
 
 	var summary strings.Builder

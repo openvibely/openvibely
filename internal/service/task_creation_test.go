@@ -408,7 +408,7 @@ func TestExecuteTaskEdits_CategoryChange(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	attachmentRepo := repository.NewAttachmentRepo(db)
-	workerSvc := NewWorkerService(nil, 0, nil)
+	workerSvc := newTestWorkerService(t)
 	taskSvc := NewTaskService(taskRepo, attachmentRepo, workerSvc)
 
 	projectRepo := repository.NewProjectRepo(db)
@@ -449,6 +449,172 @@ func TestExecuteTaskEdits_CategoryChange(t *testing.T) {
 	}
 	if updated.Category != models.CategoryActive {
 		t.Errorf("expected category 'active', got %q", updated.Category)
+	}
+
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != task.ID {
+			t.Errorf("expected submitted task ID=%s, got %s", task.ID, submitted.ID)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected edit_task backlog to active to submit task")
+	}
+}
+
+func TestExecuteTaskEdits_CategoryActiveNoOpDoesNotDoubleSubmit(t *testing.T) {
+	for _, status := range []models.TaskStatus{models.StatusPending, models.StatusQueued, models.StatusRunning} {
+		t.Run(string(status), func(t *testing.T) {
+			ctx := context.Background()
+			db := testutil.NewTestDB(t)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			workerSvc := newTestWorkerService(t)
+			taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+			projectRepo := repository.NewProjectRepo(db)
+			project := &models.Project{Name: "Test Project"}
+			if err := projectRepo.Create(ctx, project); err != nil {
+				t.Fatalf("failed to create project: %v", err)
+			}
+			task := &models.Task{ProjectID: project.ID, Title: "Already Active", Prompt: "work", Category: models.CategoryActive, Status: status, Priority: 2}
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("failed to create task: %v", err)
+			}
+
+			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, Category: "active"}}, project.ID, taskSvc, nil, "")
+
+			if !strings.Contains(summary, "no changes") {
+				t.Errorf("expected no changes for active to active edit, got %q", summary)
+			}
+			select {
+			case submitted := <-workerSvc.Submitted():
+				t.Fatalf("expected active to active edit not to submit, got %s", submitted.ID)
+			default:
+			}
+		})
+	}
+}
+
+func TestExecuteTaskEdits_CategoryBacklogCancelsActiveRunningOrQueuedTask(t *testing.T) {
+	for _, status := range []models.TaskStatus{models.StatusRunning, models.StatusQueued} {
+		t.Run(string(status), func(t *testing.T) {
+			ctx := context.Background()
+			db := testutil.NewTestDB(t)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			workerSvc := newTestWorkerService(t)
+			taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+			projectRepo := repository.NewProjectRepo(db)
+			project := &models.Project{Name: "Test Project"}
+			if err := projectRepo.Create(ctx, project); err != nil {
+				t.Fatalf("failed to create project: %v", err)
+			}
+			task := &models.Task{ProjectID: project.ID, Title: "Active Work", Prompt: "work", Category: models.CategoryActive, Status: status, Priority: 2}
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("failed to create task: %v", err)
+			}
+			cancelled := make(chan struct{}, 1)
+			workerSvc.RegisterCancel(task.ID, func() { cancelled <- struct{}{} })
+
+			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, Category: "backlog"}}, project.ID, taskSvc, nil, "")
+
+			if !strings.Contains(summary, "Edited 1 task(s)") {
+				t.Errorf("expected edit success, got %q", summary)
+			}
+			select {
+			case <-cancelled:
+			case <-time.After(100 * time.Millisecond):
+				t.Fatalf("expected edit_task active to backlog to cancel %s task", status)
+			}
+			if !workerSvc.IsCancellationRequested(task.ID) {
+				t.Fatal("expected cancellation requested marker")
+			}
+			updated, err := taskRepo.GetByID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("failed to get task: %v", err)
+			}
+			if updated.Category != models.CategoryBacklog {
+				t.Errorf("expected category backlog, got %q", updated.Category)
+			}
+			if updated.Status != models.StatusCancelled {
+				t.Errorf("expected status cancelled, got %q", updated.Status)
+			}
+		})
+	}
+}
+
+func TestExecuteTaskEdits_TitleAndCategoryChangePersistsAndSubmits(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Test Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Original", Prompt: "Original prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, Title: "Updated", Prompt: "Updated prompt", Priority: 4, Category: "active"}}, project.ID, taskSvc, nil, "")
+
+	if !strings.Contains(summary, "Edited 1 task(s)") {
+		t.Errorf("expected edit success, got %q", summary)
+	}
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if updated.Title != "Updated" {
+		t.Errorf("expected updated title, got %q", updated.Title)
+	}
+	if updated.Prompt != "Updated prompt" {
+		t.Errorf("expected updated prompt, got %q", updated.Prompt)
+	}
+	if updated.Priority != 4 {
+		t.Errorf("expected priority 4, got %d", updated.Priority)
+	}
+	if updated.Category != models.CategoryActive {
+		t.Errorf("expected active category, got %q", updated.Category)
+	}
+	select {
+	case submitted := <-workerSvc.Submitted():
+		if submitted.ID != task.ID {
+			t.Errorf("expected submitted task ID=%s, got %s", task.ID, submitted.ID)
+		}
+		if submitted.Title != "Updated" {
+			t.Errorf("expected submitted title %q, got %q", "Updated", submitted.Title)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected combined edit category activation to submit task")
+	}
+}
+
+func TestExecuteTaskEdits_TitleOnlyDoesNotSubmit(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Test Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Original", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("failed to create task: %v", err)
+	}
+
+	summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, Title: "Updated"}}, project.ID, taskSvc, nil, "")
+
+	if !strings.Contains(summary, "Edited 1 task(s)") {
+		t.Errorf("expected edit success, got %q", summary)
+	}
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("expected title-only edit not to submit, got %s", submitted.ID)
+	default:
 	}
 }
 
