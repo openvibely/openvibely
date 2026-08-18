@@ -1048,7 +1048,7 @@ func (s *EmailService) buildEmailActionToolRuntime(projectID, sender string) *ll
 	}
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
-		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, chatcontrol.SurfaceEmail, handlers),
+		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, chatcontrol.SurfaceEmail, handlers, runtimeActionHandlerSet(handlers)),
 	}
 }
 

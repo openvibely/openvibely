@@ -256,6 +256,12 @@ func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
 	}
 	for _, d := range defs {
 		_, handled, _, _ := rt.Executor(ctx, d.Name, json.RawMessage(`{}`))
+		if channelRuntimeGenericFallbackTool(d.Name) {
+			if handled {
+				t.Fatalf("generic fallback tool should fall through discord runtime executor: %s", d.Name)
+			}
+			continue
+		}
 		if !handled {
 			t.Fatalf("tool should be handled by discord runtime executor: %s", d.Name)
 		}
@@ -263,9 +269,6 @@ func TestDiscordActionHandlersCoverAdvertisedRuntimeTools(t *testing.T) {
 
 	actionCtx := discordActionContext{ChannelID: "chan-1", ThreadID: "thread-1", MessageID: "msg-1", UserID: "user-1"}
 	handlers := svc.discordActionHandlers(project.ID, actionCtx, nil)
-	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord, true, handlers); err != nil {
-		t.Fatalf("discord handler coverage: %v", err)
-	}
 	out, err := handlers["create_swarm_task"](ctx, json.RawMessage(`{"title":"Discord Swarm Created","prompt":"Split this work","category":"backlog"}`))
 	if err != nil {
 		t.Fatalf("create_swarm_task handler failed: %v", err)

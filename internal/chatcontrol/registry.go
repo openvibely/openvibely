@@ -799,7 +799,7 @@ var registry = []ActionDef{
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
-		Surfaces:     webAPISurfaces(),
+		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"description":{"type":"string","minLength":1,"maxLength":4000}},"required":["description"],"additionalProperties":false}`),
 	},
 	{
@@ -809,10 +809,9 @@ var registry = []ActionDef{
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
-		Surfaces:     webAPISurfaces(),
+		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank","yaml"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000},"automation_yaml":{"type":"string","description":"Canonical Automation YAML document to save when source is yaml.","minLength":1,"maxLength":65536}},"required":["source"],"additionalProperties":false}`),
 	},
-
 	// --- Chat domain ---
 	{
 		Name:         "get_chat_mode",

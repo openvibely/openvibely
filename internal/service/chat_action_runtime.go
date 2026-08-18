@@ -1629,10 +1629,21 @@ func (c *channelActionSummaryCollector) appendToOutput(output string) string {
 }
 
 // actionToolDefinitions returns tool definitions from the canonical registry
-// for channel surfaces (Telegram/Slack). Uses orchestrate mode since channels
-// always operate in orchestrate mode.
+// for channel surfaces. Uses orchestrate mode since channels always operate in
+// orchestrate mode.
 func actionToolDefinitions(surface chatcontrol.Surface, includeThreadTools bool) []llmcontracts.RuntimeToolDefinition {
 	return chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, surface, includeThreadTools)
+}
+
+func runtimeActionHandlerSet(handlers map[string]chatcontrol.RuntimeActionHandler) map[string]bool {
+	out := make(map[string]bool, len(handlers))
+	for name := range handlers {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 // buildFullChannelActionToolRuntime assembles the shared complete channel runtime
@@ -1641,6 +1652,6 @@ func actionToolDefinitions(surface chatcontrol.Surface, includeThreadTools bool)
 func buildFullChannelActionToolRuntime(surface chatcontrol.Surface, handlers map[string]chatcontrol.RuntimeActionHandler) *llmcontracts.RuntimeTools {
 	return &llmcontracts.RuntimeTools{
 		Definitions: actionToolDefinitions(surface, true),
-		Executor:    chatcontrol.BuildRuntimeToolExecutor(models.ChatModeOrchestrate, surface, handlers),
+		Executor:    chatcontrol.BuildRuntimeToolExecutorForActions(models.ChatModeOrchestrate, surface, handlers, runtimeActionHandlerSet(handlers)),
 	}
 }
