@@ -33,6 +33,14 @@ type Execution struct {
 	CompletedAt      *time.Time               `json:"completed_at"`
 }
 
+// TaskExecutionMetrics is the compact execution projection needed by task
+// detail status/metrics badges. It intentionally excludes prompt, output,
+// reasoning, error, and diff text.
+type TaskExecutionMetrics struct {
+	LatestStartedAt  *time.Time
+	LatestDurationMs int64
+}
+
 // ExecutionReplayMessage preserves one exact user/assistant exchange made
 // inside an execution that continued after live steering.
 type ExecutionReplayMessage struct {
