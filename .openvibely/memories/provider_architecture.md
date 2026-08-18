@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-17
+updated: 2026-08-18
 source: update_memory
-source_id: daily_model_release_check_no_new_issues_2026_08_17
+source_id: b93a64dfb021ea2ae663cee37396db66:50cc101f3635c622
 confidence: high
 title: Provider Architecture
 ---
@@ -33,6 +33,7 @@ Provider/model selection facts:
 - Interactive chat selection differs: explicit `agent_id` uses that model config, `agent_id=default` uses the global default, and empty/`auto` triggers complexity/vision-based model selection.
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not the provider/model.
 - Known execution-evidence gap tracked in `openvibely/openvibely#128`: the actual per-run model identity is stored but is not shown in task-thread execution history. The proposed slice exposes that existing identity per execution without changing model-selection behavior.
+- Issue `#653` / PR `#661` source branch `task/b93a64df-implement-github-issue-653-enforce-normalized-uniq` enforces normalized unique model setting names in Models settings. Names are trimmed and validated through the shared browser form normalization path and repository create/update guard; blank names and case-insensitive duplicate trimmed names are rejected, while updating the same row with its own normalized name succeeds. Cleanup on 2026-08-17 restored the local task worktree to published source commit `5e81ad9c` and removed unrelated alert-handler changes; net diff vs `origin/main` was limited to `internal/handler/model_handler.go`, `internal/handler/model_handler_test.go`, and `internal/repository/llm_config_repo.go`. `go build ./cmd/server && go test ./internal/... -count=1 -timeout 60s` passed after cleanup. A separate fresh audit-only review on 2026-08-18 found no material bugs, regressions, unrelated diff, publication mismatch, validation gap, or missing requirements with local `HEAD`, remote source branch, and live `refs/pull/661/head` all at `5e81ad9c`. Verify live PR/main state before treating this as merged or shipped.
 - OpenAI supports Responses API and Completions API. OpenAI Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
 - `gpt-5.3-codex` was released to the Responses API on 2026-02-24 (confirmed in OpenAI changelog). It predates the current daily-model-audit window and has not yet been evaluated for an OpenVibely model-support gap; treat as a candidate for a future bounded audit or implementation ticket.
 - OpenAI supports `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`; `gpt-5.6-sol` is the default for empty or unknown first-party OpenAI model selections. All three use a 1,050,000-token context window, have a 128,000-token maximum output, support `none`, `low`, `medium`, `high`, `xhigh`, and `max` reasoning, and default to `medium`.

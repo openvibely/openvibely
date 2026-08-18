@@ -4,7 +4,7 @@ type: project
 created: 2026-05-09
 updated: 2026-08-29
 source: update_memory
-source_id: b21e900f5ea2a08b3639bc818f1cddc4:1732a421a2b62973
+source_id: ce58dc08ee6cf3e3ca6d281fba596f35:5d0cf6dd6f7fd5c2
 confidence: high
 title: Integrations and Channels
 ---
@@ -13,6 +13,7 @@ OpenVibely integrates with GitHub, Slack, Telegram, Discord, Email, generic inbo
 
 Generic inbound webhooks:
 - Open review-gated intake gap `#349`: inbound webhooks can create and submit Active tasks, but lack a “create in Backlog for human review” mode for less-trusted external events.
+- Open Automation-trigger feature gap `#665`: inbound webhooks are configured as Channels integrations that create standalone Active tasks, but they are not exposed as Automation trigger nodes or adapter resources. External events therefore cannot enter explicit reviewable Automation graphs; this is distinct from `#349` backlog-review intake mode and `#230` multi-agent execution.
 - Open project-boundary defect `#373`: webhook update/delete/rotate/test routes must enforce selected-project ownership for webhook IDs; regression coverage should reject mismatched `project_id` plus webhook ID combinations.
 - Webhook delivery and Settings `Test` should share the private webhook task create/assign/submit operation, including duplicate-title retry behavior, ordered primary-agent assignment, task-agent assignment persistence, and worker submission. Inbound authentication/parsing and UI response rendering remain separate.
 - Issue `#568` / PR `#583`: inbound webhook create/update Settings saves share handler-level form normalization for `name`, `enabled`, `system_instructions`, `default_priority`, prompt templates, and ordered `agent_ids`. Preserve create-only project resolution/default blank name/enabled state/token-secret generation and update-only endpoint loading/blank-name preservation/checkbox-enabled behavior. Verify live GitHub/main state before treating stored implementation notes as merged or closed.
@@ -50,6 +51,7 @@ Outbound message targets:
 - Per-target actions must enforce project ownership for saved target IDs and preserve displayed `project_id` context. Cross-project target IDs must not dispatch messages or move targets.
 - Open consolidation gap `#296`: `ChannelTargetRepo.Upsert` and `ReplaceProjectTargets` duplication remains tracked separately. Issue `#496` covers broader duplicate normalization/validation across saved-target forms, draft/saved target testing, runtime `send_message` target resolution, and persistence; verify live GitHub state before treating any prior implementation as merged or closed.
 - Issue `#535`: outbound `send_message` target resolution uses `ChannelTargetRepo` lookup indexes for home, name, and target/thread queries via migration `161_channel_target_lookup_indexes.sql`. Preserve query-plan coverage for project/platform scoping, most-recently-updated home semantics, saved-target policy, explicit-target fallback rules, and runtime/tool/web test-send behavior. PR/publication state has been volatile; verify live issue/PR/main state before relying on stored snapshots.
+- Open correctness defect `#667`: Discord typed runtime targets such as `discord:channel:<id>` and `discord:user:<id>` can resolve the wrong saved target row because the legacy target lookup matches project/platform/target/thread but ignores `target_kind`. Discord user IDs and channel IDs are both numeric, and the UI/schema intentionally allow the same numeric destination when kinds differ; regression coverage should save colliding `channel` and `user` targets and assert typed channel sends dispatch to channels while typed user sends dispatch to DMs, preserving authorized-user fallback and explicit-target policy.
 
 GitHub integration:
 - Stored task PRs are routed from strictly parsed persisted `https://{host}/{owner}/{repo}/pull/{number}` URLs. Host must match selected project repository host and embedded number must match persisted PR number; malformed/foreign/query/fragment/number-mismatched records are skipped without blocking valid ones.

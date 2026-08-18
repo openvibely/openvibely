@@ -869,9 +869,7 @@ func publishBinaryBackup(current, backup string, mode os.FileMode) (err error) {
 	return syncDirectory(filepath.Dir(backup))
 }
 
-func waitForProcessExit(ctx context.Context, pid int, timeout time.Duration) error {
-	return waitForProcessExitPlatform(ctx, pid, timeout)
-}
+var waitForProcessExit = waitForProcessExitPlatform
 
 func packagedRestartCommand(cfg BinaryHelperConfig) func(string, string) (func(context.Context) error, error) {
 	return func(_, _ string) (func(context.Context) error, error) {
