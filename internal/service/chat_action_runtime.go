@@ -574,19 +574,16 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 }
 
 func channelListAutomationsResult(ctx context.Context, graphSvc *AutomationGraphService, currentProjectID string, input json.RawMessage) (string, error) {
-	if graphSvc == nil {
-		return marshalChannelAutomationResult(map[string]any{"automations": []any{}})
-	}
 	var req channelListAutomationsInput
 	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
-	projectID := strings.TrimSpace(currentProjectID)
-	if override := strings.TrimSpace(req.ProjectID); override != "" {
-		projectID = override
+	projectID, err := resolveChannelAutomationProjectID(currentProjectID, req.ProjectID, "list_automations")
+	if err != nil {
+		return "", err
 	}
-	if projectID == "" {
-		return "", fmt.Errorf("list_automations: no current project")
+	if graphSvc == nil {
+		return marshalChannelAutomationResult(map[string]any{"automations": []any{}})
 	}
 	cards, err := graphSvc.List(ctx, projectID)
 	if err != nil {
@@ -600,9 +597,6 @@ func channelListAutomationsResult(ctx context.Context, graphSvc *AutomationGraph
 }
 
 func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphService, currentProjectID string, input json.RawMessage) (string, error) {
-	if graphSvc == nil {
-		return "", fmt.Errorf("automations unavailable")
-	}
 	var req channelGetAutomationInput
 	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
@@ -611,12 +605,12 @@ func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphSe
 	if automationID == "" {
 		return "", fmt.Errorf("get_automation: automation_id is required")
 	}
-	projectID := strings.TrimSpace(currentProjectID)
-	if override := strings.TrimSpace(req.ProjectID); override != "" {
-		projectID = override
+	projectID, err := resolveChannelAutomationProjectID(currentProjectID, req.ProjectID, "get_automation")
+	if err != nil {
+		return "", err
 	}
-	if projectID == "" {
-		return "", fmt.Errorf("get_automation: no current project")
+	if graphSvc == nil {
+		return "", fmt.Errorf("automations unavailable")
 	}
 	cards, err := graphSvc.List(ctx, projectID)
 	if err != nil {
@@ -628,6 +622,18 @@ func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphSe
 		}
 	}
 	return marshalChannelAutomationResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
+}
+
+func resolveChannelAutomationProjectID(currentProjectID, requestedProjectID, toolName string) (string, error) {
+	currentProjectID = strings.TrimSpace(currentProjectID)
+	requestedProjectID = strings.TrimSpace(requestedProjectID)
+	if currentProjectID == "" {
+		return "", fmt.Errorf("%s: no current project", toolName)
+	}
+	if requestedProjectID != "" && requestedProjectID != currentProjectID {
+		return "", fmt.Errorf("project_id %q is outside the caller's authorized project context", requestedProjectID)
+	}
+	return currentProjectID, nil
 }
 
 func channelAutomationCardSummary(card models.AutomationCard) map[string]any {

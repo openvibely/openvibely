@@ -1010,6 +1010,17 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
 }
 
+func TestBuildChannelUtilityActionHandlersAutomationReadsRejectForeignProject(t *testing.T) {
+	ctx := context.Background()
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: "project-current"})
+
+	_, err := handlers["list_automations"](ctx, json.RawMessage(`{"project_id":"project-foreign"}`))
+	require.ErrorContains(t, err, `project_id "project-foreign" is outside the caller's authorized project context`)
+
+	_, err = handlers["get_automation"](ctx, json.RawMessage(`{"automation_id":"automation-1","project_id":"project-foreign"}`))
+	require.ErrorContains(t, err, `project_id "project-foreign" is outside the caller's authorized project context`)
+}
+
 func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
