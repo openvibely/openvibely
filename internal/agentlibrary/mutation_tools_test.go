@@ -601,6 +601,79 @@ skill:
 	}
 }
 
+func TestAgentSkillMutationTools_WriteScriptAndRemoveSupportFile(t *testing.T) {
+	imp, _, _, projectRoot := buildTools(t)
+	tools := AgentSkillMutationTools(imp, nil, "reviewer", "project")
+	declaration := `---
+kind: openvibely.agent_skill
+version: 1
+skill:
+  key: review_migrations
+---
+# Review migrations
+`
+	createParams, _ := json.Marshal(map[string]any{"action": "create", "declaration": declaration})
+	out, handled, isErr, err := tools.Executor(context.Background(), "agent_skill_manage", createParams)
+	if err != nil || !handled || isErr {
+		t.Fatalf("agent_skill_manage create failed output=%s handled=%v isErr=%v err=%v", out, handled, isErr, err)
+	}
+
+	scriptParams, _ := json.Marshal(map[string]any{
+		"action": "write_file",
+		"handle": "review_migrations",
+		"support": map[string]any{
+			"kind":    "scripts",
+			"path":    "check.sh",
+			"content": "#!/bin/sh\necho ok\n",
+		},
+	})
+	out, _, isErr, err = tools.Executor(context.Background(), "agent_skill_manage", scriptParams)
+	if err != nil || isErr {
+		t.Fatalf("script write should succeed, got output=%s err=%v", out, err)
+	}
+	var writeRes ImportResult
+	if err := json.Unmarshal([]byte(out), &writeRes); err != nil {
+		t.Fatalf("unmarshal write result: %v %s", err, out)
+	}
+	if !writeRes.Applied || len(writeRes.Created) != 1 || writeRes.Created[0] != "reviewer/review_migrations/scripts/check.sh" {
+		t.Fatalf("bad script write result: %+v", writeRes)
+	}
+	scriptPath := filepath.Join(projectRoot, "agents", "reviewer", "skills", "review_migrations", "scripts", "check.sh")
+	info, err := os.Stat(scriptPath)
+	if err != nil {
+		t.Fatalf("script support file should exist: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("agent-owned script support files should be executable, mode=%v", info.Mode().Perm())
+	}
+
+	removeParams, _ := json.Marshal(map[string]any{
+		"action": "remove_file",
+		"handle": "review_migrations",
+		"support": map[string]any{
+			"kind": "scripts",
+			"path": "check.sh",
+		},
+	})
+	out, _, isErr, err = tools.Executor(context.Background(), "agent_skill_manage", removeParams)
+	if err != nil || isErr {
+		t.Fatalf("remove_file should succeed, got output=%s err=%v", out, err)
+	}
+	var removeRes ImportResult
+	if err := json.Unmarshal([]byte(out), &removeRes); err != nil {
+		t.Fatalf("unmarshal remove result: %v %s", err, out)
+	}
+	if !removeRes.Applied || len(removeRes.Archived) != 1 || removeRes.Archived[0] != "reviewer/review_migrations/scripts/check.sh" {
+		t.Fatalf("bad remove result: %+v", removeRes)
+	}
+	if len(removeRes.ChangedPaths) != 1 || removeRes.ChangedPaths[0] != scriptPath {
+		t.Fatalf("remove result should include changed script path %q, got %+v", scriptPath, removeRes)
+	}
+	if _, err := os.Stat(scriptPath); !os.IsNotExist(err) {
+		t.Fatalf("script support file should be removed, stat err=%v", err)
+	}
+}
+
 func TestAgentSkillMutationTools_WriteSupportFileRejectsAgentPathHandle(t *testing.T) {
 	imp, _, _, _ := buildTools(t)
 	tools := AgentSkillMutationTools(imp, nil, "reviewer", "project")
