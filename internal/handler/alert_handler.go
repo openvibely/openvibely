@@ -98,6 +98,16 @@ func (h *Handler) renderAlertsRefresh(c echo.Context, ctx context.Context, proje
 		return err
 	}
 	unreadCount, _ := h.alertSvc.CountUnread(ctx, projectID)
+	return h.renderAlertsContent(c, projectID, alerts, unreadCount)
+}
+
+func (h *Handler) renderAlertsRefreshBestEffortList(c echo.Context, ctx context.Context, projectID string) error {
+	alerts, _ := h.alertSvc.ListSummariesByProject(ctx, projectID, 100)
+	unreadCount, _ := h.alertSvc.CountUnread(ctx, projectID)
+	return h.renderAlertsContent(c, projectID, alerts, unreadCount)
+}
+
+func (h *Handler) renderAlertsContent(c echo.Context, projectID string, alerts []models.AlertSummary, unreadCount int) error {
 	c.Response().Header().Set("HX-Trigger", "alertUpdate")
 	return render(c, http.StatusOK, pages.AlertsContent(alerts, projectID, unreadCount))
 }
@@ -137,7 +147,7 @@ func (h *Handler) MarkAlertRead(c echo.Context) error {
 
 	applog.Infof("[handler] MarkAlertRead id=%s", id)
 
-	return h.renderAlertsRefresh(c, ctx, currentProjectID)
+	return h.renderAlertsRefreshBestEffortList(c, ctx, currentProjectID)
 }
 
 func (h *Handler) MarkAllAlertsRead(c echo.Context) error {
@@ -173,7 +183,7 @@ func (h *Handler) DeleteAlert(c echo.Context) error {
 	applog.Infof("[handler] DeleteAlert id=%s", id)
 
 	if isHTMX(c) {
-		return h.renderAlertsRefresh(c, ctx, currentProjectID)
+		return h.renderAlertsRefreshBestEffortList(c, ctx, currentProjectID)
 	}
 	return c.Redirect(http.StatusSeeOther, "/alerts")
 }

@@ -107,6 +107,27 @@ func TestHandler_AlertDecisionMutationsRefreshAlertList(t *testing.T) {
 	}
 }
 
+func TestHandler_AlertRefreshHelpersPreserveListErrorHandling(t *testing.T) {
+	tc := NewTestContext(t)
+	h := tc.handler
+	project := tc.CreateProject().WithName("Refresh Error Handling Project").Build()
+
+	require.NoError(t, tc.db.Close())
+
+	strictReq := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID, nil)
+	strictRec := httptest.NewRecorder()
+	strictCtx := tc.echo.NewContext(strictReq, strictRec)
+	require.Error(t, h.renderAlertsRefresh(strictCtx, context.Background(), project.ID))
+
+	bestEffortReq := httptest.NewRequest(http.MethodGet, "/alerts?project_id="+project.ID, nil)
+	bestEffortRec := httptest.NewRecorder()
+	bestEffortCtx := tc.echo.NewContext(bestEffortReq, bestEffortRec)
+	require.NoError(t, h.renderAlertsRefreshBestEffortList(bestEffortCtx, context.Background(), project.ID))
+	assertCode(t, bestEffortRec, http.StatusOK)
+	assertAlertUpdate(t, bestEffortRec)
+	assertContains(t, bestEffortRec, "No alerts. You're all clear!")
+}
+
 func TestHandler_RejectAlertAndActionableVisibilityAreProjectScoped(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Review Project")
