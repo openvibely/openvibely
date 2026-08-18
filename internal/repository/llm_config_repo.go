@@ -18,6 +18,7 @@ type LLMConfigRepo struct {
 var (
 	ErrLLMConfigNameRequired  = errors.New("Model name is required")
 	ErrLLMConfigNameDuplicate = errors.New("A model with that name already exists")
+	ErrLLMConfigModelRequired = errors.New("Model identifier is required")
 )
 
 func NewLLMConfigRepo(db *sql.DB) *LLMConfigRepo {
@@ -72,6 +73,16 @@ func normalizeLLMConfigName(name string) (string, error) {
 		return "", ErrLLMConfigNameRequired
 	}
 	return name, nil
+}
+
+func validateLLMConfigModel(a *models.LLMConfig) error {
+	switch a.Provider {
+	case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
+		if strings.TrimSpace(a.Model) == "" {
+			return ErrLLMConfigModelRequired
+		}
+	}
+	return nil
 }
 
 func validateLLMConfigNameAvailableTx(ctx context.Context, tx *sql.Tx, name, excludeID string) (string, error) {
@@ -352,6 +363,10 @@ func (r *LLMConfigRepo) deleteWithTx(ctx context.Context, tx *sql.Tx, id string)
 }
 
 func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
+	if err := validateLLMConfigModel(a); err != nil {
+		return err
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin create model config tx: %w", err)
@@ -407,6 +422,10 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 }
 
 func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
+	if err := validateLLMConfigModel(a); err != nil {
+		return err
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin update model config tx: %w", err)

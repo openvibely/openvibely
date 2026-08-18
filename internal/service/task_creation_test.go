@@ -633,11 +633,11 @@ func TestExecuteTaskEdits_AgentReassignment(t *testing.T) {
 
 	// Create agent configs for testing
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic"}
+	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), initialAgent); err != nil {
 		t.Fatalf("failed to create initial agent: %v", err)
 	}
-	newAgent := &models.LLMConfig{Name: "New Agent", Provider: "anthropic"}
+	newAgent := &models.LLMConfig{Name: "New Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), newAgent); err != nil {
 		t.Fatalf("failed to create new agent: %v", err)
 	}
@@ -701,7 +701,7 @@ func TestExecuteTaskEdits_AgentReassignmentNoChange(t *testing.T) {
 
 	// Create an agent config
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	agent := &models.LLMConfig{Name: "Same Agent", Provider: "anthropic"}
+	agent := &models.LLMConfig{Name: "Same Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), agent); err != nil {
 		t.Fatalf("failed to create agent: %v", err)
 	}
@@ -748,11 +748,11 @@ func TestExecuteTaskEdits_AgentConfigIDAlias(t *testing.T) {
 
 	// Create agent configs for testing
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic"}
+	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), initialAgent); err != nil {
 		t.Fatalf("failed to create initial agent: %v", err)
 	}
-	newAgent := &models.LLMConfig{Name: "New Agent", Provider: "anthropic"}
+	newAgent := &models.LLMConfig{Name: "New Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), newAgent); err != nil {
 		t.Fatalf("failed to create new agent: %v", err)
 	}
@@ -816,7 +816,7 @@ func TestExecuteTaskEdits_AgentAssignmentFromNil(t *testing.T) {
 
 	// Create an agent config
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	agent := &models.LLMConfig{Name: "First Agent", Provider: "anthropic"}
+	agent := &models.LLMConfig{Name: "First Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), agent); err != nil {
 		t.Fatalf("failed to create agent: %v", err)
 	}
@@ -875,7 +875,7 @@ func TestExecuteTaskEdits_PrimaryAgentDefinitionByIDPreservesModelConfig(t *test
 		t.Fatalf("create project: %v", err)
 	}
 	modelRepo := repository.NewLLMConfigRepo(db)
-	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic"}
+	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
 	}
@@ -950,7 +950,7 @@ func TestExecuteTaskEdits_ClearPrimaryAgentDefinitionPreservesModelConfig(t *tes
 		t.Fatalf("create project: %v", err)
 	}
 	modelRepo := repository.NewLLMConfigRepo(db)
-	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic"}
+	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
 	}
@@ -1070,7 +1070,7 @@ func TestExecuteTaskEdits_AgentIDStillOnlyChangesModelConfig(t *testing.T) {
 		t.Fatalf("create primary agent: %v", err)
 	}
 	modelRepo := repository.NewLLMConfigRepo(db)
-	modelConfig := &models.LLMConfig{Name: "Model Config 2", Provider: "anthropic"}
+	modelConfig := &models.LLMConfig{Name: "Model Config 2", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
 	}
