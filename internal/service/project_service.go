@@ -11,11 +11,16 @@ import (
 )
 
 type ProjectService struct {
-	repo *repository.ProjectRepo
+	repo    *repository.ProjectRepo
+	taskSvc *TaskService
 }
 
 func NewProjectService(repo *repository.ProjectRepo) *ProjectService {
 	return &ProjectService{repo: repo}
+}
+
+func (s *ProjectService) SetTaskService(taskSvc *TaskService) {
+	s.taskSvc = taskSvc
 }
 
 func (s *ProjectService) List(ctx context.Context) ([]models.Project, error) {
@@ -42,6 +47,25 @@ func (s *ProjectService) Update(ctx context.Context, p *models.Project) error {
 }
 
 func (s *ProjectService) Delete(ctx context.Context, id string) error {
+	project, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if project == nil || project.IsDefault {
+		return fmt.Errorf("project not found or is the default project")
+	}
+	hasTasks, err := s.repo.HasTasks(ctx, id)
+	if err != nil {
+		return err
+	}
+	if hasTasks {
+		if s.taskSvc == nil {
+			return fmt.Errorf("task service is unavailable for project deletion")
+		}
+		if err := s.taskSvc.DeleteProjectTasks(ctx, id); err != nil {
+			return err
+		}
+	}
 	return s.repo.Delete(ctx, id)
 }
 

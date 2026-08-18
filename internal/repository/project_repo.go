@@ -102,6 +102,15 @@ func (r *ProjectRepo) Update(ctx context.Context, p *models.Project) error {
 	return nil
 }
 
+func (r *ProjectRepo) HasTasks(ctx context.Context, id string) (bool, error) {
+	var exists int
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM tasks WHERE project_id = ?)`, id).Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("checking project tasks: %w", err)
+	}
+	return exists != 0, nil
+}
+
 func (r *ProjectRepo) Delete(ctx context.Context, id string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
