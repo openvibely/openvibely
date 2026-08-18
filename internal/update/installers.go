@@ -198,17 +198,29 @@ type packagedUpdateHelperHandoffConfig struct {
 	StartHelper        func(*exec.Cmd) error
 	AwaitHelperHandoff func(context.Context, LocalStagedUpdate) error
 	Shutdown           func()
+	Errors             packagedUpdateHelperHandoffErrors
 
 	OnSetupFailure   func(helperPath string)
 	OnStartFailure   func(helperPath, metadataPath string)
 	OnHandoffFailure func(metadataPath string)
 }
 
+type packagedUpdateHelperHandoffErrors struct {
+	PrepareHelper      string
+	ClearPriorHandoff  string
+	PersistPreparation string
+	EncodeMetadata     string
+	PersistMetadata    string
+	StartHelper        string
+	ConfirmHandoff     string
+	RecoveryReadiness  string
+}
+
 func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHelperHandoffConfig) error {
 	staged := cfg.Staged
 	helperPath, err := publishPackagedUpdateHelper(cfg.HelperSourcePath, staged.InstallPath)
 	if err != nil {
-		return err
+		return wrapPackagedHelperHandoffError(cfg.Errors.PrepareHelper, err)
 	}
 	if cfg.Recovery {
 		_ = os.Remove(binaryHelperRecoveryReadyPath(staged.InstallPath))
@@ -217,18 +229,18 @@ func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHel
 			if cfg.OnSetupFailure != nil {
 				cfg.OnSetupFailure(helperPath)
 			}
-			return err
+			return wrapPackagedHelperHandoffError(cfg.Errors.ClearPriorHandoff, err)
 		}
 		if err := writeBinaryHelperOutcome(staged, binaryOutcomePrepared); err != nil {
 			if cfg.OnSetupFailure != nil {
 				cfg.OnSetupFailure(helperPath)
 			}
-			return err
+			return wrapPackagedHelperHandoffError(cfg.Errors.PersistPreparation, err)
 		}
 	}
 	metadata, err := json.Marshal(cfg.RelaunchMetadata)
 	if err != nil {
-		return err
+		return wrapPackagedHelperHandoffError(cfg.Errors.EncodeMetadata, err)
 	}
 	metadataPath := ""
 	args := []string{cfg.CommandName, "--parent-pid", fmt.Sprint(os.Getpid()), "--current", staged.InstallPath, "--staged", staged.ArtifactPath, "--backup", staged.BackupPath, "--health-url", cfg.HealthURL, "--expected-version", staged.Version, "--previous-version", staged.PreviousVersion, "--outcome-id", staged.OutcomeID}
@@ -240,7 +252,7 @@ func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHel
 	case packagedHelperMetadataFile:
 		metadataPath = binaryHelperRelaunchMetadataPath(staged.InstallPath)
 		if err := atomicWriteState(metadataPath, metadata); err != nil {
-			return err
+			return wrapPackagedHelperHandoffError(cfg.Errors.PersistMetadata, err)
 		}
 		args = append(args, "--relaunch-metadata", metadataPath)
 	default:
@@ -255,11 +267,11 @@ func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHel
 		if cfg.OnStartFailure != nil {
 			cfg.OnStartFailure(helperPath, metadataPath)
 		}
-		return err
+		return wrapPackagedHelperHandoffError(cfg.Errors.StartHelper, err)
 	}
 	if cfg.Recovery {
 		if err := waitForPackagedUpdateHelperRecoveryReadiness(ctx, staged); err != nil {
-			return err
+			return wrapPackagedHelperHandoffError(cfg.Errors.RecoveryReadiness, err)
 		}
 	} else {
 		await := cfg.AwaitHelperHandoff
@@ -270,11 +282,18 @@ func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHel
 			if cfg.OnHandoffFailure != nil {
 				cfg.OnHandoffFailure(metadataPath)
 			}
-			return err
+			return wrapPackagedHelperHandoffError(cfg.Errors.ConfirmHandoff, err)
 		}
 	}
 	cfg.Shutdown()
 	return nil
+}
+
+func wrapPackagedHelperHandoffError(message string, err error) error {
+	if message == "" || err == nil {
+		return err
+	}
+	return fmt.Errorf("%s: %w", message, err)
 }
 
 func publishPackagedUpdateHelper(sourcePath, installPath string) (string, error) {
@@ -1079,6 +1098,15 @@ func (i *BinaryInstaller) Apply(ctx context.Context, value any) error {
 		StartHelper:        i.StartHelper,
 		AwaitHelperHandoff: i.awaitHelperHandoff,
 		Shutdown:           i.Shutdown,
+		Errors: packagedUpdateHelperHandoffErrors{
+			PrepareHelper:      "prepare binary update helper",
+			ClearPriorHandoff:  "clear prior binary helper handoff",
+			PersistPreparation: "persist binary helper preparation",
+			EncodeMetadata:     "encode binary helper relaunch metadata",
+			PersistMetadata:    "persist binary helper relaunch metadata",
+			StartHelper:        "start binary update helper",
+			ConfirmHandoff:     "confirm binary helper handoff",
+		},
 		OnSetupFailure: func(helperPath string) {
 			_ = os.Remove(helperPath)
 		},
