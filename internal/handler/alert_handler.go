@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -91,13 +92,7 @@ func alertSummaryFromAlert(a *models.Alert) models.AlertSummary {
 	}
 }
 
-func (h *Handler) setAlertDecision(c echo.Context, state models.AlertDecisionState) error {
-	ctx := c.Request().Context()
-	projectID, _ := h.getCurrentProjectID(c)
-	if err := h.alertSvc.SetDecision(ctx, projectID, c.Param("id"), state); err != nil {
-		applog.Infof("[handler] setAlertDecision project=%s alert=%s state=%s error=%v", projectID, c.Param("id"), state, err)
-		return echo.NewHTTPError(http.StatusNotFound, "notification not found or no longer pending")
-	}
+func (h *Handler) renderAlertsRefresh(c echo.Context, ctx context.Context, projectID string) error {
 	alerts, err := h.alertSvc.ListSummariesByProject(ctx, projectID, 100)
 	if err != nil {
 		return err
@@ -105,6 +100,16 @@ func (h *Handler) setAlertDecision(c echo.Context, state models.AlertDecisionSta
 	unreadCount, _ := h.alertSvc.CountUnread(ctx, projectID)
 	c.Response().Header().Set("HX-Trigger", "alertUpdate")
 	return render(c, http.StatusOK, pages.AlertsContent(alerts, projectID, unreadCount))
+}
+
+func (h *Handler) setAlertDecision(c echo.Context, state models.AlertDecisionState) error {
+	ctx := c.Request().Context()
+	projectID, _ := h.getCurrentProjectID(c)
+	if err := h.alertSvc.SetDecision(ctx, projectID, c.Param("id"), state); err != nil {
+		applog.Infof("[handler] setAlertDecision project=%s alert=%s state=%s error=%v", projectID, c.Param("id"), state, err)
+		return echo.NewHTTPError(http.StatusNotFound, "notification not found or no longer pending")
+	}
+	return h.renderAlertsRefresh(c, ctx, projectID)
 }
 
 func (h *Handler) ApproveAlert(c echo.Context) error {
@@ -132,14 +137,7 @@ func (h *Handler) MarkAlertRead(c echo.Context) error {
 
 	applog.Infof("[handler] MarkAlertRead id=%s", id)
 
-	// Return updated alerts list
-	alerts, _ := h.alertSvc.ListSummariesByProject(ctx, currentProjectID, 100)
-	unreadCount, _ := h.alertSvc.CountUnread(ctx, currentProjectID)
-
-	// Trigger alert badge refresh in sidebar
-	c.Response().Header().Set("HX-Trigger", "alertUpdate")
-
-	return render(c, http.StatusOK, pages.AlertsContent(alerts, currentProjectID, unreadCount))
+	return h.renderAlertsRefresh(c, ctx, currentProjectID)
 }
 
 func (h *Handler) MarkAllAlertsRead(c echo.Context) error {
@@ -154,11 +152,11 @@ func (h *Handler) MarkAllAlertsRead(c echo.Context) error {
 
 	applog.Infof("[handler] MarkAllAlertsRead project=%s", currentProjectID)
 
+	// MarkAllRead guarantees the project unread count is zero, so keep the
+	// existing shortcut instead of re-counting while sharing the trigger/fragment
+	// contract with the other refresh paths.
 	alerts, _ := h.alertSvc.ListSummariesByProject(ctx, currentProjectID, 100)
-
-	// Trigger alert badge refresh in sidebar
 	c.Response().Header().Set("HX-Trigger", "alertUpdate")
-
 	return render(c, http.StatusOK, pages.AlertsContent(alerts, currentProjectID, 0))
 }
 
@@ -175,14 +173,7 @@ func (h *Handler) DeleteAlert(c echo.Context) error {
 	applog.Infof("[handler] DeleteAlert id=%s", id)
 
 	if isHTMX(c) {
-		// Re-render alerts list with updated count
-		alerts, _ := h.alertSvc.ListSummariesByProject(ctx, currentProjectID, 100)
-		unreadCount, _ := h.alertSvc.CountUnread(ctx, currentProjectID)
-
-		// Trigger alert badge refresh in sidebar
-		c.Response().Header().Set("HX-Trigger", "alertUpdate")
-
-		return render(c, http.StatusOK, pages.AlertsContent(alerts, currentProjectID, unreadCount))
+		return h.renderAlertsRefresh(c, ctx, currentProjectID)
 	}
 	return c.Redirect(http.StatusSeeOther, "/alerts")
 }
@@ -213,8 +204,8 @@ func (h *Handler) DeleteAllAlerts(c echo.Context) error {
 
 	applog.Infof("[handler] DeleteAllAlerts project=%s", currentProjectID)
 
-	// Trigger alert badge refresh in sidebar
+	// DeleteAll removes every project alert, so keep the existing empty-list and
+	// zero-unread shortcut instead of re-querying after the destructive mutation.
 	c.Response().Header().Set("HX-Trigger", "alertUpdate")
-
 	return render(c, http.StatusOK, pages.AlertsContent([]models.AlertSummary{}, currentProjectID, 0))
 }

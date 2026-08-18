@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -46,6 +47,64 @@ func TestHandler_ApproveAlertIsProjectScoped(t *testing.T) {
 	require.NoError(t, getErr)
 	require.Equal(t, models.AlertDecisionApproved, approved.DecisionState)
 	require.Equal(t, models.AlertProcessingUnclaimed, approved.ProcessingState)
+}
+
+func TestHandler_AlertDecisionMutationsRefreshAlertList(t *testing.T) {
+	cases := []struct {
+		name      string
+		path      string
+		state     models.AlertDecisionState
+		stateText string
+		call      func(*Handler, echo.Context) error
+	}{
+		{name: "approve", path: "/approve", state: models.AlertDecisionApproved, stateText: "approved", call: (*Handler).ApproveAlert},
+		{name: "reject", path: "/reject", state: models.AlertDecisionRejected, stateText: "rejected", call: (*Handler).RejectAlert},
+		{name: "dismiss", path: "/dismiss", state: models.AlertDecisionDismissed, stateText: "dismissed", call: (*Handler).DismissAlert},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			project := createProject(t, h, "Decision Refresh Project")
+			alert := &models.Alert{
+				ProjectID:       project.ID,
+				Scope:           models.AlertScopeProject,
+				Type:            models.AlertType("suggestion"),
+				Severity:        models.SeverityInfo,
+				Title:           "Decision refresh suggestion",
+				Message:         "Refresh this row",
+				Body:            "Lazy detail body must stay out of the list refresh",
+				Source:          "test",
+				DecisionState:   models.AlertDecisionPending,
+				ProcessingState: models.AlertProcessingUnclaimed,
+			}
+			require.NoError(t, h.alertSvc.Create(context.Background(), alert))
+			survivor := createAlert(t, h, project.ID, "Still unread after decision")
+
+			req := httptest.NewRequest(http.MethodPost, "/alerts/"+alert.ID+tc.path+"?project_id="+project.ID, nil)
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetParamNames("id")
+			c.SetParamValues(alert.ID)
+
+			require.NoError(t, tc.call(h, c))
+			assertCode(t, rec, http.StatusOK)
+			assertAlertUpdate(t, rec)
+			assertContains(t, rec, alert.Title)
+			assertContains(t, rec, survivor.Title)
+			assertContains(t, rec, tc.stateText)
+			assertContains(t, rec, "2 unread")
+			assertNotContains(t, rec, alert.Body)
+
+			stored, err := h.alertSvc.GetByID(context.Background(), project.ID, alert.ID)
+			require.NoError(t, err)
+			require.Equal(t, tc.state, stored.DecisionState)
+			count, err := h.alertSvc.CountUnread(context.Background(), project.ID)
+			require.NoError(t, err)
+			require.Equal(t, 2, count)
+		})
+	}
 }
 
 func TestHandler_RejectAlertAndActionableVisibilityAreProjectScoped(t *testing.T) {
