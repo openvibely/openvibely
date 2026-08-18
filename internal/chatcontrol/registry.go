@@ -773,6 +773,26 @@ var registry = []ActionDef{
 
 	// --- Automations domain (project-scoped definition control) ---
 	{
+		Name:         "list_automations",
+		Description:  "List compact summaries of all project Automations (ID, name, status, paused, adapter key, node count, next run, last run). Does not expose YAML graph definitions.",
+		Domain:       DomainAutomations,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional project ID override."}},"additionalProperties":false}`),
+	},
+	{
+		Name:         "get_automation",
+		Description:  "Return a compact summary for a single Automation by ID (same shape as list_automations). Returns a clear not-found response for unknown IDs. Does not expose YAML graph definitions.",
+		Domain:       DomainAutomations,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"automation_id":{"type":"string","description":"ID of the Automation to retrieve."},"project_id":{"type":"string","description":"Optional project ID override."}},"required":["automation_id"],"additionalProperties":false}`),
+	},
+	{
 		Name:         "preview_automation_description",
 		Description:  "Generate and validate an ephemeral custom or maintained-template Automation graph from a description using the same surfaced capabilities as the visual builder. This does not persist a draft or create runtime resources.",
 		Domain:       DomainAutomations,

@@ -178,3 +178,98 @@ func marshalAutomationActionResult(value any) (string, error) {
 	}
 	return string(encoded), nil
 }
+
+type listAutomationsToolInput struct {
+	ProjectID string `json:"project_id"`
+}
+
+type getAutomationToolInput struct {
+	AutomationID string `json:"automation_id"`
+	ProjectID    string `json:"project_id"`
+}
+
+// automationCardSummary converts an AutomationCard to the compact prompt-safe shape
+// exposed by list_automations and get_automation. It intentionally omits YAML/graph content.
+func automationCardSummary(card models.AutomationCard) map[string]any {
+	paused := card.Automation.LifecycleState == models.AutomationPaused
+	summary := map[string]any{
+		"id":          card.Automation.ID,
+		"name":        card.Automation.Name,
+		"status":      string(card.Automation.LifecycleState),
+		"paused":      paused,
+		"adapter_key": card.Version.AdapterKey,
+		"node_count": card.Counts.Running + card.Counts.Waiting +
+			card.Counts.Blocked + card.Counts.Failed + card.Counts.CompletedRecently,
+		"counts": map[string]int{
+			"running":            card.Counts.Running,
+			"waiting":            card.Counts.Waiting,
+			"blocked":            card.Counts.Blocked,
+			"failed":             card.Counts.Failed,
+			"completed_recently": card.Counts.CompletedRecently,
+		},
+	}
+	if card.NextRun != nil {
+		summary["next_run"] = card.NextRun.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	if card.LastRun != nil {
+		summary["last_run"] = card.LastRun.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	return summary
+}
+
+func (h *Handler) executeListAutomationsTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	if h.automationGraphSvc == nil {
+		return marshalAutomationActionResult(map[string]any{"automations": []any{}})
+	}
+	var req listAutomationsToolInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	projectID := strings.TrimSpace(params.ProjectID)
+	if override := strings.TrimSpace(req.ProjectID); override != "" {
+		projectID = override
+	}
+	if projectID == "" {
+		return "", fmt.Errorf("list_automations: no current project")
+	}
+	cards, err := h.automationGraphSvc.List(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	summaries := make([]map[string]any, 0, len(cards))
+	for _, card := range cards {
+		summaries = append(summaries, automationCardSummary(card))
+	}
+	return marshalAutomationActionResult(map[string]any{"automations": summaries})
+}
+
+func (h *Handler) executeGetAutomationTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	if h.automationGraphSvc == nil {
+		return "", fmt.Errorf("automations unavailable")
+	}
+	var req getAutomationToolInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	automationID := strings.TrimSpace(req.AutomationID)
+	if automationID == "" {
+		return "", fmt.Errorf("get_automation: automation_id is required")
+	}
+	projectID := strings.TrimSpace(params.ProjectID)
+	if override := strings.TrimSpace(req.ProjectID); override != "" {
+		projectID = override
+	}
+	if projectID == "" {
+		return "", fmt.Errorf("get_automation: no current project")
+	}
+	cards, err := h.automationGraphSvc.List(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	for _, card := range cards {
+		if card.Automation.ID == automationID {
+			return marshalAutomationActionResult(map[string]any{"automation": automationCardSummary(card)})
+		}
+	}
+	return marshalAutomationActionResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
+}
