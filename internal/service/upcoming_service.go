@@ -113,26 +113,38 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 	}
 
 	var projectChanges *models.ProjectChanges
+	var projectChangeFiles []string
+	var earliestStatProducedAt time.Time
 	if s.taskCommitStatRepo != nil {
 		stats, err := s.taskCommitStatRepo.ListProducedCommitStats(ctx, projectID, since)
 		if err != nil {
 			applog.Infof("[upcoming-svc] error listing task commit stats (non-fatal): %v", err)
 		} else if len(stats) > 0 {
-			projectChanges = buildProjectChangesFromTaskCommitStats(stats)
+			projectChanges, projectChangeFiles = buildProjectChangesFromTaskCommitStatsWithFiles(stats)
+			earliestStatProducedAt = earliestTaskCommitStatProducedAt(stats)
 		}
 	}
 
-	// Fall back to repository git history only for older data that predates task_commit_stats.
-	if projectChanges == nil && s.projectRepo != nil {
+	// Fall back to repository git history for old data that predates task_commit_stats.
+	// During the migration window, combine only the pre-stats subrange with DB stats
+	// so day/week ranges do not drop earlier history as soon as one DB stat exists.
+	if s.projectRepo != nil && (projectChanges == nil || earliestStatProducedAt.After(since)) {
 		project, err := s.projectRepo.GetByID(ctx, projectID)
 		if err != nil {
 			applog.Infof("[upcoming-svc] error getting project for git changes (non-fatal): %v", err)
 		} else if project.RepoPath != "" {
-			changes, err := s.getProjectChanges(project.RepoPath, since)
+			before := time.Time{}
+			if projectChanges != nil {
+				before = earliestStatProducedAt
+			}
+			changes, changedFiles, err := s.getProjectChangesInRangeWithFiles(project.RepoPath, since, before)
 			if err != nil {
 				applog.Infof("[upcoming-svc] error getting git changes (non-fatal): %v", err)
-			} else {
+			} else if projectChanges == nil {
 				projectChanges = changes
+				projectChangeFiles = changedFiles
+			} else {
+				projectChanges = mergeProjectChangesWithFiles(changes, changedFiles, projectChanges, projectChangeFiles)
 			}
 		}
 	}
@@ -166,7 +178,22 @@ func computeSince(now time.Time, timeRange models.TimeRange) time.Time {
 	}
 }
 
+func earliestTaskCommitStatProducedAt(stats []models.TaskCommitStat) time.Time {
+	var earliest time.Time
+	for _, stat := range stats {
+		if earliest.IsZero() || stat.ProducedAt.Before(earliest) {
+			earliest = stat.ProducedAt
+		}
+	}
+	return earliest
+}
+
 func buildProjectChangesFromTaskCommitStats(stats []models.TaskCommitStat) *models.ProjectChanges {
+	pc, _ := buildProjectChangesFromTaskCommitStatsWithFiles(stats)
+	return pc
+}
+
+func buildProjectChangesFromTaskCommitStatsWithFiles(stats []models.TaskCommitStat) (*models.ProjectChanges, []string) {
 	commits := make([]models.GitCommit, 0, len(stats))
 	uniqueFiles := map[string]bool{}
 	for _, stat := range stats {
@@ -206,7 +233,38 @@ func buildProjectChangesFromTaskCommitStats(stats []models.TaskCommitStat) *mode
 	sort.Strings(files)
 	pc.FileTypes = parseFileTypes(strings.Join(files, "\n"))
 
-	return pc
+	return pc, files
+}
+
+func mergeProjectChangesWithFiles(first *models.ProjectChanges, firstFiles []string, second *models.ProjectChanges, secondFiles []string) *models.ProjectChanges {
+	merged := &models.ProjectChanges{Available: true}
+	for _, part := range []*models.ProjectChanges{first, second} {
+		if part == nil || !part.Available {
+			continue
+		}
+		merged.TotalCommits += part.TotalCommits
+		merged.TotalInsertions += part.TotalInsertions
+		merged.TotalDeletions += part.TotalDeletions
+		merged.Commits = append(merged.Commits, part.Commits...)
+	}
+	sort.Slice(merged.Commits, func(i, j int) bool {
+		return merged.Commits[i].Date.After(merged.Commits[j].Date)
+	})
+	uniqueFiles := map[string]bool{}
+	for _, file := range append(firstFiles, secondFiles...) {
+		if file != "" {
+			uniqueFiles[file] = true
+		}
+	}
+	files := make([]string, 0, len(uniqueFiles))
+	for file := range uniqueFiles {
+		files = append(files, file)
+	}
+	sort.Strings(files)
+	merged.FilesChanged = len(files)
+	merged.FileTypes = parseFileTypes(strings.Join(files, "\n"))
+	merged.Changes = categorizeCommits(merged.Commits)
+	return merged
 }
 
 func changedFilesFromStat(stat models.TaskCommitStat) []string {
@@ -362,58 +420,48 @@ func formatGitSince(since time.Time) string {
 
 // getProjectChanges runs git commands against a project's repo to gather change data
 func (s *UpcomingService) getProjectChanges(repoPath string, since time.Time) (*models.ProjectChanges, error) {
+	pc, _, err := s.getProjectChangesInRangeWithFiles(repoPath, since, time.Time{})
+	return pc, err
+}
+
+func (s *UpcomingService) getProjectChangesInRangeWithFiles(repoPath string, since, before time.Time) (*models.ProjectChanges, []string, error) {
 	// Verify this is a git repo
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolving repo path: %w", err)
+		return nil, nil, fmt.Errorf("resolving repo path: %w", err)
 	}
 
 	sinceStr := formatGitSince(since)
+	logArgs := []string{"log", "--since=" + sinceStr}
+	if !before.IsZero() {
+		logArgs = append(logArgs, "--before="+formatGitSince(before))
+	}
 
 	// Get commit log with stats
-	cmd := exec.Command("git", "log",
-		"--since="+sinceStr,
+	cmd := exec.Command("git", append(logArgs,
 		"--pretty=format:%H|%h|%an|%aI|%s",
 		"--shortstat",
-	)
+	)...)
 	cmd.Dir = absPath
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("running git log: %w", err)
+		return nil, nil, fmt.Errorf("running git log: %w", err)
 	}
 
 	commits, err := parseGitLog(string(out))
 	if err != nil {
-		return nil, fmt.Errorf("parsing git log: %w", err)
+		return nil, nil, fmt.Errorf("parsing git log: %w", err)
 	}
 
-	// Get files changed with their types
-	cmd = exec.Command("git", "diff", "--stat", "--name-only",
-		fmt.Sprintf("--since=%s", sinceStr),
-		"HEAD",
-	)
-	cmd.Dir = absPath
-
-	// Use git log to get list of changed files instead (more reliable)
-	cmd = exec.Command("git", "log",
-		"--since="+sinceStr,
+	// Use git log to get list of changed files.
+	cmd = exec.Command("git", append(logArgs,
 		"--pretty=format:",
 		"--name-only",
-	)
+	)...)
 	cmd.Dir = absPath
 	fileOut, err := cmd.Output()
 	if err != nil {
 		applog.Infof("[upcoming-svc] error getting changed files (non-fatal): %v", err)
-	}
-
-	fileTypes := parseFileTypes(string(fileOut))
-
-	// Compute totals
-	pc := &models.ProjectChanges{
-		Available:    true,
-		TotalCommits: len(commits),
-		Commits:      commits,
-		FileTypes:    fileTypes,
 	}
 
 	// Count unique files
@@ -425,7 +473,20 @@ func (s *UpcomingService) getProjectChanges(repoPath string, since time.Time) (*
 			uniqueFiles[line] = true
 		}
 	}
-	pc.FilesChanged = len(uniqueFiles)
+	files := make([]string, 0, len(uniqueFiles))
+	for file := range uniqueFiles {
+		files = append(files, file)
+	}
+	sort.Strings(files)
+
+	// Compute totals
+	pc := &models.ProjectChanges{
+		Available:    true,
+		TotalCommits: len(commits),
+		Commits:      commits,
+		FileTypes:    parseFileTypes(strings.Join(files, "\n")),
+		FilesChanged: len(files),
+	}
 
 	for _, c := range commits {
 		pc.TotalInsertions += c.Insertions
@@ -435,7 +496,7 @@ func (s *UpcomingService) getProjectChanges(repoPath string, since time.Time) (*
 	// Categorize commits
 	pc.Changes = categorizeCommits(commits)
 
-	return pc, nil
+	return pc, files, nil
 }
 
 // parseGitLog parses the output of git log with --pretty and --shortstat

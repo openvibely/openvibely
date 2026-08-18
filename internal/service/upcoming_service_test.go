@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -414,6 +417,80 @@ func TestGenerateHistoryUsesTaskCommitStatsForProjectChanges(t *testing.T) {
 	}
 	if fileTypes[".go"] != 1 || fileTypes[".md"] != 1 || fileTypes[".templ"] != 1 {
 		t.Fatalf("file types = %#v, want unique changed-file extensions", fileTypes)
+	}
+}
+
+func TestGenerateHistoryCombinesFallbackBeforeFirstTaskCommitStat(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+	repoDir := t.TempDir()
+	runGit(t, repoDir, nil, "init", "-b", "main")
+	runGit(t, repoDir, nil, "config", "user.name", "Test User")
+	runGit(t, repoDir, nil, "config", "user.email", "test@example.com")
+
+	oldCommitTime := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Second)
+	if err := os.WriteFile(filepath.Join(repoDir, "legacy.go"), []byte("package legacy\n"), 0o644); err != nil {
+		t.Fatalf("write legacy file: %v", err)
+	}
+	dateEnv := []string{
+		"GIT_AUTHOR_DATE=" + oldCommitTime.Format(time.RFC3339),
+		"GIT_COMMITTER_DATE=" + oldCommitTime.Format(time.RFC3339),
+	}
+	runGit(t, repoDir, dateEnv, "add", "legacy.go")
+	runGit(t, repoDir, dateEnv, "commit", "-m", "Add legacy fallback file")
+
+	project := &models.Project{Name: "Reflection Mixed", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Reflect task", Category: models.CategoryActive, Status: models.StatusCompleted}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	stat := &models.TaskCommitStat{
+		ProjectID: project.ID, TaskID: task.ID,
+		CommitSHA: "1111111111111111111111111111111111111111", ShortSHA: "1111111",
+		Subject: "Add DB stat file", Author: "OpenVibely Bot", ProducedAt: time.Now().UTC().Add(-30 * time.Minute),
+		Insertions: 4, Deletions: 1, FilesChanged: 1, ChangedFilesJSON: `["db_stat.go"]`,
+	}
+	if err := statRepo.UpsertProducedCommitStat(ctx, stat); err != nil {
+		t.Fatalf("upsert stat: %v", err)
+	}
+
+	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	svc.SetProjectRepo(projectRepo)
+	svc.SetTaskCommitStatRepo(statRepo)
+	history, err := svc.GenerateHistory(ctx, project.ID, models.TimeRangeDay)
+	if err != nil {
+		t.Fatalf("GenerateHistory: %v", err)
+	}
+	pc := history.ProjectChanges
+	if pc == nil || !pc.Available {
+		t.Fatalf("ProjectChanges unavailable: %#v", pc)
+	}
+	if pc.TotalCommits != 2 {
+		t.Fatalf("TotalCommits = %d, want DB stat plus pre-stat fallback commit", pc.TotalCommits)
+	}
+	subjects := map[string]bool{}
+	for _, commit := range pc.Commits {
+		subjects[commit.Subject] = true
+	}
+	if !subjects["Add DB stat file"] || !subjects["Add legacy fallback file"] {
+		t.Fatalf("subjects = %#v, want DB stat and fallback commit", subjects)
+	}
+}
+
+func runGit(t *testing.T, dir string, extraEnv []string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), extraEnv...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
 }
 
