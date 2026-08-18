@@ -90,8 +90,8 @@ func TestRegistry_AllActionsHaveDescription(t *testing.T) {
 }
 
 func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
-	readActions := []string{"preview_automation_description"}
-	writeActions := []string{"save_automation"}
+	readActions := []string{"list_automations", "get_automation", "preview_automation_description"}
+	writeActions := []string{"save_automation", "run_automation_now", "pause_automation", "resume_automation"}
 	for _, name := range append(readActions, writeActions...) {
 		def := Get(name)
 		if def == nil || def.Domain != DomainAutomations {
@@ -144,6 +144,18 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 	}
 	if strings.Contains(string(save.Parameters), `"candidate"`) || strings.Contains(save.Description, "structured candidate") {
 		t.Fatal("public Automation save action must not expose a candidate creation identity")
+	}
+	for _, name := range []string{"run_automation_now", "pause_automation", "resume_automation"} {
+		def := Get(name)
+		if def == nil {
+			t.Fatalf("%s is not registered", name)
+		}
+		if !strings.Contains(string(def.Parameters), `"automation_id"`) || !strings.Contains(string(def.Parameters), `"name"`) {
+			t.Fatalf("%s must accept automation_id and name selectors", name)
+		}
+		if strings.Contains(strings.ToLower(def.Name), "delete") || strings.Contains(strings.ToLower(def.Description), "delete") {
+			t.Fatalf("%s must not expose Automation deletion", name)
+		}
 	}
 	for _, removed := range []string{"create_automation_draft", "plan_automation_publication", "publish_automation_draft", "plan_automation_save"} {
 		if Get(removed) != nil {
@@ -256,7 +268,8 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	mustNotContain(t, names, "create_task", "edit_task", "execute_tasks",
 		"set_personality", "schedule_task", "delete_schedule", "modify_schedule",
 		"create_alert", "create_notification", "delete_alert", "toggle_alert", "switch_project",
-		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
+		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
+		"save_automation", "run_automation_now", "pause_automation", "resume_automation")
 
 	// Must have read actions
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",

@@ -21,7 +21,7 @@ Chat embeds clickable task links inline as it creates work, so you can jump to a
 - Execute tasks and report their status back into the conversation
 - Send follow-up instructions into individual task threads
 - Inspect task state, changes, agent output, and lifecycle events
-- Schedule work, manage alerts, save repeatable Automation workflows, and coordinate across the whole project
+- Schedule work, manage alerts, save and operate repeatable Automation workflows, and coordinate across the whole project
 - Send outbound messages through saved Slack, Telegram, Discord, or Email channel targets
 - Accept steering or queue new prompts while a response is already in progress
 
@@ -83,7 +83,7 @@ In `Orchestrate` mode, Chat creates multiple task cards and can execute them imm
 
 ## Sending Messages Through Channels
 
-In `Orchestrate` mode, Chat can save repeatable Automation workflows from maintained templates, descriptions, or reviewed Automation YAML. Channel-origin Chat from Slack, Telegram, Discord, and Email uses the same project-scoped Automation save path as web/API Chat; `Plan` mode can preview Automation designs but cannot save them.
+In `Orchestrate` mode, Chat can save repeatable Automation workflows from maintained templates, descriptions, or reviewed Automation YAML, then run, pause, or resume saved Automations by ID or exact unambiguous name. Channel-origin Chat from Slack, Telegram, Discord, and Email uses the same project-scoped Automation save and lifecycle paths as web/API Chat; `Plan` mode can preview Automation designs but cannot save or operate them.
 
 In `Orchestrate` mode, Chat can use the `send_message` tool to send text through configured Slack, Telegram, Discord, or Email channels. Configure allowed destinations in `Channels` under `Outbound Message Targets` before asking Chat to send.
 

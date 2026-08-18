@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -188,6 +190,11 @@ type getAutomationToolInput struct {
 	ProjectID    string `json:"project_id"`
 }
 
+type automationLifecycleActionInput struct {
+	AutomationID string `json:"automation_id"`
+	Name         string `json:"name"`
+}
+
 // automationCardSummary converts an AutomationCard to the compact prompt-safe shape
 // exposed by list_automations and get_automation. It intentionally omits YAML/graph content.
 func automationCardSummary(card models.AutomationCard) map[string]any {
@@ -272,4 +279,142 @@ func (h *Handler) executeGetAutomationTool(ctx context.Context, params streaming
 		}
 	}
 	return marshalAutomationActionResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
+}
+
+func (h *Handler) executeRunAutomationNowTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	return h.executeAutomationLifecycleAction(ctx, params, input, "run_automation_now")
+}
+
+func (h *Handler) executePauseAutomationTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	return h.executeAutomationLifecycleAction(ctx, params, input, "pause_automation")
+}
+
+func (h *Handler) executeResumeAutomationTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	return h.executeAutomationLifecycleAction(ctx, params, input, "resume_automation")
+}
+
+func (h *Handler) executeAutomationLifecycleAction(ctx context.Context, params streamingResponseParams, input json.RawMessage, action string) (string, error) {
+	if h.automationGraphSvc == nil {
+		return "", fmt.Errorf("%s: automations unavailable", action)
+	}
+	if h.automationLifecycleSvc == nil {
+		return "", fmt.Errorf("%s: automation lifecycle unavailable", action)
+	}
+	var req automationLifecycleActionInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	projectID := strings.TrimSpace(params.ProjectID)
+	if projectID == "" {
+		return "", fmt.Errorf("%s: no current project", action)
+	}
+	card, err := h.resolveAutomationLifecycleTarget(ctx, projectID, req)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", action, err)
+	}
+
+	var invocations []models.AutomationInvocation
+	switch action {
+	case "run_automation_now":
+		invocations, _, err = h.automationLifecycleSvc.RunNow(ctx, projectID, card.Automation.ID)
+	case "pause_automation":
+		err = h.automationLifecycleSvc.Pause(ctx, projectID, card.Automation.ID)
+	case "resume_automation":
+		err = h.automationLifecycleSvc.Resume(ctx, projectID, card.Automation.ID)
+	default:
+		err = fmt.Errorf("unsupported Automation lifecycle action %q", action)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", action, err)
+	}
+
+	fresh, err := h.automationCardByID(ctx, projectID, card.Automation.ID)
+	if err == nil && fresh != nil {
+		card = *fresh
+	}
+	return marshalAutomationActionResult(automationLifecycleActionResult(action, projectID, card, invocations))
+}
+
+func (h *Handler) resolveAutomationLifecycleTarget(ctx context.Context, projectID string, req automationLifecycleActionInput) (models.AutomationCard, error) {
+	cards, err := h.automationGraphSvc.List(ctx, projectID)
+	if err != nil {
+		return models.AutomationCard{}, err
+	}
+	automationID := strings.TrimSpace(req.AutomationID)
+	name := strings.TrimSpace(req.Name)
+	if automationID == "" && name == "" {
+		return models.AutomationCard{}, errors.New("automation_id or name is required")
+	}
+	if automationID != "" {
+		for _, card := range cards {
+			if card.Automation.ID == automationID {
+				if name != "" && !strings.EqualFold(strings.TrimSpace(card.Automation.Name), name) {
+					return models.AutomationCard{}, fmt.Errorf("automation_id %q is named %q, not %q", automationID, card.Automation.Name, name)
+				}
+				return card, nil
+			}
+		}
+		return models.AutomationCard{}, fmt.Errorf("automation %q not found in current project", automationID)
+	}
+	var matches []models.AutomationCard
+	for _, card := range cards {
+		if strings.EqualFold(strings.TrimSpace(card.Automation.Name), name) {
+			matches = append(matches, card)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return models.AutomationCard{}, fmt.Errorf("automation named %q not found in current project", name)
+	case 1:
+		return matches[0], nil
+	default:
+		ids := make([]string, 0, len(matches))
+		for _, match := range matches {
+			ids = append(ids, match.Automation.ID)
+		}
+		sort.Strings(ids)
+		return models.AutomationCard{}, fmt.Errorf("automation name %q is ambiguous in current project; use automation_id (%s)", name, strings.Join(ids, ", "))
+	}
+}
+
+func (h *Handler) automationCardByID(ctx context.Context, projectID, automationID string) (*models.AutomationCard, error) {
+	cards, err := h.automationGraphSvc.List(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, card := range cards {
+		if card.Automation.ID == automationID {
+			return &card, nil
+		}
+	}
+	return nil, nil
+}
+
+func automationLifecycleActionResult(action, projectID string, card models.AutomationCard, invocations []models.AutomationInvocation) map[string]any {
+	result := map[string]any{
+		"action":          action,
+		"automation_id":   card.Automation.ID,
+		"name":            card.Automation.Name,
+		"lifecycle_state": string(card.Automation.LifecycleState),
+		"url":             "/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(projectID),
+	}
+	if action == "run_automation_now" {
+		started := make([]string, 0, len(invocations))
+		all := make([]map[string]string, 0, len(invocations))
+		for _, invocation := range invocations {
+			if invocation.ID == "" {
+				continue
+			}
+			status := string(invocation.Status)
+			all = append(all, map[string]string{"id": invocation.ID, "status": status})
+			switch invocation.Status {
+			case models.AutomationInvocationClaimed, models.AutomationInvocationDispatched, models.AutomationInvocationRunning:
+				started = append(started, invocation.ID)
+			}
+		}
+		result["started"] = len(started) > 0
+		result["started_invocation_ids"] = started
+		result["invocations"] = all
+	}
+	return result
 }

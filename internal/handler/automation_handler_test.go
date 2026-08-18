@@ -1747,6 +1747,12 @@ func TestAutomationChatExplicitSavePersistsInSingleToolCall(t *testing.T) {
 
 func configureAutomationChatRuntimeTestServices(t *testing.T, tc *TestContext) *service.AutomationDraftService {
 	t.Helper()
+	drafts, _ := configureAutomationChatRuntimeTestServicesWithRepo(t, tc)
+	return drafts
+}
+
+func configureAutomationChatRuntimeTestServicesWithRepo(t *testing.T, tc *TestContext) (*service.AutomationDraftService, *repository.AutomationRepo) {
+	t.Helper()
 	automationRepo := repository.NewAutomationRepo(tc.db)
 	registry := service.NewAutomationAdapterRegistry()
 	drafts := service.NewAutomationDraftService(automationRepo, registry)
@@ -1755,7 +1761,7 @@ func configureAutomationChatRuntimeTestServices(t *testing.T, tc *TestContext) *
 	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
 	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
 	tc.handler.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
-	return drafts
+	return drafts, automationRepo
 }
 
 func composedChannelAutomationRuntimeForTest(ctx context.Context, h *Handler, params streamingResponseParams, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
@@ -1869,6 +1875,123 @@ func TestAutomationChatChannelRuntimePlanModePreviewOnly(t *testing.T) {
 	require.True(t, isError)
 	require.Contains(t, output, "requires orchestrate mode")
 	require.Zero(t, countRowsForProject(t, tc, "automations", project.ID))
+}
+
+func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation lifecycle Chat").Build()
+	drafts := configureAutomationChatRuntimeTestServices(t, tc)
+	candidate := automationChatCustomApprovalCandidate(t, drafts)
+	candidate.Name = "Nightly review loop"
+	yamlDocument, err := service.EncodeAutomationDraftYAML(candidate)
+	require.NoError(t, err)
+	payload, err := json.Marshal(map[string]string{"source": "yaml", "automation_yaml": yamlDocument})
+	require.NoError(t, err)
+	params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	executeOK := func(name string, input json.RawMessage) map[string]any {
+		t.Helper()
+		output, handled, isError, execErr := runtime.Executor(ctx, name, input)
+		require.NoError(t, execErr)
+		require.True(t, handled)
+		require.False(t, isError, output)
+		var result map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &result))
+		return result
+	}
+
+	saved := executeOK("save_automation", payload)
+	automationID, _ := saved["automation_id"].(string)
+	require.NotEmpty(t, automationID)
+	require.True(t, saved["active"].(bool))
+
+	runNow := executeOK("run_automation_now", json.RawMessage(`{"name":"Nightly review loop"}`))
+	require.Equal(t, automationID, runNow["automation_id"])
+	require.Equal(t, "Nightly review loop", runNow["name"])
+	require.Equal(t, string(models.AutomationActive), runNow["lifecycle_state"])
+	require.Equal(t, "/automations/"+automationID+"?project_id="+project.ID, runNow["url"])
+	require.True(t, runNow["started"].(bool))
+	require.NotEmpty(t, runNow["started_invocation_ids"])
+
+	pause := executeOK("pause_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	require.Equal(t, string(models.AutomationPaused), pause["lifecycle_state"])
+	var enabled bool
+	require.NoError(t, tc.db.QueryRow(`SELECT enabled FROM schedules WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?)`, automationID).Scan(&enabled))
+	require.False(t, enabled, "pausing from Chat must disable the Automation-owned trigger schedule")
+
+	resume := executeOK("resume_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	require.Equal(t, string(models.AutomationActive), resume["lifecycle_state"])
+	require.NoError(t, tc.db.QueryRow(`SELECT enabled FROM schedules WHERE id IN (SELECT schedule_id FROM automation_trigger_owners WHERE automation_id = ?)`, automationID).Scan(&enabled))
+	require.True(t, enabled, "resuming from Chat must re-enable the Automation-owned trigger schedule")
+
+	get := executeOK("get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	automation, _ := get["automation"].(map[string]any)
+	require.Equal(t, string(models.AutomationActive), automation["status"])
+}
+
+func TestAutomationChatLifecycleActionsRejectAmbiguousForeignPlanAndArchivedTargets(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation lifecycle guards").Build()
+	foreign := tc.CreateProject().WithName("Foreign Automation lifecycle guards").Build()
+	drafts, automationRepo := configureAutomationChatRuntimeTestServicesWithRepo(t, tc)
+	params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	foreignRuntime := tc.handler.buildChatActionToolRuntimeFromDefs(streamingResponseParams{ProjectID: foreign.ID, PrincipalID: "alice"}, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	save := func(rt *llmcontracts.RuntimeTools, name string) string {
+		t.Helper()
+		candidate := automationChatCustomApprovalCandidate(t, drafts)
+		candidate.Name = name
+		yamlDocument, err := service.EncodeAutomationDraftYAML(candidate)
+		require.NoError(t, err)
+		payload, err := json.Marshal(map[string]string{"source": "yaml", "automation_yaml": yamlDocument})
+		require.NoError(t, err)
+		output, handled, isError, execErr := rt.Executor(ctx, "save_automation", payload)
+		require.NoError(t, execErr)
+		require.True(t, handled)
+		require.False(t, isError, output)
+		var result map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &result))
+		automationID, _ := result["automation_id"].(string)
+		require.NotEmpty(t, automationID)
+		return automationID
+	}
+	firstID := save(runtime, "Duplicate review loop")
+	secondID := save(runtime, "Duplicate review loop")
+	foreignID := save(foreignRuntime, "Foreign review loop")
+	require.NotEqual(t, firstID, secondID)
+
+	_, handled, isError, err := runtime.Executor(ctx, "pause_automation", json.RawMessage(`{"name":"Duplicate review loop"}`))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "ambiguous")
+	var pausedCount int
+	require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM automations WHERE project_id = ? AND lifecycle_state = 'paused'`, project.ID).Scan(&pausedCount))
+	require.Zero(t, pausedCount, "ambiguous name must not mutate either Automation")
+
+	_, handled, isError, err = runtime.Executor(ctx, "pause_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, foreignID)))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "not found in current project")
+	foreignDefinition, err := automationRepo.GetDefinition(ctx, foreign.ID, foreignID)
+	require.NoError(t, err)
+	require.NotNil(t, foreignDefinition)
+	require.Equal(t, models.AutomationActive, foreignDefinition.Automation.LifecycleState)
+
+	planRuntime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true), models.ChatModePlan, chatcontrol.SurfaceWeb)
+	require.False(t, planRuntime.HasDefinition("pause_automation"))
+	output, handled, isError, err := planRuntime.Executor(ctx, "pause_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, firstID)))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, isError)
+	require.Contains(t, output, "requires orchestrate mode")
+
+	require.NoError(t, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo).Archive(ctx, project.ID, firstID))
+	_, handled, isError, err = runtime.Executor(ctx, "run_automation_now", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, firstID)))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "automation must be active")
 }
 
 func TestAutomationChatSaveYAMLPersistsThroughCompilerPipeline(t *testing.T) {

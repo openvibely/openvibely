@@ -12,6 +12,7 @@
 //   - alerts: create_alert, delete_alert, toggle_alert
 //   - personality: set_personality
 //   - projects: switch_project
+//   - automations: save_automation, run_automation_now, pause_automation, resume_automation
 //   - chat: set_chat_mode
 //
 // Chat read-only (plan + orchestrate):
@@ -153,6 +154,7 @@ const githubOpenPullRequestParams = `{"type":"object","properties":{"task_id":{"
 const githubReplacePullRequestBranchParams = `{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string","description":"Task title to resolve when task_id is omitted."},"expected_head_sha":{"type":"string","pattern":"^[0-9a-fA-F]{40}$","description":"Exact current remote PR branch commit SHA used as the atomic lease guard."},"confirm_history_rewrite":{"type":"boolean","const":true,"description":"Must be true to explicitly confirm replacing shared pull request branch history."}},"required":["expected_head_sha","confirm_history_rewrite"],"additionalProperties":false}`
 const githubForwardPRFeedbackParams = `{"type":"object","properties":{"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}},"additionalProperties":false}`
 const githubActorAuthorizedParams = `{"type":"object","properties":{"github_login":{"type":"string","description":"GitHub login to check against the configured authorized actor list."}},"required":["github_login"],"additionalProperties":false}`
+const automationLifecycleParams = `{"type":"object","properties":{"automation_id":{"type":"string","description":"Saved Automation ID. Use this when known."},"name":{"type":"string","description":"Exact saved Automation name to resolve within the current project when automation_id is not known."}},"additionalProperties":false}`
 
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
@@ -811,6 +813,36 @@ var registry = []ActionDef{
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank","yaml"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000},"automation_yaml":{"type":"string","description":"Canonical Automation YAML document to save when source is yaml.","minLength":1,"maxLength":65536}},"required":["source"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "run_automation_now",
+		Description:  "Run a saved Automation immediately by ID or exact unambiguous name in the current project using the same lifecycle path as the browser Run now action. Returns Automation identity, lifecycle state, started invocation IDs, and Live URL.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(automationLifecycleParams),
+	},
+	{
+		Name:         "pause_automation",
+		Description:  "Pause a saved Automation by ID or exact unambiguous name in the current project using the same lifecycle path as the browser Disable action. Returns Automation identity, lifecycle state, and Live URL.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(automationLifecycleParams),
+	},
+	{
+		Name:         "resume_automation",
+		Description:  "Resume a saved Automation by ID or exact unambiguous name in the current project using the same lifecycle path as the browser Enable action. Returns Automation identity, lifecycle state, and Live URL.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(automationLifecycleParams),
 	},
 	// --- Chat domain ---
 	{
