@@ -12,6 +12,190 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func seedLargeCustomProviderModelConfigs(tb testing.TB, ctx context.Context, repo *LLMConfigRepo, count int) {
+	tb.Helper()
+	largeBody := strings.Repeat("x", 64*1024)
+	for i := 0; i < count; i++ {
+		cfg := &models.LLMConfig{
+			Name:                 fmt.Sprintf("Large Custom %02d", i),
+			Provider:             models.ProviderOpenAICompatible,
+			AuthMethod:           models.AuthMethodOAuth,
+			Model:                "custom-model",
+			APIKey:               "secret-key",
+			OAuthAccessToken:     "secret-token",
+			OAuthRefreshToken:    "secret-refresh",
+			OAuthClientSecret:    "secret-client",
+			BaseURL:              "https://example.com/v1/",
+			Transport:            "chat_completions",
+			PresetSlug:           "custom",
+			ExtraHeadersJSON:     `{"secret":"header"}`,
+			ExtraBodyJSON:        largeBody,
+			CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+			CustomAuthStateJSON:  `{"token":"secret"}`,
+			MixtureConfigJSON:    `{"large":"` + largeBody + `"}`,
+		}
+		if err := repo.Create(ctx, cfg); err != nil {
+			tb.Fatalf("Create large model config %d: %v", i, err)
+		}
+	}
+}
+
+func TestLLMConfigRepo_HasAny(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	hasAny, err := repo.HasAny(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("HasAny empty: %v", err)
+	}
+	if hasAny {
+		t.Fatal("HasAny empty = true, want false")
+	}
+	assertHasAnyStatement(t, counter.Statements())
+
+	planRows, err := db.QueryContext(ctx, `EXPLAIN QUERY PLAN SELECT EXISTS(SELECT 1 FROM agent_configs)`)
+	if err != nil {
+		t.Fatalf("explain HasAny query: %v", err)
+	}
+	defer planRows.Close()
+	var planDetails []string
+	for planRows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err := planRows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			t.Fatalf("scan plan row: %v", err)
+		}
+		planDetails = append(planDetails, detail)
+	}
+	if err := planRows.Err(); err != nil {
+		t.Fatalf("read plan rows: %v", err)
+	}
+	plan := strings.ToLower(strings.Join(planDetails, " | "))
+	if !strings.Contains(plan, "scan agent_configs") {
+		t.Fatalf("HasAny query plan = %q, want scan of agent_configs", plan)
+	}
+
+	cfg := &models.LLMConfig{Name: "Exists", Provider: models.ProviderTest, Model: "test-model"}
+	if err := repo.Create(ctx, cfg); err != nil {
+		t.Fatalf("Create model config: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	hasAny, err = repo.HasAny(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("HasAny non-empty: %v", err)
+	}
+	if !hasAny {
+		t.Fatal("HasAny non-empty = false, want true")
+	}
+	assertHasAnyStatement(t, counter.Statements())
+}
+
+func assertHasAnyStatement(t *testing.T, statements []string) {
+	t.Helper()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one existence query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	if stmt != "select exists(select 1 from agent_configs)" {
+		t.Fatalf("HasAny statement = %q, want SELECT EXISTS query", statements[0])
+	}
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "order by"} {
+		if strings.Contains(stmt, forbidden) {
+			t.Fatalf("HasAny statement selected forbidden data %q: %s", forbidden, statements[0])
+		}
+	}
+}
+
+func TestLLMConfigRepo_HasAnyIsFasterAndLowerAllocationThanListOnLargeFixture(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark ratio assertion in short mode")
+	}
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
+
+	fullList := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("List returned %d configs, want 50", len(configs))
+			}
+		}
+	})
+	hasAny := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			exists, err := repo.HasAny(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if !exists {
+				b.Fatal("HasAny returned false for non-empty fixture")
+			}
+		}
+	})
+
+	t.Logf("List: %d ns/op, %d B/op; HasAny: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), hasAny.NsPerOp(), hasAny.AllocedBytesPerOp())
+	if fullList.NsPerOp() < hasAny.NsPerOp()*50 {
+		t.Fatalf("HasAny is not at least 50x faster: List %d ns/op, HasAny %d ns/op", fullList.NsPerOp(), hasAny.NsPerOp())
+	}
+	if fullList.AllocedBytesPerOp() < hasAny.AllocedBytesPerOp()*50 {
+		t.Fatalf("HasAny is not at least 50x lower allocation: List %d B/op, HasAny %d B/op", fullList.AllocedBytesPerOp(), hasAny.AllocedBytesPerOp())
+	}
+}
+
+func BenchmarkLLMConfigRepoHasAnyVsListLargeCustomProviders(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		b.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
+
+	b.Run("full_list", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+	b.Run("has_any", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			exists, err := repo.HasAny(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if !exists {
+				b.Fatal("expected HasAny to return true")
+			}
+		}
+	})
+}
+
 func BenchmarkLLMConfigRepoListFullVsCardsLargeCustomProviders(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewLLMConfigRepo(db)
