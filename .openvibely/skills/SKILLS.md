@@ -259,7 +259,7 @@ always_use:
 
 ## openvibely_scoped_file_tools_workflow
 
-[OpenVibely Scoped File Tools Workflow](openvibely_scoped_file_tools_workflow/SKILL.md) — Implement and audit OpenVibely scoped file runtime path resolution, permission checks, and containment protections.
+[OpenVibely Scoped File Tools Workflow](openvibely_scoped_file_tools_workflow/SKILL.md) — Implement and audit OpenVibely scoped file runtime path resolution, permission checks, containment protections, and bounded preview performance.
 
 ## openvibely_task_create_edit_workflow
 
@@ -268,3 +268,7 @@ always_use:
 ## openvibely_reflection_metrics_workflow
 
 [OpenVibely Reflection Metrics Workflow](openvibely_reflection_metrics_workflow/SKILL.md) — Implement and audit OpenVibely Reflection produced-commit stats recording, DB-first aggregation, and git fallback safely.
+
+## openvibely_model_configuration_workflow
+
+[OpenVibely Model Configuration Workflow](openvibely_model_configuration_workflow/SKILL.md) — Implement and audit OpenVibely model configuration and default-model mutations across Chat and the Models page.
