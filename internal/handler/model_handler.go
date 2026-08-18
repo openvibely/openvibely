@@ -19,6 +19,7 @@ import (
 	llmmixture "github.com/openvibely/openvibely/internal/llm/mixture"
 	llmprompt "github.com/openvibely/openvibely/internal/llm/prompt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 	anthropicclient "github.com/openvibely/openvibely/pkg/anthropic_client"
 	"github.com/openvibely/openvibely/web/templates/pages"
@@ -675,6 +676,10 @@ type modelFormOptions struct {
 	beforeProviderSpecificFields func()
 }
 
+func isModelNameValidationError(err error) bool {
+	return errors.Is(err, repository.ErrLLMConfigNameRequired) || errors.Is(err, repository.ErrLLMConfigNameDuplicate)
+}
+
 func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context, agent *models.LLMConfig, opts modelFormOptions) error {
 	provider, authMethod := resolveProviderAndAuth(
 		c.FormValue("provider"),
@@ -686,7 +691,11 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 		authMethod = models.AuthMethodOAuth
 	}
 
-	agent.Name = c.FormValue("name")
+	normalizedName, err := h.llmConfigRepo.ValidateNameAvailable(ctx, c.FormValue("name"), agent.ID)
+	if err != nil {
+		return err
+	}
+	agent.Name = normalizedName
 	agent.Provider = provider
 	agent.AuthMethod = authMethod
 
@@ -830,6 +839,9 @@ func (h *Handler) CreateModel(c echo.Context) error {
 
 	if err := h.llmConfigRepo.Create(c.Request().Context(), a); err != nil {
 		applog.Infof("[handler] CreateModel error: %v", err)
+		if isModelNameValidationError(err) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		return err
 	}
 	applog.Infof("[handler] CreateModel success id=%s", a.ID)
@@ -895,6 +907,9 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	applog.Infof("[handler] UpdateModel id=%s name=%q model=%s auth_method=%s max_workers=%d", id, agent.Name, agent.Model, agent.AuthMethod, agent.MaxWorkers)
 	if err := h.llmConfigRepo.Update(c.Request().Context(), agent); err != nil {
 		applog.Infof("[handler] UpdateModel error: %v", err)
+		if isModelNameValidationError(err) {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		return err
 	}
 	applog.Infof("[handler] UpdateModel success id=%s", id)

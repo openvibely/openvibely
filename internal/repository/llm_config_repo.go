@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,11 @@ import (
 type LLMConfigRepo struct {
 	db *sql.DB
 }
+
+var (
+	ErrLLMConfigNameRequired  = errors.New("Model name is required")
+	ErrLLMConfigNameDuplicate = errors.New("A model with that name already exists")
+)
 
 func NewLLMConfigRepo(db *sql.DB) *LLMConfigRepo {
 	return &LLMConfigRepo{db: db}
@@ -53,6 +59,55 @@ func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig
 		&a.OllamaBaseURL, &a.BaseURL, &a.Transport, &a.PresetSlug, &a.ModelsURL,
 		&a.AuthHeaderName, &a.AuthHeaderValuePrefix, &a.ExtraHeadersJSON, &a.ExtraBodyJSON,
 		&a.DefaultMaxTokens, &a.TokenExchangeFormat, &a.TokenRefreshFormat, &a.CustomAuthConfigJSON, &a.CustomAuthStateJSON, &a.OAuthConfigRevision, &a.MixtureConfigJSON, &a.AutoStartTasks)
+}
+
+func normalizeLLMConfigName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", ErrLLMConfigNameRequired
+	}
+	return name, nil
+}
+
+func validateLLMConfigNameAvailableTx(ctx context.Context, tx *sql.Tx, name, excludeID string) (string, error) {
+	normalized, err := normalizeLLMConfigName(name)
+	if err != nil {
+		return "", err
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id, name FROM agent_configs`)
+	if err != nil {
+		return "", fmt.Errorf("checking model config name: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, existingName string
+		if err := rows.Scan(&id, &existingName); err != nil {
+			return "", fmt.Errorf("scanning model config name: %w", err)
+		}
+		if id != excludeID && strings.EqualFold(strings.TrimSpace(existingName), normalized) {
+			return "", ErrLLMConfigNameDuplicate
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("checking model config names: %w", err)
+	}
+	return normalized, nil
+}
+
+func (r *LLMConfigRepo) ValidateNameAvailable(ctx context.Context, name, excludeID string) (string, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("begin validate model config name tx: %w", err)
+	}
+	defer tx.Rollback()
+	normalized, err := validateLLMConfigNameAvailableTx(ctx, tx, name, excludeID)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit validate model config name tx: %w", err)
+	}
+	return normalized, nil
 }
 
 func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
@@ -265,6 +320,12 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 	}
 	defer tx.Rollback()
 
+	name, err := validateLLMConfigNameAvailableTx(ctx, tx, a.Name, "")
+	if err != nil {
+		return err
+	}
+	a.Name = name
+
 	if !a.IsDefault {
 		var existingCount int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_configs`).Scan(&existingCount); err != nil {
@@ -313,6 +374,12 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 		return fmt.Errorf("begin update model config tx: %w", err)
 	}
 	defer tx.Rollback()
+
+	name, err := validateLLMConfigNameAvailableTx(ctx, tx, a.Name, a.ID)
+	if err != nil {
+		return err
+	}
+	a.Name = name
 
 	if a.IsDefault {
 		if _, err := tx.ExecContext(ctx, `UPDATE agent_configs SET is_default = 0`); err != nil {
