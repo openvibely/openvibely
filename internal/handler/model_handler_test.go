@@ -639,6 +639,143 @@ func TestCreateModel_NonMixturePreservesTemperature(t *testing.T) {
 	t.Fatal("created non-mixture model not found")
 }
 
+func TestCreateModel_RejectsBlankNameWithoutInsert(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	before, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list before create: %v", err)
+	}
+
+	form := modelValidationForm(" \t\n ")
+	rec := postForm(e, "/models", form)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Model name is required") {
+		t.Fatalf("expected controlled blank-name 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	after, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list after create: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("blank create mutated rows: before=%d after=%d", len(before), len(after))
+	}
+}
+
+func TestCreateModel_HTMXRejectsDuplicateNormalizedNameWithoutInsert(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	existing := &models.LLMConfig{Name: "Production", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-5-20250929"}
+	if err := llmConfigRepo.Create(ctx, existing); err != nil {
+		t.Fatalf("create existing model: %v", err)
+	}
+	before, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list before duplicate create: %v", err)
+	}
+
+	form := modelValidationForm(" production ")
+	rec := htmxPost(e, "/models", form)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "already exists") {
+		t.Fatalf("expected controlled duplicate-name 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	after, err := llmConfigRepo.List(ctx)
+	if err != nil {
+		t.Fatalf("list after duplicate create: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("duplicate create mutated rows: before=%d after=%d", len(before), len(after))
+	}
+}
+
+func TestUpdateModel_PostRejectsBlankNameWithoutMutation(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent, err := llmConfigRepo.GetDefault(ctx)
+	if err != nil || agent == nil {
+		t.Fatalf("expected seeded default model, got %v", err)
+	}
+	original := *agent
+
+	form := modelValidationForm("   ")
+	rec := postForm(e, "/models/"+agent.ID, form)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Model name is required") {
+		t.Fatalf("expected controlled blank-name 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get updated model: %v", err)
+	}
+	if updated.Name != original.Name || updated.Model != original.Model || updated.Provider != original.Provider {
+		t.Fatalf("blank update mutated model: before=%+v after=%+v", original, updated)
+	}
+}
+
+func TestUpdateModel_HTMXRejectsDuplicateNormalizedNameWithoutMutation(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	alpha := &models.LLMConfig{Name: "Alpha", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-5-20250929"}
+	beta := &models.LLMConfig{Name: "Beta", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5.5"}
+	for _, cfg := range []*models.LLMConfig{alpha, beta} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s model: %v", cfg.Name, err)
+		}
+	}
+	original := *beta
+
+	form := modelValidationForm(" alpha ")
+	form.Set("provider", "openai")
+	form.Set("openai_auth_type", "api_key")
+	form.Set("model", beta.Model)
+	rec := htmxPut(e, "/models/"+beta.ID, form)
+
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "already exists") {
+		t.Fatalf("expected controlled duplicate-name 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	updated, err := llmConfigRepo.GetByID(ctx, beta.ID)
+	if err != nil {
+		t.Fatalf("get updated model: %v", err)
+	}
+	if updated.Name != original.Name || updated.Model != original.Model || updated.Provider != original.Provider {
+		t.Fatalf("duplicate update mutated model: before=%+v after=%+v", original, updated)
+	}
+}
+
+func TestUpdateModel_AllowsOwnNormalizedNameAndPersistsTrimmedName(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	agent := &models.LLMConfig{Name: "Stable Name", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-5-20250929"}
+	if err := llmConfigRepo.Create(ctx, agent); err != nil {
+		t.Fatalf("create model: %v", err)
+	}
+
+	form := modelValidationForm("  Stable Name  ")
+	rec := postForm(e, "/models/"+agent.ID, form)
+
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("expected own normalized name update to succeed, got %d: %s", rec.Code, rec.Body.String())
+	}
+	updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("get updated model: %v", err)
+	}
+	if updated.Name != "Stable Name" {
+		t.Fatalf("expected trimmed model name to persist, got %q", updated.Name)
+	}
+}
+
+func modelValidationForm(name string) url.Values {
+	form := url.Values{}
+	form.Set("name", name)
+	form.Set("provider", "anthropic")
+	form.Set("anthropic_auth_type", "api_key")
+	form.Set("model", "claude-sonnet-4-5-20250929")
+	form.Set("temperature", "0")
+	return form
+}
+
 func TestCreateModel_MixtureDefaultsBlankModel(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
