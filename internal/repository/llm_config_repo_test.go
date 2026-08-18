@@ -686,6 +686,61 @@ func BenchmarkAPIChatModelSelectionFullListVsCompactSelectionThenGet(b *testing.
 	})
 }
 
+func BenchmarkProjectDialogModelProjection(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		b.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
+
+	configs, err := repo.ListChatSelectionOptions(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if len(configs) != 50 || configs[0].ID == "" {
+		b.Fatalf("project dialog model fixture returned %d configs", len(configs))
+	}
+	for _, cfg := range configs {
+		if cfg.APIKey != "" || cfg.OAuthAccessToken != "" || cfg.OAuthRefreshToken != "" ||
+			cfg.OAuthClientSecret != "" || cfg.BaseURL != "" || cfg.ExtraHeadersJSON != "" ||
+			cfg.ExtraBodyJSON != "" || cfg.CustomAuthConfigJSON != "" || cfg.CustomAuthStateJSON != "" ||
+			cfg.MixtureConfigJSON != "" || cfg.MaxWorkers != 0 || cfg.WorkerTimeout != 0 ||
+			!cfg.CreatedAt.IsZero() || !cfg.UpdatedAt.IsZero() {
+			b.Fatalf("project dialog projection materialized hidden fields: %#v", cfg)
+		}
+	}
+
+	const maxAllocsPerOp = 200 * 1024
+	const maxDurationPerOp = 200 * time.Microsecond
+	b.ReportAllocs()
+	b.ResetTimer()
+	var totalAllocs uint64
+	for i := 0; i < b.N; i++ {
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		before := ms.TotalAlloc
+		configs, err := repo.ListChatSelectionOptions(ctx)
+		runtime.ReadMemStats(&ms)
+		after := ms.TotalAlloc
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(configs) != 50 || configs[0].ID == "" {
+			b.Fatalf("project dialog model projection returned %d configs", len(configs))
+		}
+		totalAllocs += after - before
+	}
+	allocsPerOp := totalAllocs / uint64(b.N)
+	if allocsPerOp > maxAllocsPerOp {
+		b.Fatalf("project dialog model projection allocated %d bytes/op, want <= %d", allocsPerOp, maxAllocsPerOp)
+	}
+	if elapsedPerOp := b.Elapsed() / time.Duration(b.N); elapsedPerOp > maxDurationPerOp {
+		b.Fatalf("project dialog model projection took %s/op, want <= %s/op", elapsedPerOp, maxDurationPerOp)
+	}
+}
+
 func TestLLMConfigRepo_ListCardsUsesBoundedProjection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

@@ -461,7 +461,7 @@ func isGitHubPATNotConfiguredError(err error) bool {
 
 func (h *Handler) NewProjectDialog(c echo.Context) error {
 	applog.Infof("[handler] NewProjectDialog requested")
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
+	agents, _ := h.llmConfigRepo.ListChatSelectionOptions(c.Request().Context())
 	return render(c, http.StatusOK, pages.NewProjectDialog(agents, h.isLocalRepoPathEnabled()))
 }
 
@@ -479,7 +479,7 @@ func (h *Handler) EditProjectDialog(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "project not found")
 	}
 
-	agents, _ := h.llmConfigRepo.List(c.Request().Context())
+	agents, _ := h.llmConfigRepo.ListChatSelectionOptions(c.Request().Context())
 
 	return render(c, http.StatusOK, pages.EditProjectDialog(p, agents, h.isLocalRepoPathEnabled()))
 }
