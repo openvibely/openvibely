@@ -305,11 +305,28 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 		return result, nil
 	}
 	if timeChanged {
-		schedule.NextRun = schedule.ComputeNextRun(time.Now())
+		if schedule.RepeatType == models.RepeatOnce {
+			// ComputeNextRun returns nil for RepeatOnce by design, so mirror the
+			// ModifyAbsolute browser path and set NextRun directly from RunAt.
+			runAt := schedule.RunAt
+			schedule.NextRun = &runAt
+		} else {
+			schedule.NextRun = schedule.ComputeNextRun(time.Now())
+		}
 	} else if req.Enabled != nil && *req.Enabled {
 		now := time.Now()
-		if schedule.NextRun == nil || schedule.NextRun.Before(now) {
-			schedule.NextRun = schedule.ComputeNextRun(now)
+		if schedule.RepeatType == models.RepeatOnce {
+			// ComputeNextRun returns nil for RepeatOnce; if NextRun is already nil
+			// (schedule has fired) or in the past and no new time was provided, we
+			// cannot compute a meaningful next run — require the caller to supply one.
+			if schedule.NextRun == nil || schedule.NextRun.Before(now) {
+				return result, actionError(ScheduleActionTimeError, "",
+					fmt.Errorf("cannot re-enable a fired one-time schedule without a new time; include time to reschedule it"))
+			}
+		} else {
+			if schedule.NextRun == nil || schedule.NextRun.Before(now) {
+				schedule.NextRun = schedule.ComputeNextRun(now)
+			}
 		}
 	}
 	if err := s.scheduleRepo.Update(ctx, schedule); err != nil {

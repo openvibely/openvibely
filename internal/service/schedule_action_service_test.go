@@ -363,6 +363,184 @@ func TestScheduleActionServiceModifyAbsoluteAppliesBrowserNextRunAndLifecycle(t 
 	require.Equal(t, models.StatusPending, updatedTask.Status)
 }
 
+// Regression tests for issue #634: Modify silently set NextRun=nil for RepeatOnce schedules.
+
+func TestScheduleActionServiceModifyRepeatOnceTimeChangeSetsNextRun(t *testing.T) {
+	// Regression case 1: Modify with RepeatOnce + time change must set NextRun to the
+	// new RunAt, not nil (ComputeNextRun always returns nil for RepeatOnce).
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "RepeatOnce time change"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Once task", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	// Create an unfired one-time schedule (NextRun set by repo to RunAt).
+	runAt := time.Date(2030, time.January, 10, 9, 0, 0, 0, time.Local).UTC()
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	require.NotNil(t, schedule.NextRun, "repo must set NextRun on creation")
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	result, err := svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Time: "10:00"})
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule)
+	require.NotNil(t, result.Schedule.NextRun, "NextRun must not be nil after time change on a RepeatOnce schedule")
+
+	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.NextRun, "persisted NextRun must not be nil")
+	require.Equal(t, stored.RunAt, *stored.NextRun, "NextRun must equal the updated RunAt")
+	require.Equal(t, 10, stored.RunAt.Local().Hour())
+	require.Equal(t, 0, stored.RunAt.Local().Minute())
+}
+
+func TestScheduleActionServiceModifyRepeatOnceReenableWithoutTimeReturnsError(t *testing.T) {
+	// Regression case 2: Modify with RepeatOnce + enabled=true + NextRun==nil must
+	// return an error; it must not silently persist Enabled=true, NextRun=NULL.
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "RepeatOnce re-enable error"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Once task fired", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	// Simulate a fired one-time schedule: Enabled=false, NextRun=nil (as the scheduler
+	// leaves it after execution).
+	runAt := time.Date(2024, time.January, 1, 9, 0, 0, 0, time.Local).UTC()
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: false}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	// Manually clear NextRun to simulate post-fire state.
+	schedule.NextRun = nil
+	require.NoError(t, scheduleRepo.Update(ctx, schedule))
+	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.Nil(t, stored.NextRun, "pre-condition: NextRun must be nil")
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	enabled := true
+	_, err = svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Enabled: &enabled})
+	require.Error(t, err, "re-enabling a fired one-time schedule without a time must return an error")
+	var actionErr *ScheduleActionError
+	require.ErrorAs(t, err, &actionErr)
+	require.Equal(t, ScheduleActionTimeError, actionErr.Kind)
+
+	// Verify nothing was persisted.
+	reloaded, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.Nil(t, reloaded.NextRun, "NextRun must remain nil — must not have been persisted as Enabled=true, NextRun=NULL")
+	require.False(t, reloaded.Enabled, "Enabled must not have been flipped to true without a valid NextRun")
+}
+
+func TestScheduleActionServiceModifyRepeatOnceTimeAndEnableSetsNextRunAndResetsStatus(t *testing.T) {
+	// Regression case 3: Modify with RepeatOnce + time + enabled=true on a fired
+	// schedule must set NextRun to the new time and reset task status to pending.
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "RepeatOnce reschedule"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Once task to reschedule", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	runAt := time.Date(2024, time.January, 1, 9, 0, 0, 0, time.Local).UTC()
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: false}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	schedule.NextRun = nil
+	require.NoError(t, scheduleRepo.Update(ctx, schedule))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+
+	enabled := true
+	result, err := svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Time: "09:30", Enabled: &enabled})
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule.NextRun, "NextRun must be set after time+enable on a RepeatOnce schedule")
+
+	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.NextRun)
+	require.Equal(t, stored.RunAt, *stored.NextRun, "NextRun must equal the new RunAt")
+	require.Equal(t, 9, stored.RunAt.Local().Hour())
+	require.Equal(t, 30, stored.RunAt.Local().Minute())
+	require.True(t, stored.Enabled)
+
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, updatedTask.Status, "task status must be reset to pending")
+}
+
+func TestScheduleActionServiceModifyRecurringTimeChangePreservesComputeNextRun(t *testing.T) {
+	// Regression case 4: Modify with a recurring schedule + time change must
+	// continue to use ComputeNextRun (not the RepeatOnce direct-assign path).
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	project := &models.Project{Name: "Recurring time change"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Daily task", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	runAt := time.Date(2030, time.January, 7, 8, 15, 0, 0, time.Local).UTC()
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	svc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	result, err := svc.Modify(ctx, project.ID, ModifyScheduleRequest{ScheduleID: schedule.ID, Time: "11:00"})
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule.NextRun, "NextRun must be set for recurring schedule after time change")
+
+	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.NextRun)
+	// For a daily schedule, ComputeNextRun advances from RunAt; verify NextRun is after now.
+	require.True(t, stored.NextRun.After(time.Now()), "NextRun must be in the future for a future-anchored daily schedule")
+}
+
+func TestScheduleActionServiceModifyRepeatOnceModifyAbsoluteIsUnaffected(t *testing.T) {
+	// Regression case 5: ModifyAbsolute (browser path) must continue to set
+	// NextRun = &RunAt and must be unaffected by the RepeatOnce runtime fix.
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "ModifyAbsolute unaffected"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{ProjectID: project.ID, Title: "Once browser task", Prompt: "prompt", Category: models.CategoryScheduled, Status: models.StatusCompleted, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	oldRunAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: oldRunAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	newRunAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+
+	result, err := svc.ModifyAbsolute(ctx, ModifyAbsoluteScheduleRequest{
+		ScheduleID:     schedule.ID,
+		RunAt:          newRunAt,
+		RepeatType:     models.RepeatOnce,
+		RepeatInterval: 1,
+	})
+	require.NoError(t, err)
+	require.Empty(t, result.Warnings)
+	require.NotNil(t, result.Schedule.NextRun)
+	require.True(t, result.Schedule.NextRun.Equal(newRunAt), "ModifyAbsolute must set NextRun=RunAt")
+
+	stored, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored.NextRun)
+	require.True(t, stored.NextRun.Equal(newRunAt))
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, updatedTask.Status)
+}
+
 func TestScheduleActionServiceModifyRuntimeTimingAppliesLifecycleButDisableDoesNot(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
