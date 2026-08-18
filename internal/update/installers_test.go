@@ -786,6 +786,90 @@ func TestBinaryInstallerRecoveryRequiresInitializedHealthURL(t *testing.T) {
 	}
 }
 
+func TestBinaryInstallerApplyWrapsHelperHandoffPhaseErrors(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		setup       func(t *testing.T, staged LocalStagedUpdate)
+		mutate      func(staged LocalStagedUpdate) LocalStagedUpdate
+		wantMessage string
+	}{
+		{
+			name: "prepare helper",
+			setup: func(t *testing.T, staged LocalStagedUpdate) {
+				t.Helper()
+				if err := os.Remove(staged.InstallPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantMessage: "prepare binary update helper",
+		},
+		{
+			name: "clear prior handoff",
+			setup: func(t *testing.T, staged LocalStagedUpdate) {
+				t.Helper()
+				blocked := binaryHelperOutcomePath(staged.InstallPath)
+				if err := os.Mkdir(blocked, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(blocked, "child"), []byte("block remove"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantMessage: "clear prior binary helper handoff",
+		},
+		{
+			name: "persist preparation",
+			mutate: func(staged LocalStagedUpdate) LocalStagedUpdate {
+				staged.OutcomeID = ""
+				return staged
+			},
+			wantMessage: "persist binary helper preparation",
+		},
+		{
+			name: "persist metadata",
+			setup: func(t *testing.T, staged LocalStagedUpdate) {
+				t.Helper()
+				blocked := binaryHelperRelaunchMetadataPath(staged.InstallPath)
+				if err := os.Mkdir(blocked, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(blocked, "child"), []byte("block replace"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantMessage: "persist binary helper relaunch metadata",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			current := filepath.Join(root, "openvibely")
+			if err := os.WriteFile(current, []byte("old"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			staged := LocalStagedUpdate{ArtifactPath: current + ".openvibely-new", InstallPath: current, BackupPath: current + ".openvibely-backup", Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"}
+			if test.mutate != nil {
+				staged = test.mutate(staged)
+			}
+			if test.setup != nil {
+				test.setup(t, staged)
+			}
+			installer := &BinaryInstaller{
+				HealthURL:          "http://127.0.0.1/health",
+				StartHelper:        func(*exec.Cmd) error { return nil },
+				awaitHelperHandoff: acknowledgeBinaryHelperForTest,
+				Shutdown:           func() { t.Fatal("shutdown requested after failed helper handoff") },
+			}
+			err := installer.Apply(context.Background(), bindBinaryRestartOrigin(staged, installer))
+			if err == nil {
+				t.Fatal("binary apply succeeded after helper handoff phase failure")
+			}
+			if !strings.Contains(err.Error(), test.wantMessage) {
+				t.Fatalf("binary apply error = %v, want context %q", err, test.wantMessage)
+			}
+		})
+	}
+}
+
 func TestBinaryInstallerRequiresAndRequestsShutdownAfterHelperStarts(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
@@ -849,8 +933,12 @@ func TestBinaryInstallerClaimedPreparedDoesNotAuthorizeShutdown(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	if err := installer.Apply(ctx, bindBinaryRestartOrigin(staged, installer)); err == nil {
+	err := installer.Apply(ctx, bindBinaryRestartOrigin(staged, installer))
+	if err == nil {
 		t.Fatal("claimed prepared outcome authorized parent shutdown")
+	}
+	if !strings.Contains(err.Error(), "confirm binary helper handoff") {
+		t.Fatalf("binary handoff failure lacked apply context: %v", err)
 	}
 	if shutdown {
 		t.Fatal("parent shutdown was requested before durable pending publication")
@@ -1340,8 +1428,12 @@ func TestBinaryInstallerHelperLaunchFailurePreservesCurrent(t *testing.T) {
 		awaitHelperHandoff: acknowledgeBinaryHelperForTest,
 		Shutdown:           func() { shutdown = true },
 	}
-	if err := installer.Apply(context.Background(), bindBinaryRestartOrigin(staged, installer)); err == nil {
+	err := installer.Apply(context.Background(), bindBinaryRestartOrigin(staged, installer))
+	if err == nil {
 		t.Fatal("helper launch failure succeeded")
+	}
+	if !strings.Contains(err.Error(), "start binary update helper") {
+		t.Fatalf("helper launch failure lacked apply context: %v", err)
 	}
 	if shutdown {
 		t.Fatal("shutdown requested after helper launch failure")
