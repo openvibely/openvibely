@@ -265,11 +265,11 @@ func buildChannelChatContext(ctx context.Context, opts channelChatContextOptions
 	return systemContext
 }
 
-func listChannelChatAssignableAgentDefinitions(ctx context.Context, platform string, repo *repository.AgentRepo) []models.Agent {
+func listChannelChatAssignableAgentDefinitions(ctx context.Context, platform string, repo *repository.AgentRepo) []models.ChatAssignableAgentDefinition {
 	if repo == nil {
 		return nil
 	}
-	agents, err := repo.List(ctx)
+	agents, err := repo.ListChatAssignableDefinitions(ctx)
 	if err != nil {
 		applog.Infof("[%s] error listing agent definitions for context: %v", channelChatLogPlatform(platform), err)
 		return nil

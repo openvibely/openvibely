@@ -57,6 +57,24 @@ type AgentSkillCatalogRef struct {
 	ProjectID string
 }
 
+func scanChatAssignableAgentDefinition(row interface{ Scan(dest ...any) error }) (*models.ChatAssignableAgentDefinition, error) {
+	var a models.ChatAssignableAgentDefinition
+	var selectableInt, enabledInt int
+	var generatedStatus string
+	var archivedAt sql.NullTime
+	if err := row.Scan(&a.ID, &a.Name, &a.Description, &a.Key, &a.SystemKind, &selectableInt, &enabledInt, &generatedStatus, &archivedAt); err != nil {
+		return nil, err
+	}
+	a.SelectableAsPrimary = selectableInt != 0
+	a.Enabled = enabledInt != 0
+	a.GeneratedStatus = models.AgentGeneratedStatus(generatedStatus)
+	if archivedAt.Valid {
+		t := archivedAt.Time
+		a.ArchivedAt = &t
+	}
+	return &a, nil
+}
+
 func scanAgent(row interface{ Scan(dest ...any) error }) (*models.Agent, error) {
 	var a models.Agent
 	var (
@@ -206,6 +224,30 @@ func normalizeAgentToolConfig(a *models.Agent) {
 
 func (r *AgentRepo) List(ctx context.Context) ([]models.Agent, error) {
 	return r.list(ctx, `SELECT `+agentColumns+` FROM agents WHERE COALESCE(generated_status, 'user_edited') <> 'archived' ORDER BY name ASC`)
+}
+
+func (r *AgentRepo) ListChatAssignableDefinitions(ctx context.Context) ([]models.ChatAssignableAgentDefinition, error) {
+	rows, err := r.db.QueryContext(ctx, `
+			SELECT id, name, COALESCE(description, ''), COALESCE(key, ''), COALESCE(system_kind, ''),
+			       COALESCE(selectable_as_primary, 1), COALESCE(enabled, 1),
+			       COALESCE(generated_status, 'user_edited'), archived_at
+			FROM agents
+			WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+			ORDER BY name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing chat assignable agent definitions: %w", err)
+	}
+	defer rows.Close()
+
+	agents := []models.ChatAssignableAgentDefinition{}
+	for rows.Next() {
+		agent, err := scanChatAssignableAgentDefinition(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning chat assignable agent definition: %w", err)
+		}
+		agents = append(agents, *agent)
+	}
+	return agents, rows.Err()
 }
 
 func (r *AgentRepo) ListRuntimeSummaries(ctx context.Context) ([]AgentRuntimeSummary, error) {

@@ -3589,11 +3589,11 @@ func (h *Handler) buildChatContext(ctx context.Context, projectID string, availa
 	return service.BuildChatContextWithAgentDefinitions(existingTasks, availableModels, agentDefinitions, schedules, time.Now())
 }
 
-func (h *Handler) listChatAssignableAgentDefinitions(ctx context.Context) []models.Agent {
+func (h *Handler) listChatAssignableAgentDefinitions(ctx context.Context) []models.ChatAssignableAgentDefinition {
 	if h.agentRepo == nil {
 		return nil
 	}
-	agents, err := h.agentRepo.List(ctx)
+	agents, err := h.agentRepo.ListChatAssignableDefinitions(ctx)
 	if err != nil {
 		applog.Infof("[handler] buildChatContext error listing agent definitions: %v", err)
 		return nil
