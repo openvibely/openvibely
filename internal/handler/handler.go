@@ -432,10 +432,16 @@ func (h *Handler) SetGitHubService(svc GitHubServiceProvider) {
 
 func (h *Handler) SetSlackService(svc SlackServiceProvider) {
 	h.slackSvc = svc
+	if setter, ok := svc.(automationGraphServiceSetter); ok {
+		setter.SetAutomationGraphService(h.automationGraphSvc)
+	}
 }
 
 func (h *Handler) SetDiscordService(svc DiscordServiceProvider) {
 	h.discordSvc = svc
+	if setter, ok := svc.(automationGraphServiceSetter); ok {
+		setter.SetAutomationGraphService(h.automationGraphSvc)
+	}
 }
 
 func (h *Handler) SetChannelMessageRouter(router *service.ChannelMessageRouter) {

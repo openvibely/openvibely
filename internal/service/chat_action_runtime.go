@@ -181,6 +181,7 @@ type channelUtilityActionHandlerOptions struct {
 	CallerTaskID              string
 	TaskRepo                  *repository.TaskRepo
 	ScheduleRepo              *repository.ScheduleRepo
+	AutomationGraphSvc        *AutomationGraphService
 	WorkerSvc                 *WorkerService
 	LLMConfigRepo             *repository.LLMConfigRepo
 	AgentRepo                 *repository.AgentRepo
@@ -190,6 +191,15 @@ type channelUtilityActionHandlerOptions struct {
 	AlertSvc                  *AlertService
 	PrepareImplementationTask func(context.Context, *models.AlertImplementationTaskInput) error
 	UnavailableAgentsText     string
+}
+
+type channelListAutomationsInput struct {
+	ProjectID string `json:"project_id"`
+}
+
+type channelGetAutomationInput struct {
+	AutomationID string `json:"automation_id"`
+	ProjectID    string `json:"project_id"`
 }
 
 func workerFromTaskService(taskSvc *TaskService) *WorkerService {
@@ -495,6 +505,12 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return ExecuteListTasksTool(ctx, opts.TaskRepo, opts.ProjectID, input)
 		},
+		"list_automations": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return channelListAutomationsResult(ctx, opts.AutomationGraphSvc, opts.ProjectID, input)
+		},
+		"get_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return channelGetAutomationResult(ctx, opts.AutomationGraphSvc, opts.ProjectID, input)
+		},
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return runChannelScheduleTask(ctx, opts, input), nil
 		},
@@ -552,6 +568,98 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		PrepareImplementationTask: opts.PrepareImplementationTask,
 	}))
 	return handlers
+}
+
+func channelListAutomationsResult(ctx context.Context, graphSvc *AutomationGraphService, currentProjectID string, input json.RawMessage) (string, error) {
+	if graphSvc == nil {
+		return marshalChannelAutomationResult(map[string]any{"automations": []any{}})
+	}
+	var req channelListAutomationsInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	projectID := strings.TrimSpace(currentProjectID)
+	if override := strings.TrimSpace(req.ProjectID); override != "" {
+		projectID = override
+	}
+	if projectID == "" {
+		return "", fmt.Errorf("list_automations: no current project")
+	}
+	cards, err := graphSvc.List(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	summaries := make([]map[string]any, 0, len(cards))
+	for _, card := range cards {
+		summaries = append(summaries, channelAutomationCardSummary(card))
+	}
+	return marshalChannelAutomationResult(map[string]any{"automations": summaries})
+}
+
+func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphService, currentProjectID string, input json.RawMessage) (string, error) {
+	if graphSvc == nil {
+		return "", fmt.Errorf("automations unavailable")
+	}
+	var req channelGetAutomationInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	automationID := strings.TrimSpace(req.AutomationID)
+	if automationID == "" {
+		return "", fmt.Errorf("get_automation: automation_id is required")
+	}
+	projectID := strings.TrimSpace(currentProjectID)
+	if override := strings.TrimSpace(req.ProjectID); override != "" {
+		projectID = override
+	}
+	if projectID == "" {
+		return "", fmt.Errorf("get_automation: no current project")
+	}
+	cards, err := graphSvc.List(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	for _, card := range cards {
+		if card.Automation.ID == automationID {
+			return marshalChannelAutomationResult(map[string]any{"automation": channelAutomationCardSummary(card)})
+		}
+	}
+	return marshalChannelAutomationResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
+}
+
+func channelAutomationCardSummary(card models.AutomationCard) map[string]any {
+	paused := card.Automation.LifecycleState == models.AutomationPaused
+	summary := map[string]any{
+		"id":          card.Automation.ID,
+		"name":        card.Automation.Name,
+		"status":      string(card.Automation.LifecycleState),
+		"paused":      paused,
+		"adapter_key": card.Version.AdapterKey,
+		"node_count": card.Counts.Running + card.Counts.Waiting +
+			card.Counts.Blocked + card.Counts.Failed + card.Counts.CompletedRecently,
+		"counts": map[string]int{
+			"running":            card.Counts.Running,
+			"waiting":            card.Counts.Waiting,
+			"blocked":            card.Counts.Blocked,
+			"failed":             card.Counts.Failed,
+			"completed_recently": card.Counts.CompletedRecently,
+		},
+	}
+	if card.NextRun != nil {
+		summary["next_run"] = card.NextRun.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	if card.LastRun != nil {
+		summary["last_run"] = card.LastRun.UTC().Format("2006-01-02T15:04:05Z")
+	}
+	return summary
+}
+
+func marshalChannelAutomationResult(value any) (string, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 func buildChannelProjectListResult(ctx context.Context, projectRepo *repository.ProjectRepo, projectID string) string {

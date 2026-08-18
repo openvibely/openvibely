@@ -87,6 +87,7 @@ type SlackService struct {
 	taskGoalSvc              *TaskGoalService
 	llmSvc                   *LLMService
 	workerSvc                *WorkerService
+	automationGraphSvc       *AutomationGraphService
 	slackUserProjectRepo     *repository.SlackUserProjectRepo
 	slackTaskContextRepo     *repository.SlackTaskContextRepo
 	slackInboundReceiptRepo  *repository.SlackInboundReceiptRepo
@@ -230,6 +231,10 @@ func (s *SlackService) SetChannelTaskRunner(runner ChannelTaskRunner) {
 
 func (s *SlackService) SetAlertService(svc *AlertService) {
 	s.alertSvc = svc
+}
+
+func (s *SlackService) SetAutomationGraphService(svc *AutomationGraphService) {
+	s.automationGraphSvc = svc
 }
 
 func (s *SlackService) SetChannelMessageRouter(router *ChannelMessageRouter) {
@@ -1427,6 +1432,7 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
+		AutomationGraphSvc:    s.automationGraphSvc,
 		WorkerSvc:             s.workerSvc,
 		LLMConfigRepo:         s.llmConfigRepo,
 		SettingsRepo:          s.settingsRepo,

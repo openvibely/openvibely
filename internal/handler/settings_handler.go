@@ -441,6 +441,9 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		if h.customPersonalityRepo != nil {
 			svc.SetCustomPersonalityRepo(h.customPersonalityRepo)
 		}
+		if h.automationGraphSvc != nil {
+			svc.SetAutomationGraphService(h.automationGraphSvc)
+		}
 		if h.chatBroadcaster != nil {
 			svc.SetChatBroadcaster(h.chatBroadcaster)
 		}

@@ -12,6 +12,7 @@ import (
 func (h *Handler) SetAutomationServices(graph *service.AutomationGraphService, registration *service.AutomationRegistrationService) {
 	h.automationGraphSvc = graph
 	h.automationRegistrationSvc = registration
+	h.setChannelAutomationGraphService(graph)
 }
 
 func (h *Handler) SetAutomationExternalStateService(external *service.AutomationExternalStateService) {
@@ -20,6 +21,25 @@ func (h *Handler) SetAutomationExternalStateService(external *service.Automation
 
 func (h *Handler) SetAutomationLiveViewTracker(tracker *service.AutomationLiveViewTracker) {
 	h.automationLiveViewTracker = tracker
+}
+
+type automationGraphServiceSetter interface {
+	SetAutomationGraphService(*service.AutomationGraphService)
+}
+
+func (h *Handler) setChannelAutomationGraphService(graph *service.AutomationGraphService) {
+	if h == nil {
+		return
+	}
+	if h.telegramService != nil {
+		h.telegramService.SetAutomationGraphService(graph)
+	}
+	if setter, ok := h.slackSvc.(automationGraphServiceSetter); ok {
+		setter.SetAutomationGraphService(graph)
+	}
+	if setter, ok := h.discordSvc.(automationGraphServiceSetter); ok {
+		setter.SetAutomationGraphService(graph)
+	}
 }
 
 func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftService, capabilities *service.AutomationCapabilitySnapshotBuilder, validator *service.AutomationSaveValidator, compiler *service.AutomationCompiler, confirmation *service.AutomationConfirmationService, lifecycle *service.AutomationLifecycleService) {
