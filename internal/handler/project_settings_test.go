@@ -292,6 +292,123 @@ func TestProjectSettings_EndToEnd(t *testing.T) {
 }
 
 // TestNewProjectDialog tests the new project creation dialog endpoint
+func TestProjectDialogsUseCompactDefaultModelProjection(t *testing.T) {
+	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
+
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	largeHiddenField := strings.Repeat("hidden-project-dialog-model-field", 4096)
+	globalDefault := &models.LLMConfig{
+		Name: "Project Dialog Global Default", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "global-default-model", APIKey: "global-secret-key", OAuthAccessToken: "global-secret-token",
+		OAuthRefreshToken: "global-secret-refresh", OAuthClientSecret: "global-secret-client",
+		OAuthAuthorizeURL: "https://auth.example.com/authorize", OAuthTokenURL: "https://auth.example.com/token",
+		OllamaBaseURL: "http://localhost:11434", BaseURL: "https://example.com/v1/", ModelsURL: "https://example.com/models",
+		ExtraHeadersJSON: `{"X-Secret":"value"}`, ExtraBodyJSON: largeHiddenField,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"access":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeHiddenField + `"}`, MaxWorkers: 3, WorkerTimeout: 99, IsDefault: true,
+	}
+	if err := llmConfigRepo.Create(ctx, globalDefault); err != nil {
+		t.Fatalf("create global default model: %v", err)
+	}
+	projectDefault := &models.LLMConfig{
+		Name: "Project Dialog Project Default", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+		Model: "project-default-model", APIKey: "project-secret-key", BaseURL: "https://project.example.com/v1/",
+		ExtraHeadersJSON: `{"Authorization":"secret"}`, ExtraBodyJSON: largeHiddenField,
+		CustomAuthConfigJSON: `{"secret":"config"}`, CustomAuthStateJSON: `{"secret":"state"}`,
+		MixtureConfigJSON: `{"large":"` + largeHiddenField + `"}`,
+	}
+	if err := llmConfigRepo.Create(ctx, projectDefault); err != nil {
+		t.Fatalf("create project default model: %v", err)
+	}
+	project := &models.Project{Name: "Compact Dialog Project", RepoPath: t.TempDir(), DefaultAgentConfigID: &projectDefault.ID}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	t.Run("new project dialog", func(t *testing.T) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/projects/new", nil)
+		e.ServeHTTP(rec, req)
+		counter.SetEnabled(false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /projects/new = %d body=%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, `Project Dialog Global Default (openai_compatible/global-default-model)`) ||
+			!strings.Contains(body, `Project Dialog Project Default (openai_compatible/project-default-model)`) ||
+			!strings.Contains(body, `[global default]`) {
+			t.Fatalf("new dialog did not preserve model labels/default marker: %s", body)
+		}
+		assertProjectDialogModelProjection(t, counter.Statements())
+		assertProjectDialogHiddenModelFieldsAbsent(t, body, largeHiddenField)
+	})
+
+	t.Run("edit project dialog", func(t *testing.T) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/projects/"+project.ID+"/edit", nil)
+		e.ServeHTTP(rec, req)
+		counter.SetEnabled(false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /projects/:id/edit = %d body=%s", rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, `value="`+projectDefault.ID+`" selected`) {
+			t.Fatalf("edit dialog did not select project default model %s: %s", projectDefault.ID, body)
+		}
+		if !strings.Contains(body, `Project Dialog Global Default (openai_compatible/global-default-model)`) || !strings.Contains(body, `[global default]`) {
+			t.Fatalf("edit dialog did not preserve global default label/marker: %s", body)
+		}
+		assertProjectDialogModelProjection(t, counter.Statements())
+		assertProjectDialogHiddenModelFieldsAbsent(t, body, largeHiddenField)
+	})
+}
+
+func assertProjectDialogModelProjection(t *testing.T, statements []string) {
+	t.Helper()
+	var modelQueries []string
+	for _, statement := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(stmt, " from agent_configs ") {
+			modelQueries = append(modelQueries, statement)
+		}
+	}
+	if len(modelQueries) != 1 {
+		t.Fatalf("agent_configs statements = %#v, want exactly one compact dialog model query", modelQueries)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(modelQueries[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, provider, model, is_default") {
+		t.Fatalf("project dialog model projection = %q, want id/name/provider/model/is_default in %s", projection, modelQueries[0])
+	}
+	for _, forbidden := range []string{"reasoning_effort", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "created_at", "updated_at", "max_workers", "worker_timeout", "auto_start_tasks"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("project dialog query selected forbidden column %q: %s", forbidden, modelQueries[0])
+		}
+	}
+	if !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("project dialog query must preserve default/name ordering: %s", modelQueries[0])
+	}
+}
+
+func assertProjectDialogHiddenModelFieldsAbsent(t *testing.T, body, largeHiddenField string) {
+	t.Helper()
+	for _, hidden := range []string{largeHiddenField, "global-secret-key", "global-secret-token", "global-secret-refresh", "global-secret-client", "project-secret-key", "hidden-project-dialog-model-field", "auth.example.com", "project.example.com", "X-Secret", "signing_secret"} {
+		if strings.Contains(body, hidden) {
+			t.Fatalf("project dialog rendered hidden model field %q", hidden)
+		}
+	}
+}
+
 func TestNewProjectDialog(t *testing.T) {
 	t.Setenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH", "true")
 
