@@ -115,7 +115,7 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 	<script>
 		async function refreshSystemUpdateCard() {
 				var card = document.getElementById('system-update-card');
-				if (!card) return;
+				if (!card || !window.openVibelyNormalizeSystemUpdateSnapshot) return;
 				try {
 					var response = await fetch('/api/system/update', {headers: {'Accept': 'application/json'}});
 					if (response.status === 204) {
@@ -126,27 +126,24 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					if (!response.ok) return;
 					var data = await response.json();
 					if (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(data);
-					var available = data.release && data.release.metadata ? data.release.metadata.version : '';
-					if (data.state === 'succeeded' || (available && data.current_version === available)) { card.classList.add('hidden'); return; }
+					var view = window.openVibelyNormalizeSystemUpdateSnapshot(data);
+					if (view.hidden) { card.classList.add('hidden'); return; }
 					card.classList.remove('hidden');
-					document.getElementById('system-update-summary').textContent = 'Current ' + data.current_version + (available ? ' · Available ' + available : ' · No update available') + ' · ' + data.distribution + ' · ' + data.channel;
-					document.getElementById('system-update-state').textContent = data.state;
-						var owner = data.distribution === 'hosted' ? 'A Hosted administrator starts the rollout.' : data.distribution === 'docker' && data.manual ? 'The container operator performs the replacement after OpenVibely is safe to restart.' : data.distribution === 'docker' ? 'An OpenVibely administrator approves the host updater agent request.' : 'An OpenVibely administrator approves restart and installation.';					document.getElementById('system-update-owner').textContent = owner;
-					var active = data.drain && data.drain.active ? data.drain.active : {};
-					var total = (active.task_executions || 0) + (active.chat_executions || 0) + (active.automation_activities || 0);
-					document.getElementById('system-update-work').textContent = data.state === 'waiting_for_idle' ? 'Waiting for AI work to finish · ' + total + ' active' : (data.state === 'ready' ? 'Safe to restart' : total + ' active AI operations');
-					var digest = document.getElementById('system-update-digest'); var imageRef = data.release && data.release.target ? data.release.target.image_ref || '' : '';
-					digest.textContent = imageRef ? 'Verified image: ' + imageRef : ''; digest.classList.toggle('hidden', !imageRef);
-					var notes = document.getElementById('system-update-notes'); var notesURL = data.release && data.release.metadata ? data.release.metadata.release_notes_url : '';
-					if (notesURL) { notes.href = notesURL; notes.classList.remove('hidden'); } else { notes.classList.add('hidden'); }
-					var error = document.getElementById('system-update-error'); error.textContent = data.configuration_error || data.error || ''; error.classList.toggle('hidden', !error.textContent);
-						var applySupported = !data.release || data.release.apply_supported !== false;
-						var accept = document.getElementById('system-update-accept');
-						accept.textContent = data.manual ? 'Prepare for update' : (data.distribution === 'docker' ? 'Update container' : 'Update OpenVibely');
-							var localPackagedReady = data.distribution === 'docker' || data.manual || data.staged;
-							accept.classList.toggle('hidden', !available || !applySupported || !localPackagedReady || data.distribution === 'hosted' || (data.state !== 'available' && data.state !== 'failed'));
-						document.getElementById('system-update-acceptance').classList.toggle('hidden', !available || !applySupported || data.distribution === 'hosted');
-						document.getElementById('system-update-cancel').classList.toggle('hidden', data.distribution === 'hosted' || (data.state !== 'waiting_for_idle' && data.state !== 'ready'));				} catch (_) {}
+					document.getElementById('system-update-summary').textContent = 'Current ' + view.currentVersion + (view.available ? ' · Available ' + view.available : ' · No update available') + ' · ' + view.distribution + ' · ' + view.channel;
+					document.getElementById('system-update-state').textContent = view.state;
+					document.getElementById('system-update-owner').textContent = view.ownerText;
+					document.getElementById('system-update-work').textContent = view.workText;
+					var digest = document.getElementById('system-update-digest');
+					digest.textContent = view.imageRef ? 'Verified image: ' + view.imageRef : ''; digest.classList.toggle('hidden', !view.imageRef);
+					var notes = document.getElementById('system-update-notes');
+					if (view.notesURL) { notes.href = view.notesURL; notes.classList.remove('hidden'); } else { notes.classList.add('hidden'); }
+					var error = document.getElementById('system-update-error'); error.textContent = view.errorText; error.classList.toggle('hidden', !view.errorText);
+					var accept = document.getElementById('system-update-accept');
+					accept.textContent = view.acceptText;
+					accept.classList.toggle('hidden', !view.actionable);
+					document.getElementById('system-update-acceptance').classList.toggle('hidden', !view.showAcceptance);
+					document.getElementById('system-update-cancel').classList.toggle('hidden', !view.showCancel);
+				} catch (_) {}
 			}
 			async function systemUpdateAction(action) {
 				var response = await fetch('/api/system/update/' + action, {method: 'POST', headers: {'Accept': 'application/json'}});

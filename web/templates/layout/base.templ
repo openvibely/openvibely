@@ -3611,14 +3611,45 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					}, 400);
 				};
 
-				function systemUpdateIsActionable(data) {
-					if (!data || !data.release || !data.release.metadata) return false;
-					var available = data.release.metadata.version || '';
-					if (!available || data.current_version === available || data.state === 'succeeded') return false;
-					if (data.release.apply_supported === false || data.distribution === 'hosted') return false;
-					var readyForLocalApply = data.distribution === 'docker' || data.manual || data.staged;
-					return readyForLocalApply && (data.state === 'available' || data.state === 'failed');
+				function normalizeSystemUpdateSnapshot(data) {
+					var release = data && data.release ? data.release : {};
+					var metadata = release.metadata || {};
+					var target = release.target || {};
+					var available = metadata.version || '';
+					var hidden = !!(!data || data.state === 'succeeded' || (available && data.current_version === available));
+					var applySupported = release.apply_supported !== false;
+					var readyForLocalApply = !!data && (data.distribution === 'docker' || data.manual || data.staged);
+					var stateAllowsApply = !!data && (data.state === 'available' || data.state === 'failed');
+					var actionable = !hidden && !!available && applySupported && data.distribution !== 'hosted' && readyForLocalApply && stateAllowsApply;
+					var active = data && data.drain && data.drain.active ? data.drain.active : {};
+					var activeTotal = (active.task_executions || 0) + (active.chat_executions || 0) + (active.automation_activities || 0);
+					var distribution = data && data.distribution ? data.distribution : '';
+					var ownerText = distribution === 'hosted' ? 'A Hosted administrator starts the rollout.' : distribution === 'docker' && data && data.manual ? 'The container operator performs the replacement after OpenVibely is safe to restart.' : distribution === 'docker' ? 'An OpenVibely administrator approves the host updater agent request.' : 'An OpenVibely administrator approves restart and installation.';
+					var workText = data && data.state === 'waiting_for_idle' ? 'Waiting for AI work to finish · ' + activeTotal + ' active' : (data && data.state === 'ready' ? 'Safe to restart' : activeTotal + ' active AI operations');
+					return {
+						data: data || null,
+						available: available,
+						currentVersion: data && data.current_version ? data.current_version : '',
+						state: data && data.state ? data.state : '',
+						distribution: distribution,
+						channel: data && data.channel ? data.channel : '',
+						hidden: hidden,
+						applySupported: applySupported,
+						readyForLocalApply: readyForLocalApply,
+						stateAllowsApply: stateAllowsApply,
+						actionable: actionable,
+						activeTotal: activeTotal,
+						ownerText: ownerText,
+						workText: workText,
+						imageRef: target.image_ref || '',
+						notesURL: metadata.release_notes_url || '',
+						errorText: data ? (data.configuration_error || data.error || '') : '',
+						acceptText: data && data.manual ? 'Prepare for update' : (distribution === 'docker' ? 'Update container' : 'Update OpenVibely'),
+						showAcceptance: !hidden && !!available && applySupported && distribution !== 'hosted',
+						showCancel: !!data && distribution !== 'hosted' && (data.state === 'waiting_for_idle' || data.state === 'ready')
+					};
 				}
+				window.openVibelyNormalizeSystemUpdateSnapshot = normalizeSystemUpdateSnapshot;
 
 				function setSystemUpdateIndicators(visible) {
 					var badge = document.getElementById('system-update-nav-badge');
@@ -3780,25 +3811,24 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				}
 
 				function handleGlobalSystemUpdateSnapshot(data) {
+					var view = normalizeSystemUpdateSnapshot(data);
 					if (!data) {
 						setSystemUpdateIndicators(false);
 						dismissSystemUpdateNotice('');
 						showSystemUpdateSucceededToast(null, consumeSystemUpdatePendingSuccess());
 						return;
 					}
-					var actionable = systemUpdateIsActionable(data);
-					setSystemUpdateIndicators(actionable);
-					if (actionable) showSystemUpdateNotice(data);
+					setSystemUpdateIndicators(view.actionable);
+					if (view.actionable) showSystemUpdateNotice(data);
 					else {
 						dismissSystemUpdateNotice('');
-						var available = data.release && data.release.metadata ? data.release.metadata.version || '' : '';
-						if (data.state === 'waiting_for_idle' || data.state === 'ready' || data.state === 'applying' || data.state === 'restarting' || data.state === 'validating') {
+						if (view.state === 'waiting_for_idle' || view.state === 'ready' || view.state === 'applying' || view.state === 'restarting' || view.state === 'validating') {
 							rememberSystemUpdatePendingSuccess(data);
 						}
 						showSystemUpdateSucceededToast(data);
-						if (available && data.current_version === available) {
+						if (view.available && view.currentVersion === view.available) {
 							showSystemUpdateSucceededToast(null, consumeSystemUpdatePendingSuccess());
-						} else if (data.state === 'failed' || data.state === 'rolled_back' || data.state === 'idle') {
+						} else if (view.state === 'failed' || view.state === 'rolled_back' || view.state === 'idle') {
 							clearSystemUpdatePendingSuccess();
 						}
 					}
