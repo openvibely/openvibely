@@ -53,6 +53,15 @@ func TestHasOtherEditFields(t *testing.T) {
 	if !hasOtherEditFields(service.TaskEditRequest{Attachments: []string{"note.txt"}}) {
 		t.Fatal("attachments should count as edit fields")
 	}
+	if !hasOtherEditFields(service.TaskEditRequest{AgentDefinitionID: "agent-def-1"}) {
+		t.Fatal("agent_definition_id should count as an edit field")
+	}
+	if !hasOtherEditFields(service.TaskEditRequest{Agent: "Docs Reviewer"}) {
+		t.Fatal("agent should count as an edit field")
+	}
+	if !hasOtherEditFields(service.TaskEditRequest{ClearAgentDefinition: true}) {
+		t.Fatal("clear_agent_definition should count as an edit field")
+	}
 	chain := models.ChainConfiguration{}
 	if !hasOtherEditFields(service.TaskEditRequest{Chain: &chain}) {
 		t.Fatal("chain should count as an edit field")

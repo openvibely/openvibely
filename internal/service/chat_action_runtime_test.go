@@ -1185,6 +1185,51 @@ func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallbac
 	require.Contains(t, strings.Join(collector.createdLines, "\n"), callbackTaskIDs[0])
 }
 
+func TestBuildChannelTaskActionHandlersEditTaskUpdatesPrimaryAgentDefinition(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Channel Edit Primary Agent"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	modelConfig := &models.LLMConfig{Name: "Channel Model", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, llmConfigRepo.Create(ctx, modelConfig))
+	agentRepo := repository.NewAgentRepo(db)
+	agentDef := &models.Agent{Name: "Channel Reviewer", Key: "channel_reviewer", Enabled: true, SelectableAsPrimary: true}
+	require.NoError(t, agentRepo.Create(ctx, agentDef))
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	taskSvc.SetAgentRepo(agentRepo)
+	task := &models.Task{ProjectID: project.ID, Title: "Channel edit target", Prompt: "Prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentID: &modelConfig.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	collector := newChannelActionSummaryCollector()
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{ProjectID: project.ID, TaskSvc: taskSvc, Collector: collector})
+
+	payload, err := json.Marshal(TaskEditRequest{ID: task.ID, Agent: agentDef.Name})
+	require.NoError(t, err)
+	summary, err := handlers["edit_task"](ctx, payload)
+	require.NoError(t, err)
+	require.Contains(t, summary, "Edited 1 task(s)")
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.AgentDefinitionID)
+	require.Equal(t, agentDef.ID, *updated.AgentDefinitionID)
+	require.NotNil(t, updated.AgentID)
+	require.Equal(t, modelConfig.ID, *updated.AgentID)
+
+	clearPayload, err := json.Marshal(TaskEditRequest{ID: task.ID, ClearAgentDefinition: true})
+	require.NoError(t, err)
+	clearSummary, err := handlers["edit_task"](ctx, clearPayload)
+	require.NoError(t, err)
+	require.Contains(t, clearSummary, "Edited 1 task(s)")
+	updated, err = taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Nil(t, updated.AgentDefinitionID)
+	require.NotNil(t, updated.AgentID)
+	require.Equal(t, modelConfig.ID, *updated.AgentID)
+	require.Contains(t, strings.Join(collector.editedLines, "\n"), task.ID)
+}
+
 func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
