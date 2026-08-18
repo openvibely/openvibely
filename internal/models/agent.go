@@ -95,6 +95,21 @@ type AgentModelDefaults struct {
 	MaxTokens   int     `json:"max_tokens,omitempty"`
 }
 
+// ChatAssignableAgentDefinition is the compact Agent shape needed to advertise
+// assignable Agent definitions in Chat prompt context without hydrating full
+// prompts, tools, permissions, skills, MCP servers, plugins, or model defaults.
+type ChatAssignableAgentDefinition struct {
+	ID                  string
+	Name                string
+	Description         string
+	Key                 string
+	SystemKind          string
+	SelectableAsPrimary bool
+	Enabled             bool
+	GeneratedStatus     AgentGeneratedStatus
+	ArchivedAt          *time.Time
+}
+
 // Agent is a named configuration that wraps a system prompt, tool restrictions,
 // skills, MCP servers, and parameterized tool config. Tasks can be assigned to an agent.
 type Agent struct {

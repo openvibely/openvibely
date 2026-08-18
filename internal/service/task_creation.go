@@ -576,7 +576,7 @@ func BuildModelContextString(configs []models.LLMConfig) string {
 
 // BuildAgentDefinitionContextString creates a prompt-safe summary of Agent definitions
 // that can be assigned as a task's primary Agent from chat orchestration.
-func BuildAgentDefinitionContextString(agents []models.Agent) string {
+func BuildAgentDefinitionContextString(agents []models.ChatAssignableAgentDefinition) string {
 	assignable := UniqueChatAssignableAgentDefinitions(agents)
 	if len(assignable) == 0 {
 		return ""
@@ -599,22 +599,26 @@ func BuildAgentDefinitionContextString(agents []models.Agent) string {
 	return sb.String()
 }
 
-func UniqueChatAssignableAgentDefinitions(agents []models.Agent) []models.Agent {
+func UniqueChatAssignableAgentDefinitions(agents []models.ChatAssignableAgentDefinition) []models.ChatAssignableAgentDefinition {
 	counts := make(map[string]int, len(agents))
 	for _, a := range agents {
-		if isChatAssignableAgentDefinition(a) {
+		if isChatAssignableAgentDefinitionSummary(a) {
 			counts[strings.ToLower(strings.TrimSpace(a.Name))]++
 		}
 	}
 
-	out := make([]models.Agent, 0, len(agents))
+	out := make([]models.ChatAssignableAgentDefinition, 0, len(agents))
 	for _, a := range agents {
 		key := strings.ToLower(strings.TrimSpace(a.Name))
-		if isChatAssignableAgentDefinition(a) && counts[key] == 1 {
+		if isChatAssignableAgentDefinitionSummary(a) && counts[key] == 1 {
 			out = append(out, a)
 		}
 	}
 	return out
+}
+
+func isChatAssignableAgentDefinitionSummary(a models.ChatAssignableAgentDefinition) bool {
+	return strings.TrimSpace(a.Name) != "" && strings.TrimSpace(a.SystemKind) == "" && a.Enabled && a.SelectableAsPrimary && a.GeneratedStatus != models.AgentStatusArchived && a.ArchivedAt == nil
 }
 
 func isChatAssignableAgentDefinition(a models.Agent) bool {
@@ -1040,7 +1044,7 @@ func BuildChatContext(tasks []models.Task, availableModels []models.LLMConfig, s
 
 // BuildChatContextWithAgentDefinitions builds the chat context with an optional
 // list of Agent definitions that can be assigned via create_task.agent.
-func BuildChatContextWithAgentDefinitions(tasks []models.Task, availableModels []models.LLMConfig, agentDefinitions []models.Agent, schedules []models.Schedule, now time.Time) string {
+func BuildChatContextWithAgentDefinitions(tasks []models.Task, availableModels []models.LLMConfig, agentDefinitions []models.ChatAssignableAgentDefinition, schedules []models.Schedule, now time.Time) string {
 	// Filter out chat tasks
 	var nonChatTasks []models.Task
 	for _, t := range tasks {
