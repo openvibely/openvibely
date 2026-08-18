@@ -1745,6 +1745,132 @@ func TestAutomationChatExplicitSavePersistsInSingleToolCall(t *testing.T) {
 	}
 }
 
+func configureAutomationChatRuntimeTestServices(t *testing.T, tc *TestContext) *service.AutomationDraftService {
+	t.Helper()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registry := service.NewAutomationAdapterRegistry()
+	drafts := service.NewAutomationDraftService(automationRepo, registry)
+	validator := service.NewAutomationSaveValidator(registry, drafts)
+	capabilities := service.NewAutomationCapabilitySnapshotBuilder(tc.projectRepo, repository.NewAgentRepo(tc.db), tc.taskRepo, tc.settingsRepo)
+	compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, validator)
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+	tc.handler.SetAutomationBuilderServices(drafts, capabilities, validator, compiler, nil, service.NewAutomationLifecycleService(automationRepo, tc.scheduleRepo))
+	return drafts
+}
+
+func composedChannelAutomationRuntimeForTest(ctx context.Context, h *Handler, params streamingResponseParams, mode models.ChatMode, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
+	channelHandlers := map[string]chatcontrol.RuntimeActionHandler{
+		"get_current_project": func(context.Context, json.RawMessage) (string, error) {
+			return "channel current project", nil
+		},
+	}
+	channelRT := &llmcontracts.RuntimeTools{
+		Definitions: chatcontrol.ToolDefsForContext(mode, surface, mode == models.ChatModeOrchestrate),
+		Executor: chatcontrol.BuildRuntimeToolExecutorForActions(mode, surface, channelHandlers, map[string]bool{
+			"get_current_project": true,
+		}),
+	}
+	params.Surface = surface
+	params.RuntimeTools = channelRT
+	return h.buildStreamingResponseActionRuntime(ctx, params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(mode, surface, mode == models.ChatModeOrchestrate), mode, surface)
+}
+
+func countRowsForProject(t *testing.T, tc *TestContext, table, projectID string) int {
+	t.Helper()
+	var count int
+	switch table {
+	case "automations", "tasks":
+		require.NoError(t, tc.db.QueryRow(fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE project_id = ?`, table), projectID).Scan(&count))
+	case "schedules":
+		require.NoError(t, tc.db.QueryRow(`SELECT COUNT(*) FROM schedules s JOIN tasks t ON t.id = s.task_id WHERE t.project_id = ?`, projectID).Scan(&count))
+	default:
+		t.Fatalf("unsupported project row count table %q", table)
+	}
+	return count
+}
+
+func TestAutomationChatChannelRuntimeTemplateSavePersistsInResolvedProject(t *testing.T) {
+	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceSlack, chatcontrol.SurfaceTelegram, chatcontrol.SurfaceDiscord, chatcontrol.SurfaceEmail} {
+		t.Run(string(surface), func(t *testing.T) {
+			tc := NewTestContext(t)
+			ctx := context.Background()
+			project := tc.CreateProject().WithName("Channel Automation Save").Build()
+			foreign := tc.CreateProject().WithName("Foreign Automation Save").Build()
+			configureAutomationChatRuntimeTestServices(t, tc)
+			model := models.LLMConfig{Name: "Channel default", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+			require.NoError(t, tc.llmConfigRepo.Create(ctx, &model))
+
+			runtime := composedChannelAutomationRuntimeForTest(ctx, tc.handler, streamingResponseParams{ProjectID: project.ID, PrincipalID: "channel-user"}, models.ChatModeOrchestrate, surface)
+			require.True(t, runtime.HasDefinition("preview_automation_description"))
+			require.True(t, runtime.HasDefinition("save_automation"))
+
+			output, handled, isError, err := runtime.Executor(ctx, "save_automation", json.RawMessage(`{"source":"template","template_key":"native_sdlc","project_id":"`+foreign.ID+`"}`))
+			require.NoError(t, err)
+			require.True(t, handled)
+			require.False(t, isError, output)
+			require.Contains(t, output, `"active":true`)
+			require.Contains(t, output, `"url":"/automations/`)
+			require.Contains(t, output, `project_id=`+project.ID)
+			require.Equal(t, 1, countRowsForProject(t, tc, "automations", project.ID))
+			require.Zero(t, countRowsForProject(t, tc, "automations", foreign.ID))
+			require.NotZero(t, countRowsForProject(t, tc, "tasks", project.ID))
+			require.Zero(t, countRowsForProject(t, tc, "tasks", foreign.ID))
+			require.NotZero(t, countRowsForProject(t, tc, "schedules", project.ID))
+			require.Zero(t, countRowsForProject(t, tc, "schedules", foreign.ID))
+		})
+	}
+}
+
+func TestAutomationChatChannelRuntimeInvalidYAMLReturnsValidationWithoutPersisting(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Channel Automation Invalid").Build()
+	configureAutomationChatRuntimeTestServices(t, tc)
+	runtime := composedChannelAutomationRuntimeForTest(ctx, tc.handler, streamingResponseParams{ProjectID: project.ID, PrincipalID: "channel-user"}, models.ChatModeOrchestrate, chatcontrol.SurfaceDiscord)
+
+	output, handled, isError, err := runtime.Executor(ctx, "save_automation", json.RawMessage(`{"source":"yaml","automation_yaml":"schema_version: 1\nname: duplicate\nname: duplicate\n"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isError, output)
+	require.Contains(t, output, `"active":false`)
+	require.Contains(t, output, "invalid_yaml")
+	require.Zero(t, countRowsForProject(t, tc, "automations", project.ID))
+	require.Zero(t, countRowsForProject(t, tc, "tasks", project.ID))
+	require.Zero(t, countRowsForProject(t, tc, "schedules", project.ID))
+}
+
+func TestAutomationChatChannelRuntimePlanModePreviewOnly(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Channel Automation Plan").Build()
+	drafts := configureAutomationChatRuntimeTestServices(t, tc)
+	candidate := automationChatCustomApprovalCandidate(t, drafts)
+	candidateJSON, err := json.Marshal(candidate)
+	require.NoError(t, err)
+	model := models.LLMConfig{Name: "Channel preview model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, tc.llmConfigRepo.Create(ctx, &model))
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = string(candidateJSON)
+	tc.handler.llmSvc.SetLLMCaller(mock)
+
+	runtime := composedChannelAutomationRuntimeForTest(ctx, tc.handler, streamingResponseParams{ProjectID: project.ID, PrincipalID: "channel-user"}, models.ChatModePlan, chatcontrol.SurfaceSlack)
+	require.True(t, runtime.HasDefinition("preview_automation_description"))
+	require.False(t, runtime.HasDefinition("save_automation"))
+
+	preview, handled, isError, err := runtime.Executor(ctx, "preview_automation_description", json.RawMessage(`{"description":"Review vision daily"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isError, preview)
+	require.Contains(t, preview, `"persisted":false`)
+
+	output, handled, isError, err := runtime.Executor(ctx, "save_automation", json.RawMessage(`{"source":"template","template_key":"native_sdlc"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, isError)
+	require.Contains(t, output, "requires orchestrate mode")
+	require.Zero(t, countRowsForProject(t, tc, "automations", project.ID))
+}
+
 func TestAutomationChatSaveYAMLPersistsThroughCompilerPipeline(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

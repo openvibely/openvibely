@@ -97,24 +97,30 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 		if def == nil || def.Domain != DomainAutomations {
 			t.Fatalf("expected %s in automations domain", name)
 		}
-		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceWeb); err != nil {
-			t.Fatalf("expected %s in web orchestrate mode: %v", name, err)
-		}
-		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceAPI); err != nil {
-			t.Fatalf("expected %s on project-aware API surface: %v", name, err)
-		}
-		if err := IsAllowed(name, models.ChatModeOrchestrate, SurfaceSlack); err == nil {
-			t.Fatalf("expected %s unavailable on channel surfaces", name)
+		for _, surface := range AllSurfaces {
+			if err := IsAllowed(name, models.ChatModeOrchestrate, surface); err != nil {
+				t.Fatalf("expected %s in orchestrate mode on %s surface: %v", name, surface, err)
+			}
+			orchestrateDefs := toolDefNames(ToolDefsForContext(models.ChatModeOrchestrate, surface, true))
+			mustContain(t, orchestrateDefs, name)
 		}
 	}
 	for _, name := range readActions {
-		if err := IsAllowed(name, models.ChatModePlan, SurfaceWeb); err != nil {
-			t.Fatalf("expected read action %s in plan mode: %v", name, err)
+		for _, surface := range AllSurfaces {
+			if err := IsAllowed(name, models.ChatModePlan, surface); err != nil {
+				t.Fatalf("expected read action %s in plan mode on %s surface: %v", name, surface, err)
+			}
+			planDefs := toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true))
+			mustContain(t, planDefs, name)
 		}
 	}
 	for _, name := range writeActions {
-		if err := IsAllowed(name, models.ChatModePlan, SurfaceWeb); err == nil {
-			t.Fatalf("expected write action %s denied in plan mode", name)
+		for _, surface := range AllSurfaces {
+			if err := IsAllowed(name, models.ChatModePlan, surface); err == nil {
+				t.Fatalf("expected write action %s denied in plan mode on %s surface", name, surface)
+			}
+			planDefs := toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true))
+			mustNotContain(t, planDefs, name)
 		}
 	}
 

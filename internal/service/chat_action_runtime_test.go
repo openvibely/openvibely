@@ -130,12 +130,16 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 					definitionNames := make(map[string]struct{}, len(runtime.Definitions))
 					for _, def := range runtime.Definitions {
 						definitionNames[def.Name] = struct{}{}
-						require.Contains(t, handlers, def.Name, "advertised runtime tool must have a handler")
+						require.Contains(t, handlers, def.Name, "advertised email runtime tool must have a handler")
 					}
 					require.NotContains(t, definitionNames, "create_task")
+
+					_, handled, blocked, err := runtime.Executor(ctx, "save_automation", nil)
+					require.NoError(t, err)
+					require.False(t, handled)
+					require.False(t, blocked)
 				}
 			} else {
-				require.NoError(t, chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, tt.surface, true, handlers))
 				expectedDefs := actionToolDefinitions(tt.surface, true)
 				for _, runtime := range tt.runtimes() {
 					require.NotNil(t, runtime)
@@ -146,6 +150,8 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 					}
 					require.Contains(t, definitionNames, "view_task_thread")
 					require.Contains(t, definitionNames, "send_to_task")
+					require.Contains(t, definitionNames, "preview_automation_description")
+					require.Contains(t, definitionNames, "save_automation")
 
 					currentProject, handled, blocked, err := runtime.Executor(ctx, "get_current_project", nil)
 					require.NoError(t, err)
@@ -153,11 +159,10 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 					require.False(t, blocked)
 					require.Equal(t, "Current project: Channel Handler Coverage (id: "+project.ID+")", currentProject)
 
-					gated, handled, blocked, err := runtime.Executor(ctx, "save_automation", nil)
+					_, handled, blocked, err = runtime.Executor(ctx, "save_automation", nil)
 					require.NoError(t, err)
-					require.True(t, handled)
-					require.True(t, blocked)
-					require.Contains(t, gated, "not available on "+string(tt.surface)+" surface")
+					require.False(t, handled)
+					require.False(t, blocked)
 				}
 			}
 
@@ -173,6 +178,15 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, "Chat mode changes are not supported on "+tt.name+". "+tt.name+" always uses orchestrate mode.", setMode)
 		})
+	}
+}
+
+func channelRuntimeGenericFallbackTool(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "memory_view", "list_automations", "get_automation", "preview_automation_description", "save_automation":
+		return true
+	default:
+		return false
 	}
 }
 

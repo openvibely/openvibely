@@ -1512,11 +1512,12 @@ func TestSlackService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 
 	for _, d := range defs {
 		_, handled, _, _ := rt.Executor(ctx, d.Name, json.RawMessage(`{}`))
+		if channelRuntimeGenericFallbackTool(d.Name) {
+			require.Falsef(t, handled, "generic fallback tool should fall through slack runtime executor: %s", d.Name)
+			continue
+		}
 		require.Truef(t, handled, "tool should be handled by slack runtime executor: %s", d.Name)
 	}
-
-	handlers := svc.slackActionHandlers(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", ThreadTS: "1710000000.100000", UserID: "U1"}, nil)
-	require.NoError(t, chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceSlack, true, handlers))
 }
 
 func TestSlackService_ProcessIncomingMessage_AuthorizationEnforced(t *testing.T) {

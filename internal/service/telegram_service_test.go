@@ -1028,11 +1028,12 @@ func TestTelegramService_RuntimeExecutorHandlesAllDefinedTools(t *testing.T) {
 
 	for _, d := range defs {
 		_, handled, _, _ := rt.Executor(ctx, d.Name, json.RawMessage(`{}`))
+		if channelRuntimeGenericFallbackTool(d.Name) {
+			require.Falsef(t, handled, "generic fallback tool should fall through telegram runtime executor: %s", d.Name)
+			continue
+		}
 		require.Truef(t, handled, "tool should be handled by telegram runtime executor: %s", d.Name)
 	}
-
-	handlers := svc.telegramActionHandlers(project.ID, 12345, 12345, nil)
-	require.NoError(t, chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceTelegram, true, handlers))
 }
 
 func TestTelegramService_CompleteExecution_Success(t *testing.T) {

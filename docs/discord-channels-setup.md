@@ -102,6 +102,7 @@ OpenVibely handles Discord messages through the same shared chat/task lifecycle 
 - Guild channel and thread messages require a bot mention.
 - Bot mentions are stripped before the prompt is sent to the chat runner.
 - If a chat turn is already active, additional Discord messages are queued and promoted FIFO through the shared queued-turn path.
+- In Orchestrate mode, Discord Chat can save project-scoped Automation workflows from maintained templates, descriptions, or reviewed Automation YAML; Plan-mode Automation previews remain read-only.
 
 ## Attachments
 
