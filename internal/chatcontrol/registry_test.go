@@ -743,6 +743,51 @@ func TestRegistry_EditTaskChainSchemaHasProperties(t *testing.T) {
 	}
 }
 
+func TestRegistry_EditTaskSchemaDistinguishesAgentDefinitionFromModelConfig(t *testing.T) {
+	def := Get("edit_task")
+	if def == nil {
+		t.Fatal("missing edit_task")
+	}
+
+	var schema map[string]interface{}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("invalid Parameters JSON: %v", err)
+	}
+	props, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing properties in edit_task schema")
+	}
+	for _, name := range []string{"agent_definition_id", "agent", "clear_agent_definition"} {
+		if _, exists := props[name]; !exists {
+			t.Fatalf("edit_task schema missing %q", name)
+		}
+	}
+	agent, ok := props["agent"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing agent property")
+	}
+	agentDesc, _ := agent["description"].(string)
+	if !strings.Contains(agentDesc, "Exact name") || !strings.Contains(agentDesc, "Agent definition") || !strings.Contains(agentDesc, "Agent name") {
+		t.Fatalf("agent description should explain exact Agent-definition name assignment, got %q", agentDesc)
+	}
+	clearAgent, ok := props["clear_agent_definition"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing clear_agent_definition property")
+	}
+	clearDesc, _ := clearAgent["description"].(string)
+	if !strings.Contains(clearDesc, "Clear") || !strings.Contains(clearDesc, "model config") {
+		t.Fatalf("clear_agent_definition description should explain model config preservation, got %q", clearDesc)
+	}
+	agentID, ok := props["agent_id"].(map[string]interface{})
+	if !ok {
+		t.Fatal("missing agent_id property")
+	}
+	agentIDDesc, _ := agentID["description"].(string)
+	if !strings.Contains(agentIDDesc, "Internal model config ID") || !strings.Contains(agentIDDesc, "Do not use for Agent definitions") {
+		t.Fatalf("agent_id description should explain model config separation, got %q", agentIDDesc)
+	}
+}
+
 func TestRegistry_CreateTaskSchemaDistinguishesAgentDefinitionFromModelConfig(t *testing.T) {
 	def := Get("create_task")
 	if def == nil {
