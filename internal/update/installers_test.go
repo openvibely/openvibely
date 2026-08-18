@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -224,6 +225,61 @@ func TestWailsBundleOperationsRejectApplicationDataInsideBundle(t *testing.T) {
 	}
 	if err := retainDesktopBundle(staged, externalLink); err == nil {
 		t.Fatal("bundle backup accepted an external application-data symlink into the replaceable bundle")
+	}
+}
+
+func TestPackagedDesktopHelperHandoffPassesExecutableRelativeMetadataForBundle(t *testing.T) {
+	root := t.TempDir()
+	installed := filepath.Join(root, "OpenVibely.app")
+	executable := filepath.Join(installed, "Contents", "MacOS", "OpenVibely")
+	if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, []byte("signed-desktop-executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staged := LocalStagedUpdate{
+		InstallPath: installed, ArtifactPath: installed + ".openvibely-new", BackupPath: installed + ".openvibely-backup",
+		Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "desktop-operation-1",
+	}
+	relative, err := desktopExecutableRelative(staged.InstallPath, executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shutdown := false
+	var helper *exec.Cmd
+	if err := startPackagedUpdateHelperHandoff(context.Background(), packagedUpdateHelperHandoffConfig{
+		Staged:           staged,
+		HelperSourcePath: executable,
+		CommandName:      "desktop-update-helper",
+		HealthURL:        "http://127.0.0.1/health",
+		RelaunchMetadata: binaryRelaunchMetadata{
+			Arguments:          []string{executable, "--from-user"},
+			WorkingDirectory:   root,
+			ExecutableRelative: filepath.ToSlash(relative),
+		},
+		MetadataTransport:  packagedHelperMetadataStdin,
+		StartHelper:        func(cmd *exec.Cmd) error { helper = cmd; return nil },
+		AwaitHelperHandoff: acknowledgeBinaryHelperForTest,
+		Shutdown:           func() { shutdown = true },
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if helper == nil || !shutdown {
+		t.Fatalf("helper=%#v shutdown=%v", helper, shutdown)
+	}
+	if strings.Contains(strings.Join(helper.Args, "\x00"), "--relaunch-metadata") {
+		t.Fatalf("desktop helper used metadata file argv: %q", helper.Args)
+	}
+	var metadata binaryRelaunchMetadata
+	if err := json.NewDecoder(helper.Stdin).Decode(&metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.ExecutableRelative != "Contents/MacOS/OpenVibely" {
+		t.Fatalf("executable_relative = %q", metadata.ExecutableRelative)
+	}
+	if data, err := os.ReadFile(packagedUpdateHelperPath(installed)); err != nil || string(data) != "signed-desktop-executable" {
+		t.Fatalf("helper copy = %q, err = %v", data, err)
 	}
 }
 
@@ -1293,8 +1349,17 @@ func TestBinaryInstallerHelperLaunchFailurePreservesCurrent(t *testing.T) {
 	if data, err := os.ReadFile(current); err != nil || string(data) != "old" {
 		t.Fatalf("current = %q, err = %v", data, err)
 	}
-	if _, err := os.Stat(helperPath); !os.IsNotExist(err) {
-		t.Fatalf("unused helper was retained: %v", err)
+	for _, path := range []string{
+		helperPath,
+		binaryHelperRelaunchMetadataPath(current),
+		binaryHelperOutcomePath(current),
+		binaryHelperPreparedPath(current),
+		binaryHelperAuthorizedPath(current),
+		binaryHelperCancelledPath(current),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("helper-start failure retained %s: %v", path, err)
+		}
 	}
 }
 
