@@ -114,6 +114,54 @@ func TestMaintainedSDLCTemplatesTreatEveryTemplateNodeAsOptional(t *testing.T) {
 	}
 }
 
+func TestDefaultAutomationDraftNodeConfigProvidesCanonicalStructuralDefaults(t *testing.T) {
+	taskConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterCustom, "review", models.AutomationNodeAgentTask, "task", map[string]bool{"task": true})
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{
+		"prompt":          "Describe the work this node should perform.",
+		"goal":            "",
+		"category":        string(models.CategoryBacklog),
+		"priority":        2,
+		"model_config_id": automationDefaultModelConfigID,
+	}, taskConfig)
+
+	scheduleConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterCustom, "daily_review", models.AutomationNodeTrigger, "fixed_schedule", map[string]bool{"task": true, "schedule": true})
+	require.NoError(t, err)
+	require.Equal(t, "Describe the scheduled work this node should perform.", scheduleConfig["prompt"])
+	require.Equal(t, string(models.CategoryScheduled), scheduleConfig["category"])
+	require.Equal(t, automationDefaultModelConfigID, scheduleConfig["model_config_id"])
+	require.Equal(t, "09:00", scheduleConfig["run_at"])
+	require.Equal(t, string(models.RepeatDaily), scheduleConfig["repeat_type"])
+	require.Equal(t, 1, scheduleConfig["repeat_interval"])
+	require.Equal(t, true, scheduleConfig["enabled"])
+	require.Equal(t, true, scheduleConfig["clear_context_on_start"])
+	require.NotContains(t, scheduleConfig, "target_node_key")
+
+	githubInboxConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterGitHubSDLC, "manual_dev_inbox", models.AutomationNodeTrigger, "github_inbox", map[string]bool{"task": true, "schedule": true})
+	require.NoError(t, err)
+	require.Equal(t, "10:00", githubInboxConfig["run_at"])
+	require.Equal(t, automationDefaultModelConfigID, githubInboxConfig["model_config_id"])
+
+	nativeImplementationConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterNativeSDLC, "manual_implementation", models.AutomationNodeAgentTask, "implementation", nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"goal": "", "model_config_id": automationDefaultModelConfigID}, nativeImplementationConfig)
+
+	issueConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterCustom, "issue", models.AutomationNodeAction, "create_github_issue", nil)
+	require.NoError(t, err)
+	require.Equal(t, "Open one focused, reviewable GitHub issue.", issueConfig["instructions"])
+	require.Equal(t, []string{}, issueConfig["labels"])
+
+	prConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterCustom, "open_pr", models.AutomationNodeAction, "open_pull_request", nil)
+	require.NoError(t, err)
+	require.Equal(t, "Open a reviewable pull request linked to the source issue.", prConfig["instructions"])
+	require.Equal(t, "", prConfig["base"])
+	require.Equal(t, false, prConfig["draft"])
+
+	approvalConfig, err := DefaultAutomationDraftNodeConfig(AutomationAdapterCustom, "review", models.AutomationNodeHumanGate, "pull_request_review", nil)
+	require.NoError(t, err)
+	require.Equal(t, map[string]any{"approval_method": "pull_request_review"}, approvalConfig)
+}
+
 func TestMaintainedSDLCTemplatesDoNotIncludeLoopAuditor(t *testing.T) {
 	registry := NewAutomationAdapterRegistry()
 	drafts := NewAutomationDraftService(nil, registry)

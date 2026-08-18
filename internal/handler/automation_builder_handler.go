@@ -477,47 +477,48 @@ func (h *Handler) applyAutomationBuilderAction(c echo.Context, candidate *models
 		}
 		var nodeType models.AutomationNodeType
 		var role string
-		config := map[string]any{}
+		defaultAdapterKey := service.AutomationAdapterCustom
+		allowedResources := map[string]bool{}
 		switch nodeKind {
 		case "schedule":
 			nodeType, role = models.AutomationNodeTrigger, "fixed_schedule"
-			config = map[string]any{"prompt": "Describe the scheduled work this node should perform.", "goal": "", "category": string(models.CategoryScheduled), "priority": 2, "model_config_id": "", "run_at": "09:00", "repeat_type": string(models.RepeatDaily), "repeat_interval": 1, "enabled": true}
+			allowedResources = map[string]bool{"task": true, "schedule": true}
 		case "task", "agent_task":
 			nodeType, role = models.AutomationNodeAgentTask, "task"
-			config = map[string]any{"prompt": "Describe the work this node should perform.", "goal": "", "category": string(models.CategoryBacklog), "priority": 2, "model_config_id": ""}
+			allowedResources = map[string]bool{"task": true}
 		case "create_notification":
 			nodeType, role = models.AutomationNodeAction, "create_notification"
-			config = map[string]any{"notification_type": "approval_request", "instructions": "Summarize the proposal that needs a human decision."}
 		case "human_approval":
 			nodeType, role = models.AutomationNodeHumanGate, "native_approval"
-			config = map[string]any{"approval_method": "native_alert"}
 		case "native_inbox":
 			nodeType, role = models.AutomationNodeTrigger, "native_inbox"
-			config = map[string]any{"prompt": service.NativeSDLCNotificationInboxPrompt, "goal": "", "category": string(models.CategoryScheduled), "priority": 2, "model_config_id": "", "run_at": "09:00", "repeat_type": string(models.RepeatHours), "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}
+			defaultAdapterKey = service.AutomationAdapterNativeSDLC
+			allowedResources = map[string]bool{"task": true, "schedule": true}
 		case "native_implementation":
 			nodeType, role = models.AutomationNodeAgentTask, "implementation"
-			config = map[string]any{"goal": "", "model_config_id": ""}
+			defaultAdapterKey = service.AutomationAdapterNativeSDLC
 		case "create_github_issue":
 			nodeType, role = models.AutomationNodeAction, "create_github_issue"
-			config = map[string]any{"instructions": "Open one focused, reviewable GitHub issue.", "labels": []string{}}
 		case "human_assignment":
 			nodeType, role = models.AutomationNodeHumanGate, "github_assignment"
-			config = map[string]any{"approval_method": "github_assignment"}
 		case "github_inbox":
 			nodeType, role = models.AutomationNodeTrigger, "github_inbox"
-			config = map[string]any{"prompt": "Process newly assigned GitHub issues and create or continue one issue-linked implementation task per approved issue.", "goal": "", "category": string(models.CategoryScheduled), "priority": 2, "model_config_id": "", "run_at": "09:00", "repeat_type": string(models.RepeatHours), "repeat_interval": 1, "enabled": true, "clear_context_on_start": true}
+			defaultAdapterKey = service.AutomationAdapterGitHubSDLC
+			allowedResources = map[string]bool{"task": true, "schedule": true}
 		case "open_pull_request":
 			nodeType, role = models.AutomationNodeAction, "open_pull_request"
-			config = map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "", "draft": false}
 		case "human_review":
 			nodeType, role = models.AutomationNodeHumanGate, "pull_request_review"
-			config = map[string]any{"approval_method": "pull_request_review"}
 		case "outcome":
 			nodeType, role = models.AutomationNodeOutcome, "completed"
 		default:
 			return echo.NewHTTPError(http.StatusBadRequest, "unsupported automation node purpose")
 		}
 		key := automationDraftUniqueKey(candidate, automationDraftKey(name, "node"), false)
+		config, err := service.DefaultAutomationDraftNodeConfig(defaultAdapterKey, key, nodeType, role, allowedResources)
+		if err != nil {
+			return err
+		}
 		index := len(candidate.Nodes)
 		candidate.Nodes = append(candidate.Nodes, models.AutomationDraftNode{
 			Key: key, Name: name, Type: nodeType, Role: role, Config: config,

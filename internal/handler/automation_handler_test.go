@@ -995,6 +995,57 @@ func TestAutomationBuilderRejectsMalformedYAMLWithoutSideEffects(t *testing.T) {
 	require.Zero(t, tableCountHandler(t, tc, "schedules"))
 }
 
+func TestAutomationBuilderManualInboxDefaultsMatchMaintainedTemplateDefaults(t *testing.T) {
+	for _, tcSpec := range []struct {
+		name        string
+		adapterKey  string
+		nodeKind    string
+		templateKey string
+	}{
+		{name: "native", adapterKey: service.AutomationAdapterNativeSDLC, nodeKind: "native_inbox", templateKey: "inbox"},
+		{name: "github", adapterKey: service.AutomationAdapterGitHubSDLC, nodeKind: "github_inbox", templateKey: "dev_inbox"},
+	} {
+		t.Run(tcSpec.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().WithName("Inbox Defaults Project").Build()
+			automationRepo := repository.NewAutomationRepo(tc.db)
+			registry := service.NewAutomationAdapterRegistry()
+			drafts := service.NewAutomationDraftService(automationRepo, registry)
+			planner := service.NewAutomationSaveValidator(registry, drafts)
+			compiler := service.NewAutomationCompiler(automationRepo, tc.handler.taskSvc, tc.taskRepo, tc.scheduleRepo, planner)
+			tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), nil)
+			tc.handler.SetAutomationBuilderServices(drafts, nil, planner, compiler, nil, nil)
+
+			opened := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+				"project_id": {project.ID}, "source": {"template"}, "template_key": {tcSpec.adapterKey},
+			}).Execute()
+			require.Equal(t, http.StatusOK, opened.Code, opened.Body.String())
+			candidate := automationCandidateFromResponse(t, opened)
+			templateNode := automationDraftNodeByKeyHandler(t, candidate, tcSpec.templateKey)
+
+			raw, err := json.Marshal(candidate)
+			require.NoError(t, err)
+			added := tc.HTMX().Post("/automations/builder?project_id=" + project.ID).WithForm(url.Values{
+				"project_id":     {project.ID},
+				"builder_source": {"template"},
+				"candidate_json": {string(raw)},
+				"builder_action": {"create_node"},
+				"node_kind":      {tcSpec.nodeKind},
+				"node_name":      {"Manual inbox"},
+			}).Execute()
+			require.Equal(t, http.StatusOK, added.Code, added.Body.String())
+			candidate = automationCandidateFromResponse(t, added)
+			manualNode := automationDraftNodeByKeyHandler(t, candidate, "manual_inbox")
+
+			for _, key := range []string{"category", "priority", "model_config_id", "goal", "repeat_type", "repeat_interval", "run_at", "enabled", "clear_context_on_start"} {
+				require.Equal(t, templateNode.Config[key], manualNode.Config[key], "%s default %s", tcSpec.name, key)
+			}
+			require.NotEqual(t, "", manualNode.Config["model_config_id"])
+			require.Equal(t, "10:00", manualNode.Config["run_at"])
+		})
+	}
+}
+
 func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(t *testing.T) {
 	tc := NewTestContext(t)
 	project := tc.CreateProject().WithName("Freeform Builder Project").Build()
@@ -1048,6 +1099,17 @@ func TestAutomationBuilderSavesUnsupportedCustomConnectionsWithoutExecutingThem(
 	require.Contains(t, saved.Body.String(), "Save did not apply. Resolve the setup items below and try again.")
 	require.Zero(t, tableCountHandler(t, tc, "tasks"), "invalid Save must not create partial task resources")
 	require.Zero(t, tableCountHandler(t, tc, "schedules"), "invalid Save must not create partial schedule resources")
+}
+
+func automationDraftNodeByKeyHandler(t *testing.T, candidate models.AutomationDraftCandidate, key string) models.AutomationDraftNode {
+	t.Helper()
+	for _, node := range candidate.Nodes {
+		if node.Key == key {
+			return node
+		}
+	}
+	require.Failf(t, "node not found", "node %q not found", key)
+	return models.AutomationDraftNode{}
 }
 
 func automationCandidateFromResponse(t *testing.T, response *httptest.ResponseRecorder) models.AutomationDraftCandidate {

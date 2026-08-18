@@ -161,62 +161,81 @@ func automationExplicitModelConfigID(value any) string {
 	return modelConfigID
 }
 
+// DefaultAutomationDraftNodeConfig returns the canonical starting Config for a draft node.
+func DefaultAutomationDraftNodeConfig(adapterKey, nodeKey string, nodeType models.AutomationNodeType, role string, allowedResources map[string]bool) (map[string]any, error) {
+	adapterKey = strings.TrimSpace(adapterKey)
+	nodeKey = strings.TrimSpace(nodeKey)
+	role = strings.TrimSpace(role)
+	resources := make(map[string]bool, len(allowedResources))
+	for key, allowed := range allowedResources {
+		resources[key] = allowed
+	}
+	config := map[string]any{}
+	usesTaskConfiguration := resources["task"] || adapterKey == AutomationAdapterGitHubSDLC && role == "implementation"
+	usesModelConfiguration := usesTaskConfiguration || role == "implementation" && (adapterKey == AutomationAdapterNativeSDLC || adapterKey == AutomationAdapterCustom && nodeType == models.AutomationNodeAgentTask)
+	if usesTaskConfiguration {
+		prompt, err := defaultAutomationNodePrompt(adapterKey, role)
+		if err != nil {
+			return nil, err
+		}
+		config["prompt"] = prompt
+		config["goal"] = ""
+		config["category"] = string(models.CategoryBacklog)
+		config["priority"] = 2
+		config["model_config_id"] = automationDefaultModelConfigID
+		if resources["schedule"] {
+			config["category"] = string(models.CategoryScheduled)
+		}
+		if adapterKey == AutomationAdapterGitHubSDLC && role == "implementation" {
+			config["category"] = string(models.CategoryActive)
+		}
+	}
+	if resources["schedule"] {
+		config["run_at"] = "09:00"
+		config["repeat_type"] = string(models.RepeatDaily)
+		config["repeat_interval"] = 1
+		config["enabled"] = true
+		config["clear_context_on_start"] = true
+		if role == "loop_auditor" {
+			config["repeat_type"] = string(models.RepeatWeekly)
+		} else if role == "native_inbox" || role == "github_inbox" || strings.Contains(nodeKey, "inbox") {
+			config["run_at"] = "10:00"
+		}
+	}
+	if usesModelConfiguration && !usesTaskConfiguration {
+		config["goal"] = ""
+		config["model_config_id"] = automationDefaultModelConfigID
+	}
+	switch role {
+	case "create_notification":
+		config["notification_type"] = "approval_request"
+		config["instructions"] = "Summarize the proposal that needs a human decision."
+	case "create_github_issue":
+		config["instructions"] = "Open one focused, reviewable GitHub issue."
+		config["labels"] = []string{}
+	case "open_pull_request":
+		config["instructions"] = "Open a reviewable pull request linked to the source issue."
+		config["base"] = ""
+		config["draft"] = false
+	case "native_approval":
+		config["approval_method"] = "native_alert"
+	case "github_assignment":
+		config["approval_method"] = "github_assignment"
+	case "pull_request_review":
+		config["approval_method"] = "pull_request_review"
+	}
+	return config, nil
+}
+
 func defaultAutomationNodeConfigs(adapter AutomationAdapter) (map[string]map[string]any, error) {
 	configs := make(map[string]map[string]any, len(adapter.Nodes))
 	for _, node := range adapter.Nodes {
-		config := map[string]any{}
-		if automationMaintainedNodeUsesTaskConfiguration(adapter, node) {
-			prompt, err := defaultAutomationNodePrompt(adapter.Key, node.Role)
-			if err != nil {
-				return nil, err
-			}
-			config["prompt"] = prompt
-			config["goal"] = ""
-			config["category"] = string(models.CategoryBacklog)
-			config["priority"] = 2
-			config["model_config_id"] = automationDefaultModelConfigID
-			if adapter.Key == AutomationAdapterGitHubSDLC && node.Role == "implementation" {
-				config["category"] = string(models.CategoryActive)
-			}
-			config["priority"] = 2
+		config, err := DefaultAutomationDraftNodeConfig(adapter.Key, node.Key, models.AutomationNodeType(node.Type), node.Role, node.AllowedResources)
+		if err != nil {
+			return nil, err
 		}
 		if node.AllowedResources["schedule"] {
 			config["target_node_key"] = adapterScheduleTarget(adapter, node.Key)
-			config["run_at"] = "09:00"
-			config["repeat_type"] = string(models.RepeatDaily)
-			config["repeat_interval"] = 1
-			config["enabled"] = true
-			config["clear_context_on_start"] = true
-			if node.AllowedResources["task"] {
-				config["category"] = string(models.CategoryScheduled)
-			}
-			if node.Role == "loop_auditor" {
-				config["repeat_type"] = string(models.RepeatWeekly)
-			} else if strings.Contains(node.Key, "inbox") {
-				config["run_at"] = "10:00"
-			}
-		}
-		if adapter.Key == AutomationAdapterNativeSDLC && node.Role == "implementation" {
-			config["goal"] = ""
-			config["model_config_id"] = automationDefaultModelConfigID
-		}
-		switch node.Role {
-		case "create_notification":
-			config["notification_type"] = "approval_request"
-			config["instructions"] = "Summarize the proposal that needs a human decision."
-		case "create_github_issue":
-			config["instructions"] = "Open one focused, reviewable GitHub issue."
-			config["labels"] = []string{}
-		case "open_pull_request":
-			config["instructions"] = "Open a reviewable pull request linked to the source issue."
-			config["base"] = ""
-			config["draft"] = false
-		case "native_approval":
-			config["approval_method"] = "native_alert"
-		case "github_assignment":
-			config["approval_method"] = "github_assignment"
-		case "pull_request_review":
-			config["approval_method"] = "pull_request_review"
 		}
 		configs[node.Key] = config
 	}
@@ -1622,7 +1641,14 @@ func defaultAutomationNodePrompt(adapterKey, role string) (string, error) {
 	case AutomationAdapterGitHubSDLC:
 		return githubSDLCRolePrompt(role)
 	default:
-		return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " ")), nil
+		switch strings.TrimSpace(role) {
+		case "fixed_schedule":
+			return "Describe the scheduled work this node should perform.", nil
+		case "task":
+			return "Describe the work this node should perform.", nil
+		default:
+			return fmt.Sprintf("Run the %s role for this %s automation using the existing project-scoped tools and human review boundaries.", strings.ReplaceAll(role, "_", " "), strings.ReplaceAll(adapterKey, "_", " ")), nil
+		}
 	}
 }
 
