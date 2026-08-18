@@ -84,6 +84,7 @@ type TelegramService struct {
 	taskGoalSvc              *TaskGoalService
 	llmSvc                   *LLMService
 	workerSvc                *WorkerService
+	automationGraphSvc       *AutomationGraphService
 	chatBroadcaster          *events.ChatBroadcaster
 	executionStreamHub       *events.ExecutionStreamHub
 	queuedTurnPromoter       func(projectID string)
@@ -228,6 +229,10 @@ func (s *TelegramService) SetAgentRepo(repo *repository.AgentRepo) {
 // SetAlertService sets the alert service for managing alerts from Telegram chat.
 func (s *TelegramService) SetAlertService(svc *AlertService) {
 	s.alertSvc = svc
+}
+
+func (s *TelegramService) SetAutomationGraphService(svc *AutomationGraphService) {
+	s.automationGraphSvc = svc
 }
 
 func (s *TelegramService) SetChannelMessageRouter(router *ChannelMessageRouter) {
@@ -1328,6 +1333,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
+		AutomationGraphSvc:    s.automationGraphSvc,
 		WorkerSvc:             s.workerSvc,
 		LLMConfigRepo:         s.llmConfigRepo,
 		AgentRepo:             s.agentRepo,

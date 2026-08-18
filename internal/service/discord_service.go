@@ -65,6 +65,7 @@ type DiscordService struct {
 	taskGoalSvc              *TaskGoalService
 	llmSvc                   *LLMService
 	workerSvc                *WorkerService
+	automationGraphSvc       *AutomationGraphService
 	threadInputRepo          *repository.ThreadInputRepo
 	chatAttachmentRepo       *repository.ChatAttachmentRepo
 	customPersonalityRepo    *repository.CustomPersonalityRepo
@@ -147,6 +148,9 @@ func (s *DiscordService) SetCustomPersonalityRepo(repo *repository.CustomPersona
 func (s *DiscordService) SetAgentRepo(repo *repository.AgentRepo) { s.agentRepo = repo }
 func (s *DiscordService) SetAlertService(svc *AlertService)       { s.alertSvc = svc }
 func (s *DiscordService) SetTaskGoalService(svc *TaskGoalService) { s.taskGoalSvc = svc }
+func (s *DiscordService) SetAutomationGraphService(svc *AutomationGraphService) {
+	s.automationGraphSvc = svc
+}
 func (s *DiscordService) SetQueuedTurnPromoter(promoter func(projectID string)) {
 	s.queuedTurnPromoter = promoter
 }
@@ -730,6 +734,7 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		CallerTaskID:          callerTaskID,
 		TaskRepo:              s.taskRepo,
 		ScheduleRepo:          s.scheduleRepo,
+		AutomationGraphSvc:    s.automationGraphSvc,
 		WorkerSvc:             s.workerSvc,
 		LLMConfigRepo:         s.llmConfigRepo,
 		AgentRepo:             s.agentRepo,

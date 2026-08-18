@@ -183,7 +183,7 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 
 func channelRuntimeGenericFallbackTool(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "memory_view", "list_automations", "get_automation", "preview_automation_description", "save_automation", "run_automation_now", "pause_automation", "resume_automation":
+	case "memory_view", "preview_automation_description", "save_automation", "run_automation_now", "pause_automation", "resume_automation":
 		return true
 	default:
 		return false
@@ -1008,6 +1008,17 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	updatedTask, err = taskRepo.GetByID(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
+}
+
+func TestBuildChannelUtilityActionHandlersAutomationReadsRejectForeignProject(t *testing.T) {
+	ctx := context.Background()
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: "project-current"})
+
+	_, err := handlers["list_automations"](ctx, json.RawMessage(`{"project_id":"project-foreign"}`))
+	require.ErrorContains(t, err, `project_id "project-foreign" is outside the caller's authorized project context`)
+
+	_, err = handlers["get_automation"](ctx, json.RawMessage(`{"automation_id":"automation-1","project_id":"project-foreign"}`))
+	require.ErrorContains(t, err, `project_id "project-foreign" is outside the caller's authorized project context`)
 }
 
 func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {
