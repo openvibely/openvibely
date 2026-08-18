@@ -40,6 +40,57 @@ func seedLargeCustomProviderModelConfigs(tb testing.TB, ctx context.Context, rep
 	}
 }
 
+func TestLLMConfigRepoRejectsBlankRunnableModelSlug(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	tests := []struct {
+		name     string
+		provider models.LLMProvider
+	}{
+		{name: "anthropic", provider: models.ProviderAnthropic},
+		{name: "openai", provider: models.ProviderOpenAI},
+		{name: "openai compatible", provider: models.ProviderOpenAICompatible},
+		{name: "ollama", provider: models.ProviderOllama},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+" create", func(t *testing.T) {
+			before, err := repo.List(ctx)
+			if err != nil {
+				t.Fatalf("list before create: %v", err)
+			}
+			cfg := &models.LLMConfig{Name: "Blank " + tt.name, Provider: tt.provider, AuthMethod: models.AuthMethodAPIKey, Model: " \t\n "}
+			if err := repo.Create(ctx, cfg); err != ErrLLMConfigModelRequired {
+				t.Fatalf("expected ErrLLMConfigModelRequired, got %v", err)
+			}
+			after, err := repo.List(ctx)
+			if err != nil {
+				t.Fatalf("list after create: %v", err)
+			}
+			if len(after) != len(before) {
+				t.Fatalf("blank model create mutated rows: before=%d after=%d", len(before), len(after))
+			}
+		})
+		t.Run(tt.name+" update", func(t *testing.T) {
+			cfg := &models.LLMConfig{Name: "Existing " + tt.name, Provider: tt.provider, AuthMethod: models.AuthMethodAPIKey, Model: "valid-model"}
+			if err := repo.Create(ctx, cfg); err != nil {
+				t.Fatalf("create existing: %v", err)
+			}
+			cfg.Model = ""
+			if err := repo.Update(ctx, cfg); err != ErrLLMConfigModelRequired {
+				t.Fatalf("expected ErrLLMConfigModelRequired, got %v", err)
+			}
+			updated, err := repo.GetByID(ctx, cfg.ID)
+			if err != nil {
+				t.Fatalf("get updated: %v", err)
+			}
+			if updated.Model != "valid-model" {
+				t.Fatalf("blank model update mutated persisted model to %q", updated.Model)
+			}
+		})
+	}
+}
+
 func TestLLMConfigRepo_HasAny(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := NewLLMConfigRepo(db)
