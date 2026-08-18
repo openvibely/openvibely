@@ -180,6 +180,8 @@ func (s *TaskService) SubmitSavedAutomationTask(task models.Task) {
 	s.workerSvc.Submit(task)
 }
 
+const defaultTaskPriority = 2
+
 func normalizeTaskTitleAndPrompt(t *models.Task) error {
 	t.Title = strings.TrimSpace(t.Title)
 	t.Prompt = strings.TrimSpace(t.Prompt)
@@ -192,10 +194,17 @@ func normalizeTaskTitleAndPrompt(t *models.Task) error {
 	return nil
 }
 
+func normalizeTaskCreatePriority(t *models.Task) {
+	if t.Priority < 1 || t.Priority > 4 {
+		t.Priority = defaultTaskPriority
+	}
+}
+
 func (s *TaskService) CreateWithGoal(ctx context.Context, t *models.Task, objective string) error {
 	if err := normalizeTaskTitleAndPrompt(t); err != nil {
 		return err
 	}
+	normalizeTaskCreatePriority(t)
 	if t.Status == "" {
 		t.Status = models.StatusPending
 	}

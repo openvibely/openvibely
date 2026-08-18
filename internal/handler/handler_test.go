@@ -1004,6 +1004,72 @@ func TestHandler_CreateTask_ActiveCategory(t *testing.T) {
 	assertCode(t, rec, http.StatusOK)
 }
 
+func TestHandler_CreateTask_NormalizesInvalidPrioritiesToDefault(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	cases := []struct {
+		name        string
+		prioritySet bool
+		priority    string
+	}{
+		{name: "omitted"},
+		{name: "empty", prioritySet: true, priority: ""},
+		{name: "malformed", prioritySet: true, priority: "urgent"},
+		{name: "below range", prioritySet: true, priority: "0"},
+		{name: "above range", prioritySet: true, priority: "5"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			form := url.Values{}
+			form.Set("title", "Invalid Priority "+tt.name)
+			form.Set("category", "backlog")
+			form.Set("prompt", "test")
+			if tt.prioritySet {
+				form.Set("priority", tt.priority)
+			}
+
+			rec := postForm(e, "/tasks?project_id=default", form)
+			assertCode(t, rec, http.StatusOK)
+		})
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.Len(t, tasks, len(cases))
+	for _, task := range tasks {
+		assert.Equal(t, 2, task.Priority, "task %q priority", task.Title)
+		assert.Equal(t, "Normal", components.PriorityLabel(task.Priority))
+	}
+}
+
+func TestHandler_CreateTask_PersistsValidPriorities(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+
+	labels := map[int]string{1: "Low", 2: "Normal", 3: "High", 4: "Urgent"}
+	for priority := 1; priority <= 4; priority++ {
+		form := url.Values{}
+		form.Set("title", fmt.Sprintf("Priority %d", priority))
+		form.Set("category", "backlog")
+		form.Set("priority", strconv.Itoa(priority))
+		form.Set("prompt", "test")
+
+		rec := postForm(e, "/tasks?project_id=default", form)
+		assertCode(t, rec, http.StatusOK)
+	}
+
+	tasks, err := h.taskRepo.ListByProject(ctx, "default", "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 4)
+	for _, task := range tasks {
+		wantLabel, ok := labels[task.Priority]
+		require.True(t, ok, "unexpected priority %d for task %q", task.Priority, task.Title)
+		assert.Equal(t, wantLabel, components.PriorityLabel(task.Priority))
+	}
+}
+
 func TestHandler_CreateTask_BacklogSwarmDefersPlanner(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
