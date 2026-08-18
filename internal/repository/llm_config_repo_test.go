@@ -499,6 +499,193 @@ func TestLLMConfigRepo_ListPickerOptionsUsesBoundedProjection(t *testing.T) {
 	}
 }
 
+func TestLLMConfigRepo_ListChatSelectionOptionsUsesBoundedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	largeBody := strings.Repeat("x", 1024*1024)
+	alpha := &models.LLMConfig{
+		Name: "Chat Selection Alpha", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "alpha-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client",
+		BaseURL: "https://example.com/v1/", Transport: "chat_completions", PresetSlug: "custom",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, alpha); err != nil {
+		t.Fatal(err)
+	}
+	zuluDefault := &models.LLMConfig{
+		Name: "Chat Selection Zulu Default", Provider: models.ProviderTest, AuthMethod: models.AuthMethodAPIKey,
+		Model: "zulu-model", APIKey: "secret-key", IsDefault: true,
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, zuluDefault); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := repo.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter.Reset()
+	counter.SetEnabled(true)
+	selection, err := repo.ListChatSelectionOptions(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selection) != len(full) {
+		t.Fatalf("selection len = %d, full len = %d", len(selection), len(full))
+	}
+	for i := range full {
+		if selection[i].ID != full[i].ID || selection[i].Name != full[i].Name ||
+			selection[i].Provider != full[i].Provider || selection[i].Model != full[i].Model ||
+			selection[i].IsDefault != full[i].IsDefault {
+			t.Fatalf("selection[%d] = %#v, full[%d] = %#v", i, selection[i], i, full[i])
+		}
+	}
+
+	byID := make(map[string]models.LLMConfig, len(selection))
+	for _, option := range selection {
+		byID[option.ID] = option
+	}
+	custom := byID[alpha.ID]
+	if custom.Name != "Chat Selection Alpha" || custom.Provider != models.ProviderOpenAICompatible || custom.Model != "alpha-model" {
+		t.Fatalf("selection context fields not preserved: %#v", custom)
+	}
+	if custom.APIKey != "" || custom.OAuthAccessToken != "" || custom.OAuthRefreshToken != "" ||
+		custom.OAuthClientSecret != "" || custom.BaseURL != "" || custom.ExtraHeadersJSON != "" ||
+		custom.ExtraBodyJSON != "" || custom.CustomAuthConfigJSON != "" || custom.CustomAuthStateJSON != "" ||
+		custom.MixtureConfigJSON != "" {
+		t.Fatalf("chat selection materialized execution/edit-only fields: %#v", custom)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact chat-selection query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, provider, model, is_default") {
+		t.Fatalf("chat selection projection = %q, want id/name/provider/model/is_default in %s", projection, statements[0])
+	}
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("chat selection query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("chat selection query must preserve default/name ordering: %s", statements[0])
+	}
+
+	fullCustom, err := repo.GetByID(ctx, alpha.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fullCustom == nil || fullCustom.APIKey != "secret-key" || fullCustom.OAuthAccessToken != "secret-token" || fullCustom.ExtraBodyJSON != largeBody || fullCustom.CustomAuthStateJSON == "" || fullCustom.MixtureConfigJSON == "" {
+		t.Fatalf("full detail path lost provider fields: %#v", fullCustom)
+	}
+}
+
+func TestLLMConfigRepo_APIChatSelectionProjectionIsFasterAndLowerAllocationThanFullListOnLargeFixture(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping benchmark ratio assertion in short mode")
+	}
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
+
+	fullList := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				b.Fatalf("full selection fixture returned %d configs", len(configs))
+			}
+		}
+	})
+	compactThenGet := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListChatSelectionOptions(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				b.Fatalf("compact selection fixture returned %d configs", len(configs))
+			}
+			selectedID := configs[0].ID
+			full, err := repo.GetByID(ctx, selectedID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
+				b.Fatalf("selected full model was not hydrated: %#v", full)
+			}
+		}
+	})
+
+	t.Logf("full List+select: %d ns/op, %d B/op; compact selection+GetByID: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
+	if fullList.NsPerOp() < compactThenGet.NsPerOp()*20 {
+		t.Fatalf("compact selection is not at least 20x faster: full %d ns/op, compact %d ns/op", fullList.NsPerOp(), compactThenGet.NsPerOp())
+	}
+	if fullList.AllocedBytesPerOp() < compactThenGet.AllocedBytesPerOp()*20 {
+		t.Fatalf("compact selection is not at least 20x lower allocation: full %d B/op, compact %d B/op", fullList.AllocedBytesPerOp(), compactThenGet.AllocedBytesPerOp())
+	}
+}
+
+func BenchmarkAPIChatModelSelectionFullListVsCompactSelectionThenGet(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		b.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
+
+	b.Run("full_list", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				b.Fatalf("full selection fixture returned %d configs", len(configs))
+			}
+		}
+	})
+	b.Run("compact_selection_plus_get_by_id", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListChatSelectionOptions(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				b.Fatalf("compact selection fixture returned %d configs", len(configs))
+			}
+			selectedID := configs[0].ID
+			full, err := repo.GetByID(ctx, selectedID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if full == nil || full.APIKey == "" || full.ExtraBodyJSON == "" || full.MixtureConfigJSON == "" {
+				b.Fatalf("selected full model was not hydrated: %#v", full)
+			}
+		}
+	})
+}
+
 func TestLLMConfigRepo_ListCardsUsesBoundedProjection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)

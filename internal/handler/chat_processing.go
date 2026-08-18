@@ -1418,7 +1418,11 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		applog.Infof("[handler] startQueuedChatInput exec=%s history error: %v", exec.ID, err)
 		history = []models.Execution{}
 	}
-	availableModels, _ := h.llmConfigRepo.List(ctx)
+	availableModels, listErr := h.llmConfigRepo.ListChatSelectionOptions(ctx)
+	if listErr != nil {
+		applog.Infof("[handler] startQueuedChatInput error listing chat model selection options: %v", listErr)
+		availableModels = []models.LLMConfig{}
+	}
 	taskContext := h.buildChatContext(ctx, input.ProjectID, availableModels)
 	personalityContext := h.getPersonalityContext(ctx, input.ProjectID)
 	workDir := h.resolveWorkDir(ctx, input.ProjectID)

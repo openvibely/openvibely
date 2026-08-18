@@ -17,6 +17,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -427,6 +428,282 @@ func TestAPIChatMessage_NoAgents(t *testing.T) {
 	var resp map[string]string
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	assert.Contains(t, resp["error"], "no agents available")
+}
+
+func TestAPIChatMessage_UsesCompactSelectionAndHydratesSingleConfiguredModel(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	largeProviderJSON := strings.Repeat("large-provider-json", 4096)
+	agent := &models.LLMConfig{
+		Name: "Hydrated API Chat Model", Provider: models.ProviderTest, AuthMethod: models.AuthMethodAPIKey,
+		Model: "claude-sonnet-api-chat", APIKey: "secret-api-key", OAuthAccessToken: "secret-oauth-token",
+		OAuthRefreshToken: "secret-refresh-token", OAuthClientSecret: "secret-client-secret",
+		BaseURL: "https://example.com/v1/", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largeProviderJSON, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largeProviderJSON + `"}`,
+		IsDefault: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+
+	mock := testutil.NewMockLLMCaller()
+	providerCalled := make(chan struct{}, 1)
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		providerCalled <- struct{}{}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	form := url.Values{}
+	form.Set("message", "Hello from compact API chat")
+	form.Set("project_id", projectID)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	select {
+	case <-providerCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mock provider call")
+	}
+
+	assertAPIChatSelectionStatements(t, counter.Statements())
+	call := mock.LastCall()
+	require.Equal(t, agent.ID, call.Agent.ID)
+	require.Equal(t, "secret-api-key", call.Agent.APIKey)
+	require.Equal(t, "secret-oauth-token", call.Agent.OAuthAccessToken)
+	require.Equal(t, "secret-refresh-token", call.Agent.OAuthRefreshToken)
+	require.Equal(t, "secret-client-secret", call.Agent.OAuthClientSecret)
+	require.Equal(t, largeProviderJSON, call.Agent.ExtraBodyJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthConfigJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthStateJSON)
+	require.NotEmpty(t, call.Agent.MixtureConfigJSON)
+
+	request := mock.LastAgentRequest()
+	modelContextLine := fmt.Sprintf("- [ID:%s] %q (model: %s, provider: %s) (default)", agent.ID, agent.Name, agent.Model, agent.Provider)
+	require.Contains(t, request.ChatSystemContext, modelContextLine)
+	require.NotContains(t, request.ChatSystemContext, "secret-api-key")
+	require.NotContains(t, request.ChatSystemContext, largeProviderJSON)
+}
+
+func TestAPIChatMessage_MultipleModelsDefaultFallbackHydratesSelectedModel(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	nonDefault := &models.LLMConfig{
+		Name: "API Chat Non Default Opus", Provider: models.ProviderTest, Model: "claude-opus-non-default",
+		APIKey: "non-default-secret",
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, nonDefault))
+	defaultModel := &models.LLMConfig{
+		Name: "API Chat Default Opus", Provider: models.ProviderTest, Model: "claude-opus-default",
+		APIKey: "default-secret", ExtraBodyJSON: `{"execution":"config"}`, IsDefault: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, defaultModel))
+
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+
+	mock := testutil.NewMockLLMCaller()
+	providerCalled := make(chan struct{}, 1)
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		providerCalled <- struct{}{}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	form := url.Values{}
+	form.Set("message", "rename this")
+	form.Set("project_id", projects[0].ID)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	select {
+	case <-providerCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mock provider call")
+	}
+	call := mock.LastCall()
+	require.Equal(t, defaultModel.ID, call.Agent.ID)
+	require.Equal(t, "default-secret", call.Agent.APIKey)
+	require.Equal(t, `{"execution":"config"}`, call.Agent.ExtraBodyJSON)
+}
+
+func TestAPIChatMessage_QueuedBehindActiveTurnStoresSelectedModelWithoutFullList(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	agent := &models.LLMConfig{
+		Name: "Queued API Chat Model", Provider: models.ProviderTest, Model: "claude-sonnet-queued",
+		APIKey: "queued-secret", ExtraBodyJSON: strings.Repeat("queued-large", 4096), IsDefault: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+
+	chatTask := &models.Task{ProjectID: projectID, Title: "Active Chat", Prompt: "active", Status: models.StatusRunning, Category: models.CategoryChat}
+	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+	activeExec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, h.execRepo.Create(ctx, activeExec))
+
+	form := url.Values{}
+	form.Set("message", "queue me")
+	form.Set("project_id", projectID)
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var resp ChatMessageAcceptedResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.True(t, resp.Queued)
+	queued, err := h.threadInputRepo.GetByID(ctx, resp.MessageID)
+	require.NoError(t, err)
+	require.NotNil(t, queued)
+	require.Equal(t, agent.ID, queued.AgentConfigID)
+	assertAPIChatSelectionStatements(t, counter.Statements())
+	assertNoAPIChatFullListStatement(t, counter.Statements())
+}
+
+func TestAPIChatMessage_QueuedPromotionUsesCompactContextAndHydratedSelectedModel(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	largeProviderJSON := strings.Repeat("queued-promotion-large", 4096)
+	agent := &models.LLMConfig{
+		Name: "Queued Promotion API Chat Model", Provider: models.ProviderTest, AuthMethod: models.AuthMethodAPIKey,
+		Model: "claude-sonnet-queued-promotion", APIKey: "queued-promotion-secret",
+		OAuthAccessToken: "queued-promotion-token", OAuthRefreshToken: "queued-promotion-refresh",
+		OAuthClientSecret: "queued-promotion-client-secret", BaseURL: "https://example.com/v1/",
+		ExtraHeadersJSON: `{"X-Secret":"value"}`, ExtraBodyJSON: largeProviderJSON,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"access":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeProviderJSON + `"}`, IsDefault: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+
+	chatTask := &models.Task{ProjectID: projectID, Title: "Active Chat", Prompt: "active", Status: models.StatusRunning, Category: models.CategoryChat}
+	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+	activeExec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	require.NoError(t, h.execRepo.Create(ctx, activeExec))
+
+	form := url.Values{}
+	form.Set("message", "queue promotion")
+	form.Set("project_id", projectID)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	var resp ChatMessageAcceptedResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.True(t, resp.Queued)
+
+	require.NoError(t, h.execRepo.Complete(ctx, activeExec.ID, models.ExecCompleted, "active done", "", 0, 0))
+	mock := testutil.NewMockLLMCaller()
+	providerCalled := make(chan struct{}, 1)
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		providerCalled <- struct{}{}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	h.PromoteQueuedChatInput(projectID)
+	select {
+	case <-providerCalled:
+	case <-time.After(5 * time.Second):
+		counter.SetEnabled(false)
+		t.Fatal("timed out waiting for queued promotion provider call")
+	}
+	counter.SetEnabled(false)
+
+	assertAPIChatSelectionStatements(t, counter.Statements())
+	assertNoAPIChatFullListStatement(t, counter.Statements())
+	call := mock.LastCall()
+	require.Equal(t, agent.ID, call.Agent.ID)
+	require.Equal(t, "queued-promotion-secret", call.Agent.APIKey)
+	require.Equal(t, "queued-promotion-token", call.Agent.OAuthAccessToken)
+	require.Equal(t, "queued-promotion-refresh", call.Agent.OAuthRefreshToken)
+	require.Equal(t, "queued-promotion-client-secret", call.Agent.OAuthClientSecret)
+	require.Equal(t, largeProviderJSON, call.Agent.ExtraBodyJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthConfigJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthStateJSON)
+	require.NotEmpty(t, call.Agent.MixtureConfigJSON)
+
+	request := mock.LastAgentRequest()
+	modelContextLine := fmt.Sprintf("- [ID:%s] %q (model: %s, provider: %s) (default)", agent.ID, agent.Name, agent.Model, agent.Provider)
+	require.Contains(t, request.ChatSystemContext, modelContextLine)
+	require.NotContains(t, request.ChatSystemContext, "queued-promotion-secret")
+	require.NotContains(t, request.ChatSystemContext, largeProviderJSON)
+}
+
+func assertAPIChatSelectionStatements(t *testing.T, statements []string) {
+	t.Helper()
+	var selectionStatements []string
+	for _, statement := range statements {
+		normalized := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
+			selectionStatements = append(selectionStatements, normalized)
+		}
+	}
+	if len(selectionStatements) != 1 {
+		t.Fatalf("expected exactly one API Chat model-selection query, got %d in statements: %q", len(selectionStatements), statements)
+	}
+	selection := selectionStatements[0]
+	projection := strings.Split(strings.ToLower(selection), " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, provider, model, is_default") {
+		t.Fatalf("API Chat selection query does not use id/name/provider/model/is_default projection: %s", selection)
+	}
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("API Chat selection query selected forbidden column %q: %s", forbidden, selection)
+		}
+	}
+}
+
+func assertNoAPIChatFullListStatement(t *testing.T, statements []string) {
+	t.Helper()
+	for _, statement := range statements {
+		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(normalized, " from agent_configs order by is_default desc, name asc") &&
+			strings.Contains(normalized, "api_key") {
+			t.Fatalf("API Chat called full model List before selection: %s", statement)
+		}
+	}
 }
 
 func TestAPIChatMessage_ResponseFormat(t *testing.T) {

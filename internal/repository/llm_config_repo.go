@@ -42,6 +42,11 @@ const llmConfigCardColumns = `id, name, provider, model, reasoning_effort,
 // request JSON, custom-auth state, worker fields, and mixture definitions.
 const llmConfigPickerColumns = `id, name, model`
 
+// llmConfigChatSelectionColumns is the compact API Chat auto-selection and
+// prompt-context projection. It preserves model identity, provider display, and
+// default-marker semantics while excluding credentials and large provider JSON.
+const llmConfigChatSelectionColumns = `id, name, provider, model, is_default`
+
 // llmConfigBadgeColumns is the minimal projection for task-card model badges
 // and the chat-thread composer label. The model slug is included because the
 // thread composer renders "Name (model)" labels; id, name, and is_default are
@@ -199,8 +204,32 @@ func (r *LLMConfigRepo) ListPickerOptions(ctx context.Context) ([]models.LLMConf
 	return configs, rows.Err()
 }
 
-// ListBadgeOptions returns only the three fields needed to render model badges on
-// task cards and task detail views (id, name, is_default). The returned
+// ListChatSelectionOptions returns the compact rows needed for API Chat model
+// auto-selection and available-model prompt context. The returned LLMConfig
+// values are intentionally incomplete and must not be used for provider
+// execution, model editing, credential access, or persistence.
+func (r *LLMConfigRepo) ListChatSelectionOptions(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+llmConfigChatSelectionColumns+`
+					 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing chat model selection options: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var a models.LLMConfig
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault); err != nil {
+			return nil, fmt.Errorf("scanning chat model selection option: %w", err)
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
+}
+
+// ListBadgeOptions returns only the four fields needed to render model badges on
+// task cards and task detail views (id, name, model, is_default). The returned
 // LLMConfig values are intentionally incomplete and must not be used for provider
 // execution, model editing, credential access, or persistence.
 func (r *LLMConfigRepo) ListBadgeOptions(ctx context.Context) ([]models.LLMConfig, error) {
