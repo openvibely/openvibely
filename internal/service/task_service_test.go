@@ -141,6 +141,47 @@ func TestTaskService_Create_DefaultsStatus(t *testing.T) {
 	}
 }
 
+func TestTaskService_Create_NormalizesPriority(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	cases := []struct {
+		name     string
+		priority int
+		want     int
+	}{
+		{name: "missing zero", priority: 0, want: 2},
+		{name: "below range", priority: -1, want: 2},
+		{name: "above range", priority: 5, want: 2},
+		{name: "low", priority: 1, want: 1},
+		{name: "normal", priority: 2, want: 2},
+		{name: "high", priority: 3, want: 3},
+		{name: "urgent", priority: 4, want: 4},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     "Priority " + tt.name,
+				Prompt:    "test priority normalization",
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusPending,
+				Priority:  tt.priority,
+			}
+			require.NoError(t, svc.CreateWithGoal(ctx, task, ""))
+			assert.Equal(t, tt.want, task.Priority)
+
+			stored, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			assert.Equal(t, tt.want, stored.Priority)
+		})
+	}
+}
+
 func TestTaskService_Create_NormalizesTitlePromptAndDuplicateCheck(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

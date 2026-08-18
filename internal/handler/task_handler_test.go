@@ -523,6 +523,9 @@ func TestHandler_CreateTask_WithMultipleAttachments(t *testing.T) {
 	}
 
 	task := tasks[0]
+	if task.Priority != 2 {
+		t.Fatalf("expected multipart priority=0 to normalize to 2, got %d", task.Priority)
+	}
 
 	// Verify all 3 attachments were created
 	attachments, err := h.attachmentRepo.ListByTask(ctx, task.ID)
