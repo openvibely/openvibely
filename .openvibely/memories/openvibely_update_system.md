@@ -4,7 +4,7 @@ type: project
 created: 2026-08-02
 updated: 2026-08-18
 source: update_memory
-source_id: issue_666_update_helper_handoff_duplication
+source_id: 51a7096348385fc3f05944b435ef6d0e:64b143f136e867e2
 confidence: high
 title: OpenVibely Update System
 ---
@@ -30,7 +30,7 @@ Distribution contracts:
 - Hosted and Docker: retain externally controlled container replacement.
 - Manual Docker users approve an available update through `POST /api/system/update/apply`, which reaches `Coordinator.Accept`; this manual accepted path may drain active work and transition to `StateReady` without an installer or staged artifact because Docker replacement is externally controlled. Non-manual accepted updates still require a staged artifact before applying.
 - Platform-specific code is limited to detached helper creation, waiting for parent exit, atomic replacement, relaunch, and stopping a failed successor before rollback.
-- Open GitHub issue #666 tracks duplicated packaged-update helper handoff assembly across `WailsInstaller.startDesktopHelper`, `BinaryInstaller.Apply`, and `BinaryInstaller.RecoverBinaryRestart`: each repeats helper publication/copy, start, wait/shutdown, and cleanup wiring with only metadata transport and install-unit details differing.
+- GitHub issue #666 / PR #676 consolidates duplicated packaged-update helper handoff assembly in `internal/update/installers.go` behind a shared private lifecycle helper used by `WailsInstaller.startDesktopHelper`, `BinaryInstaller.Apply`, and `BinaryInstaller.RecoverBinaryRestart`. Desktop installs still pass `.app` `ExecutableRelative` metadata over stdin; binary installs still write `binaryHelperRelaunchMetadataPath` and pass `--relaunch-metadata`; normal handoff authorization and recovery readiness semantics remain distinct where required. After 2026-08-18 repairs, the local task branch/worktree, live source branch, and `refs/pull/676/head` all pointed at clean PR head `bcd499ca2d010b33fc6a56288619472c21ca2384` on `origin/main`/live `main` `3d857a396ec81ead16abaf093fa2d92abc85e2c2`, with the diff limited to `internal/update/installers.go` and `internal/update/installers_test.go`. The latest repair preserved polluted local task tip `e602f85ba809132aaabd3e871d2274b8cb0c0cd3`, reset local `main` back to `origin/main` after it reintroduced unrelated chatcontrol/handler/service commits, and reran `TMPDIR=/private/tmp go test ./internal/update -count=1 -timeout 120s`, `TMPDIR=/private/tmp go build ./cmd/server`, `TMPDIR=/private/tmp go test ./internal/... -count=1 -timeout 120s`, and `git diff --check origin/main...HEAD`. A separate fresh audit-only review is still required before treating PR #676/task #666 as complete.
 - Interrupted replacement must always leave a bootable executable, and startup reconciliation must settle durable state if the helper dies or power is lost.
 
 Obsolete standalone service-manager concepts must be removed directly because this work has not shipped: `OPENVIBELY_UPDATE_RESTART`, `OPENVIBELY_UPDATE_RESTART_TARGET`, restart mode/target state, manager-origin compatibility state, systemd and launchd commands, launchd labels and cleanup, service-manager lifecycle tests, and corresponding CI/docs. Do not add migrations or backward compatibility for those unreleased formats.
