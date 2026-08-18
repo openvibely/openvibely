@@ -200,31 +200,26 @@ func (c *chatActionSummaryCollector) appendToOutput(output string) string {
 // buildChatActionToolRuntime creates request-scoped runtime tools using the
 // canonical registry and direct typed action handlers.
 func (h *Handler) buildChatActionToolRuntime(params streamingResponseParams, collector *chatActionSummaryCollector) *llmcontracts.RuntimeTools {
-	surface := chatcontrol.SurfaceWeb
-	mode := params.ChatMode
-	if mode == "" {
-		mode = models.ChatModeOrchestrate
-	}
-	// Web handler includes thread tools for orchestrate mode
-	includeThread := mode == models.ChatModeOrchestrate
-	defs := chatcontrol.ToolDefsForContext(mode, surface, includeThread)
-
-	return &llmcontracts.RuntimeTools{
-		Definitions: defs,
-		Executor:    h.chatActionExecutor(params, collector, mode, surface),
-	}
+	return h.buildChatActionToolRuntimeForSurface(params, collector, chatcontrol.SurfaceWeb)
 }
 
 // buildAPIChatActionToolRuntime creates a RuntimeTools for the API surface.
 func (h *Handler) buildAPIChatActionToolRuntime(params streamingResponseParams, collector *chatActionSummaryCollector) *llmcontracts.RuntimeTools {
-	surface := chatcontrol.SurfaceAPI
+	return h.buildChatActionToolRuntimeForSurface(params, collector, chatcontrol.SurfaceAPI)
+}
+
+// buildChatActionToolRuntimeForSurface consolidates the shared mode-defaulting,
+// includeThread derivation, ToolDefsForContext call, and RuntimeTools
+// construction for a given surface. Both named wrappers delegate here so any
+// future change to defaulting or includeThread logic only needs to be written
+// once.
+func (h *Handler) buildChatActionToolRuntimeForSurface(params streamingResponseParams, collector *chatActionSummaryCollector, surface chatcontrol.Surface) *llmcontracts.RuntimeTools {
 	mode := params.ChatMode
 	if mode == "" {
 		mode = models.ChatModeOrchestrate
 	}
 	includeThread := mode == models.ChatModeOrchestrate
 	defs := chatcontrol.ToolDefsForContext(mode, surface, includeThread)
-
 	return &llmcontracts.RuntimeTools{
 		Definitions: defs,
 		Executor:    h.chatActionExecutor(params, collector, mode, surface),
