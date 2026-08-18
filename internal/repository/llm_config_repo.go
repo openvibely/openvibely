@@ -36,13 +36,6 @@ const llmConfigCardColumns = `id, name, provider, model, reasoning_effort,
 // request JSON, custom-auth state, worker fields, and mixture definitions.
 const llmConfigPickerColumns = `id, name, model`
 
-// llmConfigBadgeColumns is the minimal projection for task-card model badges
-// and the chat-thread composer label. The model slug is included because the
-// thread composer renders "Name (model)" labels; id, name, and is_default are
-// needed to resolve the badge and default-model fallback on task cards.
-// All credential, OAuth, request-JSON, and large-blob columns are excluded.
-const llmConfigBadgeColumns = `id, name, model, is_default`
-
 func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig) error {
 	return row.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.ReasoningEffort, &a.APIKey,
 		&a.MaxTokens, &a.Temperature, &a.IsDefault, &a.CreatedAt, &a.UpdatedAt,
@@ -129,30 +122,6 @@ func (r *LLMConfigRepo) ListPickerOptions(ctx context.Context) ([]models.LLMConf
 		var a models.LLMConfig
 		if err := rows.Scan(&a.ID, &a.Name, &a.Model); err != nil {
 			return nil, fmt.Errorf("scanning model picker option: %w", err)
-		}
-		configs = append(configs, a)
-	}
-	return configs, rows.Err()
-}
-
-// ListBadgeOptions returns only the three fields needed to render model badges on
-// task cards and task detail views (id, name, is_default). The returned
-// LLMConfig values are intentionally incomplete and must not be used for provider
-// execution, model editing, credential access, or persistence.
-func (r *LLMConfigRepo) ListBadgeOptions(ctx context.Context) ([]models.LLMConfig, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT `+llmConfigBadgeColumns+`
-					 FROM agent_configs ORDER BY is_default DESC, name ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("listing model badge options: %w", err)
-	}
-	defer rows.Close()
-
-	var configs []models.LLMConfig
-	for rows.Next() {
-		var a models.LLMConfig
-		if err := rows.Scan(&a.ID, &a.Name, &a.Model, &a.IsDefault); err != nil {
-			return nil, fmt.Errorf("scanning model badge option: %w", err)
 		}
 		configs = append(configs, a)
 	}
