@@ -448,6 +448,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"get_model": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGetModel(ctx, input), nil
 		},
+		"set_default_model": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return service.ExecuteSetDefaultModelTool(ctx, h.llmConfigRepo, input)
+		},
 		"list_agents": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListAgents(ctx)), nil
 		},

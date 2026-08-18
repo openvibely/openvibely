@@ -535,6 +535,7 @@ func TestChatActionRuntimeExecutorCoversToolClosuresAndValidation(t *testing.T) 
 		{name: "set_personality", input: `{"personality":"no_nonsense_pro"}`, want: "Personality changed"},
 		{name: "list_models", input: `{}`, want: "Executor Model"},
 		{name: "get_model", input: `{"model_id":"` + model.ID + `"}`, want: "Executor Model"},
+		{name: "set_default_model", input: `{"model_id":"` + model.ID + `"}`, want: "Default model is already"},
 		{name: "list_agents", input: `{}`, want: "Configured Agents"},
 		{name: "view_settings", input: `{}`, want: "App Settings"},
 		{name: "project_info", input: `{}`, want: "Runtime Executor Coverage"},

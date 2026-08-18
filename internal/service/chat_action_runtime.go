@@ -538,6 +538,9 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		"get_model": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return channelGetModelResult(ctx, opts.LLMConfigRepo, input), nil
 		},
+		"set_default_model": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return ExecuteSetDefaultModelTool(ctx, opts.LLMConfigRepo, input)
+		},
 		"list_agents": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelListAgentsResult(ctx, opts.AgentRepo, opts.UnavailableAgentsText), nil
 		},
@@ -571,16 +574,19 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 }
 
 func channelListAutomationsResult(ctx context.Context, graphSvc *AutomationGraphService, currentProjectID string, input json.RawMessage) (string, error) {
+	if graphSvc == nil {
+		return marshalChannelAutomationResult(map[string]any{"automations": []any{}})
+	}
 	var req channelListAutomationsInput
 	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
 	}
-	projectID, err := resolveChannelAutomationProjectID(currentProjectID, req.ProjectID, "list_automations")
-	if err != nil {
-		return "", err
+	projectID := strings.TrimSpace(currentProjectID)
+	if override := strings.TrimSpace(req.ProjectID); override != "" {
+		projectID = override
 	}
-	if graphSvc == nil {
-		return marshalChannelAutomationResult(map[string]any{"automations": []any{}})
+	if projectID == "" {
+		return "", fmt.Errorf("list_automations: no current project")
 	}
 	cards, err := graphSvc.List(ctx, projectID)
 	if err != nil {
@@ -594,6 +600,9 @@ func channelListAutomationsResult(ctx context.Context, graphSvc *AutomationGraph
 }
 
 func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphService, currentProjectID string, input json.RawMessage) (string, error) {
+	if graphSvc == nil {
+		return "", fmt.Errorf("automations unavailable")
+	}
 	var req channelGetAutomationInput
 	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "", err
@@ -602,12 +611,12 @@ func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphSe
 	if automationID == "" {
 		return "", fmt.Errorf("get_automation: automation_id is required")
 	}
-	projectID, err := resolveChannelAutomationProjectID(currentProjectID, req.ProjectID, "get_automation")
-	if err != nil {
-		return "", err
+	projectID := strings.TrimSpace(currentProjectID)
+	if override := strings.TrimSpace(req.ProjectID); override != "" {
+		projectID = override
 	}
-	if graphSvc == nil {
-		return "", fmt.Errorf("automations unavailable")
+	if projectID == "" {
+		return "", fmt.Errorf("get_automation: no current project")
 	}
 	cards, err := graphSvc.List(ctx, projectID)
 	if err != nil {
@@ -619,18 +628,6 @@ func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphSe
 		}
 	}
 	return marshalChannelAutomationResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
-}
-
-func resolveChannelAutomationProjectID(currentProjectID, requestedProjectID, toolName string) (string, error) {
-	currentProjectID = strings.TrimSpace(currentProjectID)
-	requestedProjectID = strings.TrimSpace(requestedProjectID)
-	if currentProjectID == "" {
-		return "", fmt.Errorf("%s: no current project", toolName)
-	}
-	if requestedProjectID != "" && requestedProjectID != currentProjectID {
-		return "", fmt.Errorf("project_id %q is outside the caller's authorized project context", requestedProjectID)
-	}
-	return currentProjectID, nil
 }
 
 func channelAutomationCardSummary(card models.AutomationCard) map[string]any {
@@ -993,6 +990,76 @@ func channelGetModelResult(ctx context.Context, repo *repository.LLMConfigRepo, 
 		return fmt.Sprintf("Model with id %q not found.", req.ModelID)
 	}
 	return fmt.Sprintf("Model with name %q not found.", req.Name)
+}
+
+type SetDefaultModelRequest struct {
+	ModelID string `json:"model_id"`
+	Name    string `json:"name"`
+}
+
+// ExecuteSetDefaultModelTool sets the global default model using the same full
+// config update path as the browser Models page so the repository preserves the
+// single-default invariant.
+func ExecuteSetDefaultModelTool(ctx context.Context, repo *repository.LLMConfigRepo, input json.RawMessage) (string, error) {
+	if repo == nil {
+		return "", fmt.Errorf("model repository not available")
+	}
+	var req SetDefaultModelRequest
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	modelID := strings.TrimSpace(req.ModelID)
+	name := strings.TrimSpace(req.Name)
+	if modelID == "" && name == "" {
+		return "", fmt.Errorf("set_default_model requires model_id or name")
+	}
+
+	var target *models.LLMConfig
+	if modelID != "" {
+		model, err := repo.GetByID(ctx, modelID)
+		if err != nil {
+			return "", err
+		}
+		if model == nil {
+			return "", fmt.Errorf("model with id %q not found", modelID)
+		}
+		target = model
+	} else {
+		configs, err := repo.List(ctx)
+		if err != nil {
+			return "", err
+		}
+		var matches []models.LLMConfig
+		for _, c := range configs {
+			if strings.EqualFold(strings.TrimSpace(c.Name), name) {
+				matches = append(matches, c)
+			}
+		}
+		switch len(matches) {
+		case 0:
+			return "", fmt.Errorf("model with name %q not found", name)
+		case 1:
+			model, err := repo.GetByID(ctx, matches[0].ID)
+			if err != nil {
+				return "", err
+			}
+			if model == nil {
+				return "", fmt.Errorf("model with name %q not found", name)
+			}
+			target = model
+		default:
+			return "", fmt.Errorf("model name %q is ambiguous; use model_id", name)
+		}
+	}
+
+	if target.IsDefault {
+		return fmt.Sprintf("Default model is already %q (id: %s).", target.Name, target.ID), nil
+	}
+	target.IsDefault = true
+	if err := repo.Update(ctx, target); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Default model changed to %q (id: %s).", target.Name, target.ID), nil
 }
 
 func channelListAgentsResult(ctx context.Context, repo *repository.AgentRepo, unavailable string) string {

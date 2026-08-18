@@ -244,6 +244,8 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	mustContain(t, names, "switch_project", "get_chat_mode", "set_chat_mode", "list_capabilities")
 	// Must have new read actions
 	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view")
+	// Must have Models-domain write actions in orchestrate mode
+	mustContain(t, names, "set_default_model")
 	// Must have GitHub mailbox actions on web/API surfaces.
 	mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 	// Must have thread tools when requested
@@ -267,7 +269,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	// Must NOT have write actions
 	mustNotContain(t, names, "create_task", "edit_task", "execute_tasks",
 		"set_personality", "schedule_task", "delete_schedule", "modify_schedule",
-		"create_alert", "create_notification", "delete_alert", "toggle_alert", "switch_project",
+		"set_default_model", "create_alert", "create_notification", "delete_alert", "toggle_alert", "switch_project",
 		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
 		"save_automation", "run_automation_now", "pause_automation", "resume_automation")
 
@@ -474,7 +476,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"view_task_thread", "send_to_task",
 		"schedule_task", "delete_schedule", "modify_schedule",
 		"list_personalities", "set_personality",
-		"list_models", "list_agents",
+		"list_models", "get_model", "set_default_model", "list_agents",
 		"view_settings", "project_info",
 		"list_projects", "switch_project",
 		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "delete_alert", "toggle_alert",
@@ -561,6 +563,25 @@ func TestRegistry_ModelFlowActions(t *testing.T) {
 		if def.Access != AccessRead {
 			t.Errorf("%s should be read, got %s", name, def.Access)
 		}
+	}
+	setDefault := Get("set_default_model")
+	if setDefault == nil {
+		t.Fatal("missing action \"set_default_model\"")
+	}
+	if setDefault.Access != AccessWrite {
+		t.Errorf("set_default_model should be write, got %s", setDefault.Access)
+	}
+	if setDefault.Domain != DomainModels {
+		t.Errorf("set_default_model should be in Models domain, got %s", setDefault.Domain)
+	}
+	if setDefault.Sensitivity != SensitivitySystemWide {
+		t.Errorf("set_default_model should be system-wide, got %s", setDefault.Sensitivity)
+	}
+	if err := IsAllowed("set_default_model", models.ChatModeOrchestrate, SurfaceWeb); err != nil {
+		t.Fatalf("set_default_model should be allowed in orchestrate mode: %v", err)
+	}
+	if err := IsAllowed("set_default_model", models.ChatModePlan, SurfaceWeb); err == nil {
+		t.Fatal("set_default_model should be blocked in plan mode")
 	}
 }
 

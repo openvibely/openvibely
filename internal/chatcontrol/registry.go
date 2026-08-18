@@ -13,6 +13,7 @@
 //   - personality: set_personality
 //   - projects: switch_project
 //   - automations: save_automation, run_automation_now, pause_automation, resume_automation
+//   - models: set_default_model
 //   - chat: set_chat_mode
 //
 // Chat read-only (plan + orchestrate):
@@ -155,6 +156,7 @@ const githubReplacePullRequestBranchParams = `{"type":"object","properties":{"ta
 const githubForwardPRFeedbackParams = `{"type":"object","properties":{"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}},"additionalProperties":false}`
 const githubActorAuthorizedParams = `{"type":"object","properties":{"github_login":{"type":"string","description":"GitHub login to check against the configured authorized actor list."}},"required":["github_login"],"additionalProperties":false}`
 const automationLifecycleParams = `{"type":"object","properties":{"automation_id":{"type":"string","description":"Saved Automation ID. Use this when known."},"name":{"type":"string","description":"Exact saved Automation name to resolve within the current project when automation_id is not known."}},"additionalProperties":false}`
+const setDefaultModelParams = `{"type":"object","properties":{"model_id":{"type":"string","description":"Exact model configuration ID to set as the default."},"name":{"type":"string","description":"Unique model configuration name to set as the default. Case-insensitive exact match."}},"additionalProperties":false}`
 
 // registry is the canonical list of all chat-controllable actions.
 // Order matters for prompt/documentation consistency.
@@ -673,7 +675,7 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"personality":{"type":"string"}},"required":["personality"],"additionalProperties":false}`),
 	},
 
-	// --- Models domain (read-only from chat) ---
+	// --- Models domain ---
 	{
 		Name:         "list_models",
 		Description:  "List configured LLM models.",
@@ -693,6 +695,16 @@ var registry = []ActionDef{
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"model_id":{"type":"string"},"name":{"type":"string"}},"additionalProperties":false}`),
+	},
+	{
+		Name:         "set_default_model",
+		Description:  "Set the global default model configuration by exact model ID or unique case-insensitive name.",
+		Domain:       DomainModels,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivitySystemWide,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(setDefaultModelParams),
 	},
 
 	// --- Agents domain (read-only from chat) ---

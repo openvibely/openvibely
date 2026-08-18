@@ -169,6 +169,180 @@ func TestViewTaskThreadResolvesCurrentTaskID(t *testing.T) {
 	})
 }
 
+func TestListCapabilitiesShowsSetDefaultModelOnlyInOrchestrate(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Default Model Capability Project")
+	orchestrate := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ExecID: "set-default-capability-exec", ProjectID: project.ID},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true),
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := orchestrate.Executor(ctx, "list_capabilities", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.False(t, isErr, out)
+	require.NoError(t, err)
+	require.Contains(t, out, "[models]")
+	require.Contains(t, out, "set_default_model (write)")
+
+	plan := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ExecID: "set-default-plan-capability-exec", ProjectID: project.ID},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err = plan.Executor(ctx, "list_capabilities", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.False(t, isErr, out)
+	require.NoError(t, err)
+	require.NotContains(t, out, "set_default_model")
+}
+
+func TestSetDefaultModelRuntimeToolSwitchesByIDAndNameAndListModelsReflectsDefault(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Default Model Runtime Project")
+	original := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Cloud Coding"
+		a.IsDefault = true
+	})
+	local := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Local Fast"
+		a.IsDefault = false
+	})
+	backup := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Backup Model"
+		a.IsDefault = false
+	})
+
+	params := streamingResponseParams{ExecID: "set-default-model-exec", ProjectID: project.ID}
+	runtime := h.buildChatActionToolRuntimeFromDefs(
+		params,
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true),
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := runtime.Executor(ctx, "set_default_model", json.RawMessage(`{"model_id":"`+local.ID+`"}`))
+	require.True(t, handled)
+	require.False(t, isErr, out)
+	require.NoError(t, err)
+	require.Contains(t, out, "Local Fast")
+
+	current, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, current)
+	require.Equal(t, local.ID, current.ID)
+	prior, err := llmConfigRepo.GetByID(ctx, original.ID)
+	require.NoError(t, err)
+	require.False(t, prior.IsDefault)
+
+	out, handled, isErr, err = runtime.Executor(ctx, "set_default_model", json.RawMessage(`{"name":"backup model"}`))
+	require.True(t, handled)
+	require.False(t, isErr, out)
+	require.NoError(t, err)
+	require.Contains(t, out, "Backup Model")
+	current, err = llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, current)
+	require.Equal(t, backup.ID, current.ID)
+
+	modelsOut, handled, isErr, err := runtime.Executor(ctx, "list_models", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.False(t, isErr, modelsOut)
+	require.NoError(t, err)
+	require.Contains(t, modelsOut, "**Backup Model** (default)")
+	require.NotContains(t, modelsOut, "**Local Fast** (default)")
+}
+
+func TestSetDefaultModelRuntimeToolRejectsInvalidReferencesWithoutChangingDefault(t *testing.T) {
+	tests := []struct {
+		name  string
+		input json.RawMessage
+		want  string
+	}{
+		{name: "missing reference", input: json.RawMessage(`{}`), want: "requires model_id or name"},
+		{name: "blank reference", input: json.RawMessage(`{"model_id":"   ","name":"   "}`), want: "requires model_id or name"},
+		{name: "missing id", input: json.RawMessage(`{"model_id":"missing"}`), want: `model with id "missing" not found`},
+		{name: "missing name", input: json.RawMessage(`{"name":"Missing Model"}`), want: `model with name "Missing Model" not found`},
+		{name: "ambiguous name", input: json.RawMessage(`{"name":"duplicate model"}`), want: `model name "duplicate model" is ambiguous`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+			ctx := context.Background()
+			project := createProject(t, h, "Invalid Default Model Runtime Project")
+			original := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+				a.Name = "Original Default"
+				a.IsDefault = true
+			})
+			firstDup := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+				a.Name = "Duplicate One"
+				a.IsDefault = false
+			})
+			secondDup := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+				a.Name = "Duplicate Two"
+				a.IsDefault = false
+			})
+			_, err := db.ExecContext(ctx, `UPDATE agent_configs SET name = ? WHERE id IN (?, ?)`, "Duplicate Model", firstDup.ID, secondDup.ID)
+			require.NoError(t, err)
+
+			runtime := h.buildChatActionToolRuntimeFromDefs(
+				streamingResponseParams{ExecID: "invalid-set-default-model-exec", ProjectID: project.ID},
+				nil,
+				chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true),
+				models.ChatModeOrchestrate,
+				chatcontrol.SurfaceWeb,
+			)
+			out, handled, isErr, err := runtime.Executor(ctx, "set_default_model", tt.input)
+			require.True(t, handled)
+			require.True(t, isErr, out)
+			require.ErrorContains(t, err, tt.want)
+
+			current, err := llmConfigRepo.GetDefault(ctx)
+			require.NoError(t, err)
+			require.NotNil(t, current)
+			require.Equal(t, original.ID, current.ID)
+		})
+	}
+}
+
+func TestSetDefaultModelRuntimeToolBlockedInPlanMode(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Plan Default Model Runtime Project")
+	original := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Plan Original Default"
+		a.IsDefault = true
+	})
+	target := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Plan Target Model"
+		a.IsDefault = false
+	})
+
+	runtime := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ExecID: "plan-set-default-model-exec", ProjectID: project.ID},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := runtime.Executor(ctx, "set_default_model", json.RawMessage(`{"model_id":"`+target.ID+`"}`))
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, out, "requires orchestrate mode")
+
+	current, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, current)
+	require.Equal(t, original.ID, current.ID)
+}
+
 func TestWebRuntimeToolsUseSharedInputDecoder(t *testing.T) {
 	h, _, _, _ := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "Shared Web Runtime Decoder")

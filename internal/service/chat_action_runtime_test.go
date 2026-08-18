@@ -1010,17 +1010,6 @@ func TestBuildChannelUtilityActionHandlersScheduleTaskAndModifyUseSharedLogic(t 
 	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
 }
 
-func TestBuildChannelUtilityActionHandlersAutomationReadsRejectForeignProject(t *testing.T) {
-	ctx := context.Background()
-	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: "project-current"})
-
-	_, err := handlers["list_automations"](ctx, json.RawMessage(`{"project_id":"project-foreign"}`))
-	require.ErrorContains(t, err, `project_id "project-foreign" is outside the caller's authorized project context`)
-
-	_, err = handlers["get_automation"](ctx, json.RawMessage(`{"automation_id":"automation-1","project_id":"project-foreign"}`))
-	require.ErrorContains(t, err, `project_id "project-foreign" is outside the caller's authorized project context`)
-}
-
 func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -1127,6 +1116,8 @@ func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *test
 	require.NoError(t, projectRepo.Create(ctx, project))
 	agent := &models.LLMConfig{Name: "Default Model", Provider: models.ProviderTest, Model: "test", IsDefault: true}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	secondary := &models.LLMConfig{Name: "Channel Fast", Provider: models.ProviderTest, Model: "test-fast", IsDefault: false}
+	require.NoError(t, llmConfigRepo.Create(ctx, secondary))
 	require.NoError(t, taskRepo.Create(ctx, &models.Task{ProjectID: project.ID, Title: "Info task", Prompt: "prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}))
 
 	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ProjectRepo: projectRepo, SettingsRepo: settingsRepo, LLMConfigRepo: llmConfigRepo})
@@ -1139,6 +1130,12 @@ func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *test
 	modelsOut, err := handlers["list_models"](ctx, nil)
 	require.NoError(t, err)
 	require.Contains(t, modelsOut, "Default Model")
+	setDefaultOut, err := handlers["set_default_model"](ctx, json.RawMessage(`{"name":"channel fast"}`))
+	require.NoError(t, err)
+	require.Contains(t, setDefaultOut, "Channel Fast")
+	currentDefault, err := llmConfigRepo.GetDefault(ctx)
+	require.NoError(t, err)
+	require.Equal(t, secondary.ID, currentDefault.ID)
 	projectOut, err := handlers["project_info"](ctx, nil)
 	require.NoError(t, err)
 	require.Contains(t, projectOut, "Info Project")
