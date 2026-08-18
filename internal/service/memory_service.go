@@ -358,7 +358,12 @@ func (s *MemoryService) ensureMemoryAgent(ctx context.Context) (*models.Agent, e
 	if err != nil {
 		return nil, err
 	}
-	want := agentFromBundledMemoryDeclaration(decl)
+	want := systemAgentFromDeclaration(decl, systemAgentDeclarationSpec{
+		systemKind:     models.AgentSystemKindMemoryCurator,
+		key:            models.AgentSystemKindMemoryCurator,
+		sourceRefs:     []string{bundledMemoryDeclarationPath},
+		permissionMode: systemAgentMemoryPermissions,
+	})
 
 	agent, err := s.findCanonicalMemoryAgent(ctx)
 	if err != nil {
@@ -369,7 +374,7 @@ func (s *MemoryService) ensureMemoryAgent(ctx context.Context) (*models.Agent, e
 		if err := s.agentRepo.Create(ctx, agent); err != nil {
 			return nil, err
 		}
-	} else if applyBundledMemoryDeclaration(agent, want) {
+	} else if applySystemAgentDeclaration(agent, want) {
 		if err := s.agentRepo.Update(ctx, agent); err != nil {
 			return nil, err
 		}
@@ -462,111 +467,13 @@ func loadBundledMemoryDeclaration() (*agentlibrary.SkillDeclaration, error) {
 	return decl, nil
 }
 
-func agentFromBundledMemoryDeclaration(decl *agentlibrary.SkillDeclaration) *models.Agent {
-	agent := &models.Agent{
-		Name:                decl.Agent.AgentDisplayName(),
-		Description:         decl.Agent.Description,
-		SystemPrompt:        decl.Agent.SystemPrompt,
-		Model:               firstNonEmptyString(decl.ModelDefaults.Model, "inherit"),
-		Tools:               compactStrings(decl.Tools),
-		ToolConfig:          toolConfigFromAgentDeclaration(decl.ToolConfig),
-		Plugins:             compactStrings(decl.Plugins),
-		MCPServers:          mcpServersFromAgentDeclaration(decl.MCPServers),
-		Skills:              skillsFromBundledAgentIndex(decl.Agent.SystemPrompt),
-		SystemKind:          models.AgentSystemKindMemoryCurator,
-		Key:                 "memory_curator",
-		Scope:               models.AgentScope(firstNonEmptyString(decl.Agent.Scope, string(models.AgentScopeGlobal))),
-		ProjectID:           decl.Agent.ProjectID,
-		SelectableAsPrimary: decl.Agent.SelectableAsPrimary,
-		Enabled:             true,
-		GeneratedStatus:     models.AgentStatusProtected,
-		CreatedBy:           models.AgentCreatedBySystem,
-		PermissionDefaults: models.AgentPermissionDefaults{
-			ReadTaskPrompt:     decl.Permissions.ReadTaskPrompt,
-			ReadTaskExecution:  decl.Permissions.ReadTaskExecution,
-			ReadProjectMemory:  decl.Permissions.ReadProjectMemory,
-			WriteProjectMemory: decl.Permissions.WriteProjectMemory,
-			UseShellOrTools:    decl.Permissions.UseShellOrTools,
-		},
-		ModelDefaults: models.AgentModelDefaults{
-			Model:       decl.ModelDefaults.Model,
-			Temperature: decl.ModelDefaults.Temperature,
-			MaxTokens:   decl.ModelDefaults.MaxTokens,
-		},
-		SourceRefs: []string{bundledMemoryDeclarationPath},
-	}
-	if decl.Agent.Enabled != nil {
-		agent.Enabled = *decl.Agent.Enabled
-	}
-	return agent
-}
-
-func applyBundledMemoryDeclaration(agent, want *models.Agent) bool {
-	changed := false
-	set := func(ok bool, apply func()) {
-		if ok {
-			apply()
-			changed = true
-		}
-	}
-	set(agent.Name != want.Name, func() { agent.Name = want.Name })
-	set(agent.Description != want.Description, func() { agent.Description = want.Description })
-	set(agent.SystemPrompt != want.SystemPrompt, func() { agent.SystemPrompt = want.SystemPrompt })
-	set(agent.Model != want.Model, func() { agent.Model = want.Model })
-	set(!sameAgentToolsList(agent.Tools, want.Tools), func() { agent.Tools = append([]string(nil), want.Tools...) })
-	set(!sameScopedToolConfig(agent.ToolConfig, want.ToolConfig), func() { agent.ToolConfig = want.ToolConfig })
-	set(!sameSkillConfigs(agent.Skills, want.Skills), func() { agent.Skills = append([]models.SkillConfig(nil), want.Skills...) })
-	set(agent.SystemKind != want.SystemKind, func() { agent.SystemKind = want.SystemKind })
-	set(agent.Key != want.Key, func() { agent.Key = want.Key })
-	set(agent.Scope != want.Scope, func() { agent.Scope = want.Scope })
-	set(agent.ProjectID != want.ProjectID, func() { agent.ProjectID = want.ProjectID })
-	set(agent.SelectableAsPrimary != want.SelectableAsPrimary, func() { agent.SelectableAsPrimary = want.SelectableAsPrimary })
-	set(agent.Enabled != want.Enabled, func() { agent.Enabled = want.Enabled })
-	set(agent.GeneratedStatus != want.GeneratedStatus, func() { agent.GeneratedStatus = want.GeneratedStatus })
-	set(agent.CreatedBy == "" || agent.CreatedBy != want.CreatedBy, func() { agent.CreatedBy = want.CreatedBy })
-	set(!sameStringSlice(agent.SourceRefs, want.SourceRefs), func() { agent.SourceRefs = append([]string(nil), want.SourceRefs...) })
-	if !sameJSON(agent.PermissionDefaults, want.PermissionDefaults) {
-		agent.PermissionDefaults = want.PermissionDefaults
-		changed = true
-	}
-	if !sameJSON(agent.ModelDefaults, want.ModelDefaults) {
-		agent.ModelDefaults = want.ModelDefaults
-		changed = true
-	}
-	return changed
-}
-
 func (s *MemoryService) ensureMemoryHooks(ctx context.Context, agentID string, decl *agentlibrary.SkillDeclaration) error {
-	if s.lifecycleRepo == nil || decl == nil || len(decl.LifecycleHooks) == 0 {
-		return nil
-	}
-	existing, err := s.lifecycleRepo.HooksByAgent(ctx, agentID)
+	result, err := reconcileDeclaredSystemAgentLifecycleHooks(ctx, s.lifecycleRepo, agentID, decl)
 	if err != nil {
 		return err
 	}
-	desired := map[string]struct{}{}
-	for when, hookDecl := range decl.LifecycleHooks {
-		if when == "primary" {
-			continue
-		}
-		hook := lifecycleHookFromAgentDeclaration(agentID, models.LifecycleWhen(when), hookDecl)
-		desired[string(hook.When)+"/"+hook.SkillKey] = struct{}{}
-		match := findAgentLifecycleHook(existing, hook.When, hook.SkillKey)
-		if match == nil {
-			if err := s.lifecycleRepo.CreateHook(ctx, hook); err != nil {
-				return err
-			}
-			continue
-		}
-		hook.ID = match.ID
-		if !sameLifecycleHook(match, hook) {
-			if err := s.lifecycleRepo.UpdateHook(ctx, hook); err != nil {
-				return err
-			}
-		}
-	}
-	for _, hook := range existing {
-		if _, ok := desired[string(hook.When)+"/"+hook.SkillKey]; ok {
+	for _, hook := range result.existing {
+		if _, ok := result.desired[string(hook.When)+"/"+hook.SkillKey]; ok {
 			continue
 		}
 		if hook.AgentID == agentID && hook.SkillKey == "recall_memory" && hook.When == models.LifecycleBeforeRun {
