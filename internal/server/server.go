@@ -626,6 +626,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	projectSvc := service.NewProjectService(projectRepo)
 	taskGoalSvc := service.NewTaskGoalService(taskGoalRepo, taskRepo, broadcaster)
 	taskSvc := service.NewTaskService(taskRepo, attachmentRepo, workerSvc)
+	projectSvc.SetTaskService(taskSvc)
 	taskSvc.SetDeletionUploadsDir(filepath.Join(cfg.AppDataDir, "uploads"))
 	taskSvc.SetAgentRepo(agentRepo)
 	taskSvc.SetTaskGoalService(taskGoalSvc)
