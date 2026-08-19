@@ -389,6 +389,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"get_model": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeGetModel(ctx, input), nil
 		},
+		"view_usage_analytics": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeViewUsageAnalytics(ctx, params.ProjectID, input)
+		},
 		"list_agents": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListAgents(ctx)), nil
 		},
@@ -684,6 +687,10 @@ func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context,
 func githubToolJSON(payload map[string]any) (string, error) {
 	b, err := json.Marshal(payload)
 	return string(b), err
+}
+
+func (h *Handler) executeViewUsageAnalytics(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
+	return service.ExecuteViewUsageAnalyticsTool(ctx, h.usageAnalyticsSvc, projectID, input)
 }
 
 func (h *Handler) executeGetPersonality(ctx context.Context) string {
@@ -1163,6 +1170,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"execute_tasks":                          true,
 		"create_swarm_task":                      true,
 		"list_schedules":                         true,
+		"view_usage_analytics":                   true,
 		"schedule_task":                          true,
 		"delete_schedule":                        true,
 		"modify_schedule":                        true,

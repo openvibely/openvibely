@@ -172,6 +172,7 @@ type channelUtilityActionHandlerOptions struct {
 	CustomPersonalityRepo     *repository.CustomPersonalityRepo
 	ProjectRepo               *repository.ProjectRepo
 	AlertSvc                  *AlertService
+	UsageAnalyticsSvc         *UsageAnalyticsService
 	SlackStatus               func(context.Context) (SlackConnectionStatus, error)
 	SlackAuthRepo             *repository.SlackAuthRepo
 	TelegramRunning           func() bool
@@ -193,6 +194,20 @@ type channelListAutomationsInput struct {
 type channelGetAutomationInput struct {
 	AutomationID string `json:"automation_id"`
 	ProjectID    string `json:"project_id"`
+}
+
+func usageAnalyticsServiceFromRepos(existing *UsageAnalyticsService, execRepo *repository.ExecutionRepo, llmConfigRepo *repository.LLMConfigRepo) *UsageAnalyticsService {
+	if existing != nil {
+		return existing
+	}
+	if execRepo == nil {
+		return nil
+	}
+	db := execRepo.DB()
+	if db == nil {
+		return nil
+	}
+	return NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
 }
 
 func workerFromTaskService(taskSvc *TaskService) *WorkerService {
@@ -448,6 +463,9 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		},
 		"list_schedules": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return ExecuteListSchedulesTool(ctx, opts.ScheduleRepo, opts.ProjectID, input)
+		},
+		"view_usage_analytics": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return ExecuteViewUsageAnalyticsTool(ctx, opts.UsageAnalyticsSvc, opts.ProjectID, input)
 		},
 		"list_personalities": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelListPersonalitiesResult(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo), nil

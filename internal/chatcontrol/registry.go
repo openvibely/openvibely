@@ -20,6 +20,7 @@
 //   - schedules: list_schedules
 //   - projects: list_projects, project_info, get_current_project
 //   - models: list_models, get_model
+//   - analytics: view_usage_analytics
 //   - agents: list_agents
 //   - alerts: list_alerts, get_alert
 //   - personality: list_personalities, get_personality
@@ -92,6 +93,7 @@ const (
 	DomainSettings    Domain = "settings"
 	DomainMessaging   Domain = "messaging"
 	DomainGitHub      Domain = "github"
+	DomainAnalytics   Domain = "analytics"
 	DomainAutomations Domain = "automations"
 	DomainMemory      Domain = "memory"
 	DomainChat        Domain = "chat"
@@ -693,6 +695,18 @@ var registry = []ActionDef{
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"model_id":{"type":"string"},"name":{"type":"string"}},"additionalProperties":false}`),
+	},
+
+	// --- Analytics domain (read-only from chat) ---
+	{
+		Name:         "view_usage_analytics",
+		Description:  "Return compact prompt-safe current-project model usage, token totals, cost availability, top model/provider breakdowns, recent buckets, and stored account-limit summaries. Uses locally stored Analytics data only and does not refresh provider account usage.",
+		Domain:       DomainAnalytics,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"range":{"type":"string","enum":["7d","30d","90d","365d","month","all"],"description":"Convenience range matching Analytics API; defaults to 30d."},"provider":{"type":"string","description":"Optional provider filter, e.g. openai, anthropic, openai_compatible."},"group_by":{"type":"string","enum":["hour","day","week","month"],"description":"Recent usage bucket grouping; defaults to day."},"date_from":{"type":"string","description":"Optional RFC3339 or YYYY-MM-DD start time."},"date_to":{"type":"string","description":"Optional RFC3339 or YYYY-MM-DD end time."},"top_limit":{"type":"integer","minimum":1,"maximum":10,"description":"Maximum top model/provider rows to return; defaults to 5."},"recent_bucket_limit":{"type":"integer","minimum":0,"maximum":24,"description":"Maximum recent usage buckets to return; defaults to 8. Use 0 to omit buckets."}},"additionalProperties":false}`),
 	},
 
 	// --- Agents domain (read-only from chat) ---

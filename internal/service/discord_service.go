@@ -71,6 +71,7 @@ type DiscordService struct {
 	customPersonalityRepo    *repository.CustomPersonalityRepo
 	agentRepo                *repository.AgentRepo
 	alertSvc                 *AlertService
+	usageAnalyticsSvc        *UsageAnalyticsService
 	emailStatus              func(context.Context) EmailConnectionStatus
 	emailAuthRepo            *repository.EmailAuthRepo
 	webhookRepo              *repository.WebhookRepo
@@ -108,6 +109,12 @@ func NewDiscordService(
 	discordAuthRepo *repository.DiscordAuthRepo,
 	discordTaskContextRepo *repository.DiscordTaskContextRepo,
 ) *DiscordService {
+	var usageAnalyticsSvc *UsageAnalyticsService
+	if execRepo != nil {
+		if db := execRepo.DB(); db != nil {
+			usageAnalyticsSvc = NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
+		}
+	}
 	return &DiscordService{
 		settingsRepo:           settingsRepo,
 		projectRepo:            projectRepo,
@@ -118,6 +125,7 @@ func NewDiscordService(
 		taskSvc:                taskSvc,
 		llmSvc:                 llmSvc,
 		workerSvc:              workerSvc,
+		usageAnalyticsSvc:      usageAnalyticsSvc,
 		discordAuthRepo:        discordAuthRepo,
 		discordTaskContextRepo: discordTaskContextRepo,
 		userProjects:           make(map[string]string),
@@ -750,6 +758,7 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
 		DiscordStatus:         s.GetConnectionStatus,
 		DiscordAuthRepo:       s.discordAuthRepo,
 		EmailStatus:           s.emailStatus,
