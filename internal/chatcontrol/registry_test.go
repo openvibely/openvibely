@@ -273,7 +273,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 
 	// Must have read actions
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",
-		"list_personalities", "view_settings", "project_info",
+		"list_personalities", "view_settings", "list_channels", "project_info",
 		"get_chat_mode", "list_capabilities", "get_alert", "get_model",
 		"get_personality", "get_current_project", "memory_view", "view_task_thread", "list_schedules", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
 }
@@ -302,6 +302,32 @@ func TestListSchedulesRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
 	// Read-only actions must remain allowed in Plan mode on web.
 	if err := IsAllowed("list_schedules", models.ChatModePlan, SurfaceWeb); err != nil {
 		t.Fatalf("expected list_schedules allowed in plan mode: %v", err)
+	}
+}
+
+func TestListChannelsRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range AllSurfaces {
+			defs := ToolDefsForContext(mode, surface, false)
+			mustContain(t, toolDefNames(defs), "list_channels")
+			if err := IsAllowed("list_channels", mode, surface); err != nil {
+				t.Fatalf("expected list_channels allowed in %s mode on %s: %v", mode, surface, err)
+			}
+		}
+	}
+
+	def := Get("list_channels")
+	if def == nil {
+		t.Fatal("expected list_channels to be registered")
+	}
+	if def.Access != AccessRead {
+		t.Fatalf("expected list_channels to be read-only, got %q", def.Access)
+	}
+	if def.Domain != DomainSettings {
+		t.Fatalf("expected list_channels in settings domain, got %q", def.Domain)
+	}
+	if strings.Contains(strings.ToLower(def.Description), "token") && !strings.Contains(strings.ToLower(def.Description), "does not expose") {
+		t.Fatalf("list_channels description must make secret boundary explicit: %q", def.Description)
 	}
 }
 
@@ -475,7 +501,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"schedule_task", "delete_schedule", "modify_schedule",
 		"list_personalities", "set_personality",
 		"list_models", "list_agents",
-		"view_settings", "project_info",
+		"view_settings", "list_channels", "project_info",
 		"list_projects", "switch_project",
 		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "delete_alert", "toggle_alert",
 		// new actions

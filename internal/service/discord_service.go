@@ -742,6 +742,9 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		DiscordStatus:         s.GetConnectionStatus,
+		DiscordAuthRepo:       s.discordAuthRepo,
+		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,

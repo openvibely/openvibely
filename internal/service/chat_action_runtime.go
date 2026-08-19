@@ -176,6 +176,10 @@ type AlertRuntimeOptions struct {
 	PrepareImplementationTask func(context.Context, *models.AlertImplementationTaskInput) error
 }
 
+type telegramAuthListByProjectStore interface {
+	ListByProject(ctx context.Context, projectID string) ([]models.TelegramAuthorizedUser, error)
+}
+
 type channelUtilityActionHandlerOptions struct {
 	ProjectID                 string
 	CallerTaskID              string
@@ -189,6 +193,16 @@ type channelUtilityActionHandlerOptions struct {
 	CustomPersonalityRepo     *repository.CustomPersonalityRepo
 	ProjectRepo               *repository.ProjectRepo
 	AlertSvc                  *AlertService
+	SlackStatus               func(context.Context) (SlackConnectionStatus, error)
+	SlackAuthRepo             *repository.SlackAuthRepo
+	TelegramRunning           func() bool
+	TelegramAuthRepo          telegramAuthListByProjectStore
+	DiscordStatus             func(context.Context) (DiscordConnectionStatus, error)
+	DiscordAuthRepo           *repository.DiscordAuthRepo
+	EmailStatus               func(context.Context) EmailConnectionStatus
+	EmailAuthRepo             *repository.EmailAuthRepo
+	WebhookRepo               *repository.WebhookRepo
+	ChannelTargets            channelTargetStore
 	PrepareImplementationTask func(context.Context, *models.AlertImplementationTaskInput) error
 	UnavailableAgentsText     string
 }
@@ -544,6 +558,9 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		"view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelViewSettingsResult(ctx, opts.SettingsRepo, opts.LLMConfigRepo, opts.ProjectRepo), nil
 		},
+		"list_channels": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return channelListChannelsResult(ctx, opts)
+		},
 		"project_info": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelProjectInfoResult(ctx, opts.ProjectRepo, opts.TaskRepo, opts.ProjectID), nil
 		},
@@ -568,6 +585,432 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		PrepareImplementationTask: opts.PrepareImplementationTask,
 	}))
 	return handlers
+}
+
+type channelStatusActionResponse struct {
+	OK                     bool                               `json:"ok"`
+	ProjectID              string                             `json:"project_id,omitempty"`
+	ConfiguredChannelCount int                                `json:"configured_channel_count"`
+	ConfiguredChannels     []string                           `json:"configured_channels"`
+	NoneConfigured         bool                               `json:"none_configured"`
+	GitHub                 channelGitHubStatusActionSummary   `json:"github"`
+	Slack                  channelSlackStatusActionSummary    `json:"slack"`
+	Telegram               channelTelegramStatusActionSummary `json:"telegram"`
+	Discord                channelDiscordStatusActionSummary  `json:"discord"`
+	Email                  channelEmailStatusActionSummary    `json:"email"`
+	Webhooks               channelWebhookStatusActionSummary  `json:"webhooks"`
+	OutboundTargets        channelTargetStatusActionSummary   `json:"outbound_message_targets"`
+}
+
+type channelGitHubStatusActionSummary struct {
+	Configured    bool   `json:"configured"`
+	Connected     bool   `json:"connected"`
+	Status        string `json:"status"`
+	AuthMode      string `json:"auth_mode,omitempty"`
+	AppConfigured bool   `json:"app_configured"`
+	PATConfigured bool   `json:"pat_configured"`
+}
+
+type channelSlackStatusActionSummary struct {
+	Configured          bool   `json:"configured"`
+	Connected           bool   `json:"connected"`
+	Running             bool   `json:"running"`
+	Status              string `json:"status"`
+	TeamName            string `json:"team_name,omitempty"`
+	TeamID              string `json:"team_id,omitempty"`
+	BotUserID           string `json:"bot_user_id,omitempty"`
+	BotTokenSource      string `json:"bot_token_source,omitempty"`
+	SendResponses       bool   `json:"send_responses"`
+	AuthorizedUserCount int    `json:"authorized_user_count"`
+}
+
+type channelTelegramStatusActionSummary struct {
+	Configured          bool   `json:"configured"`
+	Running             bool   `json:"running"`
+	Status              string `json:"status"`
+	SendResponses       bool   `json:"send_responses"`
+	RichMessagesV2      bool   `json:"rich_messages_v2"`
+	AuthorizedUserCount int    `json:"authorized_user_count"`
+}
+
+type channelDiscordStatusActionSummary struct {
+	Configured          bool   `json:"configured"`
+	Connected           bool   `json:"connected"`
+	Running             bool   `json:"running"`
+	Status              string `json:"status"`
+	BotUserID           string `json:"bot_user_id,omitempty"`
+	SendResponses       bool   `json:"send_responses"`
+	LastError           string `json:"last_error,omitempty"`
+	AuthorizedUserCount int    `json:"authorized_user_count"`
+}
+
+type channelEmailStatusActionSummary struct {
+	Configured            bool   `json:"configured"`
+	Running               bool   `json:"running"`
+	Status                string `json:"status"`
+	Provider              string `json:"provider,omitempty"`
+	Address               string `json:"address,omitempty"`
+	IMAPHost              string `json:"imap_host,omitempty"`
+	IMAPPort              int    `json:"imap_port,omitempty"`
+	SMTPHost              string `json:"smtp_host,omitempty"`
+	SMTPPort              int    `json:"smtp_port,omitempty"`
+	SendResponses         bool   `json:"send_responses"`
+	SkipAttachments       bool   `json:"skip_attachments"`
+	AuthorizedSenderCount int    `json:"authorized_sender_count"`
+}
+
+type channelWebhookStatusActionSummary struct {
+	Total      int  `json:"total"`
+	Active     int  `json:"active"`
+	Disabled   int  `json:"disabled"`
+	Configured bool `json:"configured"`
+}
+
+type channelTargetStatusActionSummary struct {
+	Total                         int                                     `json:"total"`
+	Configured                    bool                                    `json:"configured"`
+	ExplicitUnsavedTargetsAllowed bool                                    `json:"explicit_unsaved_targets_allowed"`
+	MessagingAvailable            bool                                    `json:"messaging_available"`
+	ByPlatform                    map[string]channelTargetPlatformSummary `json:"by_platform"`
+}
+
+type channelTargetPlatformSummary struct {
+	Total  int            `json:"total"`
+	Home   int            `json:"home"`
+	Named  int            `json:"named"`
+	ByKind map[string]int `json:"by_kind"`
+}
+
+func channelTargetsFromRouter(router *ChannelMessageRouter) channelTargetStore {
+	if router == nil {
+		return nil
+	}
+	return router.targets
+}
+
+func telegramAuthListStore(store telegramAuthorizationStore) telegramAuthListByProjectStore {
+	if store == nil {
+		return nil
+	}
+	listStore, _ := store.(telegramAuthListByProjectStore)
+	return listStore
+}
+
+func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHandlerOptions) (string, error) {
+	projectID := strings.TrimSpace(opts.ProjectID)
+	settings := channelStatusSettings(ctx, opts.SettingsRepo, projectID)
+	get := func(key string) string { return strings.TrimSpace(settings[key]) }
+	isFalse := func(key string) bool { return strings.EqualFold(get(key), "false") }
+	isTrue := func(key string) bool { return strings.EqualFold(get(key), "true") }
+
+	resp := channelStatusActionResponse{
+		OK:                 projectID != "",
+		ProjectID:          projectID,
+		ConfiguredChannels: []string{},
+		OutboundTargets: channelTargetStatusActionSummary{
+			ByPlatform: map[string]channelTargetPlatformSummary{},
+		},
+	}
+	if projectID == "" {
+		resp.NoneConfigured = true
+		return marshalChannelStatusAction(resp)
+	}
+
+	githubAuthMode := NormalizeGitHubAuthMode(get(GitHubSettingAuthMode))
+	githubPATConfigured := get(GitHubSettingPAT) != ""
+	githubAppConfigured := get(GitHubSettingAppID) != "" || get(GitHubSettingAppSlug) != "" || get(GitHubSettingAppPrivateKey) != ""
+	resp.GitHub = channelGitHubStatusActionSummary{
+		Configured:    githubPATConfigured || githubAppConfigured || githubAuthMode != "",
+		Connected:     githubPATConfigured,
+		Status:        channelConnectedStatus(githubPATConfigured || githubAppConfigured || githubAuthMode != "", githubPATConfigured),
+		AuthMode:      githubAuthMode,
+		AppConfigured: githubAppConfigured,
+		PATConfigured: githubPATConfigured,
+	}
+	if resp.GitHub.Configured {
+		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "github")
+	}
+
+	slack := SlackConnectionStatus{}
+	if opts.SlackStatus != nil {
+		if status, err := opts.SlackStatus(ctx); err == nil {
+			slack = status
+		}
+	}
+	slack.Configured = slack.Configured || slack.HasClientID || slack.HasClientSecret || slack.HasAppToken || slack.HasBotToken || slack.HasBotTokenOverride || get(SlackSettingClientID) != "" || get(SlackSettingClientSecret) != "" || get(SlackSettingAppToken) != "" || get(SlackSettingBotToken) != "" || get(SlackSettingBotTokenOverride) != ""
+	if slack.BotTokenSource == "" {
+		slack.BotTokenSource = strings.ToLower(get(SlackSettingBotTokenSource))
+	}
+	resp.Slack = channelSlackStatusActionSummary{
+		Configured:     slack.Configured,
+		Connected:      slack.Connected,
+		Running:        slack.Running,
+		Status:         channelConnectedStatus(slack.Configured, slack.Connected),
+		TeamName:       strings.TrimSpace(slack.TeamName),
+		TeamID:         strings.TrimSpace(slack.TeamID),
+		BotUserID:      strings.TrimSpace(slack.BotUserID),
+		BotTokenSource: strings.TrimSpace(slack.BotTokenSource),
+		SendResponses:  !isFalse(SlackSettingSendResponses),
+	}
+	if opts.SlackAuthRepo != nil {
+		if users, err := opts.SlackAuthRepo.ListByProject(ctx, projectID); err == nil {
+			resp.Slack.AuthorizedUserCount = len(users)
+		}
+	}
+	if resp.Slack.Configured {
+		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "slack")
+	}
+
+	telegramConfigured := get(TelegramSettingBotToken) != ""
+	telegramRunning := false
+	if opts.TelegramRunning != nil {
+		telegramRunning = opts.TelegramRunning()
+	}
+	resp.Telegram = channelTelegramStatusActionSummary{
+		Configured:     telegramConfigured || telegramRunning,
+		Running:        telegramRunning,
+		Status:         channelRunningStatus(telegramConfigured || telegramRunning, telegramRunning),
+		SendResponses:  !isFalse(TelegramSettingSendResponses),
+		RichMessagesV2: !isFalse(TelegramSettingRichMessagesV2),
+	}
+	if opts.TelegramAuthRepo != nil {
+		if users, err := opts.TelegramAuthRepo.ListByProject(ctx, projectID); err == nil {
+			resp.Telegram.AuthorizedUserCount = len(users)
+		}
+	}
+	if resp.Telegram.Configured {
+		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "telegram")
+	}
+
+	discord := DiscordConnectionStatus{SendResponses: true}
+	if opts.DiscordStatus != nil {
+		if status, err := opts.DiscordStatus(ctx); err == nil {
+			discord = status
+		}
+	}
+	discord.Configured = discord.Configured || discord.HasBotToken || get(DiscordSettingBotToken) != ""
+	if get(DiscordSettingSendResponses) != "" {
+		discord.SendResponses = !isFalse(DiscordSettingSendResponses)
+	}
+	resp.Discord = channelDiscordStatusActionSummary{
+		Configured:    discord.Configured,
+		Connected:     discord.Connected,
+		Running:       discord.Running,
+		Status:        channelDiscordStatus(discord),
+		BotUserID:     strings.TrimSpace(discord.BotUserID),
+		SendResponses: discord.SendResponses,
+		LastError:     channelSafeSingleLine(discord.LastError),
+	}
+	if opts.DiscordAuthRepo != nil {
+		if users, err := opts.DiscordAuthRepo.ListByProject(ctx, projectID); err == nil {
+			resp.Discord.AuthorizedUserCount = len(users)
+		}
+	}
+	if resp.Discord.Configured {
+		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "discord")
+	}
+
+	email := EmailConnectionStatus{Provider: EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
+	if opts.EmailStatus != nil {
+		email = opts.EmailStatus(ctx)
+	}
+	if email.Provider == "" {
+		email.Provider = NormalizeEmailProvider(get(EmailSettingProvider))
+		if email.Provider == "" {
+			email.Provider = EmailProviderCustom
+		}
+	}
+	if email.Address == "" {
+		email.Address = get(EmailSettingAddress)
+	}
+	if email.IMAPHost == "" {
+		email.IMAPHost = get(EmailSettingIMAPHost)
+	}
+	if email.SMTPHost == "" {
+		email.SMTPHost = get(EmailSettingSMTPHost)
+	}
+	email.Configured = email.Configured || email.Running || email.Address != "" || email.IMAPHost != "" || email.SMTPHost != "" || get(EmailSettingPassword) != ""
+	resp.Email = channelEmailStatusActionSummary{
+		Configured:      email.Configured,
+		Running:         email.Running,
+		Status:          channelRunningStatus(email.Configured, email.Running),
+		Provider:        email.Provider,
+		Address:         email.Address,
+		IMAPHost:        email.IMAPHost,
+		IMAPPort:        email.IMAPPort,
+		SMTPHost:        email.SMTPHost,
+		SMTPPort:        email.SMTPPort,
+		SendResponses:   !isFalse(EmailSettingSendResponses),
+		SkipAttachments: isTrue(EmailSettingSkipAttachments),
+	}
+	if opts.EmailAuthRepo != nil {
+		if senders, err := opts.EmailAuthRepo.ListByProject(ctx, projectID); err == nil {
+			resp.Email.AuthorizedSenderCount = len(senders)
+		}
+	}
+	if resp.Email.Configured {
+		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "email")
+	}
+
+	if opts.WebhookRepo != nil {
+		if webhooks, err := opts.WebhookRepo.ListCardsByProject(ctx, projectID); err == nil {
+			resp.Webhooks = channelSummarizeWebhooks(webhooks)
+		}
+	}
+	if resp.Webhooks.Configured {
+		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "webhooks")
+	}
+
+	if opts.ChannelTargets != nil {
+		if targets, err := opts.ChannelTargets.ListByProject(ctx, projectID); err == nil {
+			resp.OutboundTargets = channelSummarizeTargets(targets)
+		}
+	}
+	resp.OutboundTargets.ExplicitUnsavedTargetsAllowed = isTrue(SendMessageAllowExplicitTargetsSetting + ":" + projectID)
+	resp.OutboundTargets.MessagingAvailable = resp.OutboundTargets.Configured || resp.OutboundTargets.ExplicitUnsavedTargetsAllowed
+
+	resp.ConfiguredChannelCount = len(resp.ConfiguredChannels)
+	resp.NoneConfigured = resp.ConfiguredChannelCount == 0
+	return marshalChannelStatusAction(resp)
+}
+
+func channelStatusSettings(ctx context.Context, settingsRepo *repository.SettingsRepo, projectID string) map[string]string {
+	if settingsRepo == nil {
+		return map[string]string{}
+	}
+	keys := []string{
+		GitHubSettingAuthMode,
+		GitHubSettingAppID,
+		GitHubSettingAppSlug,
+		GitHubSettingAppPrivateKey,
+		GitHubSettingPAT,
+		SlackSettingClientID,
+		SlackSettingClientSecret,
+		SlackSettingAppToken,
+		SlackSettingBotToken,
+		SlackSettingBotTokenOverride,
+		SlackSettingBotTokenSource,
+		SlackSettingSendResponses,
+		TelegramSettingBotToken,
+		TelegramSettingSendResponses,
+		TelegramSettingRichMessagesV2,
+		DiscordSettingBotToken,
+		DiscordSettingSendResponses,
+		EmailSettingProvider,
+		EmailSettingAddress,
+		EmailSettingPassword,
+		EmailSettingIMAPHost,
+		EmailSettingSMTPHost,
+		EmailSettingSendResponses,
+		EmailSettingSkipAttachments,
+	}
+	if projectID != "" {
+		keys = append(keys, SendMessageAllowExplicitTargetsSetting+":"+projectID)
+	}
+	values, err := settingsRepo.GetMany(ctx, keys)
+	if err != nil {
+		return map[string]string{}
+	}
+	return values
+}
+
+func channelSummarizeWebhooks(webhooks []models.WebhookEndpoint) channelWebhookStatusActionSummary {
+	out := channelWebhookStatusActionSummary{Total: len(webhooks), Configured: len(webhooks) > 0}
+	for _, webhook := range webhooks {
+		if webhook.Enabled {
+			out.Active++
+		} else {
+			out.Disabled++
+		}
+	}
+	return out
+}
+
+func channelSummarizeTargets(targets []models.ChannelTarget) channelTargetStatusActionSummary {
+	out := channelTargetStatusActionSummary{
+		Total:      len(targets),
+		Configured: len(targets) > 0,
+		ByPlatform: map[string]channelTargetPlatformSummary{},
+	}
+	for _, target := range targets {
+		platform := strings.ToLower(strings.TrimSpace(target.Platform))
+		if platform == "" {
+			platform = "unknown"
+		}
+		kind := strings.ToLower(strings.TrimSpace(target.TargetKind))
+		if kind == "" {
+			kind = models.DefaultChannelTargetKind(platform)
+		}
+		platformSummary := out.ByPlatform[platform]
+		platformSummary.Total++
+		if target.Home {
+			platformSummary.Home++
+		}
+		if strings.TrimSpace(target.Name) != "" {
+			platformSummary.Named++
+		}
+		if platformSummary.ByKind == nil {
+			platformSummary.ByKind = map[string]int{}
+		}
+		platformSummary.ByKind[kind]++
+		out.ByPlatform[platform] = platformSummary
+	}
+	return out
+}
+
+func marshalChannelStatusAction(resp channelStatusActionResponse) (string, error) {
+	b, err := json.MarshalIndent(resp, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func channelConnectedStatus(configured, connected bool) string {
+	switch {
+	case connected:
+		return "connected"
+	case configured:
+		return "configured_not_connected"
+	default:
+		return "not_configured"
+	}
+}
+
+func channelRunningStatus(configured, running bool) string {
+	switch {
+	case running:
+		return "running"
+	case configured:
+		return "configured_not_running"
+	default:
+		return "not_configured"
+	}
+}
+
+func channelDiscordStatus(status DiscordConnectionStatus) string {
+	if status.Connected {
+		return "connected"
+	}
+	if status.Configured && !status.Running {
+		return "gateway_offline"
+	}
+	if status.Configured {
+		return "configured_not_connected"
+	}
+	return "not_configured"
+}
+
+func channelSafeSingleLine(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) > 240 {
+		return value[:240]
+	}
+	return value
 }
 
 func channelListAutomationsResult(ctx context.Context, graphSvc *AutomationGraphService, currentProjectID string, input json.RawMessage) (string, error) {
