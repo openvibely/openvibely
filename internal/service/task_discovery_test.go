@@ -67,6 +67,9 @@ func TestExecuteListTasksTool(t *testing.T) {
 	if result.Total != 2 || result.Count != 2 {
 		t.Fatalf("expected 2 matches (chat + other project excluded), got total=%d count=%d", result.Total, result.Count)
 	}
+	if result.Filter.Query != "issue 25" || result.Filter.Category != "" || result.Filter.Status != "" || result.Note != "" {
+		t.Fatalf("unexpected filter echo/note for matching query: %+v", result)
+	}
 	var found bool
 	for _, task := range result.Tasks {
 		if task.Category == string(models.CategoryChat) {
@@ -94,6 +97,19 @@ func TestExecuteListTasksTool(t *testing.T) {
 	filtered := decodeListTasksResult(t, out)
 	if filtered.Total != 1 || len(filtered.Tasks) != 1 || filtered.Tasks[0].Title != "Unrelated task" {
 		t.Fatalf("expected single running active task, got %+v", filtered)
+	}
+	if filtered.Filter.Category != "active" || filtered.Filter.Status != "running" {
+		t.Fatalf("expected normalized category/status filter echo, got %+v", filtered.Filter)
+	}
+
+	// Exhausted empty pages explicitly identify the exact filter that was exhausted.
+	out, err = ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(`{"query":"missing issue","limit":10}`))
+	if err != nil {
+		t.Fatalf("list_tasks empty query: %v", err)
+	}
+	empty := decodeListTasksResult(t, out)
+	if empty.Total != 0 || empty.Count != 0 || empty.HasMore || empty.Filter.Query != "missing issue" || !strings.Contains(empty.Note, "No tasks matched this exact list_tasks query/filter") {
+		t.Fatalf("unexpected exhausted empty response: %+v", empty)
 	}
 
 	// Invalid category/status are rejected.
@@ -177,15 +193,13 @@ func TestExecuteListTasksTool_PreservesCompactJSONContract(t *testing.T) {
 		{
 			name:  "optional fields present",
 			query: `{"query":"Discovery JSON optional"}`,
-			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","title":"Discovery JSON optional","category":"active","status":"running","priority":4,"updated_at":"2024-01-02T03:04:05Z","parent_task_id":"%s","swarm_role":"worker"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false}`,
-				withOptionalFields.ID, parent.ID),
-		},
+			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","title":"Discovery JSON optional","category":"active","status":"running","priority":4,"updated_at":"2024-01-02T03:04:05Z","parent_task_id":"%s","swarm_role":"worker"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false,"filter":{"query":"Discovery JSON optional","category":"","status":""}}`,
+				withOptionalFields.ID, parent.ID)},
 		{
 			name:  "nullable optional fields omitted",
 			query: `{"query":"Discovery JSON nullable"}`,
-			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","title":"Discovery JSON nullable","category":"backlog","status":"pending","priority":2,"updated_at":"2024-01-02T03:04:05Z"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false}`,
-				withoutOptionalFields.ID),
-		},
+			expected: fmt.Sprintf(`{"ok":true,"tasks":[{"task_id":"%s","title":"Discovery JSON nullable","category":"backlog","status":"pending","priority":2,"updated_at":"2024-01-02T03:04:05Z"}],"count":1,"total":1,"limit":20,"offset":0,"has_more":false,"filter":{"query":"Discovery JSON nullable","category":"","status":""}}`,
+				withoutOptionalFields.ID)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := ExecuteListTasksTool(ctx, taskRepo, "default", json.RawMessage(tc.query))

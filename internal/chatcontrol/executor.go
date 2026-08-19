@@ -57,6 +57,7 @@ func normalizedActionSet(actions map[string]bool) map[string]bool {
 
 func buildRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler, includeLifecycleOnly bool, allowedActions map[string]bool) llmcontracts.RuntimeToolExecutor {
 	allowed := normalizedActionSet(allowedActions)
+	var lastEmptyListTasks *runtimeNoopDiscoveryCall
 	return func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		toolName := strings.ToLower(strings.TrimSpace(name))
 		if toolName == "" {
@@ -85,12 +86,108 @@ func buildRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers ma
 			return msg, true, true, nil
 		}
 
+		listTasksInputKey := ""
+		if toolName == "list_tasks" {
+			listTasksInputKey = canonicalListTasksRuntimeInput(input)
+			if lastEmptyListTasks != nil && lastEmptyListTasks.InputKey == listTasksInputKey {
+				return markDuplicateNoopDiscovery(lastEmptyListTasks.Output), true, false, nil
+			}
+		} else {
+			lastEmptyListTasks = nil
+		}
+
 		output, err := handler(ctx, input)
 		if err != nil {
+			if toolName == "list_tasks" {
+				lastEmptyListTasks = nil
+			}
 			return "", true, true, err
+		}
+		if toolName == "list_tasks" && isEmptyExhaustedDiscoveryOutput(output) {
+			lastEmptyListTasks = &runtimeNoopDiscoveryCall{InputKey: listTasksInputKey, Output: output}
+		} else if toolName == "list_tasks" {
+			lastEmptyListTasks = nil
 		}
 		return output, true, false, nil
 	}
+}
+
+type runtimeNoopDiscoveryCall struct {
+	InputKey string
+	Output   string
+}
+
+func canonicalListTasksRuntimeInput(input json.RawMessage) string {
+	payload := strings.TrimSpace(string(input))
+	if payload == "" {
+		payload = "{}"
+	}
+	var request struct {
+		Query    string `json:"query"`
+		Category string `json:"category"`
+		Status   string `json:"status"`
+		Limit    int    `json:"limit"`
+		Offset   int    `json:"offset"`
+	}
+	if err := json.Unmarshal([]byte(payload), &request); err != nil {
+		return payload
+	}
+	limit := request.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	offset := request.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	encoded, err := json.Marshal(struct {
+		Query    string `json:"query"`
+		Category string `json:"category"`
+		Status   string `json:"status"`
+		Limit    int    `json:"limit"`
+		Offset   int    `json:"offset"`
+	}{
+		Query:    strings.TrimSpace(request.Query),
+		Category: strings.ToLower(strings.TrimSpace(request.Category)),
+		Status:   strings.ToLower(strings.TrimSpace(request.Status)),
+		Limit:    limit,
+		Offset:   offset,
+	})
+	if err != nil {
+		return payload
+	}
+	return string(encoded)
+}
+
+func isEmptyExhaustedDiscoveryOutput(output string) bool {
+	var result struct {
+		OK      bool            `json:"ok"`
+		Tasks   json.RawMessage `json:"tasks"`
+		Total   int             `json:"total"`
+		HasMore bool            `json:"has_more"`
+	}
+	if err := json.Unmarshal([]byte(output), &result); err != nil || !result.OK || result.Total != 0 || result.HasMore {
+		return false
+	}
+	var tasks []json.RawMessage
+	return json.Unmarshal(result.Tasks, &tasks) == nil && len(tasks) == 0
+}
+
+func markDuplicateNoopDiscovery(output string) string {
+	var result map[string]any
+	if err := json.Unmarshal([]byte(output), &result); err != nil {
+		return output
+	}
+	result["duplicate_noop"] = true
+	result["note"] = "Identical list_tasks parameters already returned no tasks with total=0 and has_more=false in this run; use a different query/filter/offset or proceed without repeating this no-op discovery."
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return output
+	}
+	return string(encoded)
 }
 
 // ValidateHandlerCoverage verifies that all runtime tool definitions for the
