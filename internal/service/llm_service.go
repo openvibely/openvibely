@@ -385,6 +385,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		"pause_task_goal":                        true,
 		"resume_task_goal":                       true,
 		"list_schedules":                         true,
+		"view_usage_analytics":                   true,
 		"schedule_task":                          true,
 		"delete_schedule":                        true,
 		"modify_schedule":                        true,
@@ -453,6 +454,10 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		TaskRepo:    s.taskRepo,
 		TaskGoalSvc: s.taskGoalSvc,
 	}))
+	var usageAnalyticsSvc *UsageAnalyticsService
+	if s.usageRepo != nil {
+		usageAnalyticsSvc = NewUsageAnalyticsService(s.usageRepo, s.llmConfigRepo)
+	}
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
 		ProjectID:             task.ProjectID,
 		CallerTaskID:          task.ID,
@@ -465,6 +470,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		CustomPersonalityRepo: nil,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		UsageAnalyticsSvc:     usageAnalyticsSvc,
 		PrepareImplementationTask: func(ctx context.Context, input *models.AlertImplementationTaskInput) error {
 			return s.prepareAutomationAlertImplementationTask(ctx, task.ProjectID, input)
 		},

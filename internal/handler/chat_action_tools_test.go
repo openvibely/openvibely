@@ -16,6 +16,30 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type testUsageAnalyticsToolResponse struct {
+	OK                bool                       `json:"ok"`
+	ProjectID         string                     `json:"project_id"`
+	Totals            models.UsageTotals         `json:"totals"`
+	TopModels         []models.ModelUsagePoint   `json:"top_models"`
+	TopProviders      []testUsageProviderSummary `json:"top_providers"`
+	AccountLimits     []testUsageAccountSummary  `json:"account_limits"`
+	LastUpdatedAt     *string                    `json:"last_updated_at"`
+	LocalOnly         bool                       `json:"local_only"`
+	ProviderRefreshed bool                       `json:"provider_refreshed"`
+	CostAvailability  string                     `json:"cost_availability"`
+}
+
+type testUsageProviderSummary struct {
+	Provider    string `json:"provider"`
+	TotalTokens int    `json:"total_tokens"`
+}
+
+type testUsageAccountSummary struct {
+	Provider string                    `json:"provider"`
+	PlanType string                    `json:"plan_type"`
+	Limits   []models.AccountLimitView `json:"limits"`
+}
+
 func TestSupportsChatActionTools(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -697,6 +721,177 @@ func TestListTasksRuntimeTool_WebAndAPIExecutableAndPlanExposed(t *testing.T) {
 	if planHandlers["list_tasks"] == nil {
 		t.Fatal("expected list_tasks handler in plan mode")
 	}
+}
+
+func TestViewUsageAnalyticsRuntimeTool_NoUsageDataReturnsZeroSummary(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Usage Empty Project")
+	require.NoError(t, llmConfigRepo.Create(ctx, &models.LLMConfig{
+		Name:             "OpenAI OAuth Empty",
+		Provider:         models.ProviderOpenAI,
+		Model:            "gpt-5.3-codex",
+		AuthMethod:       models.AuthMethodOAuth,
+		OAuthAccessToken: "oauth-token-that-must-not-be-used",
+		OAuthAccountID:   "acct-secret-empty",
+	}))
+
+	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_usage_analytics"]
+	if handler == nil {
+		t.Fatal("view_usage_analytics handler missing")
+	}
+	out, err := handler(ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	var got testUsageAnalyticsToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.Equal(t, project.ID, got.ProjectID)
+	require.Equal(t, 0, got.Totals.CallCount)
+	require.Equal(t, 0, got.Totals.TotalTokens)
+	require.Equal(t, "no_usage", got.CostAvailability)
+	require.True(t, got.LocalOnly)
+	require.False(t, got.ProviderRefreshed)
+	require.NotContains(t, out, "oauth-token-that-must-not-be-used")
+	require.NotContains(t, out, "acct-secret-empty")
+}
+
+func TestViewUsageAnalyticsRuntimeTool_MultipleModelsProviderFilterAndCostAvailability(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Usage Breakdown Project")
+	otherProject := createProject(t, h, "Usage Other Project")
+	cost := 1.25
+	seedUsageEvent := func(provider, model, projectID string, inputTokens, outputTokens, cacheTokens, reasoningTokens int, costUSD *float64) {
+		t.Helper()
+		require.NoError(t, h.usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+			Provider:              provider,
+			ProjectID:             projectID,
+			Model:                 model,
+			Operation:             "chat",
+			Status:                "completed",
+			InputTokens:           inputTokens,
+			OutputTokens:          outputTokens,
+			CachedInputTokens:     cacheTokens,
+			ReasoningOutputTokens: reasoningTokens,
+			TotalTokens:           inputTokens + outputTokens,
+			CostUSD:               costUSD,
+			OccurredAt:            time.Now().UTC(),
+		}))
+	}
+	seedUsageEvent("openai", "gpt-5.3-codex", project.ID, 300, 100, 25, 10, &cost)
+	seedUsageEvent("anthropic", "claude-sonnet-4-5", project.ID, 200, 50, 0, 0, nil)
+	seedUsageEvent("openai", "gpt-5-mini", project.ID, 120, 30, 10, 5, nil)
+	seedUsageEvent("openai", "foreign-project-model", otherProject.ID, 1000, 1000, 0, 0, &cost)
+
+	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["view_usage_analytics"]
+	out, err := handler(ctx, json.RawMessage(`{"range":"all","top_limit":3}`))
+	require.NoError(t, err)
+	var got testUsageAnalyticsToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Equal(t, 800, got.Totals.TotalTokens)
+	require.Equal(t, 3, got.Totals.CallCount)
+	require.Equal(t, "partial", got.CostAvailability)
+	require.NotNil(t, got.LastUpdatedAt)
+	require.Len(t, got.TopModels, 3)
+	require.Equal(t, "gpt-5.3-codex", got.TopModels[0].Model)
+	require.Len(t, got.TopProviders, 2)
+	require.Equal(t, "openai", got.TopProviders[0].Provider)
+	require.Equal(t, 550, got.TopProviders[0].TotalTokens)
+	require.NotContains(t, out, "foreign-project-model")
+
+	filteredOut, err := handler(ctx, json.RawMessage(`{"range":"all","provider":"anthropic"}`))
+	require.NoError(t, err)
+	var filtered testUsageAnalyticsToolResponse
+	require.NoError(t, json.Unmarshal([]byte(filteredOut), &filtered))
+	require.Equal(t, 250, filtered.Totals.TotalTokens)
+	require.Len(t, filtered.TopModels, 1)
+	require.Equal(t, "anthropic", filtered.TopModels[0].Provider)
+	require.Equal(t, "unavailable", filtered.CostAvailability)
+	require.NotContains(t, filteredOut, "gpt-5.3-codex")
+}
+
+func TestViewUsageAnalyticsRuntimeTool_SanitizesAccountLimitSummaries(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Usage Account Project")
+	cfg := &models.LLMConfig{
+		Name:              "OpenAI OAuth Account",
+		Provider:          models.ProviderOpenAI,
+		Model:             "gpt-5.3-codex",
+		AuthMethod:        models.AuthMethodOAuth,
+		OAuthAccessToken:  "oauth-secret-token",
+		OAuthRefreshToken: "refresh-secret-token",
+		OAuthAccountID:    "acct-secret-id",
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, cfg))
+	used := 91.0
+	window := 300
+	reset := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	require.NoError(t, h.usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+		Provider:             "openai",
+		AccountID:            cfg.OAuthAccountID,
+		AgentConfigID:        cfg.ID,
+		PlanType:             "ChatGPT Pro",
+		PrimaryLabel:         "5-hour session",
+		PrimaryUsedPercent:   &used,
+		PrimaryWindowMinutes: &window,
+		PrimaryResetsAt:      &reset,
+		RawJSON:              `{"account_id":"raw-provider-account","authorization":"Bearer raw-secret"}`,
+		FetchedAt:            time.Now().UTC(),
+	}))
+
+	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_usage_analytics"]
+	out, err := handler(ctx, json.RawMessage(`{"range":"all","provider":"openai"}`))
+	require.NoError(t, err)
+	var got testUsageAnalyticsToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Len(t, got.AccountLimits, 1)
+	require.Equal(t, "openai", got.AccountLimits[0].Provider)
+	require.Equal(t, "ChatGPT Pro", got.AccountLimits[0].PlanType)
+	require.Len(t, got.AccountLimits[0].Limits, 1)
+	require.Equal(t, "5-hour session", got.AccountLimits[0].Limits[0].Label)
+	require.Equal(t, "warning", got.AccountLimits[0].Limits[0].Status)
+	for _, secret := range []string{cfg.ID, cfg.OAuthAccountID, cfg.OAuthAccessToken, cfg.OAuthRefreshToken, "raw-provider-account", "Bearer raw-secret"} {
+		require.NotContains(t, out, secret)
+	}
+}
+
+func TestViewUsageAnalyticsRuntimeTool_CapabilityRegistration(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		defs := chatcontrol.ToolDefsForContext(mode, chatcontrol.SurfaceWeb, mode == models.ChatModeOrchestrate)
+		found := false
+		for _, def := range defs {
+			if def.Name == "view_usage_analytics" {
+				found = true
+				break
+			}
+		}
+		require.Truef(t, found, "view_usage_analytics definition missing in mode %s", mode)
+	}
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Usage Capability Project")
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(context.Background(), "list_capabilities", nil)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, out, "view_usage_analytics")
+
+	taskThreadSummaries := filterTaskThreadCapabilitySummaries(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), nil, false)
+	found := false
+	for _, summary := range taskThreadSummaries {
+		if summary.Name == "view_usage_analytics" {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "task-thread capabilities should include view_usage_analytics")
 }
 
 func TestCreateSwarmTaskRuntimeTool_StartFlagDoesNotDeferActiveSwarm(t *testing.T) {

@@ -80,6 +80,7 @@ type TelegramService struct {
 	customPersonalityRepo    *repository.CustomPersonalityRepo
 	agentRepo                *repository.AgentRepo
 	alertSvc                 *AlertService
+	usageAnalyticsSvc        *UsageAnalyticsService
 	channelMessageRouter     *ChannelMessageRouter
 	emailStatus              func(context.Context) EmailConnectionStatus
 	emailAuthRepo            *repository.EmailAuthRepo
@@ -139,6 +140,12 @@ func NewTelegramService(
 	bot.Debug = false
 	applog.Infof("[telegram] authorized on account %s", bot.Self.UserName)
 
+	var usageAnalyticsSvc *UsageAnalyticsService
+	if execRepo != nil {
+		if db := execRepo.DB(); db != nil {
+			usageAnalyticsSvc = NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &TelegramService{
@@ -152,6 +159,7 @@ func NewTelegramService(
 		chatAttachmentRepo:  chatAttachmentRepo,
 		llmSvc:              llmSvc,
 		workerSvc:           workerSvc,
+		usageAnalyticsSvc:   usageAnalyticsSvc,
 		newBotAPI:           tgbotapi.NewBotAPI,
 		userProjects:        make(map[int64]string),
 		userProjectVersions: make(map[int64]uint64),
@@ -1356,6 +1364,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
 		TelegramRunning:       s.IsRunning,
 		TelegramAuthRepo:      telegramAuthListStore(s.telegramAuthRepo),
 		EmailStatus:           s.emailStatus,

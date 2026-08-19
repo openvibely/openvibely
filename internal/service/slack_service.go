@@ -102,6 +102,7 @@ type SlackService struct {
 	channelChatRunner        ChannelChatRunner
 	channelTaskRunner        ChannelTaskRunner
 	alertSvc                 *AlertService
+	usageAnalyticsSvc        *UsageAnalyticsService
 	channelMessageRouter     *ChannelMessageRouter
 	emailStatus              func(context.Context) EmailConnectionStatus
 	emailAuthRepo            *repository.EmailAuthRepo
@@ -151,6 +152,12 @@ func NewSlackService(
 	slackTaskContextRepo *repository.SlackTaskContextRepo,
 	slackAuthRepo *repository.SlackAuthRepo,
 ) *SlackService {
+	var usageAnalyticsSvc *UsageAnalyticsService
+	if execRepo != nil {
+		if db := execRepo.DB(); db != nil {
+			usageAnalyticsSvc = NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
+		}
+	}
 	return &SlackService{
 		settingsRepo:         settingsRepo,
 		projectRepo:          projectRepo,
@@ -161,6 +168,7 @@ func NewSlackService(
 		taskSvc:              taskSvc,
 		llmSvc:               llmSvc,
 		workerSvc:            workerSvc,
+		usageAnalyticsSvc:    usageAnalyticsSvc,
 		slackUserProjectRepo: slackUserProjectRepo,
 		slackTaskContextRepo: slackTaskContextRepo,
 		slackAuthRepo:        slackAuthRepo,
@@ -1454,6 +1462,7 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
 		SlackStatus:           s.GetConnectionStatus,
 		SlackAuthRepo:         s.slackAuthRepo,
 		EmailStatus:           s.emailStatus,

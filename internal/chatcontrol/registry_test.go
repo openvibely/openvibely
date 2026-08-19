@@ -173,7 +173,7 @@ func TestRegistry_AllActionsHaveDomain(t *testing.T) {
 	validDomains := map[Domain]bool{
 		DomainTasks: true, DomainSchedules: true, DomainAlerts: true,
 		DomainPersonality: true, DomainModels: true, DomainAgents: true,
-		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainAutomations: true, DomainMemory: true, DomainChat: true,
+		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainAnalytics: true, DomainAutomations: true, DomainMemory: true, DomainChat: true,
 	}
 	for _, a := range Registry() {
 		if !validDomains[a.Domain] {

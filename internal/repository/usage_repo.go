@@ -333,6 +333,24 @@ func (r *UsageRepo) GetUsageRateBucketsByModel(ctx context.Context, filter Usage
 	return points, rows.Err()
 }
 
+func (r *UsageRepo) GetLatestUsageEventTime(ctx context.Context, filter UsageFilter) (*time.Time, error) {
+	where, args := usageWhere(filter)
+	var occurredRaw string
+	err := r.db.QueryRowContext(ctx, `
+		SELECT occurred_at
+		FROM llm_usage_events `+where+`
+		ORDER BY occurred_at DESC, rowid DESC
+		LIMIT 1`, args...).Scan(&occurredRaw)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting latest usage event time: %w", err)
+	}
+	occurredAt := parseSQLiteTime(occurredRaw)
+	return &occurredAt, nil
+}
+
 func (r *UsageRepo) GetModelUsageBreakdown(ctx context.Context, filter UsageFilter) ([]models.ModelUsagePoint, error) {
 	if shouldUseProjectDateBoundedAggregate(filter) {
 		return r.getModelUsageBreakdownFromScan(ctx, filter)
