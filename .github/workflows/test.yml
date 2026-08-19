@@ -66,6 +66,16 @@ jobs:
             "$HOME/.cache/openvibely-apt/lists" \
             "$HOME/.cache/openvibely-apt/lists/partial"
 
+      - name: Prefer stable Ubuntu APT mirror
+        shell: bash
+        run: |
+          sudo sed -i \
+            -e 's|http://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            -e 's|https://azure.archive.ubuntu.com/ubuntu|http://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/sources.list \
+            /etc/apt/sources.list.d/*.list \
+            /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+
       - name: Install Linux desktop dependencies
         shell: bash
         run: |
@@ -89,19 +99,25 @@ jobs:
           metadata_fresh=false
           started_at=$SECONDS
           read -r -a packages <<< "$LINUX_DESKTOP_PACKAGES"
+          apt_common_options=(
+            -o Dir::State::lists="$lists_directory"
+            -o Acquire::Retries=3
+            -o Acquire::http::Timeout=30
+            -o Acquire::https::Timeout=30
+          )
+          apt_install_options=(
+            "${apt_common_options[@]}"
+            -o Dir::Cache::archives="$archives_directory"
+            -o APT::Keep-Downloaded-Packages=true
+          )
 
           apt_install() {
-            sudo apt-get \
-              -o Dir::State::lists="$lists_directory" \
-              -o Dir::Cache::archives="$archives_directory" \
-              -o APT::Keep-Downloaded-Packages=true \
-              "$@" \
-              install -y "${packages[@]}"
+            timeout 10m sudo apt-get "${apt_install_options[@]}" "$@" install -y "${packages[@]}"
           }
 
           if [[ "$metadata_cache_hit" == "true" ]] &&
             find "$lists_directory" -maxdepth 1 -type f -name '*InRelease' -mmin "-${metadata_max_age_minutes}" -print -quit | grep -q . &&
-            sudo apt-get -o Dir::State::lists="$lists_directory" -s install "${packages[@]}" >/dev/null; then
+            sudo apt-get "${apt_common_options[@]}" -s install "${packages[@]}" >/dev/null; then
             metadata_fresh=true
             metadata_validation="fresh-preflight"
           elif [[ "$metadata_cache_hit" == "true" ]]; then
@@ -111,11 +127,11 @@ jobs:
           if [[ "$archive_cache_hit" == "true" && "$metadata_fresh" == "true" ]]; then
             if ! apt_install --no-download; then
               metadata_validation="cached-install-failed+updated"
-              sudo apt-get -o Dir::State::lists="$lists_directory" update
+              timeout 5m sudo apt-get "${apt_common_options[@]}" update
               apt_install
             fi
           else
-            sudo apt-get -o Dir::State::lists="$lists_directory" update
+            timeout 5m sudo apt-get "${apt_common_options[@]}" update
             metadata_validation="${metadata_validation}+updated"
             apt_install
           fi
