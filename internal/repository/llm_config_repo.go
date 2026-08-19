@@ -38,9 +38,10 @@ const llmConfigCardColumns = `id, name, provider, model, reasoning_effort,
 		CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.label'), ''), 1, 256) ELSE '' END,
 		CASE WHEN json_valid(mixture_config_json) AND json_type(mixture_config_json, '$.reference_models') = 'array' THEN json_array_length(mixture_config_json, '$.reference_models') ELSE 0 END`
 
-// llmConfigPickerColumns is the render-only Chat model picker projection.
-// It deliberately excludes provider identity, credentials, endpoint settings,
-// request JSON, custom-auth state, worker fields, and mixture definitions.
+// llmConfigPickerColumns is the render-only model picker projection for Chat
+// and Agent dialogs. It deliberately excludes provider identity, credentials,
+// endpoint settings, request JSON, custom-auth state, worker fields, timestamps,
+// and mixture definitions.
 const llmConfigPickerColumns = `id, name, model`
 
 // llmConfigChatSelectionColumns is the compact API Chat auto-selection and
