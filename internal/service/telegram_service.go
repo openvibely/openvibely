@@ -81,6 +81,9 @@ type TelegramService struct {
 	agentRepo                *repository.AgentRepo
 	alertSvc                 *AlertService
 	channelMessageRouter     *ChannelMessageRouter
+	emailStatus              func(context.Context) EmailConnectionStatus
+	emailAuthRepo            *repository.EmailAuthRepo
+	webhookRepo              *repository.WebhookRepo
 	taskGoalSvc              *TaskGoalService
 	llmSvc                   *LLMService
 	workerSvc                *WorkerService
@@ -237,6 +240,18 @@ func (s *TelegramService) SetAutomationGraphService(svc *AutomationGraphService)
 
 func (s *TelegramService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 	s.channelMessageRouter = router
+}
+
+func (s *TelegramService) SetEmailStatusProvider(provider func(context.Context) EmailConnectionStatus) {
+	s.emailStatus = provider
+}
+
+func (s *TelegramService) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
+	s.emailAuthRepo = repo
+}
+
+func (s *TelegramService) SetWebhookRepo(repo *repository.WebhookRepo) {
+	s.webhookRepo = repo
 }
 
 // SetTaskGoalService injects the task goal service so Telegram can execute
@@ -1343,6 +1358,9 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		AlertSvc:              s.alertSvc,
 		TelegramRunning:       s.IsRunning,
 		TelegramAuthRepo:      telegramAuthListStore(s.telegramAuthRepo),
+		EmailStatus:           s.emailStatus,
+		EmailAuthRepo:         s.emailAuthRepo,
+		WebhookRepo:           s.webhookRepo,
 		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{

@@ -450,6 +450,7 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		if h.threadInputRepo != nil {
 			svc.SetThreadInputRepo(h.threadInputRepo)
 		}
+		h.wireChannelIntegrationSummaryDeps(svc)
 		svc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
 		svc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 		svc.SetChannelChatRunner(h.StartChannelChatRun)
