@@ -317,10 +317,14 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 				return "", fmt.Errorf("edit_task requires id")
 			}
 			summary := h.executeChatTaskEditRequests(ctx, params.ExecID, params.ProjectID, []service.TaskEditRequest{req})
+			trimmedSummary := strings.TrimSpace(summary)
+			if strings.Contains(summary, "Failed to edit") && !strings.Contains(summary, "[TASK_EDITED:") {
+				return trimmedSummary, fmt.Errorf("edit_task: no tasks were updated")
+			}
 			if collector != nil {
 				collector.addEdited(summary)
 			}
-			return strings.TrimSpace(summary), nil
+			return trimmedSummary, nil
 		},
 		"execute_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.TaskExecutionRequest

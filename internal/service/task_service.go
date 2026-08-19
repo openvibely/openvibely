@@ -18,6 +18,7 @@ import (
 var ErrDuplicateTask = errors.New("task with this name already exists in this project")
 var ErrTaskTitleRequired = errors.New("task title is required")
 var ErrTaskPromptRequired = errors.New("task prompt is required")
+var ErrInvalidTaskPriority = errors.New("task priority must be between 1 and 4")
 
 type TaskService struct {
 	repo                              *repository.TaskRepo
@@ -194,8 +195,15 @@ func normalizeTaskTitleAndPrompt(t *models.Task) error {
 	return nil
 }
 
+func validateTaskPriority(priority int) error {
+	if priority < 1 || priority > 4 {
+		return ErrInvalidTaskPriority
+	}
+	return nil
+}
+
 func normalizeTaskCreatePriority(t *models.Task) {
-	if t.Priority < 1 || t.Priority > 4 {
+	if err := validateTaskPriority(t.Priority); err != nil {
 		t.Priority = defaultTaskPriority
 	}
 }
@@ -250,6 +258,9 @@ func (s *TaskService) CreateWithGoal(ctx context.Context, t *models.Task, object
 
 func (s *TaskService) Update(ctx context.Context, t *models.Task) error {
 	if err := normalizeTaskTitleAndPrompt(t); err != nil {
+		return err
+	}
+	if err := validateTaskPriority(t.Priority); err != nil {
 		return err
 	}
 	applog.Infof("[task-svc] Update id=%s title=%q category=%s", t.ID, t.Title, t.Category)

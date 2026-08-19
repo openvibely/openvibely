@@ -204,7 +204,7 @@ func TestHandler_UpdateTask_FromSchedulePage(t *testing.T) {
 	form.Add("title", "Updated Title")
 	form.Add("prompt", "Updated prompt")
 	form.Add("category", string(models.CategoryScheduled))
-	form.Add("priority", "0")
+	form.Add("priority", "2")
 	form.Add("tag", "")
 
 	req := httptest.NewRequest(http.MethodPut, "/tasks/"+task.ID, strings.NewReader(form.Encode()))
@@ -559,7 +559,7 @@ func TestHandler_UpdateTask_FromTasksPage(t *testing.T) {
 	form.Add("description", "Updated description")
 	form.Add("prompt", "Updated prompt")
 	form.Add("category", string(models.CategoryActive))
-	form.Add("priority", "0")
+	form.Add("priority", "2")
 	form.Add("tag", "")
 
 	req := httptest.NewRequest(http.MethodPut, "/tasks/"+task.ID, strings.NewReader(form.Encode()))

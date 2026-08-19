@@ -356,10 +356,14 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 				return "", fmt.Errorf("edit_task requires id")
 			}
 			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{req}, opts.ProjectID, opts.TaskSvc, nil, "")
+			trimmedSummary := strings.TrimSpace(summary)
+			if strings.Contains(summary, "Failed to edit") && !strings.Contains(summary, "[TASK_EDITED:") {
+				return trimmedSummary, fmt.Errorf("edit_task: no tasks were updated")
+			}
 			if opts.Collector != nil {
 				opts.Collector.addEdited(summary)
 			}
-			return strings.TrimSpace(summary), nil
+			return trimmedSummary, nil
 		},
 		"execute_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req TaskExecutionRequest

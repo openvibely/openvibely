@@ -2870,7 +2870,7 @@ func (h *Handler) processChatAttachmentsForEdits(ctx context.Context, execID str
 // hasOtherEditFields returns true if a TaskEditRequest has fields beyond just attachments.
 func hasOtherEditFields(req service.TaskEditRequest) bool {
 	return req.Title != "" || req.Prompt != "" || req.Category != "" ||
-		req.Priority > 0 || req.Tag != "" || req.AgentID != "" ||
+		req.PrioritySet || req.Priority != 0 || req.Tag != "" || req.AgentID != "" ||
 		req.AgentConfigID != "" || req.AgentDefinitionID != "" || req.Agent != "" ||
 		req.ClearAgentDefinition || req.Chain != nil || len(req.Attachments) > 0
 }

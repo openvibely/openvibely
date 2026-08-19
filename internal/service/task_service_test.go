@@ -182,6 +182,71 @@ func TestTaskService_Create_NormalizesPriority(t *testing.T) {
 	}
 }
 
+func TestTaskService_Update_RejectsInvalidPriority(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	for _, priority := range []int{0, -1, 5} {
+		t.Run(fmt.Sprintf("priority %d", priority), func(t *testing.T) {
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     fmt.Sprintf("Invalid Priority %d", priority),
+				Prompt:    "original prompt",
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusPending,
+				Priority:  3,
+			}
+			require.NoError(t, svc.Create(ctx, task))
+
+			task.Title = "Should Not Persist"
+			task.Priority = priority
+			err := svc.Update(ctx, task)
+			require.ErrorIs(t, err, ErrInvalidTaskPriority)
+
+			stored, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			assert.Equal(t, fmt.Sprintf("Invalid Priority %d", priority), stored.Title)
+			assert.Equal(t, 3, stored.Priority)
+		})
+	}
+}
+
+func TestTaskService_Update_PersistsValidPriorities(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	ctx := context.Background()
+
+	for priority := 1; priority <= 4; priority++ {
+		t.Run(fmt.Sprintf("priority %d", priority), func(t *testing.T) {
+			initialPriority := 2
+			if priority == initialPriority {
+				initialPriority = 3
+			}
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     fmt.Sprintf("Valid Priority %d", priority),
+				Prompt:    "original prompt",
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusPending,
+				Priority:  initialPriority,
+			}
+			require.NoError(t, svc.Create(ctx, task))
+
+			task.Priority = priority
+			require.NoError(t, svc.Update(ctx, task))
+
+			stored, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			assert.Equal(t, priority, stored.Priority)
+		})
+	}
+}
+
 func TestTaskService_Create_NormalizesTitlePromptAndDuplicateCheck(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

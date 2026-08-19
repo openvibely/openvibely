@@ -1230,6 +1230,36 @@ func TestBuildChannelTaskActionHandlersEditTaskUpdatesPrimaryAgentDefinition(t *
 	require.Contains(t, strings.Join(collector.editedLines, "\n"), task.ID)
 }
 
+func TestBuildChannelTaskActionHandlersEditTaskRejectsInvalidPriority(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Channel Edit Invalid Priority"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	taskSvc := NewTaskService(taskRepo, nil, nil)
+	task := &models.Task{ProjectID: project.ID, Title: "Channel invalid priority target", Prompt: "Prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 3}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{ProjectID: project.ID, TaskSvc: taskSvc})
+
+	for _, priority := range []int{0, 5} {
+		t.Run(fmt.Sprintf("priority %d", priority), func(t *testing.T) {
+			payload := json.RawMessage(fmt.Sprintf(`{"id":%q,"title":"Should Not Persist","priority":%d}`, task.ID, priority))
+			summary, err := handlers["edit_task"](ctx, payload)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "edit_task: no tasks were updated")
+			require.Contains(t, summary, "Failed to edit 1 task(s)")
+			require.Contains(t, summary, ErrInvalidTaskPriority.Error())
+
+			updated, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			require.Equal(t, "Channel invalid priority target", updated.Title)
+			require.Equal(t, 3, updated.Priority)
+		})
+	}
+}
+
 func TestBuildChannelTaskActionHandlersCreateSwarmTaskUsesSharedSwarmService(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
