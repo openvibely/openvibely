@@ -101,27 +101,6 @@ type channelTaskActionHandlerOptions struct {
 	OnTasksCreated      func(context.Context, []TaskCreationRequest, []models.Task) error
 }
 
-// channelCreateSwarmTaskInput mirrors the canonical create_swarm_task runtime
-// tool schema for channel surfaces.
-type channelCreateSwarmTaskInput struct {
-	Title             string `json:"title"`
-	Prompt            string `json:"prompt"`
-	Goal              string `json:"goal"`
-	ProjectID         string `json:"project_id"`
-	Category          string `json:"category"`
-	Priority          int    `json:"priority"`
-	AgentID           string `json:"agent_id"`
-	AgentDefinitionID string `json:"agent_definition_id"`
-	Agent             string `json:"agent"`
-	Tag               string `json:"tag"`
-	MaxWorkers        int    `json:"max_workers"`
-	WorkerIsolation   string `json:"worker_isolation"`
-	ReviewerEnabled   *bool  `json:"reviewer_enabled"`
-	MergerEnabled     *bool  `json:"merger_enabled"`
-	StartImmediately  *bool  `json:"start_immediately"`
-	MergeTargetBranch string `json:"merge_target_branch"`
-}
-
 type channelGoalActionHandlerOptions struct {
 	ProjectID   string
 	TaskRepo    *repository.TaskRepo
@@ -258,80 +237,11 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			return strings.TrimSpace(summary), nil
 		},
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req channelCreateSwarmTaskInput
+			var req SwarmTaskRuntimeInput
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 				return "", err
 			}
-			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
-				return "", fmt.Errorf("create_swarm_task requires title and prompt")
-			}
-			projectID := strings.TrimSpace(opts.ProjectID)
-			if projectID == "" {
-				return "", fmt.Errorf("create_swarm_task requires project_id")
-			}
-			swarmSvc := opts.SwarmSvc
-			if swarmSvc == nil && opts.TaskSvc != nil {
-				swarmSvc = opts.TaskSvc.swarmSvc
-			}
-			if swarmSvc == nil {
-				return "", fmt.Errorf("create_swarm_task: swarm service unavailable")
-			}
-			category := models.CategoryActive
-			if strings.EqualFold(strings.TrimSpace(req.Category), string(models.CategoryBacklog)) {
-				category = models.CategoryBacklog
-			}
-			priority := req.Priority
-			if priority == 0 {
-				priority = 2
-			}
-			if priority < 1 || priority > 4 {
-				return "", fmt.Errorf("create_swarm_task: priority must be between 1 and 4")
-			}
-			tag := models.TaskTag(strings.TrimSpace(req.Tag))
-			switch tag {
-			case models.TagNone, models.TagFeature, models.TagBug:
-			default:
-				return "", fmt.Errorf("create_swarm_task: tag must be bug or feature")
-			}
-			reviewerEnabled := true
-			if req.ReviewerEnabled != nil {
-				reviewerEnabled = *req.ReviewerEnabled
-			}
-			mergerEnabled := true
-			if req.MergerEnabled != nil {
-				mergerEnabled = *req.MergerEnabled
-			}
-			var agentID *string
-			if trimmed := strings.TrimSpace(req.AgentID); trimmed != "" {
-				agentID = &trimmed
-			}
-			var agentDefinitionID *string
-			if strings.TrimSpace(req.AgentDefinitionID) != "" || strings.TrimSpace(req.Agent) != "" {
-				resolved, err := resolveTaskCreationAgentDefinition(ctx, TaskCreationRequest{AgentDefinitionID: req.AgentDefinitionID, Agent: req.Agent}, projectID, opts.TaskSvc)
-				if err != nil {
-					return "", fmt.Errorf("create_swarm_task: %w", err)
-				}
-				if resolved != "" {
-					agentDefinitionID = &resolved
-				}
-			}
-			parent, err := swarmSvc.CreateSwarmTask(ctx, CreateSwarmTaskRequest{
-				ProjectID:         projectID,
-				Title:             req.Title,
-				Prompt:            req.Prompt,
-				Goal:              req.Goal,
-				Category:          category,
-				Priority:          priority,
-				AgentID:           agentID,
-				AgentDefinitionID: agentDefinitionID,
-				Tag:               tag,
-				MaxWorkers:        req.MaxWorkers,
-				WorkerIsolation:   req.WorkerIsolation,
-				ReviewerEnabled:   reviewerEnabled,
-				MergerEnabled:     mergerEnabled,
-				StartImmediately:  req.StartImmediately,
-				MergeTargetBranch: req.MergeTargetBranch,
-			})
+			parent, summary, err := ExecuteCreateSwarmTaskRuntime(ctx, CreateSwarmTaskRuntimeOptions{ProjectID: opts.ProjectID, Input: req, SwarmSvc: opts.SwarmSvc, TaskSvc: opts.TaskSvc})
 			if err != nil {
 				return "", err
 			}
@@ -340,8 +250,6 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 					return "", err
 				}
 			}
-			plannerMessage := "Planner starts when the swarm parent is Active."
-			summary := fmt.Sprintf("Created swarm task: %s.\n%s\n- \"%s\" (%s) [TASK_ID:%s]", parent.Title, plannerMessage, parent.Title, parent.Category, parent.ID)
 			if opts.Collector != nil {
 				opts.Collector.addCreated(summary)
 			}
