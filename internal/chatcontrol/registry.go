@@ -23,7 +23,7 @@
 //   - agents: list_agents
 //   - alerts: list_alerts, get_alert
 //   - personality: list_personalities, get_personality
-//   - settings: view_settings
+//   - settings: view_settings, list_channels
 //   - memory: memory_view (only when selected-memory runtime tools authorize a handle)
 //   - chat: get_chat_mode, list_capabilities
 //   - messaging: send_message
@@ -753,6 +753,16 @@ var registry = []ActionDef{
 	{
 		Name:         "view_settings",
 		Description:  "View app-level settings.",
+		Domain:       DomainSettings,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
+	{
+		Name:         "list_channels",
+		Description:  "Summarize prompt-safe channel and integration readiness for the current project, including GitHub, Slack, Telegram, Discord, Email, inbound webhooks, and outbound message target counts. Does not expose tokens, passwords, webhook secrets, private keys, or raw target credentials.",
 		Domain:       DomainSettings,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,

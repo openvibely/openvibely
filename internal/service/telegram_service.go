@@ -1341,6 +1341,9 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		TelegramRunning:       s.IsRunning,
+		TelegramAuthRepo:      telegramAuthListStore(s.telegramAuthRepo),
+		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,

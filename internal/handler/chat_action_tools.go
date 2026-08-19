@@ -454,6 +454,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeViewSettings(ctx)), nil
 		},
+		"list_channels": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return strings.TrimSpace(h.executeListChannels(ctx, params.ProjectID)), nil
+		},
 		"project_info": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeProjectInfo(ctx, params.ProjectID)), nil
 		},

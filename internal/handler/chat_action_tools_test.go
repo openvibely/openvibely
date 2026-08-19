@@ -129,6 +129,116 @@ func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
 	}
 }
 
+func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Channel Status Project")
+
+	webhookRepo := repository.NewWebhookRepo(db)
+	h.SetWebhookRepo(webhookRepo)
+	channelTargetRepo := repository.NewChannelTargetRepo(db)
+	h.SetChannelTargetRepo(channelTargetRepo)
+	telegramAuthRepo := repository.NewTelegramAuthRepo(db)
+	h.SetTelegramAuthRepo(telegramAuthRepo)
+
+	h.SetGitHubService(&fakeGitHubService{statusFn: func(ctx context.Context) (service.GitHubConnectionStatus, error) {
+		return service.GitHubConnectionStatus{Configured: true, Connected: true, AuthMode: service.GitHubAuthModePAT, AccountLogin: "ov-user", AccountType: "User", HasPAT: true}, nil
+	}})
+	h.SetSlackService(&fakeSlackService{statusFn: func(ctx context.Context) (service.SlackConnectionStatus, error) {
+		return service.SlackConnectionStatus{Configured: true, Connected: true, Running: true, TeamName: "OpenVibely", TeamID: "TSAFE", BotUserID: "BSAFE", BotTokenSource: service.SlackBotTokenSourceOAuth}, nil
+	}})
+	h.SetDiscordService(&fakeDiscordService{statusFn: func(ctx context.Context) (service.DiscordConnectionStatus, error) {
+		return service.DiscordConnectionStatus{Configured: true, Connected: false, Running: false, HasBotToken: true, BotUserID: "bot-safe", SendResponses: true, LastError: "gateway unavailable"}, nil
+	}})
+
+	secretValues := []string{
+		"ghp_secret_pat_should_not_appear",
+		"private-key-secret-should-not-appear",
+		"slack-client-secret-should-not-appear",
+		"xapp-secret-should-not-appear",
+		"xoxb-secret-should-not-appear",
+		"telegram-secret-token-should-not-appear",
+		"discord-secret-token-should-not-appear",
+		"email-password-secret-should-not-appear",
+		"webhook-secret-should-not-appear",
+		"webhook-path-token-should-not-appear",
+		"CSECRETCHANNEL",
+		"thread-secret-should-not-appear",
+		"secret subject should not appear",
+	}
+	settings := map[string]string{
+		service.GitHubSettingPAT:                                          secretValues[0],
+		service.GitHubSettingAppPrivateKey:                                secretValues[1],
+		service.SlackSettingClientSecret:                                  secretValues[2],
+		service.SlackSettingAppToken:                                      secretValues[3],
+		service.SlackSettingBotToken:                                      secretValues[4],
+		service.TelegramSettingBotToken:                                   secretValues[5],
+		service.DiscordSettingBotToken:                                    secretValues[6],
+		service.EmailSettingAddress:                                       "alerts@example.com",
+		service.EmailSettingPassword:                                      secretValues[7],
+		service.EmailSettingIMAPHost:                                      "imap.example.com",
+		service.EmailSettingSMTPHost:                                      "smtp.example.com",
+		service.SendMessageAllowExplicitTargetsSetting + ":" + project.ID: "false",
+	}
+	for key, value := range settings {
+		require.NoError(t, h.settingsRepo.Set(ctx, key, value))
+	}
+
+	require.NoError(t, h.githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "reviewer", DisplayName: "Reviewer", AddedBy: "test"}))
+	for _, userID := range []string{"U123", "U456"} {
+		require.NoError(t, h.slackAuthRepo.Create(ctx, &models.SlackAuthorizedUser{ProjectID: project.ID, SlackUserID: userID, DisplayName: "Slack " + userID, AddedBy: "test"}))
+	}
+	require.NoError(t, telegramAuthRepo.Create(ctx, &models.TelegramAuthorizedUser{ProjectID: project.ID, TelegramUserID: 1001, TelegramUsername: "tguser", DisplayName: "Telegram User", AddedBy: "test"}))
+	require.NoError(t, h.discordAuthRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "1002", DisplayName: "Discord User", AddedBy: "test"}))
+	require.NoError(t, h.emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "sender@example.com", DisplayName: "Sender", AddedBy: "test"}))
+
+	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy Alerts", Enabled: true, PathToken: secretValues[9], Secret: secretValues[8], DefaultPriority: 2}))
+	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Disabled Hook", Enabled: false, DefaultPriority: 2}))
+	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: secretValues[10], ThreadID: secretValues[11], Home: true}))
+	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com", DefaultSubject: secretValues[12]}))
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "list_channels", json.RawMessage(`{}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("list_channels failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+
+	var summary channelStatusToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &summary))
+	require.True(t, summary.OK)
+	require.Equal(t, 6, summary.ConfiguredChannelCount)
+	require.Equal(t, "connected", summary.GitHub.Status)
+	require.Equal(t, "ov-user", summary.GitHub.AccountLogin)
+	require.Equal(t, 1, summary.GitHub.AuthorizedActorCount)
+	require.Equal(t, "connected", summary.Slack.Status)
+	require.Equal(t, "OpenVibely", summary.Slack.TeamName)
+	require.Equal(t, 2, summary.Slack.AuthorizedUserCount)
+	require.Equal(t, "configured_not_running", summary.Telegram.Status)
+	require.Equal(t, 1, summary.Telegram.AuthorizedUserCount)
+	require.Equal(t, "gateway_offline", summary.Discord.Status)
+	require.Equal(t, "gateway unavailable", summary.Discord.LastError)
+	require.Equal(t, 1, summary.Email.AuthorizedSenderCount)
+	require.Equal(t, "alerts@example.com", summary.Email.Address)
+	require.Equal(t, 2, summary.Webhooks.Total)
+	require.Equal(t, 1, summary.Webhooks.Active)
+	require.Equal(t, 2, summary.OutboundTargets.Total)
+	require.False(t, summary.OutboundTargets.ExplicitUnsavedTargetsAllowed)
+	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["slack"].Home)
+	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["email"].ByKind["email"])
+
+	for _, secret := range secretValues {
+		if strings.Contains(out, secret) {
+			t.Fatalf("list_channels output exposed secret/raw credential %q in:\n%s", secret, out)
+		}
+	}
+}
+
 // TestViewTaskThreadResolvesCurrentTaskID reproduces the incident where an
 // audit-only task-thread follow-up turn called view_task_thread with an
 // explicit task_id of "current" (or omitted task_id/title entirely) and got

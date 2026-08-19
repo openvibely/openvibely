@@ -1439,6 +1439,9 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		SlackStatus:           s.GetConnectionStatus,
+		SlackAuthRepo:         s.slackAuthRepo,
+		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
 		UnavailableAgentsText: "Agent listing is currently unavailable on Slack (no agent repository configured on this surface).",
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
