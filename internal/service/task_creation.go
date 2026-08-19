@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
@@ -271,6 +272,7 @@ type TaskEditRequest struct {
 	Prompt               string                     `json:"prompt,omitempty"`                 // Optional: new prompt
 	Category             string                     `json:"category,omitempty"`               // Optional: new category
 	Priority             int                        `json:"priority,omitempty"`               // Optional: new priority (1-4)
+	PrioritySet          bool                       `json:"-"`                                // Internal: true when JSON explicitly supplied priority
 	Tag                  string                     `json:"tag,omitempty"`                    // Optional: new tag ("feature", "bug", "")
 	AgentID              string                     `json:"agent_id,omitempty"`               // Optional: new model config ID (empty = leave unchanged)
 	AgentConfigID        string                     `json:"agent_config_id,omitempty"`        // Optional: alias for agent_id (for compatibility)
@@ -281,8 +283,23 @@ type TaskEditRequest struct {
 	Attachments          []string                   `json:"attachments,omitempty"`            // Optional: file paths to attach to the task
 }
 
+func (r *TaskEditRequest) UnmarshalJSON(data []byte) error {
+	type alias TaskEditRequest
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	decoded.PrioritySet = raw["priority"] != nil
+	*r = TaskEditRequest(decoded)
+	return nil
+}
+
 // ExecuteTaskEdits applies edits to existing tasks and returns a summary.
-// Only fields that are set (non-zero) in the request are updated.
+// Only fields that are set in the request are updated.
 // If attachmentRepo and uploadsDir are provided, file attachments in requests are processed.
 func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID string, taskSvc *TaskService, attachmentRepo *repository.AttachmentRepo, uploadsDir string) string {
 	if len(requests) == 0 {
@@ -325,6 +342,14 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			}
 		}
 
+		priorityRequested := req.PrioritySet || req.Priority != 0
+		if priorityRequested {
+			if err := validateTaskPriority(req.Priority); err != nil {
+				failed = append(failed, fmt.Sprintf("- \"%s\": %v", task.Title, err))
+				continue
+			}
+		}
+
 		// Apply only the fields that were specified
 		var changes []string
 		if req.Title != "" && req.Title != task.Title {
@@ -335,7 +360,7 @@ func ExecuteTaskEdits(ctx context.Context, requests []TaskEditRequest, projectID
 			task.Prompt = req.Prompt
 			changes = append(changes, "prompt")
 		}
-		if req.Priority > 0 && req.Priority != task.Priority {
+		if priorityRequested && req.Priority != task.Priority {
 			task.Priority = req.Priority
 			changes = append(changes, "priority")
 		}

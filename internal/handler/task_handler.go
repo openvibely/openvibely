@@ -326,6 +326,8 @@ func taskRequiredFieldHTTPError(err error) *echo.HTTPError {
 		return echo.NewHTTPError(http.StatusBadRequest, "Task title is required")
 	case errors.Is(err, service.ErrTaskPromptRequired):
 		return echo.NewHTTPError(http.StatusBadRequest, "Task prompt is required")
+	case errors.Is(err, service.ErrInvalidTaskPriority):
+		return echo.NewHTTPError(http.StatusBadRequest, "Task priority must be between 1 and 4")
 	default:
 		return nil
 	}
@@ -1196,9 +1198,12 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	task.Category = oldCategory
 	task.Prompt = c.FormValue("prompt")
 	task.Tag = models.TaskTag(c.FormValue("tag"))
-	if p, err := strconv.Atoi(c.FormValue("priority")); err == nil {
-		task.Priority = p
+	priorityValue := strings.TrimSpace(c.FormValue("priority"))
+	priority, err := strconv.Atoi(priorityValue)
+	if priorityValue == "" || err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Task priority must be between 1 and 4")
 	}
+	task.Priority = priority
 
 	// Handle optional agent (LLM config) selection
 	if agentID := c.FormValue("agent_id"); agentID != "" {

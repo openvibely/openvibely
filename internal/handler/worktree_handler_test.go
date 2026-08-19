@@ -74,7 +74,7 @@ func TestHandler_UpdateTask_UnchecksAutoMerge(t *testing.T) {
 		"title":              {"Auto Merge Test"},
 		"prompt":             {"do something"},
 		"category":           {"active"},
-		"priority":           {"0"},
+		"priority":           {"2"},
 		"auto_merge_present": {"1"},
 		// Note: no "auto_merge" key — this is what happens when checkbox is unchecked
 	}
@@ -597,4 +597,3 @@ func TestHandler_MergeTaskBranch_ChangesTabFastForwardAdvancesTargetAndRefreshes
 		t.Fatalf("expected local merge actions hidden after successful ff merge, got %s", body)
 	}
 }
-

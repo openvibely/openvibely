@@ -2234,6 +2234,79 @@ func TestHandler_UpdateTask(t *testing.T) {
 	}
 }
 
+func TestHandler_UpdateTask_RejectsInvalidPriorities(t *testing.T) {
+	cases := []struct {
+		name        string
+		prioritySet bool
+		priority    string
+	}{
+		{name: "missing"},
+		{name: "zero", prioritySet: true, priority: "0"},
+		{name: "above range", prioritySet: true, priority: "5"},
+		{name: "malformed", prioritySet: true, priority: "urgent"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			task := createTask(t, h, "default", "Original Invalid Priority Target", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.Priority = 3
+			})
+
+			form := url.Values{}
+			form.Set("title", "Should Not Persist")
+			form.Set("category", "active")
+			form.Set("prompt", "should not persist")
+			if tt.prioritySet {
+				form.Set("priority", tt.priority)
+			}
+
+			rec := htmxPut(e, "/tasks/"+task.ID, form)
+			assertCode(t, rec, http.StatusBadRequest)
+			assertContains(t, rec, "Task priority must be between 1 and 4")
+
+			updated, err := h.taskSvc.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			assert.Equal(t, "Original Invalid Priority Target", updated.Title)
+			assert.Equal(t, models.CategoryBacklog, updated.Category)
+			assert.Equal(t, "test prompt", updated.Prompt)
+			assert.Equal(t, 3, updated.Priority)
+		})
+	}
+}
+
+func TestHandler_UpdateTask_PersistsValidPriorities(t *testing.T) {
+	labels := map[int]string{1: "Low", 2: "Normal", 3: "High", 4: "Urgent"}
+	for priority := 1; priority <= 4; priority++ {
+		t.Run(fmt.Sprintf("priority %d", priority), func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			task := createTask(t, h, "default", "Original Valid Priority Target", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.Priority = 2
+			})
+
+			form := url.Values{}
+			form.Set("title", fmt.Sprintf("Priority %d", priority))
+			form.Set("category", "backlog")
+			form.Set("priority", strconv.Itoa(priority))
+			form.Set("prompt", "updated prompt")
+
+			rec := htmxPut(e, "/tasks/"+task.ID, form)
+			assertCode(t, rec, http.StatusOK)
+
+			updated, err := h.taskSvc.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			assert.Equal(t, priority, updated.Priority)
+			assert.Equal(t, labels[priority], components.PriorityLabel(updated.Priority))
+		})
+	}
+}
+
 func TestHandler_UpdateTask_NormalizesWhitespaceAndRejectsBlankFields(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -2315,7 +2388,7 @@ func TestHandler_UpdateTask_DetailCategoryTransitionsRefreshCompletedAt(t *testi
 		form := url.Values{}
 		form.Set("title", task.Title)
 		form.Set("category", string(category))
-		form.Set("priority", "0")
+		form.Set("priority", "2")
 		form.Set("prompt", task.Prompt)
 		rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
 		assertCode(t, rec, http.StatusOK)
@@ -2349,7 +2422,7 @@ func TestHandler_UpdateTask_NonRunningOnly(t *testing.T) {
 	form := url.Values{}
 	form.Set("title", "Updated While Pending")
 	form.Set("category", "active")
-	form.Set("priority", "0")
+	form.Set("priority", "2")
 	form.Set("prompt", "test")
 	rec := htmxPut(e, "/tasks/"+task.ID, form)
 	assertCode(t, rec, http.StatusOK)
@@ -2368,7 +2441,7 @@ func TestHandler_UpdateTask_DuplicateTitle(t *testing.T) {
 	form := url.Values{}
 	form.Set("title", "Existing Task")
 	form.Set("category", "backlog")
-	form.Set("priority", "0")
+	form.Set("priority", "2")
 	form.Set("prompt", "test prompt 2")
 	rec := htmxPut(e, "/tasks/"+task2.ID, form)
 	assertCode(t, rec, http.StatusConflict)
@@ -2692,7 +2765,7 @@ func TestHandler_UpdateTask_CategoryChangeFromCompletedToActiveIsMetadataOnly(t 
 	form.Set("title", task.Title)
 	form.Set("category", "active")
 	form.Set("prompt", task.Prompt)
-	form.Set("priority", "0")
+	form.Set("priority", "2")
 	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
 	assertCode(t, rec, http.StatusOK)
 
@@ -3608,7 +3681,7 @@ func TestHandler_UpdateTaskTag(t *testing.T) {
 		form := url.Values{}
 		form.Set("title", task.Title)
 		form.Set("category", string(task.Category))
-		form.Set("priority", "0")
+		form.Set("priority", "2")
 		form.Set("prompt", task.Prompt)
 		form.Set("tag", tag)
 		return form
