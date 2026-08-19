@@ -51,39 +51,43 @@ type DiscordConnectionStatus struct {
 }
 
 type DiscordService struct {
-	session                  *discordgo.Session
-	settingsRepo             *repository.SettingsRepo
-	discordAuthRepo          *repository.DiscordAuthRepo
-	discordTaskContextRepo   *repository.DiscordTaskContextRepo
-	discordUserProjectRepo   *repository.DiscordUserProjectRepo
-	projectRepo              *repository.ProjectRepo
-	llmConfigRepo            *repository.LLMConfigRepo
-	taskRepo                 *repository.TaskRepo
-	execRepo                 *repository.ExecutionRepo
-	scheduleRepo             *repository.ScheduleRepo
-	taskSvc                  *TaskService
-	taskGoalSvc              *TaskGoalService
-	llmSvc                   *LLMService
-	workerSvc                *WorkerService
-	automationGraphSvc       *AutomationGraphService
-	threadInputRepo          *repository.ThreadInputRepo
-	chatAttachmentRepo       *repository.ChatAttachmentRepo
-	customPersonalityRepo    *repository.CustomPersonalityRepo
-	agentRepo                *repository.AgentRepo
-	alertSvc                 *AlertService
-	emailStatus              func(context.Context) EmailConnectionStatus
-	emailAuthRepo            *repository.EmailAuthRepo
-	webhookRepo              *repository.WebhookRepo
-	chatBroadcaster          *events.ChatBroadcaster
-	executionStreamHub       *events.ExecutionStreamHub
-	queuedTurnPromoter       func(projectID string)
-	queuedTaskThreadPromoter func(taskID string)
-	channelChatRunner        ChannelChatRunner
-	channelTaskRunner        ChannelTaskRunner
-	channelMessageRouter     *ChannelMessageRouter
-	userProjects             map[string]string
-	uploadsDir               string
-	httpClient               *http.Client
+	session                    *discordgo.Session
+	settingsRepo               *repository.SettingsRepo
+	discordAuthRepo            *repository.DiscordAuthRepo
+	discordTaskContextRepo     *repository.DiscordTaskContextRepo
+	discordUserProjectRepo     *repository.DiscordUserProjectRepo
+	projectRepo                *repository.ProjectRepo
+	projectSvc                 *ProjectService
+	githubProjectSvc           GitHubProjectCloneProvider
+	memorySvc                  *MemoryService
+	agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
+	llmConfigRepo              *repository.LLMConfigRepo
+	taskRepo                   *repository.TaskRepo
+	execRepo                   *repository.ExecutionRepo
+	scheduleRepo               *repository.ScheduleRepo
+	taskSvc                    *TaskService
+	taskGoalSvc                *TaskGoalService
+	llmSvc                     *LLMService
+	workerSvc                  *WorkerService
+	automationGraphSvc         *AutomationGraphService
+	threadInputRepo            *repository.ThreadInputRepo
+	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	customPersonalityRepo      *repository.CustomPersonalityRepo
+	agentRepo                  *repository.AgentRepo
+	alertSvc                   *AlertService
+	emailStatus                func(context.Context) EmailConnectionStatus
+	emailAuthRepo              *repository.EmailAuthRepo
+	webhookRepo                *repository.WebhookRepo
+	chatBroadcaster            *events.ChatBroadcaster
+	executionStreamHub         *events.ExecutionStreamHub
+	queuedTurnPromoter         func(projectID string)
+	queuedTaskThreadPromoter   func(taskID string)
+	channelChatRunner          ChannelChatRunner
+	channelTaskRunner          ChannelTaskRunner
+	channelMessageRouter       *ChannelMessageRouter
+	userProjects               map[string]string
+	uploadsDir                 string
+	httpClient                 *http.Client
 
 	mu                       sync.RWMutex
 	running                  bool
@@ -147,6 +151,12 @@ func (s *DiscordService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 }
 func (s *DiscordService) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
 	s.customPersonalityRepo = repo
+}
+func (s *DiscordService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
+	s.projectSvc = projectSvc
+	s.githubProjectSvc = githubSvc
+	s.memorySvc = memorySvc
+	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
 }
 func (s *DiscordService) SetAgentRepo(repo *repository.AgentRepo) { s.agentRepo = repo }
 func (s *DiscordService) SetAlertService(svc *AlertService)       { s.alertSvc = svc }

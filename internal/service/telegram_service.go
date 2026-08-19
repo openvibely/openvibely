@@ -65,53 +65,57 @@ type telegramAuthorizationStore interface {
 // It acts as a proxy to the /chat page orchestrator — every message sent to the bot
 // is forwarded to the same chat assistant that powers the /chat web UI.
 type TelegramService struct {
-	bot                      *tgbotapi.BotAPI
-	taskSvc                  *TaskService
-	projectRepo              *repository.ProjectRepo
-	llmConfigRepo            *repository.LLMConfigRepo
-	taskRepo                 *repository.TaskRepo
-	execRepo                 *repository.ExecutionRepo
-	scheduleRepo             *repository.ScheduleRepo
-	chatAttachmentRepo       *repository.ChatAttachmentRepo
-	threadInputRepo          *repository.ThreadInputRepo
-	telegramAuthRepo         telegramAuthorizationStore
-	telegramUserProjectRepo  *repository.TelegramUserProjectRepo
-	settingsRepo             *repository.SettingsRepo
-	customPersonalityRepo    *repository.CustomPersonalityRepo
-	agentRepo                *repository.AgentRepo
-	alertSvc                 *AlertService
-	channelMessageRouter     *ChannelMessageRouter
-	emailStatus              func(context.Context) EmailConnectionStatus
-	emailAuthRepo            *repository.EmailAuthRepo
-	webhookRepo              *repository.WebhookRepo
-	taskGoalSvc              *TaskGoalService
-	llmSvc                   *LLMService
-	workerSvc                *WorkerService
-	automationGraphSvc       *AutomationGraphService
-	chatBroadcaster          *events.ChatBroadcaster
-	executionStreamHub       *events.ExecutionStreamHub
-	queuedTurnPromoter       func(projectID string)
-	queuedTaskThreadPromoter func(taskID string)
-	channelChatRunner        ChannelChatRunner
-	channelTaskRunner        ChannelTaskRunner
-	sendMessageFunc          func(chatID int64, text string)
-	editMessageFunc          func(chatID int64, messageID int, text string)
-	sendConfigFunc           func(c tgbotapi.Chattable) (tgbotapi.Message, error)
-	makeRequestFunc          func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
-	newBotAPI                func(token string) (*tgbotapi.BotAPI, error)
-	previewMu                sync.Mutex
-	activePreviews           map[telegramPreviewKey]*telegramPreviewState
-	userProjectsMu           sync.RWMutex
-	userProjects             map[int64]string // Maps Telegram user ID to active project ID
-	userProjectVersions      map[int64]uint64
-	userProjectSwitchMu      sync.Mutex
-	activeProjectReadHook    func(int64) // deterministic project-resolution test barrier
-	lifecycleOpMu            sync.Mutex
-	lifecycleMu              sync.Mutex
-	ctx                      context.Context
-	cancel                   context.CancelFunc
-	runDone                  chan struct{}
-	running                  bool
+	bot                        *tgbotapi.BotAPI
+	taskSvc                    *TaskService
+	projectSvc                 *ProjectService
+	githubProjectSvc           GitHubProjectCloneProvider
+	memorySvc                  *MemoryService
+	agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
+	projectRepo                *repository.ProjectRepo
+	llmConfigRepo              *repository.LLMConfigRepo
+	taskRepo                   *repository.TaskRepo
+	execRepo                   *repository.ExecutionRepo
+	scheduleRepo               *repository.ScheduleRepo
+	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	threadInputRepo            *repository.ThreadInputRepo
+	telegramAuthRepo           telegramAuthorizationStore
+	telegramUserProjectRepo    *repository.TelegramUserProjectRepo
+	settingsRepo               *repository.SettingsRepo
+	customPersonalityRepo      *repository.CustomPersonalityRepo
+	agentRepo                  *repository.AgentRepo
+	alertSvc                   *AlertService
+	channelMessageRouter       *ChannelMessageRouter
+	emailStatus                func(context.Context) EmailConnectionStatus
+	emailAuthRepo              *repository.EmailAuthRepo
+	webhookRepo                *repository.WebhookRepo
+	taskGoalSvc                *TaskGoalService
+	llmSvc                     *LLMService
+	workerSvc                  *WorkerService
+	automationGraphSvc         *AutomationGraphService
+	chatBroadcaster            *events.ChatBroadcaster
+	executionStreamHub         *events.ExecutionStreamHub
+	queuedTurnPromoter         func(projectID string)
+	queuedTaskThreadPromoter   func(taskID string)
+	channelChatRunner          ChannelChatRunner
+	channelTaskRunner          ChannelTaskRunner
+	sendMessageFunc            func(chatID int64, text string)
+	editMessageFunc            func(chatID int64, messageID int, text string)
+	sendConfigFunc             func(c tgbotapi.Chattable) (tgbotapi.Message, error)
+	makeRequestFunc            func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
+	newBotAPI                  func(token string) (*tgbotapi.BotAPI, error)
+	previewMu                  sync.Mutex
+	activePreviews             map[telegramPreviewKey]*telegramPreviewState
+	userProjectsMu             sync.RWMutex
+	userProjects               map[int64]string // Maps Telegram user ID to active project ID
+	userProjectVersions        map[int64]uint64
+	userProjectSwitchMu        sync.Mutex
+	activeProjectReadHook      func(int64) // deterministic project-resolution test barrier
+	lifecycleOpMu              sync.Mutex
+	lifecycleMu                sync.Mutex
+	ctx                        context.Context
+	cancel                     context.CancelFunc
+	runDone                    chan struct{}
+	running                    bool
 }
 
 // NewTelegramService creates a new Telegram bot service
@@ -222,6 +226,13 @@ func (s *TelegramService) SetSettingsRepo(repo *repository.SettingsRepo) {
 // SetCustomPersonalityRepo sets the custom personality repo for resolving custom personality prompts.
 func (s *TelegramService) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
 	s.customPersonalityRepo = repo
+}
+
+func (s *TelegramService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
+	s.projectSvc = projectSvc
+	s.githubProjectSvc = githubSvc
+	s.memorySvc = memorySvc
+	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
 }
 
 // SetAgentRepo sets the agent repo for listing agent definitions from Telegram chat.

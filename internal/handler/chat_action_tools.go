@@ -407,10 +407,17 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"list_projects": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListProjects(ctx, params.ProjectID)), nil
 		},
+		"create_project": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return service.ExecuteCreateGitHubProjectRuntime(ctx, input, service.CreateGitHubProjectRuntimeOptions{
+				ProjectSvc:                 h.projectSvc,
+				GitHubSvc:                  h.githubSvc,
+				MemorySvc:                  h.memorySvc,
+				AgentLibraryMaintenanceSvc: h.agentLibraryMaintenanceSvc,
+			})
+		},
 		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSwitchProject(ctx, params.ProjectID, input), nil
-		},
-		"list_alerts":                            alertHandlers["list_alerts"],
+		}, "list_alerts": alertHandlers["list_alerts"],
 		"get_alert":                              alertHandlers["get_alert"],
 		"list_existing_automation_notifications": alertHandlers["list_existing_automation_notifications"],
 		"create_alert":                           alertHandlers["create_alert"],

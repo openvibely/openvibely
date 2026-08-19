@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
@@ -136,9 +137,41 @@ type channelContextModeActionHandlerOptions struct {
 	ProjectRepo        *repository.ProjectRepo
 }
 
+type GitHubProjectCloneProvider interface {
+	CloneProjectRepo(ctx context.Context, projectID, repoURL string) (string, string, error)
+}
+
+type CreateGitHubProjectRuntimeInput struct {
+	Name                 string `json:"name"`
+	RepoURL              string `json:"repo_url"`
+	Description          string `json:"description"`
+	DefaultAgentConfigID string `json:"default_agent_config_id"`
+	MaxWorkers           *int   `json:"max_workers"`
+	SwitchAfterCreate    bool   `json:"switch_after_create"`
+}
+
+type CreateGitHubProjectRuntimeOptions struct {
+	ProjectSvc                 *ProjectService
+	GitHubSvc                  GitHubProjectCloneProvider
+	MemorySvc                  *MemoryService
+	AgentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
+	SwitchProject              func(context.Context, *models.Project) error
+}
+
+type createGitHubProjectRuntimeResponse struct {
+	OK              bool   `json:"ok"`
+	Error           string `json:"error,omitempty"`
+	ProjectID       string `json:"project_id,omitempty"`
+	Name            string `json:"name,omitempty"`
+	RepoURL         string `json:"repo_url,omitempty"`
+	RepoPathPresent bool   `json:"repo_path_present"`
+	Switched        bool   `json:"switched"`
+}
+
 type channelProjectActionHandlerOptions struct {
-	ProjectID   string
-	ProjectRepo *repository.ProjectRepo
+	ProjectID     string
+	ProjectRepo   *repository.ProjectRepo
+	CreateProject CreateGitHubProjectRuntimeOptions
 	// SwitchProject persists the active project selection for the channel identity.
 	// It must verify authorization before writing and return an error if
 	// persistence or authorization fails. A nil SwitchProject means no persistence
@@ -415,6 +448,13 @@ func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) 
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"list_projects": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return buildChannelProjectListResult(ctx, opts.ProjectRepo, opts.ProjectID), nil
+		},
+		"create_project": func(ctx context.Context, input json.RawMessage) (string, error) {
+			createOpts := opts.CreateProject
+			if createOpts.SwitchProject == nil {
+				createOpts.SwitchProject = opts.SwitchProject
+			}
+			return ExecuteCreateGitHubProjectRuntime(ctx, input, createOpts)
 		},
 		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req SwitchProjectRequest
@@ -1108,6 +1148,121 @@ func selectChannelProject(ctx context.Context, projectRepo *repository.ProjectRe
 
 func matchesChannelProjectTarget(project models.Project, target string) bool {
 	return strings.EqualFold(project.Name, target) || project.ID == target
+}
+
+func ExecuteCreateGitHubProjectRuntime(ctx context.Context, input json.RawMessage, opts CreateGitHubProjectRuntimeOptions) (string, error) {
+	respond := func(resp createGitHubProjectRuntimeResponse) (string, error) {
+		data, err := json.Marshal(resp)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
+	fail := func(msg string) (string, error) {
+		return respond(createGitHubProjectRuntimeResponse{OK: false, Error: msg})
+	}
+
+	if opts.ProjectSvc == nil {
+		return fail("project service is not configured")
+	}
+	if opts.GitHubSvc == nil {
+		return fail("GitHub integration is not configured")
+	}
+
+	req, err := decodeCreateGitHubProjectInput(input)
+	if err != nil {
+		return fail(err.Error())
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return fail("Project name is required")
+	}
+	repoURL := strings.TrimSpace(req.RepoURL)
+	if repoURL == "" {
+		return fail("GitHub URL is required")
+	}
+	if !isSupportedGitHubProjectURLInput(repoURL) {
+		return fail("repo_url must be a GitHub repository URL; local filesystem paths and bare local paths are not supported")
+	}
+	if req.MaxWorkers != nil && *req.MaxWorkers <= 0 {
+		return fail("max_workers must be a positive integer")
+	}
+
+	var defaultAgentConfigID *string
+	if v := strings.TrimSpace(req.DefaultAgentConfigID); v != "" {
+		defaultAgentConfigID = &v
+	}
+	p := &models.Project{
+		Name:                 name,
+		Description:          req.Description,
+		RepoURL:              repoURL,
+		DefaultAgentConfigID: defaultAgentConfigID,
+		MaxWorkers:           req.MaxWorkers,
+	}
+	if err := opts.ProjectSvc.Create(ctx, p); err != nil {
+		return fail(err.Error())
+	}
+
+	clonedPath, normalizedURL, cloneErr := opts.GitHubSvc.CloneProjectRepo(ctx, p.ID, p.RepoURL)
+	if cloneErr != nil {
+		_ = opts.ProjectSvc.Delete(ctx, p.ID)
+		return fail(fmt.Sprintf("failed to clone GitHub repository: %v", cloneErr))
+	}
+	p.RepoPath = clonedPath
+	p.RepoURL = normalizedURL
+	if err := opts.ProjectSvc.Update(ctx, p); err != nil {
+		_ = opts.ProjectSvc.Delete(ctx, p.ID)
+		return fail("failed to save cloned repository settings")
+	}
+	if opts.MemorySvc != nil {
+		if err := opts.MemorySvc.EnsureProject(ctx, p.ID); err != nil {
+			applog.Infof("[chat-action] create_project memory setup failed project=%s: %v", p.ID, err)
+		}
+	}
+	if opts.AgentLibraryMaintenanceSvc != nil {
+		if err := opts.AgentLibraryMaintenanceSvc.EnsureProject(ctx, p.ID); err != nil {
+			applog.Infof("[chat-action] create_project agent library setup failed project=%s: %v", p.ID, err)
+		}
+	}
+
+	switched := false
+	if req.SwitchAfterCreate && opts.SwitchProject != nil {
+		if err := opts.SwitchProject(ctx, p); err != nil {
+			applog.Infof("[chat-action] create_project switch_after_create failed project=%s: %v", p.ID, err)
+		} else {
+			switched = true
+		}
+	}
+	return respond(createGitHubProjectRuntimeResponse{OK: true, ProjectID: p.ID, Name: p.Name, RepoURL: p.RepoURL, RepoPathPresent: strings.TrimSpace(p.RepoPath) != "", Switched: switched})
+}
+
+func decodeCreateGitHubProjectInput(input json.RawMessage) (CreateGitHubProjectRuntimeInput, error) {
+	payload := strings.TrimSpace(string(input))
+	if payload == "" {
+		payload = `{}`
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+		return CreateGitHubProjectRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
+	}
+	allowed := map[string]bool{
+		"name": true, "repo_url": true, "description": true, "default_agent_config_id": true, "max_workers": true, "switch_after_create": true,
+	}
+	for key := range raw {
+		if !allowed[key] {
+			return CreateGitHubProjectRuntimeInput{}, fmt.Errorf("create_project does not support %q", key)
+		}
+	}
+	var req CreateGitHubProjectRuntimeInput
+	if err := json.Unmarshal([]byte(payload), &req); err != nil {
+		return CreateGitHubProjectRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
+	}
+	return req, nil
+}
+
+func isSupportedGitHubProjectURLInput(raw string) bool {
+	lower := strings.ToLower(strings.TrimSpace(raw))
+	return strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "ssh://") || strings.HasPrefix(lower, "git@")
 }
 
 func channelProjectAvailableNames(projects []models.Project) []string {

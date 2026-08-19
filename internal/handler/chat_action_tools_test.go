@@ -1476,3 +1476,62 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 		t.Fatalf("expected explicit repo_url close output repo=%q out=%s", closedRepo, out)
 	}
 }
+
+func TestWebChatCreateProjectRuntimeCreatesGitHubBackedProject(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	current := createProject(t, h, "Current Runtime Project")
+	h.SetGitHubService(&fakeGitHubService{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+		return "/repos/" + projectID, "https://github.com/acme/runtime", nil
+	}})
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: current.ID, ChatMode: models.ChatModeOrchestrate},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true),
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "create_project", json.RawMessage(`{"name":"Created From Chat","repo_url":"https://github.com/acme/runtime","switch_after_create":true}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+
+	var resp struct {
+		OK              bool   `json:"ok"`
+		ProjectID       string `json:"project_id"`
+		Name            string `json:"name"`
+		RepoURL         string `json:"repo_url"`
+		RepoPathPresent bool   `json:"repo_path_present"`
+		Switched        bool   `json:"switched"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK)
+	require.Equal(t, "Created From Chat", resp.Name)
+	require.Equal(t, "https://github.com/acme/runtime", resp.RepoURL)
+	require.True(t, resp.RepoPathPresent)
+	require.False(t, resp.Switched, "web/API Chat has no persisted project switch callback")
+
+	projectRepo := repository.NewProjectRepo(db)
+	created, err := projectRepo.GetByID(ctx, resp.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, "/repos/"+resp.ProjectID, created.RepoPath)
+}
+
+func TestWebChatCreateProjectRuntimePlanModeBlocked(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	ctx := context.Background()
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "create_project", json.RawMessage(`{"name":"Nope","repo_url":"https://github.com/acme/nope"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Contains(t, out, "not available")
+}

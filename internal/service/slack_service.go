@@ -76,37 +76,41 @@ type SlackConnectionStatus struct {
 // SlackService manages Slack OAuth, Socket Mode event processing, and
 // Slack-origin task completion notifications.
 type SlackService struct {
-	settingsRepo             *repository.SettingsRepo
-	projectRepo              *repository.ProjectRepo
-	llmConfigRepo            *repository.LLMConfigRepo
-	taskRepo                 *repository.TaskRepo
-	execRepo                 *repository.ExecutionRepo
-	scheduleRepo             *repository.ScheduleRepo
-	chatAttachmentRepo       *repository.ChatAttachmentRepo
-	taskSvc                  *TaskService
-	taskGoalSvc              *TaskGoalService
-	llmSvc                   *LLMService
-	workerSvc                *WorkerService
-	automationGraphSvc       *AutomationGraphService
-	slackUserProjectRepo     *repository.SlackUserProjectRepo
-	slackTaskContextRepo     *repository.SlackTaskContextRepo
-	slackInboundReceiptRepo  *repository.SlackInboundReceiptRepo
-	threadInputRepo          *repository.ThreadInputRepo
-	customPersonalityRepo    *repository.CustomPersonalityRepo
-	slackAuthRepo            *repository.SlackAuthRepo
-	agentRepo                *repository.AgentRepo
-	chatBroadcaster          *events.ChatBroadcaster
-	executionStreamHub       *events.ExecutionStreamHub
-	queuedTurnPromoter       func(projectID string)
-	queuedTaskThreadPromoter func(taskID string)
-	channelChatRunner        ChannelChatRunner
-	channelTaskRunner        ChannelTaskRunner
-	alertSvc                 *AlertService
-	channelMessageRouter     *ChannelMessageRouter
-	emailStatus              func(context.Context) EmailConnectionStatus
-	emailAuthRepo            *repository.EmailAuthRepo
-	webhookRepo              *repository.WebhookRepo
-	uploadsDir               string
+	settingsRepo               *repository.SettingsRepo
+	projectRepo                *repository.ProjectRepo
+	projectSvc                 *ProjectService
+	githubProjectSvc           GitHubProjectCloneProvider
+	memorySvc                  *MemoryService
+	agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
+	llmConfigRepo              *repository.LLMConfigRepo
+	taskRepo                   *repository.TaskRepo
+	execRepo                   *repository.ExecutionRepo
+	scheduleRepo               *repository.ScheduleRepo
+	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	taskSvc                    *TaskService
+	taskGoalSvc                *TaskGoalService
+	llmSvc                     *LLMService
+	workerSvc                  *WorkerService
+	automationGraphSvc         *AutomationGraphService
+	slackUserProjectRepo       *repository.SlackUserProjectRepo
+	slackTaskContextRepo       *repository.SlackTaskContextRepo
+	slackInboundReceiptRepo    *repository.SlackInboundReceiptRepo
+	threadInputRepo            *repository.ThreadInputRepo
+	customPersonalityRepo      *repository.CustomPersonalityRepo
+	slackAuthRepo              *repository.SlackAuthRepo
+	agentRepo                  *repository.AgentRepo
+	chatBroadcaster            *events.ChatBroadcaster
+	executionStreamHub         *events.ExecutionStreamHub
+	queuedTurnPromoter         func(projectID string)
+	queuedTaskThreadPromoter   func(taskID string)
+	channelChatRunner          ChannelChatRunner
+	channelTaskRunner          ChannelTaskRunner
+	alertSvc                   *AlertService
+	channelMessageRouter       *ChannelMessageRouter
+	emailStatus                func(context.Context) EmailConnectionStatus
+	emailAuthRepo              *repository.EmailAuthRepo
+	webhookRepo                *repository.WebhookRepo
+	uploadsDir                 string
 
 	httpClient   *http.Client
 	oauthBaseURL string
@@ -180,6 +184,13 @@ func NewSlackService(
 
 func (s *SlackService) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
 	s.customPersonalityRepo = repo
+}
+
+func (s *SlackService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
+	s.projectSvc = projectSvc
+	s.githubProjectSvc = githubSvc
+	s.memorySvc = memorySvc
+	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
 }
 
 func (s *SlackService) SetChatBroadcaster(cb *events.ChatBroadcaster) {

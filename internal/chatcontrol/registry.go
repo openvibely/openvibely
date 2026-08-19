@@ -11,7 +11,7 @@
 //   - schedules: schedule_task, delete_schedule, modify_schedule
 //   - alerts: create_alert, delete_alert, toggle_alert
 //   - personality: set_personality
-//   - projects: switch_project
+//   - projects: create_project, switch_project
 //   - automations: save_automation, run_automation_now, pause_automation, resume_automation
 //   - chat: set_chat_mode
 //
@@ -135,6 +135,7 @@ const chainSchemaProperties = `{"type":"object","properties":{"enabled":{"type":
 // createTaskParams is the full JSON Schema for the create_task tool.
 const createTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the task. If set, the Goal Agent may continue the task across turns until this condition is satisfied."},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"chain":` + chainSchemaProperties + `,"source_github_issue_number":{"type":"integer","minimum":1,"description":"For a GitHub Dev Inbox implementation task, the exact assigned issue number returned by this execution."},"source_github_repo_url":{"type":"string","description":"Optional repository URL for source_github_issue_number. Defaults to the current project repository."}},"required":["title","prompt"],"additionalProperties":false}`
 
+const createProjectParams = `{"type":"object","properties":{"name":{"type":"string","description":"Project name."},"repo_url":{"type":"string","description":"GitHub repository URL to clone for the new project. Local filesystem paths and create-directory behavior are not supported."},"description":{"type":"string","description":"Optional project description."},"default_agent_config_id":{"type":"string","description":"Optional default model config ID for the project."},"max_workers":{"type":"integer","minimum":1,"description":"Optional positive per-project worker limit."},"switch_after_create":{"type":"boolean","description":"Request switching the current Chat/channel context to the new project when the surface supports it."}},"required":["name","repo_url"],"additionalProperties":false}`
 const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the swarm parent. If set, the Goal Agent may continue the parent task until this condition is satisfied."},"project_id":{"type":"string","description":"Optional project id; defaults to current project."},"category":{"type":"string","enum":["active","backlog"],"description":"Active starts the planner now; backlog defers planning until the swarm parent is run or moved to Active."},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID for the swarm parent/children. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"tag":{"type":"string","enum":["bug","feature"]},"max_workers":{"type":"integer","minimum":1,"maximum":8},"worker_isolation":{"type":"string","enum":["worktree","read_only","shared"]},"reviewer_enabled":{"type":"boolean","description":"Whether the swarm should create and run a reviewer stage. Defaults to true."},"merger_enabled":{"type":"boolean","description":"Whether the swarm should create and run a merger stage. Defaults to true."},"merge_target_branch":{"type":"string","description":"Optional merge target branch for swarm output."}},"required":["title","prompt"],"additionalProperties":false}`
 
 // editTaskParams is the full JSON Schema for the edit_task tool.
@@ -737,6 +738,16 @@ var registry = []ActionDef{
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
+	{
+		Name:         "create_project",
+		Description:  "Create a GitHub-backed project from a project name and GitHub repository URL. Orchestrate-only; does not support local repository paths, create-directory behavior, deletion, or credential details.",
+		Domain:       DomainProjects,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(createProjectParams),
 	},
 	{
 		Name:         "switch_project",

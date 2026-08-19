@@ -1480,7 +1480,7 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	} else if models.IsSwarmChildRole(task.SwarmRole) {
 		h.notifySwarmChildTerminal(c.Request().Context(), taskID)
 	}
-	h.cancelActiveExecutionsAndPublish(c.Request().Context(), taskID, "CancelTask")
+	h.cancelRunningExecutionsAndPublish(c.Request().Context(), taskID, "CancelTask")
 	applog.Infof("[handler] CancelTask cancelled task=%s", taskID)
 
 	// Return the full kanban board for HTMX requests

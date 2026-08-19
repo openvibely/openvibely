@@ -192,29 +192,33 @@ type emailInboundReceiptStore interface {
 }
 
 type EmailService struct {
-	settingsRepo             *repository.SettingsRepo
-	projectRepo              *repository.ProjectRepo
-	llmConfigRepo            *repository.LLMConfigRepo
-	taskRepo                 *repository.TaskRepo
-	execRepo                 *repository.ExecutionRepo
-	scheduleRepo             *repository.ScheduleRepo
-	taskSvc                  *TaskService
-	llmSvc                   *LLMService
-	workerSvc                *WorkerService
-	emailAuthRepo            *repository.EmailAuthRepo
-	emailTaskContextRepo     *repository.EmailTaskContextRepo
-	emailInboundReceiptStore emailInboundReceiptStore
-	emailSenderProjectRepo   *repository.EmailSenderProjectRepo
-	threadInputRepo          *repository.ThreadInputRepo
-	customPersonalityRepo    *repository.CustomPersonalityRepo
-	agentRepo                *repository.AgentRepo
-	chatBroadcaster          *events.ChatBroadcaster
-	executionStreamHub       *events.ExecutionStreamHub
-	queuedTurnPromoter       func(projectID string)
-	channelChatRunner        ChannelChatRunner
-	channelMessageRouter     *ChannelMessageRouter
-	chatAttachmentRepo       *repository.ChatAttachmentRepo
-	uploadsDir               string
+	settingsRepo               *repository.SettingsRepo
+	projectRepo                *repository.ProjectRepo
+	projectSvc                 *ProjectService
+	githubProjectSvc           GitHubProjectCloneProvider
+	memorySvc                  *MemoryService
+	agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
+	llmConfigRepo              *repository.LLMConfigRepo
+	taskRepo                   *repository.TaskRepo
+	execRepo                   *repository.ExecutionRepo
+	scheduleRepo               *repository.ScheduleRepo
+	taskSvc                    *TaskService
+	llmSvc                     *LLMService
+	workerSvc                  *WorkerService
+	emailAuthRepo              *repository.EmailAuthRepo
+	emailTaskContextRepo       *repository.EmailTaskContextRepo
+	emailInboundReceiptStore   emailInboundReceiptStore
+	emailSenderProjectRepo     *repository.EmailSenderProjectRepo
+	threadInputRepo            *repository.ThreadInputRepo
+	customPersonalityRepo      *repository.CustomPersonalityRepo
+	agentRepo                  *repository.AgentRepo
+	chatBroadcaster            *events.ChatBroadcaster
+	executionStreamHub         *events.ExecutionStreamHub
+	queuedTurnPromoter         func(projectID string)
+	channelChatRunner          ChannelChatRunner
+	channelMessageRouter       *ChannelMessageRouter
+	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	uploadsDir                 string
 
 	mu                       sync.RWMutex
 	running                  bool
@@ -290,6 +294,12 @@ func (s *EmailService) SetExecutionStreamHub(hub *events.ExecutionStreamHub) {
 func (s *EmailService) SetThreadInputRepo(repo *repository.ThreadInputRepo) { s.threadInputRepo = repo }
 func (s *EmailService) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
 	s.customPersonalityRepo = repo
+}
+func (s *EmailService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
+	s.projectSvc = projectSvc
+	s.githubProjectSvc = githubSvc
+	s.memorySvc = memorySvc
+	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
 }
 func (s *EmailService) SetAgentRepo(repo *repository.AgentRepo) { s.agentRepo = repo }
 func (s *EmailService) SetQueuedTurnPromoter(promoter func(projectID string)) {
@@ -1056,6 +1066,12 @@ func (s *EmailService) emailActionHandlers(projectID, sender string) map[string]
 	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
+		CreateProject: CreateGitHubProjectRuntimeOptions{
+			ProjectSvc:                 s.projectSvc,
+			GitHubSvc:                  s.githubProjectSvc,
+			MemorySvc:                  s.memorySvc,
+			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,
+		},
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
 			if s.emailAuthRepo != nil {
 				ok, err := s.emailAuthRepo.IsAuthorized(ctx, project.ID, sender)

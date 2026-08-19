@@ -1615,3 +1615,132 @@ func TestChannelListAgentsResultUsesRuntimeSummariesAndPreservesOutput(t *testin
 	}
 	require.Equal(t, "No agents configured.", channelListAgentsResult(ctx, repo, ""))
 }
+
+type fakeProjectCloneProvider struct {
+	cloneFn func(ctx context.Context, projectID, repoURL string) (string, string, error)
+}
+
+func (f fakeProjectCloneProvider) CloneProjectRepo(ctx context.Context, projectID, repoURL string) (string, string, error) {
+	if f.cloneFn != nil {
+		return f.cloneFn(ctx, projectID, repoURL)
+	}
+	return "/tmp/openvibely-test/" + projectID, "https://github.com/acme/widgets", nil
+}
+
+func TestExecuteCreateGitHubProjectRuntimeCreatesGitHubBackedProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	modelRepo := repository.NewLLMConfigRepo(db)
+	model := &models.LLMConfig{Name: "Project Default", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, modelRepo.Create(ctx, model))
+
+	var cloneProjectID, cloneRepoURL string
+	out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(fmt.Sprintf(`{"name":" Runtime GitHub Project ","description":"from chat","repo_url":"https://github.com/acme/widgets","default_agent_config_id":%q,"max_workers":3}`, model.ID)), CreateGitHubProjectRuntimeOptions{
+		ProjectSvc: projectSvc,
+		GitHubSvc: fakeProjectCloneProvider{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+			cloneProjectID = projectID
+			cloneRepoURL = repoURL
+			return "/repos/" + projectID, "https://github.com/acme/widgets", nil
+		}},
+	})
+	require.NoError(t, err)
+
+	var resp createGitHubProjectRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK)
+	require.NotEmpty(t, resp.ProjectID)
+	require.Equal(t, "Runtime GitHub Project", resp.Name)
+	require.Equal(t, "https://github.com/acme/widgets", resp.RepoURL)
+	require.True(t, resp.RepoPathPresent)
+	require.False(t, resp.Switched)
+	require.Equal(t, resp.ProjectID, cloneProjectID)
+	require.Equal(t, "https://github.com/acme/widgets", cloneRepoURL)
+
+	created, err := projectRepo.GetByID(ctx, resp.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, "Runtime GitHub Project", created.Name)
+	require.Equal(t, "from chat", created.Description)
+	require.Equal(t, "/repos/"+resp.ProjectID, created.RepoPath)
+	require.Equal(t, "https://github.com/acme/widgets", created.RepoURL)
+	require.NotNil(t, created.DefaultAgentConfigID)
+	require.Equal(t, model.ID, *created.DefaultAgentConfigID)
+	require.NotNil(t, created.MaxWorkers)
+	require.Equal(t, 3, *created.MaxWorkers)
+}
+
+func TestExecuteCreateGitHubProjectRuntimeRollsBackOnCloneFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+
+	out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(`{"name":"Rollback Project","repo_url":"https://github.com/acme/fails"}`), CreateGitHubProjectRuntimeOptions{
+		ProjectSvc: projectSvc,
+		GitHubSvc: fakeProjectCloneProvider{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+			return "", "", fmt.Errorf("clone failed for safe test")
+		}},
+	})
+	require.NoError(t, err)
+	var resp createGitHubProjectRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.False(t, resp.OK)
+	require.Contains(t, resp.Error, "failed to clone")
+
+	projects, err := projectRepo.List(ctx)
+	require.NoError(t, err)
+	for _, p := range projects {
+		require.NotEqual(t, "Rollback Project", p.Name)
+	}
+}
+
+func TestExecuteCreateGitHubProjectRuntimeRejectsLocalPathAndCreateDirectoryInput(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectSvc := NewProjectService(repository.NewProjectRepo(db))
+	opts := CreateGitHubProjectRuntimeOptions{ProjectSvc: projectSvc, GitHubSvc: fakeProjectCloneProvider{}}
+
+	for _, tc := range []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{name: "repo_path field", payload: `{"name":"Local","repo_url":"https://github.com/acme/widgets","repo_path":"/tmp/widgets"}`, want: `repo_path`},
+		{name: "create_directory field", payload: `{"name":"Local","repo_url":"https://github.com/acme/widgets","create_directory":true}`, want: `create_directory`},
+		{name: "absolute local repo_url", payload: `{"name":"Local","repo_url":"/tmp/widgets"}`, want: `local filesystem paths`},
+		{name: "bare path repo_url", payload: `{"name":"Local","repo_url":"tmp/widgets"}`, want: `local filesystem paths`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(tc.payload), opts)
+			require.NoError(t, err)
+			var resp createGitHubProjectRuntimeResponse
+			require.NoError(t, json.Unmarshal([]byte(out), &resp))
+			require.False(t, resp.OK)
+			require.Contains(t, resp.Error, tc.want)
+		})
+	}
+}
+
+func TestExecuteCreateGitHubProjectRuntimeSwitchAfterCreateWhenSupported(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectSvc := NewProjectService(repository.NewProjectRepo(db))
+	var switchedTo string
+
+	out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(`{"name":"Switchable","repo_url":"https://github.com/acme/switchable","switch_after_create":true}`), CreateGitHubProjectRuntimeOptions{
+		ProjectSvc: projectSvc,
+		GitHubSvc:  fakeProjectCloneProvider{},
+		SwitchProject: func(ctx context.Context, project *models.Project) error {
+			switchedTo = project.ID
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	var resp createGitHubProjectRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK)
+	require.True(t, resp.Switched)
+	require.Equal(t, resp.ProjectID, switchedTo)
+}
