@@ -58,6 +58,22 @@ func (rt *RuntimeTools) HasDefinition(name string) bool {
 	return false
 }
 
+// DefinitionNames returns the display names for request-scoped runtime tool
+// definitions, preserving definition order while trimming whitespace and
+// omitting blank names.
+func (rt *RuntimeTools) DefinitionNames() []string {
+	if rt == nil {
+		return nil
+	}
+	var names []string
+	for _, def := range rt.Definitions {
+		if name := strings.TrimSpace(def.Name); name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 type runtimeToolsContextKey struct{}
 
 // WithRuntimeTools annotates context with request-scoped tool definitions/executor.

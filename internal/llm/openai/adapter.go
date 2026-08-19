@@ -241,24 +241,11 @@ func composeRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTo
 	}
 }
 
-func runtimeToolNames(rt *llmcontracts.RuntimeTools) []string {
-	if rt == nil {
-		return nil
-	}
-	var names []string
-	for _, def := range rt.Definitions {
-		if name := strings.TrimSpace(def.Name); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
-}
-
 func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode) string {
 	if chatMode != models.ChatModeOrchestrate {
 		return base
 	}
-	return llmprompt.ApplyChatActionToolMode(base, runtimeToolNames(rt))
+	return llmprompt.ApplyChatActionToolMode(base, rt.DefinitionNames())
 }
 
 func buildOpenAIRuntime(ctx context.Context, workDir string, agentDef *models.Agent) ([]openaiclient.ToolDefinition, func(context.Context, string, json.RawMessage) (string, bool, error), func(string) bool, func()) {
@@ -434,7 +421,7 @@ func (a *Adapter) CallStreaming(ctx context.Context, prompt string, attachments 
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, runtimeToolNames(rt))
+	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
 		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
@@ -658,7 +645,7 @@ func (a *Adapter) CallCompletionsStreaming(ctx context.Context, prompt string, a
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(attachments) +
 		prompt
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, runtimeToolNames(rt))
+	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
 		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
