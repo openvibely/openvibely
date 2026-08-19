@@ -546,9 +546,9 @@ func (r *ExecutionRepo) CancelRunningByTaskReturningIDs(ctx context.Context, tas
 	rows, err := r.db.QueryContext(ctx,
 		`UPDATE executions
 			 SET status = ?, error_message = 'cancelled', completed_at = datetime('now')
-			 WHERE task_id = ? AND status = ?
+			 WHERE task_id = ? AND status IN (?, ?)
 			 RETURNING id`,
-		models.ExecCancelled, taskID, models.ExecRunning)
+		models.ExecCancelled, taskID, models.ExecRunning, models.ExecQueued)
 	if err != nil {
 		return nil, fmt.Errorf("cancelling running task executions: %w", err)
 	}
