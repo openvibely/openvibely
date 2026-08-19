@@ -1116,6 +1116,61 @@ func TestBuildChannelUtilityActionHandlersListSchedulesIncludesEmptyDaysAndNullN
 	require.Nil(t, nextRun)
 }
 
+func TestBuildChannelUtilityActionHandlersListChannelsReportsGitHubAppConnectionSafely(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Channel GitHub App Status"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModeApp))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAppID, "12345"))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAppSlug, "openvibely-app"))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAppPrivateKey, "PRIVATE-KEY-MUST-NOT-LEAK"))
+	require.NoError(t, settingsRepo.Set(ctx, githubSettingInstallationID, "67890"))
+	require.NoError(t, settingsRepo.Set(ctx, githubSettingAccountLogin, "openvibely"))
+	require.NoError(t, settingsRepo.Set(ctx, githubSettingAccountType, "Organization"))
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, SettingsRepo: settingsRepo})
+	out, err := handlers["list_channels"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.NotContains(t, out, "PRIVATE-KEY-MUST-NOT-LEAK")
+
+	var result struct {
+		GitHub struct {
+			Configured    bool   `json:"configured"`
+			Connected     bool   `json:"connected"`
+			Status        string `json:"status"`
+			AuthMode      string `json:"auth_mode"`
+			AccountLogin  string `json:"account_login"`
+			AccountType   string `json:"account_type"`
+			AppConfigured bool   `json:"app_configured"`
+			PATConfigured bool   `json:"pat_configured"`
+		} `json:"github"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.True(t, result.GitHub.Configured)
+	require.True(t, result.GitHub.Connected)
+	require.Equal(t, "connected", result.GitHub.Status)
+	require.Equal(t, GitHubAuthModeApp, result.GitHub.AuthMode)
+	require.Equal(t, "openvibely", result.GitHub.AccountLogin)
+	require.Equal(t, "Organization", result.GitHub.AccountType)
+	require.True(t, result.GitHub.AppConfigured)
+	require.False(t, result.GitHub.PATConfigured)
+
+	require.NoError(t, settingsRepo.Set(ctx, githubSettingInstallationID, ""))
+	require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "PAT-MUST-NOT-LEAK"))
+	out, err = handlers["list_channels"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.NotContains(t, out, "PAT-MUST-NOT-LEAK")
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.True(t, result.GitHub.Configured)
+	require.False(t, result.GitHub.Connected)
+	require.Equal(t, "configured_not_connected", result.GitHub.Status)
+	require.Equal(t, GitHubAuthModeApp, result.GitHub.AuthMode)
+	require.True(t, result.GitHub.PATConfigured)
+}
+
 func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
