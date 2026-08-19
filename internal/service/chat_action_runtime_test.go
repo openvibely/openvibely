@@ -1171,6 +1171,99 @@ func TestBuildChannelUtilityActionHandlersListChannelsReportsGitHubAppConnection
 	require.True(t, result.GitHub.PATConfigured)
 }
 
+func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	settingsRepo := repository.NewSettingsRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	emailAuthRepo := repository.NewEmailAuthRepo(db)
+	webhookRepo := repository.NewWebhookRepo(db)
+	channelTargetRepo := repository.NewChannelTargetRepo(db)
+	project := &models.Project{Name: "Channel Surface Complete Status"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingProvider, EmailProviderCustom))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingAddress, "bot@example.com"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingPassword, "EMAIL-PASSWORD-MUST-NOT-LEAK"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingIMAPHost, "imap.example.com"))
+	require.NoError(t, settingsRepo.Set(ctx, EmailSettingSMTPHost, "smtp.example.com"))
+	require.NoError(t, emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "sender@example.com", DisplayName: "Sender", AddedBy: "test"}))
+	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy", Enabled: true, PathToken: "WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK", Secret: "WEBHOOK-SECRET-MUST-NOT-LEAK", DefaultPriority: 2}))
+	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: "target-1", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: "RAW-TARGET-ID-MUST-NOT-LEAK", Home: true}))
+	router := NewChannelMessageRouter(channelTargetRepo, settingsRepo)
+	emailStatus := func(context.Context) EmailConnectionStatus {
+		return EmailConnectionStatus{Configured: true, Running: true, Address: "bot@example.com", Provider: EmailProviderCustom, IMAPHost: "imap.example.com", IMAPPort: 993, SMTPHost: "smtp.example.com", SMTPPort: 587}
+	}
+
+	slackSvc := NewSlackService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	slackSvc.SetEmailStatusProvider(emailStatus)
+	slackSvc.SetEmailAuthRepo(emailAuthRepo)
+	slackSvc.SetWebhookRepo(webhookRepo)
+	slackSvc.SetChannelMessageRouter(router)
+	discordSvc := NewDiscordService(settingsRepo, projectRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	discordSvc.SetEmailStatusProvider(emailStatus)
+	discordSvc.SetEmailAuthRepo(emailAuthRepo)
+	discordSvc.SetWebhookRepo(webhookRepo)
+	discordSvc.SetChannelMessageRouter(router)
+	telegramSvc := &TelegramService{settingsRepo: settingsRepo, projectRepo: projectRepo}
+	telegramSvc.SetEmailStatusProvider(emailStatus)
+	telegramSvc.SetEmailAuthRepo(emailAuthRepo)
+	telegramSvc.SetWebhookRepo(webhookRepo)
+	telegramSvc.SetChannelMessageRouter(router)
+
+	for _, tc := range []struct {
+		name     string
+		handlers map[string]chatcontrol.RuntimeActionHandler
+	}{
+		{name: "slack", handlers: slackSvc.slackActionHandlers(project.ID, slackActionContext{TeamID: "T1", ChannelID: "C1", UserID: "U1"}, nil)},
+		{name: "discord", handlers: discordSvc.discordActionHandlers(project.ID, discordActionContext{ChannelID: "C1", UserID: "U1"}, nil)},
+		{name: "telegram", handlers: telegramSvc.telegramActionHandlers(project.ID, 1001, 2002, nil)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := tc.handlers["list_channels"](ctx, json.RawMessage(`{}`))
+			require.NoError(t, err)
+			for _, secret := range []string{"EMAIL-PASSWORD-MUST-NOT-LEAK", "WEBHOOK-PATH-TOKEN-MUST-NOT-LEAK", "WEBHOOK-SECRET-MUST-NOT-LEAK", "RAW-TARGET-ID-MUST-NOT-LEAK"} {
+				require.NotContains(t, out, secret)
+			}
+
+			var result struct {
+				Email struct {
+					Configured            bool   `json:"configured"`
+					Running               bool   `json:"running"`
+					Status                string `json:"status"`
+					AuthorizedSenderCount int    `json:"authorized_sender_count"`
+				} `json:"email"`
+				Webhooks struct {
+					Total      int  `json:"total"`
+					Active     int  `json:"active"`
+					Configured bool `json:"configured"`
+				} `json:"webhooks"`
+				OutboundTargets struct {
+					Total              int  `json:"total"`
+					Configured         bool `json:"configured"`
+					MessagingAvailable bool `json:"messaging_available"`
+					ByPlatform         map[string]struct {
+						Total int `json:"total"`
+						Home  int `json:"home"`
+					} `json:"by_platform"`
+				} `json:"outbound_message_targets"`
+			}
+			require.NoError(t, json.Unmarshal([]byte(out), &result))
+			require.True(t, result.Email.Configured)
+			require.True(t, result.Email.Running)
+			require.Equal(t, "running", result.Email.Status)
+			require.Equal(t, 1, result.Email.AuthorizedSenderCount)
+			require.True(t, result.Webhooks.Configured)
+			require.Equal(t, 1, result.Webhooks.Total)
+			require.Equal(t, 1, result.Webhooks.Active)
+			require.True(t, result.OutboundTargets.Configured)
+			require.True(t, result.OutboundTargets.MessagingAvailable)
+			require.Equal(t, 1, result.OutboundTargets.Total)
+			require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Total)
+			require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Home)
+		})
+	}
+}
+
 func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

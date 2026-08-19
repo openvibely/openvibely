@@ -103,6 +103,9 @@ type SlackService struct {
 	channelTaskRunner        ChannelTaskRunner
 	alertSvc                 *AlertService
 	channelMessageRouter     *ChannelMessageRouter
+	emailStatus              func(context.Context) EmailConnectionStatus
+	emailAuthRepo            *repository.EmailAuthRepo
+	webhookRepo              *repository.WebhookRepo
 	uploadsDir               string
 
 	httpClient   *http.Client
@@ -239,6 +242,18 @@ func (s *SlackService) SetAutomationGraphService(svc *AutomationGraphService) {
 
 func (s *SlackService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 	s.channelMessageRouter = router
+}
+
+func (s *SlackService) SetEmailStatusProvider(provider func(context.Context) EmailConnectionStatus) {
+	s.emailStatus = provider
+}
+
+func (s *SlackService) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
+	s.emailAuthRepo = repo
+}
+
+func (s *SlackService) SetWebhookRepo(repo *repository.WebhookRepo) {
+	s.webhookRepo = repo
 }
 
 // SetTaskGoalService injects the task goal service so Slack can execute
@@ -1441,6 +1456,9 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		AlertSvc:              s.alertSvc,
 		SlackStatus:           s.GetConnectionStatus,
 		SlackAuthRepo:         s.slackAuthRepo,
+		EmailStatus:           s.emailStatus,
+		EmailAuthRepo:         s.emailAuthRepo,
+		WebhookRepo:           s.webhookRepo,
 		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
 		UnavailableAgentsText: "Agent listing is currently unavailable on Slack (no agent repository configured on this surface).",
 	}))

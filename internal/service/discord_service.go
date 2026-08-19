@@ -71,6 +71,9 @@ type DiscordService struct {
 	customPersonalityRepo    *repository.CustomPersonalityRepo
 	agentRepo                *repository.AgentRepo
 	alertSvc                 *AlertService
+	emailStatus              func(context.Context) EmailConnectionStatus
+	emailAuthRepo            *repository.EmailAuthRepo
+	webhookRepo              *repository.WebhookRepo
 	chatBroadcaster          *events.ChatBroadcaster
 	executionStreamHub       *events.ExecutionStreamHub
 	queuedTurnPromoter       func(projectID string)
@@ -147,7 +150,12 @@ func (s *DiscordService) SetCustomPersonalityRepo(repo *repository.CustomPersona
 }
 func (s *DiscordService) SetAgentRepo(repo *repository.AgentRepo) { s.agentRepo = repo }
 func (s *DiscordService) SetAlertService(svc *AlertService)       { s.alertSvc = svc }
-func (s *DiscordService) SetTaskGoalService(svc *TaskGoalService) { s.taskGoalSvc = svc }
+func (s *DiscordService) SetEmailStatusProvider(provider func(context.Context) EmailConnectionStatus) {
+	s.emailStatus = provider
+}
+func (s *DiscordService) SetEmailAuthRepo(repo *repository.EmailAuthRepo) { s.emailAuthRepo = repo }
+func (s *DiscordService) SetWebhookRepo(repo *repository.WebhookRepo)     { s.webhookRepo = repo }
+func (s *DiscordService) SetTaskGoalService(svc *TaskGoalService)         { s.taskGoalSvc = svc }
 func (s *DiscordService) SetAutomationGraphService(svc *AutomationGraphService) {
 	s.automationGraphSvc = svc
 }
@@ -744,6 +752,9 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		AlertSvc:              s.alertSvc,
 		DiscordStatus:         s.GetConnectionStatus,
 		DiscordAuthRepo:       s.discordAuthRepo,
+		EmailStatus:           s.emailStatus,
+		EmailAuthRepo:         s.emailAuthRepo,
+		WebhookRepo:           s.webhookRepo,
 		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{

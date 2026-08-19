@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -163,6 +164,18 @@ type EmailServiceProvider interface {
 	SendTaskCompletionToThread(ctx context.Context, to, inboundMessageID, references, subject, taskTitle, output, errMsg string)
 	SendChatResponse(ctx context.Context, task models.Task, output, errMsg string)
 	SendTaskCompletionNotification(ctx context.Context, task models.Task, output, errMsg string)
+}
+
+type channelEmailStatusProviderSetter interface {
+	SetEmailStatusProvider(func(context.Context) service.EmailConnectionStatus)
+}
+
+type channelEmailAuthRepoSetter interface {
+	SetEmailAuthRepo(*repository.EmailAuthRepo)
+}
+
+type channelWebhookRepoSetter interface {
+	SetWebhookRepo(*repository.WebhookRepo)
 }
 
 type DiscordServiceProvider interface {
@@ -363,6 +376,9 @@ func (h *Handler) SetSlackAuthRepo(repo *repository.SlackAuthRepo) {
 // SetEmailAuthRepo sets the Email authorization repo for managing authorized senders.
 func (h *Handler) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
 	h.emailAuthRepo = repo
+	h.wireChannelIntegrationSummaryDeps(h.slackSvc)
+	h.wireChannelIntegrationSummaryDeps(h.discordSvc)
+	h.wireChannelIntegrationSummaryDeps(h.telegramService)
 }
 
 // SetDiscordAuthRepo sets the Discord authorization repo for managing authorized users.
@@ -380,6 +396,9 @@ func (h *Handler) SetDiscordTaskContextRepo(repo *repository.DiscordTaskContextR
 
 func (h *Handler) SetEmailService(svc EmailServiceProvider) {
 	h.emailService = svc
+	h.wireChannelIntegrationSummaryDeps(h.slackSvc)
+	h.wireChannelIntegrationSummaryDeps(h.discordSvc)
+	h.wireChannelIntegrationSummaryDeps(h.telegramService)
 }
 
 func (h *Handler) SetSlackTaskContextRepo(repo *repository.SlackTaskContextRepo) {
@@ -438,6 +457,7 @@ func (h *Handler) SetSlackService(svc SlackServiceProvider) {
 	if setter, ok := svc.(automationGraphServiceSetter); ok {
 		setter.SetAutomationGraphService(h.automationGraphSvc)
 	}
+	h.wireChannelIntegrationSummaryDeps(svc)
 }
 
 func (h *Handler) SetDiscordService(svc DiscordServiceProvider) {
@@ -445,6 +465,7 @@ func (h *Handler) SetDiscordService(svc DiscordServiceProvider) {
 	if setter, ok := svc.(automationGraphServiceSetter); ok {
 		setter.SetAutomationGraphService(h.automationGraphSvc)
 	}
+	h.wireChannelIntegrationSummaryDeps(svc)
 }
 
 func (h *Handler) SetChannelMessageRouter(router *service.ChannelMessageRouter) {
@@ -473,6 +494,28 @@ func (h *Handler) SetProjectFolderPicker(picker ProjectFolderPicker) {
 // SetWebhookRepo sets the webhook endpoint repository for inbound webhook management.
 func (h *Handler) SetWebhookRepo(repo *repository.WebhookRepo) {
 	h.webhookRepo = repo
+	h.wireChannelIntegrationSummaryDeps(h.slackSvc)
+	h.wireChannelIntegrationSummaryDeps(h.discordSvc)
+	h.wireChannelIntegrationSummaryDeps(h.telegramService)
+}
+
+func (h *Handler) wireChannelIntegrationSummaryDeps(svc any) {
+	if svc == nil {
+		return
+	}
+	v := reflect.ValueOf(svc)
+	if v.Kind() == reflect.Pointer && v.IsNil() {
+		return
+	}
+	if setter, ok := svc.(channelEmailStatusProviderSetter); ok && h.emailService != nil {
+		setter.SetEmailStatusProvider(h.emailService.GetConnectionStatus)
+	}
+	if setter, ok := svc.(channelEmailAuthRepoSetter); ok {
+		setter.SetEmailAuthRepo(h.emailAuthRepo)
+	}
+	if setter, ok := svc.(channelWebhookRepoSetter); ok {
+		setter.SetWebhookRepo(h.webhookRepo)
+	}
 }
 
 // SetMemoryService wires the Memory service so project-create handlers
