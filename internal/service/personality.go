@@ -9,10 +9,10 @@ import (
 
 // PersonalityInfo holds display information for a personality option.
 type PersonalityInfo struct {
-	Key      string
-	Name     string
+	Key         string
+	Name        string
 	Description string
-	IsCustom bool
+	IsCustom    bool
 }
 
 // presetPersonalities returns the hardcoded personality presets.
@@ -73,6 +73,22 @@ func customToPersonalityInfo(c models.CustomPersonality) PersonalityInfo {
 func IsPresetPersonality(key string) bool {
 	_, ok := personalityPrompts[key]
 	return ok || key == ""
+}
+
+// FindPersonality returns the matching built-in or custom personality for an exact key.
+func FindPersonality(ctx context.Context, key string, repo *repository.CustomPersonalityRepo) (PersonalityInfo, bool) {
+	for _, personality := range AllPersonalitiesWithCustom(ctx, repo) {
+		if personality.Key == key {
+			return personality, true
+		}
+	}
+	return PersonalityInfo{}, false
+}
+
+// IsAvailablePersonalityKey reports whether key is empty/default, a built-in preset, or an existing custom personality.
+func IsAvailablePersonalityKey(ctx context.Context, key string, repo *repository.CustomPersonalityRepo) bool {
+	_, ok := FindPersonality(ctx, key, repo)
+	return ok
 }
 
 // personalityPrompts maps personality keys to their system prompt modifiers.

@@ -925,14 +925,7 @@ func channelSetPersonalityResult(ctx context.Context, settingsRepo *repository.S
 	if key == "" {
 		return "set_personality requires personality."
 	}
-	valid := false
-	for _, p := range AllPersonalitiesWithCustom(ctx, customRepo) {
-		if p.Key == key {
-			valid = true
-			break
-		}
-	}
-	if !valid {
+	if !IsAvailablePersonalityKey(ctx, key, customRepo) {
 		return fmt.Sprintf("Unknown personality %q. Use list_personalities to view options.", key)
 	}
 	if settingsRepo == nil {

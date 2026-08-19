@@ -3184,23 +3184,15 @@ func (h *Handler) executeListPersonalities(ctx context.Context) string {
 
 // executeSetPersonality applies a typed set_personality runtime action.
 func (h *Handler) executeSetPersonality(ctx context.Context, req service.SetPersonalityRequest) string {
-	// Validate personality key against presets + custom
-	valid := false
-	var matchedName string
-	for _, personality := range service.AllPersonalitiesWithCustom(ctx, h.customPersonalityRepo) {
-		if personality.Key == req.Personality {
-			valid = true
-			matchedName = personality.Name
-			break
-		}
-	}
-	if !valid {
+	// Validate personality key against presets + custom.
+	personality, ok := service.FindPersonality(ctx, req.Personality, h.customPersonalityRepo)
+	if !ok {
 		return fmt.Sprintf("Unknown personality %q. Use list_personalities to see available options.", req.Personality)
 	}
 	if err := h.settingsRepo.Set(ctx, "personality", req.Personality); err != nil {
 		return fmt.Sprintf("Error setting personality to %q: %v", req.Personality, err)
 	}
-	return fmt.Sprintf("Personality changed to **%s** (`%s`)", matchedName, req.Personality)
+	return fmt.Sprintf("Personality changed to **%s** (`%s`)", personality.Name, req.Personality)
 }
 
 // executeListModels returns available model configurations.

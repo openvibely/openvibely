@@ -792,6 +792,88 @@ func TestHandler_PersonalitySave_SetAsDefault_UpdatesCardState(t *testing.T) {
 	assert.Equal(t, "zen_debugger", val)
 }
 
+func TestHandler_PersonalitySave_CustomPersonalityHTMXRefreshesSection(t *testing.T) {
+	h, e, repo, settingsRepo := setupCustomPersonalityHandler(t)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
+		Name:         "Custom Reviewer",
+		Key:          "custom_reviewer_save",
+		Description:  "Reviews like a teammate",
+		SystemPrompt: "You are a custom reviewer with enough detail to satisfy validation.",
+	}))
+	require.NoError(t, settingsRepo.Set(ctx, "personality", "zen_debugger"))
+
+	req := httptest.NewRequest(http.MethodPost, "/personality/save?personality=custom_reviewer_save", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	require.NoError(t, h.handlePersonalitySave(c))
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `id="personality-section"`)
+	assert.Contains(t, rec.Body.String(), `data-selected-personality="custom_reviewer_save"`)
+	val, err := settingsRepo.Get(ctx, "personality")
+	require.NoError(t, err)
+	assert.Equal(t, "custom_reviewer_save", val)
+}
+
+func TestHandler_PersonalitySave_RejectsDeletedCustomKeyBeforeMutation(t *testing.T) {
+	h, e, repo, settingsRepo := setupCustomPersonalityHandler(t)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
+		Name:         "Deleted Custom",
+		Key:          "deleted_custom_save",
+		Description:  "Will be deleted before save",
+		SystemPrompt: "You are a deleted custom personality with enough prompt text.",
+	}))
+	require.NoError(t, settingsRepo.Set(ctx, "personality", "zen_debugger"))
+	require.NoError(t, repo.Delete(ctx, "deleted_custom_save"))
+
+	req := httptest.NewRequest(http.MethodPost, "/personality/save?personality=deleted_custom_save", nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	require.NoError(t, h.handlePersonalitySave(c))
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Contains(t, rec.Body.String(), `Unknown personality "deleted_custom_save"`)
+	val, err := settingsRepo.Get(ctx, "personality")
+	require.NoError(t, err)
+	assert.Equal(t, "zen_debugger", val)
+}
+
+func TestHandler_PersonalitySave_RejectsUnknownKeyBeforeMutation(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		htmx bool
+	}{
+		{name: "non-HTMX", htmx: false},
+		{name: "HTMX", htmx: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _, settingsRepo := setupCustomPersonalityHandler(t)
+			ctx := context.Background()
+			require.NoError(t, settingsRepo.Set(ctx, "personality", "zen_debugger"))
+			form := url.Values{}
+			form.Set("personality", "not_a_real_personality")
+			req := httptest.NewRequest(http.MethodPost, "/personality/save", strings.NewReader(form.Encode()))
+			req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
+			if tt.htmx {
+				req.Header.Set("HX-Request", "true")
+			}
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+
+			require.NoError(t, h.handlePersonalitySave(c))
+			assert.Equal(t, http.StatusBadRequest, rec.Code)
+			assert.Contains(t, rec.Body.String(), `Unknown personality "not_a_real_personality"`)
+			val, err := settingsRepo.Get(ctx, "personality")
+			require.NoError(t, err)
+			assert.Equal(t, "zen_debugger", val)
+		})
+	}
+}
+
 func TestHandler_PersonalitySave_SetDefaultNoPersonality(t *testing.T) {
 	h, e, _, settingsRepo := setupCustomPersonalityHandler(t)
 	ctx := context.Background()
