@@ -1377,6 +1377,12 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
+		CreateProject: CreateGitHubProjectRuntimeOptions{
+			ProjectSvc:                 s.projectSvc,
+			GitHubSvc:                  s.githubProjectSvc,
+			MemorySvc:                  s.memorySvc,
+			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,
+		},
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
 			if !s.checkAuthorization(userID, "", project.ID) {
 				return fmt.Errorf("Telegram user %d is not authorized to use project %q", userID, project.Name)

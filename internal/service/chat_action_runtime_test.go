@@ -1744,3 +1744,80 @@ func TestExecuteCreateGitHubProjectRuntimeSwitchAfterCreateWhenSupported(t *test
 	require.True(t, resp.Switched)
 	require.Equal(t, resp.ProjectID, switchedTo)
 }
+
+func TestSlackTelegramDiscordRuntimesCreateGitHubProject(t *testing.T) {
+	ctx := context.Background()
+
+	tests := []struct {
+		name       string
+		repoSuffix string
+		runtime    func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools
+	}{
+		{
+			name:       "Slack",
+			repoSuffix: "slack-runtime",
+			runtime: func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
+				svc := &SlackService{projectRepo: projectRepo, userProjects: map[string]string{}}
+				svc.SetProjectCreationServices(projectSvc, githubSvc, nil, nil)
+				return svc.buildSlackActionToolRuntime(projectID, slackActionContext{TeamID: "T1", UserID: "U1"}, nil)
+			},
+		},
+		{
+			name:       "Telegram",
+			repoSuffix: "telegram-runtime",
+			runtime: func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
+				svc := &TelegramService{projectRepo: projectRepo, userProjects: map[int64]string{}, userProjectVersions: map[int64]uint64{}}
+				svc.SetProjectCreationServices(projectSvc, githubSvc, nil, nil)
+				return svc.buildTelegramActionToolRuntime(projectID, 12345, 67890, nil)
+			},
+		},
+		{
+			name:       "Discord",
+			repoSuffix: "discord-runtime",
+			runtime: func(projectID string, projectRepo *repository.ProjectRepo, projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider) *llmcontracts.RuntimeTools {
+				svc := &DiscordService{projectRepo: projectRepo, userProjects: map[string]string{}}
+				svc.SetProjectCreationServices(projectSvc, githubSvc, nil, nil)
+				return svc.buildDiscordActionToolRuntime(projectID, discordActionContext{ChannelID: "C1", UserID: "U1"}, nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			projectRepo := repository.NewProjectRepo(db)
+			projectSvc := NewProjectService(projectRepo)
+			current := &models.Project{Name: tt.name + " Current Project"}
+			require.NoError(t, projectRepo.Create(ctx, current))
+
+			normalizedURL := "https://github.com/acme/" + tt.repoSuffix
+			cloneSvc := fakeProjectCloneProvider{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+				require.Equal(t, normalizedURL, repoURL)
+				return "/repos/" + projectID, normalizedURL, nil
+			}}
+			rt := tt.runtime(current.ID, projectRepo, projectSvc, cloneSvc)
+			require.NotNil(t, rt)
+
+			payload := json.RawMessage(fmt.Sprintf(`{"name":%q,"repo_url":%q,"switch_after_create":true}`, tt.name+" Created Project", normalizedURL))
+			out, handled, isErr, err := rt.Executor(ctx, "create_project", payload)
+			require.NoError(t, err)
+			require.True(t, handled)
+			require.False(t, isErr, out)
+
+			var resp createGitHubProjectRuntimeResponse
+			require.NoError(t, json.Unmarshal([]byte(out), &resp))
+			require.True(t, resp.OK, resp.Error)
+			require.NotEmpty(t, resp.ProjectID)
+			require.Equal(t, tt.name+" Created Project", resp.Name)
+			require.Equal(t, normalizedURL, resp.RepoURL)
+			require.True(t, resp.RepoPathPresent)
+			require.True(t, resp.Switched)
+
+			created, err := projectRepo.GetByID(ctx, resp.ProjectID)
+			require.NoError(t, err)
+			require.NotNil(t, created)
+			require.Equal(t, "/repos/"+resp.ProjectID, created.RepoPath)
+			require.Equal(t, normalizedURL, created.RepoURL)
+		})
+	}
+}

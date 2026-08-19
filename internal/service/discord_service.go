@@ -770,6 +770,12 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
+		CreateProject: CreateGitHubProjectRuntimeOptions{
+			ProjectSvc:                 s.projectSvc,
+			GitHubSvc:                  s.githubProjectSvc,
+			MemorySvc:                  s.memorySvc,
+			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,
+		},
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
 			if !s.checkAuthorization(ctx, project.ID, actionCtx.UserID) {
 				return fmt.Errorf("Discord user %q is not authorized to use project %q", actionCtx.UserID, project.Name)
