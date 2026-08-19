@@ -320,7 +320,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 	fullPrompt := llmprompt.BuildTaskPromptHeader() +
 		llmprompt.BuildAttachmentInstructions(req.Attachments) +
 		req.Message
-	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, runtimeToolNames(rt))
+	fullPrompt = llmprompt.ApplyTaskCreationToolMode(fullPrompt, rt.DefinitionNames())
 	fullPrompt += "\n\n---\nRESPONSE FORMAT REQUIREMENT: You MUST end your final response with exactly one of these status lines:\n" +
 		"- If the task completed successfully: [STATUS: SUCCESS]\n" +
 		"- If a command failed, a script returned non-zero, or the task could not be completed: [STATUS: FAILED | <describe what went wrong>]\n" +
@@ -383,7 +383,7 @@ func (a *Adapter) callChatStreaming(ctx context.Context, req llmcontracts.AgentR
 	rt := llmcontracts.RuntimeToolsFromContext(ctx)
 	systemPrompt := llmprompt.BuildChatSystemPrompt(req.Followup, req.ChatMode, req.ChatSystemContext, false)
 	if req.ChatMode == models.ChatModeOrchestrate {
-		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, runtimeToolNames(rt))
+		systemPrompt = llmprompt.ApplyChatActionToolMode(systemPrompt, rt.DefinitionNames())
 	}
 	systemPrompt = llmprompt.AppendWorktreeContextPrompt(systemPrompt, workDir)
 
@@ -585,19 +585,6 @@ func parseObjectJSON(raw string) (map[string]interface{}, error) {
 		return nil, err
 	}
 	return m, nil
-}
-
-func runtimeToolNames(rt *llmcontracts.RuntimeTools) []string {
-	if rt == nil {
-		return nil
-	}
-	var names []string
-	for _, def := range rt.Definitions {
-		if name := strings.TrimSpace(def.Name); name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
 }
 
 func runtimeTools(ctx context.Context) []openaiclient.ToolDefinition {

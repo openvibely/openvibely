@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -154,5 +155,23 @@ func TestRuntimeToolsHelpersCoverNilAndTrimmedNames(t *testing.T) {
 	}
 	if WithRuntimeTools(nil, nil) == nil || WithoutRuntimeTools(nil) == nil {
 		t.Fatal("nil-safe context helpers should return contexts")
+	}
+}
+
+func TestRuntimeToolsDefinitionNames(t *testing.T) {
+	if got := (*RuntimeTools)(nil).DefinitionNames(); got != nil {
+		t.Fatalf("nil RuntimeTools DefinitionNames = %#v, want nil", got)
+	}
+
+	rt := &RuntimeTools{Definitions: []RuntimeToolDefinition{
+		{Name: " create_task "},
+		{Name: ""},
+		{Name: " \t "},
+		{Name: "github_create_issue"},
+		{Name: " send_message\n"},
+	}}
+	want := []string{"create_task", "github_create_issue", "send_message"}
+	if got := rt.DefinitionNames(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("DefinitionNames() = %#v, want %#v", got, want)
 	}
 }
