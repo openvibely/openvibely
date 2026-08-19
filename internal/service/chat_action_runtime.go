@@ -607,6 +607,8 @@ type channelGitHubStatusActionSummary struct {
 	Connected     bool   `json:"connected"`
 	Status        string `json:"status"`
 	AuthMode      string `json:"auth_mode,omitempty"`
+	AccountLogin  string `json:"account_login,omitempty"`
+	AccountType   string `json:"account_type,omitempty"`
 	AppConfigured bool   `json:"app_configured"`
 	PATConfigured bool   `json:"pat_configured"`
 }
@@ -716,14 +718,30 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		return marshalChannelStatusAction(resp)
 	}
 
-	githubAuthMode := NormalizeGitHubAuthMode(get(GitHubSettingAuthMode))
+	storedGitHubAuthMode := strings.ToLower(strings.TrimSpace(get(GitHubSettingAuthMode)))
 	githubPATConfigured := get(GitHubSettingPAT) != ""
 	githubAppConfigured := get(GitHubSettingAppID) != "" || get(GitHubSettingAppSlug) != "" || get(GitHubSettingAppPrivateKey) != ""
+	githubAuthMode := GitHubAuthModePAT
+	if storedGitHubAuthMode == GitHubAuthModeApp || storedGitHubAuthMode == GitHubAuthModePAT {
+		githubAuthMode = storedGitHubAuthMode
+	} else if githubPATConfigured {
+		githubAuthMode = GitHubAuthModePAT
+	} else if githubAppConfigured {
+		githubAuthMode = GitHubAuthModeApp
+	}
+	githubConfigured := githubPATConfigured
+	githubConnected := githubPATConfigured
+	if githubAuthMode == GitHubAuthModeApp {
+		githubConfigured = githubAppConfigured
+		githubConnected = get(githubSettingInstallationID) != ""
+	}
 	resp.GitHub = channelGitHubStatusActionSummary{
-		Configured:    githubPATConfigured || githubAppConfigured || githubAuthMode != "",
-		Connected:     githubPATConfigured,
-		Status:        channelConnectedStatus(githubPATConfigured || githubAppConfigured || githubAuthMode != "", githubPATConfigured),
+		Configured:    githubConfigured,
+		Connected:     githubConnected,
+		Status:        channelConnectedStatus(githubConfigured, githubConnected),
 		AuthMode:      githubAuthMode,
+		AccountLogin:  get(githubSettingAccountLogin),
+		AccountType:   get(githubSettingAccountType),
 		AppConfigured: githubAppConfigured,
 		PATConfigured: githubPATConfigured,
 	}
@@ -884,6 +902,9 @@ func channelStatusSettings(ctx context.Context, settingsRepo *repository.Setting
 		GitHubSettingAppSlug,
 		GitHubSettingAppPrivateKey,
 		GitHubSettingPAT,
+		githubSettingInstallationID,
+		githubSettingAccountLogin,
+		githubSettingAccountType,
 		SlackSettingClientID,
 		SlackSettingClientSecret,
 		SlackSettingAppToken,
