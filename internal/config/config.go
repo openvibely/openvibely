@@ -115,19 +115,12 @@ func LoadWithMode(mode RuntimeMode) *Config {
 	if authMode == auth.AuthModeHostedSSO {
 		appBaseURL = rawAppBaseURL
 	}
-	defaultArtifact := buildinfo.ArtifactSource
-	if mode == ModeDesktop {
-		defaultArtifact = buildinfo.ArtifactDesktop
-	}
-	artifact := buildinfo.Current(defaultArtifact).Artifact
-	updateMode := strings.TrimSpace(os.Getenv("OPENVIBELY_UPDATE_MODE"))
-	if updateMode == "" {
-		if artifact == buildinfo.ArtifactContainer {
-			updateMode = buildinfo.ModeDockerManual
-		} else {
-			updateMode = buildinfo.ModeNone
-		}
-	}
+	updateDefaults := (&Config{
+		Mode:             mode,
+		UpdateMode:       strings.TrimSpace(os.Getenv("OPENVIBELY_UPDATE_MODE")),
+		UpdateServiceURL: os.Getenv("OPENVIBELY_UPDATE_SERVICE_URL"),
+		UpdateChannel:    os.Getenv("OPENVIBELY_UPDATE_CHANNEL"),
+	}).normalizeUpdateDefaults()
 
 	return (&Config{
 		Mode:                       mode,
@@ -139,12 +132,12 @@ func LoadWithMode(mode RuntimeMode) *Config {
 		DiscordToken:               getEnv("DISCORD_BOT_TOKEN", ""),
 		Environment:                getEnv("ENVIRONMENT", "development"),
 		EnvironmentExplicitlySet:   environmentSet,
-		BuildArtifact:              artifact,
-		UpdateMode:                 updateMode,
-		UpdateServiceURL:           getEnv("OPENVIBELY_UPDATE_SERVICE_URL", "https://openvibely.ai"),
-		UpdateChannel:              getEnv("OPENVIBELY_UPDATE_CHANNEL", "stable"),
+		BuildArtifact:              updateDefaults.BuildArtifact,
+		UpdateMode:                 updateDefaults.UpdateMode,
+		UpdateServiceURL:           updateDefaults.UpdateServiceURL,
+		UpdateChannel:              updateDefaults.UpdateChannel,
 		UpdatePublicKeyFile:        getEnv("OPENVIBELY_UPDATE_PUBLIC_KEY_FILE", ""),
-		DisableUpdateNotifications: resolveBoolDefault(os.Getenv("DISABLE_UPDATE_NOTIFICATIONS"), packagedUpdateNotificationsDisabledByDefault(artifact)),
+		DisableUpdateNotifications: resolveBoolDefault(os.Getenv("DISABLE_UPDATE_NOTIFICATIONS"), packagedUpdateNotificationsDisabledByDefault(updateDefaults.BuildArtifact)),
 		HostedAgentToken:           getEnv("OPENVIBELY_HOSTED_AGENT_TOKEN", ""),
 		DockerAgentURL:             getEnv("OPENVIBELY_DOCKER_AGENT_URL", ""),
 		DockerAgentToken:           getEnv("OPENVIBELY_DOCKER_AGENT_TOKEN", ""),
@@ -206,26 +199,7 @@ func (c *Config) NormalizeForMode() *Config {
 	if c.Mode == ModeDesktop && os.Getenv("OPENVIBELY_ENABLE_LOCAL_REPO_PATH") == "" {
 		c.EnableLocalRepoPath = true
 	}
-	if c.BuildArtifact == "" {
-		defaultArtifact := buildinfo.ArtifactSource
-		if c.Mode == ModeDesktop {
-			defaultArtifact = buildinfo.ArtifactDesktop
-		}
-		c.BuildArtifact = buildinfo.Current(defaultArtifact).Artifact
-	}
-	if c.UpdateMode == "" {
-		if c.BuildArtifact == buildinfo.ArtifactContainer {
-			c.UpdateMode = buildinfo.ModeDockerManual
-		} else {
-			c.UpdateMode = buildinfo.ModeNone
-		}
-	}
-	if c.UpdateServiceURL == "" {
-		c.UpdateServiceURL = "https://openvibely.ai"
-	}
-	if c.UpdateChannel == "" {
-		c.UpdateChannel = "stable"
-	}
+	c.normalizeUpdateDefaults()
 	return c
 }
 
@@ -254,6 +228,38 @@ func defaultsForMode(mode RuntimeMode) modeDefaults {
 		defaults.EnableLocalRepoPath = true
 	}
 	return defaults
+}
+
+const (
+	defaultUpdateServiceURL = "https://openvibely.ai"
+	defaultUpdateChannel    = "stable"
+)
+
+func (c *Config) normalizeUpdateDefaults() *Config {
+	if c == nil {
+		return nil
+	}
+	if c.BuildArtifact == "" {
+		defaultArtifact := buildinfo.ArtifactSource
+		if c.Mode == ModeDesktop {
+			defaultArtifact = buildinfo.ArtifactDesktop
+		}
+		c.BuildArtifact = buildinfo.Current(defaultArtifact).Artifact
+	}
+	if c.UpdateMode == "" {
+		if c.BuildArtifact == buildinfo.ArtifactContainer {
+			c.UpdateMode = buildinfo.ModeDockerManual
+		} else {
+			c.UpdateMode = buildinfo.ModeNone
+		}
+	}
+	if c.UpdateServiceURL == "" {
+		c.UpdateServiceURL = defaultUpdateServiceURL
+	}
+	if c.UpdateChannel == "" {
+		c.UpdateChannel = defaultUpdateChannel
+	}
+	return c
 }
 
 // serverDataDir returns the default app-owned storage directory for web/server
@@ -387,26 +393,7 @@ func (c *Config) ValidateUpdate() error {
 	if c == nil {
 		return errors.New("configuration is nil")
 	}
-	if c.BuildArtifact == "" {
-		defaultArtifact := buildinfo.ArtifactSource
-		if c.Mode == ModeDesktop {
-			defaultArtifact = buildinfo.ArtifactDesktop
-		}
-		c.BuildArtifact = buildinfo.Current(defaultArtifact).Artifact
-	}
-	if c.UpdateMode == "" {
-		if c.BuildArtifact == buildinfo.ArtifactContainer {
-			c.UpdateMode = buildinfo.ModeDockerManual
-		} else {
-			c.UpdateMode = buildinfo.ModeNone
-		}
-	}
-	if c.UpdateServiceURL == "" {
-		c.UpdateServiceURL = "https://openvibely.ai"
-	}
-	if c.UpdateChannel == "" {
-		c.UpdateChannel = "stable"
-	}
+	c.normalizeUpdateDefaults()
 	distribution, err := buildinfo.ResolveDistribution(c.BuildArtifact, c.UpdateMode)
 	if err != nil {
 		return fmt.Errorf("OPENVIBELY_UPDATE_MODE: %w", err)
