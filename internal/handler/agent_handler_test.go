@@ -1546,6 +1546,293 @@ func TestHandler_ListAgents_IncludesDefaultOffPluginText(t *testing.T) {
 	}
 }
 
+func TestHandler_AgentModelPickerRoutesUseCompactProjection(t *testing.T) {
+	_, e, _, agentRepo, counter := setupAgentModelPickerProjectionTest(t)
+
+	agent := &models.Agent{Name: "Projection Existing", Key: "projection_existing", Model: "inherit", Tools: []string{"Read"}, Enabled: true}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create existing agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/agents?project_id=default", nil)
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected list status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertCompactAgentPickerQueries(t, counter.Statements(), 1)
+	body := rec.Body.String()
+	inheritIndex := strings.Index(body, `<option value="inherit">Inherit (from task)</option>`)
+	defaultIndex := strings.Index(body, `<option value="agent-picker-default">Agent Picker Default</option>`)
+	firstCustomIndex := strings.Index(body, `<option value="agent-picker-model-00">Agent Picker 00</option>`)
+	if inheritIndex < 0 || defaultIndex < 0 || firstCustomIndex < 0 || !(inheritIndex < defaultIndex && defaultIndex < firstCustomIndex) {
+		t.Fatalf("agent model dropdown order/labels not preserved: inherit=%d default=%d firstCustom=%d", inheritIndex, defaultIndex, firstCustomIndex)
+	}
+
+	createForm := agentDialogModelForm("Projection Create", "agent-picker-model-17")
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec = performAgentDialogRequest(t, e, http.MethodPost, "/agents", createForm)
+	counter.SetEnabled(false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected create status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+	created := requireUserAgentByName(t, agentRepo, "Projection Create")
+	if created.Model != "agent-picker-model-17" {
+		t.Fatalf("known create model normalized to %q", created.Model)
+	}
+
+	updateForm := agentDialogModelForm("Projection Existing Updated", "agent-picker-model-23")
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec = performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+agent.ID, updateForm)
+	counter.SetEnabled(false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected update status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+	updated, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload updated agent: %v", err)
+	}
+	if updated.Model != "agent-picker-model-23" {
+		t.Fatalf("known update model normalized to %q", updated.Model)
+	}
+}
+
+func TestHandler_AgentModelNormalizationPreservesBlankInheritUnknownAndKnown(t *testing.T) {
+	_, e, _, agentRepo, counter := setupAgentModelPickerProjectionTest(t)
+
+	createCases := []struct {
+		name      string
+		input     string
+		wantModel string
+	}{
+		{name: "Create Blank Model", input: "", wantModel: "inherit"},
+		{name: "Create Inherit Model", input: " inherit ", wantModel: "inherit"},
+		{name: "Create Unknown Model", input: "missing-model", wantModel: "inherit"},
+		{name: "Create Known Model", input: "agent-picker-model-31", wantModel: "agent-picker-model-31"},
+	}
+	for _, tc := range createCases {
+		counter.Reset()
+		counter.SetEnabled(true)
+		rec := performAgentDialogRequest(t, e, http.MethodPost, "/agents", agentDialogModelForm(tc.name, tc.input))
+		counter.SetEnabled(false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected status 200, got %d: %s", tc.name, rec.Code, rec.Body.String())
+		}
+		assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+		created := requireUserAgentByName(t, agentRepo, tc.name)
+		if created.Model != tc.wantModel {
+			t.Fatalf("%s: model = %q, want %q", tc.name, created.Model, tc.wantModel)
+		}
+	}
+
+	updateCases := []struct {
+		name      string
+		input     string
+		wantModel string
+	}{
+		{name: "Update Blank Model", input: "", wantModel: "inherit"},
+		{name: "Update Inherit Model", input: "inherit", wantModel: "inherit"},
+		{name: "Update Unknown Model", input: "missing-model", wantModel: "inherit"},
+		{name: "Update Known Model", input: "agent-picker-model-32", wantModel: "agent-picker-model-32"},
+	}
+	for _, tc := range updateCases {
+		agent := &models.Agent{Name: tc.name, Key: strings.ReplaceAll(strings.ToLower(tc.name), " ", "_"), Model: "agent-picker-model-01", Tools: []string{"Read"}, Enabled: true}
+		if err := agentRepo.Create(t.Context(), agent); err != nil {
+			t.Fatalf("create %s: %v", tc.name, err)
+		}
+		counter.Reset()
+		counter.SetEnabled(true)
+		rec := performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+agent.ID, agentDialogModelForm(tc.name, tc.input))
+		counter.SetEnabled(false)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected status 200, got %d: %s", tc.name, rec.Code, rec.Body.String())
+		}
+		assertCompactAgentPickerQueries(t, counter.Statements(), 2)
+		updated, err := agentRepo.GetByID(t.Context(), agent.ID)
+		if err != nil {
+			t.Fatalf("reload %s: %v", tc.name, err)
+		}
+		if updated.Model != tc.wantModel {
+			t.Fatalf("%s: model = %q, want %q", tc.name, updated.Model, tc.wantModel)
+		}
+	}
+}
+
+func TestHandler_GenerateAgentNormalizesModelsWithCompactPickerProjection(t *testing.T) {
+	h, e, _, _, counter := setupAgentModelPickerProjectionTest(t)
+
+	for _, tc := range []struct {
+		name      string
+		model     string
+		wantModel string
+	}{
+		{name: "known", model: "agent-picker-model-17", wantModel: "agent-picker-model-17"},
+		{name: "unknown", model: "missing-generated-model", wantModel: "inherit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h.llmSvc.SetLLMCaller(llmCallerFunc(func(ctx context.Context, prompt string, attachments []models.Attachment, agent models.LLMConfig, execID string, workDir string) (string, string, int, error) {
+				if agent.APIKey == "" || agent.ExtraBodyJSON == "" {
+					return "", "", 0, fmt.Errorf("default model was not hydrated with full execution fields: %#v", agent)
+				}
+				response := fmt.Sprintf(`{"name":"Generated %s","description":"desc","system_prompt":"Do work","model":%q,"tools":["Read"],"skills":[{"name":"Plan","description":"d","tools":"Read","content":"c"}],"mcp_servers":[]}`, tc.name, tc.model)
+				return response, response, 0, nil
+			}))
+
+			form := url.Values{}
+			form.Set("description", "Generate a coding agent")
+			counter.Reset()
+			counter.SetEnabled(true)
+			req := httptest.NewRequest(http.MethodPost, "/agents/generate", strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			counter.SetEnabled(false)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			assertCompactAgentPickerQueries(t, counter.Statements(), 1)
+			assertGenerateAgentLoadedFullDefaultModel(t, counter.Statements())
+
+			var generated struct {
+				Model          string `json:"model"`
+				GenerationMode string `json:"generation_mode"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &generated); err != nil {
+				t.Fatalf("decode generated response: %v", err)
+			}
+			if generated.GenerationMode != "llm" {
+				t.Fatalf("generation mode = %q, want llm", generated.GenerationMode)
+			}
+			if generated.Model != tc.wantModel {
+				t.Fatalf("generated model = %q, want %q", generated.Model, tc.wantModel)
+			}
+		})
+	}
+}
+
+func setupAgentModelPickerProjectionTest(t *testing.T) (*Handler, *echo.Echo, *repository.LLMConfigRepo, *repository.AgentRepo, *testutil.SQLStatementCounter) {
+	t.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+
+	largeBody := strings.Repeat("x", 64*1024)
+	extraBodyJSON := `{"large":"` + largeBody + `"}`
+	defaultCfg := &models.LLMConfig{
+		Name:          "Agent Picker Default",
+		Provider:      models.ProviderTest,
+		Model:         "agent-picker-default",
+		APIKey:        "secret-default-key",
+		ExtraBodyJSON: extraBodyJSON,
+		IsDefault:     true,
+	}
+	if err := llmConfigRepo.Create(t.Context(), defaultCfg); err != nil {
+		t.Fatalf("create default model config: %v", err)
+	}
+	for i := 0; i < 50; i++ {
+		cfg := &models.LLMConfig{
+			Name:                 fmt.Sprintf("Agent Picker %02d", i),
+			Provider:             models.ProviderOpenAICompatible,
+			AuthMethod:           models.AuthMethodOAuth,
+			Model:                fmt.Sprintf("agent-picker-model-%02d", i),
+			APIKey:               fmt.Sprintf("secret-key-%02d", i),
+			OAuthAccessToken:     "secret-token",
+			OAuthRefreshToken:    "secret-refresh",
+			OAuthClientSecret:    "secret-client",
+			BaseURL:              "https://example.com/v1/",
+			Transport:            "chat_completions",
+			PresetSlug:           "custom",
+			ExtraHeadersJSON:     `{"secret":"header"}`,
+			ExtraBodyJSON:        extraBodyJSON,
+			CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+			CustomAuthStateJSON:  `{"token":"secret"}`,
+			MixtureConfigJSON:    `{"large":"` + largeBody + `"}`,
+		}
+		if err := llmConfigRepo.Create(t.Context(), cfg); err != nil {
+			t.Fatalf("create large model config %d: %v", i, err)
+		}
+	}
+	return h, e, llmConfigRepo, agentRepo, counter
+}
+
+func agentDialogModelForm(name, model string) url.Values {
+	form := url.Values{}
+	form.Set("name", name)
+	form.Set("description", "model normalization")
+	form.Set("system_prompt", "do work")
+	form.Set("model", model)
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("enabled", "true")
+	form.Set("selectable_as_primary", "true")
+	return form
+}
+
+func requireUserAgentByName(t *testing.T, repo *repository.AgentRepo, name string) models.Agent {
+	t.Helper()
+	agents, err := repo.List(t.Context())
+	if err != nil {
+		t.Fatalf("list agents: %v", err)
+	}
+	for _, agent := range agents {
+		if agent.SystemKind == "" && agent.Name == name {
+			return agent
+		}
+	}
+	t.Fatalf("user agent %q not found in %+v", name, agents)
+	return models.Agent{}
+}
+
+func assertCompactAgentPickerQueries(t *testing.T, statements []string, minQueries int) {
+	t.Helper()
+	queries := 0
+	for _, statement := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if !strings.Contains(stmt, " from agent_configs order by is_default desc, name asc") {
+			continue
+		}
+		queries++
+		projection := strings.Split(stmt, " from agent_configs ")[0]
+		if !strings.Contains(projection, "select id, name, model") {
+			t.Fatalf("agent picker projection = %q, want id/name/model in %s", projection, statement)
+		}
+		for _, forbidden := range []string{"provider", "api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "oauth_config_revision", "mixture_config_json", "created_at", "updated_at", "max_workers", "worker_timeout", "auto_start_tasks"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("agent picker query selected forbidden column %q: %s", forbidden, statement)
+			}
+		}
+	}
+	if queries < minQueries {
+		t.Fatalf("found %d compact agent picker queries, want at least %d; statements: %#v", queries, minQueries, statements)
+	}
+}
+
+func assertGenerateAgentLoadedFullDefaultModel(t *testing.T, statements []string) {
+	t.Helper()
+	for _, statement := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(stmt, " from agent_configs where is_default = 1 limit 1") {
+			projection := strings.Split(stmt, " from agent_configs ")[0]
+			if strings.Contains(projection, "api_key") && strings.Contains(projection, "extra_body_json") {
+				return
+			}
+			t.Fatalf("GenerateAgent default-model query did not use full execution projection: %s", statement)
+		}
+	}
+	t.Fatalf("GenerateAgent did not load the full default model; statements: %#v", statements)
+}
+
 func TestHandler_GenerateAgent_RejectsUninstalledPluginSelection(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	h.SetAgentRepo(repository.NewAgentRepo(db))

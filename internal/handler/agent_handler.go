@@ -660,12 +660,12 @@ func (h *Handler) applyAgentDialogFormFields(c echo.Context, agent *models.Agent
 	agent.SystemPrompt = c.FormValue("system_prompt")
 	agent.Model = c.FormValue("model")
 
-	modelConfigs, err := h.llmConfigRepo.List(c.Request().Context())
+	modelPickerOptions, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
 	if err != nil {
-		applog.Infof("[handler] %s listing model configs failed: %v", operation, err)
+		applog.Infof("[handler] %s listing model picker options failed: %v", operation, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	agent.Model = normalizeAgentModel(agent.Model, buildAllowedAgentModels(modelConfigs))
+	agent.Model = normalizeAgentModel(agent.Model, buildAllowedAgentModels(modelPickerOptions))
 
 	if toolsJSON := c.FormValue("tools_json"); toolsJSON != "" {
 		if err := json.Unmarshal([]byte(toolsJSON), &agent.Tools); err != nil {
@@ -1225,18 +1225,12 @@ func (h *Handler) GenerateAgent(c echo.Context) error {
 		return c.JSON(http.StatusOK, normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels))
 	}
 
-	modelConfigs, err := h.llmConfigRepo.List(c.Request().Context())
+	modelPickerOptions, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
 	if err != nil {
-		generated.GenerationError = fmt.Sprintf("Could not load model configurations: %s", shortGenerationError(err))
+		generated.GenerationError = fmt.Sprintf("Could not load model picker options: %s", shortGenerationError(err))
 		return c.JSON(http.StatusOK, normalizeGeneratedAgent(generated, description, discoveredMCP, allowedModels))
 	}
-	for _, cfg := range modelConfigs {
-		modelID := strings.TrimSpace(cfg.Model)
-		if modelID == "" {
-			continue
-		}
-		allowedModels[modelID] = struct{}{}
-	}
+	allowedModels = buildAllowedAgentModels(modelPickerOptions)
 
 	defaultModel, err := h.llmConfigRepo.GetDefault(c.Request().Context())
 	if err != nil {
@@ -1506,12 +1500,12 @@ func (h *Handler) ListAgents(c echo.Context) error {
 	}
 	// applog.Debugf("[handler] ListAgents found %d agents", len(agents))
 
-	modelConfigs, err := h.llmConfigRepo.List(c.Request().Context())
+	modelPickerOptions, err := h.llmConfigRepo.ListPickerOptions(c.Request().Context())
 	if err != nil {
-		applog.Infof("[handler] ListAgents listing model configs failed: %v", err)
+		applog.Infof("[handler] ListAgents listing model picker options failed: %v", err)
 		return err
 	}
-	modelOptions := buildAgentModelOptions(modelConfigs)
+	modelOptions := buildAgentModelOptions(modelPickerOptions)
 
 	if isHtmx {
 		return render(c, http.StatusOK, pages.AgentsContent(agents, modelOptions))
