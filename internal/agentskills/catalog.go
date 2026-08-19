@@ -18,7 +18,9 @@
 package agentskills
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -392,35 +394,70 @@ func loadSkillIndexEntries(indexPath, skillsDir string, source Source, agentKey 
 	return out, nil
 }
 
-// skillDisabledOnDisk reads the SKILL.md at path and returns true only when
-// the frontmatter explicitly sets skill.enabled: false. Missing files, parse
-// errors, or an absent enabled field default to enabled (returns false).
+const maxSkillFrontmatterBytes = 64 * 1024
+
+// skillDisabledOnDisk reads only bounded YAML frontmatter from SKILL.md at path
+// and returns true only when it explicitly sets skill.enabled: false. Missing
+// files, parse errors, absent frontmatter, over-cap frontmatter, or an absent
+// enabled field default to enabled (returns false).
 func skillDisabledOnDisk(path string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil {
+	front, ok := readSkillFrontmatter(path)
+	if !ok {
 		return false
 	}
-	content := string(data)
-	if !strings.HasPrefix(content, "---") {
-		return false
-	}
-	rest := strings.TrimPrefix(content, "---")
-	rest = strings.TrimPrefix(rest, "\r")
-	rest = strings.TrimPrefix(rest, "\n")
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
-		return false
-	}
-	front := rest[:end]
 	var parsed struct {
 		Skill struct {
 			Enabled *bool `yaml:"enabled"`
 		} `yaml:"skill"`
 	}
-	if err := yaml.Unmarshal([]byte(front), &parsed); err != nil {
+	if err := yaml.Unmarshal(front, &parsed); err != nil {
 		return false
 	}
 	return parsed.Skill.Enabled != nil && !*parsed.Skill.Enabled
+}
+
+func readSkillFrontmatter(path string) ([]byte, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+
+	prefix := make([]byte, 3)
+	if n, err := io.ReadFull(f, prefix); err != nil || n != len(prefix) || string(prefix) != "---" {
+		return nil, false
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, false
+	}
+
+	limited := io.LimitReader(f, maxSkillFrontmatterBytes+1)
+	reader := bufio.NewReaderSize(limited, 1024)
+	first, err := reader.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return nil, false
+	}
+	if strings.TrimRight(first, "\r\n") != "---" || err == io.EOF {
+		return nil, false
+	}
+
+	var front strings.Builder
+	readBytes := len(first)
+	for readBytes <= maxSkillFrontmatterBytes {
+		line, err := reader.ReadString('\n')
+		readBytes += len(line)
+		if readBytes > maxSkillFrontmatterBytes {
+			return nil, false
+		}
+		if strings.TrimRight(line, "\r\n") == "---" {
+			return []byte(front.String()), true
+		}
+		if err != nil {
+			return nil, false
+		}
+		front.WriteString(line)
+	}
+	return nil, false
 }
 
 // h2HeaderRegexp captures the slug on a "## <slug>" line. The slug character
