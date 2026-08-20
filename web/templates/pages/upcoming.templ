@@ -2,7 +2,9 @@ package pages
 
 import (
 	"fmt"
+
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -309,8 +311,8 @@ templ upcomingTaskCardWithOrder(bt models.UpcomingTask, status string, currentPr
 					if bt.Task.Priority > 0 {
 						<span class="badge badge-sm badge-ghost">P{ fmt.Sprintf("%d", bt.Task.Priority) }</span>
 					}
-					if bt.Task.Tag != "" {
-						<span class={ "badge badge-sm", tagBadgeClass(bt.Task.Tag) }>{ string(bt.Task.Tag) }</span>
+					if components.TagLabel(bt.Task.Tag) != "" {
+						<span class={ "badge badge-sm", components.TagBadgeClass(bt.Task.Tag) }>{ components.TagLabel(bt.Task.Tag) }</span>
 					}
 					<span class="text-xs opacity-50">{ bt.AgentName }</span>
 				</div>
@@ -360,17 +362,6 @@ templ AISummaryResult(summary string, err error) {
 				<p class="text-sm opacity-80">{ summary }</p>
 			</div>
 		</div>
-	}
-}
-
-func tagBadgeClass(tag models.TaskTag) string {
-	switch tag {
-	case models.TagFeature:
-		return "badge-success"
-	case models.TagBug:
-		return "badge-error"
-	default:
-		return "badge-ghost"
 	}
 }
 
