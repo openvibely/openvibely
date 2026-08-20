@@ -236,8 +236,12 @@ type AlertRuntimeOptions struct {
 	PrepareImplementationTask func(context.Context, *models.AlertImplementationTaskInput) error
 }
 
-type telegramAuthListByProjectStore interface {
-	ListByProject(ctx context.Context, projectID string) ([]models.TelegramAuthorizedUser, error)
+type telegramAuthCountByProjectStore interface {
+	CountByProject(ctx context.Context, projectID string) (int, error)
+}
+
+type channelTargetSummaryStore interface {
+	SummarizeByProject(ctx context.Context, projectID string) (repository.ChannelTargetProjectSummary, error)
 }
 
 type CreateAgentRuntimeInput struct {
@@ -293,7 +297,7 @@ type channelUtilityActionHandlerOptions struct {
 	SlackStatus               func(context.Context) (SlackConnectionStatus, error)
 	SlackAuthRepo             *repository.SlackAuthRepo
 	TelegramRunning           func() bool
-	TelegramAuthRepo          telegramAuthListByProjectStore
+	TelegramAuthRepo          telegramAuthCountByProjectStore
 	DiscordStatus             func(context.Context) (DiscordConnectionStatus, error)
 	DiscordAuthRepo           *repository.DiscordAuthRepo
 	EmailStatus               func(context.Context) EmailConnectionStatus
@@ -778,12 +782,12 @@ func channelTargetsFromRouter(router *ChannelMessageRouter) channelTargetStore {
 	return router.targets
 }
 
-func telegramAuthListStore(store telegramAuthorizationStore) telegramAuthListByProjectStore {
+func telegramAuthCountStore(store telegramAuthorizationStore) telegramAuthCountByProjectStore {
 	if store == nil {
 		return nil
 	}
-	listStore, _ := store.(telegramAuthListByProjectStore)
-	return listStore
+	countStore, _ := store.(telegramAuthCountByProjectStore)
+	return countStore
 }
 
 func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHandlerOptions) (string, error) {
@@ -859,8 +863,8 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		SendResponses:  !isFalse(SlackSettingSendResponses),
 	}
 	if opts.SlackAuthRepo != nil {
-		if users, err := opts.SlackAuthRepo.ListByProject(ctx, projectID); err == nil {
-			resp.Slack.AuthorizedUserCount = len(users)
+		if count, err := opts.SlackAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.Slack.AuthorizedUserCount = count
 		}
 	}
 	if resp.Slack.Configured {
@@ -880,8 +884,8 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		RichMessagesV2: !isFalse(TelegramSettingRichMessagesV2),
 	}
 	if opts.TelegramAuthRepo != nil {
-		if users, err := opts.TelegramAuthRepo.ListByProject(ctx, projectID); err == nil {
-			resp.Telegram.AuthorizedUserCount = len(users)
+		if count, err := opts.TelegramAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.Telegram.AuthorizedUserCount = count
 		}
 	}
 	if resp.Telegram.Configured {
@@ -908,8 +912,8 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		LastError:     channelSafeSingleLine(discord.LastError),
 	}
 	if opts.DiscordAuthRepo != nil {
-		if users, err := opts.DiscordAuthRepo.ListByProject(ctx, projectID); err == nil {
-			resp.Discord.AuthorizedUserCount = len(users)
+		if count, err := opts.DiscordAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.Discord.AuthorizedUserCount = count
 		}
 	}
 	if resp.Discord.Configured {
@@ -950,8 +954,8 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		SkipAttachments: isTrue(EmailSettingSkipAttachments),
 	}
 	if opts.EmailAuthRepo != nil {
-		if senders, err := opts.EmailAuthRepo.ListByProject(ctx, projectID); err == nil {
-			resp.Email.AuthorizedSenderCount = len(senders)
+		if count, err := opts.EmailAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.Email.AuthorizedSenderCount = count
 		}
 	}
 	if resp.Email.Configured {
@@ -967,7 +971,11 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "webhooks")
 	}
 
-	if opts.ChannelTargets != nil {
+	if summaryStore, ok := opts.ChannelTargets.(channelTargetSummaryStore); ok {
+		if summary, err := summaryStore.SummarizeByProject(ctx, projectID); err == nil {
+			resp.OutboundTargets = channelTargetStatusFromRepoSummary(summary)
+		}
+	} else if opts.ChannelTargets != nil {
 		if targets, err := opts.ChannelTargets.ListByProject(ctx, projectID); err == nil {
 			resp.OutboundTargets = channelSummarizeTargets(targets)
 		}
@@ -1030,6 +1038,23 @@ func channelSummarizeWebhooks(webhooks []models.WebhookEndpoint) channelWebhookS
 			out.Active++
 		} else {
 			out.Disabled++
+		}
+	}
+	return out
+}
+
+func channelTargetStatusFromRepoSummary(summary repository.ChannelTargetProjectSummary) channelTargetStatusActionSummary {
+	out := channelTargetStatusActionSummary{
+		Total:      summary.Total,
+		Configured: summary.Configured,
+		ByPlatform: map[string]channelTargetPlatformSummary{},
+	}
+	for platform, platformSummary := range summary.ByPlatform {
+		out.ByPlatform[platform] = channelTargetPlatformSummary{
+			Total:  platformSummary.Total,
+			Home:   platformSummary.Home,
+			Named:  platformSummary.Named,
+			ByKind: platformSummary.ByKind,
 		}
 	}
 	return out

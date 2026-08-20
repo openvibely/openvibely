@@ -42,6 +42,12 @@ func (r *SlackAuthRepo) ListByProject(ctx context.Context, projectID string) ([]
 	return r.allowlist.List(ctx)
 }
 
+// CountByProject returns the system-level Slack authorized-user count.
+// projectID is accepted for UI/status compatibility but does not scope inbound authorization.
+func (r *SlackAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
+	return r.allowlist.Count(ctx)
+}
+
 // IsAuthorized checks whether a Slack user is authorized at the system channel level.
 // projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *SlackAuthRepo) IsAuthorized(ctx context.Context, projectID, slackUserID string) (bool, error) {

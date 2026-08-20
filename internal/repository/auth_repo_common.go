@@ -24,10 +24,18 @@ func deleteByID(ctx context.Context, db *sql.DB, table, entityLabel, id string) 
 
 // countAny reports whether table contains any rows. errLabel is used only in
 // the wrapped error message on query failure.
-func countAny(ctx context.Context, db *sql.DB, table, errLabel string) (bool, error) {
+func countRows(ctx context.Context, db *sql.DB, table, errLabel string) (int, error) {
 	var count int
 	if err := db.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM %s`, table)).Scan(&count); err != nil {
-		return false, fmt.Errorf("count %s: %w", errLabel, err)
+		return 0, fmt.Errorf("count %s: %w", errLabel, err)
+	}
+	return count, nil
+}
+
+func countAny(ctx context.Context, db *sql.DB, table, errLabel string) (bool, error) {
+	count, err := countRows(ctx, db, table, errLabel)
+	if err != nil {
+		return false, err
 	}
 	return count > 0, nil
 }
@@ -246,6 +254,10 @@ func (h singleIdentifierAllowlist[T]) Delete(ctx context.Context, id string) err
 
 func (h singleIdentifierAllowlist[T]) HasAny(ctx context.Context) (bool, error) {
 	return countAny(ctx, h.db, h.table, h.countAnyErrLabel)
+}
+
+func (h singleIdentifierAllowlist[T]) Count(ctx context.Context) (int, error) {
+	return countRows(ctx, h.db, h.table, h.countAnyErrLabel)
 }
 
 func (h singleIdentifierAllowlist[T]) IsAuthorizedAnywhere(ctx context.Context, identity string) (bool, error) {

@@ -57,6 +57,12 @@ func (r *EmailAuthRepo) ListByProject(ctx context.Context, projectID string) ([]
 	return r.allowlist.List(ctx)
 }
 
+// CountByProject returns the system-level email authorized-sender count.
+// projectID is accepted for UI/status compatibility but does not scope inbound authorization.
+func (r *EmailAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
+	return r.allowlist.Count(ctx)
+}
+
 // IsAuthorized checks whether an email address is authorized at the system channel level.
 // projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *EmailAuthRepo) IsAuthorized(ctx context.Context, projectID, emailAddress string) (bool, error) {

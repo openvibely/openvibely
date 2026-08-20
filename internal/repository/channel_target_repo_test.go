@@ -123,6 +123,76 @@ func TestChannelTargetRepo_CRUDAndAudit(t *testing.T) {
 	require.Nil(t, missing)
 }
 
+func TestChannelTargetRepo_SummarizeByProjectMatchesMaterializedSummary(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Summary Targets Project"}
+	otherProject := &models.Project{Name: "Other Summary Targets Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, otherProject))
+	repo := NewChannelTargetRepo(db)
+
+	fixtures := []models.ChannelTarget{
+		{ID: "slack-home", ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: "COPS", Home: true},
+		{ID: "slack-user", ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U123"},
+		{ID: "telegram-home", ProjectID: project.ID, Platform: "telegram", TargetKind: "chat", Name: "alerts", TargetID: "-100", Home: true},
+		{ID: "discord-channel", ProjectID: project.ID, Platform: "discord", TargetKind: "channel", Name: "guild", TargetID: "C456"},
+		{ID: "discord-user", ProjectID: project.ID, Platform: "discord", TargetKind: "user", TargetID: "D789"},
+		{ID: "email-team", ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com"},
+		{ID: "other-slack", ProjectID: otherProject.ID, Platform: "slack", TargetKind: "channel", Name: "other", TargetID: "COTHER", Home: true},
+	}
+	for _, target := range fixtures {
+		require.NoError(t, repo.Upsert(ctx, target))
+	}
+
+	summary, err := repo.SummarizeByProject(ctx, project.ID)
+	require.NoError(t, err)
+	materialized, err := repo.ListByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Equal(t, channelTargetMaterializedSummary(materialized), summary)
+	require.Equal(t, 6, summary.Total)
+	require.True(t, summary.Configured)
+	require.Equal(t, ChannelTargetPlatformSummary{Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}}, summary.ByPlatform["slack"])
+	require.Equal(t, ChannelTargetPlatformSummary{Total: 1, Home: 1, Named: 1, ByKind: map[string]int{"chat": 1}}, summary.ByPlatform["telegram"])
+	require.Equal(t, ChannelTargetPlatformSummary{Total: 2, Home: 0, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}}, summary.ByPlatform["discord"])
+	require.Equal(t, ChannelTargetPlatformSummary{Total: 1, Home: 0, Named: 1, ByKind: map[string]int{"email": 1}}, summary.ByPlatform["email"])
+
+	emptySummary, err := repo.SummarizeByProject(ctx, "missing-project")
+	require.NoError(t, err)
+	require.False(t, emptySummary.Configured)
+	require.Equal(t, 0, emptySummary.Total)
+	require.Empty(t, emptySummary.ByPlatform)
+}
+
+func channelTargetMaterializedSummary(targets []models.ChannelTarget) ChannelTargetProjectSummary {
+	out := ChannelTargetProjectSummary{Total: len(targets), Configured: len(targets) > 0, ByPlatform: map[string]ChannelTargetPlatformSummary{}}
+	for _, target := range targets {
+		platform := normalizeChannelTargetField(target.Platform)
+		if platform == "" {
+			platform = "unknown"
+		}
+		kind := normalizeChannelTargetField(target.TargetKind)
+		if kind == "" {
+			kind = models.DefaultChannelTargetKind(platform)
+		}
+		platformSummary := out.ByPlatform[platform]
+		platformSummary.Total++
+		if target.Home {
+			platformSummary.Home++
+		}
+		if strings.TrimSpace(target.Name) != "" {
+			platformSummary.Named++
+		}
+		if platformSummary.ByKind == nil {
+			platformSummary.ByKind = map[string]int{}
+		}
+		platformSummary.ByKind[kind]++
+		out.ByPlatform[platform] = platformSummary
+	}
+	return out
+}
+
 func TestChannelTargetRepoLookupQueriesUseDedicatedIndexes(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
