@@ -122,12 +122,12 @@ func TestDoDrainsAndClosesResponseBeforeRetry(t *testing.T) {
 }
 
 func TestRetryableStatuses(t *testing.T) {
-	for _, status := range []int{408, 429, 500, 502, 503, 504, 529} {
+	for _, status := range []int{408, 500, 502, 503, 504, 529} {
 		if !IsRetryableStatus(status) {
 			t.Errorf("status %d should be retryable", status)
 		}
 	}
-	for _, status := range []int{400, 401, 403, 404, 422} {
+	for _, status := range []int{400, 401, 403, 404, 422, 429} {
 		if IsRetryableStatus(status) {
 			t.Errorf("status %d should not be retryable", status)
 		}
@@ -140,6 +140,9 @@ func TestRetryableErrorRequiresExactStatusToken(t *testing.T) {
 	}
 	if !IsRetryableError(errors.New("API error (503): unavailable")) {
 		t.Fatal("exact transient status token should be retryable")
+	}
+	if IsRetryableError(errors.New("API error 429: rate_limit_error: exceeded usage limit")) {
+		t.Fatal("rate-limit usage errors should not be retryable")
 	}
 }
 
@@ -276,21 +279,18 @@ func TestDoStreamRetriesProviderOverloadBeforeOutput(t *testing.T) {
 	}
 }
 
-func TestDoStreamHonorsResponseRetryAfter(t *testing.T) {
+func TestDoStreamDoesNotRetryRateLimitResponse(t *testing.T) {
 	attempts := 0
 	var delays []time.Duration
 	policy := instantPolicy()
 	policy.OnRetry = func(event RetryEvent) { delays = append(delays, event.Delay) }
-	result, err := DoStream(context.Background(), policy, func(context.Context) (string, bool, error) {
+	_, err := DoStream(context.Background(), policy, func(context.Context) (string, bool, error) {
 		attempts++
-		if attempts == 1 {
-			resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": []string{"7"}}}
-			return "", false, NewResponseError(resp, errors.New("rate limited"))
-		}
-		return "ok", true, nil
+		resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": []string{"7"}}}
+		return "", false, NewResponseError(resp, errors.New("rate limited"))
 	})
-	if err != nil || result != "ok" || len(delays) != 1 || delays[0] != 7*time.Second {
-		t.Fatalf("result/error/delays = %q/%v/%v, want ok/nil/[7s]", result, err, delays)
+	if err == nil || attempts != 1 || len(delays) != 0 {
+		t.Fatalf("error/attempts/delays = %v/%d/%v, want error/1/[]", err, attempts, delays)
 	}
 }
 
@@ -359,7 +359,7 @@ func TestDoStreamTurnConnectionRetryBoundedWhenNotOptedIn(t *testing.T) {
 	}
 }
 
-func TestDoStreamTurnRetries429ByDesign(t *testing.T) {
+func TestDoStreamTurnDoesNotRetry429(t *testing.T) {
 	attempts := 0
 	policy := StreamTurnPolicy{
 		After: func(time.Duration) <-chan time.Time {
@@ -368,16 +368,13 @@ func TestDoStreamTurnRetries429ByDesign(t *testing.T) {
 			return ch
 		},
 	}
-	result, err := DoStreamTurn(context.Background(), policy, func(context.Context) (string, error) {
+	_, err := DoStreamTurn(context.Background(), policy, func(context.Context) (string, error) {
 		attempts++
-		if attempts == 1 {
-			resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": []string{"1"}}}
-			return "", NewResponseError(resp, errors.New("rate limited"))
-		}
-		return "ok", nil
+		resp := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": []string{"1"}}}
+		return "", NewResponseError(resp, errors.New("rate limited"))
 	})
-	if err != nil || result != "ok" || attempts != 2 {
-		t.Fatalf("result/error/attempts = %q/%v/%d, want ok/nil/2", result, err, attempts)
+	if err == nil || attempts != 1 {
+		t.Fatalf("error/attempts = %v/%d, want error/1", err, attempts)
 	}
 }
 

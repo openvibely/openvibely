@@ -122,7 +122,6 @@ func DefaultPolicy() Policy {
 func IsRetryableStatus(statusCode int) bool {
 	switch statusCode {
 	case http.StatusRequestTimeout,
-		http.StatusTooManyRequests,
 		http.StatusInternalServerError,
 		http.StatusBadGateway,
 		http.StatusServiceUnavailable,
@@ -168,7 +167,7 @@ func IsRetryableError(err error) bool {
 		return IsRetryableStatus(responseErr.StatusCode)
 	}
 	msg := strings.ToLower(err.Error())
-	for _, hint := range []string{"rate limit", "too many requests", "overloaded", "temporar", "unavailable", "server error", "internal_error", "received from peer", "retry your request", "try again"} {
+	for _, hint := range []string{"overloaded", "temporar", "unavailable", "server error", "internal_error", "received from peer", "retry your request", "try again"} {
 		if strings.Contains(msg, hint) {
 			return true
 		}

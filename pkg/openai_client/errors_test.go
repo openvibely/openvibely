@@ -112,7 +112,6 @@ func TestAPIError(t *testing.T) {
 			statusCode int
 			temporary  bool
 		}{
-			{429, true},
 			{500, true},
 			{502, true},
 			{503, true},
@@ -121,6 +120,7 @@ func TestAPIError(t *testing.T) {
 			{401, false},
 			{403, false},
 			{404, false},
+			{429, false},
 		}
 
 		for _, tt := range tests {
