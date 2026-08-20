@@ -734,7 +734,7 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		return nil, fmt.Errorf("repository path is required")
 	}
 
-	changes, err := collectGitHubBranchChanges(ctx, dir, baseBranch)
+	changes, err := s.collectGitHubBranchChanges(ctx, dir, baseBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -1083,12 +1083,22 @@ func localCommitSHA(ctx context.Context, dir, ref string) (string, error) {
 	return sha, nil
 }
 
+const gitHubModeLookupChunkArgBytes = 64 * 1024
+
 func collectGitHubBranchChanges(ctx context.Context, dir, baseBranch string) ([]githubBranchChange, error) {
-	tracked, err := collectTrackedGitHubBranchChanges(ctx, dir, baseBranch)
+	return collectGitHubBranchChangesWithGit(ctx, dir, baseBranch, defaultRunGit)
+}
+
+func (s *GitHubService) collectGitHubBranchChanges(ctx context.Context, dir, baseBranch string) ([]githubBranchChange, error) {
+	return collectGitHubBranchChangesWithGit(ctx, dir, baseBranch, s.runGit)
+}
+
+func collectGitHubBranchChangesWithGit(ctx context.Context, dir, baseBranch string, runGit runGitFunc) ([]githubBranchChange, error) {
+	tracked, err := collectTrackedGitHubBranchChanges(ctx, dir, baseBranch, runGit)
 	if err != nil {
 		return nil, err
 	}
-	untracked, err := collectUntrackedGitHubBranchChanges(ctx, dir)
+	untracked, err := collectUntrackedGitHubBranchChanges(ctx, dir, runGit)
 	if err != nil {
 		return nil, err
 	}
@@ -1111,15 +1121,19 @@ func collectGitHubBranchChanges(ctx context.Context, dir, baseBranch string) ([]
 	return changes, nil
 }
 
-func collectTrackedGitHubBranchChanges(ctx context.Context, dir, baseBranch string) ([]githubBranchChange, error) {
-	cmd := exec.CommandContext(ctx, "git", "diff", "--name-status", "-z", baseBranch)
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+func collectTrackedGitHubBranchChanges(ctx context.Context, dir, baseBranch string, runGit runGitFunc) ([]githubBranchChange, error) {
+	out, err := runGit(ctx, dir, nil, "diff", "--name-status", "-z", baseBranch)
 	if err != nil {
 		return nil, fmt.Errorf("checking changed files: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	fields := strings.Split(string(out), "\x00")
-	changes := make([]githubBranchChange, 0)
+	type trackedChange struct {
+		path   string
+		delete bool
+	}
+	parsed := make([]trackedChange, 0)
+	modePaths := make([]string, 0)
+	seenModePath := make(map[string]struct{})
 	for i := 0; i < len(fields); {
 		status := strings.TrimSpace(fields[i])
 		i++
@@ -1137,7 +1151,7 @@ func collectTrackedGitHubBranchChanges(ctx context.Context, dir, baseBranch stri
 			path = cleanGitHubTreePath(fields[i])
 			i++
 			if code == "R" && oldPath != "" && oldPath != path {
-				changes = append(changes, githubBranchChange{Path: oldPath, Mode: "100644", Delete: true})
+				parsed = append(parsed, trackedChange{path: oldPath, delete: true})
 			}
 		} else {
 			if i >= len(fields) {
@@ -1149,23 +1163,37 @@ func collectTrackedGitHubBranchChanges(ctx context.Context, dir, baseBranch stri
 		if path == "" {
 			continue
 		}
-		if code == "D" {
-			changes = append(changes, githubBranchChange{Path: path, Mode: "100644", Delete: true})
+		delete := code == "D"
+		parsed = append(parsed, trackedChange{path: path, delete: delete})
+		if !delete {
+			if _, ok := seenModePath[path]; !ok {
+				seenModePath[path] = struct{}{}
+				modePaths = append(modePaths, path)
+			}
+		}
+	}
+	modes, err := gitHubTreeModes(ctx, dir, modePaths, runGit)
+	if err != nil {
+		return nil, err
+	}
+	changes := make([]githubBranchChange, 0, len(parsed))
+	for _, parsedChange := range parsed {
+		if parsedChange.delete {
+			changes = append(changes, githubBranchChange{Path: parsedChange.path, Mode: "100644", Delete: true})
 			continue
 		}
-		content, mode, err := readGitHubTreeFileContent(ctx, dir, path)
+		mode := trackedGitHubTreeMode(dir, parsedChange.path, modes[parsedChange.path])
+		content, err := readGitHubTreeFileContent(ctx, dir, parsedChange.path, mode)
 		if err != nil {
 			return nil, err
 		}
-		changes = append(changes, githubBranchChange{Path: path, Content: content, Mode: mode})
+		changes = append(changes, githubBranchChange{Path: parsedChange.path, Content: content, Mode: mode})
 	}
 	return changes, nil
 }
 
-func collectUntrackedGitHubBranchChanges(ctx context.Context, dir string) ([]githubBranchChange, error) {
-	cmd := exec.CommandContext(ctx, "git", "ls-files", "--others", "--exclude-standard", "-z")
-	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+func collectUntrackedGitHubBranchChanges(ctx context.Context, dir string, runGit runGitFunc) ([]githubBranchChange, error) {
+	out, err := runGit(ctx, dir, nil, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("checking untracked files: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -1184,7 +1212,8 @@ func collectUntrackedGitHubBranchChanges(ctx context.Context, dir string) ([]git
 		if info.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
-		content, mode, err := readGitHubTreeFileContent(ctx, dir, path)
+		mode := gitHubTreeModeFromFileInfo(info)
+		content, err := readGitHubTreeFileContent(ctx, dir, path, mode)
 		if err != nil {
 			return nil, err
 		}
@@ -1193,21 +1222,23 @@ func collectUntrackedGitHubBranchChanges(ctx context.Context, dir string) ([]git
 	return changes, nil
 }
 
-func readGitHubTreeFileContent(ctx context.Context, dir, relPath string) ([]byte, string, error) {
-	mode := gitHubTreeMode(ctx, dir, relPath)
+func readGitHubTreeFileContent(ctx context.Context, dir, relPath, mode string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	absPath := filepath.Join(dir, filepath.FromSlash(relPath))
 	if mode == "120000" {
 		target, err := os.Readlink(absPath)
 		if err != nil {
-			return nil, "", fmt.Errorf("reading symlink %s: %w", relPath, err)
+			return nil, fmt.Errorf("reading symlink %s: %w", relPath, err)
 		}
-		return []byte(target), mode, nil
+		return []byte(target), nil
 	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("reading changed file %s: %w", relPath, err)
+		return nil, fmt.Errorf("reading changed file %s: %w", relPath, err)
 	}
-	return content, mode, nil
+	return content, nil
 }
 
 func cleanGitHubTreePath(path string) string {
@@ -1219,24 +1250,83 @@ func cleanGitHubTreePath(path string) string {
 	return path
 }
 
-func gitHubTreeMode(ctx context.Context, dir, relPath string) string {
-	cmd := exec.CommandContext(ctx, "git", "ls-files", "-s", "--", relPath)
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err == nil {
-		fields := strings.Fields(string(out))
-		if len(fields) > 0 {
-			switch fields[0] {
+func gitHubTreeModes(ctx context.Context, dir string, relPaths []string, runGit runGitFunc) (map[string]string, error) {
+	modes := make(map[string]string, len(relPaths))
+	for _, chunk := range chunkGitHubModeLookupPaths(relPaths) {
+		args := make([]string, 0, len(chunk)+4)
+		args = append(args, "ls-files", "-s", "-z", "--")
+		args = append(args, chunk...)
+		out, err := runGit(ctx, dir, nil, args...)
+		if err != nil {
+			return nil, fmt.Errorf("checking indexed file modes: %w: %s", err, strings.TrimSpace(string(out)))
+		}
+		for _, record := range strings.Split(string(out), "\x00") {
+			if record == "" {
+				continue
+			}
+			tab := strings.IndexByte(record, '\t')
+			if tab < 0 {
+				continue
+			}
+			meta := record[:tab]
+			path := cleanGitHubTreePath(record[tab+1:])
+			if path == "" {
+				continue
+			}
+			modeEnd := strings.IndexByte(meta, ' ')
+			if modeEnd < 0 {
+				continue
+			}
+			switch mode := meta[:modeEnd]; mode {
 			case "100755", "120000":
-				return fields[0]
+				modes[path] = mode
+			case "100644":
+				modes[path] = mode
 			}
 		}
 	}
+	return modes, nil
+}
+
+func chunkGitHubModeLookupPaths(paths []string) [][]string {
+	if len(paths) == 0 {
+		return nil
+	}
+	chunks := make([][]string, 0, (len(paths)/256)+1)
+	start := 0
+	bytesInChunk := 0
+	for i, path := range paths {
+		pathBytes := len(path) + 1
+		if i > start && bytesInChunk+pathBytes > gitHubModeLookupChunkArgBytes {
+			chunks = append(chunks, paths[start:i])
+			start = i
+			bytesInChunk = 0
+		}
+		bytesInChunk += pathBytes
+	}
+	chunks = append(chunks, paths[start:])
+	return chunks
+}
+
+func trackedGitHubTreeMode(dir, relPath, indexedMode string) string {
+	switch indexedMode {
+	case "100755", "120000":
+		return indexedMode
+	}
+	return gitHubTreeModeFromLstat(dir, relPath)
+}
+
+func gitHubTreeModeFromLstat(dir, relPath string) string {
 	absPath := filepath.Join(dir, filepath.FromSlash(relPath))
 	if info, err := os.Lstat(absPath); err == nil {
-		if info.Mode()&0111 != 0 {
-			return "100755"
-		}
+		return gitHubTreeModeFromFileInfo(info)
+	}
+	return "100644"
+}
+
+func gitHubTreeModeFromFileInfo(info os.FileInfo) string {
+	if info != nil && info.Mode()&0111 != 0 {
+		return "100755"
 	}
 	return "100644"
 }

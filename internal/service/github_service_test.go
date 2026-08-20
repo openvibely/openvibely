@@ -2838,6 +2838,228 @@ func TestPublishBranchRaceNoOpsWhenLatestRemoteTreeMatchesDesiredTree(t *testing
 	}
 }
 
+func TestCollectGitHubBranchChangesPreservesModesDeletesRenamesAndOrdering(t *testing.T) {
+	ctx := context.Background()
+	repoDir := createGitHubBranchCollectionFixture(t, 0, 0)
+	writeGitHubBranchFixtureFile(t, repoDir, "normal.txt", []byte("normal\n"), 0o644)
+	writeGitHubBranchFixtureFile(t, repoDir, "exec.sh", []byte("#!/bin/sh\necho old\n"), 0o755)
+	writeGitHubBranchFixtureFile(t, repoDir, "chmod.sh", []byte("#!/bin/sh\necho chmod\n"), 0o644)
+	writeGitHubBranchFixtureFile(t, repoDir, "deleted.txt", []byte("delete me\n"), 0o644)
+	writeGitHubBranchFixtureFile(t, repoDir, "rename-old.txt", []byte("rename me\n"), 0o644)
+	if err := os.Symlink("old-target", filepath.Join(repoDir, "tracked-link")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	runGitHubBranchFixtureGit(t, repoDir, "add", ".")
+	runGitHubBranchFixtureGit(t, repoDir, "commit", "-m", "add mode fixture")
+
+	writeGitHubBranchFixtureFile(t, repoDir, "normal.txt", []byte("normal updated\n"), 0o644)
+	writeGitHubBranchFixtureFile(t, repoDir, "exec.sh", []byte("#!/bin/sh\necho new\n"), 0o755)
+	writeGitHubBranchFixtureFile(t, repoDir, "chmod.sh", []byte("#!/bin/sh\necho chmod now exec\n"), 0o755)
+	if err := os.Remove(filepath.Join(repoDir, "deleted.txt")); err != nil {
+		t.Fatalf("remove deleted fixture: %v", err)
+	}
+	runGitHubBranchFixtureGit(t, repoDir, "mv", "rename-old.txt", "rename-new.txt")
+	if err := os.Remove(filepath.Join(repoDir, "tracked-link")); err != nil {
+		t.Fatalf("remove tracked symlink: %v", err)
+	}
+	if err := os.Symlink("new-target", filepath.Join(repoDir, "tracked-link")); err != nil {
+		t.Fatalf("replace tracked symlink: %v", err)
+	}
+	writeGitHubBranchFixtureFile(t, repoDir, "untracked-exec.sh", []byte("#!/bin/sh\necho untracked\n"), 0o755)
+	if err := os.Symlink("outside", filepath.Join(repoDir, "untracked-link")); err != nil {
+		t.Fatalf("create untracked symlink: %v", err)
+	}
+
+	changes, err := collectGitHubBranchChanges(ctx, repoDir, "main")
+	if err != nil {
+		t.Fatalf("collectGitHubBranchChanges returned error: %v", err)
+	}
+	gotPaths := make([]string, 0, len(changes))
+	byPath := make(map[string]githubBranchChange, len(changes))
+	for _, change := range changes {
+		gotPaths = append(gotPaths, change.Path)
+		byPath[change.Path] = change
+	}
+	wantPaths := []string{"chmod.sh", "deleted.txt", "exec.sh", "normal.txt", "rename-new.txt", "rename-old.txt", "tracked-link", "untracked-exec.sh"}
+	if strings.Join(gotPaths, "\x00") != strings.Join(wantPaths, "\x00") {
+		t.Fatalf("unexpected deterministic paths:\n got %v\nwant %v", gotPaths, wantPaths)
+	}
+	assertGitHubBranchChange := func(path, mode, content string, deleted bool) {
+		t.Helper()
+		change, ok := byPath[path]
+		if !ok {
+			t.Fatalf("missing change for %s", path)
+		}
+		if change.Mode != mode || change.Delete != deleted || string(change.Content) != content {
+			t.Fatalf("unexpected change for %s: mode=%q delete=%v content=%q", path, change.Mode, change.Delete, string(change.Content))
+		}
+	}
+	assertGitHubBranchChange("chmod.sh", "100755", "#!/bin/sh\necho chmod now exec\n", false)
+	assertGitHubBranchChange("deleted.txt", "100644", "", true)
+	assertGitHubBranchChange("exec.sh", "100755", "#!/bin/sh\necho new\n", false)
+	assertGitHubBranchChange("normal.txt", "100644", "normal updated\n", false)
+	assertGitHubBranchChange("rename-new.txt", "100644", "rename me\n", false)
+	assertGitHubBranchChange("rename-old.txt", "100644", "", true)
+	assertGitHubBranchChange("tracked-link", "120000", "new-target", false)
+	assertGitHubBranchChange("untracked-exec.sh", "100755", "#!/bin/sh\necho untracked\n", false)
+	if _, ok := byPath["untracked-link"]; ok {
+		t.Fatal("untracked symlink must be skipped")
+	}
+}
+
+func TestCollectGitHubBranchChangesLargeFixtureUsesBatchedModeLookup(t *testing.T) {
+	ctx := context.Background()
+	repoDir := createGitHubBranchCollectionFixture(t, 1000, 1000)
+	var gitCalls int
+	var modeLookupCalls int
+	var modeLookupPathCount int
+	var untrackedModeLookups int
+	runGit := func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		gitCalls++
+		if len(args) >= 4 && args[0] == "ls-files" && args[1] == "-s" {
+			modeLookupCalls++
+			for i, arg := range args {
+				if arg != "--" {
+					continue
+				}
+				for _, path := range args[i+1:] {
+					modeLookupPathCount++
+					if strings.HasPrefix(path, "untracked/") {
+						untrackedModeLookups++
+					}
+				}
+				break
+			}
+		}
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+
+	started := time.Now()
+	changes, err := collectGitHubBranchChangesWithGit(ctx, repoDir, "main", runGit)
+	if err != nil {
+		t.Fatalf("collectGitHubBranchChangesWithGit returned error: %v", err)
+	}
+	t.Logf("collected %d changes with %d git subprocesses and %d mode lookup subprocesses in %s", len(changes), gitCalls, modeLookupCalls, time.Since(started))
+	if len(changes) != 2000 {
+		t.Fatalf("expected 2000 modified/untracked file changes, got %d", len(changes))
+	}
+	if gitCalls > 4 {
+		t.Fatalf("expected bounded git subprocesses for 2000 files, got %d", gitCalls)
+	}
+	if modeLookupCalls != 1 {
+		t.Fatalf("expected one batched tracked mode lookup for this fixture, got %d", modeLookupCalls)
+	}
+	if modeLookupPathCount != 1000 {
+		t.Fatalf("expected mode lookup for 1000 tracked paths only, got %d", modeLookupPathCount)
+	}
+	if untrackedModeLookups != 0 {
+		t.Fatalf("untracked files must not be passed to git ls-files -s, got %d", untrackedModeLookups)
+	}
+}
+
+func TestGitHubTreeModesChunksLargePathLists(t *testing.T) {
+	ctx := context.Background()
+	paths := make([]string, 0, 300)
+	for i := 0; i < 300; i++ {
+		paths = append(paths, fmt.Sprintf("tracked/%03d-%s.txt", i, strings.Repeat("x", 300)))
+	}
+	calls := 0
+	runGit := func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		calls++
+		var b strings.Builder
+		for i, arg := range args {
+			if arg != "--" {
+				continue
+			}
+			for _, path := range args[i+1:] {
+				b.WriteString("100644 abcdef1234567890 0\t")
+				b.WriteString(path)
+				b.WriteByte(0)
+			}
+			break
+		}
+		return []byte(b.String()), nil
+	}
+	modes, err := gitHubTreeModes(ctx, t.TempDir(), paths, runGit)
+	if err != nil {
+		t.Fatalf("gitHubTreeModes returned error: %v", err)
+	}
+	if calls <= 1 || calls >= len(paths) {
+		t.Fatalf("expected chunked bounded mode lookup calls, got %d for %d paths", calls, len(paths))
+	}
+	if len(modes) != len(paths) {
+		t.Fatalf("expected %d parsed modes, got %d", len(paths), len(modes))
+	}
+}
+
+func BenchmarkCollectGitHubBranchChangesLargeFixture(b *testing.B) {
+	ctx := context.Background()
+	repoDir := createGitHubBranchCollectionFixture(b, 1000, 1000)
+	var gitCalls int64
+	runGit := func(ctx context.Context, dir string, extraEnv []string, args ...string) ([]byte, error) {
+		atomic.AddInt64(&gitCalls, 1)
+		return defaultRunGit(ctx, dir, extraEnv, args...)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		changes, err := collectGitHubBranchChangesWithGit(ctx, repoDir, "main", runGit)
+		if err != nil {
+			b.Fatalf("collectGitHubBranchChangesWithGit returned error: %v", err)
+		}
+		if len(changes) != 2000 {
+			b.Fatalf("expected 2000 changes, got %d", len(changes))
+		}
+	}
+	b.ReportMetric(float64(atomic.LoadInt64(&gitCalls))/float64(b.N), "gitcmds/op")
+}
+
+func createGitHubBranchCollectionFixture(tb testing.TB, trackedFiles, untrackedFiles int) string {
+	tb.Helper()
+	dir := tb.TempDir()
+	runGitHubBranchFixtureGit(tb, dir, "init", "-b", "main")
+	runGitHubBranchFixtureGit(tb, dir, "config", "user.email", "test@test.com")
+	runGitHubBranchFixtureGit(tb, dir, "config", "user.name", "Test")
+	writeGitHubBranchFixtureFile(tb, dir, "README.md", []byte("# Test\n"), 0o644)
+	for i := 0; i < trackedFiles; i++ {
+		writeGitHubBranchFixtureFile(tb, dir, fmt.Sprintf("tracked/%04d.txt", i), []byte("old\n"), 0o644)
+	}
+	runGitHubBranchFixtureGit(tb, dir, "add", ".")
+	runGitHubBranchFixtureGit(tb, dir, "commit", "-m", "initial commit")
+	for i := 0; i < trackedFiles; i++ {
+		writeGitHubBranchFixtureFile(tb, dir, fmt.Sprintf("tracked/%04d.txt", i), []byte(fmt.Sprintf("new %04d\n", i)), 0o644)
+	}
+	for i := 0; i < untrackedFiles; i++ {
+		writeGitHubBranchFixtureFile(tb, dir, fmt.Sprintf("untracked/%04d.txt", i), []byte(fmt.Sprintf("untracked %04d\n", i)), 0o644)
+	}
+	return dir
+}
+
+func writeGitHubBranchFixtureFile(tb testing.TB, repoDir, relPath string, content []byte, perm os.FileMode) {
+	tb.Helper()
+	absPath := filepath.Join(repoDir, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+		tb.Fatalf("mkdir fixture file parent: %v", err)
+	}
+	if err := os.WriteFile(absPath, content, perm); err != nil {
+		tb.Fatalf("write fixture file %s: %v", relPath, err)
+	}
+	if err := os.Chmod(absPath, perm); err != nil {
+		tb.Fatalf("chmod fixture file %s: %v", relPath, err)
+	}
+}
+
+func runGitHubBranchFixtureGit(tb testing.TB, dir string, args ...string) string {
+	tb.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		tb.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func TestGitHubIssueAPIMethods(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	settingsRepo := repository.NewSettingsRepo(db)
