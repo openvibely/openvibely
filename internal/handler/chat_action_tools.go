@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -12,6 +13,7 @@ import (
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/update"
 )
 
 func supportsChatActionTools(agent models.LLMConfig) bool {
@@ -30,11 +32,129 @@ type chatActionSummaryCollector struct {
 	editedLines  []string
 }
 
+type systemUpdateStatusToolResponse struct {
+	OK                 bool                         `json:"ok"`
+	Applicable         bool                         `json:"applicable"`
+	Message            string                       `json:"message"`
+	State              string                       `json:"state,omitempty"`
+	CurrentVersion     string                       `json:"current_version,omitempty"`
+	TargetVersion      string                       `json:"target_version,omitempty"`
+	Distribution       string                       `json:"distribution,omitempty"`
+	Channel            string                       `json:"channel,omitempty"`
+	ReleaseNotesURL    string                       `json:"release_notes_url,omitempty"`
+	ApplySupported     bool                         `json:"apply_supported"`
+	UpdateAction       string                       `json:"update_action,omitempty"`
+	Manual             bool                         `json:"manual"`
+	Staged             bool                         `json:"staged"`
+	Drain              systemUpdateDrainToolSummary `json:"drain"`
+	ConfigurationError string                       `json:"configuration_error,omitempty"`
+	Error              string                       `json:"error,omitempty"`
+}
+
+type systemUpdateDrainToolSummary struct {
+	State                string `json:"state,omitempty"`
+	TaskExecutions       int    `json:"task_executions"`
+	ChatExecutions       int    `json:"chat_executions"`
+	AutomationActivities int    `json:"automation_activities"`
+	ActiveTotal          int    `json:"active_total"`
+	QueuedTotal          int    `json:"queued_total"`
+	ExpiresAt            string `json:"expires_at,omitempty"`
+}
+
 func newChatActionSummaryCollector() *chatActionSummaryCollector {
 	return &chatActionSummaryCollector{
 		createdLines: []string{},
 		editedLines:  []string{},
 	}
+}
+
+func (h *Handler) executeViewSystemUpdate(_ context.Context) (string, error) {
+	if h == nil || h.updateCoordinator == nil || !h.updateCoordinator.Visible() {
+		return marshalSystemUpdateStatus(systemUpdateStatusToolResponse{
+			OK:         true,
+			Applicable: false,
+			Message:    "System update status is not currently visible or applicable for this installation.",
+		})
+	}
+	snapshot := h.updateCoordinator.Snapshot()
+	return marshalSystemUpdateStatus(systemUpdateStatusFromSnapshot(snapshot))
+}
+
+func systemUpdateStatusFromSnapshot(snapshot update.CoordinatorSnapshot) systemUpdateStatusToolResponse {
+	response := systemUpdateStatusToolResponse{
+		OK:                 true,
+		Applicable:         true,
+		Message:            systemUpdateStatusMessage(snapshot),
+		State:              snapshot.State,
+		CurrentVersion:     snapshot.CurrentVersion,
+		Distribution:       snapshot.Distribution,
+		Channel:            snapshot.Channel,
+		Manual:             snapshot.Manual,
+		Staged:             snapshot.Staged,
+		ConfigurationError: snapshot.ConfigurationError,
+		Error:              snapshot.Error,
+		Drain: systemUpdateDrainToolSummary{
+			State:                snapshot.Drain.State,
+			TaskExecutions:       snapshot.Drain.Active.TaskExecutions,
+			ChatExecutions:       snapshot.Drain.Active.ChatExecutions,
+			AutomationActivities: snapshot.Drain.Active.AutomationActivities,
+			ActiveTotal:          snapshot.Drain.Active.Total(),
+			QueuedTotal:          snapshot.Drain.QueuedTotal,
+		},
+	}
+	if !snapshot.Drain.ExpiresAt.IsZero() {
+		response.Drain.ExpiresAt = snapshot.Drain.ExpiresAt.UTC().Format(time.RFC3339)
+	}
+	if snapshot.Release != nil {
+		response.TargetVersion = snapshot.Release.Metadata.Version
+		response.ReleaseNotesURL = snapshot.Release.Metadata.ReleaseNotesURL
+		response.ApplySupported = snapshot.Release.ApplySupported
+		response.UpdateAction = snapshot.Release.Action
+	}
+	return response
+}
+
+func systemUpdateStatusMessage(snapshot update.CoordinatorSnapshot) string {
+	target := ""
+	if snapshot.Release != nil {
+		target = strings.TrimSpace(snapshot.Release.Metadata.Version)
+	}
+	switch snapshot.State {
+	case update.StateAvailable:
+		if target != "" {
+			return fmt.Sprintf("Update %s is available.", target)
+		}
+		return "A system update is available."
+	case update.StateWaitingForIdle:
+		return "OpenVibely is waiting for active work to finish before applying the update."
+	case update.StateReady:
+		return "OpenVibely is ready for the next update step."
+	case update.StateApplying, update.StateRestarting, update.StateValidating, update.StateRollingBack:
+		return fmt.Sprintf("System update is in progress: %s.", snapshot.State)
+	case update.StateFailed:
+		return "System update failed."
+	case update.StateSucceeded:
+		return "System update succeeded."
+	case update.StateRolledBack:
+		return "System update rolled back."
+	case update.StateChecking:
+		return "OpenVibely is checking for system updates."
+	case update.StateIdle:
+		return "No actionable system update is currently visible."
+	default:
+		if strings.TrimSpace(snapshot.State) != "" {
+			return fmt.Sprintf("System update state is %s.", snapshot.State)
+		}
+		return "System update status is available."
+	}
+}
+
+func marshalSystemUpdateStatus(response systemUpdateStatusToolResponse) (string, error) {
+	b, err := json.Marshal(response)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 func (c *chatActionSummaryCollector) addCreated(summary string) {
@@ -401,6 +521,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"list_channels": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListChannels(ctx, params.ProjectID)), nil
 		},
+		"view_system_update": func(ctx context.Context, _ json.RawMessage) (string, error) {
+			return h.executeViewSystemUpdate(ctx)
+		},
 		"project_info": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeProjectInfo(ctx, params.ProjectID)), nil
 		},
@@ -724,26 +847,26 @@ func (h *Handler) executeGetModel(ctx context.Context, input json.RawMessage) st
 		return "Invalid input for get_model."
 	}
 
-	configs, err := h.llmConfigRepo.List(ctx)
+	c, err := h.llmConfigRepo.GetRuntimeSummary(ctx, req.ModelID, req.Name)
 	if err != nil {
 		applog.Infof("[handler] executeGetModel error: %v", err)
 		return "Error retrieving model configurations."
 	}
-
-	for _, c := range configs {
-		if (req.ModelID != "" && c.ID == req.ModelID) ||
-			(req.Name != "" && strings.EqualFold(c.Name, req.Name)) {
-			defaultStr := ""
-			if c.IsDefault {
-				defaultStr = " (default)"
-			}
-			workerInfo := ""
-			if c.MaxWorkers > 0 {
-				workerInfo = fmt.Sprintf(", max_workers: %d", c.MaxWorkers)
-			}
-			return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s%s",
-				c.Name, defaultStr, c.Provider, c.Model, c.AuthMethod, workerInfo)
+	if c != nil {
+		defaultStr := ""
+		if c.IsDefault {
+			defaultStr = " (default)"
 		}
+		workerInfo := ""
+		if c.MaxWorkers > 0 {
+			workerInfo = fmt.Sprintf(", max_workers: %d", c.MaxWorkers)
+		}
+		authStr := string(c.AuthMethod)
+		if authStr == "" {
+			authStr = string(models.AuthMethodAPIKey)
+		}
+		return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s%s",
+			c.Name, defaultStr, c.Provider, c.Model, authStr, workerInfo)
 	}
 
 	if req.ModelID != "" {
@@ -1178,6 +1301,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"create_swarm_task":                      true,
 		"list_schedules":                         true,
 		"view_usage_analytics":                   true,
+		"view_system_update":                     true,
 		"schedule_task":                          true,
 		"delete_schedule":                        true,
 		"modify_schedule":                        true,

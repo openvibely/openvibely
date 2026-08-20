@@ -18,6 +18,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
 
@@ -415,6 +416,71 @@ func TestChatActionReadHelpersUseRepositories(t *testing.T) {
 	require.Contains(t, tc.handler.executeGetAlert(ctx, project.ID, []byte(`{"alert_id":"missing"}`)), "not found")
 	require.Contains(t, tc.handler.executeGetAlert(ctx, project.ID, []byte(`{}`)), "requires alert_id")
 	require.Contains(t, (&Handler{}).executeGetAlert(ctx, project.ID, []byte(`{"alert_id":"`+alert.ID+`"}`)), "Alert service not available")
+}
+
+func TestChatModelStatusToolsUseCompactRuntimeSummaries(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	largeBody := strings.Repeat("large-provider-json", 4096)
+	model := &models.LLMConfig{
+		Name: "Compact Runtime Model", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "compact-runtime-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client", BaseURL: "https://example.com/v1/",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`, MaxWorkers: 4, WorkerTimeout: 30,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, model))
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	modelsOut := h.executeListModels(ctx)
+	getOut := h.executeGetModel(ctx, []byte(`{"name":" compact runtime model "}`))
+	settingsOut := h.executeViewSettings(ctx)
+	counter.SetEnabled(false)
+
+	require.Contains(t, modelsOut, "Compact Runtime Model")
+	require.Contains(t, modelsOut, "max_workers: 4")
+	require.Contains(t, getOut, "Compact Runtime Model")
+	require.Contains(t, getOut, "max_workers: 4")
+	require.Contains(t, settingsOut, "Compact Runtime Model")
+	require.Contains(t, settingsOut, "max_workers=4, timeout=30s")
+	assertChatModelStatusStatementsCompact(t, counter.Statements())
+}
+
+func assertChatModelStatusStatementsCompact(t *testing.T, statements []string) {
+	t.Helper()
+	var runtimeListQueries, targetedLookupQueries int
+	for _, raw := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+		if !strings.Contains(stmt, " from agent_configs") {
+			continue
+		}
+		projection := strings.Split(stmt, " from agent_configs")[0]
+		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("chat model/status query selected forbidden column %q: %s", forbidden, raw)
+			}
+		}
+		if strings.Contains(projection, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") && strings.Contains(stmt, "where name = ? collate nocase") {
+			targetedLookupQueries++
+			continue
+		}
+		if strings.Contains(projection, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") && strings.Contains(stmt, "order by is_default desc, name asc") && !strings.Contains(stmt, " where ") {
+			runtimeListQueries++
+			continue
+		}
+		if strings.Contains(projection, "select id, name, provider, model, reasoning_effort") {
+			t.Fatalf("chat model/status tool used full model list query: %s", raw)
+		}
+	}
+	if runtimeListQueries != 2 {
+		t.Fatalf("runtime list compact query count = %d, want 2; statements: %#v", runtimeListQueries, statements)
+	}
+	if targetedLookupQueries != 1 {
+		t.Fatalf("targeted lookup compact query count = %d, want 1; statements: %#v", targetedLookupQueries, statements)
+	}
 }
 
 func TestChatActionRuntimeBuildersFiltersAndLineageHelpers(t *testing.T) {

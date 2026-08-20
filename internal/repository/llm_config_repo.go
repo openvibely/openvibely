@@ -56,6 +56,13 @@ const llmConfigChatSelectionColumns = `id, name, provider, model, is_default`
 // All credential, OAuth, request-JSON, and large-blob columns are excluded.
 const llmConfigBadgeColumns = `id, name, model, is_default`
 
+// llmConfigRuntimeSummaryColumns is the compact read-only Chat model/status
+// projection. It deliberately excludes credentials, OAuth token bodies, endpoint
+// URLs, provider request JSON, custom-auth JSON, and full mixture definitions.
+// WorkerTimeout is included because view_settings displays it for configured
+// per-model worker pools.
+const llmConfigRuntimeSummaryColumns = `id, name, provider, model, is_default, auth_method, max_workers, worker_timeout`
+
 func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig) error {
 	return row.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.ReasoningEffort, &a.APIKey,
 		&a.MaxTokens, &a.Temperature, &a.IsDefault, &a.CreatedAt, &a.UpdatedAt,
@@ -247,7 +254,7 @@ func (r *LLMConfigRepo) ListChatSelectionOptions(ctx context.Context) ([]models.
 func (r *LLMConfigRepo) ListBadgeOptions(ctx context.Context) ([]models.LLMConfig, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT `+llmConfigBadgeColumns+`
-					 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+						 FROM agent_configs ORDER BY is_default DESC, name ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("listing model badge options: %w", err)
 	}
@@ -262,6 +269,81 @@ func (r *LLMConfigRepo) ListBadgeOptions(ctx context.Context) ([]models.LLMConfi
 		configs = append(configs, a)
 	}
 	return configs, rows.Err()
+}
+
+func scanLLMConfigRuntimeSummary(row interface{ Scan(dest ...any) error }, a *models.LLMConfig) error {
+	return row.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault, &a.AuthMethod, &a.MaxWorkers, &a.WorkerTimeout)
+}
+
+// ListRuntimeSummaries returns only the bounded model fields displayed by
+// read-only Chat model/status tools. The returned LLMConfig values are
+// intentionally incomplete and must not be used for provider execution, model
+// editing, credential access, OAuth refresh, or persistence.
+func (r *LLMConfigRepo) ListRuntimeSummaries(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+llmConfigRuntimeSummaryColumns+`
+						 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing runtime model summaries: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var a models.LLMConfig
+		if err := scanLLMConfigRuntimeSummary(rows, &a); err != nil {
+			return nil, fmt.Errorf("scanning runtime model summary: %w", err)
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
+}
+
+// GetRuntimeSummary returns one compact read-only Chat model summary by exact ID
+// or case-insensitive normalized name. It uses bounded display columns only and
+// avoids hydrating all model configs for targeted get_model requests.
+func (r *LLMConfigRepo) GetRuntimeSummary(ctx context.Context, id, name string) (*models.LLMConfig, error) {
+	id = strings.TrimSpace(id)
+	name = strings.TrimSpace(name)
+	if id == "" && name == "" {
+		return nil, nil
+	}
+
+	var (
+		row interface{ Scan(dest ...any) error }
+	)
+	switch {
+	case id != "" && name != "":
+		row = r.db.QueryRowContext(ctx,
+			`SELECT `+llmConfigRuntimeSummaryColumns+`
+				 FROM agent_configs
+				 WHERE id = ? OR name = ? COLLATE NOCASE
+				 ORDER BY is_default DESC, name ASC
+				 LIMIT 1`, id, name)
+	case id != "":
+		row = r.db.QueryRowContext(ctx,
+			`SELECT `+llmConfigRuntimeSummaryColumns+`
+				 FROM agent_configs
+				 WHERE id = ?
+				 LIMIT 1`, id)
+	default:
+		row = r.db.QueryRowContext(ctx,
+			`SELECT `+llmConfigRuntimeSummaryColumns+`
+				 FROM agent_configs
+				 WHERE name = ? COLLATE NOCASE
+				 ORDER BY is_default DESC, name ASC
+				 LIMIT 1`, name)
+	}
+
+	var a models.LLMConfig
+	err := scanLLMConfigRuntimeSummary(row, &a)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting runtime model summary: %w", err)
+	}
+	return &a, nil
 }
 
 // ListMixtureDefinitions returns only the fields needed to test whether a model
