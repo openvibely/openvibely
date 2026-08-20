@@ -519,10 +519,13 @@ func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) 
 
 func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
 	handlers := map[string]chatcontrol.RuntimeActionHandler{
-		"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return ExecuteListTasksTool(ctx, opts.TaskRepo, opts.ProjectID, input)
-		},
-		"list_automations": func(ctx context.Context, input json.RawMessage) (string, error) {
+			"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
+				return ExecuteListTasksTool(ctx, opts.TaskRepo, opts.ProjectID, input)
+			},
+			"view_swarm": func(ctx context.Context, input json.RawMessage) (string, error) {
+				return ExecuteViewSwarmTool(ctx, opts.TaskRepo, opts.ProjectID, input)
+			},
+			"list_automations": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return channelListAutomationsResult(ctx, opts.AutomationGraphSvc, opts.ProjectID, input)
 		},
 		"get_automation": func(ctx context.Context, input json.RawMessage) (string, error) {

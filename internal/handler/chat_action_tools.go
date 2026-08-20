@@ -422,6 +422,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return service.ExecuteListTasksTool(ctx, h.taskRepo, params.ProjectID, input)
 		},
+		"view_swarm": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeViewSwarmTool(ctx, params, input)
+		},
 		"view_task_thread": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.ViewThreadRequest
 			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
@@ -1062,6 +1065,29 @@ type sendToTaskToolInput struct {
 	OriginAgent string `json:"origin_agent"`
 }
 
+func (h *Handler) executeViewSwarmTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	var req service.ViewSwarmRequest
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", fmt.Errorf("view_swarm: %w", err)
+	}
+	taskID := strings.TrimSpace(req.TaskID)
+	title := strings.TrimSpace(req.Title)
+	if taskID == "current" || (taskID == "" && title == "" && params.IsTaskFollowup && params.TaskID != "") {
+		resolvedTaskID, err := h.resolveTaskIDForTool(ctx, params, "current", "")
+		if err != nil {
+			return "", err
+		}
+		req.TaskID = resolvedTaskID
+		req.Title = ""
+		encoded, err := json.Marshal(req)
+		if err != nil {
+			return "", err
+		}
+		input = encoded
+	}
+	return service.ExecuteViewSwarmTool(ctx, h.taskRepo, params.ProjectID, input)
+}
+
 func (h *Handler) normalizeScheduleToolTaskReference(ctx context.Context, params streamingResponseParams, taskID, title *string, defaultOmittedToCurrent bool) error {
 	if taskID == nil || title == nil {
 		return nil
@@ -1335,6 +1361,7 @@ func assignedAgentToolDenied(toolName string, agentDef *models.Agent) bool {
 func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 	allowed := map[string]bool{
 		"list_tasks":                             true,
+		"view_swarm":                             true,
 		"view_task_thread":                       true,
 		"send_to_task":                           true,
 		"send_message":                           true,

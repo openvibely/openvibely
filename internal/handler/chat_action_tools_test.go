@@ -183,6 +183,62 @@ func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
 	}
 }
 
+func TestViewSwarmRuntimeToolResolvesCurrentTaskThreadParent(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Current Swarm Project")
+	parent := createTask(t, h, project.ID, "Current parent", func(task *models.Task) {
+		task.SwarmRole = models.SwarmRoleParent
+		task.SwarmStatus = "planning"
+	})
+	child := createTask(t, h, project.ID, "Current worker", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleWorker
+		task.SwarmSequence = 1
+		task.Status = models.StatusRunning
+	})
+
+	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, false)
+	definitionNames := make([]string, 0, len(defs))
+	for _, def := range defs {
+		definitionNames = append(definitionNames, def.Name)
+	}
+	require.Contains(t, definitionNames, "view_swarm", "task-thread runtime definitions should include view_swarm")
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, TaskID: parent.ID, IsTaskFollowup: true, ChatMode: models.ChatModeOrchestrate},
+		nil,
+		defs,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(context.Background(), "view_swarm", json.RawMessage(`{"task_id":"current"}`))
+	require.True(t, handled)
+	require.False(t, isErr, out)
+	require.NoError(t, err)
+
+	var got struct {
+		OK              bool   `json:"ok"`
+		IsSwarm         bool   `json:"is_swarm"`
+		RequestedTaskID string `json:"requested_task_id"`
+		ParentTaskID    string `json:"parent_task_id"`
+		Children        []struct {
+			TaskID    string `json:"task_id"`
+			Title     string `json:"title"`
+			Status    string `json:"status"`
+			SwarmRole string `json:"swarm_role"`
+		} `json:"children"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.True(t, got.IsSwarm)
+	require.Equal(t, parent.ID, got.RequestedTaskID)
+	require.Equal(t, parent.ID, got.ParentTaskID)
+	require.Len(t, got.Children, 1)
+	require.Equal(t, child.ID, got.Children[0].TaskID)
+	require.Equal(t, "Current worker", got.Children[0].Title)
+	require.Equal(t, "running", got.Children[0].Status)
+	require.Equal(t, "worker", got.Children[0].SwarmRole)
+}
+
 func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	ctx := context.Background()

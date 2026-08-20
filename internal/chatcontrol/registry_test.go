@@ -291,7 +291,7 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	// Must have new actions
 	mustContain(t, names, "switch_project", "get_chat_mode", "set_chat_mode", "list_capabilities")
 	// Must have new read actions
-	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view", "view_system_update")
+	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view", "view_system_update", "view_swarm")
 	// Must have GitHub mailbox actions on web/API surfaces.
 	mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 	// Must have thread tools when requested
@@ -323,7 +323,33 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",
 		"list_personalities", "view_settings", "list_channels", "view_system_update", "project_info",
 		"get_chat_mode", "list_capabilities", "get_alert", "get_model",
-		"get_personality", "get_current_project", "memory_view", "view_task_thread", "list_schedules", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
+		"get_personality", "get_current_project", "memory_view", "view_task_thread", "view_swarm", "list_schedules", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
+}
+
+func TestViewSwarmRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range AllSurfaces {
+			defs := ToolDefsForContext(mode, surface, false)
+			mustContain(t, toolDefNames(defs), "view_swarm")
+			if err := IsAllowed("view_swarm", mode, surface); err != nil {
+				t.Fatalf("expected view_swarm allowed in %s on %s: %v", mode, surface, err)
+			}
+		}
+	}
+
+	def := Get("view_swarm")
+	if def == nil {
+		t.Fatal("expected view_swarm to be registered")
+	}
+	if def.Access != AccessRead {
+		t.Fatalf("expected view_swarm to be read-only, got %q", def.Access)
+	}
+	if def.Domain != DomainTasks {
+		t.Fatalf("expected view_swarm in tasks domain, got %q", def.Domain)
+	}
+	if !strings.Contains(def.Description, "without prompts, execution outputs, diff hunks, or config blobs") {
+		t.Fatalf("view_swarm description should state compact response boundary, got %q", def.Description)
+	}
 }
 
 func TestListSchedulesRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
