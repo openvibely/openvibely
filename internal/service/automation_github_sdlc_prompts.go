@@ -3,8 +3,6 @@ package service
 import (
 	"fmt"
 	"strings"
-
-	"github.com/openvibely/openvibely/internal/models"
 )
 
 // These prompts are owned by the maintained GitHub SDLC Automation template.
@@ -40,22 +38,6 @@ Before creating anything, call ` + "`" + `list_tasks` + "`" + ` (a read-only, cu
 Use unprefixed labels only, such as ` + "`" + `task-created` + "`" + `, ` + "`" + `in-progress` + "`" + `, ` + "`" + `blocked` + "`" + `, ` + "`" + `needs-human` + "`" + `, and ` + "`" + `pr-opened` + "`" + `. Never use labels beginning with ` + "`" + `openvibely:` + "`" + `.
 
 When implementation work is complete in a task branch, use ` + "`" + `github_open_pull_request` + "`" + ` for that task and include issue metadata so the task PR record stays linked. Do not use local ` + "`" + `git push` + "`" + ` or GitHub CLI as a fallback if the tool fails; report the tool error so GitHub token/API publication can be fixed.`
-
-func effectiveTaskPromptForExecution(task models.Task) string {
-	prompt := task.Prompt
-	if isStaleMaintainedGitHubDevInboxPrompt(task, prompt) {
-		return githubSDLCDevInboxPrompt
-	}
-	return prompt
-}
-
-func isStaleMaintainedGitHubDevInboxPrompt(task models.Task, prompt string) bool {
-	if !strings.HasPrefix(task.CreatedVia, "automation:") || !strings.HasSuffix(task.CreatedVia, ":dev_inbox") {
-		return false
-	}
-	legacyPrompt := strings.Replace(githubSDLCDevInboxPrompt, githubSDLCDevInboxBroadListTasksGuidance, "", 1)
-	return strings.TrimSpace(prompt) == strings.TrimSpace(legacyPrompt)
-}
 
 const githubSDLCImplementationPrompt = `Implement the assigned GitHub issue in the current project.
 

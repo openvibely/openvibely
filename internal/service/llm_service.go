@@ -1080,13 +1080,11 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	// Create or resolve the execution record. Automation dispatches precreate an
 	// execution transactionally with their durable dispatch claim; ordinary task
 	// runs keep the existing creation path.
-	executionPrompt := effectiveTaskPromptForExecution(task)
-	task.Prompt = executionPrompt
 	exec := &models.Execution{
 		TaskID:           task.ID,
 		AgentConfigID:    agent.ID,
 		Status:           models.ExecRunning,
-		PromptSent:       executionPrompt,
+		PromptSent:       task.Prompt,
 		StartsNewContext: task.StartsNewContext,
 	}
 	if preparedID := preparedAutomationExecutionID(ctx); preparedID != "" {
