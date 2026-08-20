@@ -1384,8 +1384,11 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
-		ProjectID:   projectID,
-		ProjectRepo: s.projectRepo,
+		ProjectID:     projectID,
+		ProjectRepo:   s.projectRepo,
+		ProjectSvc:    s.projectSvc,
+		LLMConfigRepo: s.llmConfigRepo,
+		WorkerSvc:     s.workerSvc,
 		CreateProject: CreateGitHubProjectRuntimeOptions{
 			ProjectSvc:                 s.projectSvc,
 			GitHubSvc:                  s.githubProjectSvc,
