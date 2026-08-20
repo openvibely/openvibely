@@ -788,6 +788,11 @@ type taskDiscoveryRow struct {
 
 const taskDiscoverySelectColumns = `id, title, category, status, priority, updated_at, parent_task_id, swarm_role`
 
+// swarmInspectionSelectColumns is the compact projection used by read-only Chat
+// swarm inspection. It intentionally omits prompt, execution output, chain_config,
+// swarm_config, and local worktree paths.
+const swarmInspectionSelectColumns = `id, project_id, title, category, priority, status, updated_at, parent_task_id, swarm_role, swarm_status, swarm_sequence, worktree_branch, merge_status`
+
 // ListTasksForDiscovery returns a bounded, deterministic page of non-chat tasks for
 // a single project, plus the total number of matching rows for pagination. It never
 // crosses project boundaries and always excludes internal chat rows (CategoryChat).
@@ -871,6 +876,79 @@ func (r *TaskRepo) ListTasksForDiscovery(ctx context.Context, projectID string, 
 		tasks = append(tasks, task)
 	}
 	return tasks, total, rows.Err()
+}
+
+// GetTaskForSwarmInspection loads one non-chat task by ID or exact title using a
+// compact projection scoped to the supplied project. Exactly one selector must be
+// supplied by callers.
+func (r *TaskRepo) GetTaskForSwarmInspection(ctx context.Context, projectID, taskID, title string) (*models.Task, error) {
+	projectID = strings.TrimSpace(projectID)
+	taskID = strings.TrimSpace(taskID)
+	title = strings.TrimSpace(title)
+	if projectID == "" {
+		return nil, fmt.Errorf("getting swarm inspection task: project id is required")
+	}
+	where := `project_id = ? AND category != 'chat'`
+	args := []any{projectID}
+	if taskID != "" {
+		where += ` AND id = ?`
+		args = append(args, taskID)
+	} else if title != "" {
+		where += ` AND title = ?`
+		args = append(args, title)
+	} else {
+		return nil, fmt.Errorf("getting swarm inspection task: task id or title is required")
+	}
+	return r.getOneSwarmInspectionTask(ctx, `SELECT `+swarmInspectionSelectColumns+` FROM tasks WHERE `+where+` LIMIT 1`, args...)
+}
+
+// ListSwarmChildrenForInspection returns compact, ordered child summaries for a
+// swarm parent without selecting prompt, execution output, or config payloads.
+func (r *TaskRepo) ListSwarmChildrenForInspection(ctx context.Context, projectID, parentTaskID string) ([]models.Task, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+swarmInspectionSelectColumns+`
+		 FROM tasks
+		 WHERE project_id = ? AND parent_task_id = ? AND category != 'chat'
+		   AND swarm_role IN ('planner','worker','reviewer','merger','integrator')
+		 ORDER BY swarm_sequence ASC,
+		 CASE swarm_role WHEN 'planner' THEN 0 WHEN 'worker' THEN 1 WHEN 'reviewer' THEN 2 WHEN 'merger' THEN 3 WHEN 'integrator' THEN 3 ELSE 9 END,
+		 created_at ASC, id ASC`, strings.TrimSpace(projectID), strings.TrimSpace(parentTaskID))
+	if err != nil {
+		return nil, fmt.Errorf("listing swarm children for inspection: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []models.Task
+	for rows.Next() {
+		task, err := scanSwarmInspectionTask(rows.Scan)
+		if err != nil {
+			return nil, fmt.Errorf("scanning swarm inspection child: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
+func (r *TaskRepo) getOneSwarmInspectionTask(ctx context.Context, query string, args ...any) (*models.Task, error) {
+	t, err := scanSwarmInspectionTask(r.db.QueryRowContext(ctx, query, args...).Scan)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting swarm inspection task: %w", err)
+	}
+	return &t, nil
+}
+
+func scanSwarmInspectionTask(scan func(dest ...any) error) (models.Task, error) {
+	var t models.Task
+	var parentTaskID sql.NullString
+	err := scan(&t.ID, &t.ProjectID, &t.Title, &t.Category, &t.Priority, &t.Status, &t.UpdatedAt, &parentTaskID, &t.SwarmRole, &t.SwarmStatus, &t.SwarmSequence, &t.WorktreeBranch, &t.MergeStatus)
+	if parentTaskID.Valid {
+		value := parentTaskID.String
+		t.ParentTaskID = &value
+	}
+	return t, err
 }
 
 type TaskDeletionManifest struct {

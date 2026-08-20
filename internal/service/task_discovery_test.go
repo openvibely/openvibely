@@ -11,6 +11,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
+	"github.com/stretchr/testify/require"
 )
 
 func decodeListTasksResult(t *testing.T, raw string) taskDiscoveryResult {
@@ -246,4 +247,170 @@ func TestDiscoveryToolsUseSharedInputDecoder(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExecuteViewSwarmToolParentTitleReturnsOrderedCompactHierarchy(t *testing.T) {
+	ctx := context.Background()
+	taskRepo, project := setupViewSwarmServiceFixture(t)
+	parent := createViewSwarmTask(t, taskRepo, project.ID, "Release swarm", func(task *models.Task) {
+		task.SwarmRole = models.SwarmRoleParent
+		task.SwarmStatus = "planning"
+		task.Prompt = "parent prompt must not appear"
+		task.SwarmConfig = `{"planner_notes":"large config must not appear"}`
+	})
+	createViewSwarmTask(t, taskRepo, project.ID, "worker later", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleWorker
+		task.SwarmStatus = "blocked"
+		task.SwarmSequence = 20
+		task.Status = models.StatusBlocked
+		task.Prompt = "worker prompt must not appear"
+		task.WorktreeBranch = "task/worker-later"
+	})
+	createViewSwarmTask(t, taskRepo, project.ID, "planner", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRolePlanner
+		task.SwarmStatus = "running"
+		task.SwarmSequence = 0
+		task.Status = models.StatusRunning
+	})
+	createViewSwarmTask(t, taskRepo, project.ID, "worker first", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleWorker
+		task.SwarmStatus = "done"
+		task.SwarmSequence = 10
+		task.Status = models.StatusCompleted
+	})
+	createViewSwarmTask(t, taskRepo, project.ID, "reviewer", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleReviewer
+		task.SwarmStatus = "pending"
+		task.SwarmSequence = 30
+	})
+	createViewSwarmTask(t, taskRepo, project.ID, "merger", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleMerger
+		task.SwarmStatus = "waiting"
+		task.SwarmSequence = 40
+		task.MergeStatus = models.MergeStatusPending
+	})
+
+	out, err := ExecuteViewSwarmTool(ctx, taskRepo, project.ID, json.RawMessage(`{"title":"Release swarm"}`))
+	require.NoError(t, err)
+
+	var got viewSwarmResult
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.True(t, got.IsSwarm)
+	require.Equal(t, "parent", got.ResolvedFrom)
+	require.Equal(t, parent.ID, got.ParentTaskID)
+	require.Equal(t, parent.ID, got.Parent.TaskID)
+	require.Equal(t, 5, got.ChildCount)
+	require.Equal(t, []string{"planner", "worker first", "worker later", "reviewer", "merger"}, viewSwarmChildTitles(got.Children))
+	require.Equal(t, "blocked", got.Children[2].Status)
+	require.True(t, got.Children[2].HasDiff)
+	require.True(t, got.Children[4].HasDiff)
+
+	for _, forbidden := range []string{"parent prompt must not appear", "worker prompt must not appear", "large config must not appear", "prompt", "swarm_config", "chain_config", "worktree_path", "diff_output"} {
+		require.NotContains(t, out, forbidden)
+	}
+}
+
+func TestExecuteViewSwarmToolChildLookupResolvesParentHierarchy(t *testing.T) {
+	ctx := context.Background()
+	taskRepo, project := setupViewSwarmServiceFixture(t)
+	parent := createViewSwarmTask(t, taskRepo, project.ID, "Parent", func(task *models.Task) {
+		task.SwarmRole = models.SwarmRoleParent
+	})
+	child := createViewSwarmTask(t, taskRepo, project.ID, "Worker", func(task *models.Task) {
+		task.ParentTaskID = &parent.ID
+		task.SwarmRole = models.SwarmRoleWorker
+		task.SwarmSequence = 1
+	})
+
+	out, err := ExecuteViewSwarmTool(ctx, taskRepo, project.ID, json.RawMessage(`{"task_id":"`+child.ID+`"}`))
+	require.NoError(t, err)
+
+	var got viewSwarmResult
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.IsSwarm)
+	require.Equal(t, child.ID, got.RequestedTaskID)
+	require.Equal(t, "child", got.ResolvedFrom)
+	require.Equal(t, parent.ID, got.ParentTaskID)
+	require.Len(t, got.Children, 1)
+	require.Equal(t, child.ID, got.Children[0].TaskID)
+}
+
+func TestExecuteViewSwarmToolNonSwarmReturnsControlledResponse(t *testing.T) {
+	ctx := context.Background()
+	taskRepo, project := setupViewSwarmServiceFixture(t)
+	task := createViewSwarmTask(t, taskRepo, project.ID, "Ordinary", nil)
+
+	out, err := ExecuteViewSwarmTool(ctx, taskRepo, project.ID, json.RawMessage(`{"task_id":"`+task.ID+`"}`))
+	require.NoError(t, err)
+
+	var got viewSwarmResult
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.False(t, got.IsSwarm)
+	require.Equal(t, "non_swarm", got.ResolvedFrom)
+	require.Contains(t, strings.ToLower(got.Message), "not a swarm")
+	require.Empty(t, got.Children)
+}
+
+func TestExecuteViewSwarmToolDoesNotCrossProjects(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	current := &models.Project{Name: "Current"}
+	foreign := &models.Project{Name: "Foreign"}
+	require.NoError(t, projectRepo.Create(ctx, current))
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	foreignParent := createViewSwarmTask(t, taskRepo, foreign.ID, "Same swarm title", func(task *models.Task) {
+		task.SwarmRole = models.SwarmRoleParent
+	})
+
+	_, err := ExecuteViewSwarmTool(ctx, taskRepo, current.ID, json.RawMessage(`{"task_id":"`+foreignParent.ID+`"}`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "current project")
+
+	_, err = ExecuteViewSwarmTool(ctx, taskRepo, current.ID, json.RawMessage(`{"title":"Same swarm title"}`))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "current project")
+}
+
+func setupViewSwarmServiceFixture(t *testing.T) (*repository.TaskRepo, *models.Project) {
+	t.Helper()
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Swarm Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	return repository.NewTaskRepo(db, nil), project
+}
+
+func createViewSwarmTask(t *testing.T, taskRepo *repository.TaskRepo, projectID, title string, mutate func(*models.Task)) *models.Task {
+	t.Helper()
+	task := &models.Task{
+		ProjectID: projectID,
+		Title:     title,
+		Category:  models.CategoryActive,
+		Priority:  2,
+		Status:    models.StatusPending,
+		Prompt:    "test prompt",
+	}
+	if mutate != nil {
+		mutate(task)
+	}
+	require.NoError(t, taskRepo.Create(context.Background(), task))
+	return task
+}
+
+func viewSwarmChildTitles(children []swarmTaskSummary) []string {
+	titles := make([]string, 0, len(children))
+	for _, child := range children {
+		titles = append(titles, child.Title)
+	}
+	return titles
 }
