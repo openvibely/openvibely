@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"html"
 	"net/http"
 	"net/http/httptest"
@@ -51,6 +52,22 @@ func renderPersonalityPageBody(t *testing.T, h *Handler, e *echo.Echo) string {
 	require.NoError(t, h.handleAppSettings(c))
 	require.Equal(t, http.StatusOK, rec.Code)
 	return rec.Body.String()
+}
+
+func customPersonalityJSONBody(t *testing.T, payload map[string]string) string {
+	t.Helper()
+	body, err := json.Marshal(payload)
+	require.NoError(t, err)
+	return string(body)
+}
+
+func assertCustomPersonalityHTTPError(t *testing.T, err error, code int, message string) {
+	t.Helper()
+	require.Error(t, err)
+	var httpErr *echo.HTTPError
+	require.True(t, errors.As(err, &httpErr), "expected echo.HTTPError, got %T", err)
+	assert.Equal(t, code, httpErr.Code)
+	assert.Equal(t, message, httpErr.Message)
 }
 
 func personalityCardHTML(t *testing.T, body, key string) string {
@@ -105,9 +122,9 @@ func TestHandler_CreateCustomPersonality(t *testing.T) {
 	ctx := context.Background()
 
 	form := url.Values{}
-	form.Set("name", "Test Personality")
-	form.Set("description", "A test personality")
-	form.Set("system_prompt", "You are a test assistant with at least 20 characters.")
+	form.Set("name", "  Test Personality  ")
+	form.Set("description", "  A test personality  ")
+	form.Set("system_prompt", "  You are a test assistant with at least 20 characters.  ")
 
 	req := httptest.NewRequest(http.MethodPost, "/personality/custom", strings.NewReader(form.Encode()))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
@@ -129,6 +146,91 @@ func TestHandler_CreateCustomPersonality(t *testing.T) {
 	assert.NotNil(t, got)
 	assert.Equal(t, "Test Personality", got.Name)
 	assert.Equal(t, "test_personality", got.Key)
+	assert.Equal(t, "A test personality", got.Description)
+	assert.Equal(t, "You are a test assistant with at least 20 characters.", got.SystemPrompt)
+}
+
+func TestHandler_CreateCustomPersonality_JSONUsesExplicitKeyAndReturnsCreatedObject(t *testing.T) {
+	h, e, repo, _ := setupCustomPersonalityHandler(t)
+	ctx := context.Background()
+
+	body := customPersonalityJSONBody(t, map[string]string{
+		"name":          "  JSON Personality  ",
+		"key":           "  explicit_json_key  ",
+		"description":   "  JSON description  ",
+		"system_prompt": "  You are a JSON custom personality with enough details.  ",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/personality/custom", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.CreateCustomPersonality(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	var resp models.CustomPersonality
+	err = json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, "JSON Personality", resp.Name)
+	assert.Equal(t, "explicit_json_key", resp.Key)
+	assert.Equal(t, "JSON description", resp.Description)
+	assert.Equal(t, "You are a JSON custom personality with enough details.", resp.SystemPrompt)
+
+	got, err := repo.GetByKey(ctx, "explicit_json_key")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, resp.Name, got.Name)
+	assert.Equal(t, resp.Key, got.Key)
+}
+
+func TestHandler_CreateCustomPersonality_JSONWithoutKeyGeneratesKey(t *testing.T) {
+	h, e, repo, _ := setupCustomPersonalityHandler(t)
+	ctx := context.Background()
+
+	body := customPersonalityJSONBody(t, map[string]string{
+		"name":          "Generated JSON Key",
+		"description":   "JSON description",
+		"system_prompt": "You are a JSON custom personality with a generated key.",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/personality/custom", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.CreateCustomPersonality(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusCreated, rec.Code)
+
+	got, err := repo.GetByKey(ctx, "generated_json_key")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, "Generated JSON Key", got.Name)
+}
+
+func TestHandler_CreateCustomPersonality_DuplicateJSONKeyConflicts(t *testing.T) {
+	h, e, repo, _ := setupCustomPersonalityHandler(t)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, &models.CustomPersonality{
+		Name:         "Existing",
+		Key:          "duplicate_key",
+		Description:  "Existing description",
+		SystemPrompt: "Existing custom personality prompt with enough detail.",
+	}))
+
+	body := customPersonalityJSONBody(t, map[string]string{
+		"name":          "Duplicate",
+		"key":           "duplicate_key",
+		"description":   "Duplicate description",
+		"system_prompt": "Duplicate custom personality prompt with enough detail.",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/personality/custom", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := h.CreateCustomPersonality(c)
+	assertCustomPersonalityHTTPError(t, err, http.StatusConflict, "A custom personality with this key already exists")
 }
 
 func TestHandler_GetCustomPersonality(t *testing.T) {
@@ -202,9 +304,9 @@ func TestHandler_UpdateCustomPersonality(t *testing.T) {
 	require.NoError(t, repo.Create(ctx, p))
 
 	form := url.Values{}
-	form.Set("name", "Updated")
-	form.Set("description", "Updated desc")
-	form.Set("system_prompt", "Updated prompt that is long enough to pass validation")
+	form.Set("name", "  Updated  ")
+	form.Set("description", "  Updated desc  ")
+	form.Set("system_prompt", "  Updated prompt that is long enough to pass validation  ")
 
 	req := httptest.NewRequest(http.MethodPut, "/personality/custom/update_test", strings.NewReader(form.Encode()))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
@@ -226,6 +328,114 @@ func TestHandler_UpdateCustomPersonality(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Updated", got.Name)
 	assert.Equal(t, "update_test", got.Key)
+	assert.Equal(t, "Updated desc", got.Description)
+	assert.Equal(t, "Updated prompt that is long enough to pass validation", got.SystemPrompt)
+}
+
+func TestHandler_UpdateCustomPersonality_JSONReturnsUpdatedObject(t *testing.T) {
+	h, e, repo, _ := setupCustomPersonalityHandler(t)
+	ctx := context.Background()
+
+	p := &models.CustomPersonality{
+		Name:         "Original JSON",
+		Key:          "json_update_test",
+		Description:  "Original JSON desc",
+		SystemPrompt: "Original JSON prompt that is long enough",
+	}
+	require.NoError(t, repo.Create(ctx, p))
+
+	body := customPersonalityJSONBody(t, map[string]string{
+		"name":          "  Updated JSON  ",
+		"description":   "  Updated JSON desc  ",
+		"system_prompt": "  Updated JSON prompt that is long enough to pass validation  ",
+	})
+	req := httptest.NewRequest(http.MethodPut, "/personality/custom/json_update_test", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/personality/custom/:key")
+	c.SetParamNames("key")
+	c.SetParamValues("json_update_test")
+
+	err := h.UpdateCustomPersonality(c)
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp models.CustomPersonality
+	err = json.Unmarshal(rec.Body.Bytes(), &resp)
+	require.NoError(t, err)
+	assert.Equal(t, "Updated JSON", resp.Name)
+	assert.Equal(t, "json_update_test", resp.Key)
+	assert.Equal(t, "Updated JSON desc", resp.Description)
+	assert.Equal(t, "Updated JSON prompt that is long enough to pass validation", resp.SystemPrompt)
+
+	got, err := repo.GetByKey(ctx, "json_update_test")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, resp.Name, got.Name)
+	assert.Equal(t, resp.Description, got.Description)
+	assert.Equal(t, resp.SystemPrompt, got.SystemPrompt)
+}
+
+func TestHandler_CustomPersonalitySaveValidationConsistentAcrossCreateAndUpdate(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		method        string
+		contentType   string
+		payloadName   string
+		systemPrompt  string
+		expectedError string
+	}{
+		{name: "create form blank name", method: http.MethodPost, contentType: echo.MIMEApplicationForm, payloadName: " ", systemPrompt: "Prompt text long enough for validation", expectedError: "Name is required"},
+		{name: "create JSON blank name", method: http.MethodPost, contentType: echo.MIMEApplicationJSON, payloadName: " ", systemPrompt: "Prompt text long enough for validation", expectedError: "Name is required"},
+		{name: "update form blank name", method: http.MethodPut, contentType: echo.MIMEApplicationForm, payloadName: " ", systemPrompt: "Prompt text long enough for validation", expectedError: "Name is required"},
+		{name: "update JSON blank name", method: http.MethodPut, contentType: echo.MIMEApplicationJSON, payloadName: " ", systemPrompt: "Prompt text long enough for validation", expectedError: "Name is required"},
+		{name: "create form blank system prompt", method: http.MethodPost, contentType: echo.MIMEApplicationForm, payloadName: "Valid Name", systemPrompt: " ", expectedError: "System prompt is required"},
+		{name: "create JSON blank system prompt", method: http.MethodPost, contentType: echo.MIMEApplicationJSON, payloadName: "Valid Name", systemPrompt: " ", expectedError: "System prompt is required"},
+		{name: "update form blank system prompt", method: http.MethodPut, contentType: echo.MIMEApplicationForm, payloadName: "Valid Name", systemPrompt: " ", expectedError: "System prompt is required"},
+		{name: "update JSON blank system prompt", method: http.MethodPut, contentType: echo.MIMEApplicationJSON, payloadName: "Valid Name", systemPrompt: " ", expectedError: "System prompt is required"},
+		{name: "create form short system prompt", method: http.MethodPost, contentType: echo.MIMEApplicationForm, payloadName: "Valid Name", systemPrompt: "too short", expectedError: "System prompt must be at least 20 characters"},
+		{name: "create JSON short system prompt", method: http.MethodPost, contentType: echo.MIMEApplicationJSON, payloadName: "Valid Name", systemPrompt: "too short", expectedError: "System prompt must be at least 20 characters"},
+		{name: "update form short system prompt", method: http.MethodPut, contentType: echo.MIMEApplicationForm, payloadName: "Valid Name", systemPrompt: "too short", expectedError: "System prompt must be at least 20 characters"},
+		{name: "update JSON short system prompt", method: http.MethodPut, contentType: echo.MIMEApplicationJSON, payloadName: "Valid Name", systemPrompt: "too short", expectedError: "System prompt must be at least 20 characters"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _, _ := setupCustomPersonalityHandler(t)
+
+			var req *http.Request
+			if tt.contentType == echo.MIMEApplicationJSON {
+				body := customPersonalityJSONBody(t, map[string]string{
+					"name":          tt.payloadName,
+					"key":           "validation_key",
+					"description":   "Validation description",
+					"system_prompt": tt.systemPrompt,
+				})
+				req = httptest.NewRequest(tt.method, "/personality/custom/validation_key", strings.NewReader(body))
+			} else {
+				form := url.Values{}
+				form.Set("name", tt.payloadName)
+				form.Set("key", "validation_key")
+				form.Set("description", "Validation description")
+				form.Set("system_prompt", tt.systemPrompt)
+				req = httptest.NewRequest(tt.method, "/personality/custom/validation_key", strings.NewReader(form.Encode()))
+			}
+			req.Header.Set(echo.HeaderContentType, tt.contentType)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetPath("/personality/custom/:key")
+			c.SetParamNames("key")
+			c.SetParamValues("validation_key")
+
+			var err error
+			if tt.method == http.MethodPost {
+				err = h.CreateCustomPersonality(c)
+			} else {
+				err = h.UpdateCustomPersonality(c)
+			}
+
+			assertCustomPersonalityHTTPError(t, err, http.StatusBadRequest, tt.expectedError)
+		})
+	}
 }
 
 func TestHandler_DeleteCustomPersonality(t *testing.T) {
