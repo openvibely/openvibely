@@ -12,9 +12,13 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
-func seedLargeCustomProviderModelConfigs(tb testing.TB, ctx context.Context, repo *LLMConfigRepo, count int) {
+func seedLargeCustomProviderModelConfigs(tb testing.TB, ctx context.Context, repo *LLMConfigRepo, count int, maxWorkers ...int) {
 	tb.Helper()
 	largeBody := strings.Repeat("x", 64*1024)
+	workerLimit := 0
+	if len(maxWorkers) > 0 {
+		workerLimit = maxWorkers[0]
+	}
 	for i := 0; i < count; i++ {
 		cfg := &models.LLMConfig{
 			Name:                 fmt.Sprintf("Large Custom %02d", i),
@@ -33,6 +37,7 @@ func seedLargeCustomProviderModelConfigs(tb testing.TB, ctx context.Context, rep
 			CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
 			CustomAuthStateJSON:  `{"token":"secret"}`,
 			MixtureConfigJSON:    `{"large":"` + largeBody + `"}`,
+			MaxWorkers:           workerLimit,
 		}
 		if err := repo.Create(ctx, cfg); err != nil {
 			tb.Fatalf("Create large model config %d: %v", i, err)
@@ -399,6 +404,220 @@ func BenchmarkLLMConfigRepoRuntimeSummariesLargeCustomProviders(b *testing.B) {
 			}
 		}
 	})
+}
+
+func TestLLMConfigRepo_ListWorkerCapacitiesUsesBoundedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	largeBody := strings.Repeat("x", 1024*1024)
+	alpha := &models.LLMConfig{
+		Name: "Worker Alpha", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "worker-alpha-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientID: "client-id", OAuthClientSecret: "secret-client",
+		OAuthAuthorizeURL: "https://auth.example.com/authorize", OAuthTokenURL: "https://auth.example.com/token",
+		OAuthScopes: "models", OllamaBaseURL: "http://localhost:11434", BaseURL: "https://example.com/v1/",
+		Transport: "chat_completions", PresetSlug: "custom", ModelsURL: "https://example.com/v1/models",
+		AuthHeaderName: "X-API-Key", AuthHeaderValuePrefix: "Bearer", ExtraHeadersJSON: `{"secret":"header"}`,
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+		MaxWorkers: 2,
+	}
+	if err := repo.Create(ctx, alpha); err != nil {
+		t.Fatal(err)
+	}
+	unlimited := &models.LLMConfig{
+		Name: "Worker Unlimited", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey,
+		Model: "worker-unlimited-model", MaxWorkers: 0,
+	}
+	if err := repo.Create(ctx, unlimited); err != nil {
+		t.Fatal(err)
+	}
+	zuluDefault := &models.LLMConfig{
+		Name: "Worker Zulu Default", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey,
+		Model: "worker-zulu-model", APIKey: "secret-key", IsDefault: true, MaxWorkers: 1,
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, zuluDefault); err != nil {
+		t.Fatal(err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	workers, err := repo.ListWorkerCapacities(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workers) != 2 {
+		t.Fatalf("worker capacities len = %d, want 2: %#v", len(workers), workers)
+	}
+	if workers[0].ID != zuluDefault.ID || workers[1].ID != alpha.ID {
+		t.Fatalf("worker capacity ordering = [%s, %s], want default first then name asc", workers[0].Name, workers[1].Name)
+	}
+	if workers[0].Name != "Worker Zulu Default" || workers[0].Model != "worker-zulu-model" || workers[0].MaxWorkers != 1 {
+		t.Fatalf("default worker fields not preserved: %#v", workers[0])
+	}
+	if workers[1].Name != "Worker Alpha" || workers[1].Model != "worker-alpha-model" || workers[1].MaxWorkers != 2 {
+		t.Fatalf("worker fields not preserved: %#v", workers[1])
+	}
+	for _, worker := range workers {
+		assertWorkerCapacityProjectionOmitsConfigBlobs(t, worker)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact worker capacity query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if projection != "select id, name, model, max_workers" {
+		t.Fatalf("worker capacity projection = %q, want id/name/model/max_workers in %s", projection, statements[0])
+	}
+	if !strings.Contains(stmt, "where max_workers > 0") {
+		t.Fatalf("worker capacity query must filter max_workers in SQL: %s", statements[0])
+	}
+	if !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("worker capacity query must preserve default/name ordering: %s", statements[0])
+	}
+	for _, forbidden := range workerCapacityForbiddenColumns() {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("worker capacity query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+}
+
+func TestLLMConfigRepo_WorkerCapacitiesStayUnderLargeFixtureBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping worker capacity performance guard in short mode")
+	}
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50, 2)
+
+	workers, err := repo.ListWorkerCapacities(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(workers) != 50 {
+		t.Fatalf("expected 50 worker capacity rows, got %d", len(workers))
+	}
+	for _, worker := range workers {
+		assertWorkerCapacityProjectionOmitsConfigBlobs(t, worker)
+	}
+
+	fullList := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+	workerList := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListWorkerCapacities(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 worker capacity rows, got %d", len(configs))
+			}
+		}
+	})
+
+	const (
+		maxBytesPerOp    = 200 * 1024
+		maxDurationPerOp = 200 * time.Microsecond
+	)
+	t.Logf("List: %d ns/op, %d B/op; WorkerCapacities: %d ns/op, %d B/op",
+		fullList.NsPerOp(), fullList.AllocedBytesPerOp(), workerList.NsPerOp(), workerList.AllocedBytesPerOp())
+	if workerList.NsPerOp() > maxDurationPerOp.Nanoseconds() {
+		t.Fatalf("worker capacity list took %s/op, want <= %s", time.Duration(workerList.NsPerOp()), maxDurationPerOp)
+	}
+	if workerList.AllocedBytesPerOp() > maxBytesPerOp {
+		t.Fatalf("worker capacity list allocated %d B/op, want <= %d", workerList.AllocedBytesPerOp(), maxBytesPerOp)
+	}
+}
+
+func BenchmarkLLMConfigRepoWorkerCapacitiesLargeCustomProviders(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
+		b.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50, 2)
+
+	workers, err := repo.ListWorkerCapacities(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if len(workers) != 50 {
+		b.Fatalf("expected 50 worker capacity rows, got %d", len(workers))
+	}
+	for _, worker := range workers {
+		assertWorkerCapacityProjectionOmitsConfigBlobs(b, worker)
+	}
+
+	b.Run("full_list", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+	b.Run("worker_capacity_list", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListWorkerCapacities(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 worker capacity rows, got %d", len(configs))
+			}
+		}
+	})
+}
+
+func assertWorkerCapacityProjectionOmitsConfigBlobs(tb testing.TB, cfg models.LLMConfig) {
+	tb.Helper()
+	if cfg.Provider != "" || cfg.AuthMethod != "" || cfg.APIKey != "" || cfg.OAuthAccessToken != "" ||
+		cfg.OAuthRefreshToken != "" || cfg.OAuthClientID != "" || cfg.OAuthClientSecret != "" ||
+		cfg.OAuthAuthorizeURL != "" || cfg.OAuthTokenURL != "" || cfg.OAuthScopes != "" ||
+		cfg.OllamaBaseURL != "" || cfg.BaseURL != "" || cfg.ModelsURL != "" ||
+		cfg.AuthHeaderName != "" || cfg.AuthHeaderValuePrefix != "" || cfg.ExtraHeadersJSON != "" ||
+		cfg.ExtraBodyJSON != "" || cfg.CustomAuthConfigJSON != "" || cfg.CustomAuthStateJSON != "" ||
+		cfg.MixtureConfigJSON != "" || !cfg.CreatedAt.IsZero() || !cfg.UpdatedAt.IsZero() || cfg.WorkerTimeout != 0 {
+		tb.Fatalf("worker capacity projection materialized credential/config fields: %#v", cfg)
+	}
+}
+
+func workerCapacityForbiddenColumns() []string {
+	return []string{
+		"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_id", "oauth_client_secret",
+		"oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "models_url",
+		"auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json",
+		"custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "worker_timeout",
+	}
 }
 
 func BenchmarkLLMConfigRepoAgentPickerValidationLargeCustomProviders(b *testing.B) {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
@@ -442,78 +441,8 @@ func (h *Handler) CreateTask(c echo.Context) error {
 	// Handle optional file attachments (multiple files supported)
 	form, err := c.MultipartForm()
 	if err == nil && form != nil {
-		files := form.File["files"]
-		if len(files) > 0 {
-			// Create task-specific directory
-			taskDir := filepath.Join(uploadsDir, t.ID)
-			if err := os.MkdirAll(taskDir, 0755); err != nil {
-				applog.Infof("[handler] CreateTask error creating directory: %v", err)
-			} else {
-				// Process each file
-				uploadedCount := 0
-				for _, file := range files {
-					// Check file size
-					if file.Size > maxUploadSize {
-						applog.Infof("[handler] CreateTask file %s too large (%d bytes)", file.Filename, file.Size)
-						continue // Skip this file but continue with others
-					}
-
-					// Open the uploaded file
-					src, err := file.Open()
-					if err != nil {
-						applog.Infof("[handler] CreateTask error opening file %s: %v", file.Filename, err)
-						continue
-					}
-
-					// Save file
-					filename := filepath.Base(file.Filename)
-					destPath := filepath.Join(taskDir, filename)
-					dest, err := os.Create(destPath)
-					if err != nil {
-						applog.Infof("[handler] CreateTask error creating file %s: %v", filename, err)
-						src.Close()
-						continue
-					}
-
-					if _, err := io.Copy(dest, src); err != nil {
-						applog.Infof("[handler] CreateTask error copying file %s: %v", filename, err)
-						src.Close()
-						dest.Close()
-						os.Remove(destPath)
-						continue
-					}
-					src.Close()
-					dest.Close()
-
-					// Detect media type from file header
-					mediaType := file.Header.Get("Content-Type")
-					if mediaType == "" {
-						mediaType = "application/octet-stream"
-					}
-
-					// Create attachment record
-					attachment := &models.Attachment{
-						TaskID:    t.ID,
-						FileName:  filename,
-						FilePath:  destPath,
-						MediaType: mediaType,
-						FileSize:  file.Size,
-					}
-
-					if err := h.attachmentRepo.Create(c.Request().Context(), attachment); err != nil {
-						applog.Infof("[handler] CreateTask error creating attachment for %s: %v", filename, err)
-						os.Remove(destPath)
-						continue
-					}
-
-					applog.Infof("[handler] CreateTask attachment created id=%s file=%s size=%d", attachment.ID, filename, file.Size)
-					uploadedCount++
-				}
-
-				if uploadedCount > 0 {
-					applog.Infof("[handler] CreateTask completed: %d/%d attachments uploaded", uploadedCount, len(files))
-				}
-			}
+		if files := form.File["files"]; len(files) > 0 {
+			h.persistTaskAttachmentFiles(c.Request().Context(), t.ID, files, "CreateTask")
 		}
 	}
 
@@ -1246,7 +1175,7 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	// Handle file uploads if present (multipart form)
 	if form, err := c.MultipartForm(); err == nil && form != nil {
 		if files := form.File["files"]; len(files) > 0 {
-			h.processTaskFileUploads(c.Request().Context(), taskID, files)
+			h.persistTaskAttachmentFiles(c.Request().Context(), taskID, files, "UpdateTask")
 		}
 	}
 
@@ -1296,68 +1225,6 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	}
 
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+task.ID)
-}
-
-// processTaskFileUploads handles file uploads during task update.
-// Saves files to uploads/{taskID}/ and creates attachment records.
-func (h *Handler) processTaskFileUploads(ctx context.Context, taskID string, files []*multipart.FileHeader) {
-	taskDir := filepath.Join(uploadsDir, taskID)
-	if err := os.MkdirAll(taskDir, 0755); err != nil {
-		applog.Infof("[handler] processTaskFileUploads error creating directory: %v", err)
-		return
-	}
-
-	for _, file := range files {
-		if file.Size > maxUploadSize {
-			applog.Infof("[handler] processTaskFileUploads file %s too large (%d bytes)", file.Filename, file.Size)
-			continue
-		}
-
-		src, err := file.Open()
-		if err != nil {
-			applog.Infof("[handler] processTaskFileUploads error opening %s: %v", file.Filename, err)
-			continue
-		}
-
-		filename := filepath.Base(file.Filename)
-		destPath := filepath.Join(taskDir, filename)
-		dest, err := os.Create(destPath)
-		if err != nil {
-			applog.Infof("[handler] processTaskFileUploads error creating %s: %v", filename, err)
-			src.Close()
-			continue
-		}
-
-		if _, err := io.Copy(dest, src); err != nil {
-			applog.Infof("[handler] processTaskFileUploads error copying %s: %v", filename, err)
-			src.Close()
-			dest.Close()
-			os.Remove(destPath)
-			continue
-		}
-		src.Close()
-		dest.Close()
-
-		mediaType := file.Header.Get("Content-Type")
-		if mediaType == "" {
-			mediaType = "application/octet-stream"
-		}
-
-		att := &models.Attachment{
-			TaskID:    taskID,
-			FileName:  filename,
-			FilePath:  destPath,
-			MediaType: mediaType,
-			FileSize:  file.Size,
-		}
-		if err := h.attachmentRepo.Create(ctx, att); err != nil {
-			applog.Infof("[handler] processTaskFileUploads error creating record for %s: %v", filename, err)
-			os.Remove(destPath)
-			continue
-		}
-
-		applog.Infof("[handler] processTaskFileUploads uploaded %s to task %s", filename, taskID)
-	}
 }
 
 func (h *Handler) DeleteTask(c echo.Context) error {
