@@ -2,7 +2,7 @@
 
 - [Managed Memory](managed_memory.md) - Storage boundaries, lifecycle ownership, recall/update/consolidation contracts, safe scoped-memory tooling, and exclusions.
 - [Coding Agent Product Discipline](coding_agent_product_discipline.md) - User preferences for interaction, scope control, audits, prompt/docs work, validation, release workflow, and release notes.
-- [OpenVibely Architecture](openvibely_architecture.md) - Go server/desktop architecture, storage/runtime state, OAuth/hosted deployment, Docker direction, workers, schedules, logging, local development, and handler/repository architecture notes.
+- [OpenVibely Architecture](openvibely_architecture.md) - Go server/desktop architecture, storage/runtime state, OAuth/hosted deployment, Docker direction, workers, schedules, Reflection/history ranges, logging, local development, and handler/repository architecture notes.
 - [OpenVibely Update System](openvibely_update_system.md) - Signed packaged updates, standalone/desktop replacement, drain/admission, rollback/recovery, release trust, telemetry, and validation.
 - [Agent Lifecycle and Skills](agent_lifecycle_and_skills.md) - Built-in agents, skill catalogs/imports, lifecycle hooks, goals/loops, schedules, tool grants, and skill-maintenance boundaries.
 - [Provider Architecture](provider_architecture.md) - Provider adapters, normalized requests, model selection, OpenAI/Anthropic/Ollama/OpenAI-compatible support, mixtures, OAuth, provider-native tools, and runtime-tool exposure.

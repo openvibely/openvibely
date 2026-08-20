@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-08-19
-source: after_complete
-source_id: fd37f46bb8f14052236f06e2550dd109:7058dea71bb8db9d
+updated: 2026-08-20
+source: after_complete_update
+source_id: ce58dc08ee6cf3e3ca6d281fba596f35:3871531709cffc9e
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -14,6 +14,7 @@ This memory stores durable user preferences and product-discipline decisions for
 User interaction and scope preferences:
 - For design, behavior, or feasibility questions, answer directly without making implementation changes unless explicitly requested.
 - Prefer prompt or configuration corrections when they are sufficient; change runtime/product code only when an authoritative invariant must cover manual, forged, or prompt-bypassing inputs.
+- For maintained Automation template changes, bump the template revision and expose the explicit update/edit/save/recreation path; do not hardcode hidden runtime swaps to paper over point-in-time saved template state.
 - Do not describe unreleased feature contracts as legacy or preserve compatibility shims for unreleased API/UI shapes unless explicitly requested.
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
 - Ask before rewriting or collapsing meaningful Git history. Preserve a clearly named backup ref when history must be recovered or rewritten, but do not treat that backup as approval.
@@ -75,4 +76,5 @@ Release-note and release-boundary preferences:
 - `.openvibely/skills/openvibely_release_workflow/scripts/release.sh` is tracked without executable bit; invoke release rehearsals through `bash` until mode is corrected.
 
 Current durable rotation state:
-- Redundancy Finder recently inspected task-goal runtime actions, alert handler refresh tails, Automation save validation, task/worktree Changes diff-state resolution, task-board kanban refresh, dashboard page-shell rendering, execution stream terminal mapping, attachment orphan cleanup, agent create/update dialog payload parsing, browser/runtime schedule mutations, project create/update repository-source handling, model/provider form normalization, channel connection-test feedback, channel authorization allowlist persistence, Task Templates dashboard refresh, Personality settings cards, Insights dashboard grade rendering, Analytics/Insights failed-task-pattern logic, execution status badge rendering, and HTMX toast notification/event-contract rendering (`#715`). Future Redundancy Finder runs should pick a different bounded component unless explicitly asked to revisit these workflows.
+- Redundancy Finder recently inspected task-goal runtime actions, alert handler refresh tails, Automation save validation, task/worktree Changes diff-state resolution, task-board kanban refresh, dashboard page-shell rendering, execution stream terminal mapping, attachment orphan cleanup, agent create/update dialog payload parsing, browser/runtime schedule mutations, project create/update repository-source handling, model/provider form normalization, channel connection-test feedback, channel authorization allowlist persistence, Task Templates dashboard refresh, Personality settings cards, Insights dashboard grade rendering, Analytics/Insights failed-task-pattern logic, execution status badge rendering, HTMX toast notification/event-contract rendering (`#715`), task tag badge rendering (`#731`), and destructive delete-confirmation dialogs (`#756`). Future Redundancy Finder runs should pick a different bounded component unless explicitly asked to revisit these workflows.
+- Bug Finder recently inspected browser Task Detail primary-Agent edit validation (`#725`, resolved) and task attachment upload/delete project ownership (`#757`, open). Future Bug Finder runs should choose a different bounded component unless explicitly asked to revisit task edit Agent validation or task attachment ownership.

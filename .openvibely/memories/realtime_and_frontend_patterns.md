@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-19
-source: after_complete
-source_id: 3eb5ad78b50aad57c595d4075d836a08:24dc26b3af065014
+updated: 2026-08-20
+source: after_complete_update
+source_id: fd37f46bb8f14052236f06e2550dd109:aff2dbbe03cabdb2
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -70,7 +70,7 @@ Transcript safety and navigation:
 - Known review navigation gaps: execution detail pages exist but normal Thread/Reflection review surfaces do not expose visible links (`#365`, `#380`).
 - Forced task-thread refreshes must close per-exec EventSources before replacement, but revision no-op checks run before cleanup.
 - Older-history pagination captures scroll intent revision and cancels stale restoration if newer send/scroll changes intent.
-- Known frontend duplication gaps include task-thread scroll-state helpers, terminal UI/composer reconciliation, live queued-row construction, task-thread post-swap hydration, schedule repeat-interval controllers, Task Templates dashboard refresh, and execution status badge rendering.
+- Known frontend duplication gaps include task-thread scroll-state helpers, terminal UI/composer reconciliation, live queued-row construction, task-thread post-swap hydration, schedule repeat-interval controllers, Task Templates dashboard refresh, execution status badge rendering, and destructive delete-confirmation dialog scripts/components across active settings and management pages (`#756`).
 - Task detail HTMX refresh assembly and task-board mutation/sort HTMX refresh assembly should stay centralized through private helpers while preserving route-specific behavior.
 
 Responsive and shared UI contracts:
@@ -87,6 +87,7 @@ Responsive and shared UI contracts:
 - Known board/card gaps: task cards lack worktree/merge state (`#227`) and linked PR URL/status (`#374`).
 - Active kanban pending dropzones render only real active pending/queued/blocked work; terminal failed/cancelled rows must not appear as queued work.
 - Tasks page date sorting defaults newest-first for Backlog and Completed. Task Detail edit-form saves are metadata-only.
+- Resolved `#731`: task tag badge labels/classes are centralized through exported task-card component helpers such as `components.TagLabel` and `components.TagBadgeClass`; Pulse `/upcoming` reuses the same mapping instead of rendering raw tag strings or a page-local badge switch.
 - Responsive card pages must keep roots/grids/cards/badges shrink-safe. Long badge values truncate within rows.
 - Workers settings tables are intentionally non-shrinking within viewport-bound `#main-content`, with horizontal overflow contained inside the wrapper.
 - Schedule UI should distinguish disabled schedules; dynamic loop wakeups remain visually distinct.
@@ -99,7 +100,7 @@ Responsive and shared UI contracts:
 - `/models` uses `LLMConfig`/`agent_configs`; `/agents` is plugin-first and has no `color` field.
 - `Managed Memory` in UI/tool profiles is scoped memory-file capability, not broad repo read/write access.
 - Shared toasts account for native dialog top-layer behavior, reserve right inset, use accessible close buttons, and avoid mobile overflow. Automation-start toasts dedupe by neutral `toast_key` and can click through to Automation Live/detail.
-- Open duplication gap `#715`: HTMX toast rendering/event bridging is split between the global layout `openvibelyToast` contract and task-detail/worktree `showToast` paths; consolidate on the shared toast helper/event shape.
+- Resolved `#715`: HTMX toast rendering uses the global `openvibelyToast` event contract through the shared helper path. Worktree success paths should use the canonical helper while preserving unrelated HTMX trigger keys such as `refreshChanges`; task-detail pages must not reintroduce page-local `showToast` DOM rendering, deduplication, status/icon, or auto-dismiss logic.
 - For global indicators driven by page-local polling, expose shared layout handler and feed fetched snapshots instead of divergent state paths.
 - Destructive deletes for projects, tasks, models, agents, skills, schedules, and channel integrations use shared DaisyUI `<dialog>` confirmation; avoid browser `confirm()` or immediate `hx-confirm` delete wiring.
 

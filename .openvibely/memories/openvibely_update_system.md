@@ -2,9 +2,9 @@
 name: openvibely_update_system
 type: project
 created: 2026-08-02
-updated: 2026-08-19
-source: consolidation
-source_id: memory_consolidation_2026_08_19
+updated: 2026-08-20
+source: after_complete_update
+source_id: f5f7b3e9c9d1bd2c112428bcd8a3a4c7:aac5090c975d9f33
 confidence: high
 title: OpenVibely Update System
 ---
@@ -19,7 +19,7 @@ Shared update flow:
 - If validation fails, stop the failed replacement, restore the prior installation, and relaunch it.
 - Preserve signed catalog handling, update UI, approval, durable coordinator/drain state, health validation, rollback, and source/Hosted/Docker behavior.
 - Packaged local update offers are user-initiated UI, not automatic installation. Actionable releases surface as a sticky global purple update toast plus a separate Alerts nav `Update` badge; the ordinary unread-alert count remains independent.
-- `/api/system/update` is the authority for status. After restart/success, `state=succeeded` or `current_version == available` clears the update card/badge and may show one normal auto-dismiss success toast keyed by release fingerprint.
+- `/api/system/update` is the authority for status. After restart/success, `state=succeeded` or `current_version == available` clears the update card/badge and may show one normal auto-dismiss success toast keyed by release fingerprint. Web/API Chat's read-only `view_system_update` action mirrors the visible coordinator snapshot for Plan/Orchestrate status reporting and returns not-applicable instead of failing when update status is hidden or absent.
 - Browser update surfaces share `window.openVibelyNormalizeSystemUpdateSnapshot(data)` for release/current-version/succeeded hidden-state decisions and apply-supported/Hosted/Docker/manual/staged/available/failed actionability decisions.
 - Update drain snapshots must preserve the `/api/system/update` JSON contract, including `drain.queued_total`, while keeping the global pending queued `thread_inputs` count on an indexed sparse path.
 
