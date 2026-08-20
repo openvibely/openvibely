@@ -1914,6 +1914,176 @@ func TestSlackTelegramDiscordRuntimesCreateGitHubProject(t *testing.T) {
 	}
 }
 
+func TestExecuteUpdateProjectSettingsRuntimeUpdatesAndClearsDefaults(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+
+	projectLimit := 1
+	project := &models.Project{Name: "Runtime Settings Project", Description: "old", MaxWorkers: &projectLimit}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	modelA := &models.LLMConfig{Name: "Runtime Model A", Provider: models.ProviderTest, Model: "test-a"}
+	require.NoError(t, llmConfigRepo.Create(ctx, modelA))
+	modelB := &models.LLMConfig{Name: "Runtime Model B", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test"}
+	require.NoError(t, llmConfigRepo.Create(ctx, modelB))
+
+	dispatchCalls := 0
+	out, err := ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+		ProjectID:          project.ID,
+		Input:              json.RawMessage(`{"project_id":"` + project.ID + `","project_name":"Runtime Settings Project","new_name":"Renamed Runtime Project","description":"updated","default_model":"runtime model b","max_workers":2}`),
+		ProjectSvc:         projectSvc,
+		ProjectRepo:        projectRepo,
+		LLMConfigRepo:      llmConfigRepo,
+		DispatchQueuedWork: func() { dispatchCalls++ },
+	})
+	require.NoError(t, err)
+	var resp updateProjectSettingsRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK, resp.Error)
+	require.Equal(t, project.ID, resp.ProjectID)
+	require.Equal(t, "Renamed Runtime Project", resp.Name)
+	require.True(t, resp.DefaultModel.Set)
+	require.Equal(t, modelB.ID, resp.DefaultModel.ModelID)
+	require.True(t, resp.WorkerLimit.Set)
+	require.Equal(t, 2, resp.WorkerLimit.MaxWorkers)
+	require.Equal(t, 1, dispatchCalls, "increasing finite max_workers should dispatch queued work")
+
+	updated, err := projectRepo.GetByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated.DefaultAgentConfigID)
+	require.Equal(t, modelB.ID, *updated.DefaultAgentConfigID)
+	require.NotNil(t, updated.MaxWorkers)
+	require.Equal(t, 2, *updated.MaxWorkers)
+	require.Equal(t, "Renamed Runtime Project", updated.Name)
+	require.Equal(t, "updated", updated.Description)
+
+	out, err = ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+		ProjectID:          project.ID,
+		Input:              json.RawMessage(`{"clear_default_model":true,"max_workers":0}`),
+		ProjectSvc:         projectSvc,
+		ProjectRepo:        projectRepo,
+		LLMConfigRepo:      llmConfigRepo,
+		DispatchQueuedWork: func() { dispatchCalls++ },
+	})
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK, resp.Error)
+	require.False(t, resp.DefaultModel.Set)
+	require.False(t, resp.WorkerLimit.Set)
+	require.Equal(t, 2, dispatchCalls, "clearing finite max_workers should dispatch queued work")
+
+	updated, err = projectRepo.GetByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.Nil(t, updated.DefaultAgentConfigID)
+	require.Nil(t, updated.MaxWorkers)
+}
+
+func TestExecuteUpdateProjectSettingsRuntimeRejectsInvalidInputsWithoutPartialUpdate(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+
+	limit := 2
+	project := &models.Project{Name: "No Partial Project", Description: "keep", MaxWorkers: &limit, RepoPath: t.TempDir()}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	model := &models.LLMConfig{Name: "Safe Model", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, llmConfigRepo.Create(ctx, model))
+	project.DefaultAgentConfigID = &model.ID
+	require.NoError(t, projectSvc.Update(ctx, project))
+
+	run := func(input string) updateProjectSettingsRuntimeResponse {
+		out, err := ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+			ProjectID:     project.ID,
+			Input:         json.RawMessage(input),
+			ProjectSvc:    projectSvc,
+			ProjectRepo:   projectRepo,
+			LLMConfigRepo: llmConfigRepo,
+		})
+		require.NoError(t, err)
+		var resp updateProjectSettingsRuntimeResponse
+		require.NoError(t, json.Unmarshal([]byte(out), &resp))
+		return resp
+	}
+
+	for _, input := range []string{
+		`{"default_model":"missing","max_workers":3}`,
+		`{"project_id":"different-project","max_workers":3}`,
+		`{"max_workers":-1}`,
+		`{"repo_path":"/tmp/other","max_workers":3}`,
+		`{"clear_default_model":true,"default_model":"Safe Model"}`,
+	} {
+		resp := run(input)
+		require.False(t, resp.OK, input)
+		updated, err := projectRepo.GetByID(ctx, project.ID)
+		require.NoError(t, err)
+		require.Equal(t, "No Partial Project", updated.Name)
+		require.Equal(t, "keep", updated.Description)
+		require.NotNil(t, updated.DefaultAgentConfigID)
+		require.Equal(t, model.ID, *updated.DefaultAgentConfigID)
+		require.NotNil(t, updated.MaxWorkers)
+		require.Equal(t, 2, *updated.MaxWorkers)
+		require.Equal(t, project.RepoPath, updated.RepoPath)
+	}
+}
+
+func TestExecuteUpdateProjectSettingsRuntimeRejectsAmbiguousModelName(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	project := &models.Project{Name: "Ambiguous Model Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	_, err := db.ExecContext(ctx, `INSERT INTO agent_configs (id, name, provider, model, is_default, auth_method) VALUES
+		('ambiguous-model-a', 'Ambiguous Runtime Model', 'test', 'test-a', 0, 'api_key'),
+		('ambiguous-model-b', 'ambiguous runtime model', 'test', 'test-b', 0, 'api_key')`)
+	require.NoError(t, err)
+
+	out, err := ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+		ProjectID:     project.ID,
+		Input:         json.RawMessage(`{"default_model":"AMBIGUOUS RUNTIME MODEL"}`),
+		ProjectSvc:    projectSvc,
+		ProjectRepo:   projectRepo,
+		LLMConfigRepo: llmConfigRepo,
+	})
+	require.NoError(t, err)
+	var resp updateProjectSettingsRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.False(t, resp.OK)
+	require.Contains(t, resp.Error, "ambiguous")
+
+	updated, err := projectRepo.GetByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.Nil(t, updated.DefaultAgentConfigID)
+}
+
+func TestBuildChannelProjectActionHandlersUpdateProjectSettings(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	project := &models.Project{Name: "Channel Settings Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	model := &models.LLMConfig{Name: "Channel Settings Model", Provider: models.ProviderTest, Model: "test"}
+	require.NoError(t, llmConfigRepo.Create(ctx, model))
+
+	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
+		ProjectID: project.ID, ProjectRepo: projectRepo, ProjectSvc: projectSvc, LLMConfigRepo: llmConfigRepo,
+	})
+	out, err := handlers["update_project_settings"](ctx, json.RawMessage(`{"default_model_id":"`+model.ID+`","max_workers":1}`))
+	require.NoError(t, err)
+	var resp updateProjectSettingsRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK, resp.Error)
+	require.Equal(t, model.ID, resp.DefaultModel.ModelID)
+	require.True(t, resp.WorkerLimit.Set)
+}
+
 func TestCreateAgentRuntimeCreatesAgentAndRejectsUnsafeInputs(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

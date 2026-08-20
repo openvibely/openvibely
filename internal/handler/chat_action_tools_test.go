@@ -155,6 +155,86 @@ func TestHandlerSupportsChatActionToolsResolvesMixtureAggregator(t *testing.T) {
 	require.False(t, h.supportsChatActionTools(ctx, models.LLMConfig{Provider: models.ProviderMixture, MixtureConfigJSON: `{"enabled":true,"aggregator":{"agent_config_id":"missing"}}`}))
 }
 
+func TestUpdateProjectSettingsCapabilityAndInheritedDefaultModel(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "Chat Project Settings"}
+	require.NoError(t, h.projectRepo.Create(ctx, project))
+	model := &models.LLMConfig{Name: "Chat Project Model", Provider: models.ProviderTest, Model: "test-project-default"}
+	require.NoError(t, llmConfigRepo.Create(ctx, model))
+
+	orchestrateRT := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true),
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	capabilities, handled, isErr, err := orchestrateRT.Executor(ctx, "list_capabilities", nil)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr, capabilities)
+	require.Contains(t, capabilities, "update_project_settings")
+
+	planRT := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	planCapabilities, handled, isErr, err := planRT.Executor(ctx, "list_capabilities", nil)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr, planCapabilities)
+	require.NotContains(t, planCapabilities, "update_project_settings")
+	blockedOut, handled, isErr, err := planRT.Executor(ctx, "update_project_settings", json.RawMessage(`{"max_workers":2}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Contains(t, blockedOut, "not available in plan mode")
+
+	out, handled, isErr, err := orchestrateRT.Executor(ctx, "update_project_settings", json.RawMessage(`{"default_model":"chat project model","max_workers":2}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr, out)
+	var resp struct {
+		OK           bool `json:"ok"`
+		DefaultModel struct {
+			Set     bool   `json:"set"`
+			ModelID string `json:"model_id"`
+		} `json:"default_model"`
+		WorkerLimit struct {
+			Set        bool `json:"set"`
+			MaxWorkers int  `json:"max_workers"`
+		} `json:"worker_limit"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK)
+	require.True(t, resp.DefaultModel.Set)
+	require.Equal(t, model.ID, resp.DefaultModel.ModelID)
+	require.True(t, resp.WorkerLimit.Set)
+	require.Equal(t, 2, resp.WorkerLimit.MaxWorkers)
+
+	storedProject, err := h.projectRepo.GetByID(ctx, project.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedProject.DefaultAgentConfigID)
+	require.Equal(t, model.ID, *storedProject.DefaultAgentConfigID)
+	require.NotNil(t, storedProject.MaxWorkers)
+	require.Equal(t, 2, *storedProject.MaxWorkers)
+
+	task := &models.Task{ProjectID: project.ID, Title: "Inherit Project Default", Prompt: "run", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, h.taskRepo.Create(ctx, task))
+	resolved, unstartable, err := h.resolveTaskThreadExecutionAgent(ctx, task)
+	require.NoError(t, err)
+	require.False(t, unstartable)
+	require.NotNil(t, resolved)
+	require.Equal(t, model.ID, resolved.ID)
+
+	_, err = db.ExecContext(ctx, `SELECT 1`)
+	require.NoError(t, err)
+}
+
 func TestFormatCapabilitiesIncludesSelectedMemoryHandles(t *testing.T) {
 	out := formatCapabilities([]chatcontrol.ActionSummary{{Domain: "memory", Name: "memory_view", Description: "Load selected memory.", Access: "read"}}, []string{"usage_analytics.md"})
 	if !strings.Contains(out, "Selected memories for this turn") || !strings.Contains(out, "usage_analytics.md") {

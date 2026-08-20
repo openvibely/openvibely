@@ -169,9 +169,56 @@ type createGitHubProjectRuntimeResponse struct {
 	Switched        bool   `json:"switched"`
 }
 
+type UpdateProjectSettingsRuntimeInput struct {
+	ProjectID         string  `json:"project_id"`
+	ProjectName       string  `json:"project_name"`
+	NewName           *string `json:"new_name"`
+	Description       *string `json:"description"`
+	DefaultModel      string  `json:"default_model"`
+	DefaultModelID    string  `json:"default_model_id"`
+	ClearDefaultModel bool    `json:"clear_default_model"`
+	MaxWorkers        *int    `json:"max_workers"`
+	ClearMaxWorkers   bool    `json:"clear_max_workers"`
+}
+
+type UpdateProjectSettingsRuntimeOptions struct {
+	ProjectID          string
+	Input              json.RawMessage
+	ProjectSvc         *ProjectService
+	ProjectRepo        *repository.ProjectRepo
+	LLMConfigRepo      *repository.LLMConfigRepo
+	DispatchQueuedWork func()
+}
+
+type updateProjectSettingsRuntimeResponse struct {
+	OK            bool                              `json:"ok"`
+	Error         string                            `json:"error,omitempty"`
+	ProjectID     string                            `json:"project_id,omitempty"`
+	Name          string                            `json:"name,omitempty"`
+	DefaultModel  updateProjectSettingsModelSummary `json:"default_model"`
+	WorkerLimit   updateProjectSettingsWorkerLimit  `json:"worker_limit"`
+	UpdatedFields []string                          `json:"updated_fields,omitempty"`
+}
+
+type updateProjectSettingsModelSummary struct {
+	Set      bool   `json:"set"`
+	ModelID  string `json:"model_id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+}
+
+type updateProjectSettingsWorkerLimit struct {
+	Set        bool `json:"set"`
+	MaxWorkers int  `json:"max_workers,omitempty"`
+}
+
 type channelProjectActionHandlerOptions struct {
 	ProjectID     string
 	ProjectRepo   *repository.ProjectRepo
+	ProjectSvc    *ProjectService
+	LLMConfigRepo *repository.LLMConfigRepo
+	WorkerSvc     *WorkerService
 	CreateProject CreateGitHubProjectRuntimeOptions
 	// SwitchProject persists the active project selection for the channel identity.
 	// It must verify authorization before writing and return an error if
@@ -506,6 +553,20 @@ func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) 
 				createOpts.SwitchProject = opts.SwitchProject
 			}
 			return ExecuteCreateGitHubProjectRuntime(ctx, input, createOpts)
+		},
+		"update_project_settings": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var dispatch func()
+			if opts.WorkerSvc != nil {
+				dispatch = opts.WorkerSvc.DispatchNext
+			}
+			return ExecuteUpdateProjectSettingsRuntime(ctx, UpdateProjectSettingsRuntimeOptions{
+				ProjectID:          opts.ProjectID,
+				Input:              input,
+				ProjectSvc:         opts.ProjectSvc,
+				ProjectRepo:        opts.ProjectRepo,
+				LLMConfigRepo:      opts.LLMConfigRepo,
+				DispatchQueuedWork: dispatch,
+			})
 		},
 		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req SwitchProjectRequest
@@ -1216,6 +1277,266 @@ func selectChannelProject(ctx context.Context, projectRepo *repository.ProjectRe
 
 func matchesChannelProjectTarget(project models.Project, target string) bool {
 	return strings.EqualFold(project.Name, target) || project.ID == target
+}
+
+func ExecuteUpdateProjectSettingsRuntime(ctx context.Context, opts UpdateProjectSettingsRuntimeOptions) (string, error) {
+	respond := func(resp updateProjectSettingsRuntimeResponse) (string, error) {
+		data, err := json.Marshal(resp)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
+	fail := func(msg string) (string, error) {
+		return respond(updateProjectSettingsRuntimeResponse{OK: false, Error: strings.TrimSpace(msg)})
+	}
+
+	if opts.ProjectSvc == nil {
+		return fail("project service is not configured")
+	}
+	if opts.ProjectRepo == nil {
+		return fail("project repository is not configured")
+	}
+	if hasForbiddenProjectSettingsKeys(opts.Input) {
+		return fail("update_project_settings cannot change repository paths, GitHub URLs, credentials, repository bindings, or delete projects")
+	}
+
+	var req UpdateProjectSettingsRuntimeInput
+	if err := chatcontrol.DecodeRuntimeToolInput(opts.Input, &req); err != nil {
+		return fail(err.Error())
+	}
+
+	currentProjectID := strings.TrimSpace(opts.ProjectID)
+	if currentProjectID == "" {
+		return fail("no current project")
+	}
+	project, err := opts.ProjectSvc.GetByID(ctx, currentProjectID)
+	if err != nil {
+		return fail(err.Error())
+	}
+	if project == nil {
+		return fail("current project not found")
+	}
+	if assertion := strings.TrimSpace(req.ProjectID); assertion != "" && assertion != project.ID {
+		return fail(fmt.Sprintf("project_id %q does not match the current project", assertion))
+	}
+	if assertion := strings.TrimSpace(req.ProjectName); assertion != "" && !strings.EqualFold(assertion, strings.TrimSpace(project.Name)) {
+		return fail(fmt.Sprintf("project_name %q does not match the current project", assertion))
+	}
+
+	updated := *project
+	updatedFields := []string{}
+	if req.NewName != nil {
+		name := strings.TrimSpace(*req.NewName)
+		if name == "" {
+			return fail("new_name must be nonblank")
+		}
+		if name != updated.Name {
+			updated.Name = name
+			updatedFields = append(updatedFields, "name")
+		}
+	}
+	if req.Description != nil {
+		if *req.Description != updated.Description {
+			updated.Description = *req.Description
+			updatedFields = append(updatedFields, "description")
+		}
+	}
+
+	modelChanged, resolvedModel, errMsg := applyProjectDefaultModelUpdate(ctx, opts.LLMConfigRepo, &updated, req)
+	if errMsg != "" {
+		return fail(errMsg)
+	}
+	if modelChanged {
+		updatedFields = append(updatedFields, "default_model")
+	}
+
+	workerChanged, shouldDispatch, errMsg := applyProjectWorkerLimitUpdate(&updated, req)
+	if errMsg != "" {
+		return fail(errMsg)
+	}
+	if workerChanged {
+		updatedFields = append(updatedFields, "max_workers")
+	}
+
+	if len(updatedFields) > 0 {
+		if err := opts.ProjectSvc.Update(ctx, &updated); err != nil {
+			return fail(err.Error())
+		}
+		project = &updated
+		if shouldDispatch && opts.DispatchQueuedWork != nil {
+			opts.DispatchQueuedWork()
+		}
+	}
+
+	if resolvedModel == nil && project.DefaultAgentConfigID != nil && strings.TrimSpace(*project.DefaultAgentConfigID) != "" && opts.LLMConfigRepo != nil {
+		resolvedModel, _ = opts.LLMConfigRepo.GetRuntimeSummary(ctx, strings.TrimSpace(*project.DefaultAgentConfigID), "")
+	}
+	return respond(updateProjectSettingsRuntimeResponse{
+		OK:            true,
+		ProjectID:     project.ID,
+		Name:          project.Name,
+		DefaultModel:  projectDefaultModelSummary(resolvedModel),
+		WorkerLimit:   projectWorkerLimitSummary(project.MaxWorkers),
+		UpdatedFields: updatedFields,
+	})
+}
+
+func hasForbiddenProjectSettingsKeys(input json.RawMessage) bool {
+	if len(strings.TrimSpace(string(input))) == 0 {
+		return false
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(input, &raw); err != nil {
+		return false
+	}
+	for key := range raw {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "repo_path", "repo_url", "repository", "repository_path", "github_url", "github_repo_url", "delete", "delete_project", "credentials", "credential", "rebind_repository":
+			return true
+		}
+	}
+	return false
+}
+
+func applyProjectDefaultModelUpdate(ctx context.Context, repo *repository.LLMConfigRepo, project *models.Project, req UpdateProjectSettingsRuntimeInput) (bool, *models.LLMConfig, string) {
+	defaultModel := strings.TrimSpace(req.DefaultModel)
+	defaultModelID := strings.TrimSpace(req.DefaultModelID)
+	if req.ClearDefaultModel {
+		if defaultModel != "" || defaultModelID != "" {
+			return false, nil, "clear_default_model cannot be combined with default_model or default_model_id"
+		}
+		changed := project.DefaultAgentConfigID != nil
+		project.DefaultAgentConfigID = nil
+		return changed, nil, ""
+	}
+	if defaultModel == "" && defaultModelID == "" {
+		return false, nil, ""
+	}
+	if defaultModel != "" && defaultModelID != "" {
+		return false, nil, "use either default_model or default_model_id, not both"
+	}
+	if repo == nil {
+		return false, nil, "model repository is not configured"
+	}
+
+	var (
+		model *models.LLMConfig
+		err   error
+	)
+	if defaultModelID != "" {
+		model, err = repo.GetRuntimeSummary(ctx, defaultModelID, "")
+		if err != nil {
+			return false, nil, err.Error()
+		}
+		if model == nil {
+			return false, nil, fmt.Sprintf("model id %q not found", defaultModelID)
+		}
+	} else {
+		model, err = resolveRuntimeModelByIDOrExactName(ctx, repo, defaultModel)
+		if err != nil {
+			return false, nil, err.Error()
+		}
+	}
+	id := strings.TrimSpace(model.ID)
+	changed := project.DefaultAgentConfigID == nil || strings.TrimSpace(*project.DefaultAgentConfigID) != id
+	project.DefaultAgentConfigID = &id
+	return changed, model, ""
+}
+
+func resolveRuntimeModelByIDOrExactName(ctx context.Context, repo *repository.LLMConfigRepo, ref string) (*models.LLMConfig, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, fmt.Errorf("default_model must be nonblank")
+	}
+	if byID, err := repo.GetRuntimeSummary(ctx, ref, ""); err != nil {
+		return nil, err
+	} else if byID != nil {
+		return byID, nil
+	}
+	configs, err := repo.ListRuntimeSummaries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	matches := []models.LLMConfig{}
+	for _, model := range configs {
+		if strings.EqualFold(strings.TrimSpace(model.Name), ref) {
+			matches = append(matches, model)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("model %q not found", ref)
+	case 1:
+		return &matches[0], nil
+	default:
+		return nil, fmt.Errorf("model name %q is ambiguous; use the exact model ID", ref)
+	}
+}
+
+func applyProjectWorkerLimitUpdate(project *models.Project, req UpdateProjectSettingsRuntimeInput) (changed bool, shouldDispatch bool, errMsg string) {
+	if req.ClearMaxWorkers {
+		if req.MaxWorkers != nil {
+			return false, false, "clear_max_workers cannot be combined with max_workers"
+		}
+		changed = project.MaxWorkers != nil
+		shouldDispatch = isProjectWorkerLimitIncrease(project.MaxWorkers, nil)
+		project.MaxWorkers = nil
+		return changed, shouldDispatch, ""
+	}
+	if req.MaxWorkers == nil {
+		return false, false, ""
+	}
+	maxWorkers := *req.MaxWorkers
+	if maxWorkers < 0 || maxWorkers > 10 {
+		return false, false, "max_workers must be 0 or between 1 and 10"
+	}
+	var next *int
+	if maxWorkers > 0 {
+		v := maxWorkers
+		next = &v
+	}
+	changed = !sameProjectWorkerLimit(project.MaxWorkers, next)
+	shouldDispatch = isProjectWorkerLimitIncrease(project.MaxWorkers, next)
+	project.MaxWorkers = next
+	return changed, shouldDispatch, ""
+}
+
+func sameProjectWorkerLimit(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func isProjectWorkerLimitIncrease(oldLimit, newLimit *int) bool {
+	if oldLimit == nil {
+		return false
+	}
+	if newLimit == nil {
+		return true
+	}
+	return *newLimit > *oldLimit
+}
+
+func projectDefaultModelSummary(model *models.LLMConfig) updateProjectSettingsModelSummary {
+	if model == nil {
+		return updateProjectSettingsModelSummary{Set: false}
+	}
+	return updateProjectSettingsModelSummary{
+		Set:      true,
+		ModelID:  model.ID,
+		Name:     model.Name,
+		Provider: string(model.Provider),
+		Model:    model.Model,
+	}
+}
+
+func projectWorkerLimitSummary(maxWorkers *int) updateProjectSettingsWorkerLimit {
+	if maxWorkers == nil {
+		return updateProjectSettingsWorkerLimit{Set: false}
+	}
+	return updateProjectSettingsWorkerLimit{Set: true, MaxWorkers: *maxWorkers}
 }
 
 func ExecuteCreateGitHubProjectRuntime(ctx context.Context, input json.RawMessage, opts CreateGitHubProjectRuntimeOptions) (string, error) {
