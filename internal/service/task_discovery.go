@@ -94,6 +94,7 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 		return "", fmt.Errorf("list_tasks: %w", err)
 	}
 
+	query := strings.TrimSpace(req.Query)
 	category := strings.ToLower(strings.TrimSpace(req.Category))
 	if category != "" && !listTasksAllowedCategories[category] {
 		return "", fmt.Errorf("list_tasks: unsupported category %q", req.Category)
@@ -116,7 +117,7 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 	}
 
 	tasks, total, err := taskRepo.ListTasksForDiscovery(ctx, projectID, repository.TaskDiscoveryFilter{
-		Query:    strings.TrimSpace(req.Query),
+		Query:    query,
 		Category: category,
 		Status:   status,
 		Limit:    limit,
@@ -140,7 +141,7 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 		Offset:  offset,
 		HasMore: offset+len(summaries) < total,
 		Filter: taskDiscoveryFilterSummary{
-			Query:    strings.TrimSpace(req.Query),
+			Query:    query,
 			Category: category,
 			Status:   status,
 		},
