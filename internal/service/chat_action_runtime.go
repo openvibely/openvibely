@@ -1487,7 +1487,7 @@ func channelSetPersonalityResult(ctx context.Context, settingsRepo *repository.S
 }
 
 func channelListModelsResult(ctx context.Context, repo *repository.LLMConfigRepo) string {
-	configs, err := repo.List(ctx)
+	configs, err := repo.ListRuntimeSummaries(ctx)
 	if err != nil {
 		return "Error retrieving model configurations."
 	}
@@ -1518,18 +1518,20 @@ func channelGetModelResult(ctx context.Context, repo *repository.LLMConfigRepo, 
 	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
 		return "Invalid input for get_model."
 	}
-	configs, err := repo.List(ctx)
+	c, err := repo.GetRuntimeSummary(ctx, req.ModelID, req.Name)
 	if err != nil {
 		return "Error retrieving model configurations."
 	}
-	for _, c := range configs {
-		if (req.ModelID != "" && c.ID == req.ModelID) || (req.Name != "" && strings.EqualFold(c.Name, req.Name)) {
-			defaultStr := ""
-			if c.IsDefault {
-				defaultStr = " (default)"
-			}
-			return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s", c.Name, defaultStr, c.Provider, c.Model, c.AuthMethod)
+	if c != nil {
+		defaultStr := ""
+		if c.IsDefault {
+			defaultStr = " (default)"
 		}
+		auth := string(c.AuthMethod)
+		if auth == "" {
+			auth = string(models.AuthMethodAPIKey)
+		}
+		return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s", c.Name, defaultStr, c.Provider, c.Model, auth)
 	}
 	if req.ModelID != "" {
 		return fmt.Sprintf("Model with id %q not found.", req.ModelID)
@@ -1575,7 +1577,7 @@ func channelViewSettingsResult(ctx context.Context, settingsRepo *repository.Set
 			sb.WriteString(fmt.Sprintf("- Personality: %s\n", personality))
 		}
 	}
-	if configs, err := llmRepo.List(ctx); err == nil {
+	if configs, err := llmRepo.ListRuntimeSummaries(ctx); err == nil {
 		sb.WriteString(fmt.Sprintf("- Configured models: %d\n", len(configs)))
 	}
 	if projectRepo != nil {
