@@ -167,6 +167,9 @@ func IsRetryableError(err error) bool {
 		return IsRetryableStatus(responseErr.StatusCode)
 	}
 	msg := strings.ToLower(err.Error())
+	if isNonRetryableRateLimitMessage(msg) {
+		return false
+	}
 	for _, hint := range []string{"overloaded", "temporar", "unavailable", "server error", "internal_error", "received from peer", "retry your request", "try again"} {
 		if strings.Contains(msg, hint) {
 			return true
@@ -175,6 +178,15 @@ func IsRetryableError(err error) bool {
 	for _, field := range strings.Fields(msg) {
 		field = strings.Trim(field, "()[]{}:;,.\"")
 		if code, parseErr := strconv.Atoi(field); parseErr == nil && IsRetryableStatus(code) {
+			return true
+		}
+	}
+	return false
+}
+
+func isNonRetryableRateLimitMessage(msg string) bool {
+	for _, hint := range []string{"rate_limit", "rate limit", "too many requests", "usage limit", "exceeded your account", "insufficient_quota", "quota exceeded"} {
+		if strings.Contains(msg, hint) {
 			return true
 		}
 	}

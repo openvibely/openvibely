@@ -144,6 +144,9 @@ func TestRetryableErrorRequiresExactStatusToken(t *testing.T) {
 	if IsRetryableError(errors.New("API error 429: rate_limit_error: exceeded usage limit")) {
 		t.Fatal("rate-limit usage errors should not be retryable")
 	}
+	if IsRetryableError(errors.New(`API error 429: {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."}}`)) {
+		t.Fatal("rate-limit errors should not become retryable through try-again wording")
+	}
 }
 
 func TestPlainEOFIsRetryable(t *testing.T) {
