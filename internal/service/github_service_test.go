@@ -1322,9 +1322,12 @@ func TestPaginatedGitHubGetReturnsSecondPageAPIErrorWithoutPartialResults(t *tes
 
 func TestGitHubServicePullRequestAndIssueHTTPActions(t *testing.T) {
 	ctx := context.Background()
+	var seenMu sync.Mutex
 	var seen []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenMu.Lock()
 		seen = append(seen, r.Method+" "+r.URL.RequestURI())
+		seenMu.Unlock()
 		if strings.TrimSpace(r.Header.Get("Authorization")) == "" {
 			t.Fatalf("missing authorization header for %s", r.URL.RequestURI())
 		}
@@ -1426,8 +1429,11 @@ func TestGitHubServicePullRequestAndIssueHTTPActions(t *testing.T) {
 		t.Fatalf("unexpected feedback ordering/content: %+v", feedback)
 	}
 	requireNoError(t, svc.CloseIssue(ctx, repo, 11))
-	if len(seen) != 11 {
-		t.Fatalf("expected eleven API requests, got %d: %v", len(seen), seen)
+	seenMu.Lock()
+	seenSnapshot := append([]string(nil), seen...)
+	seenMu.Unlock()
+	if len(seenSnapshot) != 11 {
+		t.Fatalf("expected eleven API requests, got %d: %v", len(seenSnapshot), seenSnapshot)
 	}
 
 	if _, err := svc.GetPullRequest(ctx, nil, 7); err == nil {
