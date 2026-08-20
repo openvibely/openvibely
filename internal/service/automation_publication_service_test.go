@@ -1213,6 +1213,115 @@ func TestAutomationResumeAdmitsDeferredScheduleGitHubInboxHandoff(t *testing.T) 
 	require.Len(t, recorder.submitted, 1, "the deferred Schedule handoff must be admitted exactly once")
 }
 
+func TestAutomationPublishedCustomTaskActivationPreservesDownstreamHandoffPrompts(t *testing.T) {
+	activate := func(t *testing.T, h automationSaveHarness, candidate models.AutomationDraftCandidate, parentKey, childKey string) models.Task {
+		t.Helper()
+		ctx := context.Background()
+		saved, err := h.compiler.Save(ctx, AutomationSaveRequest{ProjectID: h.project.ID, Source: "manual", CreatedVia: "web", Candidate: candidate})
+		require.NoError(t, err)
+		parent, err := h.taskRepo.GetByID(ctx, automationResourceID(t, saved.Definition, parentKey, "task"))
+		require.NoError(t, err)
+		childID := automationResourceID(t, saved.Definition, childKey, "task")
+		tasksBefore := countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE project_id = ?`, h.project.ID)
+		require.NoError(t, h.taskRepo.UpdateStatus(ctx, parent.ID, models.StatusRunning))
+		execution := models.Execution{TaskID: parent.ID, Status: models.ExecRunning, PromptSent: parent.Prompt}
+		require.NoError(t, repository.NewExecutionRepo(h.db).Create(ctx, &execution))
+		sourceNode := automationNodeByKey(t, saved.Definition, parentKey)
+		binding := models.AutomationBinding{AutomationID: saved.Definition.Automation.ID, VersionID: saved.Definition.Version.ID, NodeID: sourceNode.ID}
+		causalCtx := WithAutomationContext(ctx, models.AutomationContext{ProjectID: h.project.ID, Bindings: []models.AutomationBinding{binding}})
+		causalCtx = withAutomationExecution(causalCtx, parent.ID, execution.ID)
+		worker := NewWorkerService(nil, 1, repository.NewProjectRepo(h.db))
+		worker.SetTaskRepo(h.taskRepo)
+		taskSvc := NewTaskService(h.taskRepo, repository.NewAttachmentRepo(h.db), worker)
+		llmSvc := &LLMService{taskRepo: h.taskRepo, automationRepo: h.automationRepo, taskSvc: taskSvc}
+		handled, err := llmSvc.activatePublishedCustomAutomationChild(causalCtx, *parent, "upstream result\n[STATUS: SUCCESS]")
+		require.NoError(t, err)
+		require.True(t, handled)
+		activated, err := h.taskRepo.GetByID(ctx, childID)
+		require.NoError(t, err)
+		require.Equal(t, tasksBefore, countRows(t, h.db, `SELECT COUNT(*) FROM tasks WHERE project_id = ?`, h.project.ID))
+		require.Contains(t, activated.Prompt, "upstream result")
+		select {
+		case submitted := <-worker.Submitted():
+			require.Equal(t, childID, submitted.ID)
+		default:
+			t.Fatal("activated child was not submitted")
+		}
+		return *activated
+	}
+
+	t.Run("pull request handoff", func(t *testing.T) {
+		h := newAutomationSaveHarness(t, "Custom PR activation")
+		ctx := context.Background()
+		projectRepo := repository.NewProjectRepo(h.db)
+		h.project.RepoURL = "https://github.com/example/automation.git"
+		require.NoError(t, projectRepo.Update(ctx, &h.project))
+		settingsRepo := repository.NewSettingsRepo(h.db)
+		require.NoError(t, settingsRepo.Set(ctx, GitHubSettingAuthMode, GitHubAuthModePAT))
+		require.NoError(t, settingsRepo.Set(ctx, GitHubSettingPAT, "test-token"))
+		githubAuthRepo := repository.NewGitHubAuthRepo(h.db)
+		require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
+		h.compiler.validator.SetCapabilityDependencies(projectRepo, settingsRepo, githubAuthRepo)
+		candidate := models.AutomationDraftCandidate{SchemaVersion: 1, Name: "Custom PR activation", AutomationType: "custom", AdapterKey: AutomationAdapterCustom,
+			Nodes: []models.AutomationDraftNode{
+				{Key: "producer", Name: "Find issues", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Find relevant issues.", "category": "scheduled", "priority": 2, "run_at": "04:00", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+				{Key: "issue", Name: "Create issue", Type: models.AutomationNodeAction, Role: "create_github_issue", Config: map[string]any{"instructions": "Open one focused issue.", "labels": []any{"bug"}}},
+				{Key: "assignment", Name: "Human assignment", Type: models.AutomationNodeHumanGate, Role: "github_assignment", Config: map[string]any{"approval_method": "github_assignment"}},
+				{Key: "schedule", Name: "GitHub inbox schedule", Type: models.AutomationNodeTrigger, Role: "fixed_schedule", Config: map[string]any{"prompt": "Poll assigned issues.", "category": "scheduled", "priority": 2, "run_at": "04:15", "repeat_type": "daily", "repeat_interval": 1, "enabled": true}},
+				{Key: "inbox", Name: "GitHub inbox", Type: models.AutomationNodeAgentTask, Role: "github_inbox", Config: map[string]any{"prompt": "Process assigned issues.", "category": "backlog", "priority": 2}},
+				{Key: "implementation", Name: "Implementation", Type: models.AutomationNodeAgentTask, Role: "task", Config: map[string]any{"prompt": "Implement the accepted issue.", "category": "active", "priority": 2}},
+				{Key: "open_pr", Name: "Open pull request", Type: models.AutomationNodeAction, Role: "open_pull_request", Config: map[string]any{"instructions": "Open a reviewable pull request linked to the source issue.", "base": "release/v2", "draft": true}},
+				{Key: "review", Name: "Human review", Type: models.AutomationNodeHumanGate, Role: "pull_request_review", Config: map[string]any{"approval_method": "pull_request_review"}},
+				{Key: "complete", Name: "Completed", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+			},
+			Edges: []models.AutomationDraftEdge{
+				{Key: "producer_issue", From: "producer", To: "issue", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "issue_assignment", From: "issue", To: "assignment", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "schedule_inbox", From: "schedule", To: "inbox", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "assignment_inbox", From: "assignment", To: "inbox", FromPort: "right", ToPort: "left", Label: "assigned", Condition: map[string]any{"state": "assigned"}},
+				{Key: "inbox_implementation", From: "inbox", To: "implementation", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "implementation_pr", From: "implementation", To: "open_pr", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "pr_review", From: "open_pr", To: "review", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+				{Key: "review_complete", From: "review", To: "complete", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			}}
+		activated := activate(t, h, candidate, "schedule", "inbox")
+		require.Contains(t, activated.Prompt, "Pull request handoff")
+		require.Contains(t, activated.Prompt, "github_open_pull_request")
+		require.Contains(t, activated.Prompt, `base "release/v2"`)
+		require.Contains(t, activated.Prompt, "draft=true")
+	})
+
+	t.Run("notification handoff", func(t *testing.T) {
+		h := newAutomationSaveHarness(t, "Custom notification activation")
+		candidate := customScheduledTaskCandidate("Custom notification activation", "Start the notification flow.")
+		candidate.Nodes = append(candidate.Nodes,
+			models.AutomationDraftNode{Key: "notify", Name: "Create notification", Type: models.AutomationNodeAction, Role: "create_notification", Config: map[string]any{"notification_type": "change_proposal", "instructions": "Ask a human to review the prepared proposal."}},
+			models.AutomationDraftNode{Key: "approval", Name: "Human approval", Type: models.AutomationNodeHumanGate, Role: "native_approval", Config: map[string]any{"approval_method": "native_alert"}},
+			models.AutomationDraftNode{Key: "complete", Name: "Completed", Type: models.AutomationNodeOutcome, Role: "completed", Config: map[string]any{}},
+		)
+		candidate.Edges = append(candidate.Edges,
+			models.AutomationDraftEdge{Key: "followup_notify", From: "followup", To: "notify", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			models.AutomationDraftEdge{Key: "notify_approval", From: "notify", To: "approval", FromPort: "right", ToPort: "left", Condition: map[string]any{}},
+			models.AutomationDraftEdge{Key: "approval_complete", From: "approval", To: "complete", FromPort: "right", ToPort: "left", Condition: map[string]any{"state": "approved"}},
+		)
+		activated := activate(t, h, candidate, "schedule", "followup")
+		require.Contains(t, activated.Prompt, "Human approval handoff")
+		require.Contains(t, activated.Prompt, "create_notification exactly once")
+		require.NotContains(t, activated.Prompt, "Pull request handoff")
+		require.NotContains(t, activated.Prompt, "github_open_pull_request")
+	})
+
+	t.Run("task only", func(t *testing.T) {
+		h := newAutomationSaveHarness(t, "Custom task-only activation")
+		candidate := customScheduledTaskCandidate("Custom task-only activation", "Start the task-only flow.")
+		activated := activate(t, h, candidate, "schedule", "followup")
+		require.NotContains(t, activated.Prompt, "Human approval handoff")
+		require.NotContains(t, activated.Prompt, "create_notification exactly once")
+		require.NotContains(t, activated.Prompt, "Pull request handoff")
+		require.NotContains(t, activated.Prompt, "github_open_pull_request")
+	})
+}
+
 func TestAutomationCustomTaskFanoutContinuesAfterBusyBranch(t *testing.T) {
 	for _, test := range []struct {
 		name         string

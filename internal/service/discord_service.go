@@ -51,36 +51,44 @@ type DiscordConnectionStatus struct {
 }
 
 type DiscordService struct {
-	session                  *discordgo.Session
-	settingsRepo             *repository.SettingsRepo
-	discordAuthRepo          *repository.DiscordAuthRepo
-	discordTaskContextRepo   *repository.DiscordTaskContextRepo
-	discordUserProjectRepo   *repository.DiscordUserProjectRepo
-	projectRepo              *repository.ProjectRepo
-	llmConfigRepo            *repository.LLMConfigRepo
-	taskRepo                 *repository.TaskRepo
-	execRepo                 *repository.ExecutionRepo
-	scheduleRepo             *repository.ScheduleRepo
-	taskSvc                  *TaskService
-	taskGoalSvc              *TaskGoalService
-	llmSvc                   *LLMService
-	workerSvc                *WorkerService
-	automationGraphSvc       *AutomationGraphService
-	threadInputRepo          *repository.ThreadInputRepo
-	chatAttachmentRepo       *repository.ChatAttachmentRepo
-	customPersonalityRepo    *repository.CustomPersonalityRepo
-	agentRepo                *repository.AgentRepo
-	alertSvc                 *AlertService
-	chatBroadcaster          *events.ChatBroadcaster
-	executionStreamHub       *events.ExecutionStreamHub
-	queuedTurnPromoter       func(projectID string)
-	queuedTaskThreadPromoter func(taskID string)
-	channelChatRunner        ChannelChatRunner
-	channelTaskRunner        ChannelTaskRunner
-	channelMessageRouter     *ChannelMessageRouter
-	userProjects             map[string]string
-	uploadsDir               string
-	httpClient               *http.Client
+	session                    *discordgo.Session
+	settingsRepo               *repository.SettingsRepo
+	discordAuthRepo            *repository.DiscordAuthRepo
+	discordTaskContextRepo     *repository.DiscordTaskContextRepo
+	discordUserProjectRepo     *repository.DiscordUserProjectRepo
+	projectRepo                *repository.ProjectRepo
+	projectSvc                 *ProjectService
+	githubProjectSvc           GitHubProjectCloneProvider
+	memorySvc                  *MemoryService
+	agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
+	llmConfigRepo              *repository.LLMConfigRepo
+	taskRepo                   *repository.TaskRepo
+	execRepo                   *repository.ExecutionRepo
+	scheduleRepo               *repository.ScheduleRepo
+	taskSvc                    *TaskService
+	taskGoalSvc                *TaskGoalService
+	llmSvc                     *LLMService
+	workerSvc                  *WorkerService
+	automationGraphSvc         *AutomationGraphService
+	threadInputRepo            *repository.ThreadInputRepo
+	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	customPersonalityRepo      *repository.CustomPersonalityRepo
+	agentRepo                  *repository.AgentRepo
+	alertSvc                   *AlertService
+	usageAnalyticsSvc          *UsageAnalyticsService
+	emailStatus                func(context.Context) EmailConnectionStatus
+	emailAuthRepo              *repository.EmailAuthRepo
+	webhookRepo                *repository.WebhookRepo
+	chatBroadcaster            *events.ChatBroadcaster
+	executionStreamHub         *events.ExecutionStreamHub
+	queuedTurnPromoter         func(projectID string)
+	queuedTaskThreadPromoter   func(taskID string)
+	channelChatRunner          ChannelChatRunner
+	channelTaskRunner          ChannelTaskRunner
+	channelMessageRouter       *ChannelMessageRouter
+	userProjects               map[string]string
+	uploadsDir                 string
+	httpClient                 *http.Client
 
 	mu                       sync.RWMutex
 	running                  bool
@@ -105,6 +113,12 @@ func NewDiscordService(
 	discordAuthRepo *repository.DiscordAuthRepo,
 	discordTaskContextRepo *repository.DiscordTaskContextRepo,
 ) *DiscordService {
+	var usageAnalyticsSvc *UsageAnalyticsService
+	if execRepo != nil {
+		if db := execRepo.DB(); db != nil {
+			usageAnalyticsSvc = NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
+		}
+	}
 	return &DiscordService{
 		settingsRepo:           settingsRepo,
 		projectRepo:            projectRepo,
@@ -115,6 +129,7 @@ func NewDiscordService(
 		taskSvc:                taskSvc,
 		llmSvc:                 llmSvc,
 		workerSvc:              workerSvc,
+		usageAnalyticsSvc:      usageAnalyticsSvc,
 		discordAuthRepo:        discordAuthRepo,
 		discordTaskContextRepo: discordTaskContextRepo,
 		userProjects:           make(map[string]string),
@@ -145,9 +160,20 @@ func (s *DiscordService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 func (s *DiscordService) SetCustomPersonalityRepo(repo *repository.CustomPersonalityRepo) {
 	s.customPersonalityRepo = repo
 }
+func (s *DiscordService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
+	s.projectSvc = projectSvc
+	s.githubProjectSvc = githubSvc
+	s.memorySvc = memorySvc
+	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
+}
 func (s *DiscordService) SetAgentRepo(repo *repository.AgentRepo) { s.agentRepo = repo }
 func (s *DiscordService) SetAlertService(svc *AlertService)       { s.alertSvc = svc }
-func (s *DiscordService) SetTaskGoalService(svc *TaskGoalService) { s.taskGoalSvc = svc }
+func (s *DiscordService) SetEmailStatusProvider(provider func(context.Context) EmailConnectionStatus) {
+	s.emailStatus = provider
+}
+func (s *DiscordService) SetEmailAuthRepo(repo *repository.EmailAuthRepo) { s.emailAuthRepo = repo }
+func (s *DiscordService) SetWebhookRepo(repo *repository.WebhookRepo)     { s.webhookRepo = repo }
+func (s *DiscordService) SetTaskGoalService(svc *TaskGoalService)         { s.taskGoalSvc = svc }
 func (s *DiscordService) SetAutomationGraphService(svc *AutomationGraphService) {
 	s.automationGraphSvc = svc
 }
@@ -742,10 +768,23 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
+		DiscordStatus:         s.GetConnectionStatus,
+		DiscordAuthRepo:       s.discordAuthRepo,
+		EmailStatus:           s.emailStatus,
+		EmailAuthRepo:         s.emailAuthRepo,
+		WebhookRepo:           s.webhookRepo,
+		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
+		CreateProject: CreateGitHubProjectRuntimeOptions{
+			ProjectSvc:                 s.projectSvc,
+			GitHubSvc:                  s.githubProjectSvc,
+			MemorySvc:                  s.memorySvc,
+			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,
+		},
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
 			if !s.checkAuthorization(ctx, project.ID, actionCtx.UserID) {
 				return fmt.Errorf("Discord user %q is not authorized to use project %q", actionCtx.UserID, project.Name)

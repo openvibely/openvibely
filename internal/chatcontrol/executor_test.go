@@ -77,6 +77,36 @@ func TestBuildRuntimeToolExecutorForActions_NonOwnedRegisteredActionFallsThrough
 	}
 }
 
+func TestBuildRuntimeToolExecutor_ListTasksDuplicateEmptyNoopIsGuarded(t *testing.T) {
+	calls := 0
+	handlers := map[string]RuntimeActionHandler{
+		"list_tasks": func(_ context.Context, input json.RawMessage) (string, error) {
+			calls++
+			return `{"ok":true,"tasks":[],"count":0,"total":0,"limit":10,"offset":0,"has_more":false,"filter":{"query":"#999","category":"","status":""},"note":"empty"}`, nil
+		},
+	}
+	executor := BuildRuntimeToolExecutor(models.ChatModeOrchestrate, SurfaceWeb, handlers)
+	ctx := context.Background()
+
+	out, handled, isError, err := executor(ctx, "list_tasks", json.RawMessage(`{"limit":10,"query":"#999"}`))
+	if err != nil || !handled || isError || calls != 1 || strings.Contains(out, "duplicate_noop") {
+		t.Fatalf("expected first list_tasks call to execute normally, calls=%d handled=%v isError=%v err=%v out=%s", calls, handled, isError, err, out)
+	}
+
+	out, handled, isError, err = executor(ctx, "list_tasks", json.RawMessage(`{"query":"#999","limit":10,"offset":0}`))
+	if err != nil || !handled || isError || calls != 1 {
+		t.Fatalf("expected duplicate list_tasks call to be guarded, calls=%d handled=%v isError=%v err=%v out=%s", calls, handled, isError, err, out)
+	}
+	if !strings.Contains(out, `"duplicate_noop":true`) || !strings.Contains(out, "Identical list_tasks parameters already returned no tasks") {
+		t.Fatalf("expected duplicate noop marker and note, got %s", out)
+	}
+
+	out, handled, isError, err = executor(ctx, "list_tasks", json.RawMessage(`{"limit":10,"offset":10,"query":"#999"}`))
+	if err != nil || !handled || isError || calls != 2 || !strings.Contains(out, `"has_more":false`) {
+		t.Fatalf("expected changed pagination input to execute, calls=%d handled=%v isError=%v err=%v out=%s", calls, handled, isError, err, out)
+	}
+}
+
 func TestBuildRuntimeToolExecutor_RegisteredActionExecutes(t *testing.T) {
 	handlers := map[string]RuntimeActionHandler{
 		"list_models": func(_ context.Context, _ json.RawMessage) (string, error) {

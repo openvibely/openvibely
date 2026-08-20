@@ -675,17 +675,238 @@ func TestHandler_GetTaskDetailStatus(t *testing.T) {
 	assertContains(t, rec2, "badge-warning")
 	assertContains(t, rec2, "Elapsed")
 
-	// Test 3: Not found task returns 404
-	req3 := httptest.NewRequest(http.MethodGet, "/tasks/nonexistent/detail-status", nil)
-	rec3 := httptest.NewRecorder()
-	c3 := e.NewContext(req3, rec3)
-	c3.SetPath("/tasks/:taskId/detail-status")
-	c3.SetParamNames("taskId")
-	c3.SetParamValues("nonexistent")
+	// Test 3: Completed task shows latest terminal duration
+	completedExec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+	})
+	if err := h.execRepo.Complete(ctx, completedExec.ID, models.ExecCompleted, "done", "", 10, 1500); err != nil {
+		t.Fatalf("complete execution: %v", err)
+	}
+	task.Status = models.StatusCompleted
+	if err := h.taskSvc.Update(ctx, task); err != nil {
+		t.Fatalf("failed to update task completed: %v", err)
+	}
+	rec3 := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+	assertCode(t, rec3, http.StatusOK)
+	assertContains(t, rec3, "Duration:")
+	assertContains(t, rec3, "1s")
 
-	if err := h.GetTaskDetailStatus(c3); err == nil {
+	// Test 4: Not found task returns 404
+	req4 := httptest.NewRequest(http.MethodGet, "/tasks/nonexistent/detail-status", nil)
+	rec4 := httptest.NewRecorder()
+	c4 := e.NewContext(req4, rec4)
+	c4.SetPath("/tasks/:taskId/detail-status")
+	c4.SetParamNames("taskId")
+	c4.SetParamValues("nonexistent")
+
+	if err := h.GetTaskDetailStatus(c4); err == nil {
 		t.Errorf("expected error for nonexistent task")
 	}
+}
+
+func TestHandler_GetTaskDetailStatusLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	agent := createAgent(t, llmConfigRepo)
+	agentDef := &models.Agent{
+		Name:                "Primary Metrics Agent",
+		Key:                 "primary_metrics_agent",
+		SystemPrompt:        "Handle metrics tasks.",
+		Model:               "inherit",
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	project := createProject(t, h, "Metrics Projection Project")
+	task := createTask(t, h, project.ID, "Metrics Projection Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+		tk.Priority = 3
+		tk.Tag = models.TagFeature
+		tk.AgentID = &agent.ID
+		tk.AgentDefinitionID = &agentDef.ID
+	})
+	task.Category = models.CategoryActive
+	if err := h.taskSvc.Update(ctx, task); err != nil {
+		t.Fatalf("update task to active completed: %v", err)
+	}
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
+		t.Fatalf("complete latest execution: %v", err)
+	}
+	var legacyTextBytes int64
+	if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(LENGTH(COALESCE(prompt_sent, '')) + LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(error_message, ''))), 0) FROM executions WHERE task_id = ?`, task.ID).Scan(&legacyTextBytes); err != nil {
+		t.Fatalf("sum legacy execution text bytes: %v", err)
+	}
+	if legacyTextBytes < 13*1024*1024 {
+		t.Fatalf("fixture should contain at least 13 MiB of historical execution text, got %d", legacyTextBytes)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+	counter.SetEnabled(false)
+	assertCode(t, rec, http.StatusOK)
+	for _, required := range []string{"Category:", "active", "Status:", "Completed", "Tag:", "Feature", "Priority:", "High", "Model:", "Test Agent", "Agent:", "Primary Metrics Agent", "Duration:", "1m 5s"} {
+		assertContains(t, rec, required)
+	}
+
+	metricsQuerySeen := false
+	for _, stmt := range counter.Statements() {
+		if !strings.Contains(stmt, "FROM executions") {
+			continue
+		}
+		if strings.Contains(stmt, "latest_started_at") && strings.Contains(stmt, "latest_duration_ms") {
+			metricsQuerySeen = true
+		}
+		for _, forbidden := range []string{"prompt_sent", "output", "error_message", "reasoning_content", "diff_output"} {
+			if strings.Contains(stmt, forbidden) {
+				t.Fatalf("detail-status execution query scanned historical %s text: %s", forbidden, stmt)
+			}
+		}
+	}
+	if !metricsQuerySeen {
+		t.Fatalf("detail-status did not execute compact task execution metrics query; statements: %#v", counter.Statements())
+	}
+	const newTextBytesScanned = 0
+	if newTextBytesScanned > legacyTextBytes/10 {
+		t.Fatalf("expected at least 90%% lower DB text bytes scanned, legacy=%d new=%d", legacyTextBytes, newTextBytesScanned)
+	}
+}
+
+func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
+	for _, tc := range []struct {
+		name             string
+		dbTextBytes      func(*sql.DB, string) int64
+		run              func(context.Context, *Handler, *echo.Echo, *models.Task, []models.LLMConfig, []models.Agent) error
+		waitQueryPattern string
+	}{
+		{
+			name: "legacy_all_history",
+			dbTextBytes: func(db *sql.DB, taskID string) int64 {
+				var total int64
+				if err := db.QueryRow(`SELECT COALESCE(SUM(LENGTH(COALESCE(prompt_sent, '')) + LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(error_message, ''))), 0) FROM executions WHERE task_id = ?`, taskID).Scan(&total); err != nil {
+					b.Fatalf("legacy text bytes: %v", err)
+				}
+				return total
+			},
+			run: func(ctx context.Context, h *Handler, _ *echo.Echo, task *models.Task, agents []models.LLMConfig, agentDefs []models.Agent) error {
+				loadedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+				if err != nil {
+					return err
+				}
+				executions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+				if err != nil {
+					return err
+				}
+				var out bytes.Buffer
+				return pages.TaskDetailMetrics(loadedTask, taskExecutionMetricsFromExecutionsForBenchmark(executions), agents, agentDefs).Render(ctx, &out)
+			},
+			waitQueryPattern: "prompt_sent, output",
+		},
+		{
+			name:        "narrow_projection",
+			dbTextBytes: func(*sql.DB, string) int64 { return 0 },
+			run: func(_ context.Context, _ *Handler, e *echo.Echo, task *models.Task, _ []models.LLMConfig, _ []models.Agent) error {
+				rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+				if rec.Code != http.StatusOK {
+					return fmt.Errorf("detail-status request status=%d", rec.Code)
+				}
+				return nil
+			},
+			waitQueryPattern: "latest_started_at",
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+			ctx := context.Background()
+			agentRepo := repository.NewAgentRepo(db)
+			h.SetAgentRepo(agentRepo)
+			agent := createAgentTB(b, llmConfigRepo)
+			agentDef := &models.Agent{Name: "Primary Metrics Agent", Key: "primary_metrics_agent", SystemPrompt: "Handle metrics tasks.", Model: "inherit", Enabled: true, SelectableAsPrimary: true}
+			if err := agentRepo.Create(ctx, agentDef); err != nil {
+				b.Fatalf("create agent definition: %v", err)
+			}
+			project := createProjectTB(b, h, "Detail Status Benchmark Project")
+			task := createTaskTB(b, h, project.ID, "Detail Status Benchmark Task", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.Status = models.StatusCompleted
+				tk.Priority = 3
+				tk.Tag = models.TagFeature
+				tk.AgentID = &agent.ID
+				tk.AgentDefinitionID = &agentDef.ID
+			})
+			task.Category = models.CategoryActive
+			if err := h.taskSvc.Update(ctx, task); err != nil {
+				b.Fatalf("update task to active completed: %v", err)
+			}
+			seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+			if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
+				b.Fatalf("complete latest execution: %v", err)
+			}
+			agents, err := h.llmConfigRepo.ListBadgeOptions(ctx)
+			if err != nil {
+				b.Fatalf("list badge options: %v", err)
+			}
+			agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
+			textBytes := tc.dbTextBytes(db, task.ID)
+			var totalLightweightLatency int64
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				queryStarted := make(chan struct{})
+				var once sync.Once
+				counter.SetObserver(func(_ context.Context, query string) {
+					if strings.Contains(query, tc.waitQueryPattern) {
+						once.Do(func() { close(queryStarted) })
+					}
+				})
+				errCh := make(chan error, 1)
+				go func() {
+					errCh <- tc.run(context.Background(), h, e, task, agents, agentDefs)
+				}()
+				select {
+				case <-queryStarted:
+				case err := <-errCh:
+					b.Fatalf("detail-status request ended before query started: %v", err)
+				case <-time.After(2 * time.Second):
+					b.Fatalf("detail-status query did not start")
+				}
+				lightweightStart := time.Now()
+				if _, err := h.projectSvc.List(context.Background()); err != nil {
+					b.Fatalf("lightweight project list: %v", err)
+				}
+				totalLightweightLatency += time.Since(lightweightStart).Nanoseconds()
+				if err := <-errCh; err != nil {
+					b.Fatal(err)
+				}
+				counter.SetObserver(nil)
+			}
+			b.ReportMetric(float64(totalLightweightLatency)/float64(b.N), "lightweight_db_block_ns/op")
+			b.ReportMetric(float64(textBytes), "db_text_bytes_scanned/op")
+		})
+	}
+}
+
+func taskExecutionMetricsFromExecutionsForBenchmark(executions []models.Execution) models.TaskExecutionMetrics {
+	var metrics models.TaskExecutionMetrics
+	if len(executions) > 0 {
+		started := executions[len(executions)-1].StartedAt
+		metrics.LatestStartedAt = &started
+	}
+	for i := len(executions) - 1; i >= 0; i-- {
+		if executions[i].DurationMs > 0 {
+			metrics.LatestDurationMs = executions[i].DurationMs
+			break
+		}
+	}
+	return metrics
 }
 
 func TestHandler_GetTaskDetailActions(t *testing.T) {
@@ -2013,6 +2234,79 @@ func TestHandler_UpdateTask(t *testing.T) {
 	}
 }
 
+func TestHandler_UpdateTask_RejectsInvalidPriorities(t *testing.T) {
+	cases := []struct {
+		name        string
+		prioritySet bool
+		priority    string
+	}{
+		{name: "missing"},
+		{name: "zero", prioritySet: true, priority: "0"},
+		{name: "above range", prioritySet: true, priority: "5"},
+		{name: "malformed", prioritySet: true, priority: "urgent"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			task := createTask(t, h, "default", "Original Invalid Priority Target", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.Priority = 3
+			})
+
+			form := url.Values{}
+			form.Set("title", "Should Not Persist")
+			form.Set("category", "active")
+			form.Set("prompt", "should not persist")
+			if tt.prioritySet {
+				form.Set("priority", tt.priority)
+			}
+
+			rec := htmxPut(e, "/tasks/"+task.ID, form)
+			assertCode(t, rec, http.StatusBadRequest)
+			assertContains(t, rec, "Task priority must be between 1 and 4")
+
+			updated, err := h.taskSvc.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			assert.Equal(t, "Original Invalid Priority Target", updated.Title)
+			assert.Equal(t, models.CategoryBacklog, updated.Category)
+			assert.Equal(t, "test prompt", updated.Prompt)
+			assert.Equal(t, 3, updated.Priority)
+		})
+	}
+}
+
+func TestHandler_UpdateTask_PersistsValidPriorities(t *testing.T) {
+	labels := map[int]string{1: "Low", 2: "Normal", 3: "High", 4: "Urgent"}
+	for priority := 1; priority <= 4; priority++ {
+		t.Run(fmt.Sprintf("priority %d", priority), func(t *testing.T) {
+			h, e, _ := setupTestHandler(t)
+			ctx := context.Background()
+			task := createTask(t, h, "default", "Original Valid Priority Target", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.Priority = 2
+			})
+
+			form := url.Values{}
+			form.Set("title", fmt.Sprintf("Priority %d", priority))
+			form.Set("category", "backlog")
+			form.Set("priority", strconv.Itoa(priority))
+			form.Set("prompt", "updated prompt")
+
+			rec := htmxPut(e, "/tasks/"+task.ID, form)
+			assertCode(t, rec, http.StatusOK)
+
+			updated, err := h.taskSvc.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			assert.Equal(t, priority, updated.Priority)
+			assert.Equal(t, labels[priority], components.PriorityLabel(updated.Priority))
+		})
+	}
+}
+
 func TestHandler_UpdateTask_NormalizesWhitespaceAndRejectsBlankFields(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
@@ -2094,7 +2388,7 @@ func TestHandler_UpdateTask_DetailCategoryTransitionsRefreshCompletedAt(t *testi
 		form := url.Values{}
 		form.Set("title", task.Title)
 		form.Set("category", string(category))
-		form.Set("priority", "0")
+		form.Set("priority", "2")
 		form.Set("prompt", task.Prompt)
 		rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
 		assertCode(t, rec, http.StatusOK)
@@ -2128,7 +2422,7 @@ func TestHandler_UpdateTask_NonRunningOnly(t *testing.T) {
 	form := url.Values{}
 	form.Set("title", "Updated While Pending")
 	form.Set("category", "active")
-	form.Set("priority", "0")
+	form.Set("priority", "2")
 	form.Set("prompt", "test")
 	rec := htmxPut(e, "/tasks/"+task.ID, form)
 	assertCode(t, rec, http.StatusOK)
@@ -2147,7 +2441,7 @@ func TestHandler_UpdateTask_DuplicateTitle(t *testing.T) {
 	form := url.Values{}
 	form.Set("title", "Existing Task")
 	form.Set("category", "backlog")
-	form.Set("priority", "0")
+	form.Set("priority", "2")
 	form.Set("prompt", "test prompt 2")
 	rec := htmxPut(e, "/tasks/"+task2.ID, form)
 	assertCode(t, rec, http.StatusConflict)
@@ -2471,7 +2765,7 @@ func TestHandler_UpdateTask_CategoryChangeFromCompletedToActiveIsMetadataOnly(t 
 	form.Set("title", task.Title)
 	form.Set("category", "active")
 	form.Set("prompt", task.Prompt)
-	form.Set("priority", "0")
+	form.Set("priority", "2")
 	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(form).Execute()
 	assertCode(t, rec, http.StatusOK)
 
@@ -3387,7 +3681,7 @@ func TestHandler_UpdateTaskTag(t *testing.T) {
 		form := url.Values{}
 		form.Set("title", task.Title)
 		form.Set("category", string(task.Category))
-		form.Set("priority", "0")
+		form.Set("priority", "2")
 		form.Set("prompt", task.Prompt)
 		form.Set("tag", tag)
 		return form

@@ -206,45 +206,6 @@ templ ChatBubble(role, content string) {
 				<div class="whitespace-pre-wrap leading-relaxed text-sm" style="word-wrap: break-word;">{ CleanDisplayContent(content) }</div>
 			} else {
 				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(content) } data-raw-content={ NormalizeDisplayMarkers(content) }></div>
-				<script>
-					(function() {
-						var el = document.currentScript.previousElementSibling;
-						var renderStarted = false;
-						function render() {
-							if (renderStarted) return;
-							renderStarted = true;
-							var raw = el.getAttribute('data-raw-content');
-							if (window.scheduleChatElementRender && raw) {
-								window.scheduleChatElementRender(el, raw);
-							} else if (window.renderStreamingContent && raw) {
-								window.renderStreamingContent(el, raw);
-							} else if (window.renderChatMarkdown && raw) {
-								el.classList.add('chat-markdown');
-								el.innerHTML = window.renderChatMarkdown(raw);
-								if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
-							} else {
-								el.textContent = raw;
-								el.classList.add('whitespace-pre-wrap');
-							}
-						// After rendering, convert task-result metadata and clean transcript controls
-						var bubble = el.closest('.chat-bubble-user-msg, .chat-bubble-assistant-msg');
-						if (bubble) {
-							if (window.convertTaskLinksInMessage) window.convertTaskLinksInMessage(bubble);
-							if (window.convertTaskEditLinksInMessage) window.convertTaskEditLinksInMessage(bubble);
-							if (window.cleanBubbleContent) window.cleanBubbleContent(bubble);
-						}
-						}
-						// renderStreamingContent may not be defined yet (defined later in page).
-						if (window.renderStreamingContent) { render(); }
-						else {
-							// Poll until renderStreamingContent is defined (defined by ChatAutoScrollScript later in page)
-							var poll = setInterval(function() {
-								if (window.renderStreamingContent) { clearInterval(poll); render(); }
-							}, 10);
-							setTimeout(function() { clearInterval(poll); render(); }, 2000); // fallback
-						}
-					})();
-				</script>
 			}
 		</div>
 	</div>
@@ -262,36 +223,6 @@ templ ChatBubbleError(role, errorMsg, output string) {
 			}
 			if output != "" {
 				<div class="chat-stream-content" data-raw-revision={ chatContentRevision(output) } data-raw-content={ NormalizeDisplayMarkers(output) }></div>
-				<script>
-					(function() {
-						var el = document.currentScript.previousElementSibling;
-						var renderStarted = false;
-						function render() {
-							if (renderStarted) return;
-							renderStarted = true;
-							var raw = el.getAttribute('data-raw-content');
-							if (window.scheduleChatElementRender && raw) {
-								window.scheduleChatElementRender(el, raw);
-							} else if (window.renderStreamingContent && raw) {
-								window.renderStreamingContent(el, raw);
-							} else if (window.renderChatMarkdown && raw) {
-								el.classList.add('chat-markdown');
-								el.innerHTML = window.renderChatMarkdown(raw);
-								if (window.addCodeCopyButtons) window.addCodeCopyButtons(el);
-							} else {
-								el.textContent = raw;
-								el.classList.add('whitespace-pre-wrap');
-							}
-						}
-						if (window.renderStreamingContent) { render(); }
-						else {
-							var poll = setInterval(function() {
-								if (window.renderStreamingContent) { clearInterval(poll); render(); }
-							}, 10);
-							setTimeout(function() { clearInterval(poll); render(); }, 2000);
-						}
-					})();
-				</script>
 			}
 		</div>
 	</div>

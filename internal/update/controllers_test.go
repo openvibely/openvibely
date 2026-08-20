@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1441,7 +1442,10 @@ func TestHostedInitialAssignmentPersistenceFailureRetriesDrainCleanupAutonomousl
 	}
 	controller := NewHostedController(api, drain, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}}, filepath.Join(root, "hosted.json"))
 	controller.renewInterval = time.Millisecond
+	writeAttempted := make(chan struct{})
+	var writeAttemptedOnce sync.Once
 	controller.stateWriter = func(path string, data []byte) error {
+		writeAttemptedOnce.Do(func() { close(writeAttempted) })
 		if !storageAvailable.Load() {
 			return errors.New("Hosted storage unavailable")
 		}
@@ -1449,6 +1453,11 @@ func TestHostedInitialAssignmentPersistenceFailureRetriesDrainCleanupAutonomousl
 	}
 	done := make(chan error, 1)
 	go func() { done <- controller.poll(context.Background()) }()
+	select {
+	case <-writeAttempted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("initial assignment did not attempt to persist before cleanup")
+	}
 	select {
 	case <-drain.Reopened():
 		t.Fatal("admission reopened before cleanup became durable")

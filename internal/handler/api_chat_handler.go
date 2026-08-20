@@ -153,19 +153,20 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "project not found"})
 	}
 
-	// Auto-select an agent
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
-	if err != nil || len(agents) == 0 {
+	// Auto-select an agent from compact selection/context rows. Provider
+	// execution below hydrates the chosen row through GetByID before use.
+	availableModels, err := h.llmConfigRepo.ListChatSelectionOptions(c.Request().Context())
+	if err != nil || len(availableModels) == 0 {
 		applog.Infof("[handler] APIChatMessage no agents available: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "no agents available"})
 	}
 	complexity := service.AnalyzeComplexity(message)
-	result := service.SelectLLM(complexity, agents)
-	var agent *models.LLMConfig
+	result := service.SelectLLM(complexity, availableModels)
+	var selectedModel *models.LLMConfig
 	if result != nil {
-		agent = result.LLMConfig
+		selectedModel = result.LLMConfig
 	} else {
-		agent = &agents[0]
+		selectedModel = &availableModels[0]
 	}
 
 	// Note: Interactive chat intentionally bypasses task worker capacity checks.
@@ -226,7 +227,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			Scope:               models.ThreadInputScopeChat,
 			ProjectID:           projectID,
 			RunExecutionID:      activeChatExec.ID,
-			AgentConfigID:       agent.ID,
+			AgentConfigID:       selectedModel.ID,
 			InputMode:           models.ThreadInputModeQueued,
 			InputStatus:         models.ThreadInputPending,
 			Content:             message,
@@ -247,7 +248,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 				ExecID:         queued.ID,
 				Message:        message,
 				Source:         "api",
-				AgentName:      agent.Name,
+				AgentName:      selectedModel.Name,
 				Queued:         true,
 				HasAttachments: queued.AttachmentSessionID != "",
 			})
@@ -258,6 +259,12 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 			StatusURL: fmt.Sprintf("/api/chat/message/%s", queued.ID),
 			Queued:    true,
 		})
+	}
+
+	agent, err := h.llmConfigRepo.GetByID(c.Request().Context(), selectedModel.ID)
+	if err != nil || agent == nil {
+		applog.Infof("[handler] APIChatMessage selected agent unavailable: id=%s err=%v", selectedModel.ID, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "selected agent unavailable"})
 	}
 
 	// Create a task record for the chat message
@@ -396,7 +403,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 	}
 	priorHistory := filterChatHistory(chatHistory, exec.ID)
 	// Build task context using shared function (same as /chat and Telegram)
-	taskContext := h.buildChatContext(c.Request().Context(), projectID, agents)
+	taskContext := h.buildChatContext(c.Request().Context(), projectID, availableModels)
 
 	// Combine context (including personality if set)
 	fullContext := taskContext

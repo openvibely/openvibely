@@ -1418,7 +1418,11 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		applog.Infof("[handler] startQueuedChatInput exec=%s history error: %v", exec.ID, err)
 		history = []models.Execution{}
 	}
-	availableModels, _ := h.llmConfigRepo.List(ctx)
+	availableModels, listErr := h.llmConfigRepo.ListChatSelectionOptions(ctx)
+	if listErr != nil {
+		applog.Infof("[handler] startQueuedChatInput error listing chat model selection options: %v", listErr)
+		availableModels = []models.LLMConfig{}
+	}
 	taskContext := h.buildChatContext(ctx, input.ProjectID, availableModels)
 	personalityContext := h.getPersonalityContext(ctx, input.ProjectID)
 	workDir := h.resolveWorkDir(ctx, input.ProjectID)
@@ -2866,7 +2870,7 @@ func (h *Handler) processChatAttachmentsForEdits(ctx context.Context, execID str
 // hasOtherEditFields returns true if a TaskEditRequest has fields beyond just attachments.
 func hasOtherEditFields(req service.TaskEditRequest) bool {
 	return req.Title != "" || req.Prompt != "" || req.Category != "" ||
-		req.Priority > 0 || req.Tag != "" || req.AgentID != "" ||
+		req.PrioritySet || req.Priority != 0 || req.Tag != "" || req.AgentID != "" ||
 		req.AgentConfigID != "" || req.AgentDefinitionID != "" || req.Agent != "" ||
 		req.ClearAgentDefinition || req.Chain != nil || len(req.Attachments) > 0
 }
@@ -3180,23 +3184,15 @@ func (h *Handler) executeListPersonalities(ctx context.Context) string {
 
 // executeSetPersonality applies a typed set_personality runtime action.
 func (h *Handler) executeSetPersonality(ctx context.Context, req service.SetPersonalityRequest) string {
-	// Validate personality key against presets + custom
-	valid := false
-	var matchedName string
-	for _, personality := range service.AllPersonalitiesWithCustom(ctx, h.customPersonalityRepo) {
-		if personality.Key == req.Personality {
-			valid = true
-			matchedName = personality.Name
-			break
-		}
-	}
-	if !valid {
+	// Validate personality key against presets + custom.
+	personality, ok := service.FindPersonality(ctx, req.Personality, h.customPersonalityRepo)
+	if !ok {
 		return fmt.Sprintf("Unknown personality %q. Use list_personalities to see available options.", req.Personality)
 	}
 	if err := h.settingsRepo.Set(ctx, "personality", req.Personality); err != nil {
 		return fmt.Sprintf("Error setting personality to %q: %v", req.Personality, err)
 	}
-	return fmt.Sprintf("Personality changed to **%s** (`%s`)", matchedName, req.Personality)
+	return fmt.Sprintf("Personality changed to **%s** (`%s`)", personality.Name, req.Personality)
 }
 
 // executeListModels returns available model configurations.

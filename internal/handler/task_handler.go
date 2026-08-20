@@ -326,6 +326,8 @@ func taskRequiredFieldHTTPError(err error) *echo.HTTPError {
 		return echo.NewHTTPError(http.StatusBadRequest, "Task title is required")
 	case errors.Is(err, service.ErrTaskPromptRequired):
 		return echo.NewHTTPError(http.StatusBadRequest, "Task prompt is required")
+	case errors.Is(err, service.ErrInvalidTaskPriority):
+		return echo.NewHTTPError(http.StatusBadRequest, "Task priority must be between 1 and 4")
 	default:
 		return nil
 	}
@@ -670,12 +672,15 @@ func (h *Handler) GetTaskDetailStatus(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	executions, _ := h.execRepo.ListByTaskChronological(c.Request().Context(), taskID)
+	metrics, err := h.execRepo.GetTaskExecutionMetrics(c.Request().Context(), taskID)
+	if err != nil {
+		applog.Infof("[handler] GetTaskDetailStatus error loading execution metrics task=%s: %v", taskID, err)
+	}
 
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
 	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 
-	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, executions, agents, agentDefs))
+	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, metrics, agents, agentDefs))
 }
 
 // GetTaskDetailActions returns just the action buttons fragment (Run Now / Edit / Delete).
@@ -1193,9 +1198,12 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	task.Category = oldCategory
 	task.Prompt = c.FormValue("prompt")
 	task.Tag = models.TaskTag(c.FormValue("tag"))
-	if p, err := strconv.Atoi(c.FormValue("priority")); err == nil {
-		task.Priority = p
+	priorityValue := strings.TrimSpace(c.FormValue("priority"))
+	priority, err := strconv.Atoi(priorityValue)
+	if priorityValue == "" || err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "Task priority must be between 1 and 4")
 	}
+	task.Priority = priority
 
 	// Handle optional agent (LLM config) selection
 	if agentID := c.FormValue("agent_id"); agentID != "" {
@@ -1472,7 +1480,7 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	} else if models.IsSwarmChildRole(task.SwarmRole) {
 		h.notifySwarmChildTerminal(c.Request().Context(), taskID)
 	}
-	h.cancelRunningExecutionsAndPublish(c.Request().Context(), taskID, "CancelTask")
+	h.cancelActiveExecutionsAndPublish(c.Request().Context(), taskID, "CancelTask")
 	applog.Infof("[handler] CancelTask cancelled task=%s", taskID)
 
 	// Return the full kanban board for HTMX requests

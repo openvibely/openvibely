@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -540,6 +541,105 @@ func TestExecuteTaskEdits_CategoryBacklogCancelsActiveRunningOrQueuedTask(t *tes
 	}
 }
 
+func TestExecuteTaskEdits_RejectsInvalidPriorities(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Runtime Invalid Priority Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+
+	cases := []struct {
+		name  string
+		build func(taskID string) TaskEditRequest
+	}{
+		{name: "below range", build: func(taskID string) TaskEditRequest {
+			return TaskEditRequest{ID: taskID, Title: "Should Not Persist", Priority: -1}
+		}},
+		{name: "explicit zero from JSON", build: func(taskID string) TaskEditRequest {
+			var req TaskEditRequest
+			payload := []byte(fmt.Sprintf(`{"id":%q,"title":"Should Not Persist","priority":0}`, taskID))
+			if err := json.Unmarshal(payload, &req); err != nil {
+				t.Fatalf("unmarshal edit request: %v", err)
+			}
+			if !req.PrioritySet {
+				t.Fatal("expected explicit JSON priority to mark PrioritySet")
+			}
+			return req
+		}},
+		{name: "above range", build: func(taskID string) TaskEditRequest {
+			return TaskEditRequest{ID: taskID, Title: "Should Not Persist", Priority: 5}
+		}},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			task := &models.Task{ProjectID: project.ID, Title: "Original " + tt.name, Prompt: "original prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 3}
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("failed to create task: %v", err)
+			}
+
+			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{tt.build(task.ID)}, project.ID, taskSvc, nil, "")
+			if !strings.Contains(summary, "Failed to edit 1 task(s)") || !strings.Contains(summary, ErrInvalidTaskPriority.Error()) {
+				t.Fatalf("expected invalid priority failure summary, got %q", summary)
+			}
+			if strings.Contains(summary, "Edited 1 task(s)") {
+				t.Fatalf("invalid priority edit should not report success: %q", summary)
+			}
+			updated, err := taskRepo.GetByID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("failed to get task: %v", err)
+			}
+			if updated.Title != "Original "+tt.name {
+				t.Fatalf("title changed after invalid priority: got %q", updated.Title)
+			}
+			if updated.Priority != 3 {
+				t.Fatalf("priority changed after invalid edit: got %d", updated.Priority)
+			}
+		})
+	}
+}
+
+func TestExecuteTaskEdits_PersistsValidPriorities(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	taskSvc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), nil)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Runtime Valid Priority Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("failed to create project: %v", err)
+	}
+
+	for priority := 1; priority <= 4; priority++ {
+		t.Run(fmt.Sprintf("priority %d", priority), func(t *testing.T) {
+			initialPriority := 2
+			if priority == initialPriority {
+				initialPriority = 3
+			}
+			task := &models.Task{ProjectID: project.ID, Title: fmt.Sprintf("Priority %d", priority), Prompt: "original prompt", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: initialPriority}
+			if err := taskRepo.Create(ctx, task); err != nil {
+				t.Fatalf("failed to create task: %v", err)
+			}
+
+			summary := ExecuteTaskEdits(ctx, []TaskEditRequest{{ID: task.ID, Priority: priority}}, project.ID, taskSvc, nil, "")
+			if !strings.Contains(summary, "Edited 1 task(s)") || !strings.Contains(summary, "updated: priority") {
+				t.Fatalf("expected priority edit success summary, got %q", summary)
+			}
+			updated, err := taskRepo.GetByID(ctx, task.ID)
+			if err != nil {
+				t.Fatalf("failed to get task: %v", err)
+			}
+			if updated.Priority != priority {
+				t.Fatalf("priority = %d, want %d", updated.Priority, priority)
+			}
+		})
+	}
+}
+
 func TestExecuteTaskEdits_TitleAndCategoryChangePersistsAndSubmits(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -633,11 +733,11 @@ func TestExecuteTaskEdits_AgentReassignment(t *testing.T) {
 
 	// Create agent configs for testing
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic"}
+	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), initialAgent); err != nil {
 		t.Fatalf("failed to create initial agent: %v", err)
 	}
-	newAgent := &models.LLMConfig{Name: "New Agent", Provider: "anthropic"}
+	newAgent := &models.LLMConfig{Name: "New Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), newAgent); err != nil {
 		t.Fatalf("failed to create new agent: %v", err)
 	}
@@ -701,7 +801,7 @@ func TestExecuteTaskEdits_AgentReassignmentNoChange(t *testing.T) {
 
 	// Create an agent config
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	agent := &models.LLMConfig{Name: "Same Agent", Provider: "anthropic"}
+	agent := &models.LLMConfig{Name: "Same Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), agent); err != nil {
 		t.Fatalf("failed to create agent: %v", err)
 	}
@@ -748,11 +848,11 @@ func TestExecuteTaskEdits_AgentConfigIDAlias(t *testing.T) {
 
 	// Create agent configs for testing
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic"}
+	initialAgent := &models.LLMConfig{Name: "Initial Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), initialAgent); err != nil {
 		t.Fatalf("failed to create initial agent: %v", err)
 	}
-	newAgent := &models.LLMConfig{Name: "New Agent", Provider: "anthropic"}
+	newAgent := &models.LLMConfig{Name: "New Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), newAgent); err != nil {
 		t.Fatalf("failed to create new agent: %v", err)
 	}
@@ -816,7 +916,7 @@ func TestExecuteTaskEdits_AgentAssignmentFromNil(t *testing.T) {
 
 	// Create an agent config
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
-	agent := &models.LLMConfig{Name: "First Agent", Provider: "anthropic"}
+	agent := &models.LLMConfig{Name: "First Agent", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := llmConfigRepo.Create(context.Background(), agent); err != nil {
 		t.Fatalf("failed to create agent: %v", err)
 	}
@@ -875,7 +975,7 @@ func TestExecuteTaskEdits_PrimaryAgentDefinitionByIDPreservesModelConfig(t *test
 		t.Fatalf("create project: %v", err)
 	}
 	modelRepo := repository.NewLLMConfigRepo(db)
-	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic"}
+	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
 	}
@@ -950,7 +1050,7 @@ func TestExecuteTaskEdits_ClearPrimaryAgentDefinitionPreservesModelConfig(t *tes
 		t.Fatalf("create project: %v", err)
 	}
 	modelRepo := repository.NewLLMConfigRepo(db)
-	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic"}
+	modelConfig := &models.LLMConfig{Name: "Selected model", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
 	}
@@ -1070,7 +1170,7 @@ func TestExecuteTaskEdits_AgentIDStillOnlyChangesModelConfig(t *testing.T) {
 		t.Fatalf("create primary agent: %v", err)
 	}
 	modelRepo := repository.NewLLMConfigRepo(db)
-	modelConfig := &models.LLMConfig{Name: "Model Config 2", Provider: "anthropic"}
+	modelConfig := &models.LLMConfig{Name: "Model Config 2", Provider: "anthropic", Model: "claude-sonnet-4-5-20250929"}
 	if err := modelRepo.Create(ctx, modelConfig); err != nil {
 		t.Fatalf("create model config: %v", err)
 	}

@@ -676,8 +676,20 @@ type modelFormOptions struct {
 	beforeProviderSpecificFields func()
 }
 
-func isModelNameValidationError(err error) bool {
-	return errors.Is(err, repository.ErrLLMConfigNameRequired) || errors.Is(err, repository.ErrLLMConfigNameDuplicate)
+func isModelValidationError(err error) bool {
+	return errors.Is(err, repository.ErrLLMConfigNameRequired) ||
+		errors.Is(err, repository.ErrLLMConfigNameDuplicate) ||
+		errors.Is(err, repository.ErrLLMConfigModelRequired)
+}
+
+func validateBrowserRunnableModelSlug(agent *models.LLMConfig) error {
+	switch agent.Provider {
+	case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
+		if strings.TrimSpace(agent.Model) == "" {
+			return repository.ErrLLMConfigModelRequired
+		}
+	}
+	return nil
 }
 
 func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context, agent *models.LLMConfig, opts modelFormOptions) error {
@@ -762,6 +774,9 @@ func (h *Handler) normalizeBrowserModelForm(ctx context.Context, c echo.Context,
 	if opts.mode == modelFormCreate && agent.Provider == "" {
 		agent.Provider = models.ProviderAnthropic
 	}
+	if err := validateBrowserRunnableModelSlug(agent); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -839,7 +854,7 @@ func (h *Handler) CreateModel(c echo.Context) error {
 
 	if err := h.llmConfigRepo.Create(c.Request().Context(), a); err != nil {
 		applog.Infof("[handler] CreateModel error: %v", err)
-		if isModelNameValidationError(err) {
+		if isModelValidationError(err) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return err
@@ -907,7 +922,7 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 	applog.Infof("[handler] UpdateModel id=%s name=%q model=%s auth_method=%s max_workers=%d", id, agent.Name, agent.Model, agent.AuthMethod, agent.MaxWorkers)
 	if err := h.llmConfigRepo.Update(c.Request().Context(), agent); err != nil {
 		applog.Infof("[handler] UpdateModel error: %v", err)
-		if isModelNameValidationError(err) {
+		if isModelValidationError(err) {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		return err
@@ -1447,7 +1462,11 @@ func (h *Handler) ListOllamaAvailableModels(c echo.Context) error {
 }
 
 func normalizeOpenAIModel(value string) string {
-	switch strings.TrimSpace(value) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	switch trimmed {
 	case "gpt-5.6-sol",
 		"gpt-5.6-terra",
 		"gpt-5.6-luna",
@@ -1463,7 +1482,7 @@ func normalizeOpenAIModel(value string) string {
 		"gpt-5.1-codex-mini",
 		"gpt-5-codex",
 		"gpt-5-codex-mini":
-		return strings.TrimSpace(value)
+		return trimmed
 	default:
 		return "gpt-5.6-sol"
 	}

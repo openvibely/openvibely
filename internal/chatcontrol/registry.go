@@ -11,7 +11,7 @@
 //   - schedules: schedule_task, delete_schedule, modify_schedule
 //   - alerts: create_alert, delete_alert, toggle_alert
 //   - personality: set_personality
-//   - projects: switch_project
+//   - projects: create_project, switch_project
 //   - automations: save_automation, run_automation_now, pause_automation, resume_automation
 //   - chat: set_chat_mode
 //
@@ -20,10 +20,11 @@
 //   - schedules: list_schedules
 //   - projects: list_projects, project_info, get_current_project
 //   - models: list_models, get_model
+//   - analytics: view_usage_analytics
 //   - agents: list_agents
 //   - alerts: list_alerts, get_alert
 //   - personality: list_personalities, get_personality
-//   - settings: view_settings
+//   - settings: view_settings, list_channels, view_system_update
 //   - memory: memory_view (only when selected-memory runtime tools authorize a handle)
 //   - chat: get_chat_mode, list_capabilities
 //   - messaging: send_message
@@ -92,6 +93,7 @@ const (
 	DomainSettings    Domain = "settings"
 	DomainMessaging   Domain = "messaging"
 	DomainGitHub      Domain = "github"
+	DomainAnalytics   Domain = "analytics"
 	DomainAutomations Domain = "automations"
 	DomainMemory      Domain = "memory"
 	DomainChat        Domain = "chat"
@@ -135,6 +137,7 @@ const chainSchemaProperties = `{"type":"object","properties":{"enabled":{"type":
 // createTaskParams is the full JSON Schema for the create_task tool.
 const createTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the task. If set, the Goal Agent may continue the task across turns until this condition is satisfied."},"category":{"type":"string","enum":["active","backlog"]},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"chain":` + chainSchemaProperties + `,"source_github_issue_number":{"type":"integer","minimum":1,"description":"For a GitHub Dev Inbox implementation task, the exact assigned issue number returned by this execution."},"source_github_repo_url":{"type":"string","description":"Optional repository URL for source_github_issue_number. Defaults to the current project repository."}},"required":["title","prompt"],"additionalProperties":false}`
 
+const createProjectParams = `{"type":"object","properties":{"name":{"type":"string","description":"Project name."},"repo_url":{"type":"string","description":"GitHub repository URL to clone for the new project. Local filesystem paths and create-directory behavior are not supported."},"description":{"type":"string","description":"Optional project description."},"default_agent_config_id":{"type":"string","description":"Optional default model config ID for the project."},"max_workers":{"type":"integer","minimum":1,"description":"Optional positive per-project worker limit."},"switch_after_create":{"type":"boolean","description":"Request switching the current Chat/channel context to the new project when the surface supports it."}},"required":["name","repo_url"],"additionalProperties":false}`
 const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the swarm parent. If set, the Goal Agent may continue the parent task until this condition is satisfied."},"project_id":{"type":"string","description":"Optional project id; defaults to current project."},"category":{"type":"string","enum":["active","backlog"],"description":"Active starts the planner now; backlog defers planning until the swarm parent is run or moved to Active."},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID for the swarm parent/children. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"tag":{"type":"string","enum":["bug","feature"]},"max_workers":{"type":"integer","minimum":1,"maximum":8},"worker_isolation":{"type":"string","enum":["worktree","read_only","shared"]},"reviewer_enabled":{"type":"boolean","description":"Whether the swarm should create and run a reviewer stage. Defaults to true."},"merger_enabled":{"type":"boolean","description":"Whether the swarm should create and run a merger stage. Defaults to true."},"merge_target_branch":{"type":"string","description":"Optional merge target branch for swarm output."}},"required":["title","prompt"],"additionalProperties":false}`
 
 // editTaskParams is the full JSON Schema for the edit_task tool.
@@ -206,7 +209,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:               "list_tasks",
-		Description:        "Discover tasks in the current project by partial title and/or optional category/status filters. Returns compact summaries (task ID, title, category, status, priority, updated time, parent/swarm role) with deterministic ordering and explicit limit/offset pagination. Read-only; excludes internal chat rows and never crosses projects. Use it to find an existing task's ID before create_task/edit_task/execute_tasks or to reconcile a GitHub issue by number/URL.",
+		Description:        "Discover tasks in the current project by partial title and/or optional category/status filters. Omit category/status to search all visible task categories and statuses; do not enumerate lifecycle filters after an empty total=0, has_more=false result for the same query. Returns compact summaries (task ID, title, category, status, priority, updated time, parent/swarm role) with deterministic ordering and explicit limit/offset pagination. Read-only; excludes internal chat rows and never crosses projects. Use it to find an existing task's ID before create_task/edit_task/execute_tasks or to reconcile a GitHub issue by number/URL.",
 		Domain:             DomainTasks,
 		Access:             AccessRead,
 		Sensitivity:        SensitivityNormal,
@@ -695,6 +698,18 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"model_id":{"type":"string"},"name":{"type":"string"}},"additionalProperties":false}`),
 	},
 
+	// --- Analytics domain (read-only from chat) ---
+	{
+		Name:         "view_usage_analytics",
+		Description:  "Return compact prompt-safe current-project model usage, token totals, cost availability, top model/provider breakdowns, recent buckets, and stored account-limit summaries. Uses locally stored Analytics data only and does not refresh provider account usage.",
+		Domain:       DomainAnalytics,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"range":{"type":"string","enum":["7d","30d","90d","365d","month","all"],"description":"Convenience range matching Analytics API; defaults to 30d."},"provider":{"type":"string","description":"Optional provider filter, e.g. openai, anthropic, openai_compatible."},"group_by":{"type":"string","enum":["hour","day","week","month"],"description":"Recent usage bucket grouping; defaults to day."},"date_from":{"type":"string","description":"Optional RFC3339 or YYYY-MM-DD start time."},"date_to":{"type":"string","description":"Optional RFC3339 or YYYY-MM-DD end time."},"top_limit":{"type":"integer","minimum":1,"maximum":10,"description":"Maximum top model/provider rows to return; defaults to 5."},"recent_bucket_limit":{"type":"integer","minimum":0,"maximum":24,"description":"Maximum recent usage buckets to return; defaults to 8. Use 0 to omit buckets."}},"additionalProperties":false}`),
+	},
+
 	// --- Agents domain (read-only from chat) ---
 	{
 		Name:         "list_agents",
@@ -739,6 +754,16 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	},
 	{
+		Name:         "create_project",
+		Description:  "Create a GitHub-backed project from a project name and GitHub repository URL. Orchestrate-only; does not support local repository paths, create-directory behavior, deletion, or credential details.",
+		Domain:       DomainProjects,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(createProjectParams),
+	},
+	{
 		Name:         "switch_project",
 		Description:  "Switch active project by id or name.",
 		Domain:       DomainProjects,
@@ -758,6 +783,26 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
+	{
+		Name:         "list_channels",
+		Description:  "Summarize prompt-safe channel and integration readiness for the current project, including GitHub, Slack, Telegram, Discord, Email, inbound webhooks, and outbound message target counts. Does not expose tokens, passwords, webhook secrets, private keys, or raw target credentials.",
+		Domain:       DomainSettings,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
+	{
+		Name:         "view_system_update",
+		Description:  "Return a compact prompt-safe summary of OpenVibely system update status from the update coordinator. Read-only; available on web/API Chat and does not accept, cancel, apply, stage, restart, or roll back updates.",
+		Domain:       DomainSettings,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	},
 

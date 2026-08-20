@@ -85,6 +85,173 @@ func TestCreateSchedule_RejectsOversizedIntervalWithoutPersistence(t *testing.T)
 	}
 }
 
+func TestScheduleMutationRoutesRejectForeignProjectContext(t *testing.T) {
+	validScheduleForm := func(runAt time.Time) url.Values {
+		return url.Values{
+			"run_at":          {runAt.Format("2006-01-02T15:04")},
+			"repeat_type":     {"daily"},
+			"repeat_interval": {"1"},
+		}
+	}
+
+	scheduleUnchanged := func(t *testing.T, got, want *models.Schedule) {
+		t.Helper()
+		if got == nil {
+			t.Fatal("expected schedule to remain present")
+		}
+		if got.TaskID != want.TaskID || !got.RunAt.Equal(want.RunAt) || got.RepeatType != want.RepeatType || got.RepeatInterval != want.RepeatInterval || got.Enabled != want.Enabled || got.ClearContextOnStart != want.ClearContextOnStart {
+			t.Fatalf("schedule changed unexpectedly: got=%+v want=%+v", got, want)
+		}
+		if (got.NextRun == nil) != (want.NextRun == nil) {
+			t.Fatalf("next_run changed unexpectedly: got=%v want=%v", got.NextRun, want.NextRun)
+		}
+		if got.NextRun != nil && !got.NextRun.Equal(*want.NextRun) {
+			t.Fatalf("next_run changed unexpectedly: got=%v want=%v", got.NextRun, want.NextRun)
+		}
+	}
+
+	t.Run("create without agent assignment field", func(t *testing.T) {
+		tc := NewTestContext(t)
+		projectA := tc.CreateProject().WithName("Project A").Build()
+		projectB := tc.CreateProject().WithName("Project B").Build()
+		task := tc.CreateTask(projectA.ID).Build()
+
+		rec := tc.HTTP().Post("/tasks/" + task.ID + "/schedule?project_id=" + projectB.ID).WithForm(validScheduleForm(time.Now().Add(time.Hour))).Execute()
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		schedules, err := tc.scheduleRepo.ListByTask(context.Background(), task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(schedules) != 0 {
+			t.Fatalf("foreign create persisted %d schedules", len(schedules))
+		}
+	})
+
+	for _, method := range []string{http.MethodPut, http.MethodPost} {
+		t.Run("update "+method, func(t *testing.T) {
+			tc := NewTestContext(t)
+			projectA := tc.CreateProject().WithName("Project A").Build()
+			projectB := tc.CreateProject().WithName("Project B").Build()
+			task := tc.CreateTask(projectA.ID).Build()
+			originalRunAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+			schedule := tc.CreateSchedule(task.ID).WithRunAt(originalRunAt).WithRepeatType(models.RepeatOnce).Build()
+			before, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			path := "/schedules/" + schedule.ID + "?project_id=" + projectB.ID
+			var rec *httptest.ResponseRecorder
+			if method == http.MethodPut {
+				rec = tc.HTTP().Put(path).WithForm(validScheduleForm(time.Now().Add(3 * time.Hour))).Execute()
+			} else {
+				rec = tc.HTTP().Post(path).WithForm(validScheduleForm(time.Now().Add(3 * time.Hour))).Execute()
+			}
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			after, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scheduleUnchanged(t, after, before)
+		})
+	}
+
+	for _, endpoint := range []struct {
+		name               string
+		path               func(string, string) string
+		useSelectedProject bool
+	}{
+		{name: "browser toggle", path: func(scheduleID, projectID string) string {
+			return "/schedules/" + scheduleID + "/toggle?project_id=" + projectID
+		}},
+		{name: "api toggle query", path: func(scheduleID, projectID string) string {
+			return "/api/schedules/" + scheduleID + "/toggle?project_id=" + projectID
+		}},
+		{name: "api toggle selected project", useSelectedProject: true, path: func(scheduleID, projectID string) string {
+			return "/api/schedules/" + scheduleID + "/toggle"
+		}},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			projectA := tc.CreateProject().WithName("Project A").Build()
+			projectB := tc.CreateProject().WithName("Project B").Build()
+			task := tc.CreateTask(projectA.ID).Build()
+			schedule := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+			if endpoint.useSelectedProject {
+				if err := tc.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, projectB.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			rec := tc.HTTP().Post(endpoint.path(schedule.ID, projectB.ID)).Execute()
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			after, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			scheduleUnchanged(t, after, before)
+		})
+	}
+
+	t.Run("delete", func(t *testing.T) {
+		tc := NewTestContext(t)
+		projectA := tc.CreateProject().WithName("Project A").Build()
+		projectB := tc.CreateProject().WithName("Project B").Build()
+		task := tc.CreateTask(projectA.ID).Build()
+		schedule := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
+		before, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		rec := tc.HTTP().Delete("/schedules/" + schedule.ID + "?project_id=" + projectB.ID).Execute()
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		after, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scheduleUnchanged(t, after, before)
+	})
+
+	t.Run("reschedule", func(t *testing.T) {
+		tc := NewTestContext(t)
+		projectA := tc.CreateProject().WithName("Project A").Build()
+		projectB := tc.CreateProject().WithName("Project B").Build()
+		task := tc.CreateTask(projectA.ID).Build()
+		originalRunAt := time.Now().Add(24 * time.Hour).UTC().Truncate(time.Second)
+		schedule := tc.CreateSchedule(task.ID).WithRunAt(originalRunAt).WithRepeatType(models.RepeatDaily).Build()
+		before, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		rec := tc.HTMX().Patch("/schedules/" + schedule.ID + "/reschedule?project_id=" + projectB.ID).WithForm(url.Values{
+			"new_date": {time.Now().AddDate(0, 0, 2).Format("2006-01-02")},
+			"hour":     {"10"},
+		}).Execute()
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d body=%s", rec.Code, rec.Body.String())
+		}
+		after, err := tc.scheduleRepo.GetByID(context.Background(), schedule.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scheduleUnchanged(t, after, before)
+	})
+}
+
 func TestCreateAndUpdateSchedule_NativeRedirectParity(t *testing.T) {
 	for _, tcse := range []struct {
 		name            string

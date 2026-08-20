@@ -9,12 +9,65 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/update"
 	"github.com/stretchr/testify/require"
 )
+
+type testUsageAnalyticsToolResponse struct {
+	OK                bool                       `json:"ok"`
+	ProjectID         string                     `json:"project_id"`
+	Totals            models.UsageTotals         `json:"totals"`
+	TopModels         []models.ModelUsagePoint   `json:"top_models"`
+	TopProviders      []testUsageProviderSummary `json:"top_providers"`
+	AccountLimits     []testUsageAccountSummary  `json:"account_limits"`
+	LastUpdatedAt     *string                    `json:"last_updated_at"`
+	LocalOnly         bool                       `json:"local_only"`
+	ProviderRefreshed bool                       `json:"provider_refreshed"`
+	CostAvailability  string                     `json:"cost_availability"`
+}
+
+type testUsageProviderSummary struct {
+	Provider    string `json:"provider"`
+	TotalTokens int    `json:"total_tokens"`
+}
+
+type testUsageAccountSummary struct {
+	Provider string                    `json:"provider"`
+	PlanType string                    `json:"plan_type"`
+	Limits   []models.AccountLimitView `json:"limits"`
+}
+
+type countingUpdateInstaller struct {
+	stageCalls    int
+	applyCalls    int
+	validateCalls int
+	rollbackCalls int
+}
+
+func (i *countingUpdateInstaller) Stage(context.Context, update.VerifiedRelease) (any, error) {
+	i.stageCalls++
+	return struct{}{}, nil
+}
+
+func (i *countingUpdateInstaller) Apply(context.Context, any) error {
+	i.applyCalls++
+	return nil
+}
+
+func (i *countingUpdateInstaller) Validate(context.Context, update.ReleaseMetadata) error {
+	i.validateCalls++
+	return nil
+}
+
+func (i *countingUpdateInstaller) Rollback(context.Context, any) error {
+	i.rollbackCalls++
+	return nil
+}
 
 func TestSupportsChatActionTools(t *testing.T) {
 	tests := []struct {
@@ -127,6 +180,284 @@ func TestListCapabilitiesExecutorIncludesSelectedMemoryHandles(t *testing.T) {
 			t.Fatalf("expected list_capabilities output to contain %q, got:\n%s", want, out)
 		}
 	}
+}
+
+func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Channel Status Project")
+
+	webhookRepo := repository.NewWebhookRepo(db)
+	h.SetWebhookRepo(webhookRepo)
+	channelTargetRepo := repository.NewChannelTargetRepo(db)
+	h.SetChannelTargetRepo(channelTargetRepo)
+	telegramAuthRepo := repository.NewTelegramAuthRepo(db)
+	h.SetTelegramAuthRepo(telegramAuthRepo)
+
+	h.SetGitHubService(&fakeGitHubService{statusFn: func(ctx context.Context) (service.GitHubConnectionStatus, error) {
+		return service.GitHubConnectionStatus{Configured: true, Connected: true, AuthMode: service.GitHubAuthModePAT, AccountLogin: "ov-user", AccountType: "User", HasPAT: true}, nil
+	}})
+	h.SetSlackService(&fakeSlackService{statusFn: func(ctx context.Context) (service.SlackConnectionStatus, error) {
+		return service.SlackConnectionStatus{Configured: true, Connected: true, Running: true, TeamName: "OpenVibely", TeamID: "TSAFE", BotUserID: "BSAFE", BotTokenSource: service.SlackBotTokenSourceOAuth}, nil
+	}})
+	h.SetDiscordService(&fakeDiscordService{statusFn: func(ctx context.Context) (service.DiscordConnectionStatus, error) {
+		return service.DiscordConnectionStatus{Configured: true, Connected: false, Running: false, HasBotToken: true, BotUserID: "bot-safe", SendResponses: true, LastError: "gateway unavailable"}, nil
+	}})
+
+	secretValues := []string{
+		"ghp_secret_pat_should_not_appear",
+		"private-key-secret-should-not-appear",
+		"slack-client-secret-should-not-appear",
+		"xapp-secret-should-not-appear",
+		"xoxb-secret-should-not-appear",
+		"telegram-secret-token-should-not-appear",
+		"discord-secret-token-should-not-appear",
+		"email-password-secret-should-not-appear",
+		"webhook-secret-should-not-appear",
+		"webhook-path-token-should-not-appear",
+		"CSECRETCHANNEL",
+		"thread-secret-should-not-appear",
+		"secret subject should not appear",
+	}
+	settings := map[string]string{
+		service.GitHubSettingPAT:                                          secretValues[0],
+		service.GitHubSettingAppPrivateKey:                                secretValues[1],
+		service.SlackSettingClientSecret:                                  secretValues[2],
+		service.SlackSettingAppToken:                                      secretValues[3],
+		service.SlackSettingBotToken:                                      secretValues[4],
+		service.TelegramSettingBotToken:                                   secretValues[5],
+		service.DiscordSettingBotToken:                                    secretValues[6],
+		service.EmailSettingAddress:                                       "alerts@example.com",
+		service.EmailSettingPassword:                                      secretValues[7],
+		service.EmailSettingIMAPHost:                                      "imap.example.com",
+		service.EmailSettingSMTPHost:                                      "smtp.example.com",
+		service.SendMessageAllowExplicitTargetsSetting + ":" + project.ID: "false",
+	}
+	for key, value := range settings {
+		require.NoError(t, h.settingsRepo.Set(ctx, key, value))
+	}
+
+	require.NoError(t, h.githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "reviewer", DisplayName: "Reviewer", AddedBy: "test"}))
+	for _, userID := range []string{"U123", "U456"} {
+		require.NoError(t, h.slackAuthRepo.Create(ctx, &models.SlackAuthorizedUser{ProjectID: project.ID, SlackUserID: userID, DisplayName: "Slack " + userID, AddedBy: "test"}))
+	}
+	require.NoError(t, telegramAuthRepo.Create(ctx, &models.TelegramAuthorizedUser{ProjectID: project.ID, TelegramUserID: 1001, TelegramUsername: "tguser", DisplayName: "Telegram User", AddedBy: "test"}))
+	require.NoError(t, h.discordAuthRepo.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: project.ID, DiscordUserID: "1002", DisplayName: "Discord User", AddedBy: "test"}))
+	require.NoError(t, h.emailAuthRepo.Create(ctx, &models.EmailAuthorizedSender{ProjectID: project.ID, EmailAddress: "sender@example.com", DisplayName: "Sender", AddedBy: "test"}))
+
+	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy Alerts", Enabled: true, PathToken: secretValues[9], Secret: secretValues[8], DefaultPriority: 2}))
+	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Disabled Hook", Enabled: false, DefaultPriority: 2}))
+	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: secretValues[10], ThreadID: secretValues[11], Home: true}))
+	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com", DefaultSubject: secretValues[12]}))
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "list_channels", json.RawMessage(`{}`))
+	if !handled || isErr || err != nil {
+		t.Fatalf("list_channels failed handled=%v isErr=%v err=%v out=%q", handled, isErr, err, out)
+	}
+
+	var summary channelStatusToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &summary))
+	require.True(t, summary.OK)
+	require.Equal(t, 6, summary.ConfiguredChannelCount)
+	require.Equal(t, "connected", summary.GitHub.Status)
+	require.Equal(t, "ov-user", summary.GitHub.AccountLogin)
+	require.Equal(t, 1, summary.GitHub.AuthorizedActorCount)
+	require.Equal(t, "connected", summary.Slack.Status)
+	require.Equal(t, "OpenVibely", summary.Slack.TeamName)
+	require.Equal(t, 2, summary.Slack.AuthorizedUserCount)
+	require.Equal(t, "configured_not_running", summary.Telegram.Status)
+	require.Equal(t, 1, summary.Telegram.AuthorizedUserCount)
+	require.Equal(t, "gateway_offline", summary.Discord.Status)
+	require.Equal(t, "gateway unavailable", summary.Discord.LastError)
+	require.Equal(t, 1, summary.Email.AuthorizedSenderCount)
+	require.Equal(t, "alerts@example.com", summary.Email.Address)
+	require.Equal(t, 2, summary.Webhooks.Total)
+	require.Equal(t, 1, summary.Webhooks.Active)
+	require.Equal(t, 2, summary.OutboundTargets.Total)
+	require.False(t, summary.OutboundTargets.ExplicitUnsavedTargetsAllowed)
+	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["slack"].Home)
+	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["email"].ByKind["email"])
+
+	for _, secret := range secretValues {
+		if strings.Contains(out, secret) {
+			t.Fatalf("list_channels output exposed secret/raw credential %q in:\n%s", secret, out)
+		}
+	}
+}
+
+func TestViewSystemUpdateRuntimeTool_NotApplicableWithoutVisibleCoordinator(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		coordinator *update.Coordinator
+	}{
+		{name: "no coordinator"},
+		{name: "hidden source coordinator", coordinator: update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "source"}, "stable", nil, nil, false, "", nil)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &Handler{}
+			h.SetUpdateCoordinator(tc.coordinator)
+			handler := h.chatActionHandlers(streamingResponseParams{}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_system_update"]
+			require.NotNil(t, handler)
+
+			out, err := handler(context.Background(), json.RawMessage(`{}`))
+			require.NoError(t, err)
+			var got systemUpdateStatusToolResponse
+			require.NoError(t, json.Unmarshal([]byte(out), &got))
+			require.True(t, got.OK)
+			require.False(t, got.Applicable)
+			require.Contains(t, got.Message, "not currently visible or applicable")
+		})
+	}
+}
+
+func TestViewSystemUpdateRuntimeTool_AvailableUpdateReportsReleaseMetadata(t *testing.T) {
+	h := &Handler{}
+	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "binary"}, "stable", nil, nil, true, "", nil)
+	statePath := filepath.Join(t.TempDir(), "update-state.json")
+	persisted := `{
+		"state":"available",
+		"release":{"metadata":{"version":"1.2.3","channel":"stable","release_notes_url":"https://example.test/releases/1.2.3"},"target":{"kind":"binary","os":"darwin","arch":"arm64","url":"https://secret.example.test/artifact","sha256":"secret-sha"},"apply_supported":true,"action":"restart"},
+		"staged_release":{"metadata":{"version":"1.2.3","channel":"stable","release_notes_url":"https://example.test/releases/1.2.3"},"target":{"kind":"binary"},"apply_supported":true,"action":"restart"}
+	}`
+	require.NoError(t, os.WriteFile(statePath, []byte(persisted), 0o600))
+	require.NoError(t, coordinator.SetPersistence(statePath))
+	h.SetUpdateCoordinator(coordinator)
+
+	handler := h.chatActionHandlers(streamingResponseParams{}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["view_system_update"]
+	out, err := handler(context.Background(), json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	var got systemUpdateStatusToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.True(t, got.Applicable)
+	require.Equal(t, update.StateAvailable, got.State)
+	require.Equal(t, "1.0.0", got.CurrentVersion)
+	require.Equal(t, "1.2.3", got.TargetVersion)
+	require.Equal(t, "binary", got.Distribution)
+	require.Equal(t, "stable", got.Channel)
+	require.Equal(t, "https://example.test/releases/1.2.3", got.ReleaseNotesURL)
+	require.True(t, got.Manual)
+	require.True(t, got.Staged)
+	require.True(t, got.ApplySupported)
+	require.Equal(t, "restart", got.UpdateAction)
+	require.NotContains(t, out, "secret.example.test")
+	require.NotContains(t, out, "secret-sha")
+}
+
+func TestViewSystemUpdateRuntimeTool_WaitingForIdleReportsDrainStatus(t *testing.T) {
+	drain := update.NewDrainManager(
+		func() update.ActiveWork {
+			return update.ActiveWork{TaskExecutions: 1, ChatExecutions: 2, AutomationActivities: 3}
+		},
+		func() int { return 4 },
+		time.Minute,
+		time.Now,
+	)
+	_, err := drain.BeginDrain(update.DrainRequest{Lease: 5 * time.Minute})
+	require.NoError(t, err)
+	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "docker"}, "stable", drain, nil, true, "", nil)
+	coordinator.SetManagedStateProvider(func() update.ManagedUpdateState {
+		return update.ManagedUpdateState{Active: true, State: update.StateWaitingForIdle, DesiredVersion: "1.2.3", ReleaseNotesURL: "https://example.test/releases/1.2.3"}
+	})
+	h := &Handler{}
+	h.SetUpdateCoordinator(coordinator)
+
+	handler := h.chatActionHandlers(streamingResponseParams{}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_system_update"]
+	out, err := handler(context.Background(), json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	var got systemUpdateStatusToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Equal(t, update.StateWaitingForIdle, got.State)
+	require.Contains(t, got.Message, "waiting for active work")
+	require.Equal(t, update.DrainStateDraining, got.Drain.State)
+	require.Equal(t, 1, got.Drain.TaskExecutions)
+	require.Equal(t, 2, got.Drain.ChatExecutions)
+	require.Equal(t, 3, got.Drain.AutomationActivities)
+	require.Equal(t, 6, got.Drain.ActiveTotal)
+	require.Equal(t, 4, got.Drain.QueuedTotal)
+	require.NotEmpty(t, got.Drain.ExpiresAt)
+}
+
+func TestViewSystemUpdateRuntimeTool_FailedReportsErrorAndConfigurationText(t *testing.T) {
+	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "binary"}, "beta", nil, nil, false, "missing updater signing key", nil)
+	coordinator.SetManagedStateProvider(func() update.ManagedUpdateState {
+		return update.ManagedUpdateState{Active: true, State: update.StateFailed, DesiredVersion: "1.2.3", Error: "artifact verification failed"}
+	})
+	h := &Handler{}
+	h.SetUpdateCoordinator(coordinator)
+
+	handler := h.chatActionHandlers(streamingResponseParams{}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_system_update"]
+	out, err := handler(context.Background(), json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	var got systemUpdateStatusToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Equal(t, update.StateFailed, got.State)
+	require.Equal(t, "artifact verification failed", got.Error)
+	require.Equal(t, "missing updater signing key", got.ConfigurationError)
+	require.Contains(t, got.Message, "failed")
+}
+
+func TestViewSystemUpdateRuntimeTool_RegisteredAndReadOnly(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		defs := chatcontrol.ToolDefsForContext(mode, chatcontrol.SurfaceWeb, mode == models.ChatModeOrchestrate)
+		found := false
+		for _, def := range defs {
+			if def.Name == "view_system_update" {
+				found = true
+				require.Equal(t, "read", string(def.Access))
+				break
+			}
+		}
+		require.Truef(t, found, "view_system_update definition missing in mode %s", mode)
+	}
+
+	h := &Handler{}
+	installer := &countingUpdateInstaller{}
+	drain := update.NewDrainManager(func() update.ActiveWork { return update.ActiveWork{} }, func() int { return 0 }, time.Minute, time.Now)
+	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "binary"}, "stable", drain, installer, false, "", nil)
+	coordinator.SetManagedStateProvider(func() update.ManagedUpdateState {
+		return update.ManagedUpdateState{Active: true, State: update.StateAvailable, DesiredVersion: "1.2.3"}
+	})
+	h.SetUpdateCoordinator(coordinator)
+	beforeDrain := drain.Status()
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(context.Background(), "view_system_update", nil)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, out, `"ok":true`)
+	require.Equal(t, beforeDrain.State, drain.Status().State)
+	require.Zero(t, installer.stageCalls)
+	require.Zero(t, installer.applyCalls)
+	require.Zero(t, installer.validateCalls)
+	require.Zero(t, installer.rollbackCalls)
+
+	capabilities := filterTaskThreadCapabilitySummaries(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), nil, false)
+	found := false
+	for _, summary := range capabilities {
+		if summary.Name == "view_system_update" {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "task-thread capabilities should include view_system_update")
 }
 
 // TestViewTaskThreadResolvesCurrentTaskID reproduces the incident where an
@@ -587,6 +918,177 @@ func TestListTasksRuntimeTool_WebAndAPIExecutableAndPlanExposed(t *testing.T) {
 	if planHandlers["list_tasks"] == nil {
 		t.Fatal("expected list_tasks handler in plan mode")
 	}
+}
+
+func TestViewUsageAnalyticsRuntimeTool_NoUsageDataReturnsZeroSummary(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Usage Empty Project")
+	require.NoError(t, llmConfigRepo.Create(ctx, &models.LLMConfig{
+		Name:             "OpenAI OAuth Empty",
+		Provider:         models.ProviderOpenAI,
+		Model:            "gpt-5.3-codex",
+		AuthMethod:       models.AuthMethodOAuth,
+		OAuthAccessToken: "oauth-token-that-must-not-be-used",
+		OAuthAccountID:   "acct-secret-empty",
+	}))
+
+	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_usage_analytics"]
+	if handler == nil {
+		t.Fatal("view_usage_analytics handler missing")
+	}
+	out, err := handler(ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	var got testUsageAnalyticsToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.Equal(t, project.ID, got.ProjectID)
+	require.Equal(t, 0, got.Totals.CallCount)
+	require.Equal(t, 0, got.Totals.TotalTokens)
+	require.Equal(t, "no_usage", got.CostAvailability)
+	require.True(t, got.LocalOnly)
+	require.False(t, got.ProviderRefreshed)
+	require.NotContains(t, out, "oauth-token-that-must-not-be-used")
+	require.NotContains(t, out, "acct-secret-empty")
+}
+
+func TestViewUsageAnalyticsRuntimeTool_MultipleModelsProviderFilterAndCostAvailability(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Usage Breakdown Project")
+	otherProject := createProject(t, h, "Usage Other Project")
+	cost := 1.25
+	seedUsageEvent := func(provider, model, projectID string, inputTokens, outputTokens, cacheTokens, reasoningTokens int, costUSD *float64) {
+		t.Helper()
+		require.NoError(t, h.usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+			Provider:              provider,
+			ProjectID:             projectID,
+			Model:                 model,
+			Operation:             "chat",
+			Status:                "completed",
+			InputTokens:           inputTokens,
+			OutputTokens:          outputTokens,
+			CachedInputTokens:     cacheTokens,
+			ReasoningOutputTokens: reasoningTokens,
+			TotalTokens:           inputTokens + outputTokens,
+			CostUSD:               costUSD,
+			OccurredAt:            time.Now().UTC(),
+		}))
+	}
+	seedUsageEvent("openai", "gpt-5.3-codex", project.ID, 300, 100, 25, 10, &cost)
+	seedUsageEvent("anthropic", "claude-sonnet-4-5", project.ID, 200, 50, 0, 0, nil)
+	seedUsageEvent("openai", "gpt-5-mini", project.ID, 120, 30, 10, 5, nil)
+	seedUsageEvent("openai", "foreign-project-model", otherProject.ID, 1000, 1000, 0, 0, &cost)
+
+	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["view_usage_analytics"]
+	out, err := handler(ctx, json.RawMessage(`{"range":"all","top_limit":3}`))
+	require.NoError(t, err)
+	var got testUsageAnalyticsToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Equal(t, 800, got.Totals.TotalTokens)
+	require.Equal(t, 3, got.Totals.CallCount)
+	require.Equal(t, "partial", got.CostAvailability)
+	require.NotNil(t, got.LastUpdatedAt)
+	require.Len(t, got.TopModels, 3)
+	require.Equal(t, "gpt-5.3-codex", got.TopModels[0].Model)
+	require.Len(t, got.TopProviders, 2)
+	require.Equal(t, "openai", got.TopProviders[0].Provider)
+	require.Equal(t, 550, got.TopProviders[0].TotalTokens)
+	require.NotContains(t, out, "foreign-project-model")
+
+	filteredOut, err := handler(ctx, json.RawMessage(`{"range":"all","provider":"anthropic"}`))
+	require.NoError(t, err)
+	var filtered testUsageAnalyticsToolResponse
+	require.NoError(t, json.Unmarshal([]byte(filteredOut), &filtered))
+	require.Equal(t, 250, filtered.Totals.TotalTokens)
+	require.Len(t, filtered.TopModels, 1)
+	require.Equal(t, "anthropic", filtered.TopModels[0].Provider)
+	require.Equal(t, "unavailable", filtered.CostAvailability)
+	require.NotContains(t, filteredOut, "gpt-5.3-codex")
+}
+
+func TestViewUsageAnalyticsRuntimeTool_SanitizesAccountLimitSummaries(t *testing.T) {
+	h, _, llmConfigRepo, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Usage Account Project")
+	cfg := &models.LLMConfig{
+		Name:              "OpenAI OAuth Account",
+		Provider:          models.ProviderOpenAI,
+		Model:             "gpt-5.3-codex",
+		AuthMethod:        models.AuthMethodOAuth,
+		OAuthAccessToken:  "oauth-secret-token",
+		OAuthRefreshToken: "refresh-secret-token",
+		OAuthAccountID:    "acct-secret-id",
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, cfg))
+	used := 91.0
+	window := 300
+	reset := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+	require.NoError(t, h.usageRepo.CreateAccountUsageSnapshot(ctx, &models.AccountUsageSnapshot{
+		Provider:             "openai",
+		AccountID:            cfg.OAuthAccountID,
+		AgentConfigID:        cfg.ID,
+		PlanType:             "ChatGPT Pro",
+		PrimaryLabel:         "5-hour session",
+		PrimaryUsedPercent:   &used,
+		PrimaryWindowMinutes: &window,
+		PrimaryResetsAt:      &reset,
+		RawJSON:              `{"account_id":"raw-provider-account","authorization":"Bearer raw-secret"}`,
+		FetchedAt:            time.Now().UTC(),
+	}))
+
+	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_usage_analytics"]
+	out, err := handler(ctx, json.RawMessage(`{"range":"all","provider":"openai"}`))
+	require.NoError(t, err)
+	var got testUsageAnalyticsToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Len(t, got.AccountLimits, 1)
+	require.Equal(t, "openai", got.AccountLimits[0].Provider)
+	require.Equal(t, "ChatGPT Pro", got.AccountLimits[0].PlanType)
+	require.Len(t, got.AccountLimits[0].Limits, 1)
+	require.Equal(t, "5-hour session", got.AccountLimits[0].Limits[0].Label)
+	require.Equal(t, "warning", got.AccountLimits[0].Limits[0].Status)
+	for _, secret := range []string{cfg.ID, cfg.OAuthAccountID, cfg.OAuthAccessToken, cfg.OAuthRefreshToken, "raw-provider-account", "Bearer raw-secret"} {
+		require.NotContains(t, out, secret)
+	}
+}
+
+func TestViewUsageAnalyticsRuntimeTool_CapabilityRegistration(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		defs := chatcontrol.ToolDefsForContext(mode, chatcontrol.SurfaceWeb, mode == models.ChatModeOrchestrate)
+		found := false
+		for _, def := range defs {
+			if def.Name == "view_usage_analytics" {
+				found = true
+				break
+			}
+		}
+		require.Truef(t, found, "view_usage_analytics definition missing in mode %s", mode)
+	}
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "Usage Capability Project")
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(context.Background(), "list_capabilities", nil)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, out, "view_usage_analytics")
+
+	taskThreadSummaries := filterTaskThreadCapabilitySummaries(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), nil, false)
+	found := false
+	for _, summary := range taskThreadSummaries {
+		if summary.Name == "view_usage_analytics" {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "task-thread capabilities should include view_usage_analytics")
 }
 
 func TestCreateSwarmTaskRuntimeTool_StartFlagDoesNotDeferActiveSwarm(t *testing.T) {
@@ -1365,4 +1867,63 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if closedRepo != "example/other" || !strings.Contains(out, `"state":"closed"`) {
 		t.Fatalf("expected explicit repo_url close output repo=%q out=%s", closedRepo, out)
 	}
+}
+
+func TestWebChatCreateProjectRuntimeCreatesGitHubBackedProject(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	current := createProject(t, h, "Current Runtime Project")
+	h.SetGitHubService(&fakeGitHubService{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+		return "/repos/" + projectID, "https://github.com/acme/runtime", nil
+	}})
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: current.ID, ChatMode: models.ChatModeOrchestrate},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true),
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "create_project", json.RawMessage(`{"name":"Created From Chat","repo_url":"https://github.com/acme/runtime","switch_after_create":true}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+
+	var resp struct {
+		OK              bool   `json:"ok"`
+		ProjectID       string `json:"project_id"`
+		Name            string `json:"name"`
+		RepoURL         string `json:"repo_url"`
+		RepoPathPresent bool   `json:"repo_path_present"`
+		Switched        bool   `json:"switched"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK)
+	require.Equal(t, "Created From Chat", resp.Name)
+	require.Equal(t, "https://github.com/acme/runtime", resp.RepoURL)
+	require.True(t, resp.RepoPathPresent)
+	require.False(t, resp.Switched, "web/API Chat has no persisted project switch callback")
+
+	projectRepo := repository.NewProjectRepo(db)
+	created, err := projectRepo.GetByID(ctx, resp.ProjectID)
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, "/repos/"+resp.ProjectID, created.RepoPath)
+}
+
+func TestWebChatCreateProjectRuntimePlanModeBlocked(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	ctx := context.Background()
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "create_project", json.RawMessage(`{"name":"Nope","repo_url":"https://github.com/acme/nope"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Contains(t, out, "not available")
 }

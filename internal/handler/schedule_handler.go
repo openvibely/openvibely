@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -56,19 +57,70 @@ func parseScheduleForm(c echo.Context, defaultRepeatType models.RepeatType) (sch
 	}, nil
 }
 
+func (h *Handler) scheduleMutationProjectID(c echo.Context) string {
+	if projectID := strings.TrimSpace(c.QueryParam("project_id")); projectID != "" {
+		return projectID
+	}
+	if h.settingsRepo == nil {
+		return ""
+	}
+	selectedProjectID, err := h.settingsRepo.Get(c.Request().Context(), uiPreferenceSelectedProjectIDKey)
+	if err != nil {
+		applog.Debugf("[handler] failed to load selected project preference for schedule mutation: %v", err)
+		return ""
+	}
+	return strings.TrimSpace(selectedProjectID)
+}
+
+func (h *Handler) requireTaskInRequestProject(ctx context.Context, taskID, projectID string) (*models.Task, error) {
+	var (
+		task *models.Task
+		err  error
+	)
+	if h.taskSvc != nil {
+		task, err = h.taskSvc.GetByID(ctx, taskID)
+	} else if h.taskRepo != nil {
+		task, err = h.taskRepo.GetByID(ctx, taskID)
+	} else {
+		return nil, echo.NewHTTPError(http.StatusInternalServerError, "task repository not available")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if projectID != "" && task.ProjectID != projectID {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "task does not belong to the active project")
+	}
+	return task, nil
+}
+
+func (h *Handler) requireScheduleInRequestProject(ctx context.Context, scheduleID, projectID string) (*models.Schedule, *models.Task, error) {
+	schedule, err := h.scheduleRepo.GetByID(ctx, scheduleID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if schedule == nil {
+		return nil, nil, echo.NewHTTPError(http.StatusNotFound, "schedule not found")
+	}
+	task, err := h.requireTaskInRequestProject(ctx, schedule.TaskID, projectID)
+	if err != nil {
+		if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusBadRequest {
+			return nil, nil, echo.NewHTTPError(http.StatusBadRequest, "schedule does not belong to the active project")
+		}
+		return nil, nil, err
+	}
+	return schedule, task, nil
+}
+
 func (h *Handler) scheduleAgentAssignmentFromForm(c echo.Context, taskID string) (bool, *string, error) {
 	if c.FormValue("schedule_agent_definition_present") == "" {
 		return false, nil, nil
 	}
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	task, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.scheduleMutationProjectID(c))
 	if err != nil {
 		return false, nil, err
-	}
-	if task == nil {
-		return false, nil, echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-	if projectID := c.QueryParam("project_id"); projectID != "" && projectID != task.ProjectID {
-		return false, nil, echo.NewHTTPError(http.StatusBadRequest, "task does not belong to the active project")
 	}
 	agentDefinitionID, err := h.resolvePrimaryAgentDefinition(c.Request().Context(), task.ProjectID, c.FormValue("agent_definition_id"))
 	if err != nil {
@@ -123,12 +175,17 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 
 	clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
 
+	if _, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.scheduleMutationProjectID(c)); err != nil {
+		return err
+	}
+
 	agentAssignmentPresent, agentDefinitionID, err := h.scheduleAgentAssignmentFromForm(c, taskID)
 	if err != nil {
 		return err
 	}
 
 	result, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).CreateAbsoluteForTask(c.Request().Context(), service.CreateAbsoluteScheduleForTaskRequest{
+		ProjectID:              h.scheduleMutationProjectID(c),
 		TaskID:                 taskID,
 		RunAt:                  formValues.runAt,
 		RepeatType:             formValues.repeatType,
@@ -162,15 +219,11 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	applog.Infof("[handler] UpdateSchedule id=%s run_at=%q repeat_type=%s interval=%s htmx=%v",
 		id, runAtStr, c.FormValue("repeat_type"), c.FormValue("repeat_interval"), isHTMX)
 
-	// Get the existing schedule
-	schedule, err := h.scheduleRepo.GetByID(c.Request().Context(), id)
+	// Get the existing schedule and verify it belongs to the requested project.
+	schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, h.scheduleMutationProjectID(c))
 	if err != nil {
 		applog.Infof("[handler] UpdateSchedule error getting schedule: %v", err)
 		return err
-	}
-	if schedule == nil {
-		applog.Infof("[handler] UpdateSchedule schedule not found id=%s", id)
-		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
 	}
 
 	agentAssignmentPresent, agentDefinitionID, err := h.scheduleAgentAssignmentFromForm(c, schedule.TaskID)
@@ -194,6 +247,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	}
 
 	result, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).ModifyAbsolute(c.Request().Context(), service.ModifyAbsoluteScheduleRequest{
+		ProjectID:              h.scheduleMutationProjectID(c),
 		ScheduleID:             schedule.ID,
 		RunAt:                  formValues.runAt,
 		RepeatType:             formValues.repeatType,
@@ -229,15 +283,12 @@ type scheduleToggleResult struct {
 
 // toggleScheduleEnabled performs the schedule state transition shared by the
 // browser and JSON API transports.
-func (h *Handler) toggleScheduleEnabled(ctx context.Context, id string) (scheduleToggleResult, error) {
+func (h *Handler) toggleScheduleEnabled(ctx context.Context, id, projectID string) (scheduleToggleResult, error) {
 	var result scheduleToggleResult
-	schedule, err := h.scheduleRepo.GetByID(ctx, id)
+	schedule, _, err := h.requireScheduleInRequestProject(ctx, id, projectID)
 	if err != nil {
 		result.errorOperation = "lookup"
 		return result, err
-	}
-	if schedule == nil {
-		return result, nil
 	}
 	result.schedule = schedule
 
@@ -277,7 +328,7 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 	id := c.Param("id")
 	ctx := c.Request().Context()
 
-	result, err := h.toggleScheduleEnabled(ctx, id)
+	result, err := h.toggleScheduleEnabled(ctx, id, h.scheduleMutationProjectID(c))
 	if err != nil {
 		if result.errorOperation == "lookup" {
 			applog.Infof("[handler] ToggleScheduleEnabled error getting schedule: %v", err)
@@ -314,7 +365,7 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 // @Router /api/schedules/{id}/toggle [post]
 func (h *Handler) APIToggleScheduleEnabled(c echo.Context) error {
 	id := c.Param("id")
-	result, err := h.toggleScheduleEnabled(c.Request().Context(), id)
+	result, err := h.toggleScheduleEnabled(c.Request().Context(), id, h.scheduleMutationProjectID(c))
 	if err != nil {
 		return err
 	}
@@ -330,6 +381,11 @@ func (h *Handler) APIToggleScheduleEnabled(c echo.Context) error {
 func (h *Handler) DeleteSchedule(c echo.Context) error {
 	id := c.Param("id")
 	applog.Infof("[handler] DeleteSchedule id=%s", id)
+
+	if _, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, h.scheduleMutationProjectID(c)); err != nil {
+		applog.Infof("[handler] DeleteSchedule error getting schedule: %v", err)
+		return err
+	}
 
 	// Browser delete intentionally removes only the schedule row. Runtime
 	// delete_schedule uses ScheduleActionService.Delete, which moves a scheduled
@@ -530,15 +586,11 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid hour")
 	}
 
-	// Get the existing schedule
-	schedule, err := h.scheduleRepo.GetByID(c.Request().Context(), scheduleID)
+	// Get the existing schedule and verify it belongs to the requested project.
+	schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), scheduleID, h.scheduleMutationProjectID(c))
 	if err != nil {
 		applog.Infof("[handler] RescheduleTask error getting schedule: %v", err)
 		return err
-	}
-	if schedule == nil {
-		applog.Infof("[handler] RescheduleTask schedule not found id=%s", scheduleID)
-		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
 	}
 
 	// Preserve the minute and second from the original RunAt (in local time for display consistency)

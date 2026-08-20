@@ -91,6 +91,25 @@ func alertSummaryFromAlert(a *models.Alert) models.AlertSummary {
 	}
 }
 
+func (h *Handler) renderAlertListRefresh(c echo.Context, projectID string, alerts []models.AlertSummary, unreadCountOverride *int) error {
+	ctx := c.Request().Context()
+	if alerts == nil {
+		var err error
+		alerts, err = h.alertSvc.ListSummariesByProject(ctx, projectID, 100)
+		if err != nil {
+			return err
+		}
+	}
+	unreadCount := 0
+	if unreadCountOverride != nil {
+		unreadCount = *unreadCountOverride
+	} else {
+		unreadCount, _ = h.alertSvc.CountUnread(ctx, projectID)
+	}
+	c.Response().Header().Set("HX-Trigger", "alertUpdate")
+	return render(c, http.StatusOK, pages.AlertsContent(alerts, projectID, unreadCount))
+}
+
 func (h *Handler) setAlertDecision(c echo.Context, state models.AlertDecisionState) error {
 	ctx := c.Request().Context()
 	projectID, _ := h.getCurrentProjectID(c)
@@ -98,13 +117,7 @@ func (h *Handler) setAlertDecision(c echo.Context, state models.AlertDecisionSta
 		applog.Infof("[handler] setAlertDecision project=%s alert=%s state=%s error=%v", projectID, c.Param("id"), state, err)
 		return echo.NewHTTPError(http.StatusNotFound, "notification not found or no longer pending")
 	}
-	alerts, err := h.alertSvc.ListSummariesByProject(ctx, projectID, 100)
-	if err != nil {
-		return err
-	}
-	unreadCount, _ := h.alertSvc.CountUnread(ctx, projectID)
-	c.Response().Header().Set("HX-Trigger", "alertUpdate")
-	return render(c, http.StatusOK, pages.AlertsContent(alerts, projectID, unreadCount))
+	return h.renderAlertListRefresh(c, projectID, nil, nil)
 }
 
 func (h *Handler) ApproveAlert(c echo.Context) error {
@@ -132,14 +145,7 @@ func (h *Handler) MarkAlertRead(c echo.Context) error {
 
 	applog.Infof("[handler] MarkAlertRead id=%s", id)
 
-	// Return updated alerts list
-	alerts, _ := h.alertSvc.ListSummariesByProject(ctx, currentProjectID, 100)
-	unreadCount, _ := h.alertSvc.CountUnread(ctx, currentProjectID)
-
-	// Trigger alert badge refresh in sidebar
-	c.Response().Header().Set("HX-Trigger", "alertUpdate")
-
-	return render(c, http.StatusOK, pages.AlertsContent(alerts, currentProjectID, unreadCount))
+	return h.renderAlertListRefresh(c, currentProjectID, nil, nil)
 }
 
 func (h *Handler) MarkAllAlertsRead(c echo.Context) error {
@@ -154,12 +160,8 @@ func (h *Handler) MarkAllAlertsRead(c echo.Context) error {
 
 	applog.Infof("[handler] MarkAllAlertsRead project=%s", currentProjectID)
 
-	alerts, _ := h.alertSvc.ListSummariesByProject(ctx, currentProjectID, 100)
-
-	// Trigger alert badge refresh in sidebar
-	c.Response().Header().Set("HX-Trigger", "alertUpdate")
-
-	return render(c, http.StatusOK, pages.AlertsContent(alerts, currentProjectID, 0))
+	zeroUnread := 0
+	return h.renderAlertListRefresh(c, currentProjectID, nil, &zeroUnread)
 }
 
 func (h *Handler) DeleteAlert(c echo.Context) error {
@@ -175,14 +177,7 @@ func (h *Handler) DeleteAlert(c echo.Context) error {
 	applog.Infof("[handler] DeleteAlert id=%s", id)
 
 	if isHTMX(c) {
-		// Re-render alerts list with updated count
-		alerts, _ := h.alertSvc.ListSummariesByProject(ctx, currentProjectID, 100)
-		unreadCount, _ := h.alertSvc.CountUnread(ctx, currentProjectID)
-
-		// Trigger alert badge refresh in sidebar
-		c.Response().Header().Set("HX-Trigger", "alertUpdate")
-
-		return render(c, http.StatusOK, pages.AlertsContent(alerts, currentProjectID, unreadCount))
+		return h.renderAlertListRefresh(c, currentProjectID, nil, nil)
 	}
 	return c.Redirect(http.StatusSeeOther, "/alerts")
 }
@@ -213,8 +208,6 @@ func (h *Handler) DeleteAllAlerts(c echo.Context) error {
 
 	applog.Infof("[handler] DeleteAllAlerts project=%s", currentProjectID)
 
-	// Trigger alert badge refresh in sidebar
-	c.Response().Header().Set("HX-Trigger", "alertUpdate")
-
-	return render(c, http.StatusOK, pages.AlertsContent([]models.AlertSummary{}, currentProjectID, 0))
+	zeroUnread := 0
+	return h.renderAlertListRefresh(c, currentProjectID, []models.AlertSummary{}, &zeroUnread)
 }

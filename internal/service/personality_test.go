@@ -114,6 +114,34 @@ func TestIsPresetPersonality(t *testing.T) {
 	}
 }
 
+func TestIsAvailablePersonalityKey(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewCustomPersonalityRepo(db)
+	ctx := context.Background()
+	cp := &models.CustomPersonality{
+		Name:         "Available Custom",
+		Key:          "available_custom",
+		Description:  "A custom test personality",
+		SystemPrompt: "Be a custom test personality with enough text.",
+	}
+	if err := repo.Create(ctx, cp); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if !IsAvailablePersonalityKey(ctx, "", repo) {
+		t.Error("empty key should be available for base/default")
+	}
+	if !IsAvailablePersonalityKey(ctx, "pirate_captain", repo) {
+		t.Error("built-in key should be available")
+	}
+	if !IsAvailablePersonalityKey(ctx, "available_custom", repo) {
+		t.Error("existing custom key should be available")
+	}
+	if IsAvailablePersonalityKey(ctx, "missing_custom", repo) {
+		t.Error("missing custom key should not be available")
+	}
+}
+
 func TestAllPersonalitiesWithCustom(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewCustomPersonalityRepo(db)

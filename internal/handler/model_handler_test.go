@@ -662,6 +662,60 @@ func TestCreateModel_RejectsBlankNameWithoutInsert(t *testing.T) {
 	}
 }
 
+func TestCreateModel_RejectsBlankRunnableModelSlugWithoutInsert(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	tests := []struct {
+		name       string
+		provider   string
+		modelValue *string
+		customize  func(url.Values)
+	}{
+		{name: "anthropic missing", provider: "anthropic", modelValue: nil},
+		{name: "anthropic empty", provider: "anthropic", modelValue: ptrString("")},
+		{name: "anthropic whitespace", provider: "anthropic", modelValue: ptrString(" \t\n ")},
+		{name: "openai missing", provider: "openai", modelValue: nil, customize: func(form url.Values) { form.Set("openai_auth_type", "api_key") }},
+		{name: "openai empty", provider: "openai", modelValue: ptrString(""), customize: func(form url.Values) { form.Set("openai_auth_type", "api_key") }},
+		{name: "openai whitespace", provider: "openai", modelValue: ptrString(" \t\n "), customize: func(form url.Values) { form.Set("openai_auth_type", "api_key") }},
+		{name: "openai compatible missing", provider: "openai_compatible", modelValue: nil, customize: configureOpenAICompatibleValidationForm},
+		{name: "openai compatible empty", provider: "openai_compatible", modelValue: ptrString(""), customize: configureOpenAICompatibleValidationForm},
+		{name: "openai compatible whitespace", provider: "openai_compatible", modelValue: ptrString(" \t\n "), customize: configureOpenAICompatibleValidationForm},
+		{name: "ollama missing", provider: "ollama", modelValue: nil},
+		{name: "ollama empty", provider: "ollama", modelValue: ptrString("")},
+		{name: "ollama whitespace", provider: "ollama", modelValue: ptrString(" \t\n ")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before, err := llmConfigRepo.List(ctx)
+			if err != nil {
+				t.Fatalf("list before create: %v", err)
+			}
+
+			form := modelValidationForm("Blank Slug " + tt.name)
+			form.Set("provider", tt.provider)
+			form.Del("model")
+			if tt.modelValue != nil {
+				form.Set("model", *tt.modelValue)
+			}
+			if tt.customize != nil {
+				tt.customize(form)
+			}
+			rec := postForm(e, "/models", form)
+
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Model identifier is required") {
+				t.Fatalf("expected controlled blank-model 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			after, err := llmConfigRepo.List(ctx)
+			if err != nil {
+				t.Fatalf("list after create: %v", err)
+			}
+			if len(after) != len(before) {
+				t.Fatalf("blank model create mutated rows: before=%d after=%d", len(before), len(after))
+			}
+		})
+	}
+}
+
 func TestCreateModel_HTMXRejectsDuplicateNormalizedNameWithoutInsert(t *testing.T) {
 	_, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -710,6 +764,49 @@ func TestUpdateModel_PostRejectsBlankNameWithoutMutation(t *testing.T) {
 	}
 	if updated.Name != original.Name || updated.Model != original.Model || updated.Provider != original.Provider {
 		t.Fatalf("blank update mutated model: before=%+v after=%+v", original, updated)
+	}
+}
+
+func TestUpdateModel_RejectsBlankRunnableModelSlugWithoutMutation(t *testing.T) {
+	_, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	tests := []struct {
+		name      string
+		agent     *models.LLMConfig
+		customize func(url.Values)
+	}{
+		{name: "anthropic", agent: &models.LLMConfig{Name: "Runnable Anthropic", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodAPIKey, Model: "claude-sonnet-4-5-20250929"}},
+		{name: "openai", agent: &models.LLMConfig{Name: "Runnable OpenAI", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-5.5"}, customize: func(form url.Values) { form.Set("openai_auth_type", "api_key") }},
+		{name: "openai compatible", agent: &models.LLMConfig{Name: "Runnable Compatible", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodAPIKey, Model: "vendor/model", BaseURL: "https://api.example.test/v1/", Transport: "chat_completions", PresetSlug: "custom"}, customize: configureOpenAICompatibleValidationForm},
+		{name: "ollama", agent: &models.LLMConfig{Name: "Runnable Ollama", Provider: models.ProviderOllama, AuthMethod: models.AuthMethodAPIKey, Model: "llama3"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := *tt.agent
+			if err := llmConfigRepo.Create(ctx, &agent); err != nil {
+				t.Fatalf("create model: %v", err)
+			}
+			original := agent
+
+			form := modelValidationForm(agent.Name)
+			form.Set("provider", string(agent.Provider))
+			form.Set("model", " \t\n ")
+			if tt.customize != nil {
+				tt.customize(form)
+			}
+			rec := htmxPut(e, "/models/"+agent.ID, form)
+
+			if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Model identifier is required") {
+				t.Fatalf("expected controlled blank-model 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+			updated, err := llmConfigRepo.GetByID(ctx, agent.ID)
+			if err != nil {
+				t.Fatalf("get updated model: %v", err)
+			}
+			if updated.Model != original.Model || updated.Provider != original.Provider || updated.Name != original.Name {
+				t.Fatalf("blank model update mutated model: before=%+v after=%+v", original, updated)
+			}
+		})
 	}
 }
 
@@ -774,6 +871,16 @@ func modelValidationForm(name string) url.Values {
 	form.Set("model", "claude-sonnet-4-5-20250929")
 	form.Set("temperature", "0")
 	return form
+}
+
+func configureOpenAICompatibleValidationForm(form url.Values) {
+	form.Set("base_url", "https://api.example.test/v1/")
+	form.Set("transport", "chat_completions")
+	form.Set("preset_slug", "custom")
+}
+
+func ptrString(value string) *string {
+	return &value
 }
 
 func TestCreateModel_MixtureDefaultsBlankModel(t *testing.T) {
@@ -3359,7 +3466,7 @@ func TestNormalizeOpenAIModel(t *testing.T) {
 		{"gpt-5.1-codex-mini", "gpt-5.1-codex-mini"},
 		{"gpt-5-codex", "gpt-5-codex"},
 		{"gpt-5-codex-mini", "gpt-5-codex-mini"},
-		{"", "gpt-5.6-sol"},              // empty defaults to latest
+		{"", ""},                         // empty stays empty for form validation
 		{"invalid-model", "gpt-5.6-sol"}, // unknown defaults to latest
 		{"  gpt-5.5  ", "gpt-5.5"},       // whitespace trimmed
 	}

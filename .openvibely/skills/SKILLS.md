@@ -272,3 +272,15 @@ always_use:
 ## openvibely_model_configuration_workflow
 
 [OpenVibely Model Configuration Workflow](openvibely_model_configuration_workflow/SKILL.md) — Implement and audit OpenVibely model configuration and default-model mutations across Chat and the Models page.
+
+## openvibely_api_chat_model_selection_workflow
+
+[OpenVibely API Chat Model Selection Workflow](openvibely_api_chat_model_selection_workflow/SKILL.md) — Implement and audit API Chat message model auto-selection without hydrating every full LLM config.
+
+## openvibely_update_config_workflow
+
+[OpenVibely Update Config Workflow](openvibely_update_config_workflow/SKILL.md) — Maintain OpenVibely update configuration defaults and validation semantics in internal/config.
+
+## openvibely_personality_workflow
+
+[OpenVibely Personality Workflow](openvibely_personality_workflow/SKILL.md) — Implement and audit OpenVibely personality presets, custom personalities, settings saves, and runtime set_personality behavior.

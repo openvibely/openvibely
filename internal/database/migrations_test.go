@@ -12,11 +12,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func openMigrationTestDB(t *testing.T, dbPath string) *sql.DB {
-	t.Helper()
+func openMigrationTestDB(tb testing.TB, dbPath string) *sql.DB {
+	tb.Helper()
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	db.SetMaxOpenConns(1)
 	for _, pragma := range []string{
@@ -26,10 +26,10 @@ func openMigrationTestDB(t *testing.T, dbPath string) *sql.DB {
 	} {
 		if _, err := db.Exec(pragma); err != nil {
 			db.Close()
-			t.Fatalf("failed to apply %s: %v", pragma, err)
+			tb.Fatalf("failed to apply %s: %v", pragma, err)
 		}
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	tb.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -268,6 +268,74 @@ func TestMigration132IndexesLifecycleExecutionParentForeignKey(t *testing.T) {
 	}
 }
 
+const systemUpdateQueuedCountQuery = `SELECT
+	(SELECT COUNT(*) FROM tasks WHERE status IN ('pending','queued')) +
+	(SELECT COUNT(*) FROM thread_inputs WHERE input_status = 'pending' AND input_mode = 'queued')`
+
+func TestMigration170IndexesSystemUpdateQueuedThreadInputCount(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "thread-inputs-global-queued-count-170.db")
+	db := openMigrationTestDB(t, dbPath)
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 169); err != nil {
+		t.Fatal(err)
+	}
+	seedMigration170QueuedCountFixture(t, db, 200000)
+
+	before := explainQueryPlan(t, db, systemUpdateQueuedCountQuery)
+	if !strings.Contains(before, "SCAN thread_inputs") {
+		t.Fatalf("migration 169 update queued-count plan = %q, want historical thread_inputs scan baseline", before)
+	}
+
+	if err := goose.UpTo(db, ".", 170); err != nil {
+		t.Fatal(err)
+	}
+
+	var total int
+	if err := db.QueryRow(systemUpdateQueuedCountQuery).Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	if total != 7 {
+		t.Fatalf("system update queued total = %d, want exact task + thread input count 7", total)
+	}
+
+	after := explainQueryPlan(t, db, systemUpdateQueuedCountQuery)
+	if !strings.Contains(after, "SEARCH thread_inputs USING COVERING INDEX idx_thread_inputs_pending_queued_count") {
+		t.Fatalf("migration 170 update queued-count plan = %q, want pending queued count index search", after)
+	}
+	if strings.Contains(after, "SCAN thread_inputs") {
+		t.Fatalf("migration 170 update queued-count plan = %q, want no historical thread_inputs scan", after)
+	}
+
+	scopedPlans := map[string]struct {
+		query string
+		args  []any
+		index string
+	}{
+		"task promotion": {
+			query: `SELECT id FROM thread_inputs WHERE scope = 'task_thread' AND input_mode = 'queued' AND input_status = 'pending' AND task_id = ? ORDER BY queue_position ASC, created_at ASC, rowid ASC LIMIT 1`,
+			args:  []any{"target-task-170"},
+			index: "idx_thread_inputs_pending_task",
+		},
+		"chat promotion": {
+			query: `SELECT id FROM thread_inputs WHERE scope = 'chat' AND input_mode = 'queued' AND input_status = 'pending' AND project_id = ? ORDER BY queue_position ASC, created_at ASC, rowid ASC LIMIT 1`,
+			args:  []any{"target-project-170"},
+			index: "idx_thread_inputs_pending_chat",
+		},
+	}
+	for name, tc := range scopedPlans {
+		plan := explainQueryPlan(t, db, tc.query, tc.args...)
+		if !strings.Contains(plan, tc.index) {
+			t.Fatalf("%s plan after migration 170 = %q, want existing scoped index %s", name, plan, tc.index)
+		}
+		if strings.Contains(plan, "USE TEMP B-TREE") {
+			t.Fatalf("%s plan after migration 170 = %q, want scoped index to preserve queue ordering", name, plan)
+		}
+	}
+}
+
 func TestMigration159IndexesTaskLifecycleActivityOrdering(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "lifecycle-task-started-index-159.db")
 	db := openMigrationTestDB(t, dbPath)
@@ -432,6 +500,42 @@ func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
 	}
 }
 
+func seedMigration170QueuedCountFixture(tb testing.TB, db *sql.DB, threadInputs int) {
+	tb.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('target-project-170', 'Migration 170', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt) VALUES
+			('target-task-170', 'target-project-170', 'Pending Task 170', 'active', 0, 'pending', 'p'),
+			('queued-task-170', 'target-project-170', 'Queued Task 170', 'active', 0, 'queued', 'p'),
+			('completed-task-170', 'target-project-170', 'Completed Task 170', 'active', 0, 'completed', 'p');
+	`); err != nil {
+		tb.Fatalf("seed migration 170 project/tasks: %v", err)
+	}
+	if _, err := db.Exec(`
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
+		INSERT INTO thread_inputs (id, scope, project_id, task_id, input_mode, input_status, content, queue_position, created_at)
+		SELECT
+			'hist-170-' || printf('%06d', n),
+			CASE WHEN n % 3 = 0 THEN 'task_thread' ELSE 'chat' END,
+			'target-project-170',
+			CASE WHEN n % 3 = 0 THEN 'completed-task-170' ELSE NULL END,
+			CASE WHEN n % 2 = 0 THEN 'queued' ELSE 'steering' END,
+			CASE WHEN n IN (50000, 100000, 150000) THEN 'pending' ELSE 'applied' END,
+			'historical input',
+			n,
+			datetime('2026-01-01 00:00:00', '+' || n || ' seconds')
+		FROM seq`, threadInputs); err != nil {
+		tb.Fatalf("seed migration 170 historical thread inputs: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO thread_inputs (id, scope, project_id, task_id, input_mode, input_status, content, queue_position, created_at) VALUES
+			('task-pending-170', 'task_thread', 'target-project-170', 'target-task-170', 'queued', 'pending', 'task pending', 1, '2026-01-02 00:00:00'),
+			('chat-pending-170', 'chat', 'target-project-170', NULL, 'queued', 'pending', 'chat pending', 1, '2026-01-02 00:00:01');
+	`); err != nil {
+		tb.Fatalf("seed migration 170 sparse pending thread inputs: %v", err)
+	}
+}
+
 func explainQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
 	t.Helper()
 	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
@@ -452,6 +556,41 @@ func explainQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) strin
 		t.Fatal(err)
 	}
 	return strings.Join(details, "; ")
+}
+
+func BenchmarkMigration170SystemUpdateQueuedCount(b *testing.B) {
+	for _, tc := range []struct {
+		name    string
+		version int64
+	}{
+		{name: "migration_169_scan", version: 169},
+		{name: "migration_170_indexed", version: 170},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			dbPath := filepath.Join(b.TempDir(), tc.name+".db")
+			db := openMigrationTestDB(b, dbPath)
+			goose.SetBaseFS(migrations.FS)
+			if err := goose.SetDialect("sqlite3"); err != nil {
+				b.Fatal(err)
+			}
+			if err := goose.UpTo(db, ".", tc.version); err != nil {
+				b.Fatal(err)
+			}
+			seedMigration170QueuedCountFixture(b, db, 200000)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var total int
+				if err := db.QueryRow(systemUpdateQueuedCountQuery).Scan(&total); err != nil {
+					b.Fatal(err)
+				}
+				if total != 7 {
+					b.Fatalf("system update queued total = %d, want 7", total)
+				}
+			}
+		})
+	}
 }
 
 func TestMigration122DeletesFailedPublicationCreatedSchedulesBeforeDroppingJournal(t *testing.T) {
@@ -897,8 +1036,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 169 {
-		t.Fatalf("max goose version = %d, want 169", maxVersion)
+	if maxVersion != 170 {
+		t.Fatalf("max goose version = %d, want 170", maxVersion)
 	}
 }
 
@@ -1037,8 +1176,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 169 {
-		t.Fatalf("max goose version = %d, want 169", maxVersion)
+	if maxVersion != 170 {
+		t.Fatalf("max goose version = %d, want 170", maxVersion)
 	}
 }
 
@@ -1486,8 +1625,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 169 {
-		t.Fatalf("max goose version = %d, want 169", maxVersion)
+	if maxVersion != 170 {
+		t.Fatalf("max goose version = %d, want 170", maxVersion)
 	}
 }
 
@@ -1822,8 +1961,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 169 {
-		t.Fatalf("max goose version = %d, want 169", maxVersion)
+	if maxVersion != 170 {
+		t.Fatalf("max goose version = %d, want 170", maxVersion)
 	}
 }
 

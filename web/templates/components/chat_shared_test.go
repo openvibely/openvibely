@@ -49,8 +49,8 @@ func TestChatRenderingPathsUseBaseSafeMarkdownRenderer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated Chat components: %v", err)
 	}
-	if strings.Count(string(generated), "innerHTML = window.renderChatMarkdown(") != 7 {
-		t.Fatalf("completed, resume, and streaming Chat/task-thread paths must all use the safe Markdown renderer; got %d generated call sites", strings.Count(string(generated), "innerHTML = window.renderChatMarkdown("))
+	if strings.Count(string(generated), "innerHTML = window.renderChatMarkdown(") != 5 {
+		t.Fatalf("resume, streaming, and shared hydration paths must all use the safe Markdown renderer; got %d generated call sites", strings.Count(string(generated), "innerHTML = window.renderChatMarkdown("))
 	}
 	for _, unsafe := range []string{
 		"innerHTML = raw",
@@ -754,17 +754,140 @@ func TestChatAutoScrollScript_RehydratesAssistantRawContentViaStreamingRenderer(
 	}
 }
 
-func TestCompletedBubblePollingFallbackDoesNotRenderTwice(t *testing.T) {
+func TestCompletedBubbleUsesSharedHydratorWithoutInlineScript(t *testing.T) {
+	raw := strings.Repeat("x", 128)
 	var buf bytes.Buffer
-	if err := ChatBubble("Assistant", "completed").Render(context.Background(), &buf); err != nil {
+	if err := ChatBubble("Assistant", raw).Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render completed bubble: %v", err)
 	}
 	content := buf.String()
-	if !strings.Contains(content, "var renderStarted = false") ||
-		!strings.Contains(content, "if (renderStarted) return") ||
-		!strings.Contains(content, "renderStarted = true") ||
-		!strings.Contains(content, "window.scheduleChatElementRender(el, raw)") {
-		t.Fatal("completed bubble polling and timeout paths must share a one-shot render guard")
+	if strings.Contains(content, "<script") || strings.Contains(content, "document.currentScript") || strings.Contains(content, "setInterval") {
+		t.Fatalf("completed assistant bubble must not include per-bubble render script; got %d bytes", len(content))
+	}
+	if !strings.Contains(content, `class="chat-stream-content"`) || !strings.Contains(content, `data-raw-content="`+raw+`"`) || !strings.Contains(content, `data-raw-revision="`) {
+		t.Fatalf("completed assistant bubble must expose compact raw-content markup for the shared hydrator:\n%s", content)
+	}
+
+	var window bytes.Buffer
+	for i := 0; i < 100; i++ {
+		if err := ChatBubble("Assistant", raw).Render(context.Background(), &window); err != nil {
+			t.Fatalf("render completed bubble %d: %v", i, err)
+		}
+	}
+	const previousProbeBytes = 215600
+	if got, max := window.Len(), previousProbeBytes/4; got > max {
+		t.Fatalf("100 short completed assistant bubbles rendered %d bytes, want <= %d for at least 75%% reduction from probe", got, max)
+	}
+	fixed := len(content) - len(raw)
+	t.Logf("100 short completed assistant bubbles rendered %d bytes; fixed markup overhead %d bytes per bubble", window.Len(), fixed)
+	if fixed >= 300 {
+		t.Fatalf("completed assistant bubble fixed markup overhead = %d bytes, want < 300", fixed)
+	}
+}
+
+func TestCompletedErrorBubbleUsesSharedHydratorWithoutInlineScript(t *testing.T) {
+	var buf bytes.Buffer
+	if err := ChatBubbleError("Assistant", "failed", "partial output").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render error bubble: %v", err)
+	}
+	content := buf.String()
+	if strings.Contains(content, "<script") || strings.Contains(content, "document.currentScript") || strings.Contains(content, "setInterval") {
+		t.Fatalf("error assistant bubble must not include per-bubble render script; got %d bytes", len(content))
+	}
+	if !strings.Contains(content, `Error: failed`) || !strings.Contains(content, `class="chat-stream-content"`) || !strings.Contains(content, `data-raw-content="partial output"`) {
+		t.Fatalf("error assistant bubble must keep label and compact raw partial output markup:\n%s", content)
+	}
+}
+
+func TestCompletedBubbleSharedHydrationInChrome(t *testing.T) {
+	chrome := testChromePath(t)
+	var bubble bytes.Buffer
+	if err := ChatBubble("Assistant", "# Rendered\n\n```go\nfmt.Println(\"hi\")\n```").Render(context.Background(), &bubble); err != nil {
+		t.Fatalf("render completed bubble: %v", err)
+	}
+	var chatScript bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &chatScript); err != nil {
+		t.Fatalf("render shared chat script: %v", err)
+	}
+	html := `<!doctype html><html><head><meta charset="utf-8"></head><body><main id="fixture-root"><div id="chat-messages">` + bubble.String() + `</div></main><script>
+	window.requestAnimationFrame = function(callback) { return setTimeout(callback, 0); };
+	window.cancelAnimationFrame = clearTimeout;
+	window.renderChatMarkdown = function(text) {
+	  function esc(value) { return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+	  var fence = String.fromCharCode(96, 96, 96);
+	  return esc(text).replace(new RegExp(fence + 'go\\n([\\s\\S]*?)\\n' + fence, 'g'), '<pre><code class="language-go">$1</code></pre>').replace(/^# (.*)$/m, '<h1>$1</h1>');
+	};
+	window.addCodeCopyButtons = function(container) {
+	  container.querySelectorAll('pre').forEach(function(pre) {
+	    var button = document.createElement('button');
+	    button.setAttribute('data-code-copy-button', 'true');
+	    button.textContent = 'Copy';
+	    pre.appendChild(button);
+	  });
+	};
+	window.renderChatMarkdownLargeFallback = function(text) {
+	  var div = document.createElement('div');
+	  div.className = 'chat-markdown';
+	  div.innerHTML = window.renderChatMarkdown(text);
+	  window.addCodeCopyButtons(div);
+	  return div;
+	};
+	</script>` + chatScript.String() + `<script>
+	window.addEventListener('DOMContentLoaded', function() {
+	  var root = document.getElementById('fixture-root');
+	  var messages = document.getElementById('chat-messages');
+	  function fail(message) { root.setAttribute('data-test-result', 'fail'); root.setAttribute('data-test-error', message); }
+	  if ((messages.textContent || '').indexOf('# Rendered') !== -1) return fail('raw markdown was visible before shared hydration');
+	  Promise.resolve(window.cleanAssistantMessages(messages)).then(function() {
+	    if (!messages.querySelector('.chat-markdown h1')) return fail('markdown heading did not hydrate');
+	    if (!messages.querySelector('pre code.language-go')) return fail('code block did not hydrate');
+	    if (!messages.querySelector('[data-code-copy-button="true"]')) return fail('copy button was not attached');
+	    if ((messages.textContent || '').indexOf(String.fromCharCode(96, 96, 96)) !== -1) return fail('raw fenced markdown remained visible after hydration');
+	    root.setAttribute('data-test-result', 'pass');
+	  }).catch(function(error) { fail(String(error && error.stack || error)); });
+	});
+	</script></body></html>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	stdoutPath := filepath.Join(t.TempDir(), "chrome-completed-bubble.html")
+	stderrPath := filepath.Join(t.TempDir(), "chrome-completed-bubble.log")
+	stdoutFile, err := os.Create(stdoutPath)
+	if err != nil {
+		t.Fatalf("create Chrome stdout: %v", err)
+	}
+	defer stdoutFile.Close()
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--run-all-compositor-stages-before-draw", "--no-first-run", "--no-default-browser-check", "--user-data-dir="+filepath.Join(t.TempDir(), "chrome-completed-bubble-profile"), "--virtual-time-budget=5000", "--dump-dom", server.URL)
+	cmd.Stdout = stdoutFile
+	cmd.Stderr = stderrFile
+	configureTestBrowserProcess(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start Chrome completed-bubble fixture: %v", err)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	var result string
+	for time.Now().Before(deadline) {
+		if output, readErr := os.ReadFile(stdoutPath); readErr == nil {
+			result = string(output)
+			if strings.Contains(result, `data-test-result="pass"`) || strings.Contains(result, `data-test-result="fail"`) {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	stopTestBrowserProcess(cmd)
+	if !strings.Contains(result, `data-test-result="pass"`) {
+		state := regexp.MustCompile(`<main id="fixture-root"[^>]*>`).FindString(result)
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("completed-bubble browser hydration fixture failed: %s\nDOM: %s\nChrome stderr: %s", state, result, stderr)
 	}
 }
 
@@ -2665,18 +2788,22 @@ func TestChatBubble_PreservesTaskIDMarkers(t *testing.T) {
 		t.Error("ChatBubble should preserve coded task summaries for direct-load hydration")
 	}
 
-	// Should have the convertTaskLinksInMessage call
-	if !strings.Contains(html, "convertTaskLinksInMessage") {
-		t.Error("ChatBubble should call convertTaskLinksInMessage for task link conversion")
+	if strings.Contains(html, "<script") || strings.Contains(html, "convertTaskLinksInMessage") || strings.Contains(html, "classList.add('chat-markdown')") {
+		t.Error("ChatBubble should leave task-link conversion and Markdown fallback to the shared hydrator")
 	}
 
-	// Keep the chat-stream-content class even in markdown fallback so refresh cleanup
-	// can reliably find and re-process the container.
-	if strings.Contains(html, "className = 'chat-markdown'") {
-		t.Error("ChatBubble should not replace container className with chat-markdown")
+	var script bytes.Buffer
+	if err := ChatAutoScrollScript().Render(context.Background(), &script); err != nil {
+		t.Fatalf("render shared chat script: %v", err)
 	}
-	if !strings.Contains(html, "classList.add('chat-markdown')") {
-		t.Error("ChatBubble markdown fallback should add chat-markdown class without removing existing classes")
+	scriptHTML := script.String()
+	if !strings.Contains(scriptHTML, "window.convertTaskLinksInMessage(bubble)") {
+		t.Error("shared assistant hydrator should convert task link markers after rendering raw bubbles")
+	}
+	// Keep the chat-stream-content class even in raw-bubble markdown fallback so refresh cleanup
+	// can reliably find and re-process the container.
+	if !strings.Contains(scriptHTML, "classList.add('chat-markdown')") {
+		t.Error("shared Markdown fallback should add chat-markdown class without removing existing classes")
 	}
 }
 

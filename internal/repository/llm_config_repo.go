@@ -18,6 +18,7 @@ type LLMConfigRepo struct {
 var (
 	ErrLLMConfigNameRequired  = errors.New("Model name is required")
 	ErrLLMConfigNameDuplicate = errors.New("A model with that name already exists")
+	ErrLLMConfigModelRequired = errors.New("Model identifier is required")
 )
 
 func NewLLMConfigRepo(db *sql.DB) *LLMConfigRepo {
@@ -37,10 +38,16 @@ const llmConfigCardColumns = `id, name, provider, model, reasoning_effort,
 		CASE WHEN json_valid(mixture_config_json) THEN substr(COALESCE(json_extract(mixture_config_json, '$.aggregator.label'), ''), 1, 256) ELSE '' END,
 		CASE WHEN json_valid(mixture_config_json) AND json_type(mixture_config_json, '$.reference_models') = 'array' THEN json_array_length(mixture_config_json, '$.reference_models') ELSE 0 END`
 
-// llmConfigPickerColumns is the render-only Chat model picker projection.
-// It deliberately excludes provider identity, credentials, endpoint settings,
-// request JSON, custom-auth state, worker fields, and mixture definitions.
+// llmConfigPickerColumns is the render-only model picker projection for Chat
+// and Agent dialogs. It deliberately excludes provider identity, credentials,
+// endpoint settings, request JSON, custom-auth state, worker fields, timestamps,
+// and mixture definitions.
 const llmConfigPickerColumns = `id, name, model`
+
+// llmConfigChatSelectionColumns is the compact API Chat auto-selection and
+// prompt-context projection. It preserves model identity, provider display, and
+// default-marker semantics while excluding credentials and large provider JSON.
+const llmConfigChatSelectionColumns = `id, name, provider, model, is_default`
 
 // llmConfigBadgeColumns is the minimal projection for task-card model badges
 // and the chat-thread composer label. The model slug is included because the
@@ -67,6 +74,16 @@ func normalizeLLMConfigName(name string) (string, error) {
 		return "", ErrLLMConfigNameRequired
 	}
 	return name, nil
+}
+
+func validateLLMConfigModel(a *models.LLMConfig) error {
+	switch a.Provider {
+	case models.ProviderAnthropic, models.ProviderOpenAI, models.ProviderOpenAICompatible, models.ProviderOllama:
+		if strings.TrimSpace(a.Model) == "" {
+			return ErrLLMConfigModelRequired
+		}
+	}
+	return nil
 }
 
 func validateLLMConfigNameAvailableTx(ctx context.Context, tx *sql.Tx, name, excludeID string) (string, error) {
@@ -199,8 +216,32 @@ func (r *LLMConfigRepo) ListPickerOptions(ctx context.Context) ([]models.LLMConf
 	return configs, rows.Err()
 }
 
-// ListBadgeOptions returns only the three fields needed to render model badges on
-// task cards and task detail views (id, name, is_default). The returned
+// ListChatSelectionOptions returns the compact rows needed for API Chat model
+// auto-selection and available-model prompt context. The returned LLMConfig
+// values are intentionally incomplete and must not be used for provider
+// execution, model editing, credential access, or persistence.
+func (r *LLMConfigRepo) ListChatSelectionOptions(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+llmConfigChatSelectionColumns+`
+					 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing chat model selection options: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var a models.LLMConfig
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault); err != nil {
+			return nil, fmt.Errorf("scanning chat model selection option: %w", err)
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
+}
+
+// ListBadgeOptions returns only the four fields needed to render model badges on
+// task cards and task detail views (id, name, model, is_default). The returned
 // LLMConfig values are intentionally incomplete and must not be used for provider
 // execution, model editing, credential access, or persistence.
 func (r *LLMConfigRepo) ListBadgeOptions(ctx context.Context) ([]models.LLMConfig, error) {
@@ -323,6 +364,10 @@ func (r *LLMConfigRepo) deleteWithTx(ctx context.Context, tx *sql.Tx, id string)
 }
 
 func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
+	if err := validateLLMConfigModel(a); err != nil {
+		return err
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin create model config tx: %w", err)
@@ -378,6 +423,10 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 }
 
 func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
+	if err := validateLLMConfigModel(a); err != nil {
+		return err
+	}
+
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin update model config tx: %w", err)

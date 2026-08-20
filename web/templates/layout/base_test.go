@@ -139,6 +139,57 @@ if (document.title !== 'History Task - OpenVibely') throw new Error('cache-miss 
 	}
 }
 
+func TestBaseGlobalToastBridgeOwnsHTMXToastRendering(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Toast", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render base: %v", err)
+	}
+	html := buf.String()
+	for _, expected := range []string{
+		"document.body.addEventListener('openvibelyToast'",
+		"var status = detail.status || detail.type || 'info'",
+		"if (status === 'success') status = 'completed'",
+		"var taskId = detail.taskId || detail.task_id || ''",
+		"var linkURL = detail.linkURL || detail.link_url || ''",
+		"var linkText = detail.linkText || detail.link_text || ''",
+		"var toastKey = detail.toastKey || detail.toast_key || ''",
+		"var clickURL = detail.clickURL || detail.click_url || ''",
+		"window.showToast(message, status, taskId, { linkURL: linkURL, linkText: linkText, toastKey: toastKey, clickURL: clickURL })",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("global toast bridge missing contract %q", expected)
+		}
+	}
+	if strings.Contains(html, "document.body.addEventListener('showToast'") {
+		t.Fatal("base layout must not register a second legacy showToast HTMX bridge")
+	}
+}
+
+func TestBaseGlobalToastRendererPreservesDuplicateSuppressionAndLinks(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Toast", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render base: %v", err)
+	}
+	html := buf.String()
+	for _, expected := range []string{
+		"function shouldSuppressDuplicateToast(message, status, taskId)",
+		"now - lastShownAt < 1000",
+		"now - timestamp > 5000",
+		"if (taskId && findVisibleTaskToast(taskId))",
+		"if (toastKey && findVisibleToastKey(toastKey))",
+		"if (shouldSuppressDuplicateToast(displayTitle, status, taskId))",
+		"link.addEventListener('click', function(event)",
+		"event.stopPropagation()",
+		"window.openVibelyNavigate(linkURL)",
+		"const toasts = container.querySelectorAll('.toast-notification:not(.toast-dismiss)')",
+		"if (toasts.length > 5)",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("global toast renderer missing behavior %q", expected)
+		}
+	}
+}
+
 func TestBasePurgesSensitiveHTMXHistoryBeforeHTMXLoads(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", nil, "").Render(context.Background(), &buf); err != nil {

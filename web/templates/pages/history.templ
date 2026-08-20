@@ -3,7 +3,9 @@ package pages
 import (
 	"fmt"
 	"strings"
+
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
@@ -150,10 +152,9 @@ templ historyExecutionCard(de models.HistoryExecution, currentProjectID string) 
 		<div class="card-body p-4">
 			<div class="flex items-center justify-between">
 				<div class="flex items-center gap-3 flex-1 min-w-0">
-					@execStatusBadge(de.Execution.Status)
+					@components.ExecutionStatusBadge(de.Execution.Status, "badge-sm")
 					<span class="font-medium text-sm truncate">{ de.TaskTitle }</span>
-				</div>
-				<div class="flex items-center gap-3 flex-shrink-0">
+				</div>				<div class="flex items-center gap-3 flex-shrink-0">
 					if de.AgentName != "" {
 						<span class="text-xs opacity-50">{ de.AgentName }</span>
 					} else {
@@ -324,21 +325,6 @@ templ projectChangesSection(pc *models.ProjectChanges) {
 				</div>
 			</div>
 		</div>
-	}
-}
-
-templ execStatusBadge(status models.ExecutionStatus) {
-	switch status {
-		case models.ExecCompleted:
-			<span class="badge badge-success badge-sm">Success</span>
-		case models.ExecFailed:
-			<span class="badge badge-error badge-sm">Failed</span>
-		case models.ExecCancelled:
-			<span class="badge badge-warning badge-sm">Cancelled</span>
-		case models.ExecRunning:
-			<span class="badge badge-primary badge-sm">Running</span>
-		default:
-			<span class="badge badge-ghost badge-sm">{ string(status) }</span>
 	}
 }
 

@@ -60,14 +60,22 @@ type taskDiscoverySummary struct {
 	SwarmRole    string `json:"swarm_role,omitempty"`
 }
 
+type taskDiscoveryFilterSummary struct {
+	Query    string `json:"query"`
+	Category string `json:"category"`
+	Status   string `json:"status"`
+}
+
 type taskDiscoveryResult struct {
-	OK      bool                   `json:"ok"`
-	Tasks   []taskDiscoverySummary `json:"tasks"`
-	Count   int                    `json:"count"`
-	Total   int                    `json:"total"`
-	Limit   int                    `json:"limit"`
-	Offset  int                    `json:"offset"`
-	HasMore bool                   `json:"has_more"`
+	OK      bool                       `json:"ok"`
+	Tasks   []taskDiscoverySummary     `json:"tasks"`
+	Count   int                        `json:"count"`
+	Total   int                        `json:"total"`
+	Limit   int                        `json:"limit"`
+	Offset  int                        `json:"offset"`
+	HasMore bool                       `json:"has_more"`
+	Filter  taskDiscoveryFilterSummary `json:"filter"`
+	Note    string                     `json:"note,omitempty"`
 }
 
 // ExecuteListTasksTool runs the bounded, read-only, current-project task discovery
@@ -131,6 +139,14 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 		Limit:   limit,
 		Offset:  offset,
 		HasMore: offset+len(summaries) < total,
+		Filter: taskDiscoveryFilterSummary{
+			Query:    strings.TrimSpace(req.Query),
+			Category: category,
+			Status:   status,
+		},
+	}
+	if result.Total == 0 && !result.HasMore {
+		result.Note = "No tasks matched this exact list_tasks query/filter in the current project; has_more=false means there are no further pages for these parameters."
 	}
 	b, err := json.Marshal(result)
 	if err != nil {

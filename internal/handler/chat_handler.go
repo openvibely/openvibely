@@ -374,7 +374,7 @@ func (h *Handler) ChatStop(c echo.Context) error {
 		applog.Infof("[handler] ChatStop error preserving chat category task=%s: %v", activeChatExec.TaskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to preserve chat history")
 	}
-	h.cancelRunningExecutionsAndPublish(c.Request().Context(), activeChatExec.TaskID, "ChatStop")
+	h.cancelActiveExecutionsAndPublish(c.Request().Context(), activeChatExec.TaskID, "ChatStop")
 	if isHTMX(c) {
 		return render(c, http.StatusOK, components.ChatComposerActionButtonOOB("chat-form-primary-action", "/chat/stop?project_id="+projectID, false, ""))
 	}

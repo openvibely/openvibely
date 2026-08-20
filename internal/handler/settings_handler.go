@@ -450,6 +450,7 @@ func (h *Handler) handleTelegramSave(c echo.Context) error {
 		if h.threadInputRepo != nil {
 			svc.SetThreadInputRepo(h.threadInputRepo)
 		}
+		h.wireChannelIntegrationSummaryDeps(svc)
 		svc.SetQueuedTurnPromoter(h.PromoteQueuedChatInput)
 		svc.SetQueuedTaskThreadPromoter(h.PromoteQueuedTaskThreadInput)
 		svc.SetChannelChatRunner(h.StartChannelChatRun)
@@ -1023,14 +1024,25 @@ func templateEscape(s string) string {
 
 // handlePersonalitySave saves the global chat personality setting
 func (h *Handler) handlePersonalitySave(c echo.Context) error {
-	// Accept personality from form value OR query param (for kebab menu hx-post with query string)
-	personality := c.FormValue("personality")
-	if personality == "" {
-		personality = c.QueryParam("personality")
+	ctx := c.Request().Context()
+	// Accept personality from form value OR query param (for kebab menu hx-post with query string).
+	// Read PostForm directly so an explicit empty form value still clears to the base/default personality.
+	personality := c.QueryParam("personality")
+	if err := c.Request().ParseForm(); err == nil {
+		if values, ok := c.Request().PostForm["personality"]; ok {
+			personality = ""
+			if len(values) > 0 {
+				personality = values[0]
+			}
+		}
+	}
+
+	if !service.IsAvailablePersonalityKey(ctx, personality, h.customPersonalityRepo) {
+		return c.String(http.StatusBadRequest, fmt.Sprintf("Unknown personality %q. Refresh Personality settings and choose an available option.", personality))
 	}
 
 	if h.settingsRepo != nil {
-		if err := h.settingsRepo.Set(c.Request().Context(), "personality", personality); err != nil {
+		if err := h.settingsRepo.Set(ctx, "personality", personality); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save personality")
 		}
 	}

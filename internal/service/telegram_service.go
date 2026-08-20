@@ -65,50 +65,58 @@ type telegramAuthorizationStore interface {
 // It acts as a proxy to the /chat page orchestrator — every message sent to the bot
 // is forwarded to the same chat assistant that powers the /chat web UI.
 type TelegramService struct {
-	bot                      *tgbotapi.BotAPI
-	taskSvc                  *TaskService
-	projectRepo              *repository.ProjectRepo
-	llmConfigRepo            *repository.LLMConfigRepo
-	taskRepo                 *repository.TaskRepo
-	execRepo                 *repository.ExecutionRepo
-	scheduleRepo             *repository.ScheduleRepo
-	chatAttachmentRepo       *repository.ChatAttachmentRepo
-	threadInputRepo          *repository.ThreadInputRepo
-	telegramAuthRepo         telegramAuthorizationStore
-	telegramUserProjectRepo  *repository.TelegramUserProjectRepo
-	settingsRepo             *repository.SettingsRepo
-	customPersonalityRepo    *repository.CustomPersonalityRepo
-	agentRepo                *repository.AgentRepo
-	alertSvc                 *AlertService
-	channelMessageRouter     *ChannelMessageRouter
-	taskGoalSvc              *TaskGoalService
-	llmSvc                   *LLMService
-	workerSvc                *WorkerService
-	automationGraphSvc       *AutomationGraphService
-	chatBroadcaster          *events.ChatBroadcaster
-	executionStreamHub       *events.ExecutionStreamHub
-	queuedTurnPromoter       func(projectID string)
-	queuedTaskThreadPromoter func(taskID string)
-	channelChatRunner        ChannelChatRunner
-	channelTaskRunner        ChannelTaskRunner
-	sendMessageFunc          func(chatID int64, text string)
-	editMessageFunc          func(chatID int64, messageID int, text string)
-	sendConfigFunc           func(c tgbotapi.Chattable) (tgbotapi.Message, error)
-	makeRequestFunc          func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
-	newBotAPI                func(token string) (*tgbotapi.BotAPI, error)
-	previewMu                sync.Mutex
-	activePreviews           map[telegramPreviewKey]*telegramPreviewState
-	userProjectsMu           sync.RWMutex
-	userProjects             map[int64]string // Maps Telegram user ID to active project ID
-	userProjectVersions      map[int64]uint64
-	userProjectSwitchMu      sync.Mutex
-	activeProjectReadHook    func(int64) // deterministic project-resolution test barrier
-	lifecycleOpMu            sync.Mutex
-	lifecycleMu              sync.Mutex
-	ctx                      context.Context
-	cancel                   context.CancelFunc
-	runDone                  chan struct{}
-	running                  bool
+	bot                        *tgbotapi.BotAPI
+	taskSvc                    *TaskService
+	projectSvc                 *ProjectService
+	githubProjectSvc           GitHubProjectCloneProvider
+	memorySvc                  *MemoryService
+	agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService
+	projectRepo                *repository.ProjectRepo
+	llmConfigRepo              *repository.LLMConfigRepo
+	taskRepo                   *repository.TaskRepo
+	execRepo                   *repository.ExecutionRepo
+	scheduleRepo               *repository.ScheduleRepo
+	chatAttachmentRepo         *repository.ChatAttachmentRepo
+	threadInputRepo            *repository.ThreadInputRepo
+	telegramAuthRepo           telegramAuthorizationStore
+	telegramUserProjectRepo    *repository.TelegramUserProjectRepo
+	settingsRepo               *repository.SettingsRepo
+	customPersonalityRepo      *repository.CustomPersonalityRepo
+	agentRepo                  *repository.AgentRepo
+	alertSvc                   *AlertService
+	usageAnalyticsSvc          *UsageAnalyticsService
+	channelMessageRouter       *ChannelMessageRouter
+	emailStatus                func(context.Context) EmailConnectionStatus
+	emailAuthRepo              *repository.EmailAuthRepo
+	webhookRepo                *repository.WebhookRepo
+	taskGoalSvc                *TaskGoalService
+	llmSvc                     *LLMService
+	workerSvc                  *WorkerService
+	automationGraphSvc         *AutomationGraphService
+	chatBroadcaster            *events.ChatBroadcaster
+	executionStreamHub         *events.ExecutionStreamHub
+	queuedTurnPromoter         func(projectID string)
+	queuedTaskThreadPromoter   func(taskID string)
+	channelChatRunner          ChannelChatRunner
+	channelTaskRunner          ChannelTaskRunner
+	sendMessageFunc            func(chatID int64, text string)
+	editMessageFunc            func(chatID int64, messageID int, text string)
+	sendConfigFunc             func(c tgbotapi.Chattable) (tgbotapi.Message, error)
+	makeRequestFunc            func(endpoint string, params tgbotapi.Params) (*tgbotapi.APIResponse, error)
+	newBotAPI                  func(token string) (*tgbotapi.BotAPI, error)
+	previewMu                  sync.Mutex
+	activePreviews             map[telegramPreviewKey]*telegramPreviewState
+	userProjectsMu             sync.RWMutex
+	userProjects               map[int64]string // Maps Telegram user ID to active project ID
+	userProjectVersions        map[int64]uint64
+	userProjectSwitchMu        sync.Mutex
+	activeProjectReadHook      func(int64) // deterministic project-resolution test barrier
+	lifecycleOpMu              sync.Mutex
+	lifecycleMu                sync.Mutex
+	ctx                        context.Context
+	cancel                     context.CancelFunc
+	runDone                    chan struct{}
+	running                    bool
 }
 
 // NewTelegramService creates a new Telegram bot service
@@ -136,6 +144,12 @@ func NewTelegramService(
 	bot.Debug = false
 	applog.Infof("[telegram] authorized on account %s", bot.Self.UserName)
 
+	var usageAnalyticsSvc *UsageAnalyticsService
+	if execRepo != nil {
+		if db := execRepo.DB(); db != nil {
+			usageAnalyticsSvc = NewUsageAnalyticsService(repository.NewUsageRepo(db), llmConfigRepo)
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &TelegramService{
@@ -149,6 +163,7 @@ func NewTelegramService(
 		chatAttachmentRepo:  chatAttachmentRepo,
 		llmSvc:              llmSvc,
 		workerSvc:           workerSvc,
+		usageAnalyticsSvc:   usageAnalyticsSvc,
 		newBotAPI:           tgbotapi.NewBotAPI,
 		userProjects:        make(map[int64]string),
 		userProjectVersions: make(map[int64]uint64),
@@ -221,6 +236,13 @@ func (s *TelegramService) SetCustomPersonalityRepo(repo *repository.CustomPerson
 	s.customPersonalityRepo = repo
 }
 
+func (s *TelegramService) SetProjectCreationServices(projectSvc *ProjectService, githubSvc GitHubProjectCloneProvider, memorySvc *MemoryService, agentLibraryMaintenanceSvc *AgentLibraryMaintenanceService) {
+	s.projectSvc = projectSvc
+	s.githubProjectSvc = githubSvc
+	s.memorySvc = memorySvc
+	s.agentLibraryMaintenanceSvc = agentLibraryMaintenanceSvc
+}
+
 // SetAgentRepo sets the agent repo for listing agent definitions from Telegram chat.
 func (s *TelegramService) SetAgentRepo(repo *repository.AgentRepo) {
 	s.agentRepo = repo
@@ -237,6 +259,18 @@ func (s *TelegramService) SetAutomationGraphService(svc *AutomationGraphService)
 
 func (s *TelegramService) SetChannelMessageRouter(router *ChannelMessageRouter) {
 	s.channelMessageRouter = router
+}
+
+func (s *TelegramService) SetEmailStatusProvider(provider func(context.Context) EmailConnectionStatus) {
+	s.emailStatus = provider
+}
+
+func (s *TelegramService) SetEmailAuthRepo(repo *repository.EmailAuthRepo) {
+	s.emailAuthRepo = repo
+}
+
+func (s *TelegramService) SetWebhookRepo(repo *repository.WebhookRepo) {
+	s.webhookRepo = repo
 }
 
 // SetTaskGoalService injects the task goal service so Telegram can execute
@@ -1341,10 +1375,23 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
+		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
+		TelegramRunning:       s.IsRunning,
+		TelegramAuthRepo:      telegramAuthListStore(s.telegramAuthRepo),
+		EmailStatus:           s.emailStatus,
+		EmailAuthRepo:         s.emailAuthRepo,
+		WebhookRepo:           s.webhookRepo,
+		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
 		ProjectID:   projectID,
 		ProjectRepo: s.projectRepo,
+		CreateProject: CreateGitHubProjectRuntimeOptions{
+			ProjectSvc:                 s.projectSvc,
+			GitHubSvc:                  s.githubProjectSvc,
+			MemorySvc:                  s.memorySvc,
+			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,
+		},
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
 			if !s.checkAuthorization(userID, "", project.ID) {
 				return fmt.Errorf("Telegram user %d is not authorized to use project %q", userID, project.Name)

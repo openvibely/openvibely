@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	llmoauth "github.com/openvibely/openvibely/internal/llm/oauth"
 	"github.com/openvibely/openvibely/internal/models"
@@ -107,6 +108,345 @@ func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter 
 		}
 	}
 
+	if err := s.populateAnalyticsUsageView(ctx, filter, view, configsByID, refreshErrors); err != nil {
+		return nil, err
+	}
+	return view, nil
+}
+
+func (s *UsageAnalyticsService) BuildLocalAnalyticsUsage(ctx context.Context, filter repository.UsageFilter) (*models.AnalyticsUsageViewModel, error) {
+	if s == nil || s.usageRepo == nil {
+		return nil, fmt.Errorf("usage analytics service is not configured")
+	}
+
+	view := &models.AnalyticsUsageViewModel{}
+	configsByID := map[string]models.LLMConfig{}
+	if s.llmConfigRepo != nil {
+		configs, err := s.llmConfigRepo.List(ctx)
+		if err != nil {
+			view.Errors = append(view.Errors, fmt.Sprintf("listing OAuth accounts: %v", err))
+		} else {
+			for i := range configs {
+				configsByID[configs[i].ID] = configs[i]
+			}
+			view.AccountLimits = append(view.AccountLimits, s.oauthAccountPlaceholders(configs, filter.Provider)...)
+		}
+	}
+
+	if err := s.populateAnalyticsUsageView(ctx, filter, view, configsByID, nil); err != nil {
+		return nil, err
+	}
+	if latestUsageAt, err := s.usageRepo.GetLatestUsageEventTime(ctx, filter); err != nil {
+		return nil, err
+	} else if latestUsageAt != nil && (view.LastUpdatedAt == nil || latestUsageAt.After(*view.LastUpdatedAt)) {
+		view.LastUpdatedAt = latestUsageAt
+	}
+	return view, nil
+}
+
+type usageAnalyticsActionInput struct {
+	Range             string `json:"range"`
+	Provider          string `json:"provider"`
+	GroupBy           string `json:"group_by"`
+	DateFrom          string `json:"date_from"`
+	DateTo            string `json:"date_to"`
+	TopLimit          int    `json:"top_limit"`
+	RecentBucketLimit *int   `json:"recent_bucket_limit"`
+}
+
+type usageAnalyticsActionResponse struct {
+	OK                 bool                            `json:"ok"`
+	ProjectID          string                          `json:"project_id"`
+	Filter             usageAnalyticsActionFilter      `json:"filter"`
+	Totals             models.UsageTotals              `json:"totals"`
+	Cost               usageAnalyticsActionCost        `json:"cost"`
+	TopModels          []models.ModelUsagePoint        `json:"top_models"`
+	TopProviders       []usageAnalyticsProviderSummary `json:"top_providers"`
+	RecentBuckets      []models.UsageRatePoint         `json:"recent_buckets,omitempty"`
+	AccountLimits      []usageAnalyticsAccountSummary  `json:"account_limits"`
+	LastUpdatedAt      *string                         `json:"last_updated_at,omitempty"`
+	LocalOnly          bool                            `json:"local_only"`
+	ProviderRefreshed  bool                            `json:"provider_refreshed"`
+	CostAvailability   string                          `json:"cost_availability"`
+	AccountLimitSource string                          `json:"account_limit_source"`
+	Errors             []string                        `json:"errors,omitempty"`
+}
+
+type usageAnalyticsActionFilter struct {
+	Range    string `json:"range"`
+	Provider string `json:"provider,omitempty"`
+	GroupBy  string `json:"group_by"`
+	DateFrom string `json:"date_from,omitempty"`
+	DateTo   string `json:"date_to,omitempty"`
+}
+
+type usageAnalyticsActionCost struct {
+	Available bool     `json:"available"`
+	Status    string   `json:"status"`
+	TotalUSD  *float64 `json:"total_usd,omitempty"`
+}
+
+type usageAnalyticsProviderSummary struct {
+	Provider      string   `json:"provider"`
+	TotalTokens   int      `json:"total_tokens"`
+	InputTokens   int      `json:"input_tokens"`
+	OutputTokens  int      `json:"output_tokens"`
+	CacheTokens   int      `json:"cached_input_tokens"`
+	CostUSD       *float64 `json:"cost_usd,omitempty"`
+	CostAvailable bool     `json:"cost_available"`
+	CallCount     int      `json:"call_count"`
+	Percent       float64  `json:"percent"`
+}
+
+type usageAnalyticsAccountSummary struct {
+	Provider             string                    `json:"provider"`
+	PlanType             string                    `json:"plan_type,omitempty"`
+	StatusLabel          string                    `json:"status_label,omitempty"`
+	ExtraUsageLabel      string                    `json:"extra_usage_label,omitempty"`
+	ExtraUsageMonthlyUSD *float64                  `json:"extra_usage_monthly_usd,omitempty"`
+	ExtraUsageUsedUSD    *float64                  `json:"extra_usage_used_usd,omitempty"`
+	UpdatedAt            string                    `json:"updated_at,omitempty"`
+	Limits               []models.AccountLimitView `json:"limits"`
+	Error                string                    `json:"error,omitempty"`
+}
+
+func ExecuteViewUsageAnalyticsTool(ctx context.Context, usageAnalyticsSvc *UsageAnalyticsService, projectID string, input json.RawMessage) (string, error) {
+	if usageAnalyticsSvc == nil {
+		return "", fmt.Errorf("usage analytics service is not configured")
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return "", fmt.Errorf("view_usage_analytics requires a current project")
+	}
+	var req usageAnalyticsActionInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	filter, filterSummary := usageAnalyticsActionFilterFromInput(projectID, req)
+	view, err := usageAnalyticsSvc.BuildLocalAnalyticsUsage(ctx, filter)
+	if err != nil {
+		return "", err
+	}
+	response := compactUsageAnalyticsActionResponse(projectID, filterSummary, view, req.TopLimit, req.RecentBucketLimit)
+	b, err := json.Marshal(response)
+	return string(b), err
+}
+
+func usageAnalyticsActionFilterFromInput(projectID string, req usageAnalyticsActionInput) (repository.UsageFilter, usageAnalyticsActionFilter) {
+	rangeValue := strings.TrimSpace(req.Range)
+	if rangeValue == "" {
+		rangeValue = "30d"
+	}
+	groupBy := strings.TrimSpace(req.GroupBy)
+	if groupBy == "" {
+		groupBy = "day"
+	}
+	filter := repository.UsageFilter{ProjectID: projectID, Provider: strings.TrimSpace(req.Provider), GroupBy: groupBy, Refresh: false}
+	if from := parseUsageAnalyticsActionTime(strings.TrimSpace(req.DateFrom)); !from.IsZero() {
+		filter.DateFrom = from
+	}
+	if to := parseUsageAnalyticsActionTime(strings.TrimSpace(req.DateTo)); !to.IsZero() {
+		filter.DateTo = to
+	}
+	if filter.DateFrom.IsZero() && filter.DateTo.IsZero() {
+		now := time.Now()
+		if days, ok := usageAnalyticsActionRangeDays(rangeValue); ok {
+			filter.DateFrom = now.AddDate(0, 0, -days)
+			filter.DateTo = now
+		} else {
+			switch rangeValue {
+			case "month":
+				filter.DateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+				filter.DateTo = now
+			case "all":
+			default:
+				rangeValue = "30d"
+				filter.DateFrom = now.AddDate(0, 0, -30)
+				filter.DateTo = now
+			}
+		}
+	}
+	summary := usageAnalyticsActionFilter{Range: rangeValue, Provider: filter.Provider, GroupBy: groupBy}
+	if !filter.DateFrom.IsZero() {
+		summary.DateFrom = filter.DateFrom.UTC().Format(time.RFC3339)
+	}
+	if !filter.DateTo.IsZero() {
+		summary.DateTo = filter.DateTo.UTC().Format(time.RFC3339)
+	}
+	return filter, summary
+}
+
+func parseUsageAnalyticsActionTime(value string) time.Time {
+	if value == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t.UTC()
+	}
+	if t, err := time.Parse("2006-01-02", value); err == nil {
+		return t.UTC()
+	}
+	return time.Time{}
+}
+
+func usageAnalyticsActionRangeDays(value string) (int, bool) {
+	if !strings.HasSuffix(value, "d") {
+		return 0, false
+	}
+	days, err := strconv.Atoi(strings.TrimSuffix(value, "d"))
+	return days, err == nil && days > 0
+}
+
+func compactUsageAnalyticsActionResponse(projectID string, filter usageAnalyticsActionFilter, view *models.AnalyticsUsageViewModel, topLimit int, recentLimit *int) usageAnalyticsActionResponse {
+	if topLimit <= 0 {
+		topLimit = 5
+	}
+	if topLimit > 10 {
+		topLimit = 10
+	}
+	bucketLimit := 8
+	if recentLimit != nil {
+		bucketLimit = *recentLimit
+	}
+	if bucketLimit < 0 {
+		bucketLimit = 0
+	}
+	if bucketLimit > 24 {
+		bucketLimit = 24
+	}
+	costStatus := usageAnalyticsActionCostStatus(view.Totals, view.ModelBreakdown)
+	response := usageAnalyticsActionResponse{
+		OK:                 true,
+		ProjectID:          projectID,
+		Filter:             filter,
+		Totals:             view.Totals,
+		Cost:               usageAnalyticsActionCost{Available: view.Totals.CostAvailable, Status: costStatus, TotalUSD: view.Totals.CostUSD},
+		TopModels:          firstUsageAnalyticsModelRows(view.ModelBreakdown, topLimit),
+		TopProviders:       topUsageAnalyticsProviderRows(view.ModelBreakdown, topLimit),
+		RecentBuckets:      lastUsageAnalyticsRateRows(view.UsageRate, bucketLimit),
+		AccountLimits:      compactUsageAnalyticsAccountRows(view.AccountLimits),
+		LocalOnly:          true,
+		ProviderRefreshed:  false,
+		CostAvailability:   costStatus,
+		AccountLimitSource: "stored_snapshots_only",
+		Errors:             view.Errors,
+	}
+	if view.LastUpdatedAt != nil {
+		updated := view.LastUpdatedAt.UTC().Format(time.RFC3339)
+		response.LastUpdatedAt = &updated
+	}
+	return response
+}
+
+func usageAnalyticsActionCostStatus(totals models.UsageTotals, breakdown []models.ModelUsagePoint) string {
+	if totals.CallCount == 0 {
+		return "no_usage"
+	}
+	if !totals.CostAvailable {
+		return "unavailable"
+	}
+	for _, row := range breakdown {
+		if row.CallCount > 0 && row.CostUSD == nil {
+			return "partial"
+		}
+	}
+	return "available"
+}
+
+func firstUsageAnalyticsModelRows(rows []models.ModelUsagePoint, limit int) []models.ModelUsagePoint {
+	if limit > len(rows) {
+		limit = len(rows)
+	}
+	out := make([]models.ModelUsagePoint, limit)
+	copy(out, rows[:limit])
+	return out
+}
+
+func lastUsageAnalyticsRateRows(rows []models.UsageRatePoint, limit int) []models.UsageRatePoint {
+	if limit <= 0 || len(rows) == 0 {
+		return nil
+	}
+	if limit > len(rows) {
+		limit = len(rows)
+	}
+	out := make([]models.UsageRatePoint, limit)
+	copy(out, rows[len(rows)-limit:])
+	return out
+}
+
+func topUsageAnalyticsProviderRows(rows []models.ModelUsagePoint, limit int) []usageAnalyticsProviderSummary {
+	index := map[string]int{}
+	providers := []usageAnalyticsProviderSummary{}
+	costSums := map[string]float64{}
+	costAvailable := map[string]bool{}
+	for _, row := range rows {
+		i, ok := index[row.Provider]
+		if !ok {
+			index[row.Provider] = len(providers)
+			providers = append(providers, usageAnalyticsProviderSummary{Provider: row.Provider})
+			i = len(providers) - 1
+		}
+		providers[i].TotalTokens += row.TotalTokens
+		providers[i].InputTokens += row.InputTokens
+		providers[i].OutputTokens += row.OutputTokens
+		providers[i].CacheTokens += row.CacheTokens
+		providers[i].CallCount += row.CallCount
+		if row.CostUSD != nil {
+			costSums[row.Provider] += *row.CostUSD
+			costAvailable[row.Provider] = true
+		}
+	}
+	totalTokens := 0
+	for _, row := range providers {
+		totalTokens += row.TotalTokens
+	}
+	for i := range providers {
+		if costAvailable[providers[i].Provider] {
+			cost := costSums[providers[i].Provider]
+			providers[i].CostUSD = &cost
+			providers[i].CostAvailable = true
+		}
+		if totalTokens > 0 {
+			providers[i].Percent = float64(providers[i].TotalTokens) * 100 / float64(totalTokens)
+		}
+	}
+	sort.Slice(providers, func(i, j int) bool {
+		if providers[i].TotalTokens == providers[j].TotalTokens {
+			return providers[i].Provider < providers[j].Provider
+		}
+		return providers[i].TotalTokens > providers[j].TotalTokens
+	})
+	if limit > len(providers) {
+		limit = len(providers)
+	}
+	out := make([]usageAnalyticsProviderSummary, limit)
+	copy(out, providers[:limit])
+	return out
+}
+
+func compactUsageAnalyticsAccountRows(accounts []models.AccountUsageView) []usageAnalyticsAccountSummary {
+	out := make([]usageAnalyticsAccountSummary, 0, len(accounts))
+	for _, account := range accounts {
+		updated := ""
+		if !account.UpdatedAt.IsZero() {
+			updated = account.UpdatedAt.UTC().Format(time.RFC3339)
+		}
+		out = append(out, usageAnalyticsAccountSummary{
+			Provider:             account.Provider,
+			PlanType:             account.PlanType,
+			StatusLabel:          account.StatusLabel,
+			ExtraUsageLabel:      account.ExtraUsageLabel,
+			ExtraUsageMonthlyUSD: account.ExtraUsageMonthlyUSD,
+			ExtraUsageUsedUSD:    account.ExtraUsageUsedUSD,
+			UpdatedAt:            updated,
+			Limits:               account.Limits,
+			Error:                account.Error,
+		})
+	}
+	return out
+}
+
+func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
 	snapshots, err := s.usageRepo.GetLatestAccountUsageSnapshots(ctx, filter.Provider)
 	if err != nil {
 		view.Errors = append(view.Errors, fmt.Sprintf("loading account snapshots: %v", err))
@@ -124,18 +464,18 @@ func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter 
 
 	totals, err := s.usageRepo.GetUsageTotals(ctx, filter)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	view.Totals = *totals
 
 	daily, err := s.usageRepo.GetDailyUsage(ctx, filter)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	view.DailyUsage = daily
 	dailyByModel, err := s.usageRepo.GetDailyUsageByModel(ctx, filter)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	view.DailyUsageByModel = dailyByModel
 
@@ -145,22 +485,21 @@ func (s *UsageAnalyticsService) BuildAnalyticsUsage(ctx context.Context, filter 
 	}
 	rate, err := s.usageRepo.GetUsageRateBuckets(ctx, rateFilter)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	view.UsageRate = rate
 	rateByModel, err := s.usageRepo.GetUsageRateBucketsByModel(ctx, rateFilter)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	view.UsageRateByModel = rateByModel
 
 	breakdown, err := s.usageRepo.GetModelUsageBreakdown(ctx, filter)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	view.ModelBreakdown = breakdown
-
-	return view, nil
+	return nil
 }
 
 func (s *UsageAnalyticsService) refreshAccountSnapshots(ctx context.Context, configs []models.LLMConfig, provider string, force bool) ([]models.AccountUsageSnapshot, map[string]string) {

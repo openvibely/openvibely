@@ -7,6 +7,131 @@ import (
 	"github.com/openvibely/openvibely/internal/buildinfo"
 )
 
+func TestLoadWithModeUpdateDefaults(t *testing.T) {
+	originalArtifact := buildinfo.Artifact
+	t.Cleanup(func() { buildinfo.Artifact = originalArtifact })
+	buildinfo.Artifact = ""
+
+	for _, name := range []string{"OPENVIBELY_UPDATE_MODE", "OPENVIBELY_UPDATE_SERVICE_URL", "OPENVIBELY_UPDATE_CHANNEL"} {
+		t.Setenv(name, "")
+	}
+
+	for _, test := range []struct {
+		name         string
+		mode         RuntimeMode
+		wantArtifact string
+	}{
+		{name: "server", mode: ModeServer, wantArtifact: buildinfo.ArtifactSource},
+		{name: "desktop", mode: ModeDesktop, wantArtifact: buildinfo.ArtifactDesktop},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := LoadWithMode(test.mode)
+			if cfg.BuildArtifact != test.wantArtifact {
+				t.Fatalf("BuildArtifact=%q want %q", cfg.BuildArtifact, test.wantArtifact)
+			}
+			if cfg.UpdateMode != buildinfo.ModeNone {
+				t.Fatalf("UpdateMode=%q want %q", cfg.UpdateMode, buildinfo.ModeNone)
+			}
+			if cfg.UpdateServiceURL != defaultUpdateServiceURL {
+				t.Fatalf("UpdateServiceURL=%q want %q", cfg.UpdateServiceURL, defaultUpdateServiceURL)
+			}
+			if cfg.UpdateChannel != defaultUpdateChannel {
+				t.Fatalf("UpdateChannel=%q want %q", cfg.UpdateChannel, defaultUpdateChannel)
+			}
+		})
+	}
+}
+
+func TestUpdateDefaultsUseDockerManualForContainers(t *testing.T) {
+	originalArtifact := buildinfo.Artifact
+	t.Cleanup(func() { buildinfo.Artifact = originalArtifact })
+	buildinfo.Artifact = buildinfo.ArtifactContainer
+
+	for _, name := range []string{"OPENVIBELY_UPDATE_MODE", "OPENVIBELY_UPDATE_SERVICE_URL", "OPENVIBELY_UPDATE_CHANNEL"} {
+		t.Setenv(name, "")
+	}
+
+	cfg := LoadWithMode(ModeServer)
+	if cfg.BuildArtifact != buildinfo.ArtifactContainer {
+		t.Fatalf("BuildArtifact=%q want %q", cfg.BuildArtifact, buildinfo.ArtifactContainer)
+	}
+	if cfg.UpdateMode != buildinfo.ModeDockerManual {
+		t.Fatalf("UpdateMode=%q want %q", cfg.UpdateMode, buildinfo.ModeDockerManual)
+	}
+
+	partial := (&Config{Mode: ModeServer, BuildArtifact: buildinfo.ArtifactContainer}).NormalizeForMode()
+	if partial.UpdateMode != buildinfo.ModeDockerManual {
+		t.Fatalf("NormalizeForMode UpdateMode=%q want %q", partial.UpdateMode, buildinfo.ModeDockerManual)
+	}
+}
+
+func TestNormalizeForModeAndValidateUpdateSharePartialUpdateDefaults(t *testing.T) {
+	originalArtifact := buildinfo.Artifact
+	t.Cleanup(func() { buildinfo.Artifact = originalArtifact })
+	buildinfo.Artifact = ""
+
+	normalized := (&Config{Mode: ModeServer}).NormalizeForMode()
+	validated := &Config{Mode: ModeServer}
+	if err := validated.ValidateUpdate(); err != nil {
+		t.Fatal(err)
+	}
+
+	if normalized.BuildArtifact != validated.BuildArtifact ||
+		normalized.UpdateMode != validated.UpdateMode ||
+		normalized.UpdateServiceURL != validated.UpdateServiceURL ||
+		normalized.UpdateChannel != validated.UpdateChannel {
+		t.Fatalf("NormalizeForMode defaults %#v differ from ValidateUpdate defaults %#v", normalized, validated)
+	}
+}
+
+func TestUpdateDefaultsPreserveExplicitEnvAndStructValues(t *testing.T) {
+	originalArtifact := buildinfo.Artifact
+	t.Cleanup(func() { buildinfo.Artifact = originalArtifact })
+	buildinfo.Artifact = buildinfo.ArtifactContainer
+
+	t.Setenv("OPENVIBELY_UPDATE_MODE", " docker-agent ")
+	t.Setenv("OPENVIBELY_UPDATE_SERVICE_URL", "http://localhost:8080")
+	t.Setenv("OPENVIBELY_UPDATE_CHANNEL", "beta")
+
+	loaded := LoadWithMode(ModeServer)
+	if loaded.BuildArtifact != buildinfo.ArtifactContainer {
+		t.Fatalf("BuildArtifact=%q want %q", loaded.BuildArtifact, buildinfo.ArtifactContainer)
+	}
+	if loaded.UpdateMode != buildinfo.ModeDockerAgent {
+		t.Fatalf("UpdateMode=%q want explicit %q", loaded.UpdateMode, buildinfo.ModeDockerAgent)
+	}
+	if loaded.UpdateServiceURL != "http://localhost:8080" {
+		t.Fatalf("UpdateServiceURL=%q want explicit localhost origin", loaded.UpdateServiceURL)
+	}
+	if loaded.UpdateChannel != "beta" {
+		t.Fatalf("UpdateChannel=%q want explicit beta", loaded.UpdateChannel)
+	}
+
+	configured := &Config{
+		Mode:             ModeDesktop,
+		BuildArtifact:    buildinfo.ArtifactBinary,
+		UpdateMode:       buildinfo.ModeNone,
+		UpdateServiceURL: "http://localhost:9090",
+		UpdateChannel:    "preview",
+	}
+	configured.NormalizeForMode()
+	if configured.BuildArtifact != buildinfo.ArtifactBinary ||
+		configured.UpdateMode != buildinfo.ModeNone ||
+		configured.UpdateServiceURL != "http://localhost:9090" ||
+		configured.UpdateChannel != "preview" {
+		t.Fatalf("NormalizeForMode overwrote explicit update fields: %#v", configured)
+	}
+	if err := configured.ValidateUpdate(); err != nil {
+		t.Fatal(err)
+	}
+	if configured.BuildArtifact != buildinfo.ArtifactBinary ||
+		configured.UpdateMode != buildinfo.ModeNone ||
+		configured.UpdateServiceURL != "http://localhost:9090" ||
+		configured.UpdateChannel != "preview" {
+		t.Fatalf("ValidateUpdate overwrote explicit update fields: %#v", configured)
+	}
+}
+
 func TestValidateUpdateConfigurationArtifactModeMatrix(t *testing.T) {
 	base := func() *Config {
 		return &Config{Mode: ModeServer, BuildArtifact: buildinfo.ArtifactContainer, UpdateMode: buildinfo.ModeDockerManual, UpdateServiceURL: "https://openvibely.ai", UpdateChannel: "stable"}
