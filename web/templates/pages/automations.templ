@@ -396,20 +396,42 @@ templ AutomationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 	@automationLiveContent(graph, currentProjectID, deleteAvailable)
 }
 
-templ automationCanvasViewSwitcher() {
-	<div class="join" role="group" aria-label="Automation canvas view" data-automation-view-switcher>
+templ automationViewSwitcher(ariaLabel string) {
+	<div class="join" role="group" aria-label={ ariaLabel } data-automation-view-switcher>
 		<button class="btn btn-sm join-item btn-active" type="button" aria-pressed="true" data-automation-view-graph>Graph</button>
 		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-details>Details</button>
 		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-yaml>YAML</button>
 	</div>
 }
 
-templ automationBuilderViewSwitcher() {
-	<div class="join" role="group" aria-label="Automation builder view" data-automation-view-switcher>
-		<button class="btn btn-sm join-item btn-active" type="button" aria-pressed="true" data-automation-view-graph>Graph</button>
-		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-details>Details</button>
-		<button class="btn btn-sm join-item" type="button" aria-pressed="false" data-automation-view-yaml>YAML</button>
-	</div>
+templ automationViewStateScript() {
+	<script>
+		window.setAutomationCanvasView = window.setAutomationCanvasView || function(root, view, options) {
+			if (!root || ['graph', 'details', 'yaml'].indexOf(view) < 0) return false;
+			options = options || {};
+			var graphPanel = root.querySelector(options.graphPanelSelector || '[data-automation-graph-panel]');
+			var detailsPanel = root.querySelector(options.detailsPanelSelector || '[data-automation-live-details-panel], [data-automation-details-panel]');
+			var yamlPanel = root.querySelector(options.yamlPanelSelector || '[data-automation-yaml-panel]');
+			var graphButton = root.querySelector('[data-automation-view-graph]');
+			var detailsButton = root.querySelector('[data-automation-view-details]');
+			var yamlButton = root.querySelector('[data-automation-view-yaml]');
+			if (!graphPanel || !detailsPanel || !yamlPanel || !graphButton || !detailsButton || !yamlButton) return false;
+			var graphSelected = view === 'graph', detailsSelected = view === 'details', yamlSelected = view === 'yaml';
+			graphPanel.hidden = !graphSelected;
+			graphPanel.style.display = graphSelected ? (options.graphDisplay || '') : 'none';
+			detailsPanel.hidden = !detailsSelected;
+			detailsPanel.style.display = detailsSelected ? (options.detailsDisplay || 'block') : 'none';
+			yamlPanel.hidden = !yamlSelected;
+			yamlPanel.style.display = yamlSelected ? (options.yamlDisplay || 'flex') : 'none';
+			graphButton.classList.toggle('btn-active', graphSelected);
+			detailsButton.classList.toggle('btn-active', detailsSelected);
+			yamlButton.classList.toggle('btn-active', yamlSelected);
+			graphButton.setAttribute('aria-pressed', String(graphSelected));
+			detailsButton.setAttribute('aria-pressed', String(detailsSelected));
+			yamlButton.setAttribute('aria-pressed', String(yamlSelected));
+			return true;
+		};
+	</script>
 }
 
 // automationYAMLSharedScript defines the single source of truth for YAML line
@@ -456,6 +478,7 @@ templ automationYAMLSharedScript() {
 }
 
 templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
+		@automationViewStateScript()
 		@automationYAMLSharedScript()
 		<div id="automation-live" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-id={ graph.Automation.ID } data-project-id={ currentProjectID }
 			data-refresh-url={ fmt.Sprintf("/automations/%s?project_id=%s", graph.Automation.ID, currentProjectID) }>
@@ -475,7 +498,7 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 				</div>
 			</div>
 						<div class="rounded-box border border-base-300 bg-base-100 p-4 min-w-0 min-h-0 flex flex-1 flex-col" data-automation-readonly-canvas data-automation-view-root>						<div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-automation-live-card-actions>
-							@automationCanvasViewSwitcher()							<div class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-badges>
+							@automationViewSwitcher("Automation canvas view")							<div class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-live-badges>
 							<span class="badge badge-primary badge-outline" data-automation-live-status>{ string(graph.Automation.LifecycleState) }</span>
 							<span class="badge badge-ghost" data-automation-live-health>{ string(graph.Automation.HealthState) }</span>
 						</div>
@@ -630,26 +653,12 @@ templ automationLiveContent(graph models.AutomationLiveGraph, currentProjectID s
 					}
 				}, 20000);
 					var canvasRoot = document.querySelector('[data-automation-readonly-canvas]');
-					var graphPanel = canvasRoot && canvasRoot.querySelector('[data-automation-graph-panel]');
-					var detailsPanel = canvasRoot && canvasRoot.querySelector('[data-automation-live-details-panel]');
 					var yamlPanel = canvasRoot && canvasRoot.querySelector('[data-automation-yaml-panel]');
 					var graphViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-graph]');
 					var detailsViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-details]');
 					var yamlViewButton = canvasRoot && canvasRoot.querySelector('[data-automation-view-yaml]');
 					function selectAutomationLiveView(view) {
-						if (!graphPanel || !detailsPanel || !yamlPanel) return;
-						graphPanel.hidden = view !== 'graph';
-						graphPanel.style.display = view !== 'graph' ? 'none' : '';
-						detailsPanel.hidden = view !== 'details';
-						detailsPanel.style.display = view !== 'details' ? 'none' : '';
-						yamlPanel.hidden = view !== 'yaml';
-						yamlPanel.style.display = view === 'yaml' ? 'flex' : 'none';
-						graphViewButton.classList.toggle('btn-active', view === 'graph');
-						detailsViewButton.classList.toggle('btn-active', view === 'details');
-						yamlViewButton.classList.toggle('btn-active', view === 'yaml');
-						graphViewButton.setAttribute('aria-pressed', String(view === 'graph'));
-						detailsViewButton.setAttribute('aria-pressed', String(view === 'details'));
-						yamlViewButton.setAttribute('aria-pressed', String(view === 'yaml'));
+						return window.setAutomationCanvasView && window.setAutomationCanvasView(canvasRoot, view, {detailsPanelSelector: '[data-automation-live-details-panel]'});
 					}
 					graphViewButton && graphViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'graph'; selectAutomationLiveView('graph'); });
 					detailsViewButton && detailsViewButton.addEventListener('click', function() { window._automationLiveSelectedView = 'details'; selectAutomationLiveView('details'); });
@@ -990,6 +999,7 @@ templ AutomationBuilder(projects []models.Project, currentProjectID string, page
 }
 
 templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProjectID string) {
+	@automationViewStateScript()
 	@automationYAMLSharedScript()
 	<div id="automation-builder" class="flex h-full min-w-0 max-w-full flex-col overflow-y-auto" data-automation-draft data-automation-yaml-builder>
 		<div class={ templ.KV("flex h-full min-h-0 shrink-0 flex-col", automationBuilderUsesEditShell(page)) } data-automation-builder-edit-pane>
@@ -1084,7 +1094,7 @@ templ AutomationBuilderContent(page models.AutomationBuilderPage, currentProject
 			}
 				<section class={ "rounded-box border border-base-300 bg-base-100", templ.KV("mb-5 p-3 sm:p-4", !automationBuilderUsesEditShell(page)), templ.KV("mb-0 p-4", automationBuilderUsesEditShell(page)), templ.KV("flex flex-1 min-h-[20rem] flex-col", automationBuilderUsesEditShell(page)) } data-automation-draft-canvas data-automation-view-root data-edge-palette={ automationDraftEdgesJSON(page.EdgePalette) }>
 					<div class={ "flex flex-wrap justify-between gap-3", templ.KV("items-start", !automationBuilderUsesEditShell(page)), templ.KV("mb-3 items-center", automationBuilderUsesEditShell(page)) }>
-						@automationBuilderViewSwitcher()					<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-node-tool>
+						@automationViewSwitcher("Automation builder view")					<div class="flex shrink-0 flex-wrap items-center justify-end gap-2" data-automation-node-tool>
 						<button class="btn btn-primary btn-sm" type="button" data-automation-add-node-open onclick="document.getElementById('automation-node-dialog').showModal()">Add node</button>
 					</div>
 				</div>
@@ -1965,7 +1975,6 @@ yamlViewport.scrollTop = 0;
 						syncCandidate();
 					});
 						var viewRoot = builder.querySelector('[data-automation-view-root]');
-						var graphPanel = viewRoot && viewRoot.querySelector('[data-automation-graph-panel]');
 						var yamlPanel = viewRoot && viewRoot.querySelector('[data-automation-yaml-panel]');
 						var detailsPanel = viewRoot && viewRoot.querySelector('[data-automation-details-panel]');
 						var graphButton = viewRoot && viewRoot.querySelector('[data-automation-view-graph]');
@@ -1973,22 +1982,10 @@ yamlViewport.scrollTop = 0;
 						var detailsButton = viewRoot && viewRoot.querySelector('[data-automation-view-details]');
 						var detailsForm = builder.querySelector('[data-automation-details-form]');
 						function selectAutomationBuilderView(view) {
-							if (!graphPanel || !yamlPanel || !detailsPanel) return;
-							var yamlSelected = view === 'yaml', detailsSelected = view === 'details';
-							graphPanel.hidden = yamlSelected || detailsSelected;
-							graphPanel.style.display = yamlSelected || detailsSelected ? 'none' : '';
-							yamlPanel.hidden = !yamlSelected;
-							yamlPanel.style.display = yamlSelected ? 'flex' : 'none';
-							detailsPanel.hidden = !detailsSelected;
-							detailsPanel.style.display = detailsSelected ? 'block' : 'none';
-							graphButton.classList.toggle('btn-active', !yamlSelected && !detailsSelected);
-							yamlButton.classList.toggle('btn-active', yamlSelected);
-							detailsButton.classList.toggle('btn-active', detailsSelected);
-							graphButton.setAttribute('aria-pressed', String(!yamlSelected && !detailsSelected));
-							yamlButton.setAttribute('aria-pressed', String(yamlSelected));
-							detailsButton.setAttribute('aria-pressed', String(detailsSelected));
+							var applied = window.setAutomationCanvasView && window.setAutomationCanvasView(viewRoot, view, {detailsPanelSelector: '[data-automation-details-panel]'});
+							if (!applied) return;
 							queueYAMLLineLayout();
-							if (yamlSelected) validateYAMLNow();
+							if (view === 'yaml') validateYAMLNow();
 						}
 						function previewYAMLThenSelect(view) {
 							var form = document.getElementById('automation-design-form');

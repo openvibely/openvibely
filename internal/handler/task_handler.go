@@ -1211,12 +1211,12 @@ func (h *Handler) UpdateTask(c echo.Context) error {
 	} else {
 		task.AgentID = nil
 	}
-	// Handle optional agent definition selection
-	if agentDefID := c.FormValue("agent_definition_id"); agentDefID != "" {
-		task.AgentDefinitionID = &agentDefID
-	} else {
-		task.AgentDefinitionID = nil
+	// Handle optional primary Agent definition selection separately from the model config.
+	agentDefID, err := h.resolvePrimaryAgentDefinition(c.Request().Context(), task.ProjectID, c.FormValue("agent_definition_id"))
+	if err != nil {
+		return err
 	}
+	task.AgentDefinitionID = agentDefID
 
 	// Handle auto-merge settings — if the hidden sentinel is present, the edit form
 	// was submitted and we always update (unchecked checkbox sends no value).
