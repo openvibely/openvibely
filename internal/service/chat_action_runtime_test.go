@@ -2187,3 +2187,68 @@ func TestChannelUtilityCreateAgentRuntimeAndCompactListAgents(t *testing.T) {
 	require.Contains(t, listOut, "Reusable from channel.")
 	require.NotContains(t, listOut, "Act as a reusable channel-created Agent")
 }
+
+func TestChannelAlertResultHelpersPersistAndFormatAlerts(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	project := &models.Project{Name: "Channel Alert Helpers"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	require.Equal(t, "Alert service not available.", channelListAlertsResult(ctx, nil, project.ID))
+	require.Equal(t, "No alerts found. You're all clear!", channelListAlertsResult(ctx, alertSvc, project.ID))
+	require.Equal(t, "Invalid input for get_alert.", channelGetAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{`)))
+	require.Equal(t, "get_alert requires alert_id.", channelGetAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{}`)))
+	require.Equal(t, "create_alert requires title.", channelCreateAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{"message":"missing"}`)))
+	require.Equal(t, "Invalid severity \"critical\".", channelCreateAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{"title":"Bad severity","severity":"critical"}`)))
+	require.Equal(t, "Invalid alert type \"unknown\".", channelCreateAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{"title":"Bad type","type":"unknown"}`)))
+
+	created := channelCreateAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{"title":"Investigate channel","message":"Channel worker stalled","severity":"warning","type":"task_needs_followup"}`))
+	require.Contains(t, created, `Created alert "Investigate channel"`)
+	require.Contains(t, created, "severity: warning")
+
+	alerts, err := alertSvc.ListSummariesByProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, alerts, 1)
+	alertID := alerts[0].ID
+
+	listed := channelListAlertsResult(ctx, alertSvc, project.ID)
+	require.Contains(t, listed, "Found 1 alerts (1 unread):")
+	require.Contains(t, listed, "Investigate channel")
+	require.Contains(t, listed, alertID)
+	require.Contains(t, listed, "severity: warning")
+	require.Contains(t, listed, "unread")
+
+	got := channelGetAlertResult(ctx, alertSvc, project.ID, json.RawMessage(fmt.Sprintf(`{"alert_id":%q}`, alertID)))
+	require.Contains(t, got, "Alert: Investigate channel")
+	require.Contains(t, got, "Type: task_needs_followup")
+	require.Contains(t, got, "Severity: warning")
+	require.Contains(t, got, "Status: unread")
+	require.Contains(t, got, "Message: Channel worker stalled")
+
+	require.Equal(t, "toggle_alert requires alert_id.", channelToggleAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{}`)))
+	toggled := channelToggleAlertResult(ctx, alertSvc, project.ID, json.RawMessage(fmt.Sprintf(`{"alert_id":%q}`, alertID)))
+	require.Equal(t, "Marked alert "+alertID+" as read.", toggled)
+	got = channelGetAlertResult(ctx, alertSvc, project.ID, json.RawMessage(fmt.Sprintf(`{"alert_id":%q}`, alertID)))
+	require.Contains(t, got, "Status: read")
+
+	require.Equal(t, "delete_alert requires alert_id.", channelDeleteAlertResult(ctx, alertSvc, project.ID, json.RawMessage(`{}`)))
+	deleted := channelDeleteAlertResult(ctx, alertSvc, project.ID, json.RawMessage(fmt.Sprintf(`{"alert_id":%q}`, alertID)))
+	require.Equal(t, "Deleted alert "+alertID+".", deleted)
+	require.Equal(t, "No alerts found. You're all clear!", channelListAlertsResult(ctx, alertSvc, project.ID))
+	require.Contains(t, channelGetAlertResult(ctx, alertSvc, project.ID, json.RawMessage(fmt.Sprintf(`{"alert_id":%q}`, alertID))), "not found")
+
+	severity, errText := channelAlertSeverity("")
+	require.Empty(t, errText)
+	require.Equal(t, models.SeverityInfo, severity)
+	severity, errText = channelAlertSeverity(" error ")
+	require.Empty(t, errText)
+	require.Equal(t, models.SeverityError, severity)
+	alertType, errText := channelAlertType("")
+	require.Empty(t, errText)
+	require.Equal(t, models.AlertCustom, alertType)
+	alertType, errText = channelAlertType("task_failed")
+	require.Empty(t, errText)
+	require.Equal(t, models.AlertTaskFailed, alertType)
+}

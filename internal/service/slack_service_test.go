@@ -3679,3 +3679,39 @@ func TestSlackService_RuntimeSwitchProject_PersistsToRepo(t *testing.T) {
 	require.Equal(t, project2.ID, activeProjectID,
 		"getActiveProject must return the newly-persisted project on next session")
 }
+
+func TestSlackTextAndAttachmentHelpers(t *testing.T) {
+	require.Equal(t, "hello", sanitizeSlackText(" <@U123> hello <@U999> "))
+	require.Equal(t, "Please analyze the attachment.", slackMessageTextOrAttachmentPrompt(" ", true))
+	require.Equal(t, "hello", slackMessageTextOrAttachmentPrompt(" hello ", true))
+	require.True(t, slackMessageMentionsBot(slackevents.MessageEvent{Text: "hi <@BOT>"}, " BOT "))
+	require.True(t, slackMessageMentionsBot(slackevents.MessageEvent{Message: &slack.Msg{Text: "nested <@BOT>"}}, "BOT"))
+	require.False(t, slackMessageMentionsBot(slackevents.MessageEvent{Text: "hi"}, "BOT"))
+	require.False(t, slackMessageMentionsBot(slackevents.MessageEvent{Text: "<@BOT>"}, ""))
+
+	require.Equal(t, "report.txt", slackSafeFileName(slackIncomingFile{Name: "../../report.txt", Title: "ignored"}))
+	require.Equal(t, "title.md", slackSafeFileName(slackIncomingFile{Title: "title.md"}))
+	require.Equal(t, "slack-F1", slackSafeFileName(slackIncomingFile{ID: "F1"}))
+	require.Equal(t, "slack-attachment", slackSafeFileName(slackIncomingFile{}))
+	require.Equal(t, "photo.png", slackFileDisplayName(slackIncomingFile{Name: "photo.png"}))
+	require.Equal(t, "image/jpeg", slackIncomingFileMediaType(slackIncomingFile{Mimetype: "application/octet-stream"}, "photo.jpg"))
+	require.Equal(t, "text/plain", slackIncomingFileMediaType(slackIncomingFile{Mimetype: "TEXT/PLAIN; charset=utf-8"}, "photo.jpg"))
+	require.Equal(t, "application/pdf", mediaTypeFromSlackFilename("doc.pdf"))
+	require.Equal(t, "text/plain", mediaTypeFromSlackFilename("script.go"))
+	require.Equal(t, "application/octet-stream", mediaTypeFromSlackFilename("archive.bin"))
+
+	require.True(t, slackIncomingFilesContainImage([]slackIncomingFile{{Name: "photo.png"}}))
+	require.False(t, slackIncomingFilesContainImage([]slackIncomingFile{{Name: "notes.txt", Mimetype: "text/plain"}}))
+	require.True(t, slackIncomingFilesRequireVision([]slackIncomingFile{{Name: "photo.png"}}))
+	require.True(t, slackIncomingFilesRequireVision([]slackIncomingFile{{Mimetype: "application/octet-stream", URLPrivateDownload: "https://files.slack.com/files-pri/T-F/file"}}))
+	require.False(t, slackIncomingFilesRequireVision([]slackIncomingFile{{Name: "notes.txt", Mimetype: "text/plain"}}))
+	require.True(t, slackChatAttachmentsContainImage([]models.ChatAttachment{{MediaType: "image/png"}}))
+	require.False(t, slackChatAttachmentsContainImage([]models.ChatAttachment{{MediaType: "text/plain"}}))
+
+	history := []models.Execution{{ID: "old", Output: "a"}, {ID: "current", Output: "b"}, {ID: "after", Output: "c"}}
+	filtered := filterSlackChatHistory(history, "current")
+	require.Len(t, filtered, 2)
+	require.Equal(t, "old", filtered[0].ID)
+	require.Equal(t, "after", filtered[1].ID)
+	require.Equal(t, history, filterSlackChatHistory(history, "missing"))
+}

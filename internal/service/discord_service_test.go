@@ -1864,3 +1864,120 @@ func TestDiscordSendTaskCompletionNotificationRoutesToContext(t *testing.T) {
 		t.Fatalf("completion routed incorrectly channel=%q message=%q text=%q", channelID, messageID, text)
 	}
 }
+
+func TestDiscordFormattingAndAttachmentHelpers(t *testing.T) {
+	if got := splitDiscordMessage(strings.Repeat("a", discordMessageLimit+25)); len(got) != 2 || len(got[0]) != discordMessageLimit || len(got[1]) != 25 {
+		t.Fatalf("splitDiscordMessage chunks = %d (%d,%d), want 2 (%d,25)", len(got), len(got[0]), len(got[1]), discordMessageLimit)
+	}
+	if got := formatDiscordTaskCompletion("Deploy", "", "boom"); !strings.Contains(got, "Task failed: Deploy") || !strings.Contains(got, "boom") {
+		t.Fatalf("failure completion = %q", got)
+	}
+	if got := formatDiscordTaskCompletion("Deploy", "", ""); !strings.Contains(got, "Task completed: Deploy") || !strings.Contains(got, "(No output)") {
+		t.Fatalf("empty success completion = %q", got)
+	}
+	if got := sanitizeDiscordText("<@111> <@!222> hello <@333>", "222"); got != "hello" {
+		t.Fatalf("sanitizeDiscordText = %q, want hello", got)
+	}
+	if !discordMentionsBot([]*discordgo.User{{ID: "bot"}, nil}, "bot") || discordMentionsBot([]*discordgo.User{{ID: "other"}}, "bot") || discordMentionsBot([]*discordgo.User{{ID: "bot"}}, "") {
+		t.Fatalf("discordMentionsBot returned unexpected result")
+	}
+	if got := discordThreadID(&discordgo.Message{Thread: &discordgo.Channel{ID: "thread-1"}}); got != "thread-1" {
+		t.Fatalf("discordThreadID = %q", got)
+	}
+	if got := discordDisplayName(&discordgo.User{Username: "user", GlobalName: "Global"}); got != "Global" {
+		t.Fatalf("discordDisplayName global = %q", got)
+	}
+	if got := discordDisplayName(&discordgo.User{Username: "user"}); got != "user" {
+		t.Fatalf("discordDisplayName username = %q", got)
+	}
+
+	attachments := []*discordgo.MessageAttachment{
+		nil,
+		{ID: " 1 ", Filename: " photo.png ", ContentType: " image/png ", Size: 10, URL: " https://cdn.discordapp.com/a.png ", ProxyURL: " https://media.discordapp.net/a.png "},
+		{ID: "2", Filename: "notes.txt"},
+	}
+	incoming := discordIncomingAttachmentsFromMessage(attachments)
+	if len(incoming) != 2 || incoming[0].ID != "1" || incoming[0].FileName != "photo.png" || incoming[1].FileName != "notes.txt" {
+		t.Fatalf("discordIncomingAttachmentsFromMessage = %#v", incoming)
+	}
+	if got := discordAttachmentPrompt(attachments); got != "User sent attachment(s):  photo.png , notes.txt" {
+		t.Fatalf("discordAttachmentPrompt = %q", got)
+	}
+	if got := discordAttachmentPrompt(nil); got != "User sent an attachment." {
+		t.Fatalf("discordAttachmentPrompt nil = %q", got)
+	}
+	if !discordIncomingAttachmentsRequireVision([]discordIncomingAttachment{{FileName: "photo.png", ContentType: ""}}) {
+		t.Fatalf("png filename should require vision")
+	}
+	if !discordIncomingAttachmentsRequireVision([]discordIncomingAttachment{{ContentType: "application/octet-stream", URL: "https://cdn.discordapp.com/file"}}) {
+		t.Fatalf("unknown downloaded file should require vision")
+	}
+	if discordIncomingAttachmentsRequireVision([]discordIncomingAttachment{{FileName: "notes.txt", ContentType: "text/plain"}}) {
+		t.Fatalf("text/plain should not require vision")
+	}
+
+	chatAttachments := []models.ChatAttachment{{FileName: "photo.png", FilePath: "/tmp/photo.png", MediaType: "image/png", FileSize: 9}, {FileName: "notes.txt", FilePath: "/tmp/notes.txt", MediaType: "text/plain", FileSize: 5}}
+	images := discordImageAttachmentsFromChatAttachments(chatAttachments)
+	if len(images) != 1 || images[0].FileName != "photo.png" || images[0].MediaType != "image/png" {
+		t.Fatalf("discordImageAttachmentsFromChatAttachments = %#v", images)
+	}
+	if got := discordSafeFileName(discordIncomingAttachment{ID: "abc", FileName: "../../evil.png"}); got != "evil.png" {
+		t.Fatalf("discordSafeFileName path = %q", got)
+	}
+	if got := discordSafeFileName(discordIncomingAttachment{ID: "abc"}); got != "discord-abc" {
+		t.Fatalf("discordSafeFileName id fallback = %q", got)
+	}
+	if got := discordIncomingFileMediaType(discordIncomingAttachment{ContentType: "IMAGE/PNG; name=x"}, "ignored.txt"); got != "image/png" {
+		t.Fatalf("discordIncomingFileMediaType explicit = %q", got)
+	}
+	if got := discordIncomingFileMediaType(discordIncomingAttachment{ContentType: "application/octet-stream"}, "photo.jpg"); got != "image/jpeg" {
+		t.Fatalf("discordIncomingFileMediaType inferred = %q", got)
+	}
+	urls := discordAttachmentDownloadURLs(discordIncomingAttachment{URL: " https://cdn.discordapp.com/a ", ProxyURL: "https://cdn.discordapp.com/a"})
+	if len(urls) != 1 || urls[0] != "https://cdn.discordapp.com/a" {
+		t.Fatalf("discordAttachmentDownloadURLs = %#v", urls)
+	}
+	if !discordTrustedAttachmentHost(" CDN.DiscordApp.Com ") || !discordTrustedAttachmentHost("media.discordapp.net") || discordTrustedAttachmentHost("example.com") {
+		t.Fatalf("discordTrustedAttachmentHost returned unexpected result")
+	}
+	if err := validateDiscordAttachmentURL(nil); err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("validateDiscordAttachmentURL nil err = %v", err)
+	}
+	parsed, _ := url.Parse("http://cdn.discordapp.com/file")
+	if err := validateDiscordAttachmentURL(parsed); err == nil || !strings.Contains(err.Error(), "scheme") {
+		t.Fatalf("validateDiscordAttachmentURL scheme err = %v", err)
+	}
+	parsed, _ = url.Parse("https://example.com/file")
+	if err := validateDiscordAttachmentURL(parsed); err == nil || !strings.Contains(err.Error(), "not trusted") {
+		t.Fatalf("validateDiscordAttachmentURL host err = %v", err)
+	}
+	parsed, _ = url.Parse("https://cdn.discordapp.com/file")
+	if err := validateDiscordAttachmentURL(parsed); err != nil {
+		t.Fatalf("validateDiscordAttachmentURL trusted: %v", err)
+	}
+	next, err := discordRedirectLocation("https://cdn.discordapp.com/path/file", "../next.png")
+	if err != nil || next.String() != "https://cdn.discordapp.com/next.png" {
+		t.Fatalf("discordRedirectLocation = %v err=%v", next, err)
+	}
+}
+
+func TestDiscordSettingsHelpersRoundTrip(t *testing.T) {
+	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
+	ctx := context.Background()
+	if got := (&DiscordService{}).getSetting(ctx, DiscordSettingBotUserID); got != "" {
+		t.Fatalf("nil repo getSetting = %q", got)
+	}
+	if err := (&DiscordService{}).setSetting(ctx, DiscordSettingBotUserID, "ignored"); err != nil {
+		t.Fatalf("nil repo setSetting: %v", err)
+	}
+	if err := svc.setSetting(ctx, DiscordSettingBotUserID, "bot-1"); err != nil {
+		t.Fatalf("setSetting: %v", err)
+	}
+	if got := svc.getSetting(ctx, DiscordSettingBotUserID); got != "bot-1" {
+		t.Fatalf("getSetting = %q", got)
+	}
+	stored, err := settingsRepo.Get(ctx, DiscordSettingBotUserID)
+	if err != nil || stored != "bot-1" {
+		t.Fatalf("stored setting = %q err=%v", stored, err)
+	}
+}

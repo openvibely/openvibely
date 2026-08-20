@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -128,6 +129,60 @@ func TestRequestLoggerOmitsSensitiveRequestData(t *testing.T) {
 		if strings.Contains(logged, secret) {
 			t.Fatalf("logger exposed %q: %s", secret, logged)
 		}
+	}
+}
+
+func TestMoveCopyHelpersPreserveFilesAndDirectories(t *testing.T) {
+	root := t.TempDir()
+	srcFile := filepath.Join(root, "source.txt")
+	dstFile := filepath.Join(root, "dest.txt")
+	if err := os.WriteFile(srcFile, []byte("source-data"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(srcFile, dstFile, 0o640); err != nil {
+		t.Fatalf("copyFile: %v", err)
+	}
+	if got, err := os.ReadFile(dstFile); err != nil || string(got) != "source-data" {
+		t.Fatalf("copied file content=%q err=%v", got, err)
+	}
+	if err := copyFile(srcFile, dstFile, 0o640); err == nil {
+		t.Fatal("copyFile should not overwrite an existing destination")
+	}
+
+	srcDir := filepath.Join(root, "tree")
+	if err := os.MkdirAll(filepath.Join(srcDir, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "nested", "file.txt"), []byte("nested-data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dstDir := filepath.Join(root, "tree-copy")
+	if err := copyDir(srcDir, dstDir); err != nil {
+		t.Fatalf("copyDir: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(dstDir, "nested", "file.txt")); err != nil || string(got) != "nested-data" {
+		t.Fatalf("copied directory content=%q err=%v", got, err)
+	}
+
+	moveSrc := filepath.Join(root, "move-me")
+	moveDst := filepath.Join(root, "moved")
+	if err := os.WriteFile(moveSrc, []byte("move-data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveOrCopyPath(moveSrc, moveDst); err != nil {
+		t.Fatalf("moveOrCopyPath: %v", err)
+	}
+	if _, err := os.Stat(moveSrc); !os.IsNotExist(err) {
+		t.Fatalf("source should be removed after move, err=%v", err)
+	}
+	if got, err := os.ReadFile(moveDst); err != nil || string(got) != "move-data" {
+		t.Fatalf("moved content=%q err=%v", got, err)
+	}
+	if isCrossDeviceRename(errors.New("permission denied")) {
+		t.Fatal("ordinary errors should not be classified as cross-device renames")
+	}
+	if !isCrossDeviceRename(errors.New("invalid cross-device link")) || !isCrossDeviceRename(errors.New("cross-device rename")) {
+		t.Fatal("expected cross-device rename errors to be detected")
 	}
 }
 

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -150,5 +153,97 @@ func TestReconcilePersistentServers_RemovesDisabledServer(t *testing.T) {
 	}
 	if runtime[0].Name != "github" {
 		t.Fatalf("expected github runtime entry to remain, got %#v", runtime[0])
+	}
+}
+
+func TestHTTPMCPManagerExecutesToolAndPropagatesServerErrors(t *testing.T) {
+	resetSharedStateForTests()
+	defer resetSharedStateForTests()
+
+	var mu sync.Mutex
+	seenMethods := []string{}
+	seenAuth := []string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method=%s, want POST", r.Method)
+		}
+		if got := r.Header.Get("X-MCP-Token"); got != "secret-token" {
+			t.Fatalf("missing MCP header, got %q", got)
+		}
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode JSON-RPC request: %v", err)
+		}
+		mu.Lock()
+		seenMethods = append(seenMethods, req.Method)
+		seenAuth = append(seenAuth, r.Header.Get("X-MCP-Token"))
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		switch req.Method {
+		case "initialize":
+			_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{"capabilities":{}}`)})
+		case "tools/list":
+			_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{"tools":[{"name":"echo","description":"echo text","inputSchema":{"type":"object","properties":{"text":{"type":"string"}}}}]}`)})
+		case "tools/call":
+			params, ok := req.Params.(map[string]interface{})
+			if !ok || params["name"] != "echo" {
+				_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &jsonRPCError{Code: -32602, Message: "unknown tool"}})
+				return
+			}
+			args, _ := params["arguments"].(map[string]interface{})
+			if args["fail"] == true {
+				_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &jsonRPCError{Code: -32000, Message: "tool failed"}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(`{"content":[{"type":"text","text":"first line"},{"type":"text","text":"second line"}],"isError":false}`)})
+		default:
+			_ = json.NewEncoder(w).Encode(jsonRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &jsonRPCError{Code: -32601, Message: "missing method"}})
+		}
+	}))
+	defer srv.Close()
+
+	manager, err := NewMCPManager(context.Background(), []models.MCPServerConfig{{
+		Name:    "tools",
+		Type:    "http",
+		URL:     srv.URL,
+		Headers: map[string]string{"X-MCP-Token": "secret-token"},
+	}}, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewMCPManager: %v", err)
+	}
+	defer manager.Close()
+
+	defs := manager.ToolDefinitions()
+	if len(defs) != 1 || defs[0].Name != "tools__echo" || defs[0].Description != "[MCP:tools] echo text" {
+		t.Fatalf("unexpected tool definitions: %#v", defs)
+	}
+	if !manager.IsMCPTool("tools__echo") || manager.IsMCPTool("tools__missing") {
+		t.Fatalf("MCP tool detection mismatch")
+	}
+	out, isErr, err := manager.ExecuteTool("tools__echo", map[string]interface{}{"text": "hello"})
+	if err != nil || isErr || out != "first line\nsecond line" {
+		t.Fatalf("ExecuteTool output=%q isErr=%v err=%v", out, isErr, err)
+	}
+	_, isErr, err = manager.ExecuteTool("tools__echo", map[string]interface{}{"fail": true})
+	if err == nil || !isErr || err.Error() != "MCP error -32000: tool failed" {
+		t.Fatalf("expected JSON-RPC error, isErr=%v err=%v", isErr, err)
+	}
+	_, isErr, err = manager.ExecuteTool("tools__missing", nil)
+	if err == nil || !isErr || err.Error() != "unknown MCP tool: tools__missing" {
+		t.Fatalf("expected unknown tool error, isErr=%v err=%v", isErr, err)
+	}
+
+	mu.Lock()
+	methods := append([]string(nil), seenMethods...)
+	authHeaders := append([]string(nil), seenAuth...)
+	mu.Unlock()
+	if len(methods) < 4 || methods[0] != "initialize" || methods[1] != "tools/list" {
+		t.Fatalf("unexpected method sequence: %#v", methods)
+	}
+	for _, auth := range authHeaders {
+		if auth != "secret-token" {
+			t.Fatalf("auth header was not propagated on every call: %#v", authHeaders)
+		}
 	}
 }
