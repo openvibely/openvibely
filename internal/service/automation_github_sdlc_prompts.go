@@ -3,6 +3,8 @@ package service
 import (
 	"fmt"
 	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
 )
 
 // These prompts are owned by the maintained GitHub SDLC Automation template.
@@ -21,6 +23,8 @@ Pass the required category label in the github_create_issue labels argument; do 
 
 const githubSDLCExistingIssueDiscoveryInstructions = `Before creating any issue, call ` + "`" + `github_list_existing_automation_issues` + "`" + `. Use the returned issue numbers, titles, labels, and states to avoid reporting work already covered by this Automation account. Follow next_offset until it is zero before deciding no existing issue matches. If a candidate might match an existing issue, call ` + "`" + `github_get_issue` + "`" + ` for that issue and read the body. If it is covered, skip that candidate and keep searching for a different new finding. Try to create at most one new GitHub issue this run. Only call ` + "`" + `github_create_issue` + "`" + ` after you believe the finding is not already represented. If no new finding remains, report that no new issue was found.`
 
+const githubSDLCDevInboxBroadListTasksGuidance = ` For GitHub issue reconciliation, omit ` + "`" + `category` + "`" + ` and ` + "`" + `status` + "`" + ` unless you are paginating a non-empty result; omitted filters already search all visible task categories and statuses. Do not enumerate lifecycle state combinations after an empty result with ` + "`" + `total=0` + "`" + ` and ` + "`" + `has_more=false` + "`" + ` for that issue query; use a different query such as the exact proposed task title only when issue-number/URL matching is inconclusive.`
+
 const githubSDLCDevInboxPrompt = `Check GitHub for implementation mailbox work and PR review feedback for this project.
 
 First call ` + "`" + `github_forward_pr_feedback_to_tasks` + "`" + ` to fetch new pull request comments, review summaries, and review comments from GitHub Authorized Users on OpenVibely-created task PRs. This tool forwards each new authorized feedback item to the linked implementation task thread and deduplicates previously forwarded feedback. If the tool reports missing feedback dependencies, report that PR feedback routing is unavailable but continue normal issue inbox polling.
@@ -31,11 +35,27 @@ Use the issue details returned by ` + "`" + `github_list_assigned_issues` + "`" 
 
 Treat an eligible issue as actionable when it is assigned to the PAT owner or configured Authorized Users. Optional labels such as ` + "`" + `approved` + "`" + `, ` + "`" + `feature` + "`" + `, ` + "`" + `bug` + "`" + `, ` + "`" + `performance` + "`" + `, or ` + "`" + `duplication` + "`" + ` may refine priority/scope, but do not require an ` + "`" + `approved` + "`" + ` label unless the user's workflow explicitly says to require one.
 
-Before creating anything, call ` + "`" + `list_tasks` + "`" + ` (a read-only, current-project task discovery tool) with the GitHub issue number and/or URL as the ` + "`" + `query` + "`" + ` to reconcile existing implementation work. For GitHub issue reconciliation, omit ` + "`" + `category` + "`" + ` and ` + "`" + `status` + "`" + ` unless you are paginating a non-empty result; omitted filters already search all visible task categories and statuses. Do not enumerate lifecycle state combinations after an empty result with ` + "`" + `total=0` + "`" + ` and ` + "`" + `has_more=false` + "`" + ` for that issue query; use a different query such as the exact proposed task title only when issue-number/URL matching is inconclusive. If ` + "`" + `list_tasks` + "`" + ` returns a matching task, continue that task instead of creating a duplicate. For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue. If no existing task is evident from available task/thread context, call ` + "`" + `create_task` + "`" + ` immediately with category=active; do not wait for an existing PR. A newly created Active task is submitted automatically. Do not call ` + "`" + `execute_tasks` + "`" + ` for a newly created Active task, because that can submit the same task twice. Set ` + "`" + `source_github_issue_number` + "`" + ` to the exact issue number returned by this inbox execution. Do not set ` + "`" + `source_github_repo_url` + "`" + `; the server resolves Automation provenance from the selected project's configured repository URL, or from a GitHub remote in its local checkout when that URL is blank. Include the GitHub issue number, URL, title, body or acceptance notes, relevant labels, and assignment context in the task prompt, then call ` + "`" + `set_task_goal` + "`" + ` for the created or reconciled task so it implements the issue and opens/reuses a PR with ` + "`" + `github_open_pull_request` + "`" + ` when done. For a reconciled existing task, call ` + "`" + `execute_tasks` + "`" + ` only when ` + "`" + `list_tasks` + "`" + ` shows category Backlog or status failed/cancelled, and pass that exact existing task ID so approved implementation resumes. Never call ` + "`" + `execute_tasks` + "`" + ` for an Active pending, queued, running, or completed task. Do not leave approved implementation work in Backlog or merely reconcile a task without starting it when it still needs execution. Do not post status comments on GitHub issues. Add ` + "`" + `task-created` + "`" + ` / ` + "`" + `in-progress` + "`" + ` labels only after the task is confirmed started.
+Before creating anything, call ` + "`" + `list_tasks` + "`" + ` (a read-only, current-project task discovery tool) with the GitHub issue number and/or URL as the ` + "`" + `query` + "`" + ` to reconcile existing implementation work.` + githubSDLCDevInboxBroadListTasksGuidance + ` If ` + "`" + `list_tasks` + "`" + ` returns a matching task, continue that task instead of creating a duplicate. For each actionable issue, create or continue a distinct visible OpenVibely implementation task for that GitHub issue. If no existing task is evident from available task/thread context, call ` + "`" + `create_task` + "`" + ` immediately with category=active; do not wait for an existing PR. A newly created Active task is submitted automatically. Do not call ` + "`" + `execute_tasks` + "`" + ` for a newly created Active task, because that can submit the same task twice. Set ` + "`" + `source_github_issue_number` + "`" + ` to the exact issue number returned by this inbox execution. Do not set ` + "`" + `source_github_repo_url` + "`" + `; the server resolves Automation provenance from the selected project's configured repository URL, or from a GitHub remote in its local checkout when that URL is blank. Include the GitHub issue number, URL, title, body or acceptance notes, relevant labels, and assignment context in the task prompt, then call ` + "`" + `set_task_goal` + "`" + ` for the created or reconciled task so it implements the issue and opens/reuses a PR with ` + "`" + `github_open_pull_request` + "`" + ` when done. For a reconciled existing task, call ` + "`" + `execute_tasks` + "`" + ` only when ` + "`" + `list_tasks` + "`" + ` shows category Backlog or status failed/cancelled, and pass that exact existing task ID so approved implementation resumes. Never call ` + "`" + `execute_tasks` + "`" + ` for an Active pending, queued, running, or completed task. Do not leave approved implementation work in Backlog or merely reconcile a task without starting it when it still needs execution. Do not post status comments on GitHub issues. Add ` + "`" + `task-created` + "`" + ` / ` + "`" + `in-progress` + "`" + ` labels only after the task is confirmed started.
 
 Use unprefixed labels only, such as ` + "`" + `task-created` + "`" + `, ` + "`" + `in-progress` + "`" + `, ` + "`" + `blocked` + "`" + `, ` + "`" + `needs-human` + "`" + `, and ` + "`" + `pr-opened` + "`" + `. Never use labels beginning with ` + "`" + `openvibely:` + "`" + `.
 
 When implementation work is complete in a task branch, use ` + "`" + `github_open_pull_request` + "`" + ` for that task and include issue metadata so the task PR record stays linked. Do not use local ` + "`" + `git push` + "`" + ` or GitHub CLI as a fallback if the tool fails; report the tool error so GitHub token/API publication can be fixed.`
+
+func effectiveTaskPromptForExecution(task models.Task) string {
+	prompt := task.Prompt
+	if isStaleMaintainedGitHubDevInboxPrompt(task, prompt) {
+		return githubSDLCDevInboxPrompt
+	}
+	return prompt
+}
+
+func isStaleMaintainedGitHubDevInboxPrompt(task models.Task, prompt string) bool {
+	if !strings.HasPrefix(task.CreatedVia, "automation:") || !strings.HasSuffix(task.CreatedVia, ":dev_inbox") {
+		return false
+	}
+	legacyPrompt := strings.Replace(githubSDLCDevInboxPrompt, githubSDLCDevInboxBroadListTasksGuidance, "", 1)
+	return strings.TrimSpace(prompt) == strings.TrimSpace(legacyPrompt)
+}
 
 const githubSDLCImplementationPrompt = `Implement the assigned GitHub issue in the current project.
 
