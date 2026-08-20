@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/lifecycle"
@@ -295,6 +299,28 @@ func (h *Handler) chatActionExecutor(params streamingResponseParams, collector *
 	return chatcontrol.BuildRuntimeToolExecutor(mode, surface, handlers)
 }
 
+func (h *Handler) materializeRuntimeAgentFromChat(ctx context.Context, projectID string, agent *models.Agent) error {
+	if h == nil || agent == nil || h.agentSkillRoot == "" {
+		return nil
+	}
+	pid := strings.TrimSpace(projectID)
+	if strings.TrimSpace(agent.ProjectID) != "" {
+		pid = strings.TrimSpace(agent.ProjectID)
+	}
+	projectRoot := ""
+	if agent.Scope == models.AgentScopeProject && pid != "" && h.projectRepo != nil {
+		projectRoot = service.ProjectSkillRootForResolver(ctx, h.projectRepo, pid)
+	}
+	target := "/agents"
+	if pid != "" {
+		target += "?project_id=" + url.QueryEscape(pid)
+	}
+	req := httptest.NewRequest(http.MethodPost, target, nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	c := echo.New().NewContext(req, rec)
+	return h.materializeAgentToDisk(c, agent, projectRoot)
+}
+
 func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *chatActionSummaryCollector, mode models.ChatMode, surface chatcontrol.Surface) map[string]chatcontrol.RuntimeActionHandler {
 	alertHandlers := service.BuildAlertRuntimeActionHandlers(service.AlertRuntimeOptions{
 		ProjectID: params.ProjectID, CallerTaskID: params.TaskID, Source: "agent", AlertSvc: h.alertSvc, TaskRepo: h.taskRepo,
@@ -515,7 +541,23 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"list_agents": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListAgents(ctx)), nil
 		},
-		"view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
+		"create_agent": func(ctx context.Context, input json.RawMessage) (string, error) {
+			req, err := service.DecodeCreateAgentRuntimeInput(input)
+			if err != nil {
+				return "", err
+			}
+			out, _, err := service.ExecuteCreateAgentRuntime(ctx, service.CreateAgentRuntimeOptions{
+				ProjectID:     params.ProjectID,
+				Input:         req,
+				AgentRepo:     h.agentRepo,
+				LLMConfigRepo: h.llmConfigRepo,
+				ProjectRepo:   h.projectRepo,
+				Materialize: func(ctx context.Context, agent *models.Agent) error {
+					return h.materializeRuntimeAgentFromChat(ctx, params.ProjectID, agent)
+				},
+			})
+			return out, err
+		}, "view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeViewSettings(ctx)), nil
 		},
 		"list_channels": func(ctx context.Context, _ json.RawMessage) (string, error) {

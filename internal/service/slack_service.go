@@ -1469,6 +1469,7 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		AutomationGraphSvc:    s.automationGraphSvc,
 		WorkerSvc:             s.workerSvc,
 		LLMConfigRepo:         s.llmConfigRepo,
+		AgentRepo:             s.agentRepo,
 		SettingsRepo:          s.settingsRepo,
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,

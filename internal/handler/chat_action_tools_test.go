@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1922,6 +1923,69 @@ func TestWebChatCreateProjectRuntimePlanModeBlocked(t *testing.T) {
 		chatcontrol.SurfaceWeb,
 	)
 	out, handled, isErr, err := rt.Executor(ctx, "create_project", json.RawMessage(`{"name":"Nope","repo_url":"https://github.com/acme/nope"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Contains(t, out, "not available")
+}
+
+func TestCreateAgentRuntimeTool_WebAPICreatesProjectScopedAgentAndMaterializes(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetAgentSkillRoot(t.TempDir())
+	project := createProject(t, h, "Runtime Agent Project")
+	project.RepoPath = t.TempDir()
+	require.NoError(t, h.projectSvc.Update(ctx, project))
+
+	model := &models.LLMConfig{Name: "Runtime Agent Model", Provider: models.ProviderOpenAI, Model: "runtime-agent-model", AuthMethod: models.AuthMethodAPIKey}
+	require.NoError(t, llmConfigRepo.Create(ctx, model))
+
+	for _, surface := range []chatcontrol.Surface{chatcontrol.SurfaceWeb, chatcontrol.SurfaceAPI} {
+		t.Run(string(surface), func(t *testing.T) {
+			name := "Accessibility Runtime Reviewer " + string(surface)
+			handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, surface)["create_agent"]
+			require.NotNil(t, handler)
+
+			out, err := handler(ctx, json.RawMessage(fmt.Sprintf(`{"name":%q,"description":"Reviews docs and UI accessibility.","system_prompt":"Review accessibility evidence with concise recommendations.","model":"Runtime Agent Model","tools":["Read","Grep"],"scoped_files":[{"directory":"docs","permissions":["read"]}],"scope":"project"}`, name)))
+			require.NoError(t, err, out)
+			require.Contains(t, out, `"ok":true`)
+
+			stored, err := agentRepo.GetUniqueSelectableByName(ctx, name)
+			require.NoError(t, err)
+			require.NotNil(t, stored)
+			require.Equal(t, project.ID, stored.ProjectID)
+			require.Equal(t, models.AgentScopeProject, stored.Scope)
+			require.True(t, stored.Enabled)
+			require.True(t, stored.SelectableAsPrimary)
+			require.Equal(t, "runtime-agent-model", stored.Model)
+			require.Contains(t, stored.Tools, models.AgentToolScopedFiles)
+			require.Equal(t, []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"read"}}}, stored.ToolConfig.ScopedFiles)
+
+			declPath := filepath.Join(project.RepoPath, ".openvibely", "agents", stored.Key, "SKILLS.md")
+			body, readErr := os.ReadFile(declPath)
+			require.NoError(t, readErr)
+			require.Contains(t, string(body), name)
+		})
+	}
+}
+
+func TestCreateAgentRuntimeTool_PlanModeDoesNotExposeWriteAction(t *testing.T) {
+	h, _, _ := setupTestHandler(t)
+	ctx := context.Background()
+	defs := chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true)
+	for _, def := range defs {
+		require.NotEqual(t, "create_agent", def.Name)
+	}
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ChatMode: models.ChatModePlan},
+		nil,
+		defs,
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "create_agent", json.RawMessage(`{"name":"Nope","system_prompt":"No write in plan."}`))
 	require.NoError(t, err)
 	require.True(t, handled)
 	require.True(t, isErr)
