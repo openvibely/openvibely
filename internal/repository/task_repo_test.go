@@ -376,9 +376,10 @@ func TestTaskRepo_CountPendingByProject(t *testing.T) {
 		t.Fatalf("Create project2: %v", err)
 	}
 
-	// Create active+pending tasks for default project (should be counted as queue)
+	// Create active pending/queued tasks for default project (should be counted as queue)
 	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "P1", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
 	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "P1b", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
+	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "Q1", Category: models.CategoryActive, Status: models.StatusQueued, Prompt: "p"})
 
 	// Create backlog+pending task (should NOT be counted - not in active queue)
 	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "P2", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"})
@@ -400,9 +401,9 @@ func TestTaskRepo_CountPendingByProject(t *testing.T) {
 		t.Fatalf("CountPendingByProject: %v", err)
 	}
 
-	// Should count only active+pending tasks for default project (2, not 3)
-	if counts["default"] != 2 {
-		t.Errorf("expected default=2, got %d", counts["default"])
+	// Should count only active pending/queued tasks for default project (3, not backlog/running)
+	if counts["default"] != 3 {
+		t.Errorf("expected default=3, got %d", counts["default"])
 	}
 
 	// Should count 1 active+pending task for project2 (not scheduled or completed)

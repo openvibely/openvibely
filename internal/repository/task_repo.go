@@ -1343,12 +1343,12 @@ func (r *TaskRepo) CountByProjectAndCategory(ctx context.Context, projectID stri
 	return counts, rows.Err()
 }
 
-// CountPendingByProject returns the number of active pending tasks for each project.
-// These are tasks in the 'active' category with status='pending' — i.e., tasks queued
-// for worker execution but waiting because workers are busy or at capacity.
+// CountPendingByProject returns the number of active tasks waiting for worker
+// execution for each project. This includes ordinary active pending tasks and
+// active queued tasks that are blocked behind task-thread FIFO/capacity.
 func (r *TaskRepo) CountPendingByProject(ctx context.Context) (map[string]int, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT project_id, COUNT(*) FROM tasks WHERE category = 'active' AND status = 'pending' GROUP BY project_id`)
+		`SELECT project_id, COUNT(*) FROM tasks WHERE category = 'active' AND status IN ('pending', 'queued') GROUP BY project_id`)
 	if err != nil {
 		return nil, fmt.Errorf("counting pending tasks by project: %w", err)
 	}
