@@ -39,7 +39,7 @@ RUN dnf install -y \
  && dnf clean all \
  && rm -rf /var/cache/dnf \
  && (chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap /usr/sbin/newuidmap /usr/sbin/newgidmap 2>/dev/null || true)
-ARG GO_VERSION=1.26.5
+ARG GO_VERSION=1.26.6
 ARG TARGETARCH
 RUN case "${TARGETARCH:-amd64}" in \
       amd64) go_arch=amd64 ;; \

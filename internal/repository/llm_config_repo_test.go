@@ -247,6 +247,72 @@ func BenchmarkLLMConfigRepoHasAnyVsListLargeCustomProviders(b *testing.B) {
 	})
 }
 
+func BenchmarkLLMConfigRepoAgentPickerValidationLargeCustomProviders(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
+
+	picker, err := repo.ListPickerOptions(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if len(picker) < 50 {
+		b.Fatalf("expected production-shaped fixture, got %d configs", len(picker))
+	}
+	for _, option := range picker {
+		if option.APIKey != "" || option.OAuthAccessToken != "" || option.OAuthRefreshToken != "" ||
+			option.OAuthClientSecret != "" || option.BaseURL != "" || option.ExtraHeadersJSON != "" ||
+			option.ExtraBodyJSON != "" || option.CustomAuthConfigJSON != "" || option.CustomAuthStateJSON != "" ||
+			option.MixtureConfigJSON != "" || !option.CreatedAt.IsZero() || !option.UpdatedAt.IsZero() ||
+			option.MaxWorkers != 0 || option.WorkerTimeout != 0 {
+			b.Fatalf("agent picker projection materialized execution/edit-only fields: %#v", option)
+		}
+	}
+
+	const (
+		sampleOps        = 100
+		maxBytesPerOp    = 200 * 1024
+		maxDurationPerOp = 200 * time.Microsecond
+	)
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	allocBefore := ms.TotalAlloc
+	startedAt := time.Now()
+	for i := 0; i < sampleOps; i++ {
+		configs, err := repo.ListPickerOptions(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(configs) < 50 {
+			b.Fatalf("expected production-shaped fixture, got %d configs", len(configs))
+		}
+	}
+	runtime.ReadMemStats(&ms)
+	bytesPerOp := (ms.TotalAlloc - allocBefore) / sampleOps
+	durationPerOp := time.Since(startedAt) / sampleOps
+	b.ReportMetric(float64(bytesPerOp), "guarded_bytes/op")
+	b.ReportMetric(float64(durationPerOp.Nanoseconds()), "guarded_ns/op")
+	if bytesPerOp > maxBytesPerOp {
+		b.Fatalf("agent picker projection allocated %d bytes/op, want <= %d", bytesPerOp, maxBytesPerOp)
+	}
+	if durationPerOp > maxDurationPerOp {
+		b.Fatalf("agent picker projection took %s/op, want <= %s/op", durationPerOp, maxDurationPerOp)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		configs, err := repo.ListPickerOptions(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(configs) < 50 {
+			b.Fatalf("expected production-shaped fixture, got %d configs", len(configs))
+		}
+	}
+}
+
 func BenchmarkLLMConfigRepoListFullVsCardsLargeCustomProviders(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewLLMConfigRepo(db)

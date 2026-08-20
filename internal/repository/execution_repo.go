@@ -534,35 +534,35 @@ func (r *ExecutionRepo) syncAutomationActivitiesForExecution(ctx context.Context
 	return nil
 }
 
-func (r *ExecutionRepo) CancelRunningByTask(ctx context.Context, taskID string) (int64, error) {
-	ids, err := r.CancelRunningByTaskReturningIDs(ctx, taskID)
+func (r *ExecutionRepo) CancelActiveByTask(ctx context.Context, taskID string) (int64, error) {
+	ids, err := r.CancelActiveByTaskReturningIDs(ctx, taskID)
 	if err != nil {
 		return 0, err
 	}
 	return int64(len(ids)), nil
 }
 
-func (r *ExecutionRepo) CancelRunningByTaskReturningIDs(ctx context.Context, taskID string) ([]string, error) {
+func (r *ExecutionRepo) CancelActiveByTaskReturningIDs(ctx context.Context, taskID string) ([]string, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`UPDATE executions
 			 SET status = ?, error_message = 'cancelled', completed_at = datetime('now')
-			 WHERE task_id = ? AND status = ?
+			 WHERE task_id = ? AND status IN (?, ?)
 			 RETURNING id`,
-		models.ExecCancelled, taskID, models.ExecRunning)
+		models.ExecCancelled, taskID, models.ExecRunning, models.ExecQueued)
 	if err != nil {
-		return nil, fmt.Errorf("cancelling running task executions: %w", err)
+		return nil, fmt.Errorf("cancelling active task executions: %w", err)
 	}
 	defer rows.Close()
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scanning cancelled execution id: %w", err)
+			return nil, fmt.Errorf("scanning cancelled active execution id: %w", err)
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("scanning cancelled execution ids: %w", err)
+		return nil, fmt.Errorf("scanning cancelled active execution ids: %w", err)
 	}
 	return ids, nil
 }

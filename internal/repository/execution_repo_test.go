@@ -1021,6 +1021,61 @@ func TestExecutionRepo_CompleteSuccessIfNoPendingSteeringReportsTerminalState(t 
 	}
 }
 
+func TestExecutionRepo_CancelActiveByTaskCancelsRunningAndQueuedOnly(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+
+	task := &models.Task{ProjectID: "default", Title: "Cancel Active Test", Category: models.CategoryActive, Status: models.StatusQueued, Prompt: "test"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	execs := map[string]models.ExecutionStatus{
+		"running-exec":   models.ExecRunning,
+		"queued-exec":    models.ExecQueued,
+		"completed-exec": models.ExecCompleted,
+	}
+	for id, status := range execs {
+		exec := &models.Execution{ID: id, TaskID: task.ID, Status: status, PromptSent: id}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatalf("create execution %s: %v", id, err)
+		}
+	}
+
+	cancelledIDs, err := execRepo.CancelActiveByTaskReturningIDs(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("CancelActiveByTaskReturningIDs: %v", err)
+	}
+	cancelled := map[string]bool{}
+	for _, id := range cancelledIDs {
+		cancelled[id] = true
+	}
+	for _, id := range []string{"running-exec", "queued-exec"} {
+		if !cancelled[id] {
+			t.Fatalf("expected %s to be returned as cancelled; got %v", id, cancelledIDs)
+		}
+		stored, err := execRepo.GetByID(ctx, id)
+		if err != nil {
+			t.Fatalf("GetByID %s: %v", id, err)
+		}
+		if stored.Status != models.ExecCancelled || stored.ErrorMessage != "cancelled" || stored.CompletedAt == nil {
+			t.Fatalf("%s not cancelled correctly: status=%s err=%q completed_at=%v", id, stored.Status, stored.ErrorMessage, stored.CompletedAt)
+		}
+	}
+	if cancelled["completed-exec"] {
+		t.Fatalf("completed execution must not be returned as cancelled")
+	}
+	completed, err := execRepo.GetByID(ctx, "completed-exec")
+	if err != nil {
+		t.Fatalf("GetByID completed-exec: %v", err)
+	}
+	if completed.Status != models.ExecCompleted {
+		t.Fatalf("completed execution was changed to %s", completed.Status)
+	}
+}
+
 func TestExecutionRepo_ChatHistoryWindowReturnsLatestChronologicalAndBeforeCursor(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)

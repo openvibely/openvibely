@@ -2,9 +2,9 @@
 name: managed_memory
 type: project
 created: 2026-05-09
-updated: 2026-08-14
-source: update_memory
-source_id: d87ef6d051970bf69bec289136a3a796:5384687464bdf67c
+updated: 2026-08-19
+source: consolidation
+source_id: memory_consolidation_2026_08_19
 confidence: high
 title: Managed Memory
 ---
@@ -24,14 +24,13 @@ Durable storage boundaries:
 
 Lifecycle and retrieval facts:
 - Memory lifecycle work is owned by the built-in Memory Curator through `recall_memory`, `update_memory`, and scheduled `consolidate_memory` skills.
-- Ordinary implementation and audit agents must not manually edit managed memory or skill Markdown as part of task work; those files are lifecycle-agent-owned. Authorized lifecycle curator turns should make the scoped updates directly.
-- If a normal implementation/audit task encounters `.openvibely/memories/*` changes or merge conflicts while syncing a worktree, it should avoid hand-curating or combining memory content; preserve the appropriate target-side/current memory state and leave durable memory interpretation to Memory Curator to prevent conflicts.
-- The user explicitly prefers memory updates not be delegated to another task or agent. When the active lifecycle agent has authorized scoped memory mutation tools, it should perform the update directly; if direct managed-memory mutation is unavailable, report that limitation rather than creating a delegated memory-update task.
+- Ordinary implementation and audit agents must not manually edit managed memory or skill Markdown as part of task work; those files are lifecycle-agent-owned. Authorized lifecycle curator turns should make scoped updates directly.
+- If normal implementation/audit work encounters `.openvibely/memories/*` changes or merge conflicts while syncing a worktree, it should preserve the appropriate target/current memory state and leave interpretation to Memory Curator.
+- The user explicitly prefers memory updates not be delegated to another task or agent. When the active lifecycle agent has authorized scoped memory mutation tools, it should perform the update directly; if direct mutation is unavailable, report the limitation.
 - Recall is a `route_task` handle-selection step with `selected_memories`, parallel to Skill Curator `selected_skills`, and receives only the compact index from `MEMORIES.md`; topic bodies are not loaded during route selection.
 - Normal tasks and task-thread follow-ups consume managed memory through route-selected handles. Interactive Chat uses a narrower recall-only lifecycle preparation path.
 - Selected-memory prompt context is handle-only for skill-style parity. Memory bodies are loaded only on demand through the authorized `memory_view` tool.
-- `memory_view` is a read-only request-scoped runtime tool authorized only for route-selected indexed handles plus exact indexed handles explicitly requested by the user for that turn. It rejects `MEMORIES.md`, full paths, traversal, unindexed handles, and arbitrary unselected files.
-- `memory_view` is also an explicit agent allowed-tool grant surfaced in the agent create/edit dialog.
-- The product currently exposes selected memory labels in task lifecycle evidence but has no project-level UI for browsing the durable memory index/files, unlike the skill management surface. A bounded read-only browser backed by `MEMORIES.md` and the existing safe memory-file resolver is tracked in `openvibely/openvibely#32`; editing, new persistence, and background processing are intentionally outside that proposal.
+- `memory_view` is read-only and request-scoped. It is authorized only for route-selected indexed handles plus exact indexed handles explicitly requested by the user for that turn, rejects `MEMORIES.md`, paths/traversal/unindexed handles, and is also an explicit agent allowed-tool grant surfaced in the agent create/edit dialog.
 - Route-generated memory summaries/snippets/topics are debug metadata, not final task/chat model context.
 - Memory consolidation runs as a normal visible scheduled task assigned to Memory Curator with scoped memory-file tools; hidden bespoke scheduler behavior is not intended.
+- The product currently lacks a project-level UI for browsing durable memory index/files; a bounded read-only browser backed by `MEMORIES.md` and the existing safe resolver is tracked in `openvibely/openvibely#32`.

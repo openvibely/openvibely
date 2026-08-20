@@ -1,7 +1,7 @@
 # =============================================================================
 # Stage 1: Builder — compile Go binary with all generated assets
 # =============================================================================
-FROM golang:1.26.5-alpine AS builder
+FROM golang:1.26.6-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
 
