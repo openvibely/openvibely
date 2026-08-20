@@ -516,6 +516,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"list_schedules": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return service.ExecuteListSchedulesTool(ctx, h.scheduleRepo, params.ProjectID, input)
 		},
+		"view_pulse": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return service.ExecuteViewPulseTool(ctx, h.upcomingSvc, params.ProjectID, input)
+		},
 		"list_personalities": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListPersonalities(ctx)), nil
 		},
@@ -1343,6 +1346,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"create_swarm_task":                      true,
 		"list_schedules":                         true,
 		"view_usage_analytics":                   true,
+		"view_pulse":                             true,
 		"view_system_update":                     true,
 		"schedule_task":                          true,
 		"delete_schedule":                        true,

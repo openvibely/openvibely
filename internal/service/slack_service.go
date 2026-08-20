@@ -107,6 +107,7 @@ type SlackService struct {
 	channelTaskRunner          ChannelTaskRunner
 	alertSvc                   *AlertService
 	usageAnalyticsSvc          *UsageAnalyticsService
+	upcomingSvc                *UpcomingService
 	channelMessageRouter       *ChannelMessageRouter
 	emailStatus                func(context.Context) EmailConnectionStatus
 	emailAuthRepo              *repository.EmailAuthRepo
@@ -253,6 +254,10 @@ func (s *SlackService) SetChannelTaskRunner(runner ChannelTaskRunner) {
 
 func (s *SlackService) SetAlertService(svc *AlertService) {
 	s.alertSvc = svc
+}
+
+func (s *SlackService) SetUpcomingService(svc *UpcomingService) {
+	s.upcomingSvc = svc
 }
 
 func (s *SlackService) SetAutomationGraphService(svc *AutomationGraphService) {
@@ -1475,6 +1480,7 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
 		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
+		UpcomingSvc:           s.upcomingSvc,
 		SlackStatus:           s.GetConnectionStatus,
 		SlackAuthRepo:         s.slackAuthRepo,
 		EmailStatus:           s.emailStatus,

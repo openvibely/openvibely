@@ -189,7 +189,7 @@ func TestRegistry_AllActionsHaveDomain(t *testing.T) {
 	validDomains := map[Domain]bool{
 		DomainTasks: true, DomainSchedules: true, DomainAlerts: true,
 		DomainPersonality: true, DomainModels: true, DomainAgents: true,
-		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainAnalytics: true, DomainAutomations: true, DomainMemory: true, DomainChat: true,
+		DomainProjects: true, DomainSettings: true, DomainMessaging: true, DomainGitHub: true, DomainAnalytics: true, DomainPulse: true, DomainAutomations: true, DomainMemory: true, DomainChat: true,
 	}
 	for _, a := range Registry() {
 		if !validDomains[a.Domain] {
@@ -409,6 +409,40 @@ func TestViewSystemUpdateRegisteredReadOnlyWebAPIBothModes(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(def.Description), "read-only") {
 		t.Fatalf("view_system_update description must document read-only behavior: %q", def.Description)
+	}
+}
+
+func TestViewPulseRegisteredReadOnlySupportedSurfacesBothModes(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range []Surface{SurfaceWeb, SurfaceAPI, SurfaceSlack, SurfaceTelegram, SurfaceDiscord} {
+			defs := ToolDefsForContext(mode, surface, false)
+			mustContain(t, toolDefNames(defs), "view_pulse")
+			if err := IsAllowed("view_pulse", mode, surface); err != nil {
+				t.Fatalf("expected view_pulse allowed in %s mode on %s: %v", mode, surface, err)
+			}
+		}
+		defs := ToolDefsForContext(mode, SurfaceEmail, false)
+		mustNotContain(t, toolDefNames(defs), "view_pulse")
+		if err := IsAllowed("view_pulse", mode, SurfaceEmail); err == nil || err.Code != "surface_blocked" {
+			t.Fatalf("expected view_pulse blocked on email in %s mode, got %v", mode, err)
+		}
+	}
+
+	def := Get("view_pulse")
+	if def == nil {
+		t.Fatal("expected view_pulse to be registered")
+	}
+	if def.Access != AccessRead {
+		t.Fatalf("expected view_pulse to be read-only, got %q", def.Access)
+	}
+	if def.Domain != DomainPulse {
+		t.Fatalf("expected view_pulse in pulse domain, got %q", def.Domain)
+	}
+	description := strings.ToLower(def.Description)
+	for _, want := range []string{"read-only", "bounded", "does not expose", "does not", "mutate"} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("view_pulse description must document safe bounded behavior; missing %q in %q", want, def.Description)
+		}
 	}
 }
 

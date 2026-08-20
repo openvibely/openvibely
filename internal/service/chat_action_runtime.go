@@ -242,6 +242,7 @@ type channelUtilityActionHandlerOptions struct {
 	ProjectRepo               *repository.ProjectRepo
 	AlertSvc                  *AlertService
 	UsageAnalyticsSvc         *UsageAnalyticsService
+	UpcomingSvc               *UpcomingService
 	SlackStatus               func(context.Context) (SlackConnectionStatus, error)
 	SlackAuthRepo             *repository.SlackAuthRepo
 	TelegramRunning           func() bool
@@ -542,6 +543,9 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		},
 		"view_usage_analytics": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return ExecuteViewUsageAnalyticsTool(ctx, opts.UsageAnalyticsSvc, opts.ProjectID, input)
+		},
+		"view_pulse": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return ExecuteViewPulseTool(ctx, opts.UpcomingSvc, opts.ProjectID, input)
 		},
 		"list_personalities": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelListPersonalitiesResult(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo), nil

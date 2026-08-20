@@ -76,6 +76,7 @@ type DiscordService struct {
 	agentRepo                  *repository.AgentRepo
 	alertSvc                   *AlertService
 	usageAnalyticsSvc          *UsageAnalyticsService
+	upcomingSvc                *UpcomingService
 	emailStatus                func(context.Context) EmailConnectionStatus
 	emailAuthRepo              *repository.EmailAuthRepo
 	webhookRepo                *repository.WebhookRepo
@@ -168,6 +169,7 @@ func (s *DiscordService) SetProjectCreationServices(projectSvc *ProjectService, 
 }
 func (s *DiscordService) SetAgentRepo(repo *repository.AgentRepo) { s.agentRepo = repo }
 func (s *DiscordService) SetAlertService(svc *AlertService)       { s.alertSvc = svc }
+func (s *DiscordService) SetUpcomingService(svc *UpcomingService) { s.upcomingSvc = svc }
 func (s *DiscordService) SetEmailStatusProvider(provider func(context.Context) EmailConnectionStatus) {
 	s.emailStatus = provider
 }
@@ -769,6 +771,7 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
 		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
+		UpcomingSvc:           s.upcomingSvc,
 		DiscordStatus:         s.GetConnectionStatus,
 		DiscordAuthRepo:       s.discordAuthRepo,
 		EmailStatus:           s.emailStatus,

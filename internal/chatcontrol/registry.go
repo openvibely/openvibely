@@ -19,6 +19,7 @@
 // Chat read-only (plan + orchestrate):
 //   - tasks: list_tasks, view_task_thread
 //   - schedules: list_schedules
+//   - pulse: view_pulse
 //   - projects: list_projects, project_info, get_current_project
 //   - models: list_models, get_model
 //   - analytics: view_usage_analytics
@@ -95,6 +96,7 @@ const (
 	DomainMessaging   Domain = "messaging"
 	DomainGitHub      Domain = "github"
 	DomainAnalytics   Domain = "analytics"
+	DomainPulse       Domain = "pulse"
 	DomainAutomations Domain = "automations"
 	DomainMemory      Domain = "memory"
 	DomainChat        Domain = "chat"
@@ -480,6 +482,16 @@ var registry = []ActionDef{
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string","description":"Optional: restrict to schedules bound to this task ID."},"title":{"type":"string","description":"Optional partial (case-insensitive substring) task title match."},"enabled":{"type":"boolean","description":"Optional: filter by enabled (true) or disabled (false) schedules."},"limit":{"type":"integer","minimum":1,"maximum":50,"description":"Max results to return (default 20, capped at 50)."},"offset":{"type":"integer","minimum":0,"description":"Number of results to skip for pagination."}},"additionalProperties":false}`),
+	},
+	{
+		Name:         "view_pulse",
+		Description:  "Return the current project's read-only Pulse upcoming-work agenda: running tasks, pending active tasks, scheduled tasks due within seven days, and compact priority/status/category/schedule counts. Uses bounded task previews and does not expose full prompts, execution outputs, schedule history, or mutate work.",
+		Domain:       DomainPulse,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     chatSurfacesExceptEmail(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	},
 	{
 		Name:         "schedule_task",
@@ -945,6 +957,10 @@ func bothModes() []models.ChatMode {
 
 func webAPISurfaces() []Surface {
 	return []Surface{SurfaceWeb, SurfaceAPI}
+}
+
+func chatSurfacesExceptEmail() []Surface {
+	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceDiscord}
 }
 
 // ---- Public query API ----

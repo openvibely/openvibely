@@ -461,6 +461,154 @@ func TestViewSystemUpdateRuntimeTool_RegisteredAndReadOnly(t *testing.T) {
 	require.True(t, found, "task-thread capabilities should include view_system_update")
 }
 
+type testPulseToolResponse struct {
+	OK             bool                 `json:"ok"`
+	ProjectID      string               `json:"project_id"`
+	LookaheadDays  int                  `json:"lookahead_days"`
+	RunningTasks   []testPulseTaskEntry `json:"running_tasks"`
+	PendingTasks   []testPulseTaskEntry `json:"pending_tasks"`
+	ScheduledTasks []testPulseTaskEntry `json:"scheduled_tasks"`
+	TaskSummary    struct {
+		TotalPending int `json:"total_pending"`
+		Priority     struct {
+			Urgent int `json:"urgent"`
+			High   int `json:"high"`
+			Normal int `json:"normal"`
+			Low    int `json:"low"`
+		} `json:"priority"`
+		Status struct {
+			Pending   int `json:"pending"`
+			Running   int `json:"running"`
+			Completed int `json:"completed"`
+			Failed    int `json:"failed"`
+		} `json:"status"`
+		Category struct {
+			Active    int `json:"active"`
+			Backlog   int `json:"backlog"`
+			Scheduled int `json:"scheduled"`
+		} `json:"category"`
+		Scheduled struct {
+			Overdue     int `json:"overdue"`
+			DueToday    int `json:"due_today"`
+			DueThisWeek int `json:"due_this_week"`
+		} `json:"scheduled"`
+	} `json:"task_summary"`
+}
+
+type testPulseTaskEntry struct {
+	TaskID         string     `json:"task_id"`
+	Title          string     `json:"title"`
+	Status         string     `json:"status"`
+	Category       string     `json:"category"`
+	Priority       int        `json:"priority"`
+	PromptPreview  string     `json:"prompt_preview"`
+	ScheduleID     string     `json:"schedule_id"`
+	NextRun        *time.Time `json:"next_run"`
+	RepeatType     string     `json:"repeat_type"`
+	RepeatInterval int        `json:"repeat_interval"`
+	RepeatLabel    string     `json:"repeat_label"`
+}
+
+func TestViewPulseRuntimeToolReturnsUpcomingAgenda(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Pulse Runtime Project")
+	foreign := createProject(t, h, "Foreign Pulse Project")
+	agent := createAgent(t, h.llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Pulse Agent" })
+	longPrompt := strings.Repeat("x", 350)
+
+	running := &models.Task{ProjectID: project.ID, Title: "Running implementation", Prompt: longPrompt, Category: models.CategoryActive, Status: models.StatusRunning, Priority: 4, AgentID: &agent.ID}
+	require.NoError(t, h.taskRepo.Create(ctx, running))
+	pending := &models.Task{ProjectID: project.ID, Title: "Queued follow-up", Prompt: "short prompt", Category: models.CategoryActive, Status: models.StatusPending, Priority: 3}
+	require.NoError(t, h.taskRepo.Create(ctx, pending))
+	scheduledTask := &models.Task{ProjectID: project.ID, Title: "Scheduled today", Prompt: "scheduled prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, h.taskRepo.Create(ctx, scheduledTask))
+	futureTask := &models.Task{ProjectID: project.ID, Title: "Scheduled later", Prompt: "future prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 1}
+	require.NoError(t, h.taskRepo.Create(ctx, futureTask))
+	foreignTask := &models.Task{ProjectID: foreign.ID, Title: "Foreign scheduled", Prompt: "foreign prompt", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 4}
+	require.NoError(t, h.taskRepo.Create(ctx, foreignTask))
+
+	now := time.Now().UTC()
+	scheduled := &models.Schedule{TaskID: scheduledTask.ID, RunAt: now.Add(2 * time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, h.scheduleRepo.Create(ctx, scheduled))
+	future := &models.Schedule{TaskID: futureTask.ID, RunAt: now.AddDate(0, 0, 8), RepeatType: models.RepeatWeekly, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, h.scheduleRepo.Create(ctx, future))
+	foreignSchedule := &models.Schedule{TaskID: foreignTask.ID, RunAt: now.Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, h.scheduleRepo.Create(ctx, foreignSchedule))
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "view_pulse", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.NotContains(t, out, strings.Repeat("x", 250), "full prompts must not be exposed")
+	require.NotContains(t, out, foreignTask.ID)
+	require.NotContains(t, out, future.ID)
+
+	var got testPulseToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.Equal(t, project.ID, got.ProjectID)
+	require.Equal(t, 7, got.LookaheadDays)
+	require.Len(t, got.RunningTasks, 1)
+	require.Equal(t, running.ID, got.RunningTasks[0].TaskID)
+	require.Equal(t, "Running implementation", got.RunningTasks[0].Title)
+	require.LessOrEqual(t, len(got.RunningTasks[0].PromptPreview), 200)
+	require.Len(t, got.PendingTasks, 1)
+	require.Equal(t, pending.ID, got.PendingTasks[0].TaskID)
+	require.Len(t, got.ScheduledTasks, 1)
+	require.Equal(t, scheduledTask.ID, got.ScheduledTasks[0].TaskID)
+	require.Equal(t, scheduled.ID, got.ScheduledTasks[0].ScheduleID)
+	require.Equal(t, "daily", got.ScheduledTasks[0].RepeatLabel)
+	require.NotNil(t, got.ScheduledTasks[0].NextRun)
+	require.Equal(t, 4, got.TaskSummary.TotalPending)
+	require.Equal(t, 1, got.TaskSummary.Priority.Urgent)
+	require.Equal(t, 1, got.TaskSummary.Priority.High)
+	require.Equal(t, 1, got.TaskSummary.Priority.Normal)
+	require.Equal(t, 1, got.TaskSummary.Priority.Low)
+	require.Equal(t, 3, got.TaskSummary.Status.Pending)
+	require.Equal(t, 1, got.TaskSummary.Status.Running)
+	require.Equal(t, 2, got.TaskSummary.Category.Active)
+	require.Equal(t, 2, got.TaskSummary.Category.Scheduled)
+	require.Equal(t, 0, got.TaskSummary.Scheduled.Overdue)
+	require.Equal(t, 1, got.TaskSummary.Scheduled.DueToday)
+	require.Equal(t, 1, got.TaskSummary.Scheduled.DueThisWeek)
+}
+
+func TestViewPulseRuntimeToolEmptyProjectReturnsZeroAgenda(t *testing.T) {
+	h, _, _, _ := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Empty Pulse Project")
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(ctx, "view_pulse", json.RawMessage(`{}`))
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+
+	var got testPulseToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.Empty(t, got.RunningTasks)
+	require.Empty(t, got.PendingTasks)
+	require.Empty(t, got.ScheduledTasks)
+	require.Zero(t, got.TaskSummary.TotalPending)
+	require.Zero(t, got.TaskSummary.Scheduled.Overdue)
+	require.Zero(t, got.TaskSummary.Scheduled.DueToday)
+	require.Zero(t, got.TaskSummary.Scheduled.DueThisWeek)
+}
+
 // TestViewTaskThreadResolvesCurrentTaskID reproduces the incident where an
 // audit-only task-thread follow-up turn called view_task_thread with an
 // explicit task_id of "current" (or omitted task_id/title entirely) and got

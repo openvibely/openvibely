@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -93,6 +94,181 @@ func (s *UpcomingService) GenerateUpcoming(ctx context.Context, projectID string
 		projectID, len(running), len(pending), len(scheduled))
 
 	return upcoming, nil
+}
+
+// ExecuteViewPulseTool returns a compact, prompt-safe upcoming-work agenda for
+// the current project using the same data path as the Pulse page.
+func ExecuteViewPulseTool(ctx context.Context, upcomingSvc *UpcomingService, projectID string, input json.RawMessage) (string, error) {
+	if upcomingSvc == nil {
+		return "", fmt.Errorf("view_pulse: upcoming service is not configured")
+	}
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return "", fmt.Errorf("view_pulse requires a current project")
+	}
+	var req struct{}
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	upcoming, err := upcomingSvc.GenerateUpcoming(ctx, projectID)
+	if err != nil {
+		return "", err
+	}
+	response := compactPulseActionResponse(upcoming)
+	b, err := json.Marshal(response)
+	return string(b), err
+}
+
+type pulseActionResponse struct {
+	OK             bool                   `json:"ok"`
+	ProjectID      string                 `json:"project_id"`
+	GeneratedAt    time.Time              `json:"generated_at"`
+	LookaheadDays  int                    `json:"lookahead_days"`
+	RunningTasks   []pulseActionTaskEntry `json:"running_tasks"`
+	PendingTasks   []pulseActionTaskEntry `json:"pending_tasks"`
+	ScheduledTasks []pulseActionTaskEntry `json:"scheduled_tasks"`
+	TaskSummary    pulseActionTaskSummary `json:"task_summary"`
+}
+
+type pulseActionTaskEntry struct {
+	TaskID         string              `json:"task_id"`
+	Title          string              `json:"title"`
+	Status         models.TaskStatus   `json:"status"`
+	Category       models.TaskCategory `json:"category"`
+	Priority       int                 `json:"priority"`
+	Tag            models.TaskTag      `json:"tag,omitempty"`
+	AgentName      string              `json:"agent_name,omitempty"`
+	PromptPreview  string              `json:"prompt_preview,omitempty"`
+	CreatedAt      time.Time           `json:"created_at"`
+	UpdatedAt      time.Time           `json:"updated_at"`
+	ScheduleID     string              `json:"schedule_id,omitempty"`
+	NextRun        *time.Time          `json:"next_run,omitempty"`
+	RepeatType     models.RepeatType   `json:"repeat_type,omitempty"`
+	RepeatInterval int                 `json:"repeat_interval,omitempty"`
+	RepeatLabel    string              `json:"repeat_label,omitempty"`
+}
+
+type pulseActionTaskSummary struct {
+	TotalPending int `json:"total_pending"`
+	Priority     struct {
+		Urgent int `json:"urgent"`
+		High   int `json:"high"`
+		Normal int `json:"normal"`
+		Low    int `json:"low"`
+	} `json:"priority"`
+	Status struct {
+		Pending   int `json:"pending"`
+		Running   int `json:"running"`
+		Completed int `json:"completed"`
+		Failed    int `json:"failed"`
+	} `json:"status"`
+	Category struct {
+		Active    int `json:"active"`
+		Backlog   int `json:"backlog"`
+		Scheduled int `json:"scheduled"`
+	} `json:"category"`
+	Scheduled struct {
+		Overdue     int `json:"overdue"`
+		DueToday    int `json:"due_today"`
+		DueThisWeek int `json:"due_this_week"`
+	} `json:"scheduled"`
+}
+
+func compactPulseActionResponse(upcoming *models.Upcoming) pulseActionResponse {
+	if upcoming == nil {
+		return pulseActionResponse{OK: true, LookaheadDays: 7}
+	}
+	response := pulseActionResponse{
+		OK:             true,
+		ProjectID:      upcoming.ProjectID,
+		GeneratedAt:    upcoming.GeneratedAt,
+		LookaheadDays:  7,
+		RunningTasks:   compactPulseTaskEntries(upcoming.RunningTasks),
+		PendingTasks:   compactPulseTaskEntries(upcoming.PendingTasks),
+		ScheduledTasks: compactPulseTaskEntries(upcoming.ScheduledTasks),
+	}
+	if upcoming.TaskSummary != nil {
+		s := upcoming.TaskSummary
+		response.TaskSummary.TotalPending = s.TotalPending
+		response.TaskSummary.Priority.Urgent = s.UrgentCount
+		response.TaskSummary.Priority.High = s.HighCount
+		response.TaskSummary.Priority.Normal = s.NormalCount
+		response.TaskSummary.Priority.Low = s.LowCount
+		response.TaskSummary.Status.Pending = s.PendingCount
+		response.TaskSummary.Status.Running = s.RunningCount
+		response.TaskSummary.Status.Completed = s.CompletedCount
+		response.TaskSummary.Status.Failed = s.FailedCount
+		response.TaskSummary.Category.Active = s.ActiveCount
+		response.TaskSummary.Category.Backlog = s.BacklogCount
+		response.TaskSummary.Category.Scheduled = s.ScheduledCount
+		response.TaskSummary.Scheduled.Overdue = s.OverdueCount
+		response.TaskSummary.Scheduled.DueToday = s.ScheduledToday
+		response.TaskSummary.Scheduled.DueThisWeek = s.ScheduledThisWeek
+	}
+	return response
+}
+
+func compactPulseTaskEntries(tasks []models.UpcomingTask) []pulseActionTaskEntry {
+	entries := make([]pulseActionTaskEntry, 0, len(tasks))
+	for _, upcomingTask := range tasks {
+		task := upcomingTask.Task
+		entry := pulseActionTaskEntry{
+			TaskID:        task.ID,
+			Title:         task.Title,
+			Status:        task.Status,
+			Category:      task.Category,
+			Priority:      task.Priority,
+			Tag:           task.Tag,
+			AgentName:     upcomingTask.AgentName,
+			PromptPreview: task.Prompt,
+			CreatedAt:     task.CreatedAt,
+			UpdatedAt:     task.UpdatedAt,
+			NextRun:       upcomingTask.NextRun,
+		}
+		if upcomingTask.Schedule != nil {
+			entry.ScheduleID = upcomingTask.Schedule.ID
+			entry.RepeatType = upcomingTask.Schedule.RepeatType
+			entry.RepeatInterval = upcomingTask.Schedule.RepeatInterval
+			entry.RepeatLabel = pulseRepeatLabel(upcomingTask.Schedule.RepeatType, upcomingTask.Schedule.RepeatInterval)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func pulseRepeatLabel(repeatType models.RepeatType, interval int) string {
+	switch repeatType {
+	case models.RepeatOnce:
+		return "once"
+	case models.RepeatDaily:
+		if interval == 1 {
+			return "daily"
+		}
+	case models.RepeatWeekly:
+		if interval == 1 {
+			return "weekly"
+		}
+	case models.RepeatMonthly:
+		if interval == 1 {
+			return "monthly"
+		}
+	case models.RepeatHours:
+		if interval == 1 {
+			return "hourly"
+		}
+	case models.RepeatMinutes:
+		if interval == 1 {
+			return "every minute"
+		}
+	case models.RepeatSeconds:
+		if interval == 1 {
+			return "every second"
+		}
+	}
+	if interval <= 0 {
+		return string(repeatType)
+	}
+	return fmt.Sprintf("every %d %s", interval, repeatType)
 }
 
 // GenerateHistory creates a summary of recently completed work for a project

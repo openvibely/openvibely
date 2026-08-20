@@ -85,6 +85,7 @@ type TelegramService struct {
 	agentRepo                  *repository.AgentRepo
 	alertSvc                   *AlertService
 	usageAnalyticsSvc          *UsageAnalyticsService
+	upcomingSvc                *UpcomingService
 	channelMessageRouter       *ChannelMessageRouter
 	emailStatus                func(context.Context) EmailConnectionStatus
 	emailAuthRepo              *repository.EmailAuthRepo
@@ -251,6 +252,10 @@ func (s *TelegramService) SetAgentRepo(repo *repository.AgentRepo) {
 // SetAlertService sets the alert service for managing alerts from Telegram chat.
 func (s *TelegramService) SetAlertService(svc *AlertService) {
 	s.alertSvc = svc
+}
+
+func (s *TelegramService) SetUpcomingService(svc *UpcomingService) {
+	s.upcomingSvc = svc
 }
 
 func (s *TelegramService) SetAutomationGraphService(svc *AutomationGraphService) {
@@ -1376,6 +1381,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
 		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
+		UpcomingSvc:           s.upcomingSvc,
 		TelegramRunning:       s.IsRunning,
 		TelegramAuthRepo:      telegramAuthListStore(s.telegramAuthRepo),
 		EmailStatus:           s.emailStatus,
