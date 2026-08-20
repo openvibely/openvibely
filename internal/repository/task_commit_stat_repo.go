@@ -45,6 +45,23 @@ func (r *TaskCommitStatRepo) UpsertProducedCommitStat(ctx context.Context, stat 
 	return nil
 }
 
+func (r *TaskCommitStatRepo) FirstProducedCommitStatTime(ctx context.Context, projectID string) (time.Time, error) {
+	var producedAt time.Time
+	err := r.db.QueryRowContext(ctx, `
+		SELECT produced_at
+		FROM task_commit_stats
+		WHERE project_id = ?
+		ORDER BY produced_at ASC
+		LIMIT 1`, projectID).Scan(&producedAt)
+	if err == sql.ErrNoRows {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, fmt.Errorf("getting first task commit stat time: %w", err)
+	}
+	return producedAt, nil
+}
+
 func (r *TaskCommitStatRepo) ListProducedCommitStats(ctx context.Context, projectID string, since time.Time) ([]models.TaskCommitStat, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, task_id, execution_id, commit_sha, short_sha, subject, author,

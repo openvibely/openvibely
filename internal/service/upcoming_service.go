@@ -114,30 +114,38 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 
 	var projectChanges *models.ProjectChanges
 	var projectChangeFiles []string
-	var earliestStatProducedAt time.Time
+	var firstProjectStatProducedAt time.Time
 	if s.taskCommitStatRepo != nil {
+		firstProducedAt, err := s.taskCommitStatRepo.FirstProducedCommitStatTime(ctx, projectID)
+		if err != nil {
+			applog.Infof("[upcoming-svc] error getting first task commit stat time (non-fatal): %v", err)
+		} else {
+			firstProjectStatProducedAt = firstProducedAt
+		}
+
 		stats, err := s.taskCommitStatRepo.ListProducedCommitStats(ctx, projectID, since)
 		if err != nil {
 			applog.Infof("[upcoming-svc] error listing task commit stats (non-fatal): %v", err)
 		} else if len(stats) > 0 {
 			projectChanges, projectChangeFiles = buildProjectChangesFromTaskCommitStatsWithFiles(stats)
-			earliestStatProducedAt = earliestTaskCommitStatProducedAt(stats)
 		}
 	}
 
-	// Fall back to repository git history for old data that predates task_commit_stats.
-	// During the migration window, combine only the pre-stats subrange with DB stats
-	// so day/week ranges do not drop earlier history as soon as one DB stat exists.
-	if s.projectRepo != nil && (projectChanges == nil || earliestStatProducedAt.After(since)) {
+	// Fall back to repository git history only for old data that predates the
+	// project's first recorded task_commit_stats row. Once a project has stats
+	// coverage before the selected range, quiet gaps must not count raw git history.
+	fallbackBefore := time.Time{}
+	shouldUseGitFallback := projectChanges == nil && firstProjectStatProducedAt.IsZero()
+	if !firstProjectStatProducedAt.IsZero() && firstProjectStatProducedAt.After(since) {
+		shouldUseGitFallback = true
+		fallbackBefore = firstProjectStatProducedAt
+	}
+	if s.projectRepo != nil && shouldUseGitFallback {
 		project, err := s.projectRepo.GetByID(ctx, projectID)
 		if err != nil {
 			applog.Infof("[upcoming-svc] error getting project for git changes (non-fatal): %v", err)
 		} else if project.RepoPath != "" {
-			before := time.Time{}
-			if projectChanges != nil {
-				before = earliestStatProducedAt
-			}
-			changes, changedFiles, err := s.getProjectChangesInRangeWithFiles(project.RepoPath, since, before)
+			changes, changedFiles, err := s.getProjectChangesInRangeWithFiles(project.RepoPath, since, fallbackBefore)
 			if err != nil {
 				applog.Infof("[upcoming-svc] error getting git changes (non-fatal): %v", err)
 			} else if projectChanges == nil {
@@ -176,16 +184,6 @@ func computeSince(now time.Time, timeRange models.TimeRange) time.Time {
 	default:
 		return now.Add(-24 * time.Hour)
 	}
-}
-
-func earliestTaskCommitStatProducedAt(stats []models.TaskCommitStat) time.Time {
-	var earliest time.Time
-	for _, stat := range stats {
-		if earliest.IsZero() || stat.ProducedAt.Before(earliest) {
-			earliest = stat.ProducedAt
-		}
-	}
-	return earliest
 }
 
 func buildProjectChangesFromTaskCommitStats(stats []models.TaskCommitStat) *models.ProjectChanges {
