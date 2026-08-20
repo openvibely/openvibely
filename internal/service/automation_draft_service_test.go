@@ -895,6 +895,20 @@ func TestCustomAutomationValidatesGitHubHandoffsAndRejectsHumanBoundaryBypasses(
 
 	require.Empty(t, svc.ValidateCandidate(candidate), "the GitHub graph must map to the existing assignment, inbox, task, PR, and review machinery")
 
+	var inboxNode models.AutomationDraftNode
+	for _, node := range candidate.Nodes {
+		if node.Key == "inbox" {
+			inboxNode = node
+			break
+		}
+	}
+	prompt := automationCompiledTaskPrompt(candidate, inboxNode)
+	require.Contains(t, prompt, "Use the provided GitHub runtime tools as the only source for inbox discovery")
+	require.Contains(t, prompt, "do not use local shell commands, gh, Python scripts, curl, or direct GitHub API calls")
+	require.Contains(t, prompt, "omit category and status for a broad search across all visible task categories and statuses")
+	require.Contains(t, prompt, "Supplying category or status restricts results to only that lifecycle state")
+	require.Contains(t, prompt, "After create_task succeeds for a newly created Active task, do not call list_tasks again for that issue")
+
 	backlogImplementation := candidate
 	backlogImplementation.Nodes = append([]models.AutomationDraftNode(nil), candidate.Nodes...)
 	for i := range backlogImplementation.Nodes {
