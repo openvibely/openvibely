@@ -246,7 +246,7 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}
 
-	result, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).OpenForTask(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
+	result, err := h.newTaskPullRequestService().OpenForTask(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
 		CommitMessage: h.buildPullRequestPrepCommitMessage(c.Request().Context(), task),
 	})
 	if err != nil {

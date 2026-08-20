@@ -51,6 +51,7 @@ type githubIssueRuntimeOptions struct {
 	ProjectRepo              *repository.ProjectRepo
 	TaskRepo                 *repository.TaskRepo
 	TaskPullRequestRepo      *repository.TaskPullRequestRepo
+	TaskCommitStatRepo       *repository.TaskCommitStatRepo
 	GitHubPRFeedbackRepo     *repository.GitHubPRFeedbackRepo
 	GitHubAuthRepo           *repository.GitHubAuthRepo
 	ThreadInputRepo          *repository.ThreadInputRepo
@@ -354,7 +355,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if req.IssueNumber > 0 {
 				issueNumber = &req.IssueNumber
 			}
-			pullRequestService := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo)
+			pullRequestService := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo).SetTaskCommitStatRepo(opts.TaskCommitStatRepo)
 			var result *OpenTaskPullRequestResult
 			if automationBound {
 				result, err = pullRequestService.OpenForAutomationTask(ctx, project, task, OpenTaskPullRequestOptions{
@@ -414,7 +415,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			pullRequestService := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo)
+			pullRequestService := NewTaskPullRequestService(opts.GitHub, opts.TaskPullRequestRepo).SetTaskCommitStatRepo(opts.TaskCommitStatRepo)
 			var record *models.TaskPullRequest
 			if automationBound {
 				record, err = pullRequestService.ReplaceBranchHeadForAutomationTask(ctx, project, task, req.ExpectedHeadSHA)

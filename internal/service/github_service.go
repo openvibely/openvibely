@@ -169,7 +169,8 @@ type GitHubPublishBranchRequest struct {
 }
 
 type GitHubPublishBranchResult struct {
-	HeadSHA string
+	HeadSHA       string
+	CreatedCommit bool
 }
 
 type GitHubReplaceBranchHeadRequest struct {
@@ -819,9 +820,9 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, retryCommitSHA, false); err != nil {
 			return nil, err
 		}
-		return &GitHubPublishBranchResult{HeadSHA: retryCommitSHA}, nil
+		return &GitHubPublishBranchResult{HeadSHA: retryCommitSHA, CreatedCommit: true}, nil
 	}
-	return &GitHubPublishBranchResult{HeadSHA: commitSHA}, nil
+	return &GitHubPublishBranchResult{HeadSHA: commitSHA, CreatedCommit: true}, nil
 }
 
 func (s *GitHubService) publishExistingLocalCommit(ctx context.Context, repo *GitHubRepoRef, branch, sha string, force bool) error {

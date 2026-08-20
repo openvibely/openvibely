@@ -73,6 +73,7 @@ type Handler struct {
 	lifecycleRepo              *repository.LifecycleRepo
 	worktreeSvc                *service.WorktreeService
 	taskPullRequestRepo        *repository.TaskPullRequestRepo
+	taskCommitStatRepo         *repository.TaskCommitStatRepo
 	githubPRFeedbackRepo       *repository.GitHubPRFeedbackRepo
 	githubAuthRepo             *repository.GitHubAuthRepo
 	githubSvc                  GitHubServiceProvider
@@ -282,6 +283,7 @@ func New(
 		threadInputRepo:     threadInputRepo,
 		usageRepo:           usageRepo,
 		skillAnalyticsRepo:  skillAnalyticsRepo,
+		taskCommitStatRepo:  taskCommitStatRepo,
 		usageAnalyticsSvc:   usageAnalyticsSvc,
 		workerRepo:          workerRepo,
 		attachmentRepo:      attachmentRepo,
@@ -437,6 +439,20 @@ func (h *Handler) SetWorktreeService(svc *service.WorktreeService) {
 // SetTaskPullRequestRepo sets the task pull request repo for task PR records.
 func (h *Handler) SetTaskPullRequestRepo(repo *repository.TaskPullRequestRepo) {
 	h.taskPullRequestRepo = repo
+}
+
+func (h *Handler) SetTaskCommitStatRepo(repo *repository.TaskCommitStatRepo) {
+	h.taskCommitStatRepo = repo
+	if h.llmSvc != nil {
+		h.llmSvc.SetTaskCommitStatRepo(repo)
+	}
+	if h.upcomingSvc != nil {
+		h.upcomingSvc.SetTaskCommitStatRepo(repo)
+	}
+}
+
+func (h *Handler) newTaskPullRequestService() *service.TaskPullRequestService {
+	return service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).SetTaskCommitStatRepo(h.taskCommitStatRepo)
 }
 
 func (h *Handler) SetGitHubPRFeedbackRepo(repo *repository.GitHubPRFeedbackRepo) {

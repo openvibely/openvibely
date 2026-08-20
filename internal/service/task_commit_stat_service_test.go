@@ -121,6 +121,54 @@ func TestHandlePostExecutionRecordsProducedCommitStat(t *testing.T) {
 	}
 }
 
+func TestMergeBranchRecordsAppCreatedMergeCommitStat(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	project := &models.Project{Name: "Merge Commit Stats", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if out, err := gitOutput(repoDir, "checkout", "-b", "task/merge-stat"); err != nil {
+		t.Fatalf("checkout task branch: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "merge_stat.go"), []byte("package mergestat\n"), 0644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	if err := CommitWorktreeChanges(repoDir, "Add merge stat file"); err != nil {
+		t.Fatalf("commit task branch: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Merge stat task", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: repoDir, WorktreeBranch: "task/merge-stat", MergeTargetBranch: "main"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	llmSvc := &LLMService{taskCommitStatRepo: statRepo}
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, repository.NewSettingsRepo(db))
+	worktreeSvc.SetLLMService(llmSvc)
+
+	result, err := worktreeSvc.MergeBranch(ctx, task, repoDir, "merge")
+	if err != nil {
+		t.Fatalf("MergeBranch: %v", err)
+	}
+	if result == nil || !result.Success || result.MergeCommit == "" {
+		t.Fatalf("merge result = %#v, want success with merge commit", result)
+	}
+	stats, err := statRepo.ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("list stats: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("stats count = %d, want 1", len(stats))
+	}
+	if stats[0].CommitSHA != result.MergeCommit || stats[0].Subject != "Merge task: Merge stat task" {
+		t.Fatalf("recorded stat = %#v, want merge commit %s", stats[0], result.MergeCommit)
+	}
+}
+
 func TestTaskCommitStatUpsertDoesNotDoubleCountDuplicateCommit(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

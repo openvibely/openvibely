@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -25,8 +26,9 @@ type taskPullRequestBranchReplacer interface {
 }
 
 type TaskPullRequestService struct {
-	github TaskPullRequestGitHubProvider
-	repo   *repository.TaskPullRequestRepo
+	github             TaskPullRequestGitHubProvider
+	repo               *repository.TaskPullRequestRepo
+	taskCommitStatRepo *repository.TaskCommitStatRepo
 }
 
 type OpenTaskPullRequestOptions struct {
@@ -49,6 +51,11 @@ type OpenTaskPullRequestResult struct {
 
 func NewTaskPullRequestService(github TaskPullRequestGitHubProvider, repo *repository.TaskPullRequestRepo) *TaskPullRequestService {
 	return &TaskPullRequestService{github: github, repo: repo}
+}
+
+func (s *TaskPullRequestService) SetTaskCommitStatRepo(repo *repository.TaskCommitStatRepo) *TaskPullRequestService {
+	s.taskCommitStatRepo = repo
+	return s
 }
 
 func IsOpenPullRequestState(state string) bool {
@@ -270,6 +277,9 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 	if publishedHeadSHA == "" {
 		return nil, fmt.Errorf("publishing branch did not return a remote head sha")
 	}
+	if publishResult != nil && publishResult.CreatedCommit {
+		s.recordPublishedCommitStat(ctx, task, createReq.Base, publishedHeadSHA, commitMessage)
+	}
 	if existingPR != nil && IsOpenPullRequestState(existingPR.PRState) {
 		livePR, err := s.github.GetPullRequest(ctx, repoRef, existingPR.PRNumber)
 		if err != nil {
@@ -357,6 +367,21 @@ func (s *TaskPullRequestService) openForTask(ctx context.Context, project *model
 		ReusedRemote: foundPR != nil || !created,
 		Created:      created,
 	}, nil
+}
+
+func (s *TaskPullRequestService) recordPublishedCommitStat(ctx context.Context, task *models.Task, baseRef, commitSHA, subject string) {
+	if s == nil || s.taskCommitStatRepo == nil || task == nil || strings.TrimSpace(task.WorktreePath) == "" {
+		return
+	}
+	stat, err := collectPublishedBranchCommitStat(task.WorktreePath, baseRef, commitSHA, subject, "OpenVibely Bot")
+	if err != nil {
+		applog.Infof("[task-commit-stats] error collecting published commit stat task=%s sha=%s: %v", task.ID, commitSHA, err)
+		return
+	}
+	applyTaskCommitStatContext(ctx, stat, nil, task, nil)
+	if err := s.taskCommitStatRepo.UpsertProducedCommitStat(ctx, stat); err != nil {
+		applog.Infof("[task-commit-stats] error recording published commit stat task=%s sha=%s: %v", task.ID, commitSHA, err)
+	}
 }
 
 func (s *TaskPullRequestService) buildCreatePullRequestRequest(ctx context.Context, project *models.Project, task *models.Task, opts OpenTaskPullRequestOptions, repoRef *GitHubRepoRef) GitHubCreatePullRequestRequest {

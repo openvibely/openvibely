@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -304,6 +307,65 @@ func TestTaskPullRequestServiceOpenForTaskCreatesAndPersistsPR(t *testing.T) {
 	}
 	if record == nil || record.PRNumber != 77 || record.PublishedHeadSHA != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || record.IssueNumber == nil || *record.IssueNumber != 99 || record.IssueURL == "" {
 		t.Fatalf("unexpected persisted PR record: %#v", record)
+	}
+}
+
+func TestTaskPullRequestServiceOpenForTaskRecordsPublishedCommitStat(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	if out, err := gitOutput(repoDir, "checkout", "-b", "task/publish-stat"); err != nil {
+		t.Fatalf("checkout task branch: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n\nPublished update\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "published.go"), []byte("package published\n\nfunc Added() {}\n"), 0644); err != nil {
+		t.Fatalf("write published.go: %v", err)
+	}
+	project := &models.Project{Name: "Published Commit Stats", RepoPath: repoDir, RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Publish stat task", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: repoDir, WorktreeBranch: "task/publish-stat", MergeTargetBranch: "main"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	publishedSHA := strings.Repeat("c", 40)
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+			if req.BaseBranch != "main" || req.Branch != task.WorktreeBranch || req.WorktreePath != repoDir {
+				t.Fatalf("unexpected publish request: %#v", req)
+			}
+			return &GitHubPublishBranchResult{HeadSHA: publishedSHA, CreatedCommit: true}, nil
+		},
+		createPRFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: 87, URL: "https://github.com/openvibely/openvibely/pull/87", State: "open", HeadRef: req.Head, HeadRepoFullName: "openvibely/openvibely", HeadSHA: publishedSHA}, nil
+		},
+	}, prRepo).SetTaskCommitStatRepo(statRepo)
+
+	_, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{CommitMessage: "Publish task stats"})
+	if err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	stats, err := statRepo.ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("list stats: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("stats count = %d, want 1", len(stats))
+	}
+	stat := stats[0]
+	if stat.CommitSHA != publishedSHA || stat.ShortSHA != publishedSHA[:7] || stat.Subject != "Publish task stats" {
+		t.Fatalf("unexpected published stat metadata: %#v", stat)
+	}
+	if stat.Insertions != 5 || stat.FilesChanged != 2 || stat.ChangedFilesJSON != `["README.md","published.go"]` {
+		t.Fatalf("unexpected published stat totals: insertions=%d files=%d changed=%s", stat.Insertions, stat.FilesChanged, stat.ChangedFilesJSON)
 	}
 }
 

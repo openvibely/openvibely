@@ -1094,7 +1094,13 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 			commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, *task.AgentID, commitCtx)
 		}
 		message := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
-		if err := CommitWorktreeChanges(task.WorktreePath, message); err != nil {
+		var err error
+		if ws.llmSvc != nil {
+			err = ws.llmSvc.CommitTaskWorktreeChanges(ctx, task, nil, task.WorktreePath, message)
+		} else {
+			err = CommitWorktreeChanges(task.WorktreePath, message)
+		}
+		if err != nil {
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 			return &MergeResult{ErrorMessage: err.Error()}, fmt.Errorf("auto-commit before merge failed: %w", err)
 		}
@@ -1124,6 +1130,7 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 		return &MergeResult{ErrorMessage: fmt.Sprintf("checkout target: %s", string(out))}, fmt.Errorf("checkout target branch: %w", err)
 	}
+	targetBeforeMerge, _ := gitCommitSHA(repoDir, "HEAD")
 
 	// Build merge command based on type
 	var mergeArgs []string
@@ -1187,12 +1194,18 @@ func (ws *WorktreeService) MergeBranch(ctx context.Context, task *models.Task, r
 	hashCmd := exec.Command("git", "rev-parse", "HEAD")
 	hashCmd.Dir = repoDir
 	hashOut, _ := hashCmd.Output()
+	mergeCommit := strings.TrimSpace(string(hashOut))
+	if ws.llmSvc != nil && mergeCommit != "" && mergeCommit != targetBeforeMerge {
+		if err := ws.llmSvc.RecordTaskCommitStat(ctx, task, nil, repoDir, mergeCommit); err != nil {
+			applog.Infof("[task-commit-stats] error recording app merge commit stat task=%s sha=%s: %v", task.ID, mergeCommit, err)
+		}
+	}
 
 	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged)
 
 	return &MergeResult{
 		Success:     true,
-		MergeCommit: strings.TrimSpace(string(hashOut)),
+		MergeCommit: mergeCommit,
 	}, nil
 }
 
@@ -1270,8 +1283,12 @@ func (ws *WorktreeService) RebaseBranch(ctx context.Context, task *models.Task, 
 		_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 		return &RebaseResult{ErrorMessage: fmt.Sprintf("resolving rebased HEAD: %s", strings.TrimSpace(string(headOut)))}, fmt.Errorf("resolving rebased HEAD: %w", err)
 	}
+	rebasedHead := strings.TrimSpace(string(headOut))
+	if ws.llmSvc != nil && rebasedHead != "" {
+		ws.recordTaskCommitRange(ctx, task, task.WorktreePath, targetBranch, rebasedHead)
+	}
 	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending)
-	return &RebaseResult{Success: true, RebasedHead: strings.TrimSpace(string(headOut))}, nil
+	return &RebaseResult{Success: true, RebasedHead: rebasedHead}, nil
 }
 
 func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, task *models.Task, repoDir string, targetBranch string) (*MergeResult, error) {
@@ -1299,6 +1316,7 @@ func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, 
 		return &MergeResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
 	}
 
+	rebased := false
 	if out, err := gitOutput(task.WorktreePath, "merge-base", "--is-ancestor", targetBranch, "HEAD"); err != nil {
 		if trimmed := strings.TrimSpace(string(out)); trimmed != "" {
 			applog.Debugf("[worktree] task branch %s is not already fast-forwardable from %s before auto-rebase: %s", task.WorktreeBranch, targetBranch, trimmed)
@@ -1318,6 +1336,7 @@ func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, 
 			_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusFailed)
 			return &MergeResult{ErrorMessage: strings.TrimSpace(string(rebaseOut))}, fmt.Errorf("auto-rebase task branch onto %s failed: %w", targetBranch, rebaseErr)
 		}
+		rebased = true
 	}
 
 	oldTargetOut, err := gitOutput(task.WorktreePath, "rev-parse", "refs/heads/"+targetBranch)
@@ -1341,6 +1360,9 @@ func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, 
 			msg = fmt.Sprintf("%s: %s", msg, trimmed)
 		}
 		return &MergeResult{ErrorMessage: msg}, fmt.Errorf("%s", msg)
+	}
+	if rebased && ws.llmSvc != nil {
+		ws.recordTaskCommitRange(ctx, task, task.WorktreePath, oldTarget, newTask)
 	}
 
 	if targetWorktree, err := findWorktreeForBranch(repoDir, targetBranch); err != nil {
@@ -1379,6 +1401,26 @@ func (ws *WorktreeService) fastForwardTaskWorktreeToTarget(ctx context.Context, 
 
 	_ = ws.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusMerged)
 	return &MergeResult{Success: true, MergeCommit: newTask}, nil
+}
+
+func (ws *WorktreeService) recordTaskCommitRange(ctx context.Context, task *models.Task, repoPath, baseSHA, headSHA string) {
+	if ws == nil || ws.llmSvc == nil || task == nil || strings.TrimSpace(repoPath) == "" || strings.TrimSpace(baseSHA) == "" || strings.TrimSpace(headSHA) == "" {
+		return
+	}
+	out, err := gitOutput(repoPath, "rev-list", "--reverse", baseSHA+".."+headSHA)
+	if err != nil {
+		applog.Infof("[task-commit-stats] error listing app rebased commits task=%s base=%s head=%s: %v", task.ID, baseSHA, headSHA, err)
+		return
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		sha := strings.TrimSpace(line)
+		if sha == "" {
+			continue
+		}
+		if err := ws.llmSvc.RecordTaskCommitStat(ctx, task, nil, repoPath, sha); err != nil {
+			applog.Infof("[task-commit-stats] error recording app rebased commit stat task=%s sha=%s: %v", task.ID, sha, err)
+		}
+	}
 }
 
 func findWorktreeForBranch(repoDir string, branch string) (string, error) {
@@ -1560,10 +1602,16 @@ func (ws *WorktreeService) ResolveConflictsWithAI(ctx context.Context, task *mod
 	hashCmd := exec.Command("git", "rev-parse", "HEAD")
 	hashCmd.Dir = repoDir
 	hashOut, _ := hashCmd.Output()
+	mergeCommit := strings.TrimSpace(string(hashOut))
+	if ws.llmSvc != nil && mergeCommit != "" {
+		if err := ws.llmSvc.RecordTaskCommitStat(ctx, task, nil, repoDir, mergeCommit); err != nil {
+			applog.Infof("[task-commit-stats] error recording app conflict-resolution commit stat task=%s sha=%s: %v", task.ID, mergeCommit, err)
+		}
+	}
 
 	return &MergeResult{
 		Success:     true,
-		MergeCommit: strings.TrimSpace(string(hashOut)),
+		MergeCommit: mergeCommit,
 	}, nil
 }
 

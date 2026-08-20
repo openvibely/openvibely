@@ -772,7 +772,7 @@ func (h *Handler) executeGitHubOpenPullRequestTool(ctx context.Context, params s
 	if req.IssueNumber > 0 {
 		issueNumber = &req.IssueNumber
 	}
-	result, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).OpenForTask(ctx, project, task, service.OpenTaskPullRequestOptions{
+	result, err := h.newTaskPullRequestService().OpenForTask(ctx, project, task, service.OpenTaskPullRequestOptions{
 		Title:       req.PRTitle,
 		Body:        req.PRBody,
 		Base:        req.Base,
@@ -801,7 +801,7 @@ func (h *Handler) executeGitHubReplacePullRequestBranchTool(ctx context.Context,
 	if err != nil {
 		return "", err
 	}
-	record, err := service.NewTaskPullRequestService(h.githubSvc, h.taskPullRequestRepo).ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
+	record, err := h.newTaskPullRequestService().ReplaceBranchHeadForTask(ctx, project, task, req.ExpectedHeadSHA)
 	if err != nil {
 		return "", err
 	}

@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +22,7 @@ func (s *LLMService) SetTaskCommitStatRepo(repo *repository.TaskCommitStatRepo) 
 	s.taskCommitStatRepo = repo
 }
 
-// CommitTaskWorktreeChanges commits OpenVibely-produced task turn changes and records summary-only commit stats.
+// CommitTaskWorktreeChanges commits OpenVibely-produced task changes and records summary-only commit stats.
 func (s *LLMService) CommitTaskWorktreeChanges(ctx context.Context, task *models.Task, execModel *models.Execution, worktreePath, message string) error {
 	beforeSHA, _ := gitCommitSHA(worktreePath, "HEAD")
 	if err := CommitWorktreeChanges(worktreePath, message); err != nil {
@@ -30,20 +32,33 @@ func (s *LLMService) CommitTaskWorktreeChanges(ctx context.Context, task *models
 	if err != nil || afterSHA == "" || afterSHA == beforeSHA {
 		return nil
 	}
-	if s == nil || s.taskCommitStatRepo == nil || task == nil {
-		return nil
-	}
-	if err := s.recordProducedCommitStat(ctx, task, execModel, worktreePath, afterSHA); err != nil {
+	if err := s.RecordTaskCommitStat(ctx, task, execModel, worktreePath, afterSHA); err != nil {
 		applog.Infof("[task-commit-stats] error recording produced commit stat task=%s sha=%s: %v", task.ID, afterSHA, err)
 	}
 	return nil
 }
 
-func (s *LLMService) recordProducedCommitStat(ctx context.Context, task *models.Task, execModel *models.Execution, worktreePath, sha string) error {
-	stat, err := collectProducedCommitStat(worktreePath, sha)
+// RecordTaskCommitStat records summary-only stats for a commit the app produced for a task.
+func (s *LLMService) RecordTaskCommitStat(ctx context.Context, task *models.Task, execModel *models.Execution, repoPath, sha string) error {
+	if s == nil || s.taskCommitStatRepo == nil || task == nil {
+		return nil
+	}
+	return recordProducedCommitStat(ctx, s.taskCommitStatRepo, s.execRepo, task, execModel, repoPath, sha)
+}
+
+func recordProducedCommitStat(ctx context.Context, statRepo *repository.TaskCommitStatRepo, execRepo *repository.ExecutionRepo, task *models.Task, execModel *models.Execution, repoPath, sha string) error {
+	if statRepo == nil || task == nil {
+		return nil
+	}
+	stat, err := collectProducedCommitStat(repoPath, sha)
 	if err != nil {
 		return err
 	}
+	applyTaskCommitStatContext(ctx, stat, execRepo, task, execModel)
+	return statRepo.UpsertProducedCommitStat(ctx, stat)
+}
+
+func applyTaskCommitStatContext(ctx context.Context, stat *models.TaskCommitStat, execRepo *repository.ExecutionRepo, task *models.Task, execModel *models.Execution) {
 	stat.ProjectID = task.ProjectID
 	stat.TaskID = task.ID
 	if execModel != nil {
@@ -52,8 +67,8 @@ func (s *LLMService) recordProducedCommitStat(ctx context.Context, task *models.
 		}
 		if execModel.CompletedAt != nil && !execModel.CompletedAt.IsZero() {
 			stat.ProducedAt = execModel.CompletedAt.UTC()
-		} else if s.execRepo != nil && execModel.ID != "" {
-			storedExec, err := s.execRepo.GetByID(ctx, execModel.ID)
+		} else if execRepo != nil && execModel.ID != "" {
+			storedExec, err := execRepo.GetByID(ctx, execModel.ID)
 			if err == nil && storedExec != nil && storedExec.CompletedAt != nil && !storedExec.CompletedAt.IsZero() {
 				stat.ProducedAt = storedExec.CompletedAt.UTC()
 			}
@@ -62,7 +77,29 @@ func (s *LLMService) recordProducedCommitStat(ctx context.Context, task *models.
 	if stat.ProducedAt.IsZero() {
 		stat.ProducedAt = time.Now().UTC()
 	}
-	return s.taskCommitStatRepo.UpsertProducedCommitStat(ctx, stat)
+}
+
+func collectPublishedBranchCommitStat(worktreePath, baseRef, sha, subject, author string) (*models.TaskCommitStat, error) {
+	sha = strings.TrimSpace(sha)
+	if sha == "" {
+		return nil, fmt.Errorf("commit sha is required")
+	}
+	stat := &models.TaskCommitStat{
+		CommitSHA: sha,
+		ShortSHA:  shortCommitSHA(sha),
+		Author:    strings.TrimSpace(author),
+		Subject:   strings.TrimSpace(subject),
+	}
+	if stat.Author == "" {
+		stat.Author = "OpenVibely Bot"
+	}
+	if stat.Subject == "" {
+		stat.Subject = "Publish task branch"
+	}
+	if err := addNumstatFromGitDiff(worktreePath, baseRef, stat); err != nil {
+		return nil, err
+	}
+	return stat, nil
 }
 
 func collectProducedCommitStat(worktreePath, sha string) (*models.TaskCommitStat, error) {
@@ -120,6 +157,111 @@ func collectProducedCommitStat(worktreePath, sha string) (*models.TaskCommitStat
 	}
 	stat.ChangedFilesJSON = string(changedFilesJSON)
 	return stat, nil
+}
+
+func addNumstatFromGitDiff(worktreePath, baseRef string, stat *models.TaskCommitStat) error {
+	baseRef = strings.TrimSpace(baseRef)
+	if baseRef == "" {
+		return fmt.Errorf("base ref is required")
+	}
+	seenFiles := map[string]bool{}
+	var files []string
+
+	diffCmd := exec.Command("git", "diff", "--numstat", baseRef)
+	diffCmd.Dir = worktreePath
+	diffOut, err := diffCmd.Output()
+	if err != nil {
+		return fmt.Errorf("reading publish diff numstat: %w", err)
+	}
+	if err := addNumstatLines(stat, string(diffOut), seenFiles, &files); err != nil {
+		return err
+	}
+
+	untrackedCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard", "-z")
+	untrackedCmd.Dir = worktreePath
+	untrackedOut, err := untrackedCmd.Output()
+	if err != nil {
+		return fmt.Errorf("reading untracked publish files: %w", err)
+	}
+	for _, field := range strings.Split(string(untrackedOut), "\x00") {
+		path := strings.TrimSpace(filepath.ToSlash(field))
+		if path == "" || seenFiles[path] {
+			continue
+		}
+		absPath := filepath.Join(worktreePath, filepath.FromSlash(path))
+		info, err := os.Lstat(absPath)
+		if err != nil || info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			continue
+		}
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			return fmt.Errorf("reading untracked publish file %s: %w", path, err)
+		}
+		stat.Insertions += countTextLines(content)
+		seenFiles[path] = true
+		files = append(files, path)
+	}
+
+	stat.FilesChanged = len(files)
+	changedFilesJSON, err := json.Marshal(files)
+	if err != nil {
+		return fmt.Errorf("encoding changed files: %w", err)
+	}
+	stat.ChangedFilesJSON = string(changedFilesJSON)
+	return nil
+}
+
+func addNumstatLines(stat *models.TaskCommitStat, output string, seenFiles map[string]bool, files *[]string) error {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 3 {
+			continue
+		}
+		if n, err := strconv.Atoi(fields[0]); err == nil {
+			stat.Insertions += n
+		}
+		if n, err := strconv.Atoi(fields[1]); err == nil {
+			stat.Deletions += n
+		}
+		path := strings.Join(fields[2:], "\t")
+		if path != "" && !seenFiles[path] {
+			seenFiles[path] = true
+			*files = append(*files, path)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scanning commit numstat: %w", err)
+	}
+	return nil
+}
+
+func countTextLines(content []byte) int {
+	if len(content) == 0 {
+		return 0
+	}
+	lines := 0
+	for _, b := range content {
+		if b == '\n' {
+			lines++
+		}
+	}
+	if content[len(content)-1] != '\n' {
+		lines++
+	}
+	return lines
+}
+
+func shortCommitSHA(sha string) string {
+	sha = strings.TrimSpace(sha)
+	if len(sha) <= 7 {
+		return sha
+	}
+	return sha[:7]
 }
 
 func gitCommitSHA(worktreePath, ref string) (string, error) {
