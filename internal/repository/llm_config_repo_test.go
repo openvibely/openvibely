@@ -539,11 +539,15 @@ func TestLLMConfigRepo_WorkerCapacitiesStayUnderLargeFixtureBudget(t *testing.T)
 	})
 
 	const (
-		maxBytesPerOp    = 200 * 1024
-		maxDurationPerOp = 200 * time.Microsecond
+		maxBytesPerOp      = 200 * 1024
+		maxDurationPerOp   = time.Millisecond
+		minFullListSpeedup = 20
 	)
 	t.Logf("List: %d ns/op, %d B/op; WorkerCapacities: %d ns/op, %d B/op",
 		fullList.NsPerOp(), fullList.AllocedBytesPerOp(), workerList.NsPerOp(), workerList.AllocedBytesPerOp())
+	if workerList.NsPerOp()*minFullListSpeedup > fullList.NsPerOp() {
+		t.Fatalf("worker capacity list took %s/op, want at least %dx faster than full List (%s/op)", time.Duration(workerList.NsPerOp()), minFullListSpeedup, time.Duration(fullList.NsPerOp()))
+	}
 	if workerList.NsPerOp() > maxDurationPerOp.Nanoseconds() {
 		t.Fatalf("worker capacity list took %s/op, want <= %s", time.Duration(workerList.NsPerOp()), maxDurationPerOp)
 	}

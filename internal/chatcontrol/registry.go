@@ -11,7 +11,7 @@
 //   - schedules: schedule_task, delete_schedule, modify_schedule
 //   - alerts: create_alert, delete_alert, toggle_alert
 //   - personality: set_personality
-//   - projects: create_project, switch_project
+//   - projects: create_project, update_project_settings, switch_project
 //   - agents: create_agent
 //   - automations: save_automation, run_automation_now, pause_automation, resume_automation
 //   - chat: set_chat_mode
@@ -142,6 +142,7 @@ const createTaskParams = `{"type":"object","properties":{"title":{"type":"string
 
 const createAgentParams = `{"type":"object","properties":{"name":{"type":"string","description":"Display name for the reusable Agent profile."},"description":{"type":"string","description":"Short summary shown on the Agents page and selection surfaces."},"system_prompt":{"type":"string","description":"System prompt/persona for this user-managed Agent."},"model":{"type":"string","description":"Optional model override by configured model id/name, or inherit. Defaults to inherit."},"tools":{"type":"array","items":{"type":"string"},"description":"Optional allowed tool names from the safe Agent tool catalog. Unknown tools are rejected."},"scoped_files":{"type":"array","items":{"type":"object","properties":{"directory":{"type":"string","description":"Project-relative directory."},"permissions":{"type":"array","items":{"type":"string","enum":["read","write","delete"]}}},"required":["directory"],"additionalProperties":false},"description":"Optional safe scoped-file grants. Secret-bearing MCP env/header values are not supported."},"scope":{"type":"string","enum":["project","global"],"description":"Agent scope. Defaults to project."},"project_id":{"type":"string","description":"Optional assertion matching the current project for project-scoped Agents."},"enabled":{"type":"boolean","description":"Whether the Agent is enabled. Defaults to true."},"selectable_as_primary":{"type":"boolean","description":"Whether the Agent can be assigned as a primary Agent for tasks. Defaults to true."}},"required":["name","system_prompt"],"additionalProperties":false}`
 const createProjectParams = `{"type":"object","properties":{"name":{"type":"string","description":"Project name."},"repo_url":{"type":"string","description":"GitHub repository URL to clone for the new project. Local filesystem paths and create-directory behavior are not supported."},"description":{"type":"string","description":"Optional project description."},"default_agent_config_id":{"type":"string","description":"Optional default model config ID for the project."},"max_workers":{"type":"integer","minimum":1,"description":"Optional positive per-project worker limit."},"switch_after_create":{"type":"boolean","description":"Request switching the current Chat/channel context to the new project when the surface supports it."}},"required":["name","repo_url"],"additionalProperties":false}`
+const updateProjectSettingsParams = `{"type":"object","properties":{"project_id":{"type":"string","description":"Optional assertion matching the current project ID. The action updates only the current project."},"project_name":{"type":"string","description":"Optional assertion matching the current project name exactly, case-insensitive. The action updates only the current project."},"new_name":{"type":"string","description":"Optional new project display name. Must be nonblank after trimming."},"description":{"type":"string","description":"Optional replacement project description. Use an empty string to clear it."},"default_model":{"type":"string","description":"Optional project default model to set, by exact model config ID first or unambiguous exact model name."},"default_model_id":{"type":"string","description":"Optional project default model config ID to set. Use either default_model or default_model_id, not both."},"clear_default_model":{"type":"boolean","description":"Clear the project-specific default model so future tasks inherit the global default."},"max_workers":{"type":"integer","minimum":0,"maximum":10,"description":"Optional per-project worker limit. Use 0 to clear the project-specific limit."},"clear_max_workers":{"type":"boolean","description":"Clear the project-specific worker limit, equivalent to max_workers=0."}},"additionalProperties":false}`
 const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the swarm parent. If set, the Goal Agent may continue the parent task until this condition is satisfied."},"project_id":{"type":"string","description":"Optional project id; defaults to current project."},"category":{"type":"string","enum":["active","backlog"],"description":"Active starts the planner now; backlog defers planning until the swarm parent is run or moved to Active."},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID for the swarm parent/children. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"tag":{"type":"string","enum":["bug","feature"]},"max_workers":{"type":"integer","minimum":1,"maximum":8},"worker_isolation":{"type":"string","enum":["worktree","read_only","shared"]},"reviewer_enabled":{"type":"boolean","description":"Whether the swarm should create and run a reviewer stage. Defaults to true."},"merger_enabled":{"type":"boolean","description":"Whether the swarm should create and run a merger stage. Defaults to true."},"merge_target_branch":{"type":"string","description":"Optional merge target branch for swarm output."}},"required":["title","prompt"],"additionalProperties":false}`
 
 // editTaskParams is the full JSON Schema for the edit_task tool.
@@ -787,8 +788,17 @@ var registry = []ActionDef{
 		Parameters:   json.RawMessage(createProjectParams),
 	},
 	{
-		Name:         "switch_project",
-		Description:  "Switch active project by id or name.",
+		Name:         "update_project_settings",
+		Description:  "Update safe settings for the current project: name, description, project default model, and per-project worker limit. Orchestrate-only; optional project_id/project_name are current-project assertions. Does not expose repository path changes, GitHub URL recloning, project deletion, credential edits, or repository rebinding.",
+		Domain:       DomainProjects,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(updateProjectSettingsParams),
+	},
+	{
+		Name: "switch_project", Description: "Switch active project by id or name.",
 		Domain:       DomainProjects,
 		Access:       AccessWrite,
 		Sensitivity:  SensitivityNormal,

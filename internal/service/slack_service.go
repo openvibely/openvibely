@@ -1490,10 +1490,12 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		UnavailableAgentsText: "Agent listing is currently unavailable on Slack (no agent repository configured on this surface).",
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
-		ProjectID:   projectID,
-		ProjectRepo: s.projectRepo,
-		CreateProject: CreateGitHubProjectRuntimeOptions{
-			ProjectSvc:                 s.projectSvc,
+		ProjectID:     projectID,
+		ProjectRepo:   s.projectRepo,
+		ProjectSvc:    s.projectSvc,
+		LLMConfigRepo: s.llmConfigRepo,
+		WorkerSvc:     s.workerSvc,
+		CreateProject: CreateGitHubProjectRuntimeOptions{ProjectSvc: s.projectSvc,
 			GitHubSvc:                  s.githubProjectSvc,
 			MemorySvc:                  s.memorySvc,
 			AgentLibraryMaintenanceSvc: s.agentLibraryMaintenanceSvc,

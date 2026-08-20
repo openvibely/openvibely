@@ -586,6 +586,20 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 				AgentLibraryMaintenanceSvc: h.agentLibraryMaintenanceSvc,
 			})
 		},
+		"update_project_settings": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var dispatch func()
+			if h.workerSvc != nil {
+				dispatch = h.workerSvc.DispatchNext
+			}
+			return service.ExecuteUpdateProjectSettingsRuntime(ctx, service.UpdateProjectSettingsRuntimeOptions{
+				ProjectID:          params.ProjectID,
+				Input:              input,
+				ProjectSvc:         h.projectSvc,
+				ProjectRepo:        h.projectRepo,
+				LLMConfigRepo:      h.llmConfigRepo,
+				DispatchQueuedWork: dispatch,
+			})
+		},
 		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSwitchProject(ctx, params.ProjectID, input), nil
 		}, "list_alerts": alertHandlers["list_alerts"],

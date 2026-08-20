@@ -280,6 +280,42 @@ func TestCreateProjectRegisteredOrchestrateOnly(t *testing.T) {
 	}
 }
 
+func TestUpdateProjectSettingsRegisteredOrchestrateOnly(t *testing.T) {
+	def := Get("update_project_settings")
+	if def == nil {
+		t.Fatal("update_project_settings missing from registry")
+	}
+	if def.Domain != DomainProjects || def.Access != AccessWrite {
+		t.Fatalf("update_project_settings domain/access = %s/%s, want projects/write", def.Domain, def.Access)
+	}
+	for _, surface := range AllSurfaces {
+		if err := IsAllowed("update_project_settings", models.ChatModeOrchestrate, surface); err != nil {
+			t.Fatalf("update_project_settings should be allowed in orchestrate on %s: %v", surface, err)
+		}
+		mustContain(t, toolDefNames(ToolDefsForContext(models.ChatModeOrchestrate, surface, true)), "update_project_settings")
+		if err := IsAllowed("update_project_settings", models.ChatModePlan, surface); err == nil {
+			t.Fatalf("update_project_settings should be denied in plan on %s", surface)
+		}
+		mustNotContain(t, toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true)), "update_project_settings")
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	for _, name := range []string{"project_id", "project_name", "default_model", "default_model_id", "clear_default_model", "max_workers", "clear_max_workers"} {
+		if _, ok := schema.Properties[name]; !ok {
+			t.Fatalf("update_project_settings schema missing %s", name)
+		}
+	}
+	for _, forbidden := range []string{"repo_path", "repo_url", "github_url", "delete_project", "credentials"} {
+		if _, ok := schema.Properties[forbidden]; ok {
+			t.Fatalf("update_project_settings schema must not expose %s", forbidden)
+		}
+	}
+}
+
 // ---- Surface-specific capability tests ----
 
 func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
@@ -287,7 +323,7 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	names := toolDefNames(defs)
 
 	// Must have core write actions
-	mustContain(t, names, "create_task", "edit_task", "execute_tasks", "send_to_task", "send_message", "create_project")
+	mustContain(t, names, "create_task", "edit_task", "execute_tasks", "send_to_task", "send_message", "create_project", "update_project_settings")
 	// Must have new actions
 	mustContain(t, names, "switch_project", "get_chat_mode", "set_chat_mode", "list_capabilities")
 	// Must have new read actions
@@ -315,7 +351,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	// Must NOT have write actions
 	mustNotContain(t, names, "create_task", "edit_task", "execute_tasks",
 		"set_personality", "schedule_task", "delete_schedule", "modify_schedule",
-		"create_alert", "create_notification", "delete_alert", "toggle_alert", "create_project", "switch_project",
+		"create_alert", "create_notification", "delete_alert", "toggle_alert", "create_project", "update_project_settings", "switch_project",
 		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
 		"save_automation", "run_automation_now", "pause_automation", "resume_automation")
 
@@ -617,7 +653,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"list_personalities", "set_personality",
 		"list_models", "list_agents", "create_agent",
 		"view_settings", "list_channels", "view_system_update", "project_info",
-		"list_projects", "create_project", "switch_project",
+		"list_projects", "create_project", "update_project_settings", "switch_project",
 		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "delete_alert", "toggle_alert",
 		// new actions
 		"get_chat_mode", "set_chat_mode", "list_capabilities",
