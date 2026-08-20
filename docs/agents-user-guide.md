@@ -24,6 +24,12 @@ Why this matters:
 5. Set routing hints and permissions.
 6. Click `Save`.
 
+## Save From Chat
+
+In Orchestrate-mode Chat, you can explicitly ask Chat to save a reusable Agent profile with a name, description, system prompt, optional model override, allowed tools, scoped-file grants, enabled state, and primary-task selectability. Chat-created Agents appear on the Agents page and can be assigned to future tasks like Agents created in the browser.
+
+Use the Agents page for advanced edits such as plugin configuration, Agent-owned skills, lifecycle hooks, and protected system-agent review; Chat does not accept credentials, MCP env/header secrets, OAuth tokens, API keys, plugin marketplace changes, deletion, or protected-agent edits.
+
 ## Generate From Description
 
 In `Agent Details`, enter a description and click `Generate`. This drafts configuration from your description including a starter system prompt.

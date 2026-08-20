@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -190,6 +191,41 @@ type AlertRuntimeOptions struct {
 
 type telegramAuthListByProjectStore interface {
 	ListByProject(ctx context.Context, projectID string) ([]models.TelegramAuthorizedUser, error)
+}
+
+type CreateAgentRuntimeInput struct {
+	Name                string                     `json:"name"`
+	Description         string                     `json:"description"`
+	SystemPrompt        string                     `json:"system_prompt"`
+	Model               string                     `json:"model"`
+	Tools               []string                   `json:"tools"`
+	ScopedFiles         []models.ScopedFilesConfig `json:"scoped_files"`
+	Scope               string                     `json:"scope"`
+	ProjectID           string                     `json:"project_id"`
+	Enabled             *bool                      `json:"enabled"`
+	SelectableAsPrimary *bool                      `json:"selectable_as_primary"`
+}
+
+type CreateAgentRuntimeOptions struct {
+	ProjectID     string
+	Input         CreateAgentRuntimeInput
+	AgentRepo     *repository.AgentRepo
+	LLMConfigRepo *repository.LLMConfigRepo
+	ProjectRepo   *repository.ProjectRepo
+	Materialize   func(context.Context, *models.Agent) error
+}
+
+type createAgentRuntimeResponse struct {
+	OK                  bool   `json:"ok"`
+	Error               string `json:"error,omitempty"`
+	AgentID             string `json:"agent_id,omitempty"`
+	Name                string `json:"name,omitempty"`
+	Description         string `json:"description,omitempty"`
+	Model               string `json:"model,omitempty"`
+	Scope               string `json:"scope,omitempty"`
+	ProjectID           string `json:"project_id,omitempty"`
+	Enabled             bool   `json:"enabled"`
+	SelectableAsPrimary bool   `json:"selectable_as_primary"`
 }
 
 type channelUtilityActionHandlerOptions struct {
@@ -524,6 +560,20 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		},
 		"list_agents": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelListAgentsResult(ctx, opts.AgentRepo, opts.UnavailableAgentsText), nil
+		},
+		"create_agent": func(ctx context.Context, input json.RawMessage) (string, error) {
+			req, err := DecodeCreateAgentRuntimeInput(input)
+			if err != nil {
+				return "", err
+			}
+			out, _, err := ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{
+				ProjectID:     opts.ProjectID,
+				Input:         req,
+				AgentRepo:     opts.AgentRepo,
+				LLMConfigRepo: opts.LLMConfigRepo,
+				ProjectRepo:   opts.ProjectRepo,
+			})
+			return out, err
 		},
 		"view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelViewSettingsResult(ctx, opts.SettingsRepo, opts.LLMConfigRepo, opts.ProjectRepo), nil
@@ -1252,6 +1302,322 @@ func ExecuteCreateGitHubProjectRuntime(ctx context.Context, input json.RawMessag
 		}
 	}
 	return respond(createGitHubProjectRuntimeResponse{OK: true, ProjectID: p.ID, Name: p.Name, RepoURL: p.RepoURL, RepoPathPresent: strings.TrimSpace(p.RepoPath) != "", Switched: switched})
+}
+
+func ExecuteCreateAgentRuntime(ctx context.Context, opts CreateAgentRuntimeOptions) (string, *models.Agent, error) {
+	respond := func(response createAgentRuntimeResponse) (string, *models.Agent, error) {
+		b, err := json.Marshal(response)
+		if err != nil {
+			return "", nil, err
+		}
+		if response.Error != "" {
+			return string(b), nil, errors.New(response.Error)
+		}
+		return string(b), nil, nil
+	}
+	fail := func(msg string) (string, *models.Agent, error) {
+		msg = strings.TrimSpace(msg)
+		if msg == "" {
+			msg = "create_agent failed"
+		}
+		return respond(createAgentRuntimeResponse{OK: false, Error: msg})
+	}
+
+	if opts.AgentRepo == nil {
+		return fail("agent repository is not configured")
+	}
+	if opts.LLMConfigRepo == nil {
+		return fail("model repository is not configured")
+	}
+	projectID := strings.TrimSpace(opts.ProjectID)
+	req := opts.Input
+	req.Name = strings.TrimSpace(req.Name)
+	req.Description = strings.TrimSpace(req.Description)
+	req.SystemPrompt = strings.TrimSpace(req.SystemPrompt)
+	if req.Name == "" {
+		return fail("name is required")
+	}
+	if req.SystemPrompt == "" {
+		return fail("system_prompt is required")
+	}
+	if strings.TrimSpace(req.ProjectID) != "" && strings.TrimSpace(req.ProjectID) != projectID {
+		return fail("project_id must match the current project context")
+	}
+
+	scope := strings.ToLower(strings.TrimSpace(req.Scope))
+	if scope == "" {
+		scope = string(models.AgentScopeProject)
+	}
+	if scope != string(models.AgentScopeGlobal) && scope != string(models.AgentScopeProject) {
+		return fail("scope must be global or project")
+	}
+	if scope == string(models.AgentScopeProject) && projectID == "" {
+		return fail("project scope requires a current project")
+	}
+	if scope == string(models.AgentScopeProject) && opts.ProjectRepo != nil {
+		project, err := opts.ProjectRepo.GetByID(ctx, projectID)
+		if err != nil {
+			return fail("loading current project: " + err.Error())
+		}
+		if project == nil {
+			return fail("project scope requires a valid current project")
+		}
+	}
+
+	model, err := resolveRuntimeAgentModel(ctx, opts.LLMConfigRepo, req.Model)
+	if err != nil {
+		return fail(err.Error())
+	}
+	tools, err := normalizeRuntimeAgentTools(req.Tools)
+	if err != nil {
+		return fail(err.Error())
+	}
+	scopedFiles, err := normalizeRuntimeScopedFiles(req.ScopedFiles)
+	if err != nil {
+		return fail(err.Error())
+	}
+	if len(scopedFiles) > 0 && !runtimeAgentToolListContains(tools, models.AgentToolScopedFiles) {
+		tools = append(tools, models.AgentToolScopedFiles)
+	}
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	selectable := true
+	if req.SelectableAsPrimary != nil {
+		selectable = *req.SelectableAsPrimary
+	}
+
+	agent := &models.Agent{
+		Name:                req.Name,
+		Description:         req.Description,
+		SystemPrompt:        req.SystemPrompt,
+		Model:               model,
+		Tools:               tools,
+		ToolConfig:          models.AgentToolConfig{ScopedFiles: scopedFiles},
+		Plugins:             []string{},
+		MCPServers:          []models.MCPServerConfig{},
+		Skills:              []models.SkillConfig{},
+		Scope:               models.AgentScope(scope),
+		SelectableAsPrimary: selectable,
+		Enabled:             enabled,
+		CreatedBy:           models.AgentCreatedByUser,
+		GeneratedStatus:     models.AgentStatusUserEdited,
+		SourceRefs:          []string{},
+	}
+	if agent.Scope == models.AgentScopeProject {
+		agent.ProjectID = projectID
+	}
+	if err := opts.AgentRepo.Create(ctx, agent); err != nil {
+		return fail(runtimeAgentCreateError(err))
+	}
+	if opts.Materialize != nil {
+		if err := opts.Materialize(ctx, agent); err != nil {
+			return fail(err.Error())
+		}
+	}
+	response := createAgentRuntimeResponse{
+		OK:                  true,
+		AgentID:             agent.ID,
+		Name:                agent.Name,
+		Description:         agent.Description,
+		Model:               agent.Model,
+		Scope:               string(agent.Scope),
+		ProjectID:           agent.ProjectID,
+		Enabled:             agent.Enabled,
+		SelectableAsPrimary: agent.SelectableAsPrimary,
+	}
+	b, err := json.Marshal(response)
+	if err != nil {
+		return "", nil, err
+	}
+	return string(b), agent, nil
+}
+
+func DecodeCreateAgentRuntimeInput(input json.RawMessage) (CreateAgentRuntimeInput, error) {
+	payload := strings.TrimSpace(string(input))
+	if payload == "" {
+		payload = `{}`
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+		return CreateAgentRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
+	}
+	allowed := map[string]bool{
+		"name": true, "description": true, "system_prompt": true, "model": true, "tools": true,
+		"scoped_files": true, "scope": true, "project_id": true, "enabled": true, "selectable_as_primary": true,
+	}
+	for key := range raw {
+		if !allowed[key] {
+			return CreateAgentRuntimeInput{}, fmt.Errorf("create_agent does not support %q", key)
+		}
+	}
+	var req CreateAgentRuntimeInput
+	if err := json.Unmarshal([]byte(payload), &req); err != nil {
+		return CreateAgentRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
+	}
+	return req, nil
+}
+
+func runtimeAgentCreateError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if err == repository.ErrAgentNameRequired {
+		return "agent name is required"
+	}
+	if err == repository.ErrSelectableAgentNameAlreadyExists {
+		return "enabled selectable primary agent name already exists"
+	}
+	return err.Error()
+}
+
+func resolveRuntimeAgentModel(ctx context.Context, repo *repository.LLMConfigRepo, requested string) (string, error) {
+	model := strings.TrimSpace(requested)
+	if model == "" || strings.EqualFold(model, "inherit") {
+		return "inherit", nil
+	}
+	options, err := repo.ListPickerOptions(ctx)
+	if err != nil {
+		return "", fmt.Errorf("listing model picker options: %w", err)
+	}
+	for _, option := range options {
+		if strings.TrimSpace(option.Model) == model {
+			return option.Model, nil
+		}
+	}
+	var matches []models.LLMConfig
+	for _, option := range options {
+		if strings.EqualFold(strings.TrimSpace(option.Name), model) {
+			matches = append(matches, option)
+		}
+	}
+	if len(matches) == 1 {
+		return strings.TrimSpace(matches[0].Model), nil
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("model name %q is ambiguous", model)
+	}
+	return "", fmt.Errorf("unknown model %q", model)
+}
+
+func defaultRuntimeAgentTools() []string {
+	return []string{"Read", "Grep", "Glob", "Bash", "memory_view"}
+}
+
+func normalizeRuntimeAgentTools(input []string) ([]string, error) {
+	if len(input) == 0 {
+		return defaultRuntimeAgentTools(), nil
+	}
+	canonical := make(map[string]string, len(models.AllAgentTools))
+	for _, tool := range models.AllAgentTools {
+		canonical[strings.ToLower(tool)] = tool
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(input))
+	for _, raw := range input {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		tool, ok := canonical[strings.ToLower(trimmed)]
+		if !ok {
+			return nil, fmt.Errorf("unknown tool %q", trimmed)
+		}
+		if _, exists := seen[tool]; exists {
+			continue
+		}
+		seen[tool] = struct{}{}
+		out = append(out, tool)
+	}
+	if len(out) == 0 {
+		return defaultRuntimeAgentTools(), nil
+	}
+	return out, nil
+}
+
+func runtimeAgentToolListContains(tools []string, target string) bool {
+	for _, tool := range tools {
+		if tool == target {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeRuntimeScopedFiles(input []models.ScopedFilesConfig) ([]models.ScopedFilesConfig, error) {
+	if len(input) == 0 {
+		return nil, nil
+	}
+	out := make([]models.ScopedFilesConfig, 0, len(input))
+	for _, cfg := range input {
+		dir, err := normalizeRuntimeScopedFilesDirectory(cfg.Directory)
+		if err != nil {
+			return nil, err
+		}
+		perms, err := normalizeRuntimeScopedFilesPermissions(cfg.Permissions)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, models.ScopedFilesConfig{Directory: dir, Permissions: perms})
+	}
+	return out, nil
+}
+
+func normalizeRuntimeScopedFilesDirectory(directory string) (string, error) {
+	directory = strings.TrimSpace(directory)
+	if directory == "" {
+		directory = ".openvibely/memories"
+	}
+	normalized := strings.ReplaceAll(directory, "\\", "/")
+	if strings.HasPrefix(normalized, "/") || strings.HasPrefix(normalized, "~") || (len(normalized) >= 2 && normalized[1] == ':') {
+		return "", fmt.Errorf("scoped file directory must be project-relative")
+	}
+	parts := strings.Split(normalized, "/")
+	cleanedParts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			return "", fmt.Errorf("scoped file directory must stay inside the project")
+		default:
+			cleanedParts = append(cleanedParts, part)
+		}
+	}
+	if len(cleanedParts) == 0 {
+		return "", fmt.Errorf("scoped file directory must stay inside the project")
+	}
+	return strings.Join(cleanedParts, "/"), nil
+}
+
+func normalizeRuntimeScopedFilesPermissions(input []string) ([]string, error) {
+	if len(input) == 0 {
+		return []string{"read"}, nil
+	}
+	allowed := map[string]bool{"read": true, "write": true, "delete": true}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(input))
+	for _, raw := range input {
+		perm := strings.ToLower(strings.TrimSpace(raw))
+		if perm == "" {
+			continue
+		}
+		if !allowed[perm] {
+			return nil, fmt.Errorf("unknown scoped file permission %q", raw)
+		}
+		if _, exists := seen[perm]; exists {
+			continue
+		}
+		seen[perm] = struct{}{}
+		out = append(out, perm)
+	}
+	if len(out) == 0 {
+		return []string{"read"}, nil
+	}
+	return out, nil
 }
 
 func decodeCreateGitHubProjectInput(input json.RawMessage) (CreateGitHubProjectRuntimeInput, error) {

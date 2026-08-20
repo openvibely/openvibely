@@ -1911,3 +1911,107 @@ func TestSlackTelegramDiscordRuntimesCreateGitHubProject(t *testing.T) {
 		})
 	}
 }
+
+func TestCreateAgentRuntimeCreatesAgentAndRejectsUnsafeInputs(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Runtime Agent Service Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+
+	out, agent, err := ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input: CreateAgentRuntimeInput{
+			Name:         "Docs Reviewer",
+			Description:  "Reviews docs only.",
+			SystemPrompt: "Review documentation changes only.",
+			Model:        "inherit",
+			Tools:        []string{"Read", "Grep", "read"},
+			ScopedFiles:  []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"read", "write", "read"}}},
+			Scope:        "project",
+		},
+	})
+	require.NoError(t, err, out)
+	require.NotNil(t, agent)
+	require.Contains(t, out, `"ok":true`)
+	require.Equal(t, project.ID, agent.ProjectID)
+	require.Equal(t, models.AgentScopeProject, agent.Scope)
+	require.True(t, agent.Enabled)
+	require.True(t, agent.SelectableAsPrimary)
+	require.Equal(t, []string{"Read", "Grep", models.AgentToolScopedFiles}, agent.Tools)
+	require.Equal(t, []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"read", "write"}}}, agent.ToolConfig.ScopedFiles)
+
+	stored, err := agentRepo.GetUniqueSelectableByName(ctx, "Docs Reviewer")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+
+	for _, tc := range []struct {
+		name      string
+		input     CreateAgentRuntimeInput
+		wantError string
+	}{
+		{name: "duplicate selectable name", input: CreateAgentRuntimeInput{Name: " docs reviewer ", SystemPrompt: "duplicate"}, wantError: "enabled selectable primary agent name already exists"},
+		{name: "unknown tool", input: CreateAgentRuntimeInput{Name: "Tool Bad", SystemPrompt: "bad", Tools: []string{"Read", "RootShell"}}, wantError: `unknown tool "RootShell"`},
+		{name: "invalid scoped file directory", input: CreateAgentRuntimeInput{Name: "Scoped Bad", SystemPrompt: "bad", ScopedFiles: []models.ScopedFilesConfig{{Directory: "../secrets", Permissions: []string{"read"}}}}, wantError: "scoped file directory must stay inside the project"},
+		{name: "invalid scoped file permission", input: CreateAgentRuntimeInput{Name: "Perm Bad", SystemPrompt: "bad", ScopedFiles: []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"admin"}}}}, wantError: `unknown scoped file permission "admin"`},
+		{name: "foreign project id", input: CreateAgentRuntimeInput{Name: "Foreign", SystemPrompt: "bad", Scope: "project", ProjectID: "other-project"}, wantError: "project_id must match the current project context"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, created, err := ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{ProjectID: project.ID, AgentRepo: agentRepo, LLMConfigRepo: llmConfigRepo, ProjectRepo: projectRepo, Input: tc.input})
+			require.Error(t, err)
+			require.Nil(t, created)
+			require.Contains(t, err.Error(), tc.wantError)
+			matches, getErr := agentRepo.ListByName(ctx, tc.input.Name)
+			require.NoError(t, getErr)
+			if tc.name == "duplicate selectable name" {
+				require.Len(t, matches, 1)
+			} else {
+				require.Empty(t, matches)
+			}
+		})
+	}
+
+	_, decodeErr := DecodeCreateAgentRuntimeInput(json.RawMessage(`{"name":"Unsafe","system_prompt":"x","mcp_servers":[{"env":{"API_KEY":"secret"}}]}`))
+	require.Error(t, decodeErr)
+	require.Contains(t, decodeErr.Error(), `create_agent does not support "mcp_servers"`)
+	_, decodeErr = DecodeCreateAgentRuntimeInput(json.RawMessage(`{"name":"Unsafe","system_prompt":"x","plugins":["github@marketplace"]}`))
+	require.Error(t, decodeErr)
+	require.Contains(t, decodeErr.Error(), `create_agent does not support "plugins"`)
+	_, decodeErr = DecodeCreateAgentRuntimeInput(json.RawMessage(`{"id":"protected","name":"Unsafe","system_prompt":"x"}`))
+	require.Error(t, decodeErr)
+	require.Contains(t, decodeErr.Error(), `create_agent does not support "id"`)
+}
+
+func TestChannelUtilityCreateAgentRuntimeAndCompactListAgents(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Channel Runtime Agent Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, AgentRepo: agentRepo, LLMConfigRepo: llmConfigRepo, ProjectRepo: projectRepo})
+
+	createHandler := handlers["create_agent"]
+	require.NotNil(t, createHandler)
+	out, err := createHandler(ctx, json.RawMessage(`{"name":"Channel Reuser","description":"Reusable from channel.","system_prompt":"Act as a reusable channel-created Agent.","model":"inherit","tools":["Read"]}`))
+	require.NoError(t, err, out)
+	require.Contains(t, out, `"ok":true`)
+
+	stored, err := agentRepo.GetUniqueSelectableByName(ctx, "Channel Reuser")
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, project.ID, stored.ProjectID)
+	require.Equal(t, []string{"Read"}, stored.Tools)
+
+	listOut, err := handlers["list_agents"](ctx, nil)
+	require.NoError(t, err)
+	require.Contains(t, listOut, "Channel Reuser")
+	require.Contains(t, listOut, "Reusable from channel.")
+	require.NotContains(t, listOut, "Act as a reusable channel-created Agent")
+}

@@ -578,7 +578,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"view_task_thread", "send_to_task",
 		"schedule_task", "delete_schedule", "modify_schedule",
 		"list_personalities", "set_personality",
-		"list_models", "list_agents",
+		"list_models", "list_agents", "create_agent",
 		"view_settings", "list_channels", "view_system_update", "project_info",
 		"list_projects", "create_project", "switch_project",
 		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "delete_alert", "toggle_alert",
@@ -1032,5 +1032,27 @@ func TestRegistry_TaskGoalToolsAndCreateTaskGoalSchema(t *testing.T) {
 	props := schema["properties"].(map[string]any)
 	if _, ok := props["goal"]; !ok {
 		t.Fatalf("create_task schema missing goal: %+v", props)
+	}
+}
+
+func TestCreateAgentRegistryModesAndSurfaces(t *testing.T) {
+	for _, def := range ToolDefsForContext(models.ChatModePlan, SurfaceWeb, true) {
+		if def.Name == "create_agent" {
+			t.Fatal("create_agent must not be exposed in plan mode")
+		}
+	}
+	for _, surface := range []Surface{SurfaceWeb, SurfaceAPI, SurfaceSlack, SurfaceTelegram, SurfaceDiscord, SurfaceEmail} {
+		found := false
+		for _, def := range ToolDefsForContext(models.ChatModeOrchestrate, surface, false) {
+			if def.Name == "create_agent" {
+				found = true
+				if strings.Contains(string(def.Parameters), "mcp_servers") || strings.Contains(string(def.Parameters), "api_key") || strings.Contains(string(def.Parameters), "oauth") || strings.Contains(string(def.Parameters), "plugins") {
+					t.Fatalf("create_agent schema for surface %s exposes unsupported secret/plugin fields: %s", surface, string(def.Parameters))
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("create_agent not exposed in orchestrate mode for surface %s", surface)
+		}
 	}
 }
