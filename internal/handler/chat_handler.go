@@ -309,7 +309,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	// Render user message and streaming/queued placeholder
 	var userMsg templ.Component
 	if len(chatAttachments) > 0 {
-		userMsg = components.ChatBubbleWithAttachments("User", message, chatAttachments)
+		userMsg = components.ChatBubbleWithAttachments("User", message, chatAttachments, projectID)
 	} else {
 		userMsg = components.ChatBubble("User", message)
 	}

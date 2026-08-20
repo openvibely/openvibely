@@ -1864,7 +1864,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to route swarm follow-up")
 		}
 		return render(c, http.StatusOK, templ.Join(
-			components.TaskThreadQueuedFollowupResponse(message, nil),
+			components.TaskThreadQueuedFollowupResponse(message, nil, task.ProjectID),
 			components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), false, ""),
 		))
 	}
@@ -1992,7 +1992,7 @@ func (h *Handler) TaskThreadSend(c echo.Context) error {
 	}
 
 	return render(c, http.StatusOK, templ.Join(
-		components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments),
+		components.TaskThreadFollowupResponse(message, exec.ID, chatAttachments, task.ProjectID),
 		components.ChatComposerActionButtonOOB("task-thread-form-primary-action", fmt.Sprintf("/tasks/%s/cancel?composer_stop=1", taskID), true, exec.ID),
 	))
 }
@@ -2216,6 +2216,14 @@ func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "task and execution are required")
 	}
 
+	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+
 	exec, err := h.execRepo.GetByID(c.Request().Context(), execID)
 	if err != nil {
 		return err
@@ -2233,5 +2241,5 @@ func (h *Handler) GetTaskThreadExecutionFragment(c echo.Context) error {
 			attachments = byExec[execID]
 		}
 	}
-	return render(c, http.StatusOK, components.TaskThreadFollowupResponse(exec.PromptSent, exec.ID, attachments))
+	return render(c, http.StatusOK, components.TaskThreadFollowupResponse(exec.PromptSent, exec.ID, attachments, task.ProjectID))
 }

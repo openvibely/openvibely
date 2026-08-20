@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/service"
 	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -28,6 +30,91 @@ func useTempUploadsDir(t *testing.T) {
 	t.Cleanup(func() {
 		uploadsDir = originalUploadsDir
 	})
+}
+
+type chatAttachmentOwnershipFixture struct {
+	e                  *echo.Echo
+	h                  *Handler
+	chatAttachmentRepo *repository.ChatAttachmentRepo
+	owningProject      models.Project
+	foreignProject     models.Project
+	attachment         models.ChatAttachment
+	fileContent        []byte
+}
+
+func setupChatAttachmentOwnershipFixture(t *testing.T) chatAttachmentOwnershipFixture {
+	t.Helper()
+	useTempUploadsDir(t)
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := service.NewProjectService(projectRepo)
+	settingsRepo := repository.NewSettingsRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	chatAttachmentRepo := repository.NewChatAttachmentRepo(db)
+	h := &Handler{
+		projectSvc:         projectSvc,
+		settingsRepo:       settingsRepo,
+		chatAttachmentRepo: chatAttachmentRepo,
+	}
+
+	owningProject := &models.Project{Name: "Attachment Owner"}
+	require.NoError(t, projectSvc.Create(ctx, owningProject))
+	foreignProject := &models.Project{Name: "Attachment Foreign"}
+	require.NoError(t, projectSvc.Create(ctx, foreignProject))
+
+	task := &models.Task{
+		ProjectID: owningProject.ID,
+		Title:     "Chat attachment owner task",
+		Category:  models.CategoryChat,
+		Priority:  1,
+		Status:    models.StatusRunning,
+		Prompt:    "chat prompt",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	exec := &models.Execution{TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "chat prompt"}
+	require.NoError(t, execRepo.Create(ctx, exec))
+
+	fileContent := []byte("project A secret attachment body")
+	filePath := filepath.Join(uploadsDir, "chat", exec.ID, "secret.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(filePath), 0755))
+	require.NoError(t, os.WriteFile(filePath, fileContent, 0644))
+	attachment := &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    "secret.txt",
+		FilePath:    filePath,
+		MediaType:   "text/plain",
+		FileSize:    int64(len(fileContent)),
+	}
+	require.NoError(t, chatAttachmentRepo.Create(ctx, attachment))
+
+	return chatAttachmentOwnershipFixture{
+		e:                  echo.New(),
+		h:                  h,
+		chatAttachmentRepo: chatAttachmentRepo,
+		owningProject:      *owningProject,
+		foreignProject:     *foreignProject,
+		attachment:         *attachment,
+		fileContent:        fileContent,
+	}
+}
+
+func newChatAttachmentContext(t *testing.T, e *echo.Echo, method, attachmentID, projectID string) (echo.Context, *httptest.ResponseRecorder) {
+	t.Helper()
+	path := "/chat/attachments/" + attachmentID
+	if method == http.MethodGet {
+		path += "/download"
+	}
+	if projectID != "" {
+		path += "?project_id=" + projectID
+	}
+	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(attachmentID)
+	return c, rec
 }
 
 func uploadChatAttachmentForTest(t *testing.T, e *echo.Echo, h *Handler, filename string, content []byte, contentType string, sessionID string) string {
@@ -66,6 +153,65 @@ func uploadChatAttachmentForTest(t *testing.T, e *echo.Echo, h *Handler, filenam
 	require.Len(t, response.Attachments, 1)
 	assert.Equal(t, contentType, response.Attachments[0].MediaType)
 	return response.SessionID
+}
+
+func TestDownloadChatAttachmentRejectsCrossProjectAttachment(t *testing.T) {
+	fixture := setupChatAttachmentOwnershipFixture(t)
+
+	c, rec := newChatAttachmentContext(t, fixture.e, http.MethodGet, fixture.attachment.ID, fixture.foreignProject.ID)
+	err := fixture.h.DownloadChatAttachment(c)
+
+	require.Error(t, err)
+	httpErr, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, httpErr.Code)
+	assert.NotContains(t, rec.Body.String(), string(fixture.fileContent))
+	assert.FileExists(t, fixture.attachment.FilePath)
+}
+
+func TestDownloadChatAttachmentServesSameProjectAttachment(t *testing.T) {
+	fixture := setupChatAttachmentOwnershipFixture(t)
+
+	c, rec := newChatAttachmentContext(t, fixture.e, http.MethodGet, fixture.attachment.ID, fixture.owningProject.ID)
+	err := fixture.h.DownloadChatAttachment(c)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, string(fixture.fileContent), rec.Body.String())
+}
+
+func TestDeleteChatAttachmentRejectsCrossProjectAttachment(t *testing.T) {
+	fixture := setupChatAttachmentOwnershipFixture(t)
+
+	c, _ := newChatAttachmentContext(t, fixture.e, http.MethodDelete, fixture.attachment.ID, fixture.foreignProject.ID)
+	err := fixture.h.DeleteChatAttachment(c)
+
+	require.Error(t, err)
+	httpErr, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusNotFound, httpErr.Code)
+	stored, getErr := fixture.chatAttachmentRepo.GetByID(context.Background(), fixture.attachment.ID)
+	require.NoError(t, getErr)
+	require.NotNil(t, stored)
+	assert.FileExists(t, fixture.attachment.FilePath)
+	contents, readErr := os.ReadFile(fixture.attachment.FilePath)
+	require.NoError(t, readErr)
+	assert.Equal(t, fixture.fileContent, contents)
+}
+
+func TestDeleteChatAttachmentRemovesSameProjectAttachment(t *testing.T) {
+	fixture := setupChatAttachmentOwnershipFixture(t)
+
+	c, rec := newChatAttachmentContext(t, fixture.e, http.MethodDelete, fixture.attachment.ID, fixture.owningProject.ID)
+	err := fixture.h.DeleteChatAttachment(c)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	stored, getErr := fixture.chatAttachmentRepo.GetByID(context.Background(), fixture.attachment.ID)
+	require.NoError(t, getErr)
+	assert.Nil(t, stored)
+	assert.NoFileExists(t, fixture.attachment.FilePath)
+	assert.Contains(t, rec.Body.String(), "No attachments")
 }
 
 func TestUploadChatAttachment_AllFileTypes(t *testing.T) {

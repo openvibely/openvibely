@@ -516,7 +516,7 @@ func TestTaskThreadQueuedPromotionRefreshesComposerActionToStop(t *testing.T) {
 	completed := models.Execution{ID: "thread-before-promotion", TaskID: task.ID, Status: models.ExecCompleted, PromptSent: "old", Output: "done"}
 	promoted := models.Execution{ID: "thread-promoted", TaskID: task.ID, Status: models.ExecRunning, PromptSent: "queued next", IsFollowup: true}
 	initialHTML := renderReconnectComponent(t, components.TaskThreadView(task, []models.Execution{completed}, nil, nil, nil, nil, false, 30))
-	promotedFragment := renderReconnectComponent(t, components.TaskThreadFollowupResponse(promoted.PromptSent, promoted.ID, nil))
+	promotedFragment := renderReconnectComponent(t, components.TaskThreadFollowupResponse(promoted.PromptSent, promoted.ID, nil, task.ProjectID))
 	stopAction := renderReconnectComponent(t, components.ChatComposerActionButtonOOB("task-thread-form-primary-action", "/tasks/thread-promotion/cancel?composer_stop=1", true, "thread-promotion-turn"))
 	prelude := reconnectFixturePrelude(t, map[string]string{"initial": initialHTML})
 	promotedJSON, err := json.Marshal(promotedFragment)

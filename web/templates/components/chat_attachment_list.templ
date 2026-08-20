@@ -2,10 +2,28 @@ package components
 
 import (
 	"fmt"
+	"net/url"
+
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-templ ChatAttachmentListOnly(attachments []models.ChatAttachment) {
+func ChatAttachmentDownloadURL(attachmentID, projectID string) string {
+	base := fmt.Sprintf("/chat/attachments/%s/download", attachmentID)
+	if projectID == "" {
+		return base
+	}
+	return base + "?project_id=" + url.QueryEscape(projectID)
+}
+
+func ChatAttachmentDeleteURL(attachmentID, projectID string) string {
+	base := fmt.Sprintf("/chat/attachments/%s", attachmentID)
+	if projectID == "" {
+		return base
+	}
+	return base + "?project_id=" + url.QueryEscape(projectID)
+}
+
+templ ChatAttachmentListOnly(attachments []models.ChatAttachment, projectID string) {
 	<div id="chat-attachment-list" class="space-y-2">
 		if len(attachments) == 0 {
 			<p class="text-sm opacity-50">No attachments</p>
@@ -18,7 +36,7 @@ templ ChatAttachmentListOnly(attachments []models.ChatAttachment) {
 						</svg>
 						<div>
 							<a
-								href={ templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)) }
+								href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) }
 								class="text-sm font-medium hover:underline"
 								target="_blank"
 							>
@@ -29,7 +47,7 @@ templ ChatAttachmentListOnly(attachments []models.ChatAttachment) {
 					</div>
 					<button
 						class="btn btn-ghost btn-xs text-error"
-						hx-delete={ fmt.Sprintf("/chat/attachments/%s", att.ID) }
+						hx-delete={ ChatAttachmentDeleteURL(att.ID, projectID) }
 						hx-target="#chat-attachment-list"
 						hx-swap="outerHTML"
 					>
