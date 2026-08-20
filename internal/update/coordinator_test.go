@@ -1113,11 +1113,16 @@ func TestCoordinatorResumesPersistedWaitingDrainBeforeCreatingReplacement(t *tes
 	defer cancel()
 	coordinator.StartRecovery(ctx)
 	deadline := time.Now().Add(time.Second)
-	for installer.applies.Load() == 0 && time.Now().Before(deadline) {
+	var snapshot CoordinatorSnapshot
+	for time.Now().Before(deadline) {
+		snapshot = coordinator.Snapshot()
+		if installer.applies.Load() == 1 && snapshot.State == StateSucceeded {
+			break
+		}
 		time.Sleep(time.Millisecond)
 	}
-	if installer.applies.Load() != 1 || coordinator.Snapshot().State != StateSucceeded {
-		t.Fatalf("applies=%d snapshot=%#v", installer.applies.Load(), coordinator.Snapshot())
+	if installer.applies.Load() != 1 || snapshot.State != StateSucceeded {
+		t.Fatalf("applies=%d snapshot=%#v", installer.applies.Load(), snapshot)
 	}
 }
 
