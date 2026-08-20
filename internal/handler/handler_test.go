@@ -2278,6 +2278,124 @@ func TestHandler_UpdateTask_RejectsInvalidPriorities(t *testing.T) {
 	}
 }
 
+func taskEditFormValues(title, category, priority, prompt, agentDefinitionID string) url.Values {
+	form := url.Values{}
+	form.Set("title", title)
+	form.Set("category", category)
+	form.Set("priority", priority)
+	form.Set("prompt", prompt)
+	form.Set("agent_definition_id", agentDefinitionID)
+	return form
+}
+
+func assertTaskPrimaryAgentDefinition(t *testing.T, h *Handler, taskID string, want *string) {
+	t.Helper()
+	stored, err := h.taskSvc.GetByID(context.Background(), taskID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	if want == nil {
+		assert.Nil(t, stored.AgentDefinitionID)
+		return
+	}
+	require.NotNil(t, stored.AgentDefinitionID)
+	assert.Equal(t, *want, *stored.AgentDefinitionID)
+}
+
+func TestHandler_UpdateTask_AssignsAndClearsPrimaryAgentDefinition(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agentRepo := repository.NewAgentRepo(tc.db)
+	tc.handler.agentRepo = agentRepo
+	agent := createScheduleTestAgent(t, agentRepo, "Task Edit Runner", models.AgentScopeProject, project.ID, true)
+	task := createTask(t, tc.handler, project.ID, "Task Edit Assign Agent", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+	})
+
+	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Task Edit Assign Agent", "backlog", "2", "updated prompt", agent.ID)).Execute()
+	assertCode(t, rec, http.StatusOK)
+	assertTaskPrimaryAgentDefinition(t, tc.handler, task.ID, &agent.ID)
+
+	rec = tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Task Edit Assign Agent", "backlog", "2", "updated prompt", "")).Execute()
+	assertCode(t, rec, http.StatusOK)
+	stored, err := tc.handler.taskSvc.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Nil(t, stored.AgentDefinitionID)
+}
+
+func TestHandler_UpdateTask_RejectsInvalidPrimaryAgentDefinitions(t *testing.T) {
+	cases := []struct {
+		name     string
+		agentID  func(t *testing.T, repo *repository.AgentRepo, projectID, otherProjectID string) string
+		wantBody string
+	}{
+		{
+			name: "cross project",
+			agentID: func(t *testing.T, repo *repository.AgentRepo, _, otherProjectID string) string {
+				return createScheduleTestAgent(t, repo, "Other Project Task Edit Agent", models.AgentScopeProject, otherProjectID, true).ID
+			},
+			wantBody: "invalid primary agent",
+		},
+		{
+			name: "unknown",
+			agentID: func(t *testing.T, _ *repository.AgentRepo, _, _ string) string {
+				return "agent-does-not-exist"
+			},
+		},
+		{
+			name: "disabled",
+			agentID: func(t *testing.T, repo *repository.AgentRepo, projectID, _ string) string {
+				agent := createScheduleTestAgent(t, repo, "Disabled Task Edit Agent", models.AgentScopeProject, projectID, true)
+				agent.Enabled = false
+				require.NoError(t, repo.Update(context.Background(), agent))
+				return agent.ID
+			},
+			wantBody: "invalid primary agent",
+		},
+		{
+			name: "archived",
+			agentID: func(t *testing.T, repo *repository.AgentRepo, projectID, _ string) string {
+				agent := createScheduleTestAgent(t, repo, "Archived Task Edit Agent", models.AgentScopeProject, projectID, true)
+				agent.GeneratedStatus = models.AgentStatusArchived
+				require.NoError(t, repo.Update(context.Background(), agent))
+				return agent.ID
+			},
+			wantBody: "invalid primary agent",
+		},
+		{
+			name: "non selectable",
+			agentID: func(t *testing.T, repo *repository.AgentRepo, projectID, _ string) string {
+				return createScheduleTestAgent(t, repo, "Non Selectable Task Edit Agent", models.AgentScopeProject, projectID, false).ID
+			},
+			wantBody: "invalid primary agent",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().WithName("Project A").Build()
+			otherProject := tc.CreateProject().WithName("Project B").Build()
+			agentRepo := repository.NewAgentRepo(tc.db)
+			tc.handler.agentRepo = agentRepo
+			previous := createScheduleTestAgent(t, agentRepo, "Existing Task Edit Agent", models.AgentScopeProject, project.ID, true)
+			task := createTask(t, tc.handler, project.ID, "Task Edit Invalid Agent", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.AgentDefinitionID = &previous.ID
+			})
+			invalidAgentID := tt.agentID(t, agentRepo, project.ID, otherProject.ID)
+
+			rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Should Not Persist", "backlog", "2", "should not persist", invalidAgentID)).Execute()
+			assertCode(t, rec, http.StatusBadRequest)
+			if tt.wantBody != "" {
+				assertContains(t, rec, tt.wantBody)
+			}
+			assertTaskPrimaryAgentDefinition(t, tc.handler, task.ID, &previous.ID)
+		})
+	}
+}
+
 func TestHandler_UpdateTask_PersistsValidPriorities(t *testing.T) {
 	labels := map[int]string{1: "Low", 2: "Normal", 3: "High", 4: "Urgent"}
 	for priority := 1; priority <= 4; priority++ {
