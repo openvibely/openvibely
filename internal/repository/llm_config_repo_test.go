@@ -247,6 +247,156 @@ func BenchmarkLLMConfigRepoHasAnyVsListLargeCustomProviders(b *testing.B) {
 	})
 }
 
+func TestLLMConfigRepo_RuntimeSummariesStayUnderLargeFixtureBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping runtime model summary performance guard in short mode")
+	}
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
+	targets, err := repo.ListRuntimeSummaries(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 50 {
+		t.Fatalf("expected 50 summaries, got %d", len(targets))
+	}
+	targetID := targets[len(targets)-1].ID
+	targetName := targets[len(targets)-1].Name
+
+	fullList := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+	runtimeList := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListRuntimeSummaries(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+	getByID := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			cfg, err := repo.GetRuntimeSummary(ctx, targetID, "")
+			if err != nil {
+				b.Fatal(err)
+			}
+			if cfg == nil || cfg.ID != targetID {
+				b.Fatalf("expected target %s, got %#v", targetID, cfg)
+			}
+		}
+	})
+	getByName := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			cfg, err := repo.GetRuntimeSummary(ctx, "", targetName)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if cfg == nil || cfg.Name != targetName {
+				b.Fatalf("expected target %s, got %#v", targetName, cfg)
+			}
+		}
+	})
+
+	const (
+		maxBytesPerOp    = 200 * 1024
+		maxDurationPerOp = 200 * time.Microsecond
+	)
+	t.Logf("List: %d ns/op, %d B/op; RuntimeSummaries: %d ns/op, %d B/op; GetByID: %d ns/op, %d B/op; GetByName: %d ns/op, %d B/op",
+		fullList.NsPerOp(), fullList.AllocedBytesPerOp(), runtimeList.NsPerOp(), runtimeList.AllocedBytesPerOp(), getByID.NsPerOp(), getByID.AllocedBytesPerOp(), getByName.NsPerOp(), getByName.AllocedBytesPerOp())
+	for label, result := range map[string]testing.BenchmarkResult{"runtime list": runtimeList, "get by id": getByID, "get by name": getByName} {
+		if result.NsPerOp() > maxDurationPerOp.Nanoseconds() {
+			t.Fatalf("%s took %s/op, want <= %s", label, time.Duration(result.NsPerOp()), maxDurationPerOp)
+		}
+		if result.AllocedBytesPerOp() > maxBytesPerOp {
+			t.Fatalf("%s allocated %d B/op, want <= %d", label, result.AllocedBytesPerOp(), maxBytesPerOp)
+		}
+	}
+}
+
+func BenchmarkLLMConfigRepoRuntimeSummariesLargeCustomProviders(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		b.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
+	targets, err := repo.ListRuntimeSummaries(ctx)
+	if err != nil {
+		b.Fatal(err)
+	}
+	if len(targets) != 50 {
+		b.Fatalf("expected 50 summaries, got %d", len(targets))
+	}
+	targetID := targets[len(targets)-1].ID
+	targetName := targets[len(targets)-1].Name
+
+	b.Run("full_list", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+	b.Run("runtime_summary_list", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListRuntimeSummaries(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+	b.Run("runtime_summary_get_by_id", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			cfg, err := repo.GetRuntimeSummary(ctx, targetID, "")
+			if err != nil {
+				b.Fatal(err)
+			}
+			if cfg == nil || cfg.ID != targetID {
+				b.Fatalf("expected target %s, got %#v", targetID, cfg)
+			}
+		}
+	})
+	b.Run("runtime_summary_get_by_name", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			cfg, err := repo.GetRuntimeSummary(ctx, "", targetName)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if cfg == nil || cfg.Name != targetName {
+				b.Fatalf("expected target %s, got %#v", targetName, cfg)
+			}
+		}
+	})
+}
+
 func BenchmarkLLMConfigRepoAgentPickerValidationLargeCustomProviders(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewLLMConfigRepo(db)
@@ -524,6 +674,172 @@ func TestLLMConfigRepo_ListBadgeOptionsUsesBoundedProjection(t *testing.T) {
 	}
 	if !strings.Contains(stmt, "order by is_default desc, name asc") {
 		t.Fatalf("badge query must preserve default/name ordering: %s", statements[0])
+	}
+}
+
+func TestLLMConfigRepo_ListRuntimeSummariesUsesBoundedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	largeBody := strings.Repeat("x", 1024*1024)
+	alpha := &models.LLMConfig{
+		Name: "Runtime Alpha", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "runtime-alpha-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client",
+		BaseURL: "https://example.com/v1/", OllamaBaseURL: "http://localhost:11434",
+		ModelsURL: "https://example.com/models", OAuthAuthorizeURL: "https://example.com/auth",
+		OAuthTokenURL: "https://example.com/token", Transport: "chat_completions", PresetSlug: "custom",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`, MaxWorkers: 3, WorkerTimeout: 45,
+	}
+	if err := repo.Create(ctx, alpha); err != nil {
+		t.Fatal(err)
+	}
+	zuluDefault := &models.LLMConfig{
+		Name: "Runtime Zulu Default", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey,
+		Model: "runtime-zulu-model", APIKey: "secret-key", IsDefault: true, MaxWorkers: 5,
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, zuluDefault); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := repo.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter.Reset()
+	counter.SetEnabled(true)
+	summaries, err := repo.ListRuntimeSummaries(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != len(full) {
+		t.Fatalf("summary len = %d, full len = %d", len(summaries), len(full))
+	}
+	for i := range full {
+		if summaries[i].ID != full[i].ID || summaries[i].Name != full[i].Name ||
+			summaries[i].Provider != full[i].Provider || summaries[i].Model != full[i].Model ||
+			summaries[i].IsDefault != full[i].IsDefault || summaries[i].AuthMethod != full[i].AuthMethod ||
+			summaries[i].MaxWorkers != full[i].MaxWorkers || summaries[i].WorkerTimeout != full[i].WorkerTimeout {
+			t.Fatalf("summary[%d] = %#v, full[%d] = %#v", i, summaries[i], i, full[i])
+		}
+	}
+
+	byID := make(map[string]models.LLMConfig, len(summaries))
+	for _, summary := range summaries {
+		byID[summary.ID] = summary
+	}
+	customSummary := byID[alpha.ID]
+	if customSummary.APIKey != "" || customSummary.OAuthAccessToken != "" || customSummary.OAuthRefreshToken != "" ||
+		customSummary.OAuthClientSecret != "" || customSummary.BaseURL != "" || customSummary.OllamaBaseURL != "" ||
+		customSummary.ModelsURL != "" || customSummary.OAuthAuthorizeURL != "" || customSummary.OAuthTokenURL != "" ||
+		customSummary.ExtraHeadersJSON != "" || customSummary.ExtraBodyJSON != "" ||
+		customSummary.CustomAuthConfigJSON != "" || customSummary.CustomAuthStateJSON != "" || customSummary.MixtureConfigJSON != "" {
+		t.Fatalf("runtime summary materialized credential, endpoint, or large-body fields: %#v", customSummary)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact runtime summary query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") {
+		t.Fatalf("runtime summary projection = %q, want compact display fields in %s", projection, statements[0])
+	}
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("runtime summary query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("runtime summary query must preserve default/name ordering: %s", statements[0])
+	}
+}
+
+func TestLLMConfigRepo_GetRuntimeSummaryUsesTargetedBoundedLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	largeBody := strings.Repeat("x", 1024*1024)
+	target := &models.LLMConfig{
+		Name: "Target Runtime Model", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "target-runtime-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client", BaseURL: "https://example.com/v1/",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`, MaxWorkers: 7,
+	}
+	if err := repo.Create(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	other := &models.LLMConfig{Name: "Other Runtime Model", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "other-runtime-model", IsDefault: true, ExtraBodyJSON: largeBody}
+	if err := repo.Create(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	byID, err := repo.GetRuntimeSummary(ctx, target.ID, "")
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byID == nil || byID.ID != target.ID || byID.Name != target.Name || byID.MaxWorkers != 7 {
+		t.Fatalf("lookup by id = %#v, want target summary", byID)
+	}
+	assertRuntimeSummaryLookupStatement(t, counter.Statements(), "id = ?")
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	byName, err := repo.GetRuntimeSummary(ctx, "", " target runtime model ")
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byName == nil || byName.ID != target.ID {
+		t.Fatalf("lookup by normalized name = %#v, want target", byName)
+	}
+	assertRuntimeSummaryLookupStatement(t, counter.Statements(), "name = ? collate nocase")
+
+	missing, err := repo.GetRuntimeSummary(ctx, "missing", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing != nil {
+		t.Fatalf("missing lookup = %#v, want nil", missing)
+	}
+}
+
+func assertRuntimeSummaryLookupStatement(t *testing.T, statements []string, requiredWhere string) {
+	t.Helper()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one targeted runtime summary query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") {
+		t.Fatalf("runtime lookup projection = %q, want compact display fields in %s", projection, statements[0])
+	}
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("runtime lookup selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(stmt, requiredWhere) {
+		t.Fatalf("runtime lookup query %q does not contain required predicate %q", statements[0], requiredWhere)
 	}
 }
 

@@ -847,26 +847,26 @@ func (h *Handler) executeGetModel(ctx context.Context, input json.RawMessage) st
 		return "Invalid input for get_model."
 	}
 
-	configs, err := h.llmConfigRepo.List(ctx)
+	c, err := h.llmConfigRepo.GetRuntimeSummary(ctx, req.ModelID, req.Name)
 	if err != nil {
 		applog.Infof("[handler] executeGetModel error: %v", err)
 		return "Error retrieving model configurations."
 	}
-
-	for _, c := range configs {
-		if (req.ModelID != "" && c.ID == req.ModelID) ||
-			(req.Name != "" && strings.EqualFold(c.Name, req.Name)) {
-			defaultStr := ""
-			if c.IsDefault {
-				defaultStr = " (default)"
-			}
-			workerInfo := ""
-			if c.MaxWorkers > 0 {
-				workerInfo = fmt.Sprintf(", max_workers: %d", c.MaxWorkers)
-			}
-			return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s%s",
-				c.Name, defaultStr, c.Provider, c.Model, c.AuthMethod, workerInfo)
+	if c != nil {
+		defaultStr := ""
+		if c.IsDefault {
+			defaultStr = " (default)"
 		}
+		workerInfo := ""
+		if c.MaxWorkers > 0 {
+			workerInfo = fmt.Sprintf(", max_workers: %d", c.MaxWorkers)
+		}
+		authStr := string(c.AuthMethod)
+		if authStr == "" {
+			authStr = string(models.AuthMethodAPIKey)
+		}
+		return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s%s",
+			c.Name, defaultStr, c.Provider, c.Model, authStr, workerInfo)
 	}
 
 	if req.ModelID != "" {
