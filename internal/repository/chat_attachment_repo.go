@@ -42,12 +42,27 @@ func (r *ChatAttachmentRepo) CreateWithExecutor(ctx context.Context, exec SQLExe
 
 func (r *ChatAttachmentRepo) GetByID(ctx context.Context, id string) (*models.ChatAttachment, error) {
 	query := `
-		SELECT id, execution_id, file_name, file_path, media_type, file_size, created_at
-		FROM chat_attachments
-		WHERE id = ?
-	`
+			SELECT id, execution_id, file_name, file_path, media_type, file_size, created_at
+			FROM chat_attachments
+			WHERE id = ?
+		`
+	return r.scanAttachment(ctx, query, id)
+}
+
+func (r *ChatAttachmentRepo) GetByIDForProject(ctx context.Context, id, projectID string) (*models.ChatAttachment, error) {
+	query := `
+			SELECT ca.id, ca.execution_id, ca.file_name, ca.file_path, ca.media_type, ca.file_size, ca.created_at
+			FROM chat_attachments ca
+			JOIN executions e ON e.id = ca.execution_id
+			JOIN tasks t ON t.id = e.task_id
+			WHERE ca.id = ? AND t.project_id = ?
+		`
+	return r.scanAttachment(ctx, query, id, projectID)
+}
+
+func (r *ChatAttachmentRepo) scanAttachment(ctx context.Context, query string, args ...interface{}) (*models.ChatAttachment, error) {
 	var att models.ChatAttachment
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(
 		&att.ID,
 		&att.ExecutionID,
 		&att.FileName,
@@ -148,6 +163,30 @@ func (r *ChatAttachmentRepo) Delete(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("deleting chat attachment: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking rows affected: %w", err)
+	}
+	if rows == 0 {
+		return fmt.Errorf("chat attachment not found")
+	}
+	return nil
+}
+
+func (r *ChatAttachmentRepo) DeleteByIDForProject(ctx context.Context, id, projectID string) error {
+	query := `
+		DELETE FROM chat_attachments
+		WHERE id = ? AND EXISTS (
+			SELECT 1
+			FROM executions e
+			JOIN tasks t ON t.id = e.task_id
+			WHERE e.id = chat_attachments.execution_id AND t.project_id = ?
+		)
+	`
+	result, err := r.db.ExecContext(ctx, query, id, projectID)
+	if err != nil {
+		return fmt.Errorf("deleting chat attachment for project: %w", err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {

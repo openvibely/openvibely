@@ -17,6 +17,7 @@ import (
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/web/templates/components"
 )
 
 const (
@@ -376,7 +377,7 @@ func (h *Handler) APIChatMessage(c echo.Context) error {
 				continue
 			}
 
-			attachmentURLs = append(attachmentURLs, fmt.Sprintf("/chat/attachments/%s/download", chatAtt.ID))
+			attachmentURLs = append(attachmentURLs, components.ChatAttachmentDownloadURL(chatAtt.ID, projectID))
 
 			contextFiles = append(contextFiles, chatAttachmentModelContextFile{
 				FileName:  filename,

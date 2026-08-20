@@ -47,7 +47,7 @@ templ ChatEarlierMessages(chatHistory []models.Execution, chatAttachments map[st
 	for _, exec := range chatHistory {
 		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ components.ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
 			if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
-				@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
+				@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID)
 			} else {
 				@components.ChatBubble("User", exec.PromptSent)
 			}
@@ -118,7 +118,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 						}
 					>
 						if attachments, hasAttachments := chatAttachments[exec.ID]; hasAttachments {
-							@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments)
+							@components.ChatBubbleWithAttachments("User", exec.PromptSent, attachments, currentProjectID)
 						} else {
 							@components.ChatBubble("User", exec.PromptSent)
 						}

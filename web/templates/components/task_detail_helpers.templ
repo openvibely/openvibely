@@ -308,7 +308,7 @@ templ TaskThreadEarlierMessages(task *models.Task, executions []models.Execution
 	if hasEarlier && len(executions) > 0 {
 		@ChatEarlierMessagesLoader("task-thread-messages", fmt.Sprintf("/tasks/%s/thread?before=%s&limit=%d", task.ID, executions[0].ID, windowLimit), windowLimit)
 	}
-	@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
+	@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID)
 }
 
 templ TaskThreadView(task *models.Task, executions []models.Execution, agents []models.LLMConfig, agentDef *models.Agent, chatAttachments map[string][]models.ChatAttachment, pendingInputs []models.ThreadInput, hasEarlier bool, windowLimit int) {
@@ -362,9 +362,9 @@ templ taskThreadView(task *models.Task, executions []models.Execution, agents []
 				@ChatEmptyState("No messages yet. Click \"Run Now\" to start, then follow up here.")
 			} else {
 				if preservedExecIDs != nil {
-					@ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, preservedExecIDs)
+					@ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID, preservedExecIDs)
 				} else {
-					@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier)
+					@ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID)
 				}
 				@PendingThreadInputRows(pendingInputs, taskQueuedSteerEndpoint)
 				@TaskThreadStatusIndicator(task, executions)
@@ -1356,13 +1356,13 @@ templ TaskThreadLiveEventsScript(taskID string) {
 
 // TaskThreadFollowupResponse renders user message + streaming assistant for a task thread follow-up.
 // Delegates to the shared ChatFollowupResponse component with thread settings.
-templ TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment) {
-	@ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments)
+templ TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment, projectID string) {
+	@ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments, projectID)
 }
 
-templ TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment) {
+templ TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment, projectID string) {
 	if len(attachments) > 0 {
-		@ChatBubbleWithAttachments("User", message, attachments)
+		@ChatBubbleWithAttachments("User", message, attachments, projectID)
 	} else {
 		@ChatBubble("User", message)
 	}

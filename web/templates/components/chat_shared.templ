@@ -266,7 +266,7 @@ templ ChatBubbleRunning(role, partialOutput string) {
 }
 
 // ChatBubbleWithAttachments renders a message with inline attachment display.
-templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatAttachment) {
+templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatAttachment, projectID string) {
 	<div class={ chatBubbleClass(role), "rounded-xl p-4" }>
 		<div class="text-xs font-semibold opacity-50 mb-2 flex items-center gap-2">
 			{ role }
@@ -287,9 +287,9 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 					for _, att := range attachments {
 						if IsImageMediaType(att.MediaType) {
 							<div class="mb-3">
-								<a href={ templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)) } target="_blank" class="block">
+								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } target="_blank" class="block">
 									<img
-										src={ templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)) }
+										src={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) }
 										alt={ att.FileName }
 										class="max-w-full rounded-lg border border-base-content/10 hover:opacity-90 transition-opacity cursor-pointer"
 										style="max-height: 400px; object-fit: contain;"
@@ -310,7 +310,7 @@ templ ChatBubbleWithAttachments(role, content string, attachments []models.ChatA
 								<svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
 								</svg>
-								<a href={ templ.SafeURL(fmt.Sprintf("/chat/attachments/%s/download", att.ID)) } class="hover:underline font-medium" target="_blank">
+								<a href={ templ.SafeURL(ChatAttachmentDownloadURL(att.ID, projectID)) } class="hover:underline font-medium" target="_blank">
 									{ att.FileName }
 								</a>
 								<span class="opacity-60">({ FormatFileSize(att.FileSize) })</span>
@@ -1325,11 +1325,11 @@ func chatExecutionIsTerminal(exec models.Execution) bool {
 	return exec.Status == models.ExecCompleted || exec.Status == models.ExecFailed || exec.Status == models.ExecCancelled
 }
 
-templ chatExecutionPairContent(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
+templ chatExecutionPairContent(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string) {
 	<!-- User message: show for followups and first non-followup only -->
 	if exec.IsFollowup || (!hasEarlier && !hasEarlierNonFollowup(executions, index)) {
 		if atts, hasAtts := attachments[exec.ID]; hasAtts && len(atts) > 0 {
-			@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts)
+			@ChatBubbleWithAttachments("User", chatUserContent(exec, task, executions, index), atts, projectID)
 		} else {
 			@ChatBubble("User", chatUserContent(exec, task, executions, index))
 		}
@@ -1346,32 +1346,32 @@ templ chatExecutionPairContent(exec models.Execution, task *models.Task, executi
 	}
 }
 
-templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string) {
+templ ChatExecutionPair(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string) {
 	if chatExecutionIsTerminal(exec) {
 		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true">
-			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 		</div>
 	} else {
 		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) }>
-			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+			@chatExecutionPairContent(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 		</div>
 	}
 }
 
-templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, preservedExecIDs map[string]bool) {
+templ ChatExecutionPairPoll(exec models.Execution, task *models.Task, executions []models.Execution, index int, hasEarlier bool, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID, projectID string, preservedExecIDs map[string]bool) {
 	if chatExecutionIsTerminal(exec) && preservedExecIDs[exec.ID] {
 		<div id={ "chat-execution-" + exec.ID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ exec.ID } data-exec-status={ string(exec.Status) } data-execution-revision={ ChatExecutionRevision(exec) } data-started-at={ exec.StartedAt.Format(time.RFC3339Nano) } hx-preserve="true"></div>
 	} else {
-		@ChatExecutionPair(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+		@ChatExecutionPair(exec, task, executions, index, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 	}
 }
 
 // ChatFollowupResponse renders user message + streaming assistant for a follow-up.
 // Used by both ChatSend (main chat) and TaskThreadSend (task thread).
-templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment) {
+templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTargetID string, isThread bool, attachments []models.ChatAttachment, projectID string) {
 	<div id={ "chat-execution-" + execID } class="chat-execution-pair space-y-6" data-execution-pair="true" data-exec-id={ execID } data-exec-status="running">
 		if len(attachments) > 0 {
-			@ChatBubbleWithAttachments("User", message, attachments)
+			@ChatBubbleWithAttachments("User", message, attachments, projectID)
 		} else {
 			@ChatBubble("User", message)
 		}
@@ -1383,15 +1383,15 @@ templ ChatFollowupResponse(message, execID, messagesContainerID, pausePollingTar
 // This is the shared message rendering loop used by both /chat and task thread.
 // For task thread, deduplicates the original task prompt: only shows it for the
 // first non-followup execution. Subsequent re-runs skip the user bubble.
-templ ChatMessages(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool) {
+templ ChatMessages(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool, projectID string) {
 	for i, exec := range executions {
-		@ChatExecutionPair(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID)
+		@ChatExecutionPair(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID)
 	}
 }
 
-templ ChatMessagesPoll(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool, preservedExecIDs map[string]bool) {
+templ ChatMessagesPoll(executions []models.Execution, task *models.Task, attachments map[string][]models.ChatAttachment, messagesContainerID, pausePollingTargetID string, hasEarlier bool, projectID string, preservedExecIDs map[string]bool) {
 	for i, exec := range executions {
-		@ChatExecutionPairPoll(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, preservedExecIDs)
+		@ChatExecutionPairPoll(exec, task, executions, i, hasEarlier, attachments, messagesContainerID, pausePollingTargetID, projectID, preservedExecIDs)
 	}
 }
 

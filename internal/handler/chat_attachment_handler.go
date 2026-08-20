@@ -158,10 +158,16 @@ func (h *Handler) DownloadChatAttachment(c echo.Context) error {
 	attachmentID := c.Param("id")
 	applog.Infof("[handler] DownloadChatAttachment id=%s", attachmentID)
 
-	// Get attachment
-	attachment, err := h.chatAttachmentRepo.GetByID(c.Request().Context(), attachmentID)
+	currentProjectID, err := h.getCurrentProjectID(c)
+	if err != nil || currentProjectID == "" {
+		applog.Infof("[handler] DownloadChatAttachment project resolution failed: %v", err)
+		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
+	}
+
+	// Get attachment scoped to the current project.
+	attachment, err := h.chatAttachmentRepo.GetByIDForProject(c.Request().Context(), attachmentID, currentProjectID)
 	if err != nil || attachment == nil {
-		applog.Infof("[handler] DownloadChatAttachment not found: %v", err)
+		applog.Infof("[handler] DownloadChatAttachment not found or forbidden project=%s: %v", currentProjectID, err)
 		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
 	}
 
@@ -182,17 +188,23 @@ func (h *Handler) DeleteChatAttachment(c echo.Context) error {
 	attachmentID := c.Param("id")
 	applog.Infof("[handler] DeleteChatAttachment id=%s", attachmentID)
 
-	// Get attachment to find the file path and execution ID
-	attachment, err := h.chatAttachmentRepo.GetByID(c.Request().Context(), attachmentID)
+	currentProjectID, err := h.getCurrentProjectID(c)
+	if err != nil || currentProjectID == "" {
+		applog.Infof("[handler] DeleteChatAttachment project resolution failed: %v", err)
+		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
+	}
+
+	// Get attachment to find the file path and execution ID, scoped to the current project.
+	attachment, err := h.chatAttachmentRepo.GetByIDForProject(c.Request().Context(), attachmentID, currentProjectID)
 	if err != nil || attachment == nil {
-		applog.Infof("[handler] DeleteChatAttachment not found: %v", err)
+		applog.Infof("[handler] DeleteChatAttachment not found or forbidden project=%s: %v", currentProjectID, err)
 		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
 	}
 
 	executionID := attachment.ExecutionID
 
-	// Delete from database
-	if err := h.chatAttachmentRepo.Delete(c.Request().Context(), attachmentID); err != nil {
+	// Delete from database with the same project guard used for lookup.
+	if err := h.chatAttachmentRepo.DeleteByIDForProject(c.Request().Context(), attachmentID, currentProjectID); err != nil {
 		applog.Infof("[handler] DeleteChatAttachment error deleting from db: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete attachment")
 	}
@@ -206,7 +218,7 @@ func (h *Handler) DeleteChatAttachment(c echo.Context) error {
 
 	// Return updated attachments list for this execution
 	attachments, _ := h.chatAttachmentRepo.ListByExecution(c.Request().Context(), executionID)
-	return render(c, http.StatusOK, components.ChatAttachmentListOnly(attachments))
+	return render(c, http.StatusOK, components.ChatAttachmentListOnly(attachments, currentProjectID))
 }
 
 func (h *Handler) cleanupUnpublishedPendingAttachmentSession(ctx context.Context, sessionID string) error {

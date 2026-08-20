@@ -520,7 +520,7 @@ func TaskThreadEarlierMessages(task *models.Task, executions []models.Execution,
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -783,12 +783,12 @@ func taskThreadView(task *models.Task, executions []models.Execution, agents []m
 			}
 		} else {
 			if preservedExecIDs != nil {
-				templ_7745c5c3_Err = ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, preservedExecIDs).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = ChatMessagesPoll(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID, preservedExecIDs).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = ChatMessages(executions, task, chatAttachments, "task-thread-messages", "task-thread-view", hasEarlier, task.ProjectID).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -925,7 +925,7 @@ func TaskThreadLiveEventsScript(taskID string) templ.Component {
 
 // TaskThreadFollowupResponse renders user message + streaming assistant for a task thread follow-up.
 // Delegates to the shared ChatFollowupResponse component with thread settings.
-func TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment) templ.Component {
+func TaskThreadFollowupResponse(message string, execID string, attachments []models.ChatAttachment, projectID string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -946,7 +946,7 @@ func TaskThreadFollowupResponse(message string, execID string, attachments []mod
 			templ_7745c5c3_Var30 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = ChatFollowupResponse(message, execID, "task-thread-messages", "task-thread-view", true, attachments, projectID).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -954,7 +954,7 @@ func TaskThreadFollowupResponse(message string, execID string, attachments []mod
 	})
 }
 
-func TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment) templ.Component {
+func TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatAttachment, projectID string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -976,7 +976,7 @@ func TaskThreadQueuedFollowupResponse(message string, attachments []models.ChatA
 		}
 		ctx = templ.ClearChildren(ctx)
 		if len(attachments) > 0 {
-			templ_7745c5c3_Err = ChatBubbleWithAttachments("User", message, attachments).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ChatBubbleWithAttachments("User", message, attachments, projectID).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

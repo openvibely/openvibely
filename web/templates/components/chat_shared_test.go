@@ -968,7 +968,7 @@ func TestChatContentRevisionIsCompactAndContentSensitive(t *testing.T) {
 func TestChatExecutionPairPreservesTerminalTranscriptDuringMorph(t *testing.T) {
 	terminal := models.Execution{ID: "terminal-1", Status: models.ExecCompleted, Output: "large output"}
 	var terminalHTML bytes.Buffer
-	if err := ChatExecutionPair(terminal, nil, []models.Execution{terminal}, 0, false, nil, "messages", "thread").Render(context.Background(), &terminalHTML); err != nil {
+	if err := ChatExecutionPair(terminal, nil, []models.Execution{terminal}, 0, false, nil, "messages", "thread", "project-a").Render(context.Background(), &terminalHTML); err != nil {
 		t.Fatalf("render terminal execution pair: %v", err)
 	}
 	if !strings.Contains(terminalHTML.String(), `id="chat-execution-terminal-1"`) || !strings.Contains(terminalHTML.String(), `hx-preserve="true"`) {
@@ -977,7 +977,7 @@ func TestChatExecutionPairPreservesTerminalTranscriptDuringMorph(t *testing.T) {
 
 	running := models.Execution{ID: "running-1", Status: models.ExecRunning}
 	var runningHTML bytes.Buffer
-	if err := ChatExecutionPair(running, nil, []models.Execution{running}, 0, false, nil, "messages", "thread").Render(context.Background(), &runningHTML); err != nil {
+	if err := ChatExecutionPair(running, nil, []models.Execution{running}, 0, false, nil, "messages", "thread", "project-a").Render(context.Background(), &runningHTML); err != nil {
 		t.Fatalf("render running execution pair: %v", err)
 	}
 	if strings.Contains(runningHTML.String(), `hx-preserve="true"`) {
@@ -985,7 +985,7 @@ func TestChatExecutionPairPreservesTerminalTranscriptDuringMorph(t *testing.T) {
 	}
 
 	var followupHTML bytes.Buffer
-	if err := ChatFollowupResponse("follow up", "running-1", "messages", "thread", true, nil).Render(context.Background(), &followupHTML); err != nil {
+	if err := ChatFollowupResponse("follow up", "running-1", "messages", "thread", true, nil, "project-a").Render(context.Background(), &followupHTML); err != nil {
 		t.Fatalf("render live follow-up pair: %v", err)
 	}
 	if !strings.Contains(followupHTML.String(), `id="chat-execution-running-1"`) {
@@ -1559,7 +1559,7 @@ func TestChatBubbleWithAttachments_MarksImagesForSmartScroll(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := ChatBubbleWithAttachments("User", "see screenshot", attachments).Render(context.Background(), &buf); err != nil {
+	if err := ChatBubbleWithAttachments("User", "see screenshot", attachments, "project-a").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render ChatBubbleWithAttachments: %v", err)
 	}
 	content := buf.String()
@@ -1569,6 +1569,28 @@ func TestChatBubbleWithAttachments_MarksImagesForSmartScroll(t *testing.T) {
 	}
 	if count := strings.Count(content, `data-chat-attachment-image="true"`); count != 1 {
 		t.Fatalf("expected only image attachments to be marked for smart scroll, got %d markers", count)
+	}
+	if !strings.Contains(content, `/chat/attachments/att-image/download?project_id=project-a`) {
+		t.Fatalf("image attachment URL must carry project context, got: %s", content)
+	}
+	if !strings.Contains(content, `/chat/attachments/att-file/download?project_id=project-a`) {
+		t.Fatalf("file attachment URL must carry project context, got: %s", content)
+	}
+}
+
+func TestChatAttachmentListOnlyCarriesProjectContext(t *testing.T) {
+	attachments := []models.ChatAttachment{{ID: "att-list", FileName: "notes.txt", MediaType: "text/plain", FileSize: 42}}
+
+	var buf bytes.Buffer
+	if err := ChatAttachmentListOnly(attachments, "project-a").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render ChatAttachmentListOnly: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, `/chat/attachments/att-list/download?project_id=project-a`) {
+		t.Fatalf("download URL must carry project context, got: %s", content)
+	}
+	if !strings.Contains(content, `hx-delete="/chat/attachments/att-list?project_id=project-a"`) {
+		t.Fatalf("delete URL must carry project context, got: %s", content)
 	}
 }
 
@@ -2381,7 +2403,7 @@ func TestChatMessages_RunningExecUsesSSEStreaming(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	err := ChatMessages(executions, task, nil, "task-thread-messages", "task-thread-view", false).Render(context.Background(), &buf)
+	err := ChatMessages(executions, task, nil, "task-thread-messages", "task-thread-view", false, task.ProjectID).Render(context.Background(), &buf)
 	if err != nil {
 		t.Fatalf("Failed to render ChatMessages: %v", err)
 	}
