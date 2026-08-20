@@ -1084,6 +1084,69 @@ func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {
 	require.Contains(t, pageOut, `"has_more":true`)
 }
 
+func TestBuildChannelUtilityActionHandlersViewPulseUsesUpcomingService(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	upcomingSvc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	project := &models.Project{Name: "Channel Pulse"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	other := &models.Project{Name: "Other Channel Pulse"}
+	require.NoError(t, projectRepo.Create(ctx, other))
+
+	pending := &models.Task{ProjectID: project.ID, Title: "Channel queued", Prompt: "queued prompt", Category: models.CategoryActive, Status: models.StatusPending, Priority: 3}
+	require.NoError(t, taskRepo.Create(ctx, pending))
+	scheduledTask := &models.Task{ProjectID: project.ID, Title: "Channel scheduled", Prompt: strings.Repeat("p", 250), Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, scheduledTask))
+	foreignTask := &models.Task{ProjectID: other.ID, Title: "Foreign channel scheduled", Prompt: "foreign", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 4}
+	require.NoError(t, taskRepo.Create(ctx, foreignTask))
+	now := time.Now().UTC()
+	scheduled := &models.Schedule{TaskID: scheduledTask.ID, RunAt: now.Add(-time.Hour), RepeatType: models.RepeatHours, RepeatInterval: 2, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, scheduleRepo.Create(ctx, scheduled))
+	foreignSchedule := &models.Schedule{TaskID: foreignTask.ID, RunAt: now.Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	require.NoError(t, scheduleRepo.Create(ctx, foreignSchedule))
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, TaskRepo: taskRepo, ScheduleRepo: scheduleRepo, UpcomingSvc: upcomingSvc})
+	out, err := handlers["view_pulse"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.NotContains(t, out, foreignTask.ID)
+	require.NotContains(t, out, strings.Repeat("p", 225))
+
+	var got struct {
+		OK           bool   `json:"ok"`
+		ProjectID    string `json:"project_id"`
+		PendingTasks []struct {
+			TaskID string `json:"task_id"`
+		} `json:"pending_tasks"`
+		ScheduledTasks []struct {
+			TaskID      string `json:"task_id"`
+			ScheduleID  string `json:"schedule_id"`
+			RepeatLabel string `json:"repeat_label"`
+		} `json:"scheduled_tasks"`
+		TaskSummary struct {
+			Scheduled struct {
+				Overdue     int `json:"overdue"`
+				DueToday    int `json:"due_today"`
+				DueThisWeek int `json:"due_this_week"`
+			} `json:"scheduled"`
+		} `json:"task_summary"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.Equal(t, project.ID, got.ProjectID)
+	require.Len(t, got.PendingTasks, 1)
+	require.Equal(t, pending.ID, got.PendingTasks[0].TaskID)
+	require.Len(t, got.ScheduledTasks, 1)
+	require.Equal(t, scheduledTask.ID, got.ScheduledTasks[0].TaskID)
+	require.Equal(t, scheduled.ID, got.ScheduledTasks[0].ScheduleID)
+	require.Equal(t, "every 2 hours", got.ScheduledTasks[0].RepeatLabel)
+	require.Equal(t, 1, got.TaskSummary.Scheduled.Overdue)
+	require.Equal(t, 1, got.TaskSummary.Scheduled.DueToday)
+	require.Equal(t, 1, got.TaskSummary.Scheduled.DueThisWeek)
+}
+
 func TestBuildChannelUtilityActionHandlersListSchedulesIncludesEmptyDaysAndNullNextRun(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

@@ -52,6 +52,7 @@ type LLMService struct {
 	fileChangeBroadcaster     *events.FileChangeBroadcaster
 	threadInputRepo           *repository.ThreadInputRepo
 	usageRepo                 *repository.UsageRepo
+	upcomingSvc               *UpcomingService
 	skillAnalyticsRepo        *repository.SkillAnalyticsRepo
 	broadcaster               *events.Broadcaster
 	executionStreamHub        *events.ExecutionStreamHub
@@ -137,6 +138,10 @@ func (s *LLMService) SetThreadInputRepo(repo *repository.ThreadInputRepo) {
 
 func (s *LLMService) SetUsageRepo(repo *repository.UsageRepo) {
 	s.usageRepo = repo
+}
+
+func (s *LLMService) SetUpcomingService(upcomingSvc *UpcomingService) {
+	s.upcomingSvc = upcomingSvc
 }
 
 func (s *LLMService) SetBroadcaster(b *events.Broadcaster) {
@@ -388,6 +393,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		"resume_task_goal":                       true,
 		"list_schedules":                         true,
 		"view_usage_analytics":                   true,
+		"view_pulse":                             true,
 		"schedule_task":                          true,
 		"delete_schedule":                        true,
 		"modify_schedule":                        true,
@@ -473,6 +479,7 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		ProjectRepo:           s.projectRepo,
 		AlertSvc:              s.alertSvc,
 		UsageAnalyticsSvc:     usageAnalyticsSvc,
+		UpcomingSvc:           s.upcomingSvc,
 		PrepareImplementationTask: func(ctx context.Context, input *models.AlertImplementationTaskInput) error {
 			return s.prepareAutomationAlertImplementationTask(ctx, task.ProjectID, input)
 		},
