@@ -221,30 +221,11 @@ func (s *LLMService) activatePublishedCustomAutomationChild(ctx context.Context,
 		var busyErr error
 		for _, handoff := range handoffs {
 			targetNode := &handoff.Node
-			var config map[string]any
-			if err := json.Unmarshal([]byte(targetNode.ConfigJSON), &config); err != nil {
-				return true, fmt.Errorf("decoding custom Automation task configuration: %w", err)
-			}
-			targetDraft := models.AutomationDraftNode{Key: targetNode.NodeKey, Name: targetNode.Name, Type: targetNode.NodeType, Role: targetNode.Role, Config: config}
-			promptCandidate := models.AutomationDraftCandidate{AdapterKey: AutomationAdapterCustom, Nodes: []models.AutomationDraftNode{targetDraft}}
-			notificationNode, err := s.automationRepo.GetCustomNotificationHandoff(ctx, parentTask.ProjectID, automationID, binding.VersionID, targetNode.ID)
+			promptCandidate, targetDraft, err := s.publishedCustomPromptCandidateForNode(ctx, parentTask.ProjectID, automationID, binding.VersionID, *targetNode)
 			if err != nil {
 				return true, err
 			}
-			if notificationNode != nil {
-				var notificationConfig map[string]any
-				if err := json.Unmarshal([]byte(notificationNode.ConfigJSON), &notificationConfig); err != nil {
-					return true, fmt.Errorf("decoding custom Automation notification configuration: %w", err)
-				}
-				promptCandidate.Nodes = append(promptCandidate.Nodes, models.AutomationDraftNode{
-					Key: notificationNode.NodeKey, Name: notificationNode.Name, Type: notificationNode.NodeType,
-					Role: notificationNode.Role, Config: notificationConfig,
-				})
-				promptCandidate.Edges = append(promptCandidate.Edges, models.AutomationDraftEdge{
-					From: targetNode.NodeKey, To: notificationNode.NodeKey, FromPort: "right", ToPort: "left",
-				})
-			}
-			category, _ := config["category"].(string)
+			category, _ := targetDraft.Config["category"].(string)
 			if sourceNode.NodeType == models.AutomationNodeTrigger {
 				category = string(models.CategoryActive)
 			}
@@ -263,6 +244,53 @@ func (s *LLMService) activatePublishedCustomAutomationChild(ctx context.Context,
 		return true, busyErr
 	}
 	return false, nil
+}
+
+func (s *LLMService) publishedCustomPromptCandidateForNode(ctx context.Context, projectID, automationID, versionID string, targetNode models.AutomationNode) (models.AutomationDraftCandidate, models.AutomationDraftNode, error) {
+	metadata, err := s.automationRepo.GetAutomationGraphMetadata(ctx, projectID, automationID, versionID)
+	if err != nil {
+		return models.AutomationDraftCandidate{}, models.AutomationDraftNode{}, err
+	}
+	if metadata != nil && strings.TrimSpace(metadata.CandidateJSON) != "" {
+		var candidate models.AutomationDraftCandidate
+		if err := json.Unmarshal([]byte(metadata.CandidateJSON), &candidate); err != nil {
+			return models.AutomationDraftCandidate{}, models.AutomationDraftNode{}, fmt.Errorf("decoding custom Automation graph metadata: %w", err)
+		}
+		if candidate.AdapterKey == AutomationAdapterCustom {
+			if targetDraft, ok := findDraftNode(candidate, targetNode.NodeKey); ok {
+				return candidate, targetDraft, nil
+			}
+		}
+	}
+
+	targetDraft, err := automationDraftNodeFromPublishedNode(targetNode)
+	if err != nil {
+		return models.AutomationDraftCandidate{}, models.AutomationDraftNode{}, err
+	}
+	promptCandidate := models.AutomationDraftCandidate{AdapterKey: AutomationAdapterCustom, Nodes: []models.AutomationDraftNode{targetDraft}}
+	notificationNode, err := s.automationRepo.GetCustomNotificationHandoff(ctx, projectID, automationID, versionID, targetNode.ID)
+	if err != nil {
+		return models.AutomationDraftCandidate{}, models.AutomationDraftNode{}, err
+	}
+	if notificationNode != nil {
+		notificationDraft, err := automationDraftNodeFromPublishedNode(*notificationNode)
+		if err != nil {
+			return models.AutomationDraftCandidate{}, models.AutomationDraftNode{}, err
+		}
+		promptCandidate.Nodes = append(promptCandidate.Nodes, notificationDraft)
+		promptCandidate.Edges = append(promptCandidate.Edges, models.AutomationDraftEdge{
+			From: targetNode.NodeKey, To: notificationNode.NodeKey, FromPort: "right", ToPort: "left",
+		})
+	}
+	return promptCandidate, targetDraft, nil
+}
+
+func automationDraftNodeFromPublishedNode(node models.AutomationNode) (models.AutomationDraftNode, error) {
+	var config map[string]any
+	if err := json.Unmarshal([]byte(node.ConfigJSON), &config); err != nil {
+		return models.AutomationDraftNode{}, fmt.Errorf("decoding custom Automation task configuration: %w", err)
+	}
+	return models.AutomationDraftNode{Key: node.NodeKey, Name: node.Name, Type: node.NodeType, Role: node.Role, Config: config}, nil
 }
 
 func (s *LLMService) activateCompiledAutomationChild(ctx context.Context, parentTask models.Task, parentOutput string, config *models.ChainConfiguration) error {
