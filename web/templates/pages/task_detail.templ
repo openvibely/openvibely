@@ -1652,65 +1652,6 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 					console.error('Failed to copy text: ', err);
 				});
 			}
-
-			// Listen for showToast events from HTMX responses
-			// Guard against multiple listener registrations
-			if (!window._showToastListenerRegistered) {
-				window._showToastListenerRegistered = true;
-				
-				// Deduplication: track recent toasts by message+type key
-				window._recentToasts = window._recentToasts || new Map();
-				
-				document.body.addEventListener('showToast', function(event) {
-					if (event.detail && event.detail.message) {
-						const container = document.getElementById('toast-container');
-						if (!container) return;
-
-						// Create deduplication key from message + type + taskId (if present)
-						const dedupKey = event.detail.message + '|' + (event.detail.type || 'info') + '|' + (event.detail.taskId || '');
-						const now = Date.now();
-						
-						// Check if this exact toast was shown recently (within 1 second)
-						if (window._recentToasts.has(dedupKey)) {
-							const lastShown = window._recentToasts.get(dedupKey);
-							if (now - lastShown < 1000) {
-								// Duplicate toast within 1 second - skip
-								return;
-							}
-						}
-						
-						// Record this toast
-						window._recentToasts.set(dedupKey, now);
-						
-						// Clean up old entries (older than 5 seconds)
-						for (const [key, timestamp] of window._recentToasts.entries()) {
-							if (now - timestamp > 5000) {
-								window._recentToasts.delete(key);
-							}
-						}
-
-						const alertClass = event.detail.type === 'success' ? 'alert-success' : 
-						                   event.detail.type === 'error' ? 'alert-error' : 
-						                   event.detail.type === 'warning' ? 'alert-warning' : 'alert-info';
-						
-						const icon = event.detail.type === 'success' ? 
-							'<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>' :
-							'<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>';
-
-						const toast = document.createElement('div');
-						toast.className = 'toast-notification alert ' + alertClass + ' shadow-lg';
-						toast.innerHTML = icon + '<span>' + event.detail.message + '</span>';
-						
-						container.appendChild(toast);
-
-						// Auto-dismiss after 4 seconds
-						setTimeout(function() {
-							toast.classList.add('toast-dismiss');
-							setTimeout(function() { toast.remove(); }, 300);
-						}, 4000);
-					}
-				});
-			}
 		</script>
 	</div>
 }

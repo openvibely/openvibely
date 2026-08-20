@@ -130,7 +130,9 @@ func (h *Handler) MergeTaskBranch(c echo.Context) error {
 	if targetBranch == "" {
 		targetBranch = "main"
 	}
-	c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"refreshChanges": true, "showToast": {"message": "Merged locally into %s", "type": "success", "taskId": "%s"}}`, targetBranch, task.ID))
+	setHTMXToastWithOptionsAndTriggers(c, fmt.Sprintf("Merged locally into %s", targetBranch), "completed", "", "", task.ID, "", "", map[string]any{
+		"refreshChanges": true,
+	})
 
 	if fromChangesTab {
 		return h.GetTaskChanges(c)
@@ -478,6 +480,6 @@ func (h *Handler) UpdateWorktreeSettings(c echo.Context) error {
 		h.settingsRepo.Set(ctx, "worktree_cleanup", cleanup)
 	}
 
-	c.Response().Header().Set("HX-Trigger", fmt.Sprintf(`{"showToast": {"message": "Worktree settings saved", "type": "success"}}`))
+	setHTMXToast(c, "Worktree settings saved", "completed")
 	return c.NoContent(http.StatusOK)
 }
