@@ -168,9 +168,18 @@ type GitHubPublishBranchRequest struct {
 	CommitterEmail string
 }
 
+type GitHubPublishedCommitStats struct {
+	Insertions   int
+	Deletions    int
+	FilesChanged int
+	ChangedFiles []string
+}
+
 type GitHubPublishBranchResult struct {
 	HeadSHA       string
 	CreatedCommit bool
+	ParentSHA     string
+	CommitStats   *GitHubPublishedCommitStats
 }
 
 type GitHubReplaceBranchHeadRequest struct {
@@ -820,9 +829,60 @@ func (s *GitHubService) PublishBranch(ctx context.Context, repo *GitHubRepoRef, 
 		if err := s.publishExistingLocalCommitWithToken(ctx, token, repo, branch, retryCommitSHA, false); err != nil {
 			return nil, err
 		}
-		return &GitHubPublishBranchResult{HeadSHA: retryCommitSHA, CreatedCommit: true}, nil
+		return s.createdGitHubPublishBranchResult(ctx, token, repo, retryCommitSHA, latestBranchSHA), nil
 	}
-	return &GitHubPublishBranchResult{HeadSHA: commitSHA, CreatedCommit: true}, nil
+	return s.createdGitHubPublishBranchResult(ctx, token, repo, commitSHA, parentSHA), nil
+}
+
+func (s *GitHubService) createdGitHubPublishBranchResult(ctx context.Context, token string, repo *GitHubRepoRef, commitSHA, parentSHA string) *GitHubPublishBranchResult {
+	result := &GitHubPublishBranchResult{HeadSHA: commitSHA, CreatedCommit: true, ParentSHA: strings.TrimSpace(parentSHA)}
+	if !isGitHubCommitSHA(commitSHA) {
+		return result
+	}
+	stats, err := s.githubCommitStats(ctx, token, repo, commitSHA)
+	if err != nil {
+		applog.Infof("[github] error reading published commit stats sha=%s: %v", commitSHA, err)
+	} else {
+		result.CommitStats = stats
+	}
+	return result
+}
+
+func (s *GitHubService) githubCommitStats(ctx context.Context, token string, repo *GitHubRepoRef, commitSHA string) (*GitHubPublishedCommitStats, error) {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/commits/%s", githubAPIBaseURLForRepo(repo, s.apiBaseURL), url.PathEscape(repo.Owner), url.PathEscape(repo.Name), url.PathEscape(commitSHA))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	s.applyGitHubHeaders(req, token)
+	var payload struct {
+		Stats struct {
+			Additions int `json:"additions"`
+			Deletions int `json:"deletions"`
+		} `json:"stats"`
+		Files []struct {
+			Filename string `json:"filename"`
+		} `json:"files"`
+	}
+	if err := s.doGitHubJSON(req, &payload); err != nil {
+		return nil, err
+	}
+	changedFiles := make([]string, 0, len(payload.Files))
+	seen := map[string]bool{}
+	for _, file := range payload.Files {
+		path := strings.TrimSpace(file.Filename)
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		changedFiles = append(changedFiles, path)
+	}
+	return &GitHubPublishedCommitStats{
+		Insertions:   payload.Stats.Additions,
+		Deletions:    payload.Stats.Deletions,
+		FilesChanged: len(changedFiles),
+		ChangedFiles: changedFiles,
+	}, nil
 }
 
 func (s *GitHubService) publishExistingLocalCommit(ctx context.Context, repo *GitHubRepoRef, branch, sha string, force bool) error {

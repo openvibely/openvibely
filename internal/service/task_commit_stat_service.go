@@ -79,7 +79,22 @@ func applyTaskCommitStatContext(ctx context.Context, stat *models.TaskCommitStat
 	}
 }
 
-func collectPublishedBranchCommitStat(worktreePath, baseRef, sha, subject, author string) (*models.TaskCommitStat, error) {
+func collectPublishedBranchCommitStat(worktreePath, baseRef, sha, subject, author string, commitStats *GitHubPublishedCommitStats) (*models.TaskCommitStat, error) {
+	stat, err := newPublishedBranchCommitStat(sha, subject, author)
+	if err != nil {
+		return nil, err
+	}
+	if commitStats != nil {
+		addGitHubPublishedCommitStats(stat, commitStats)
+		return stat, nil
+	}
+	if err := addNumstatFromGitDiff(worktreePath, baseRef, stat); err != nil {
+		return nil, err
+	}
+	return stat, nil
+}
+
+func newPublishedBranchCommitStat(sha, subject, author string) (*models.TaskCommitStat, error) {
 	sha = strings.TrimSpace(sha)
 	if sha == "" {
 		return nil, fmt.Errorf("commit sha is required")
@@ -96,10 +111,32 @@ func collectPublishedBranchCommitStat(worktreePath, baseRef, sha, subject, autho
 	if stat.Subject == "" {
 		stat.Subject = "Publish task branch"
 	}
-	if err := addNumstatFromGitDiff(worktreePath, baseRef, stat); err != nil {
-		return nil, err
-	}
 	return stat, nil
+}
+
+func addGitHubPublishedCommitStats(stat *models.TaskCommitStat, commitStats *GitHubPublishedCommitStats) {
+	stat.Insertions = commitStats.Insertions
+	stat.Deletions = commitStats.Deletions
+	seenFiles := map[string]bool{}
+	changedFiles := make([]string, 0, len(commitStats.ChangedFiles))
+	for _, file := range commitStats.ChangedFiles {
+		path := strings.TrimSpace(file)
+		if path == "" || seenFiles[path] {
+			continue
+		}
+		seenFiles[path] = true
+		changedFiles = append(changedFiles, path)
+	}
+	stat.FilesChanged = len(changedFiles)
+	if stat.FilesChanged == 0 && commitStats.FilesChanged > 0 {
+		stat.FilesChanged = commitStats.FilesChanged
+	}
+	changedFilesJSON, err := json.Marshal(changedFiles)
+	if err != nil {
+		stat.ChangedFilesJSON = "[]"
+		return
+	}
+	stat.ChangedFilesJSON = string(changedFilesJSON)
 }
 
 func collectProducedCommitStat(worktreePath, sha string) (*models.TaskCommitStat, error) {

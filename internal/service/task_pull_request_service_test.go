@@ -369,6 +369,78 @@ func TestTaskPullRequestServiceOpenForTaskRecordsPublishedCommitStat(t *testing.
 	}
 }
 
+func TestTaskPullRequestServiceOpenForTaskRecordsPublishedUpdateCommitStat(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	if out, err := gitOutput(repoDir, "checkout", "-b", "task/publish-update-stat"); err != nil {
+		t.Fatalf("checkout task branch: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("# Test\n\nPreviously published branch change\n"), 0644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "update.go"), []byte("package update\n\nfunc Later() {}\n"), 0644); err != nil {
+		t.Fatalf("write update.go: %v", err)
+	}
+	project := &models.Project{Name: "Published Update Stats", RepoPath: repoDir, RepoURL: "https://github.com/openvibely/openvibely"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Publish update stat task", Category: models.CategoryActive, Status: models.StatusCompleted, WorktreePath: repoDir, WorktreeBranch: "task/publish-update-stat", MergeTargetBranch: "main"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	previousSHA := strings.Repeat("b", 40)
+	publishedSHA := strings.Repeat("d", 40)
+	if err := prRepo.Upsert(ctx, &models.TaskPullRequest{TaskID: task.ID, PRNumber: 88, PRURL: "https://github.com/openvibely/openvibely/pull/88", PRState: "open", PublishedHeadSHA: previousSHA}); err != nil {
+		t.Fatalf("seed PR record: %v", err)
+	}
+	svc := NewTaskPullRequestService(&fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(_ context.Context, _ *GitHubRepoRef, req GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+			if req.BaseBranch != "main" || req.Branch != task.WorktreeBranch || req.WorktreePath != repoDir {
+				t.Fatalf("unexpected publish request: %#v", req)
+			}
+			return &GitHubPublishBranchResult{
+				HeadSHA:       publishedSHA,
+				CreatedCommit: true,
+				ParentSHA:     previousSHA,
+				CommitStats:   &GitHubPublishedCommitStats{Insertions: 3, FilesChanged: 1, ChangedFiles: []string{"update.go"}},
+			}, nil
+		},
+		getPullRequestFn: func(_ context.Context, _ *GitHubRepoRef, number int) (*GitHubPullRequest, error) {
+			return &GitHubPullRequest{Number: number, URL: "https://github.com/openvibely/openvibely/pull/88", State: "open", HeadRef: task.WorktreeBranch, HeadRepoFullName: "openvibely/openvibely", HeadSHA: publishedSHA}, nil
+		},
+		createPRFn: func(context.Context, *GitHubRepoRef, GitHubCreatePullRequestRequest) (*GitHubPullRequest, error) {
+			t.Fatal("existing open PR should be reused")
+			return nil, nil
+		},
+	}, prRepo).SetTaskCommitStatRepo(statRepo)
+
+	_, err := svc.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{CommitMessage: "Publish update stats"})
+	if err != nil {
+		t.Fatalf("OpenForTask: %v", err)
+	}
+	stats, err := statRepo.ListProducedCommitStats(ctx, project.ID, time.Now().UTC().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("list stats: %v", err)
+	}
+	if len(stats) != 1 {
+		t.Fatalf("stats count = %d, want 1", len(stats))
+	}
+	stat := stats[0]
+	if stat.CommitSHA != publishedSHA || stat.ShortSHA != publishedSHA[:7] || stat.Subject != "Publish update stats" {
+		t.Fatalf("unexpected published update stat metadata: %#v", stat)
+	}
+	if stat.Insertions != 3 || stat.Deletions != 0 || stat.FilesChanged != 1 || stat.ChangedFilesJSON != `["update.go"]` {
+		t.Fatalf("unexpected published update stat totals: insertions=%d deletions=%d files=%d changed=%s", stat.Insertions, stat.Deletions, stat.FilesChanged, stat.ChangedFilesJSON)
+	}
+}
+
 func TestTaskPullRequestServiceOpenForTaskReusesExistingRecord(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
