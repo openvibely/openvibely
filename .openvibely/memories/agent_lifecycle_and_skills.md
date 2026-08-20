@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-08-19
-source: after_complete
-source_id: f0269116fc237972e80b697e08d5f417:2aca6476a8c5d378
+updated: 2026-08-20
+source: after_complete_update
+source_id: 934f30938ce25f51f6f1fdb7e9e460d0:6e3a872cceea2e5d
 confidence: high
 title: Agent Lifecycle and Skills
 ---

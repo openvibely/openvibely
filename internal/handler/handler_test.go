@@ -7304,6 +7304,10 @@ func TestHandler_GetTaskThread_ChannelSwarmChildFollowupSurvivesStaleRecoverySwe
 			SlackUserID:    "Uswarm",
 		},
 	})
+	require.Eventually(t, func() bool {
+		stored, err := h.execRepo.GetByID(ctx, exec.ID)
+		return err == nil && stored != nil && stored.Status == models.ExecRunning
+	}, 2*time.Second, 25*time.Millisecond)
 	assert.NoError(t, h.execRepo.UpdateOutput(ctx, exec.ID, "partial worker output"))
 
 	_, err := h.execRepo.RecoverStaleRunningTaskExecutions(ctx)

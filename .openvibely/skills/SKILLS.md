@@ -175,11 +175,6 @@ always_use:
 ## openvibely_automation_graph_workflow
 
 [OpenVibely Automation Graph Workflow](openvibely_automation_graph_workflow/SKILL.md) — Implement, debug, and explain OpenVibely Automation graph nodes, browser-local creation, atomic Save, runtime handoffs, and projections without creating a parallel executor.
-
-## openvibely_sdlc_loop_audit
-
-[OpenVibely SDLC Loop Audit](openvibely_sdlc_loop_audit/SKILL.md) — Reconcile GitHub assignments, issues, pull requests, tasks, and deterministic Automation loop health without creating duplicate work.
-
 ## openvibely_alert_lifecycle_workflow
 
 [OpenVibely Alert Lifecycle Workflow](openvibely_alert_lifecycle_workflow/SKILL.md) — Implement, audit, and diagnose OpenVibely alert lifecycle behavior and project-scoped runtime authorization.
@@ -239,7 +234,7 @@ always_use:
 
 ## openvibely_project_form_source_workflow
 
-[OpenVibely Project Form Source Workflow](openvibely_project_form_source_workflow/SKILL.md) — Keep OpenVibely project create/update form repository-source parsing, validation, clone/reclone, and response behavior aligned.
+[OpenVibely Project Form And Settings Workflow](openvibely_project_form_source_workflow/SKILL.md) — Keep OpenVibely project create/update forms, Chat project actions, safe settings mutations, and repository-source behavior aligned.
 
 ## openvibely_chat_link_opening_workflow
 
@@ -252,11 +247,6 @@ always_use:
 ## openvibely_ui_preference_persistence
 
 [OpenVibely UI Preference Persistence](openvibely_ui_preference_persistence/SKILL.md) — Persist browser and desktop UI preferences without theme flashes, layout jumps, or split storage contracts.
-
-## openvibely_sdlc_finder_deduplication_workflow
-
-[OpenVibely SDLC Finder Deduplication Workflow](openvibely_sdlc_finder_deduplication_workflow/SKILL.md) — Keep GitHub and Native SDLC Automation finder loops from recreating already-reported work.
-
 ## openvibely_scoped_file_tools_workflow
 
 [OpenVibely Scoped File Tools Workflow](openvibely_scoped_file_tools_workflow/SKILL.md) — Implement and audit OpenVibely scoped file runtime path resolution, permission checks, containment protections, and bounded preview performance.
@@ -267,7 +257,7 @@ always_use:
 
 ## openvibely_reflection_metrics_workflow
 
-[OpenVibely Reflection Metrics Workflow](openvibely_reflection_metrics_workflow/SKILL.md) — Implement and audit OpenVibely Reflection produced-commit stats recording, DB-first aggregation, and git fallback safely.
+[OpenVibely Reflection Metrics Workflow](openvibely_reflection_metrics_workflow/SKILL.md) — Implement and audit OpenVibely Reflection app-created commit stats recording, DB-first aggregation, and git fallback safely.
 
 ## openvibely_model_configuration_workflow
 
@@ -284,3 +274,15 @@ always_use:
 ## openvibely_personality_workflow
 
 [OpenVibely Personality Workflow](openvibely_personality_workflow/SKILL.md) — Implement and audit OpenVibely personality presets, custom personalities, settings saves, and runtime set_personality behavior.
+
+## openvibely_chat_agent_creation_workflow
+
+[OpenVibely Chat Agent Creation Workflow](openvibely_chat_agent_creation_workflow/SKILL.md) — Implement and audit Chat/runtime actions that save reusable user-managed Agent profiles.
+
+## openvibely_worker_capacity_projection_workflow
+
+[OpenVibely Worker Capacity Projection Workflow](openvibely_worker_capacity_projection_workflow/SKILL.md) — Optimize OpenVibely worker/model-capacity stats without hydrating full model configuration secrets or blobs.
+
+## openvibely_pulse_upcoming_workflow
+
+[OpenVibely Pulse Upcoming Workflow](openvibely_pulse_upcoming_workflow/SKILL.md) — Implement and audit the Pulse upcoming-work agenda, projections, and Chat/tool surfaces without exposing unbounded task data.

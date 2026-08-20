@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-19
-source: after_complete
-source_id: b726c8898cb11f43eb8cc9dc6ba1b069:4b9fa91e0a7a63c5
+updated: 2026-08-20
+source: after_complete_update
+source_id: be36f80de298ab77ddf1500419f9d9ba:f8423a4478b8140e
 confidence: high
 title: Provider Architecture
 ---
@@ -73,10 +73,11 @@ OAuth account facts:
 Provider-native and runtime tools:
 - Provider-native web search/fetch is executed by providers, not local web tooling. OpenAI sends `web_search`; Anthropic sends versioned raw-tool types such as `web_search_20250305` and `web_fetch_20250910`.
 - Runtime tools are request-scoped, provider-generic, and carried through the LLM service/provider adapter path. Tool definitions carry read/write access classification.
+- Shared runtime executor behavior includes a request-scoped guard for consecutive identical exhausted-empty `list_tasks` calls: after a `total=0`, `has_more=false`, empty-task response for canonicalized parameters, the next identical call is answered as `duplicate_noop=true` with guidance instead of re-querying. Different parameters, non-`list_tasks` calls, handler errors, or nonempty/pageable results clear the guard so intervening mutations can be observed.
 - Runtime-tool-capable providers currently include OpenAI API/OAuth, Anthropic API/OAuth, and OpenAI-compatible API-key Chat Completions. Unsupported providers/transports receive no unusable native tool definitions and no legacy marker fallback.
-- Provider-local built-in tool execution for file/shell tools is duplicated across OpenAI and Anthropic clients; issue `#687` tracks consolidation.
+- Resolved `#687` in PR `#752`: provider-local built-in file/shell tool execution for OpenAI and Anthropic is centralized in `pkg/agenttools`; `pkg/openai_client` and `pkg/anthropic_client` retain provider-specific schema definitions and thin `ExecuteTool` wrappers. A 2026-08-20 final audit found no material issues and verified the published PR file list/content matched the audited issue-scoped implementation.
 - Runtime-tool prompt guidance names are extracted through shared `RuntimeTools.DefinitionNames()` in `internal/llm/contracts`; OpenAI, Anthropic, and OpenAI-compatible adapters should use this provider-neutral helper rather than adapter-local name-list conversions.
-- Anthropic `execBash` default timeout is 10 minutes only when no positive timeout is provided; any positive explicit timeout is preserved.
+- Provider-local bash timeout policy is explicit configuration on the shared `pkg/agenttools` executor: OpenAI passes its timeout policy through the wrapper, while Anthropic defaults to 10 minutes only when no positive timeout is provided and preserves any positive explicit timeout.
 - Memory tool exposure is a request/tool-profile decision, not a global provider-adapter default.
 - Anthropic has a provider-side name-combination collision for `skill_view`, `skills_list`, and `skill_manage`; the adapter aliases canonical internal `skills_list` to wire name `skill_list` and translates back locally.
 - `read_file` runtime executors emit `decimalLineNumber\t<source bytes>`. Keep this compact format so indentation after the tab is preserved and rendered/copied/model-facing content does not diverge.

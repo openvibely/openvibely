@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-08-19
-source: after_complete
-source_id: e66c64236d6c3b8344566d00dbb75c41:3e665d862de2f852
+updated: 2026-08-20
+source: after_complete_update
+source_id: e2807674fa6759bb2db9f3ad65c6ea27:4dd00d946e023eb6
 confidence: high
 title: Integrations and Channels
 ---
@@ -24,14 +24,15 @@ Shared channel direction:
 - Channel-origin Chat and task-thread behavior stays aligned with web/API lifecycle, queueing, steering, cancellation, task goals, agent resolution, selected memory, and swarm child follow-up rules. Canonical task/thread semantics live in `chat_thread_system.md`.
 - `internal/service/channel_chat_ingress.go` owns reusable inbound Chat flow for Slack, Discord, Telegram, and Email, including attachment staging/linking, model selection, active-chat lookup/queue branching, first-turn task/execution creation, reply context, broadcasts, history assembly, runner invocation, and queued promotion.
 - Shared generic channel image validation, pending session IDs, unique temp filenames, MIME sniffing, and decoder imports belong in neutral channel ingress code.
-- `internal/service/chat_action_runtime.go` centralizes generic channel runtime handlers for task creation/edit/execution, goals, task-thread viewing/sending, project/list utilities including GitHub-backed `create_project`, schedule/personality/model utilities, completion, alerts, and capability formatting.
-- Open `#699` channel wiring gap: Slack, Telegram, and Discord channel runtimes advertise `create_project` but currently omit the `CreateGitHubProjectRuntimeOptions` dependencies when building project handlers, so execution returns `project service is not configured`; Email shows the intended dependency wiring.
+- `internal/service/chat_action_runtime.go` centralizes generic channel runtime handlers for task creation/edit/execution, goals, task-thread viewing/sending, project/list utilities including GitHub-backed `create_project`, schedule/personality/model utilities, Pulse upcoming-work summaries, completion, alerts, and capability formatting.
+- Local implementation for `#699`: Slack, Telegram, Discord, and Email channel runtimes wire `CreateGitHubProjectRuntimeOptions` into project handlers, so advertised `create_project` can create GitHub-backed projects and honor `switch_after_create` through channel active-project persistence. Publication state is tracked separately in `worktree_and_lineage.md` because PR `#719` has had stale remote-handoff incidents.
 - The read-only `list_channels` action is the Chat/control-plane path for compact channel readiness: it summarizes GitHub, Slack, Telegram, Discord, Email, inbound webhook counts, outbound target counts by platform/kind, and explicit-target policy using prompt-safe booleans/counts/status strings only. Web/API Chat uses the full handler summary; Slack, Discord, and Telegram channel runtimes wire service-side handlers so advertised tools are covered.
 - Resolved `#684`: Slack/Discord/Telegram service-side `list_channels` aligns GitHub status with Web/API behavior for GitHub App installations. Channel runtime GitHub App mode reports connected from stored installation state, does not use a PAT fallback to mark explicit App mode connected, and includes only prompt-safe account login/type metadata, not secrets.
 - Resolved `#684` all-surface completeness: Slack/Discord/Telegram channel-provided `list_channels` handlers wire `EmailStatus`, `EmailAuthRepo`, `WebhookRepo`, and outbound target stores into the service-side summary, so channel surfaces report Email/Webhook/outbound target status and counts consistently with Web/API Chat without exposing passwords, webhook path tokens/secrets, or raw target credentials.
 - Channel task-creation callback assembly should stay DRY across Slack, Discord, and Telegram while preserving platform-specific callbacks.
 - Slack, Telegram, Discord, and Email own their `switch_project` authorization and active-project persistence callbacks. Slack, Discord, and Email use shared channel runtime switch handler rather than Telegram-style direct `/project` commands.
 - Channel-provided runtime tools take precedence by name, then fall back to generic tools a partial channel runtime does not implement.
+- Slack, Telegram, and Discord channel utility runtimes advertise and execute the read-only `view_pulse` upcoming-work action through the shared Pulse/Upcoming service path; Email does not advertise it unless explicit handler support is added.
 - Runtime-tool-incapable provider/auth paths receive no channel action tools and no bracket-marker fallback.
 - `internal/chatcontrol.DecodeRuntimeToolInput` is the production decoder for chat-action JSON inputs across web Chat, Automation Chat, channels, GitHub runtime, outbound `send_message`, `list_tasks`, and `list_schedules`.
 - Authorized-user/sender handlers share generic CRUD helper patterns where schemas align; Slack's composite-key user-project repo is an intentional exception.
@@ -62,6 +63,9 @@ GitHub integration:
 - Manually created OpenVibely tasks referencing an existing GitHub issue use ordinary task PR flow and do not need GitHub SDLC Automation issue-task provenance.
 - Explicit-assignee list tools require assignee to be configured GitHub Authorized User before provider calls. PAT-owner scanning uses `github_list_my_assigned_issues`.
 - Scheduled GitHub Dev Inbox treats assignment to PAT owner or configured Authorized User as approval to implement. It does not require approved label, existing PR, or prior Automation mapping. Workflow labels should stay unprefixed, such as `task-created`, `in-progress`, `blocked`, `needs-human`, and `pr-opened`.
+- GitHub SDLC Dev Inbox and maintained templates should use one broad `list_tasks` lookup per issue number/URL, omitting `category` and `status`; do not enumerate lifecycle states such as active/backlog/completed or pending/queued/running after an empty broad search. `list_tasks` still only supports one substring query at a time, so multiple issue numbers need separate broad calls.
+- Open reconciliation defect `#741`: `list_tasks` currently searches task titles only, so an existing implementation task whose prompt or provenance contains the GitHub issue number/URL but whose title does not can be missed and duplicated by Dev Inbox reconciliation.
+- 2026-08-20 runtime incident: a Dev Inbox run with updated broad-search prompt guidance still sent repeated `list_tasks` calls with `category=active,status=pending`; those lifecycle filters are model-chosen ordinary filters, not a separate `list_tasks` mode or server default. Prompt-only guidance may be insufficient for duplicate prevention, but generic `list_tasks` semantics should remain consistent unless an explicit product change is made.
 - Assigned-issue list entries skip detail hydration only when raw GitHub JSON is explicitly complete for task creation; incomplete/unknown entries hydrate that issue after repository/issue deduplication.
 - Open stale-PR gap `#233`: ordinary task PR records are not reconciled with GitHub after creation, so closed/merged remote PRs can still receive forwarded feedback or be reported reusable.
 - GitHub SDLC hygiene gap: closed issues can retain workflow labels/authorized-assignee state and stale local PR records can mislead inbox/review workflows. Verify live GitHub PR/issue state and current OpenVibely task records before continuing/deduplicating inbox issues.

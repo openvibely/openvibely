@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-19
-source: after_complete
-source_id: ce58dc08ee6cf3e3ca6d281fba596f35:9c3fcd168a95360b
+updated: 2026-08-20
+source: after_complete_update
+source_id: ddfa68e7901e0394204fc6ef9f6d7a97:faeff8d84d506186
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -28,6 +28,7 @@ SQLite and runtime-state contracts:
 - High-cardinality task deletion paths must keep foreign-key and cleanup-ownership lookups indexed, especially `alerts.execution_id`, lifecycle parent references, task/execution attachments, and pending-upload session IDs.
 - Single-task deletion, UI bulk deletion, Chat clearing, and non-default project deletion use a shared per-task cleanup boundary. Project deletion routes project-owned tasks through `TaskService` cleanup before deleting the project row while default-project deletion remains blocked.
 - Attachment cleanup ownership is captured in the same SQLite transaction as cancellation/cascading task deletion. Filesystem cleanup runs only after relational deletion commits. Pending-file publication and retirement coordinate through a process-wide session fence plus durable `retired_attachment_sessions` tombstones; retired client-supplied sessions return HTTP 409.
+- Task attachment file persistence for browser task creation, browser task edit uploads, and `POST /tasks/:taskId/attachments` is centralized through one handler helper while preserving surface-specific HTTP responses and side effects. That shared path owns upload directory creation, per-file max-size skipping, `filepath.Base` filename normalization, `io.Copy`, partial-file cleanup, blank media-type defaulting to `application/octet-stream`, and attachment row creation. Multipart attachment entry points use a shared bounded parser before form access so oversized browser/API task and chat uploads are rejected before full multipart parsing or filesystem/database side effects.
 - Startup orphaned-file reconciliation for task and chat attachments shares repository-level walk/delete/prune helpers while preserving task-vs-chat upload-root boundaries.
 - Storage changes must remain compatible across Docker/VPS, local server, and desktop deployments.
 - Local storage migrations preserve existing user state by moving/copying old local database, SQLite sidecars, repos, uploads, and related runtime directories into `$HOME/.openvibely` when no explicit storage override is set. `OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION` skips this migration.
@@ -44,7 +45,7 @@ Worker and scheduling contracts:
 - Creating a one-time schedule for a completed/failed task through browser or runtime resets terminal non-running targets to pending so the due scheduler can submit them. Running targets remain running; recurring already-scheduled completed/failed tasks preserve scheduler-time reset behavior.
 - Initial `NextRun` for newly created schedules follows the repository lower-level rule `NextRun = RunAt`, including recurring schedules whose `run_at` is already in the past.
 - Direct schedule create/update non-HTMX redirects share a task-schedules redirect helper preserving project scope.
-- Open bug `#714`: browser/API schedule management endpoints registered globally by schedule ID can update, toggle, delete, or drag/drop-reschedule schedules outside the selected/current project; runtime-tool schedule paths already enforce project ownership.
+- Resolved `#714`: browser/API schedule create, update, browser/API toggle, delete, and drag/drop-reschedule paths enforce project-scoped ownership before mutation. Runtime-tool schedule paths already enforced project ownership; handler-layer routes now also reject foreign task/schedule IDs against the current/requested project while preserving same-project HTMX/redirect flows.
 
 OAuth and hosted deployment facts:
 - Model OAuth initiate/callback resolves absolute app URLs through `APP_BASE_URL` first, then forwarded/request host fallback.
@@ -61,6 +62,16 @@ Docker image direction:
 - The runtime image includes common Go, Node.js, Python, Rust, Java, Ruby, and C/C++ toolchains and excludes Podman/Buildah. Fedora's shorter support cycle requires regular base-version upgrades.
 - Final OCI user is `10001:10001`; entrypoint override remains non-root and mounted `/data` must already be writable by that UID/GID. Runtime ownership mutation and legacy-volume migration guidance are intentionally excluded.
 - The image removes `sudo` and setuid/setgid bits after package installation. Non-root execution is defense in depth, not a complete sandbox.
+
+Reflection and history contracts:
+- Reflection `hour`, `day`, and `week` ranges are rolling windows computed from current time (`day` is last 24 hours), not calendar-boundary ranges such as local midnight to now.
+- Reflection project changes prefer `task_commit_stats` app-produced task commit records. Repository `git log` history is only a fallback for old data that predates stats; during migration, the pre-stats subrange is merged with DB stats so old history is not dropped as soon as one stat exists.
+- The user expects Reflection to record commits created by the app accurately, not only task-turn output commits. Current app-created commit recording covers task output commits, post-execution safety commits, dirty worktree commits before merge, local merge commits, squash merge commits, AI conflict-resolution commits, app-managed rebased task commits, and GitHub API-created PR publication commits even when the SHA is remote-only.
+- Fast-forward merges create no new commit and should not add a separate stat row; the commits they fast-forward to should already be recorded when the app created them.
+- Raw `git log HEAD` counts can exceed Reflection project-change counts because they include manual commits, dependency/internal updates, fallback-era history, and other repository history that is not app-produced task stats.
+- Resolved 2026-08-20: `GenerateHistory` fallback coverage is based on the project’s first-ever `task_commit_stats.produced_at`, not the earliest stat inside the selected range. Raw git history is only merged for the true pre-stats subrange (`since -> first-ever-stat`); ranges already covered by stats must not count raw git commits during quiet gaps before the first in-range stat.
+- Resolved 2026-08-20: GitHub API-created PR publication commit stats avoid update overcounts by using the created commit’s actual delta. `PublishBranch` returns the created commit’s parent SHA and fetches commit-level stats from GitHub `/commits/{sha}` for real remote SHAs; `TaskPullRequestService` records those stats, with fallback diffing against the returned parent SHA rather than always diffing against the base branch.
+- A 2026-08-20 local `main` diagnostic found 33 raw commits in the prior 24 hours: 24 were definitely fast-forwarded from `task/...` branches by `main` reflog evidence, 6 were manual/other direct commits, and 3 were unmatched intermediate commits. This historical diagnostic explained why the old narrower task-output metric undercounted app/task-originated commits before broader app-created commit recording was implemented.
 
 Diagnostics, handlers, and local development:
 - When the user asks about local SQLite size or vacuum behavior, inspect live DB `$HOME/.openvibely/openvibely.db` read-only, including sidecars. Do not run checkpoints, vacuum, or modifying diagnostics unless explicitly asked.
