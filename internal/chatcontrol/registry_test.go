@@ -27,10 +27,13 @@ func TestRegistry_ListTasksDescriptionDiscouragesLifecycleEnumeration(t *testing
 	if def == nil {
 		t.Fatal("list_tasks action missing")
 	}
-	if !strings.Contains(def.Description, "Omit category/status to search all visible task categories and statuses") {
+	if !strings.Contains(def.Description, "Omit category/status for a broad search across all visible task categories and statuses") {
 		t.Fatalf("list_tasks description should explain broad category/status search, got %q", def.Description)
 	}
-	if !strings.Contains(def.Description, "do not enumerate lifecycle filters after an empty total=0, has_more=false result") {
+	if !strings.Contains(def.Description, "Supplying category or status restricts results to only that lifecycle state") {
+		t.Fatalf("list_tasks description should explain category/status filters are restrictive, got %q", def.Description)
+	}
+	if !strings.Contains(def.Description, "Do not enumerate lifecycle filters after an empty total=0, has_more=false result") {
 		t.Fatalf("list_tasks description should discourage empty lifecycle enumeration, got %q", def.Description)
 	}
 }
