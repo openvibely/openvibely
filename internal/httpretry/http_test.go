@@ -149,6 +149,13 @@ func TestPlainEOFIsRetryable(t *testing.T) {
 	}
 }
 
+func TestPeerInternalStreamErrorIsRetryable(t *testing.T) {
+	err := NewStreamError(errors.New("stream error: stream ID 1241; INTERNAL_ERROR; received from peer"))
+	if !IsRetryableError(err) {
+		t.Fatal("HTTP/2 peer INTERNAL_ERROR stream failure should be retryable")
+	}
+}
+
 func TestBackoffHonorsRetryAfterAndExponentialDelay(t *testing.T) {
 	if got := Backoff(2, nil, time.Second); got != 4*time.Second {
 		t.Fatalf("exponential backoff = %v, want 4s", got)

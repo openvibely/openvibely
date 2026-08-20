@@ -168,7 +168,7 @@ func IsRetryableError(err error) bool {
 		return IsRetryableStatus(responseErr.StatusCode)
 	}
 	msg := strings.ToLower(err.Error())
-	for _, hint := range []string{"rate limit", "too many requests", "overloaded", "temporar", "unavailable", "server error", "retry your request", "try again"} {
+	for _, hint := range []string{"rate limit", "too many requests", "overloaded", "temporar", "unavailable", "server error", "internal_error", "received from peer", "retry your request", "try again"} {
 		if strings.Contains(msg, hint) {
 			return true
 		}
