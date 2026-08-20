@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -159,6 +160,15 @@ func taskAttachmentUploadSurfaces() []taskAttachmentUploadSurface {
 
 func newTaskAttachmentMultipartRequest(t *testing.T, method, target string, fields map[string]string, file taskAttachmentTestFile) *http.Request {
 	t.Helper()
+	var files []taskAttachmentTestFile
+	if file.name != "" {
+		files = append(files, file)
+	}
+	return newTaskAttachmentMultipartRequestWithFiles(t, method, target, fields, files)
+}
+
+func newTaskAttachmentMultipartRequestWithFiles(t *testing.T, method, target string, fields map[string]string, files []taskAttachmentTestFile) *http.Request {
+	t.Helper()
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	for name, value := range fields {
@@ -166,7 +176,7 @@ func newTaskAttachmentMultipartRequest(t *testing.T, method, target string, fiel
 			t.Fatalf("write field %s: %v", name, err)
 		}
 	}
-	if file.name != "" {
+	for _, file := range files {
 		header := textproto.MIMEHeader{}
 		header.Set("Content-Disposition", `form-data; name="files"; filename="`+file.name+`"`)
 		if file.contentType != "" {
@@ -236,7 +246,119 @@ func TestTaskAttachmentUploadsPersistEquivalentRowsAcrossSurfaces(t *testing.T) 
 	}
 }
 
-func TestTaskAttachmentUploadsSkipOversizedFilesAcrossSurfaces(t *testing.T) {
+func TestTaskAttachmentUploadsAllowValidMultiFileBodyAboveSingleFileRequestCapAcrossSurfaces(t *testing.T) {
+	for _, tcCase := range []struct {
+		name    string
+		request func(t *testing.T, tc *TestContext, projectID string, files []taskAttachmentTestFile) (*http.Request, func() string)
+	}{
+		{
+			name: "task creation",
+			request: func(t *testing.T, tc *TestContext, projectID string, files []taskAttachmentTestFile) (*http.Request, func() string) {
+				t.Helper()
+				title := "task attachment create multi file above single cap"
+				req := newTaskAttachmentMultipartRequestWithFiles(t, http.MethodPost, "/tasks?project_id="+projectID, map[string]string{
+					"title":    title,
+					"category": "backlog",
+					"priority": "2",
+					"prompt":   "created with multiple attachments",
+				}, files)
+				req.Header.Set("HX-Request", "true")
+				return req, func() string {
+					task, err := tc.taskRepo.GetByProjectAndTitle(context.Background(), projectID, title)
+					if err != nil {
+						t.Fatalf("get created task: %v", err)
+					}
+					if task == nil {
+						t.Fatalf("created task %q not found", title)
+					}
+					return task.ID
+				}
+			},
+		},
+		{
+			name: "task edit",
+			request: func(t *testing.T, tc *TestContext, projectID string, files []taskAttachmentTestFile) (*http.Request, func() string) {
+				t.Helper()
+				task := tc.CreateTask(projectID).
+					WithTitle("task attachment edit multi file above single cap").
+					WithCategory(models.CategoryBacklog).
+					WithPriority(2).
+					Build()
+				req := newTaskAttachmentMultipartRequestWithFiles(t, http.MethodPut, "/tasks/"+task.ID, map[string]string{
+					"title":    task.Title,
+					"category": "backlog",
+					"priority": "2",
+					"prompt":   task.Prompt,
+				}, files)
+				req.Header.Set("HX-Request", "true")
+				return req, func() string { return task.ID }
+			},
+		},
+		{
+			name: "attachment endpoint",
+			request: func(t *testing.T, tc *TestContext, projectID string, files []taskAttachmentTestFile) (*http.Request, func() string) {
+				t.Helper()
+				task := tc.CreateTask(projectID).
+					WithTitle("task attachment endpoint multi file above single cap").
+					WithCategory(models.CategoryBacklog).
+					Build()
+				req := newTaskAttachmentMultipartRequestWithFiles(t, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, files)
+				req.Header.Set("HX-Request", "true")
+				return req, func() string { return task.ID }
+			},
+		},
+	} {
+		t.Run(tcCase.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			uploadsRoot := withTaskAttachmentUploadsDir(t)
+			files := []taskAttachmentTestFile{
+				{name: "first.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("a"), 6<<20)},
+				{name: "second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 6<<20)},
+			}
+			req, taskIDAfterUpload := tcCase.request(t, tc, project.ID, files)
+			if req.ContentLength <= browserAttachmentRequestLimit(maxUploadSize) {
+				t.Fatalf("test request length %d should exceed old one-file cap %d", req.ContentLength, browserAttachmentRequestLimit(maxUploadSize))
+			}
+			if req.ContentLength > attachmentRequestLimit(maxUploadSize, maxTaskAttachmentFilesPerRequest) {
+				t.Fatalf("test request length %d should fit task request cap %d", req.ContentLength, attachmentRequestLimit(maxUploadSize, maxTaskAttachmentFilesPerRequest))
+			}
+
+			rec := httptest.NewRecorder()
+			tc.echo.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+
+			taskID := taskIDAfterUpload()
+			attachments, err := tc.attachmentRepo.ListByTask(context.Background(), taskID)
+			if err != nil {
+				t.Fatalf("list attachments: %v", err)
+			}
+			if len(attachments) != len(files) {
+				t.Fatalf("expected %d attachments, got %d: %+v", len(files), len(attachments), attachments)
+			}
+			expectedSizes := map[string]int64{
+				"first.bin":  int64(len(files[0].content)),
+				"second.bin": int64(len(files[1].content)),
+			}
+			for _, att := range attachments {
+				wantSize, ok := expectedSizes[att.FileName]
+				if !ok {
+					t.Fatalf("unexpected attachment %q", att.FileName)
+				}
+				if att.FileSize != wantSize {
+					t.Fatalf("attachment %s size=%d want=%d", att.FileName, att.FileSize, wantSize)
+				}
+				if _, err := os.Stat(filepath.Join(uploadsRoot, taskID, att.FileName)); err != nil {
+					t.Fatalf("expected stored file %s: %v", att.FileName, err)
+				}
+			}
+		})
+	}
+}
+
+func TestTaskAttachmentUploadsRejectOversizedFilesAcrossSurfaces(t *testing.T) {
 	for _, surface := range taskAttachmentUploadSurfaces() {
 		t.Run(surface.name, func(t *testing.T) {
 			tc := NewTestContext(t)
@@ -249,11 +371,19 @@ func TestTaskAttachmentUploadsSkipOversizedFilesAcrossSurfaces(t *testing.T) {
 				content:     bytes.Repeat([]byte("x"), maxUploadSize+1),
 			}
 			taskID, rec := surface.upload(t, tc, project.ID, file)
-			if rec.Code != surface.wantNoUpload {
+			if rec.Code != http.StatusRequestEntityTooLarge {
 				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 			}
+
 			if taskID == "" {
-				t.Fatalf("expected task ID")
+				tasks, err := tc.taskRepo.ListByProject(context.Background(), project.ID, "")
+				if err != nil {
+					t.Fatalf("list tasks: %v", err)
+				}
+				if len(tasks) != 0 {
+					t.Fatalf("expected no task to be created, got %+v", tasks)
+				}
+				return
 			}
 
 			attachments, err := tc.attachmentRepo.ListByTask(context.Background(), taskID)
@@ -333,6 +463,119 @@ func TestTaskAttachmentUploadsCleanFilesOnRepositoryFailureAcrossSurfaces(t *tes
 	}
 }
 
+func TestTaskCreateAndEditAttachmentFormsRejectOversizedMultipartBeforeMutation(t *testing.T) {
+	for _, tcCase := range []struct {
+		name   string
+		target func(t *testing.T, tc *TestContext, projectID string) (method string, path string, assertNoMutation func())
+	}{
+		{
+			name: "create",
+			target: func(t *testing.T, tc *TestContext, projectID string) (string, string, func()) {
+				t.Helper()
+				return http.MethodPost, "/tasks?project_id=" + projectID, func() {
+					tasks, err := tc.taskRepo.ListByProject(context.Background(), projectID, "")
+					if err != nil {
+						t.Fatalf("list tasks: %v", err)
+					}
+					if len(tasks) != 0 {
+						t.Fatalf("expected no task to be created, got %+v", tasks)
+					}
+				}
+			},
+		},
+		{
+			name: "edit",
+			target: func(t *testing.T, tc *TestContext, projectID string) (string, string, func()) {
+				t.Helper()
+				task := tc.CreateTask(projectID).WithTitle("original title").WithCategory(models.CategoryBacklog).Build()
+				return http.MethodPut, "/tasks/" + task.ID, func() {
+					updated, err := tc.taskRepo.GetByID(context.Background(), task.ID)
+					if err != nil {
+						t.Fatalf("get task: %v", err)
+					}
+					if updated.Title != "original title" {
+						t.Fatalf("expected task title to remain unchanged, got %q", updated.Title)
+					}
+					attachments, err := tc.attachmentRepo.ListByTask(context.Background(), task.ID)
+					if err != nil {
+						t.Fatalf("list attachments: %v", err)
+					}
+					if len(attachments) != 0 {
+						t.Fatalf("expected no attachments, got %+v", attachments)
+					}
+				}
+			},
+		},
+	} {
+		t.Run(tcCase.name, func(t *testing.T) {
+			tmpMultipartDir := t.TempDir()
+			t.Setenv("TMPDIR", tmpMultipartDir)
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			withTaskAttachmentUploadsDir(t)
+			method, target, assertNoMutation := tcCase.target(t, tc, project.ID)
+			req, body, totalSize := newSizedMultipartUploadRequest(t, method, target, map[string]string{
+				"title":    "mutated title",
+				"category": "backlog",
+				"priority": "2",
+				"prompt":   "mutated prompt",
+			}, "files", "too-large.txt", "text/plain", 25<<20, false)
+			req.Header.Set("HX-Request", "true")
+			rec := httptest.NewRecorder()
+			tc.echo.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("expected 413, got %d; body=%s", rec.Code, rec.Body.String())
+			}
+			maxRead := browserAttachmentRequestLimit(maxUploadSize) + 1
+			if body.bytesRead > maxRead {
+				t.Fatalf("read %d bytes, want <= %d", body.bytesRead, maxRead)
+			}
+			if body.bytesRead >= totalSize {
+				t.Fatalf("read full oversized body: read=%d total=%d", body.bytesRead, totalSize)
+			}
+			assertNoMutation()
+			assertDirEmpty(t, tmpMultipartDir)
+		})
+	}
+}
+
+func TestUploadAttachment_OversizedMultipartRequestIsBoundedBeforePersistence(t *testing.T) {
+	tmpMultipartDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpMultipartDir)
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	uploadsRoot := withTaskAttachmentUploadsDir(t)
+
+	req, body, totalSize := newSizedMultipartUploadRequest(t, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, "files", "too-large.txt", "text/plain", 25<<20, false)
+	rec := httptest.NewRecorder()
+	tc.echo.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+	maxRead := browserAttachmentRequestLimit(maxUploadSize) + 1
+	if body.bytesRead > maxRead {
+		t.Fatalf("read %d bytes, want <= %d", body.bytesRead, maxRead)
+	}
+	if body.bytesRead >= totalSize {
+		t.Fatalf("read full oversized body: read=%d total=%d", body.bytesRead, totalSize)
+	}
+
+	attachments, err := tc.attachmentRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("list attachments: %v", err)
+	}
+	if len(attachments) != 0 {
+		t.Fatalf("expected no attachments, got %+v", attachments)
+	}
+	if _, err := os.Stat(filepath.Join(uploadsRoot, task.ID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no task attachment directory, stat err=%v", err)
+	}
+	assertDirEmpty(t, tmpMultipartDir)
+}
+
 func assertNoTaskAttachmentsOrFile(t *testing.T, tc *TestContext, taskID, path string) {
 	t.Helper()
 	attachments, err := tc.attachmentRepo.ListByTask(context.Background(), taskID)
@@ -344,6 +587,71 @@ func assertNoTaskAttachmentsOrFile(t *testing.T, tc *TestContext, taskID, path s
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected partial file %s to be removed, stat err=%v", path, err)
+	}
+}
+
+type countingReadCloser struct {
+	r         io.Reader
+	bytesRead int64
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	r.bytesRead += int64(n)
+	return n, err
+}
+
+func (r *countingReadCloser) Close() error { return nil }
+
+type repeatedByteReader struct {
+	remaining int64
+}
+
+func (r *repeatedByteReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, io.EOF
+	}
+	if int64(len(p)) > r.remaining {
+		p = p[:r.remaining]
+	}
+	for i := range p {
+		p[i] = 'x'
+	}
+	r.remaining -= int64(len(p))
+	return len(p), nil
+}
+
+func newSizedMultipartUploadRequest(t *testing.T, method, target string, fields map[string]string, fileField, filename, contentType string, fileSize int64, setContentLength bool) (*http.Request, *countingReadCloser, int64) {
+	t.Helper()
+	const boundary = "openvibely-issue-748-boundary"
+	var prefix bytes.Buffer
+	for name, value := range fields {
+		fmt.Fprintf(&prefix, "--%s\r\nContent-Disposition: form-data; name=%q\r\n\r\n%s\r\n", boundary, name, value)
+	}
+	fmt.Fprintf(&prefix, "--%s\r\nContent-Disposition: form-data; name=%q; filename=%q\r\n", boundary, fileField, filename)
+	if contentType != "" {
+		fmt.Fprintf(&prefix, "Content-Type: %s\r\n", contentType)
+	}
+	prefix.WriteString("\r\n")
+	suffix := []byte("\r\n--" + boundary + "--\r\n")
+	totalSize := int64(prefix.Len()) + fileSize + int64(len(suffix))
+	body := &countingReadCloser{r: io.MultiReader(bytes.NewReader(prefix.Bytes()), &repeatedByteReader{remaining: fileSize}, bytes.NewReader(suffix))}
+	req := httptest.NewRequest(method, target, body)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+	if setContentLength {
+		req.ContentLength = totalSize
+	}
+	return req, body, totalSize
+}
+
+func assertDirEmpty(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir %s: %v", dir, err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected %s to be empty, found %d entries", dir, len(entries))
 	}
 }
 

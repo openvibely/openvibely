@@ -334,6 +334,13 @@ func taskRequiredFieldHTTPError(err error) *echo.HTTPError {
 
 func (h *Handler) CreateTask(c echo.Context) error {
 	projectID := c.QueryParam("project_id")
+	if _, err := parseBoundedMultipartForm(c, maxUploadSize, maxTaskAttachmentFilesPerRequest); err != nil {
+		applog.Infof("[handler] CreateTask error parsing form: %v", err)
+		if httpErr, ok := err.(*echo.HTTPError); ok {
+			return httpErr
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse form")
+	}
 	priority, _ := strconv.Atoi(c.FormValue("priority"))
 	category := models.TaskCategory(c.FormValue("category"))
 	if category == "" {
@@ -1092,6 +1099,13 @@ func (h *Handler) updateTaskGoalFromEditForm(c echo.Context, taskID string) erro
 func (h *Handler) UpdateTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] UpdateTask id=%s", taskID)
+	if _, err := parseBoundedMultipartForm(c, maxUploadSize, maxTaskAttachmentFilesPerRequest); err != nil {
+		applog.Infof("[handler] UpdateTask error parsing form: %v", err)
+		if httpErr, ok := err.(*echo.HTTPError); ok {
+			return httpErr
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse form")
+	}
 
 	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil {

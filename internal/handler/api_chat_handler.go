@@ -122,15 +122,18 @@ type ChatMessageStatusResponse struct {
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/chat/message [post]
 func (h *Handler) APIChatMessage(c echo.Context) error {
-	// Parse multipart form (limit total request body to prevent abuse)
-	if err := c.Request().ParseMultipartForm(apiMaxFileSize * int64(apiMaxFilesPerReq)); err != nil {
-		// If it's not multipart, try regular form
-		if c.Request().Header.Get("Content-Type") == "" || strings.HasPrefix(c.Request().Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
-			// That's OK, no attachments
-		} else {
+	contentType := c.Request().Header.Get("Content-Type")
+	if isMultipartContentType(contentType) {
+		if _, err := parseBoundedMultipartForm(c, apiMaxFileSize, apiMaxFilesPerReq); err != nil {
 			applog.Infof("[handler] APIChatMessage error parsing form: %v", err)
+			if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusRequestEntityTooLarge {
+				return c.JSON(http.StatusRequestEntityTooLarge, map[string]string{"error": "request body too large"})
+			}
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to parse request form"})
 		}
+	} else if contentType != "" && !strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+		applog.Infof("[handler] APIChatMessage unsupported form content type: %s", contentType)
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "failed to parse request form"})
 	}
 
 	message := c.FormValue("message")

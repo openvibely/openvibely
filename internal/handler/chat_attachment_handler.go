@@ -35,10 +35,17 @@ func init() {
 func (h *Handler) UploadChatAttachment(c echo.Context) error {
 	applog.Infof("[handler] UploadChatAttachment")
 
-	// Parse multipart form
-	form, err := c.MultipartForm()
+	form, err := parseBoundedMultipartForm(c, maxChatUploadSize, maxFilesPerUpload)
 	if err != nil {
 		applog.Infof("[handler] UploadChatAttachment error parsing form: %v", err)
+		if httpErr, ok := err.(*echo.HTTPError); ok {
+			return httpErr
+		}
+		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse form")
+	}
+
+	if form == nil {
+		applog.Infof("[handler] UploadChatAttachment no multipart form provided")
 		return echo.NewHTTPError(http.StatusBadRequest, "failed to parse form")
 	}
 

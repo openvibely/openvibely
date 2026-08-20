@@ -348,6 +348,77 @@ func TestUploadChatAttachment_ExistingPendingSessionMaxFilesLimit(t *testing.T) 
 	assert.Equal(t, http.StatusBadRequest, httpErr.Code)
 }
 
+func TestUploadChatAttachment_AllowsValidMultiFileUploadAboveSingleFileRequestCap(t *testing.T) {
+	useTempUploadsDir(t)
+
+	db := testutil.NewTestDB(t)
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    repository.NewThreadInputRepo(db),
+	}
+	e := echo.New()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	for _, filename := range []string{"first.bin", "second.bin"} {
+		part, err := writer.CreateFormFile("files", filename)
+		require.NoError(t, err)
+		_, err = io.Copy(part, bytes.NewReader(bytes.Repeat([]byte("x"), 6<<20)))
+		require.NoError(t, err)
+	}
+	require.NoError(t, writer.Close())
+	require.Greater(t, int64(body.Len()), browserAttachmentRequestLimit(maxChatUploadSize))
+	require.LessOrEqual(t, int64(body.Len()), attachmentRequestLimit(maxChatUploadSize, maxFilesPerUpload))
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	rec := httptest.NewRecorder()
+	require.NoError(t, h.UploadChatAttachment(e.NewContext(req, rec)))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var response struct {
+		SessionID   string `json:"session_id"`
+		Attachments []struct {
+			Filename string `json:"filename"`
+			Size     int64  `json:"size"`
+		} `json:"attachments"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.NotEmpty(t, response.SessionID)
+	require.Len(t, response.Attachments, 2)
+	for _, attachment := range response.Attachments {
+		assert.Equal(t, int64(6<<20), attachment.Size)
+		assert.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", response.SessionID, attachment.Filename))
+	}
+}
+
+func TestUploadChatAttachment_OversizedMultipartRequestIsBoundedBeforePendingSession(t *testing.T) {
+	useTempUploadsDir(t)
+	tmpMultipartDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpMultipartDir)
+
+	db := testutil.NewTestDB(t)
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    repository.NewThreadInputRepo(db),
+	}
+	e := echo.New()
+	const sessionID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	req, body, totalSize := newSizedMultipartUploadRequest(t, http.MethodPost, "/chat/attachments", map[string]string{"attachment_session_id": sessionID}, "files", "too-large.bin", "application/octet-stream", 25<<20, false)
+	rec := httptest.NewRecorder()
+	err := h.UploadChatAttachment(e.NewContext(req, rec))
+
+	require.Error(t, err)
+	httpErr, ok := err.(*echo.HTTPError)
+	require.True(t, ok)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, httpErr.Code)
+	maxRead := browserAttachmentRequestLimit(maxChatUploadSize) + 1
+	assert.LessOrEqual(t, body.bytesRead, maxRead)
+	assert.Less(t, body.bytesRead, totalSize)
+	require.NoDirExists(t, filepath.Join(uploadsDir, "chat", "pending", sessionID))
+	assertDirEmpty(t, tmpMultipartDir)
+}
+
 func TestUploadChatAttachment_FileSizeLimit(t *testing.T) {
 	useTempUploadsDir(t)
 
@@ -389,7 +460,7 @@ func TestUploadChatAttachment_FileSizeLimit(t *testing.T) {
 	assert.Error(t, err)
 	httpErr, ok := err.(*echo.HTTPError)
 	assert.True(t, ok)
-	assert.Equal(t, http.StatusBadRequest, httpErr.Code)
+	assert.Equal(t, http.StatusRequestEntityTooLarge, httpErr.Code)
 }
 
 func TestUploadChatAttachment_MaxFilesLimit(t *testing.T) {
