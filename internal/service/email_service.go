@@ -1064,8 +1064,11 @@ func (s *EmailService) buildEmailActionToolRuntime(projectID, sender string) *ll
 
 func (s *EmailService) emailActionHandlers(projectID, sender string) map[string]chatcontrol.RuntimeActionHandler {
 	handlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
-		ProjectID:   projectID,
-		ProjectRepo: s.projectRepo,
+		ProjectID:     projectID,
+		ProjectRepo:   s.projectRepo,
+		ProjectSvc:    s.projectSvc,
+		LLMConfigRepo: s.llmConfigRepo,
+		WorkerSvc:     s.workerSvc,
 		CreateProject: CreateGitHubProjectRuntimeOptions{
 			ProjectSvc:                 s.projectSvc,
 			GitHubSvc:                  s.githubProjectSvc,
