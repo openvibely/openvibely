@@ -898,6 +898,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	agentLibraryMaintenanceSvc.SetLifecycleRepo(lifecycleRepo)
 	agentLibraryMaintenanceSvc.SetAgentsRootPath(globalSkillRoot)
 	workerSvc.SetAgentRootSyncService(agentLibraryMaintenanceSvc)
+	slackSvc.SetProjectCreationServices(projectSvc, githubSvc, memorySvc, agentLibraryMaintenanceSvc)
+	emailSvc.SetProjectCreationServices(projectSvc, githubSvc, memorySvc, agentLibraryMaintenanceSvc)
+	discordSvc.SetProjectCreationServices(projectSvc, githubSvc, memorySvc, agentLibraryMaintenanceSvc)
 	if err := agentLibraryMaintenanceSvc.EnsureGlobalAgents(context.Background()); err != nil {
 		applog.Infof("[agent-library] ensure global system agents: %v", err)
 	}
@@ -946,6 +949,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 			telegramSvc.SetTaskGoalService(taskGoalSvc)
 			telegramSvc.SetThreadInputRepo(repository.NewThreadInputRepo(db))
 			telegramSvc.SetChannelMessageRouter(channelMessageRouter)
+			telegramSvc.SetProjectCreationServices(projectSvc, githubSvc, memorySvc, agentLibraryMaintenanceSvc)
 			channelMessageRouter.SetTelegramService(telegramSvc)
 			applog.Infof("telegram bot initialized")
 		}
