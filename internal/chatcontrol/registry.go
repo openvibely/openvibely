@@ -211,7 +211,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:               "list_tasks",
-		Description:        "Discover tasks in the current project by partial title and/or optional category/status filters. Omit category/status to search all visible task categories and statuses; do not enumerate lifecycle filters after an empty total=0, has_more=false result for the same query. Returns compact summaries (task ID, title, category, status, priority, updated time, parent/swarm role) with deterministic ordering and explicit limit/offset pagination. Read-only; excludes internal chat rows and never crosses projects. Use it to find an existing task's ID before create_task/edit_task/execute_tasks or to reconcile a GitHub issue by number/URL.",
+		Description:        "Discover tasks in the current project by partial title and/or optional category/status filters. Omit category/status for a broad search across all visible task categories and statuses. Supplying category or status restricts results to only that lifecycle state and can exclude otherwise matching tasks; do not add them when checking whether any matching task exists. Do not enumerate lifecycle filters after an empty total=0, has_more=false result for the same query. Returns compact summaries (task ID, title, category, status, priority, updated time, parent/swarm role) with deterministic ordering and explicit limit/offset pagination. Read-only; excludes internal chat rows and never crosses projects. Use it to find an existing task's ID before create_task/edit_task/execute_tasks or to reconcile a GitHub issue by number/URL.",
 		Domain:             DomainTasks,
 		Access:             AccessRead,
 		Sensitivity:        SensitivityNormal,

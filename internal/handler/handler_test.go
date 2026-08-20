@@ -2307,14 +2307,19 @@ func TestHandler_UpdateTask_AssignsAndClearsPrimaryAgentDefinition(t *testing.T)
 	project := tc.CreateProject().Build()
 	agentRepo := repository.NewAgentRepo(tc.db)
 	tc.handler.agentRepo = agentRepo
-	agent := createScheduleTestAgent(t, agentRepo, "Task Edit Runner", models.AgentScopeProject, project.ID, true)
+	projectAgent := createScheduleTestAgent(t, agentRepo, "Task Edit Runner", models.AgentScopeProject, project.ID, true)
+	globalAgent := createScheduleTestAgent(t, agentRepo, "Task Edit Global Runner", models.AgentScopeGlobal, "", true)
 	task := createTask(t, tc.handler, project.ID, "Task Edit Assign Agent", func(tk *models.Task) {
 		tk.Category = models.CategoryBacklog
 	})
 
-	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Task Edit Assign Agent", "backlog", "2", "updated prompt", agent.ID)).Execute()
+	rec := tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Task Edit Assign Agent", "backlog", "2", "updated prompt", projectAgent.ID)).Execute()
 	assertCode(t, rec, http.StatusOK)
-	assertTaskPrimaryAgentDefinition(t, tc.handler, task.ID, &agent.ID)
+	assertTaskPrimaryAgentDefinition(t, tc.handler, task.ID, &projectAgent.ID)
+
+	rec = tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Task Edit Assign Agent", "backlog", "2", "updated prompt", globalAgent.ID)).Execute()
+	assertCode(t, rec, http.StatusOK)
+	assertTaskPrimaryAgentDefinition(t, tc.handler, task.ID, &globalAgent.ID)
 
 	rec = tc.HTMX().Put("/tasks/" + task.ID).WithForm(taskEditFormValues("Task Edit Assign Agent", "backlog", "2", "updated prompt", "")).Execute()
 	assertCode(t, rec, http.StatusOK)
