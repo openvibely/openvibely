@@ -136,8 +136,8 @@ func (r *multipartFileLimitReadCloser) scan(data []byte) error {
 		if !r.inBody {
 			idx := bytes.Index(r.pending, []byte("\r\n\r\n"))
 			if idx < 0 {
-				if keep := len("\r\n\r\n") - 1; len(r.pending) > keep {
-					r.pending = r.pending[len(r.pending)-keep:]
+				if int64(len(r.pending)) > multipartRequestOverheadAllowance {
+					return echo.NewHTTPError(http.StatusRequestEntityTooLarge, "request body too large")
 				}
 				return nil
 			}

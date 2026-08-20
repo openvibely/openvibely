@@ -520,6 +520,7 @@ func TestTaskCreateAndEditAttachmentFormsRejectOversizedMultipartBeforeMutation(
 				"priority": "2",
 				"prompt":   "mutated prompt",
 			}, "files", "too-large.txt", "text/plain", 25<<20, false)
+			body.limitReadChunkSize(1)
 			req.Header.Set("HX-Request", "true")
 			rec := httptest.NewRecorder()
 			tc.echo.ServeHTTP(rec, req)
@@ -549,6 +550,7 @@ func TestUploadAttachment_OversizedMultipartRequestIsBoundedBeforePersistence(t 
 	uploadsRoot := withTaskAttachmentUploadsDir(t)
 
 	req, body, totalSize := newSizedMultipartUploadRequest(t, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, "files", "too-large.txt", "text/plain", 25<<20, false)
+	body.limitReadChunkSize(1)
 	rec := httptest.NewRecorder()
 	tc.echo.ServeHTTP(rec, req)
 
@@ -602,6 +604,22 @@ func (r *countingReadCloser) Read(p []byte) (int, error) {
 }
 
 func (r *countingReadCloser) Close() error { return nil }
+
+func (r *countingReadCloser) limitReadChunkSize(max int) {
+	r.r = &maxChunkReader{r: r.r, max: max}
+}
+
+type maxChunkReader struct {
+	r   io.Reader
+	max int
+}
+
+func (r *maxChunkReader) Read(p []byte) (int, error) {
+	if len(p) > r.max {
+		p = p[:r.max]
+	}
+	return r.r.Read(p)
+}
 
 type repeatedByteReader struct {
 	remaining int64

@@ -271,6 +271,38 @@ func TestAPIChatMessage_OversizedMultipartRequestIsRejectedBeforeSideEffects(t *
 	assertDirEmpty(t, tmpMultipartDir)
 }
 
+func TestAPIChatMessage_OversizedMultipartWithSplitFileHeaderIsBounded(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+	tmpMultipartDir := t.TempDir()
+	t.Setenv("TMPDIR", tmpMultipartDir)
+
+	req, body, totalSize := newSizedMultipartUploadRequest(t, http.MethodPost, "/api/chat/message", map[string]string{
+		"message":    "Check this large upload",
+		"project_id": projectID,
+	}, "attachments", "too-large.txt", "text/plain", 25<<20, false)
+	body.limitReadChunkSize(1)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusRequestEntityTooLarge, rec.Code)
+	maxRead := browserAttachmentRequestLimit(apiMaxFileSize) + 1
+	assert.LessOrEqual(t, body.bytesRead, maxRead)
+	assert.Less(t, body.bytesRead, totalSize)
+	chatHistory, err := h.execRepo.ListChatHistory(ctx, projectID, 50)
+	require.NoError(t, err)
+	assert.Empty(t, chatHistory)
+	pendingRoot := filepath.Join(uploadsDir, "chat", "pending")
+	if _, err := os.Stat(pendingRoot); !os.IsNotExist(err) {
+		t.Fatalf("expected no pending attachment root, stat err=%v", err)
+	}
+	assertDirEmpty(t, tmpMultipartDir)
+}
+
 func TestAPIChatMessage_WithImageAttachment(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
