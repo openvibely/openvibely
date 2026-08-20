@@ -404,24 +404,22 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/")
 }
 
-// buildModelWorkerStatsList returns per-model worker stats for all model configs
+// buildModelWorkerStatsList returns per-model worker stats for configured model worker pools.
 func (h *Handler) buildModelWorkerStatsList(ctx context.Context) []pages.ModelWorkerStats {
-	agents, err := h.llmConfigRepo.List(ctx)
+	agents, err := h.llmConfigRepo.ListWorkerCapacities(ctx)
 	if err != nil {
 		applog.Infof("[handler] buildModelWorkerStatsList error: %v", err)
 		return nil
 	}
 	stats := make([]pages.ModelWorkerStats, 0, len(agents))
 	for _, agent := range agents {
-		if agent.MaxWorkers > 0 {
-			stats = append(stats, pages.ModelWorkerStats{
-				ID:         agent.ID,
-				Name:       agent.Name,
-				Model:      agent.Model,
-				Running:    h.workerSvc.ModelRunning(agent.ID),
-				MaxWorkers: agent.MaxWorkers,
-			})
-		}
+		stats = append(stats, pages.ModelWorkerStats{
+			ID:         agent.ID,
+			Name:       agent.Name,
+			Model:      agent.Model,
+			Running:    h.workerSvc.ModelRunning(agent.ID),
+			MaxWorkers: agent.MaxWorkers,
+		})
 	}
 	return stats
 }
@@ -910,7 +908,7 @@ func (h *Handler) GetProjectCapacity(c echo.Context) error {
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/capacity/models [get]
 func (h *Handler) GetModelCapacities(c echo.Context) error {
-	agents, err := h.llmConfigRepo.List(c.Request().Context())
+	agents, err := h.llmConfigRepo.ListWorkerCapacities(c.Request().Context())
 	if err != nil {
 		applog.Infof("[handler] GetModelCapacities error: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list models")
@@ -918,24 +916,21 @@ func (h *Handler) GetModelCapacities(c echo.Context) error {
 
 	capacities := make([]ModelCapacityResponse, 0, len(agents))
 	for _, agent := range agents {
-		if agent.MaxWorkers > 0 {
-			running := h.workerSvc.ModelRunning(agent.ID)
-			hasCapacity := h.workerSvc.HasModelCapacity(agent.ID)
-			availableSlots := agent.MaxWorkers - running
-			if availableSlots < 0 {
-				availableSlots = 0
-			}
-
-			capacities = append(capacities, ModelCapacityResponse{
-				ID:             agent.ID,
-				Name:           agent.Name,
-				Model:          agent.Model,
-				Running:        running,
-				MaxWorkers:     agent.MaxWorkers,
-				HasCapacity:    hasCapacity,
-				AvailableSlots: availableSlots,
-			})
+		running := h.workerSvc.ModelRunning(agent.ID)
+		availableSlots := agent.MaxWorkers - running
+		if availableSlots < 0 {
+			availableSlots = 0
 		}
+
+		capacities = append(capacities, ModelCapacityResponse{
+			ID:             agent.ID,
+			Name:           agent.Name,
+			Model:          agent.Model,
+			Running:        running,
+			MaxWorkers:     agent.MaxWorkers,
+			HasCapacity:    running < agent.MaxWorkers,
+			AvailableSlots: availableSlots,
+		})
 	}
 
 	return c.JSON(http.StatusOK, capacities)
