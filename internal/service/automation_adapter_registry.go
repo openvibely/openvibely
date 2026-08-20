@@ -50,7 +50,7 @@ func CurrentAutomationTemplateRevision(adapterKey string) int {
 	case AutomationAdapterNativeSDLC:
 		return 9
 	case AutomationAdapterGitHubSDLC:
-		return 9
+		return 10
 	default:
 		return 0
 	}

@@ -57,7 +57,7 @@ func normalizedActionSet(actions map[string]bool) map[string]bool {
 
 func buildRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers map[string]RuntimeActionHandler, includeLifecycleOnly bool, allowedActions map[string]bool) llmcontracts.RuntimeToolExecutor {
 	allowed := normalizedActionSet(allowedActions)
-	var lastEmptyListTasks *runtimeNoopDiscoveryCall
+	emptyListTasks := make(map[string]string)
 	return func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
 		toolName := strings.ToLower(strings.TrimSpace(name))
 		if toolName == "" {
@@ -89,32 +89,26 @@ func buildRuntimeToolExecutor(mode models.ChatMode, surface Surface, handlers ma
 		listTasksInputKey := ""
 		if toolName == "list_tasks" {
 			listTasksInputKey = canonicalListTasksRuntimeInput(input)
-			if lastEmptyListTasks != nil && lastEmptyListTasks.InputKey == listTasksInputKey {
-				return markDuplicateNoopDiscovery(lastEmptyListTasks.Output), true, false, nil
+			if previousOutput, ok := emptyListTasks[listTasksInputKey]; ok {
+				return markDuplicateNoopDiscovery(previousOutput), true, false, nil
 			}
-		} else {
-			lastEmptyListTasks = nil
 		}
 
 		output, err := handler(ctx, input)
 		if err != nil {
-			if toolName == "list_tasks" {
-				lastEmptyListTasks = nil
-			}
 			return "", true, true, err
 		}
-		if toolName == "list_tasks" && isEmptyExhaustedDiscoveryOutput(output) {
-			lastEmptyListTasks = &runtimeNoopDiscoveryCall{InputKey: listTasksInputKey, Output: output}
-		} else if toolName == "list_tasks" {
-			lastEmptyListTasks = nil
+		if toolName == "list_tasks" {
+			if isEmptyExhaustedDiscoveryOutput(output) {
+				emptyListTasks[listTasksInputKey] = output
+			} else {
+				delete(emptyListTasks, listTasksInputKey)
+			}
+		} else if def := Get(toolName); def != nil && def.Access == AccessWrite {
+			emptyListTasks = make(map[string]string)
 		}
 		return output, true, false, nil
 	}
-}
-
-type runtimeNoopDiscoveryCall struct {
-	InputKey string
-	Output   string
 }
 
 func canonicalListTasksRuntimeInput(input json.RawMessage) string {
