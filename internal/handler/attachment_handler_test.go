@@ -514,12 +514,12 @@ func TestTaskCreateAndEditAttachmentFormsRejectOversizedMultipartBeforeMutation(
 			project := tc.CreateProject().Build()
 			withTaskAttachmentUploadsDir(t)
 			method, target, assertNoMutation := tcCase.target(t, tc, project.ID)
-			req, body, totalSize := newSizedMultipartUploadRequest(t, method, target, map[string]string{
+			req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, method, target, map[string]string{
 				"title":    "mutated title",
 				"category": "backlog",
 				"priority": "2",
 				"prompt":   "mutated prompt",
-			}, "files", "too-large.txt", "text/plain", 25<<20, false)
+			}, "files", "too-large.txt", "text/plain", 25<<20, invalidMultipartBoundaryPayloadPrefix(), false)
 			body.limitReadChunkSize(1)
 			req.Header.Set("HX-Request", "true")
 			rec := httptest.NewRecorder()
@@ -549,7 +549,7 @@ func TestUploadAttachment_OversizedMultipartRequestIsBoundedBeforePersistence(t 
 	task := tc.CreateTask(project.ID).Build()
 	uploadsRoot := withTaskAttachmentUploadsDir(t)
 
-	req, body, totalSize := newSizedMultipartUploadRequest(t, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, "files", "too-large.txt", "text/plain", 25<<20, false)
+	req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, "files", "too-large.txt", "text/plain", 25<<20, invalidMultipartBoundaryPayloadPrefix(), false)
 	body.limitReadChunkSize(1)
 	rec := httptest.NewRecorder()
 	tc.echo.ServeHTTP(rec, req)
@@ -641,7 +641,15 @@ func (r *repeatedByteReader) Read(p []byte) (int, error) {
 
 func newSizedMultipartUploadRequest(t *testing.T, method, target string, fields map[string]string, fileField, filename, contentType string, fileSize int64, setContentLength bool) (*http.Request, *countingReadCloser, int64) {
 	t.Helper()
+	return newSizedMultipartUploadRequestWithFilePrefix(t, method, target, fields, fileField, filename, contentType, fileSize, nil, setContentLength)
+}
+
+func newSizedMultipartUploadRequestWithFilePrefix(t *testing.T, method, target string, fields map[string]string, fileField, filename, contentType string, fileSize int64, filePrefix []byte, setContentLength bool) (*http.Request, *countingReadCloser, int64) {
+	t.Helper()
 	const boundary = "openvibely-issue-748-boundary"
+	if int64(len(filePrefix)) > fileSize {
+		t.Fatalf("file prefix length %d exceeds file size %d", len(filePrefix), fileSize)
+	}
 	var prefix bytes.Buffer
 	for name, value := range fields {
 		fmt.Fprintf(&prefix, "--%s\r\nContent-Disposition: form-data; name=%q\r\n\r\n%s\r\n", boundary, name, value)
@@ -653,13 +661,18 @@ func newSizedMultipartUploadRequest(t *testing.T, method, target string, fields 
 	prefix.WriteString("\r\n")
 	suffix := []byte("\r\n--" + boundary + "--\r\n")
 	totalSize := int64(prefix.Len()) + fileSize + int64(len(suffix))
-	body := &countingReadCloser{r: io.MultiReader(bytes.NewReader(prefix.Bytes()), &repeatedByteReader{remaining: fileSize}, bytes.NewReader(suffix))}
+	body := &countingReadCloser{r: io.MultiReader(bytes.NewReader(prefix.Bytes()), bytes.NewReader(filePrefix), &repeatedByteReader{remaining: fileSize - int64(len(filePrefix))}, bytes.NewReader(suffix))}
 	req := httptest.NewRequest(method, target, body)
 	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
 	if setContentLength {
 		req.ContentLength = totalSize
 	}
 	return req, body, totalSize
+}
+
+func invalidMultipartBoundaryPayloadPrefix() []byte {
+	const boundary = "openvibely-issue-748-boundary"
+	return []byte("\r\n--" + boundary + "X\r\n\r\n")
 }
 
 func assertDirEmpty(t *testing.T, dir string) {

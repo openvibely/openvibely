@@ -404,7 +404,7 @@ func TestUploadChatAttachment_OversizedMultipartRequestIsBoundedBeforePendingSes
 	}
 	e := echo.New()
 	const sessionID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	req, body, totalSize := newSizedMultipartUploadRequest(t, http.MethodPost, "/chat/attachments", map[string]string{"attachment_session_id": sessionID}, "files", "too-large.bin", "application/octet-stream", 25<<20, false)
+	req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, http.MethodPost, "/chat/attachments", map[string]string{"attachment_session_id": sessionID}, "files", "too-large.bin", "application/octet-stream", 25<<20, invalidMultipartBoundaryPayloadPrefix(), false)
 	body.limitReadChunkSize(1)
 	rec := httptest.NewRecorder()
 	err := h.UploadChatAttachment(e.NewContext(req, rec))
