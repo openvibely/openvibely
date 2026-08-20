@@ -1306,6 +1306,96 @@ func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *test
 	require.Contains(t, projectOut, "Total tasks: 1")
 }
 
+func TestBuildChannelUtilityActionHandlersModelStatusToolsUseCompactRuntimeSummaries(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	project := &models.Project{Name: "Channel Compact Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	largeBody := strings.Repeat("large-provider-json", 4096)
+	defaultModel := &models.LLMConfig{
+		Name: "Channel Default Model", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey,
+		Model: "channel-default-model", IsDefault: true, APIKey: "secret-key",
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, defaultModel))
+	customModel := &models.LLMConfig{
+		Name: "Channel Compact Model", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "channel-compact-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client", BaseURL: "https://example.com/v1/",
+		ModelsURL: "https://example.com/models", OAuthAuthorizeURL: "https://example.com/auth", OAuthTokenURL: "https://example.com/token",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`, MaxWorkers: 4, WorkerTimeout: 30,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, customModel))
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID: project.ID, ProjectRepo: projectRepo, SettingsRepo: settingsRepo, LLMConfigRepo: llmConfigRepo,
+	})
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	modelsOut, err := handlers["list_models"](ctx, nil)
+	require.NoError(t, err)
+	getOut, err := handlers["get_model"](ctx, json.RawMessage(`{"name":" channel compact model "}`))
+	require.NoError(t, err)
+	settingsOut, err := handlers["view_settings"](ctx, nil)
+	require.NoError(t, err)
+	counter.SetEnabled(false)
+
+	require.Contains(t, modelsOut, "Channel Default Model (default)")
+	require.Contains(t, modelsOut, "Channel Compact Model")
+	require.Contains(t, getOut, "Model: Channel Compact Model")
+	require.Contains(t, getOut, "Provider: openai_compatible")
+	require.Contains(t, settingsOut, "- Configured models: 2")
+	for _, out := range []string{modelsOut, getOut, settingsOut} {
+		require.NotContains(t, out, "secret")
+		require.NotContains(t, out, largeBody)
+	}
+	assertChannelModelStatusStatementsCompact(t, counter.Statements())
+}
+
+func assertChannelModelStatusStatementsCompact(t *testing.T, statements []string) {
+	t.Helper()
+	var runtimeListQueries, targetedLookupQueries int
+	for _, raw := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+		if !strings.Contains(stmt, " from agent_configs") {
+			continue
+		}
+		projection := strings.Split(stmt, " from agent_configs")[0]
+		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("channel model/status query selected forbidden column %q: %s", forbidden, raw)
+			}
+		}
+		if strings.Contains(projection, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") && strings.Contains(stmt, "where name = ? collate nocase") {
+			targetedLookupQueries++
+			continue
+		}
+		if strings.Contains(projection, "select id, name, provider, model, is_default, auth_method, max_workers, worker_timeout") && strings.Contains(stmt, "order by is_default desc, name asc") && !strings.Contains(stmt, " where ") {
+			runtimeListQueries++
+			continue
+		}
+		if strings.Contains(projection, "select id, name, provider, model, reasoning_effort") {
+			t.Fatalf("channel model/status tool used full model list query: %s", raw)
+		}
+	}
+	if runtimeListQueries != 2 {
+		t.Fatalf("runtime list compact query count = %d, want 2; statements: %#v", runtimeListQueries, statements)
+	}
+	if targetedLookupQueries != 1 {
+		t.Fatalf("targeted lookup compact query count = %d, want 1; statements: %#v", targetedLookupQueries, statements)
+	}
+}
+
 func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallback(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
