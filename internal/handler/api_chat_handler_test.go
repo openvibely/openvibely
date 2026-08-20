@@ -281,10 +281,10 @@ func TestAPIChatMessage_OversizedMultipartWithSplitFileHeaderIsBounded(t *testin
 	tmpMultipartDir := t.TempDir()
 	t.Setenv("TMPDIR", tmpMultipartDir)
 
-	req, body, totalSize := newSizedMultipartUploadRequest(t, http.MethodPost, "/api/chat/message", map[string]string{
+	req, body, totalSize := newSizedMultipartUploadRequestWithFilePrefix(t, http.MethodPost, "/api/chat/message", map[string]string{
 		"message":    "Check this large upload",
 		"project_id": projectID,
-	}, "attachments", "too-large.txt", "text/plain", 25<<20, false)
+	}, "attachments", "too-large.txt", "text/plain", 25<<20, invalidMultipartBoundaryPayloadPrefix(), false)
 	body.limitReadChunkSize(1)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)

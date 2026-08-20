@@ -154,14 +154,25 @@ func (r *multipartFileLimitReadCloser) scan(data []byte) error {
 			if err := r.countFileBytes(int64(idx)); err != nil {
 				return err
 			}
-			r.pending = r.pending[idx+len(r.boundary):]
+			r.pending = r.pending[idx:]
+			if !r.hasCompleteBoundaryDelimiter() {
+				return nil
+			}
+			if !r.hasValidBoundaryDelimiter() {
+				if err := r.countFileBytes(1); err != nil {
+					return err
+				}
+				r.pending = r.pending[1:]
+				continue
+			}
+			r.pending = r.pending[len(r.boundary):]
 			r.inBody = false
 			r.currentFile = false
 			r.fileBytes = 0
 			continue
 		}
 
-		keep := len(r.boundary) - 1
+		keep := len(r.boundary) + 1
 		if len(r.pending) <= keep {
 			return nil
 		}
@@ -172,6 +183,18 @@ func (r *multipartFileLimitReadCloser) scan(data []byte) error {
 		r.pending = r.pending[processLen:]
 	}
 	return nil
+}
+
+func (r *multipartFileLimitReadCloser) hasCompleteBoundaryDelimiter() bool {
+	return len(r.pending) >= len(r.boundary)+2
+}
+
+func (r *multipartFileLimitReadCloser) hasValidBoundaryDelimiter() bool {
+	if !r.hasCompleteBoundaryDelimiter() {
+		return false
+	}
+	suffix := r.pending[len(r.boundary):]
+	return bytes.HasPrefix(suffix, []byte("\r\n")) || bytes.HasPrefix(suffix, []byte("--"))
 }
 
 func (r *multipartFileLimitReadCloser) countFileBytes(n int64) error {
