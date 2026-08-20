@@ -108,7 +108,7 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 
 	baseURL := "http://127.0.0.1:" + port
 	waitForHealthVersion(t, baseURL, "0.5.0")
-	waitForUpdateState(t, baseURL, StateAvailable)
+	waitForStagedUpdate(t, baseURL)
 	resp, err := http.Post(baseURL+"/api/system/update/apply", "application/json", nil)
 	if err != nil {
 		t.Fatalf("accept update: %v\n%s", err, readLogs())
@@ -649,6 +649,34 @@ func waitForUpdateState(t *testing.T, baseURL, state string) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatalf("update state did not become %s: last=%s", state, last)
+}
+
+func waitForStagedUpdate(t *testing.T, baseURL string) {
+	t.Helper()
+	deadline := time.Now().Add(90 * time.Second)
+	var last string
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(baseURL + "/api/system/update")
+		if err == nil {
+			var body struct {
+				State  string `json:"state"`
+				Error  string `json:"error"`
+				Staged bool   `json:"staged"`
+			}
+			if resp.Body != nil {
+				_ = json.NewDecoder(resp.Body).Decode(&body)
+				_ = resp.Body.Close()
+			}
+			if resp.StatusCode == http.StatusOK && body.State == StateAvailable && body.Staged {
+				return
+			}
+			last = fmt.Sprintf("HTTP %d state %q staged=%t error %q", resp.StatusCode, body.State, body.Staged, body.Error)
+		} else {
+			last = err.Error()
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatalf("update replacement was not staged: last=%s", last)
 }
 
 func installDesktopUnit(t *testing.T, root, name, executable string) (string, string, string) {
