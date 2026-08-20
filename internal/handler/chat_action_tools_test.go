@@ -429,6 +429,33 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 	}
 }
 
+func TestListChannelsOutboundTargetAggregateSummaryMatchesMaterializedOutput(t *testing.T) {
+	targets := []models.ChannelTarget{
+		{Platform: "slack", TargetKind: "channel", Name: "ops", Home: true},
+		{Platform: "slack", TargetKind: "user"},
+		{Platform: "telegram", TargetKind: "chat", Name: "alerts", Home: true},
+		{Platform: "discord", TargetKind: "channel", Name: "guild"},
+		{Platform: "discord", TargetKind: "user"},
+		{Platform: "email", TargetKind: "email", Name: "team"},
+	}
+	materialized := summarizeOutboundTargets(targets)
+	aggregate := outboundTargetsStatusFromRepoSummary(repository.ChannelTargetProjectSummary{
+		Total:      6,
+		Configured: true,
+		ByPlatform: map[string]repository.ChannelTargetPlatformSummary{
+			"slack":    {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}},
+			"telegram": {Total: 1, Home: 1, Named: 1, ByKind: map[string]int{"chat": 1}},
+			"discord":  {Total: 2, Home: 0, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}},
+			"email":    {Total: 1, Home: 0, Named: 1, ByKind: map[string]int{"email": 1}},
+		},
+	})
+	materializedJSON, err := json.MarshalIndent(materialized, "", "  ")
+	require.NoError(t, err)
+	aggregateJSON, err := json.MarshalIndent(aggregate, "", "  ")
+	require.NoError(t, err)
+	require.Equal(t, string(materializedJSON), string(aggregateJSON))
+}
+
 func TestViewSystemUpdateRuntimeTool_NotApplicableWithoutVisibleCoordinator(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

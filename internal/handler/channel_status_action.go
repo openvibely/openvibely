@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -194,8 +195,8 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 		SendResponses:  !isFalse(service.SlackSettingSendResponses),
 	}
 	if h.slackAuthRepo != nil {
-		if users, err := h.slackAuthRepo.ListByProject(ctx, projectID); err == nil {
-			resp.Slack.AuthorizedUserCount = len(users)
+		if count, err := h.slackAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.Slack.AuthorizedUserCount = count
 		}
 	}
 	if resp.Slack.Configured {
@@ -212,8 +213,8 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 		RichMessagesV2: !isFalse(service.TelegramSettingRichMessagesV2),
 	}
 	if h.telegramAuthRepo != nil {
-		if users, err := h.telegramAuthRepo.ListByProject(ctx, projectID); err == nil {
-			resp.Telegram.AuthorizedUserCount = len(users)
+		if count, err := h.telegramAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.Telegram.AuthorizedUserCount = count
 		}
 	}
 	if resp.Telegram.Configured {
@@ -243,8 +244,8 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 		LastError:     safeSingleLine(discord.LastError),
 	}
 	if h.discordAuthRepo != nil {
-		if users, err := h.discordAuthRepo.ListByProject(ctx, projectID); err == nil {
-			resp.Discord.AuthorizedUserCount = len(users)
+		if count, err := h.discordAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.Discord.AuthorizedUserCount = count
 		}
 	}
 	if resp.Discord.Configured {
@@ -285,8 +286,8 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 		SkipAttachments: isTrue(service.EmailSettingSkipAttachments),
 	}
 	if h.emailAuthRepo != nil {
-		if senders, err := h.emailAuthRepo.ListByProject(ctx, projectID); err == nil {
-			resp.Email.AuthorizedSenderCount = len(senders)
+		if count, err := h.emailAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.Email.AuthorizedSenderCount = count
 		}
 	}
 	if resp.Email.Configured {
@@ -303,8 +304,8 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 	}
 
 	if h.channelTargetRepo != nil {
-		if targets, err := h.channelTargetRepo.ListByProject(ctx, projectID); err == nil {
-			resp.OutboundTargets = summarizeOutboundTargets(targets)
+		if summary, err := h.channelTargetRepo.SummarizeByProject(ctx, projectID); err == nil {
+			resp.OutboundTargets = outboundTargetsStatusFromRepoSummary(summary)
 		}
 	}
 	resp.OutboundTargets.ExplicitUnsavedTargetsAllowed = isTrue(service.SendMessageAllowExplicitTargetsSetting + ":" + projectID)
@@ -368,6 +369,23 @@ func summarizeWebhooks(webhooks []models.WebhookEndpoint) webhookStatusSummary {
 			out.Disabled++
 		}
 		out.EndpointIDs = append(out.EndpointIDs, webhookEndpointLabel{ID: strings.TrimSpace(webhook.ID), Name: strings.TrimSpace(webhook.Name), Enabled: webhook.Enabled})
+	}
+	return out
+}
+
+func outboundTargetsStatusFromRepoSummary(summary repository.ChannelTargetProjectSummary) outboundTargetsStatusSummary {
+	out := outboundTargetsStatusSummary{
+		Total:      summary.Total,
+		Configured: summary.Configured,
+		ByPlatform: map[string]outboundTargetPlatformSummary{},
+	}
+	for platform, platformSummary := range summary.ByPlatform {
+		out.ByPlatform[platform] = outboundTargetPlatformSummary{
+			Total:  platformSummary.Total,
+			Home:   platformSummary.Home,
+			Named:  platformSummary.Named,
+			ByKind: platformSummary.ByKind,
+		}
 	}
 	return out
 }

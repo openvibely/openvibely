@@ -46,6 +46,12 @@ func (r *TelegramAuthRepo) ListByProject(ctx context.Context, projectID string) 
 	return users, rows.Err()
 }
 
+// CountByProject returns the system-level Telegram authorized-user count.
+// projectID is accepted for UI/status compatibility but does not scope inbound authorization.
+func (r *TelegramAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
+	return countRows(ctx, r.db, "telegram_authorized_users", "telegram auth users")
+}
+
 // IsAuthorized checks whether a Telegram user is authorized at the system channel level.
 // Checks both by user ID and by username (for entries added by username before the user messaged).
 // projectID is accepted for compatibility but does not scope inbound authorization.

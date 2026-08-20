@@ -1383,7 +1383,7 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		UsageAnalyticsSvc:     usageAnalyticsServiceFromRepos(s.usageAnalyticsSvc, s.execRepo, s.llmConfigRepo),
 		UpcomingSvc:           s.upcomingSvc,
 		TelegramRunning:       s.IsRunning,
-		TelegramAuthRepo:      telegramAuthListStore(s.telegramAuthRepo),
+		TelegramAuthRepo:      telegramAuthCountStore(s.telegramAuthRepo),
 		EmailStatus:           s.emailStatus,
 		EmailAuthRepo:         s.emailAuthRepo,
 		WebhookRepo:           s.webhookRepo,

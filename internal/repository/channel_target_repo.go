@@ -16,6 +16,64 @@ type ChannelTargetRepo struct {
 
 func NewChannelTargetRepo(db *sql.DB) *ChannelTargetRepo { return &ChannelTargetRepo{db: db} }
 
+type ChannelTargetProjectSummary struct {
+	Total      int
+	Configured bool
+	ByPlatform map[string]ChannelTargetPlatformSummary
+}
+
+type ChannelTargetPlatformSummary struct {
+	Total  int
+	Home   int
+	Named  int
+	ByKind map[string]int
+}
+
+func (r *ChannelTargetRepo) SummarizeByProject(ctx context.Context, projectID string) (ChannelTargetProjectSummary, error) {
+	out := ChannelTargetProjectSummary{ByPlatform: map[string]ChannelTargetPlatformSummary{}}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT platform, target_kind, COUNT(*),
+		       SUM(CASE WHEN is_home THEN 1 ELSE 0 END),
+		       SUM(CASE WHEN name <> '' THEN 1 ELSE 0 END)
+		FROM channel_targets
+		WHERE project_id = ?
+		GROUP BY platform, target_kind`, projectID)
+	if err != nil {
+		return out, fmt.Errorf("summarize channel targets: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var platform, kind string
+		var total, home, named int
+		if err := rows.Scan(&platform, &kind, &total, &home, &named); err != nil {
+			return out, fmt.Errorf("scan channel target summary: %w", err)
+		}
+		platform = normalizeChannelTargetField(platform)
+		if platform == "" {
+			platform = "unknown"
+		}
+		kind = normalizeChannelTargetField(kind)
+		if kind == "" {
+			kind = models.DefaultChannelTargetKind(platform)
+		}
+		platformSummary := out.ByPlatform[platform]
+		platformSummary.Total += total
+		platformSummary.Home += home
+		platformSummary.Named += named
+		if platformSummary.ByKind == nil {
+			platformSummary.ByKind = map[string]int{}
+		}
+		platformSummary.ByKind[kind] += total
+		out.ByPlatform[platform] = platformSummary
+		out.Total += total
+	}
+	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	out.Configured = out.Total > 0
+	return out, nil
+}
+
 func (r *ChannelTargetRepo) ListByProject(ctx context.Context, projectID string) ([]models.ChannelTarget, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject, created_at, updated_at

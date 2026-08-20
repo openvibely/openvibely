@@ -1327,6 +1327,76 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 	}
 }
 
+func TestChannelServiceListChannelsUsesTargetSummaryStore(t *testing.T) {
+	ctx := context.Background()
+	store := &summaryOnlyChannelTargetStore{summary: repository.ChannelTargetProjectSummary{
+		Total:      2,
+		Configured: true,
+		ByPlatform: map[string]repository.ChannelTargetPlatformSummary{
+			"slack": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}},
+		},
+	}}
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID:      "summary-project",
+		ChannelTargets: store,
+	})
+	out, err := handlers["list_channels"](ctx, json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.False(t, store.listCalled, "list_channels should use SummarizeByProject instead of materializing targets")
+
+	var result struct {
+		OutboundTargets struct {
+			Total      int  `json:"total"`
+			Configured bool `json:"configured"`
+			ByPlatform map[string]struct {
+				Total  int            `json:"total"`
+				Home   int            `json:"home"`
+				Named  int            `json:"named"`
+				ByKind map[string]int `json:"by_kind"`
+			} `json:"by_platform"`
+		} `json:"outbound_message_targets"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &result))
+	require.Equal(t, 2, result.OutboundTargets.Total)
+	require.True(t, result.OutboundTargets.Configured)
+	require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Home)
+	require.Equal(t, map[string]int{"channel": 1, "user": 1}, result.OutboundTargets.ByPlatform["slack"].ByKind)
+}
+
+type summaryOnlyChannelTargetStore struct {
+	summary    repository.ChannelTargetProjectSummary
+	listCalled bool
+}
+
+func (s *summaryOnlyChannelTargetStore) SummarizeByProject(ctx context.Context, projectID string) (repository.ChannelTargetProjectSummary, error) {
+	return s.summary, nil
+}
+
+func (s *summaryOnlyChannelTargetStore) ListByProject(ctx context.Context, projectID string) ([]models.ChannelTarget, error) {
+	s.listCalled = true
+	return nil, fmt.Errorf("ListByProject should not be called")
+}
+
+func (s *summaryOnlyChannelTargetStore) FindHome(ctx context.Context, projectID, platform string) (*models.ChannelTarget, error) {
+	return nil, nil
+}
+
+func (s *summaryOnlyChannelTargetStore) FindByName(ctx context.Context, projectID, platform, name string) (*models.ChannelTarget, error) {
+	return nil, nil
+}
+
+func (s *summaryOnlyChannelTargetStore) FindByTarget(ctx context.Context, projectID, platform, targetID, threadID string) (*models.ChannelTarget, error) {
+	return nil, nil
+}
+
+func (s *summaryOnlyChannelTargetStore) FindByTargetAndKind(ctx context.Context, projectID, platform, targetID, threadID, targetKind string) (*models.ChannelTarget, error) {
+	return nil, nil
+}
+
+func (s *summaryOnlyChannelTargetStore) RecordSend(ctx context.Context, send models.ChannelMessageSend) error {
+	return nil
+}
+
 func TestBuildChannelUtilityActionHandlersPersonalityModelAndProjectInfo(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
