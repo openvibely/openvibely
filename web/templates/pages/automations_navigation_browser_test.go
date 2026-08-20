@@ -270,6 +270,45 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	}
 }
 
+func TestAutomationViewSwitcherMarkupAndStateHelperAreShared(t *testing.T) {
+	sourceBytes, err := os.ReadFile("automations.templ")
+	if err != nil {
+		t.Fatalf("read automations.templ: %v", err)
+	}
+	source := string(sourceBytes)
+	for _, forbidden := range []string{"templ automationCanvasViewSwitcher", "templ automationBuilderViewSwitcher"} {
+		if strings.Contains(source, forbidden) {
+			t.Fatalf("Automation view switcher markup must not be duplicated through %s", forbidden)
+		}
+	}
+	for _, want := range []string{
+		"templ automationViewSwitcher(ariaLabel string)",
+		`@automationViewSwitcher("Automation canvas view")`,
+		`@automationViewSwitcher("Automation builder view")`,
+		"templ automationViewStateScript()",
+		"window.setAutomationCanvasView",
+		"return true;",
+	} {
+		if !strings.Contains(source, want) {
+			t.Errorf("expected shared Automation view switching source to contain %q", want)
+		}
+	}
+	for _, marker := range []string{
+		`data-automation-view-graph>Graph</button>`,
+		`data-automation-view-details>Details</button>`,
+		`data-automation-view-yaml>YAML</button>`,
+	} {
+		if got := strings.Count(source, marker); got != 1 {
+			t.Errorf("expected shared switcher marker %q to appear once in source, got %d", marker, got)
+		}
+	}
+	for _, update := range []string{`style.display`, `classList.toggle('btn-active'`, `setAttribute('aria-pressed'`} {
+		if got := strings.Count(source, update); got != 3 {
+			t.Errorf("expected three shared view-state %q updates in the helper only, got %d", update, got)
+		}
+	}
+}
+
 func TestAutomationBuilderGraphAndYAMLViewsAreNonDivergent(t *testing.T) {
 	candidate := models.AutomationDraftCandidate{
 		SchemaVersion: 1, Name: "YAML graph", AutomationType: "custom", AdapterKey: "custom",
@@ -282,9 +321,10 @@ func TestAutomationBuilderGraphAndYAMLViewsAreNonDivergent(t *testing.T) {
 		t.Fatalf("render Automation YAML graph: %v", err)
 	}
 	body := out.String()
-	graph := strings.Index(body, `data-automation-graph-panel`)
-	yaml := strings.Index(body, `data-automation-yaml-panel`)
-	editor := strings.Index(body, `data-automation-yaml-editor`)
+	markupOnly := regexp.MustCompile(`(?s)<script>.*?</script>`).ReplaceAllString(body, "")
+	graph := strings.Index(markupOnly, `data-automation-graph-panel`)
+	yaml := strings.Index(markupOnly, `data-automation-yaml-panel`)
+	editor := strings.Index(markupOnly, `data-automation-yaml-editor`)
 	if graph < 0 || yaml < 0 || editor < 0 || !(yaml < graph) {
 		t.Fatalf("expected YAML editor and read-only graph panels, got yaml=%d graph=%d editor=%d", yaml, graph, editor)
 	}
@@ -296,7 +336,7 @@ func TestAutomationBuilderGraphAndYAMLViewsAreNonDivergent(t *testing.T) {
 			t.Errorf("synchronized authoring surface must contain %q", want)
 		}
 	}
-	for _, want := range []string{`graphButton && graphButton.addEventListener`, `yamlButton && yamlButton.addEventListener`, `detailsButton && detailsButton.addEventListener`, `detailsPanel.hidden = !detailsSelected`, `form.requestSubmit()`, `automationYAMLValue() !== visualCandidateYAML()`, `input.value = submittedYAML`} {
+	for _, want := range []string{`graphButton && graphButton.addEventListener`, `yamlButton && yamlButton.addEventListener`, `detailsButton && detailsButton.addEventListener`, `setAutomationCanvasView(viewRoot, view`, `if (view === 'yaml') validateYAMLNow()`, `form.requestSubmit()`, `automationYAMLValue() !== visualCandidateYAML()`, `input.value = submittedYAML`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("Graph/YAML/Details synchronization must contain %q", want)
 		}
@@ -415,8 +455,17 @@ window.addEventListener('DOMContentLoaded', function() {
     var detailsButton = document.querySelector('[data-automation-view-details]');
     var graphButton = document.querySelector('[data-automation-view-graph]');
     if (!graphPanel || !detailsPanel || !yamlPanel || !yamlButton || !detailsButton || !graphButton) fail('missing Live view switcher elements');
+    function expectActive(view, label) {
+      [[graphButton, 'graph'], [detailsButton, 'details'], [yamlButton, 'yaml']].forEach(function(pair) {
+        var selected = pair[1] === view;
+        if (pair[0].classList.contains('btn-active') !== selected) fail(label + ' btn-active mismatch for ' + pair[1]);
+        if (pair[0].getAttribute('aria-pressed') !== String(selected)) fail(label + ' aria-pressed mismatch for ' + pair[1]);
+      });
+    }
     if (!isVisible(graphPanel) || isVisible(detailsPanel) || isVisible(yamlPanel)) fail('initial Live view must show only the graph panel');
+    expectActive('graph', 'initial Live view');
     yamlButton.click();
+    expectActive('yaml', 'selected Live YAML view');
     if (isVisible(graphPanel) || isVisible(detailsPanel) || !isVisible(yamlPanel)) fail('selecting YAML must hide the graph and details panels and show only the YAML panel');
     var yamlTextarea = yamlPanel.querySelector('[data-automation-yaml-editor]');
     if (!yamlTextarea || !yamlTextarea.value.includes('schema_version: 1')) fail('YAML panel did not render the saved automation YAML when selected');
@@ -435,10 +484,13 @@ window.addEventListener('DOMContentLoaded', function() {
     if (window.getComputedStyle(indentedLine).paddingLeft === '0px') fail('Live/Preview YAML panel must reuse the editable editor hanging-indent rendering, but nested lines have no left padding');
     if (!indentedLine.textContent.includes('First')) fail('Live/Preview YAML indented line did not render its text content');
     detailsButton.click();
+    expectActive('details', 'selected Live Details view');
     if (isVisible(graphPanel) || !isVisible(detailsPanel) || isVisible(yamlPanel)) fail('selecting Details must hide the graph and YAML panels and show only the details panel');
     graphButton.click();
+    expectActive('graph', 'selected Live Graph view');
     if (!isVisible(graphPanel) || isVisible(detailsPanel) || isVisible(yamlPanel)) fail('selecting Graph must hide the details and YAML panels and show only the graph panel');
     yamlButton.click();
+    expectActive('yaml', 're-selected Live YAML view');
     if (isVisible(graphPanel) || isVisible(detailsPanel) || !isVisible(yamlPanel)) fail('re-selecting YAML must show only the YAML panel');
     var freshContainer = document.getElementById('automation-live-fresh-markup');
     var liveRoot = document.getElementById('automation-live');
@@ -1232,11 +1284,22 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!initialDiagnostic || initialDiagnostic.classList.contains('hidden') || !initialDiagnostic.textContent.includes('line 1')) fail('preloaded YAML was not validated during editor initialization');
     var details = document.querySelector('[data-automation-details-panel]');
     var detailsButton = document.querySelector('[data-automation-view-details]');
-    if (!details || !detailsButton) fail('Details view switcher or panel is missing');
+    var graphButton = document.querySelector('[data-automation-view-graph]');
+    var yamlButton = document.querySelector('[data-automation-view-yaml]');
+    if (!details || !detailsButton || !graphButton || !yamlButton) fail('Details view switcher or panel is missing');
+    function expectBuilderActive(view, label) {
+      [[graphButton, 'graph'], [detailsButton, 'details'], [yamlButton, 'yaml']].forEach(function(pair) {
+        var selected = pair[1] === view;
+        if (pair[0].classList.contains('btn-active') !== selected) fail(label + ' btn-active mismatch for ' + pair[1]);
+        if (pair[0].getAttribute('aria-pressed') !== String(selected)) fail(label + ' aria-pressed mismatch for ' + pair[1]);
+      });
+    }
+    expectBuilderActive('graph', 'initial builder Graph view');
     if (!details.querySelector('[data-automation-details-form]')) fail('Details view is missing its form');
     if (!details.querySelector('[data-automation-node-detail]')) fail('Details view is missing node details');
     if (!details.querySelector('[data-automation-edge-detail]')) fail('Details view is missing transition details');
     click('[data-automation-view-yaml]', 'YAML view button');
+    expectBuilderActive('yaml', 'selected builder YAML view');
     await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
     var diagnostic = document.querySelector('[data-automation-yaml-diagnostic]');
     if (!diagnostic || !diagnostic.textContent.includes('line 2')) fail('preloaded YAML was not validated when the YAML panel became visible');
@@ -1245,9 +1308,11 @@ window.addEventListener('DOMContentLoaded', function() {
     await new Promise(function(resolve) { window.setTimeout(resolve, 400); });
     if (!diagnostic.classList.contains('hidden')) fail('valid YAML did not clear the preloaded diagnostic');
     detailsButton.click();
+    expectBuilderActive('details', 'selected builder Details view');
     if (!isVisible(details) || isVisible(graph) || isVisible(yaml)) fail('Details switch did not make only the details editor visible');
     if (!details.querySelector('textarea[name="node_first_prompt"]') || !details.querySelector('textarea[name="node_first_goal"]')) fail('Details view omitted prior task configuration controls');
     click('[data-automation-view-yaml]', 'YAML view button after Details');
+    expectBuilderActive('yaml', 're-selected builder YAML view');
     if (!isVisible(yaml) || isVisible(graph) || isVisible(details)) fail('YAML switch did not restore the editable YAML view');
 	    var gutter = document.querySelector('[data-automation-yaml-gutter]');
 	    var editorShell = document.querySelector('[data-automation-yaml-editor-shell]');
@@ -1396,6 +1461,7 @@ window.addEventListener('DOMContentLoaded', function() {
       return spans[spans.length - 1].className;
     }
     click('[data-automation-view-graph]', 'Graph view button');
+    expectBuilderActive('graph', 'selected builder Graph view');
     if (!isVisible(graph) || isVisible(yaml)) fail('Graph switch did not restore the canvas');
 
     click('[data-automation-view-yaml]', 'YAML view button before Add node dialog');
