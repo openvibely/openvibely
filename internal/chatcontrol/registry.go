@@ -24,7 +24,7 @@
 //   - agents: list_agents
 //   - alerts: list_alerts, get_alert
 //   - personality: list_personalities, get_personality
-//   - settings: view_settings, list_channels
+//   - settings: view_settings, list_channels, view_system_update
 //   - memory: memory_view (only when selected-memory runtime tools authorize a handle)
 //   - chat: get_chat_mode, list_capabilities
 //   - messaging: send_message
@@ -209,7 +209,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:               "list_tasks",
-		Description:        "Discover tasks in the current project by partial title and/or optional category/status filters. Returns compact summaries (task ID, title, category, status, priority, updated time, parent/swarm role) with deterministic ordering and explicit limit/offset pagination. Read-only; excludes internal chat rows and never crosses projects. Use it to find an existing task's ID before create_task/edit_task/execute_tasks or to reconcile a GitHub issue by number/URL.",
+		Description:        "Discover tasks in the current project by partial title and/or optional category/status filters. Omit category/status to search all visible task categories and statuses; do not enumerate lifecycle filters after an empty total=0, has_more=false result for the same query. Returns compact summaries (task ID, title, category, status, priority, updated time, parent/swarm role) with deterministic ordering and explicit limit/offset pagination. Read-only; excludes internal chat rows and never crosses projects. Use it to find an existing task's ID before create_task/edit_task/execute_tasks or to reconcile a GitHub issue by number/URL.",
 		Domain:             DomainTasks,
 		Access:             AccessRead,
 		Sensitivity:        SensitivityNormal,
@@ -793,6 +793,16 @@ var registry = []ActionDef{
 		Sensitivity:  SensitivityNormal,
 		AllowedModes: bothModes(),
 		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+	},
+	{
+		Name:         "view_system_update",
+		Description:  "Return a compact prompt-safe summary of OpenVibely system update status from the update coordinator. Read-only; available on web/API Chat and does not accept, cancel, apply, stage, restart, or roll back updates.",
+		Domain:       DomainSettings,
+		Access:       AccessRead,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: bothModes(),
+		Surfaces:     webAPISurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
 	},
 

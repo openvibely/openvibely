@@ -30,6 +30,10 @@ func setHTMXToastWithLink(c echo.Context, message, status, linkURL, linkText str
 }
 
 func setHTMXToastWithOptions(c echo.Context, message, status, linkURL, linkText, taskID, toastKey, clickURL string) {
+	setHTMXToastWithOptionsAndTriggers(c, message, status, linkURL, linkText, taskID, toastKey, clickURL, nil)
+}
+
+func setHTMXToastWithOptionsAndTriggers(c echo.Context, message, status, linkURL, linkText, taskID, toastKey, clickURL string, extraTriggers map[string]any) {
 	toast := map[string]any{
 		"message": message,
 		"status":  status,
@@ -50,9 +54,11 @@ func setHTMXToastWithOptions(c echo.Context, message, status, linkURL, linkText,
 		toast["click_url"] = clickURL
 	}
 
-	payload := map[string]any{
-		"openvibelyToast": toast,
+	payload := make(map[string]any, len(extraTriggers)+1)
+	for key, value := range extraTriggers {
+		payload[key] = value
 	}
+	payload["openvibelyToast"] = toast
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return

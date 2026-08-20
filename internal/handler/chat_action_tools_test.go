@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/update"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,6 +40,33 @@ type testUsageAccountSummary struct {
 	Provider string                    `json:"provider"`
 	PlanType string                    `json:"plan_type"`
 	Limits   []models.AccountLimitView `json:"limits"`
+}
+
+type countingUpdateInstaller struct {
+	stageCalls    int
+	applyCalls    int
+	validateCalls int
+	rollbackCalls int
+}
+
+func (i *countingUpdateInstaller) Stage(context.Context, update.VerifiedRelease) (any, error) {
+	i.stageCalls++
+	return struct{}{}, nil
+}
+
+func (i *countingUpdateInstaller) Apply(context.Context, any) error {
+	i.applyCalls++
+	return nil
+}
+
+func (i *countingUpdateInstaller) Validate(context.Context, update.ReleaseMetadata) error {
+	i.validateCalls++
+	return nil
+}
+
+func (i *countingUpdateInstaller) Rollback(context.Context, any) error {
+	i.rollbackCalls++
+	return nil
 }
 
 func TestSupportsChatActionTools(t *testing.T) {
@@ -261,6 +290,174 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 			t.Fatalf("list_channels output exposed secret/raw credential %q in:\n%s", secret, out)
 		}
 	}
+}
+
+func TestViewSystemUpdateRuntimeTool_NotApplicableWithoutVisibleCoordinator(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		coordinator *update.Coordinator
+	}{
+		{name: "no coordinator"},
+		{name: "hidden source coordinator", coordinator: update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "source"}, "stable", nil, nil, false, "", nil)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &Handler{}
+			h.SetUpdateCoordinator(tc.coordinator)
+			handler := h.chatActionHandlers(streamingResponseParams{}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_system_update"]
+			require.NotNil(t, handler)
+
+			out, err := handler(context.Background(), json.RawMessage(`{}`))
+			require.NoError(t, err)
+			var got systemUpdateStatusToolResponse
+			require.NoError(t, json.Unmarshal([]byte(out), &got))
+			require.True(t, got.OK)
+			require.False(t, got.Applicable)
+			require.Contains(t, got.Message, "not currently visible or applicable")
+		})
+	}
+}
+
+func TestViewSystemUpdateRuntimeTool_AvailableUpdateReportsReleaseMetadata(t *testing.T) {
+	h := &Handler{}
+	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "binary"}, "stable", nil, nil, true, "", nil)
+	statePath := filepath.Join(t.TempDir(), "update-state.json")
+	persisted := `{
+		"state":"available",
+		"release":{"metadata":{"version":"1.2.3","channel":"stable","release_notes_url":"https://example.test/releases/1.2.3"},"target":{"kind":"binary","os":"darwin","arch":"arm64","url":"https://secret.example.test/artifact","sha256":"secret-sha"},"apply_supported":true,"action":"restart"},
+		"staged_release":{"metadata":{"version":"1.2.3","channel":"stable","release_notes_url":"https://example.test/releases/1.2.3"},"target":{"kind":"binary"},"apply_supported":true,"action":"restart"}
+	}`
+	require.NoError(t, os.WriteFile(statePath, []byte(persisted), 0o600))
+	require.NoError(t, coordinator.SetPersistence(statePath))
+	h.SetUpdateCoordinator(coordinator)
+
+	handler := h.chatActionHandlers(streamingResponseParams{}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["view_system_update"]
+	out, err := handler(context.Background(), json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	var got systemUpdateStatusToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.True(t, got.OK)
+	require.True(t, got.Applicable)
+	require.Equal(t, update.StateAvailable, got.State)
+	require.Equal(t, "1.0.0", got.CurrentVersion)
+	require.Equal(t, "1.2.3", got.TargetVersion)
+	require.Equal(t, "binary", got.Distribution)
+	require.Equal(t, "stable", got.Channel)
+	require.Equal(t, "https://example.test/releases/1.2.3", got.ReleaseNotesURL)
+	require.True(t, got.Manual)
+	require.True(t, got.Staged)
+	require.True(t, got.ApplySupported)
+	require.Equal(t, "restart", got.UpdateAction)
+	require.NotContains(t, out, "secret.example.test")
+	require.NotContains(t, out, "secret-sha")
+}
+
+func TestViewSystemUpdateRuntimeTool_WaitingForIdleReportsDrainStatus(t *testing.T) {
+	drain := update.NewDrainManager(
+		func() update.ActiveWork {
+			return update.ActiveWork{TaskExecutions: 1, ChatExecutions: 2, AutomationActivities: 3}
+		},
+		func() int { return 4 },
+		time.Minute,
+		time.Now,
+	)
+	_, err := drain.BeginDrain(update.DrainRequest{Lease: 5 * time.Minute})
+	require.NoError(t, err)
+	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "docker"}, "stable", drain, nil, true, "", nil)
+	coordinator.SetManagedStateProvider(func() update.ManagedUpdateState {
+		return update.ManagedUpdateState{Active: true, State: update.StateWaitingForIdle, DesiredVersion: "1.2.3", ReleaseNotesURL: "https://example.test/releases/1.2.3"}
+	})
+	h := &Handler{}
+	h.SetUpdateCoordinator(coordinator)
+
+	handler := h.chatActionHandlers(streamingResponseParams{}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_system_update"]
+	out, err := handler(context.Background(), json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	var got systemUpdateStatusToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Equal(t, update.StateWaitingForIdle, got.State)
+	require.Contains(t, got.Message, "waiting for active work")
+	require.Equal(t, update.DrainStateDraining, got.Drain.State)
+	require.Equal(t, 1, got.Drain.TaskExecutions)
+	require.Equal(t, 2, got.Drain.ChatExecutions)
+	require.Equal(t, 3, got.Drain.AutomationActivities)
+	require.Equal(t, 6, got.Drain.ActiveTotal)
+	require.Equal(t, 4, got.Drain.QueuedTotal)
+	require.NotEmpty(t, got.Drain.ExpiresAt)
+}
+
+func TestViewSystemUpdateRuntimeTool_FailedReportsErrorAndConfigurationText(t *testing.T) {
+	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "binary"}, "beta", nil, nil, false, "missing updater signing key", nil)
+	coordinator.SetManagedStateProvider(func() update.ManagedUpdateState {
+		return update.ManagedUpdateState{Active: true, State: update.StateFailed, DesiredVersion: "1.2.3", Error: "artifact verification failed"}
+	})
+	h := &Handler{}
+	h.SetUpdateCoordinator(coordinator)
+
+	handler := h.chatActionHandlers(streamingResponseParams{}, nil, models.ChatModePlan, chatcontrol.SurfaceWeb)["view_system_update"]
+	out, err := handler(context.Background(), json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	var got systemUpdateStatusToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Equal(t, update.StateFailed, got.State)
+	require.Equal(t, "artifact verification failed", got.Error)
+	require.Equal(t, "missing updater signing key", got.ConfigurationError)
+	require.Contains(t, got.Message, "failed")
+}
+
+func TestViewSystemUpdateRuntimeTool_RegisteredAndReadOnly(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		defs := chatcontrol.ToolDefsForContext(mode, chatcontrol.SurfaceWeb, mode == models.ChatModeOrchestrate)
+		found := false
+		for _, def := range defs {
+			if def.Name == "view_system_update" {
+				found = true
+				require.Equal(t, "read", string(def.Access))
+				break
+			}
+		}
+		require.Truef(t, found, "view_system_update definition missing in mode %s", mode)
+	}
+
+	h := &Handler{}
+	installer := &countingUpdateInstaller{}
+	drain := update.NewDrainManager(func() update.ActiveWork { return update.ActiveWork{} }, func() int { return 0 }, time.Minute, time.Now)
+	coordinator := update.NewCoordinator(nil, update.CurrentBuild{Build: buildinfo.Build{Version: "1.0.0"}, Distribution: "binary"}, "stable", drain, installer, false, "", nil)
+	coordinator.SetManagedStateProvider(func() update.ManagedUpdateState {
+		return update.ManagedUpdateState{Active: true, State: update.StateAvailable, DesiredVersion: "1.2.3"}
+	})
+	h.SetUpdateCoordinator(coordinator)
+	beforeDrain := drain.Status()
+
+	rt := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := rt.Executor(context.Background(), "view_system_update", nil)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.NoError(t, err)
+	require.Contains(t, out, `"ok":true`)
+	require.Equal(t, beforeDrain.State, drain.Status().State)
+	require.Zero(t, installer.stageCalls)
+	require.Zero(t, installer.applyCalls)
+	require.Zero(t, installer.validateCalls)
+	require.Zero(t, installer.rollbackCalls)
+
+	capabilities := filterTaskThreadCapabilitySummaries(chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), nil, false)
+	found := false
+	for _, summary := range capabilities {
+		if summary.Name == "view_system_update" {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "task-thread capabilities should include view_system_update")
 }
 
 // TestViewTaskThreadResolvesCurrentTaskID reproduces the incident where an

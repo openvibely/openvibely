@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -583,11 +584,22 @@ func TestHandler_MergeTaskBranch_ChangesTabFastForwardAdvancesTargetAndRefreshes
 		t.Fatalf("expected merge_status merged, got %s", updated.MergeStatus)
 	}
 	trigger := rec.Header().Get("HX-Trigger")
-	if !strings.Contains(trigger, "refreshChanges") {
+	var triggerData map[string]any
+	if err := json.Unmarshal([]byte(trigger), &triggerData); err != nil {
+		t.Fatalf("expected valid HX-Trigger JSON, got %q: %v", trigger, err)
+	}
+	if triggerData["refreshChanges"] != true {
 		t.Fatalf("expected refreshChanges trigger, got %q", trigger)
 	}
-	if !strings.Contains(trigger, "Merged locally into") {
-		t.Fatalf("expected success toast trigger, got %q", trigger)
+	if _, ok := triggerData["showToast"]; ok {
+		t.Fatalf("merge success must not emit legacy showToast trigger, got %q", trigger)
+	}
+	toast, ok := triggerData["openvibelyToast"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected canonical success toast trigger, got %q", trigger)
+	}
+	if toast["message"] != "Merged locally into "+targetBranch || toast["status"] != "completed" || toast["task_id"] != task.ID {
+		t.Fatalf("unexpected merge success toast payload: %#v", toast)
 	}
 	body := rec.Body.String()
 	if !strings.Contains(body, "Worktree Changes") {

@@ -22,6 +22,19 @@ func TestRegistry_AllActionsHaveValidJSON(t *testing.T) {
 	}
 }
 
+func TestRegistry_ListTasksDescriptionDiscouragesLifecycleEnumeration(t *testing.T) {
+	def := Get("list_tasks")
+	if def == nil {
+		t.Fatal("list_tasks action missing")
+	}
+	if !strings.Contains(def.Description, "Omit category/status to search all visible task categories and statuses") {
+		t.Fatalf("list_tasks description should explain broad category/status search, got %q", def.Description)
+	}
+	if !strings.Contains(def.Description, "do not enumerate lifecycle filters after an empty total=0, has_more=false result") {
+		t.Fatalf("list_tasks description should discourage empty lifecycle enumeration, got %q", def.Description)
+	}
+}
+
 func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedRecipients(t *testing.T) {
 	def := Get("send_message")
 	if def == nil {
@@ -275,7 +288,7 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	// Must have new actions
 	mustContain(t, names, "switch_project", "get_chat_mode", "set_chat_mode", "list_capabilities")
 	// Must have new read actions
-	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view")
+	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view", "view_system_update")
 	// Must have GitHub mailbox actions on web/API surfaces.
 	mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 	// Must have thread tools when requested
@@ -305,7 +318,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 
 	// Must have read actions
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",
-		"list_personalities", "view_settings", "list_channels", "project_info",
+		"list_personalities", "view_settings", "list_channels", "view_system_update", "project_info",
 		"get_chat_mode", "list_capabilities", "get_alert", "get_model",
 		"get_personality", "get_current_project", "memory_view", "view_task_thread", "list_schedules", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs")
 }
@@ -360,6 +373,39 @@ func TestListChannelsRegisteredReadOnlyAllSurfacesBothModes(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(def.Description), "token") && !strings.Contains(strings.ToLower(def.Description), "does not expose") {
 		t.Fatalf("list_channels description must make secret boundary explicit: %q", def.Description)
+	}
+}
+
+func TestViewSystemUpdateRegisteredReadOnlyWebAPIBothModes(t *testing.T) {
+	for _, mode := range []models.ChatMode{models.ChatModePlan, models.ChatModeOrchestrate} {
+		for _, surface := range []Surface{SurfaceWeb, SurfaceAPI} {
+			defs := ToolDefsForContext(mode, surface, false)
+			mustContain(t, toolDefNames(defs), "view_system_update")
+			if err := IsAllowed("view_system_update", mode, surface); err != nil {
+				t.Fatalf("expected view_system_update allowed in %s mode on %s: %v", mode, surface, err)
+			}
+		}
+		for _, surface := range []Surface{SurfaceSlack, SurfaceTelegram, SurfaceDiscord, SurfaceEmail} {
+			defs := ToolDefsForContext(mode, surface, false)
+			mustNotContain(t, toolDefNames(defs), "view_system_update")
+			if err := IsAllowed("view_system_update", mode, surface); err == nil || err.Code != "surface_blocked" {
+				t.Fatalf("expected view_system_update blocked on %s in %s mode, got %v", surface, mode, err)
+			}
+		}
+	}
+
+	def := Get("view_system_update")
+	if def == nil {
+		t.Fatal("expected view_system_update to be registered")
+	}
+	if def.Access != AccessRead {
+		t.Fatalf("expected view_system_update to be read-only, got %q", def.Access)
+	}
+	if def.Domain != DomainSettings {
+		t.Fatalf("expected view_system_update in settings domain, got %q", def.Domain)
+	}
+	if !strings.Contains(strings.ToLower(def.Description), "read-only") {
+		t.Fatalf("view_system_update description must document read-only behavior: %q", def.Description)
 	}
 }
 
@@ -533,7 +579,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"schedule_task", "delete_schedule", "modify_schedule",
 		"list_personalities", "set_personality",
 		"list_models", "list_agents",
-		"view_settings", "list_channels", "project_info",
+		"view_settings", "list_channels", "view_system_update", "project_info",
 		"list_projects", "create_project", "switch_project",
 		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "delete_alert", "toggle_alert",
 		// new actions

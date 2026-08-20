@@ -67,6 +67,7 @@ type CreateScheduleForTaskRequest struct {
 // CreateAbsoluteScheduleForTaskRequest is the browser-form creation contract:
 // the form has already parsed an absolute local datetime into RunAt.
 type CreateAbsoluteScheduleForTaskRequest struct {
+	ProjectID              string
 	TaskID                 string
 	RunAt                  time.Time
 	RepeatType             models.RepeatType
@@ -80,6 +81,7 @@ type CreateAbsoluteScheduleForTaskRequest struct {
 // replaces the schedule timing with an absolute RunAt value rather than the
 // runtime-tool HH:MM grammar.
 type ModifyAbsoluteScheduleRequest struct {
+	ProjectID              string
 	ScheduleID             string
 	RunAt                  time.Time
 	RepeatType             models.RepeatType
@@ -134,7 +136,7 @@ func (s *ScheduleActionService) CreateForTask(ctx context.Context, req CreateSch
 }
 
 func (s *ScheduleActionService) CreateAbsoluteForTask(ctx context.Context, req CreateAbsoluteScheduleForTaskRequest) (*ScheduleActionResult, error) {
-	task, err := s.resolveTask(ctx, "", req.TaskID, "")
+	task, err := s.resolveTask(ctx, req.ProjectID, req.TaskID, "")
 	if err != nil {
 		return nil, actionError(ScheduleActionReferenceError, "", err)
 	}
@@ -160,7 +162,7 @@ func (s *ScheduleActionService) CreateAbsoluteForTask(ctx context.Context, req C
 }
 
 func (s *ScheduleActionService) ModifyAbsolute(ctx context.Context, req ModifyAbsoluteScheduleRequest) (*ScheduleActionResult, error) {
-	schedule, task, err := s.resolveSchedule(ctx, "", req.ScheduleID, "", "")
+	schedule, task, err := s.resolveSchedule(ctx, req.ProjectID, req.ScheduleID, "", "")
 	if err != nil {
 		return nil, actionError(ScheduleActionReferenceError, "", err)
 	}
