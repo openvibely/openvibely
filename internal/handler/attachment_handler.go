@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +19,13 @@ const (
 )
 
 var uploadsDir = "uploads"
+
+var (
+	taskAttachmentMkdirAll = os.MkdirAll
+	taskAttachmentCreate   = os.Create
+	taskAttachmentCopy     = io.Copy
+	taskAttachmentRemove   = os.Remove
+)
 
 func init() {
 	SetUploadsDir(uploadsDir)
@@ -63,56 +72,70 @@ func (h *Handler) UploadAttachment(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "no files provided")
 	}
 
-	// Create task-specific directory
-	taskDir := filepath.Join(uploadsDir, taskID)
-	if err := os.MkdirAll(taskDir, 0755); err != nil {
-		applog.Infof("[handler] UploadAttachment error creating directory: %v", err)
+	result := h.persistTaskAttachmentFiles(c.Request().Context(), taskID, files, "UploadAttachment")
+	if result.directoryError != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create directory")
 	}
+	if result.uploadedCount == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "no files could be uploaded")
+	}
 
-	// Process each file
-	uploadedCount := 0
+	// Return updated attachments list
+	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
+	return render(c, http.StatusOK, components.AttachmentListOnly(attachments))
+}
+
+type taskAttachmentUploadResult struct {
+	uploadedCount  int
+	directoryError error
+}
+
+// persistTaskAttachmentFiles saves uploaded files to uploads/{taskID}/ and creates task attachment records.
+func (h *Handler) persistTaskAttachmentFiles(ctx context.Context, taskID string, files []*multipart.FileHeader, logScope string) taskAttachmentUploadResult {
+	result := taskAttachmentUploadResult{}
+	taskDir := filepath.Join(uploadsDir, taskID)
+	if err := taskAttachmentMkdirAll(taskDir, 0755); err != nil {
+		applog.Infof("[handler] %s error creating directory: %v", logScope, err)
+		result.directoryError = err
+		return result
+	}
+
 	for _, file := range files {
-		// Check file size
 		if file.Size > maxUploadSize {
-			applog.Infof("[handler] UploadAttachment file %s too large (%d bytes)", file.Filename, file.Size)
-			continue // Skip this file but continue with others
+			applog.Infof("[handler] %s file %s too large (%d bytes)", logScope, file.Filename, file.Size)
+			continue
 		}
 
-		// Open the uploaded file
 		src, err := file.Open()
 		if err != nil {
-			applog.Infof("[handler] UploadAttachment error opening file %s: %v", file.Filename, err)
+			applog.Infof("[handler] %s error opening file %s: %v", logScope, file.Filename, err)
 			continue
 		}
 
-		// Save file
 		filename := filepath.Base(file.Filename)
 		destPath := filepath.Join(taskDir, filename)
-		dest, err := os.Create(destPath)
+		dest, err := taskAttachmentCreate(destPath)
 		if err != nil {
-			applog.Infof("[handler] UploadAttachment error creating file %s: %v", filename, err)
+			applog.Infof("[handler] %s error creating file %s: %v", logScope, filename, err)
 			src.Close()
 			continue
 		}
 
-		if _, err := io.Copy(dest, src); err != nil {
-			applog.Infof("[handler] UploadAttachment error copying file %s: %v", filename, err)
+		if _, err := taskAttachmentCopy(dest, src); err != nil {
+			applog.Infof("[handler] %s error copying file %s: %v", logScope, filename, err)
 			src.Close()
 			dest.Close()
-			os.Remove(destPath)
+			taskAttachmentRemove(destPath)
 			continue
 		}
 		src.Close()
 		dest.Close()
 
-		// Detect media type from file header
 		mediaType := file.Header.Get("Content-Type")
 		if mediaType == "" {
 			mediaType = "application/octet-stream"
 		}
 
-		// Create attachment record
 		attachment := &models.Attachment{
 			TaskID:    taskID,
 			FileName:  filename,
@@ -121,25 +144,20 @@ func (h *Handler) UploadAttachment(c echo.Context) error {
 			FileSize:  file.Size,
 		}
 
-		if err := h.attachmentRepo.Create(c.Request().Context(), attachment); err != nil {
-			applog.Infof("[handler] UploadAttachment error creating attachment for %s: %v", filename, err)
-			os.Remove(destPath)
+		if err := h.attachmentRepo.Create(ctx, attachment); err != nil {
+			applog.Infof("[handler] %s error creating attachment for %s: %v", logScope, filename, err)
+			taskAttachmentRemove(destPath)
 			continue
 		}
 
-		applog.Infof("[handler] UploadAttachment success id=%s file=%s size=%d", attachment.ID, filename, file.Size)
-		uploadedCount++
+		applog.Infof("[handler] %s attachment created id=%s file=%s size=%d", logScope, attachment.ID, filename, file.Size)
+		result.uploadedCount++
 	}
 
-	if uploadedCount == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "no files could be uploaded")
+	if result.uploadedCount > 0 {
+		applog.Infof("[handler] %s completed: %d/%d attachments uploaded", logScope, result.uploadedCount, len(files))
 	}
-
-	applog.Infof("[handler] UploadAttachment completed: %d/%d files uploaded", uploadedCount, len(files))
-
-	// Return updated attachments list
-	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-	return render(c, http.StatusOK, components.AttachmentListOnly(attachments))
+	return result
 }
 
 func (h *Handler) DeleteAttachment(c echo.Context) error {
