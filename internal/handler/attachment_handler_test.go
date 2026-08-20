@@ -198,6 +198,52 @@ func newTaskAttachmentMultipartRequestWithFiles(t *testing.T, method, target str
 	return req
 }
 
+func newTaskAttachmentMultipartRequestWithPaddedDelimiters(t *testing.T, method, target string, fields map[string]string, files []taskAttachmentTestFile) *http.Request {
+	t.Helper()
+	body, contentType := newPaddedDelimiterMultipartBody(t, fields, "files", files)
+	req := httptest.NewRequest(method, target, body)
+	req.Header.Set("Content-Type", contentType)
+	return req
+}
+
+func newPaddedDelimiterMultipartBody(t *testing.T, fields map[string]string, fileField string, files []taskAttachmentTestFile) (*bytes.Buffer, string) {
+	t.Helper()
+	const boundary = "openvibely-issue-748-padded-boundary"
+	body := &bytes.Buffer{}
+	firstPart := true
+	writeBoundary := func(final bool) {
+		if firstPart {
+			firstPart = false
+			if final {
+				fmt.Fprintf(body, "--%s-- \t\r\n", boundary)
+				return
+			}
+			fmt.Fprintf(body, "--%s\r\n", boundary)
+			return
+		}
+		if final {
+			fmt.Fprintf(body, "\r\n--%s-- \t\r\n", boundary)
+			return
+		}
+		fmt.Fprintf(body, "\r\n--%s \t\r\n", boundary)
+	}
+	for name, value := range fields {
+		writeBoundary(false)
+		fmt.Fprintf(body, "Content-Disposition: form-data; name=%q\r\n\r\n%s", name, value)
+	}
+	for _, file := range files {
+		writeBoundary(false)
+		fmt.Fprintf(body, "Content-Disposition: form-data; name=%q; filename=%q\r\n", fileField, file.name)
+		if file.contentType != "" {
+			fmt.Fprintf(body, "Content-Type: %s\r\n", file.contentType)
+		}
+		body.WriteString("\r\n")
+		body.Write(file.content)
+	}
+	writeBoundary(true)
+	return body, "multipart/form-data; boundary=" + boundary
+}
+
 func withTaskAttachmentUploadsDir(t *testing.T) string {
 	t.Helper()
 	tmpDir := t.TempDir()
@@ -353,6 +399,98 @@ func TestTaskAttachmentUploadsAllowValidMultiFileBodyAboveSingleFileRequestCapAc
 				if _, err := os.Stat(filepath.Join(uploadsRoot, taskID, att.FileName)); err != nil {
 					t.Fatalf("expected stored file %s: %v", att.FileName, err)
 				}
+			}
+		})
+	}
+}
+
+func TestTaskAttachmentUploadsAllowPaddedBoundaryDelimiterWhitespaceAcrossSurfaces(t *testing.T) {
+	for _, tcCase := range []struct {
+		name    string
+		request func(t *testing.T, tc *TestContext, projectID string, files []taskAttachmentTestFile) (*http.Request, func() string)
+	}{
+		{
+			name: "task creation",
+			request: func(t *testing.T, tc *TestContext, projectID string, files []taskAttachmentTestFile) (*http.Request, func() string) {
+				t.Helper()
+				title := "task attachment create padded delimiter"
+				req := newTaskAttachmentMultipartRequestWithPaddedDelimiters(t, http.MethodPost, "/tasks?project_id="+projectID, map[string]string{
+					"title":    title,
+					"category": "backlog",
+					"priority": "2",
+					"prompt":   "created with padded boundary attachments",
+				}, files)
+				req.Header.Set("HX-Request", "true")
+				return req, func() string {
+					task, err := tc.taskRepo.GetByProjectAndTitle(context.Background(), projectID, title)
+					if err != nil {
+						t.Fatalf("get created task: %v", err)
+					}
+					if task == nil {
+						t.Fatalf("created task %q not found", title)
+					}
+					return task.ID
+				}
+			},
+		},
+		{
+			name: "task edit",
+			request: func(t *testing.T, tc *TestContext, projectID string, files []taskAttachmentTestFile) (*http.Request, func() string) {
+				t.Helper()
+				task := tc.CreateTask(projectID).
+					WithTitle("task attachment edit padded delimiter").
+					WithCategory(models.CategoryBacklog).
+					WithPriority(2).
+					Build()
+				req := newTaskAttachmentMultipartRequestWithPaddedDelimiters(t, http.MethodPut, "/tasks/"+task.ID, map[string]string{
+					"title":    task.Title,
+					"category": "backlog",
+					"priority": "2",
+					"prompt":   task.Prompt,
+				}, files)
+				req.Header.Set("HX-Request", "true")
+				return req, func() string { return task.ID }
+			},
+		},
+		{
+			name: "attachment endpoint",
+			request: func(t *testing.T, tc *TestContext, projectID string, files []taskAttachmentTestFile) (*http.Request, func() string) {
+				t.Helper()
+				task := tc.CreateTask(projectID).
+					WithTitle("task attachment endpoint padded delimiter").
+					WithCategory(models.CategoryBacklog).
+					Build()
+				req := newTaskAttachmentMultipartRequestWithPaddedDelimiters(t, http.MethodPost, "/tasks/"+task.ID+"/attachments", nil, files)
+				req.Header.Set("HX-Request", "true")
+				return req, func() string { return task.ID }
+			},
+		},
+	} {
+		t.Run(tcCase.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			project := tc.CreateProject().Build()
+			withTaskAttachmentUploadsDir(t)
+			files := []taskAttachmentTestFile{
+				{name: "padded-first.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("a"), 6<<20)},
+				{name: "padded-second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 6<<20)},
+			}
+			req, taskIDAfterUpload := tcCase.request(t, tc, project.ID, files)
+			if req.ContentLength <= browserAttachmentRequestLimit(maxUploadSize) {
+				t.Fatalf("test request length %d should exceed old one-file cap %d", req.ContentLength, browserAttachmentRequestLimit(maxUploadSize))
+			}
+
+			rec := httptest.NewRecorder()
+			tc.echo.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+
+			attachments, err := tc.attachmentRepo.ListByTask(context.Background(), taskIDAfterUpload())
+			if err != nil {
+				t.Fatalf("list attachments: %v", err)
+			}
+			if len(attachments) != len(files) {
+				t.Fatalf("expected %d attachments, got %d: %+v", len(files), len(attachments), attachments)
 			}
 		})
 	}

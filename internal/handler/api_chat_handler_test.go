@@ -459,6 +459,60 @@ func TestAPIChatMessage_WithMultipleAttachments(t *testing.T) {
 	assert.True(t, fileNames["readme.md"], "expected readme.md attachment")
 }
 
+func TestAPIChatMessage_AllowsPaddedBoundaryDelimiterWhitespace(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:        "Test Agent",
+		Provider:    models.ProviderTest,
+		Model:       "claude-3-sonnet-20240229",
+		APIKey:      "test-key",
+		MaxTokens:   4096,
+		Temperature: 1.0,
+		IsDefault:   true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+
+	tmpDir := t.TempDir()
+	oldUploadsDir := uploadsDir
+	uploadsDir = tmpDir
+	defer func() { uploadsDir = oldUploadsDir }()
+
+	files := []taskAttachmentTestFile{
+		{name: "padded-first.txt", contentType: "text/plain", content: bytes.Repeat([]byte("a"), 6<<20)},
+		{name: "padded-second.txt", contentType: "text/plain", content: bytes.Repeat([]byte("b"), 6<<20)},
+	}
+	body, contentType := newPaddedDelimiterMultipartBody(t, map[string]string{
+		"message":    "Check these padded boundary files",
+		"project_id": projectID,
+	}, "attachments", files)
+	require.Greater(t, int64(body.Len()), browserAttachmentRequestLimit(apiMaxFileSize))
+	require.LessOrEqual(t, int64(body.Len()), apiAttachmentRequestLimit(apiMaxFileSize, apiMaxFilesPerReq))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/message", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	chatHistory, err := h.execRepo.ListChatHistory(ctx, projectID, 50)
+	require.NoError(t, err)
+	require.NotEmpty(t, chatHistory)
+	attachments, err := h.chatAttachmentRepo.ListByExecution(ctx, chatHistory[0].ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 2)
+	for _, attachment := range attachments {
+		assert.Equal(t, int64(6<<20), attachment.FileSize)
+		assert.FileExists(t, attachment.FilePath)
+	}
+}
+
 func TestAPIChatMessage_NoAgents(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()

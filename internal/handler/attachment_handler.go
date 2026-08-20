@@ -186,7 +186,29 @@ func (r *multipartFileLimitReadCloser) scan(data []byte) error {
 }
 
 func (r *multipartFileLimitReadCloser) hasCompleteBoundaryDelimiter() bool {
-	return len(r.pending) >= len(r.boundary)+2
+	suffix := r.pending[len(r.boundary):]
+	if len(suffix) == 0 {
+		return false
+	}
+	if bytes.HasPrefix(suffix, []byte("--")) {
+		rest := skipMultipartLWSP(suffix[2:])
+		if len(rest) == 0 {
+			return len(suffix) > multipartRequestOverheadAllowance
+		}
+		if rest[0] == '\r' {
+			return len(rest) >= len("\r\n")
+		}
+		return true
+	}
+
+	rest := skipMultipartLWSP(suffix)
+	if len(rest) == 0 {
+		return len(suffix) > multipartRequestOverheadAllowance
+	}
+	if rest[0] == '\r' {
+		return len(rest) >= len("\r\n")
+	}
+	return true
 }
 
 func (r *multipartFileLimitReadCloser) hasValidBoundaryDelimiter() bool {
@@ -194,7 +216,19 @@ func (r *multipartFileLimitReadCloser) hasValidBoundaryDelimiter() bool {
 		return false
 	}
 	suffix := r.pending[len(r.boundary):]
-	return bytes.HasPrefix(suffix, []byte("\r\n")) || bytes.HasPrefix(suffix, []byte("--"))
+	if bytes.HasPrefix(suffix, []byte("--")) {
+		rest := skipMultipartLWSP(suffix[2:])
+		return len(rest) == 0 || bytes.HasPrefix(rest, []byte("\r\n")) || bytes.HasPrefix(rest, []byte("\n"))
+	}
+	rest := skipMultipartLWSP(suffix)
+	return bytes.HasPrefix(rest, []byte("\r\n")) || bytes.HasPrefix(rest, []byte("\n"))
+}
+
+func skipMultipartLWSP(b []byte) []byte {
+	for len(b) > 0 && (b[0] == ' ' || b[0] == '\t') {
+		b = b[1:]
+	}
+	return b
 }
 
 func (r *multipartFileLimitReadCloser) countFileBytes(n int64) error {
