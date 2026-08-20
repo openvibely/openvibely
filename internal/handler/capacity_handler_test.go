@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -380,6 +382,86 @@ func TestHandler_GetModelCapacities(t *testing.T) {
 	assert.Equal(t, 2, a2Resp.MaxWorkers)
 	assert.True(t, a2Resp.HasCapacity)
 	assert.Equal(t, 2, a2Resp.AvailableSlots)
+}
+
+func TestHandler_GetModelCapacitiesUsesCompactWorkerProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	if _, err := db.ExecContext(ctx, `DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	alpha := &models.LLMConfig{
+		Name: "Worker Alpha", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "worker-alpha-model", MaxWorkers: 1, APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client", BaseURL: "https://example.com/v1/",
+		ModelsURL: "https://example.com/v1/models", ExtraHeadersJSON: `{"secret":"header"}`,
+		ExtraBodyJSON: strings.Repeat("x", 64*1024), CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":true}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, alpha))
+	unlimited := &models.LLMConfig{
+		Name: "Worker Unlimited", Provider: models.ProviderAnthropic, Model: "worker-unlimited-model", MaxWorkers: 0,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, unlimited))
+	zuluDefault := &models.LLMConfig{
+		Name: "Worker Zulu Default", Provider: models.ProviderOpenAI, Model: "worker-zulu-model", IsDefault: true, MaxWorkers: 2,
+		APIKey: "secret-key", ExtraBodyJSON: strings.Repeat("y", 64*1024),
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, zuluDefault))
+
+	h.workerSvc.SetLLMConfigRepo(llmConfigRepo)
+	require.True(t, h.workerSvc.TryAcquireModelSlot(zuluDefault.ID))
+	defer h.workerSvc.ReleaseModelSlot(zuluDefault.ID)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodGet, "/api/capacity/models", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var resp []ModelCapacityResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp, 2)
+	assert.Equal(t, zuluDefault.ID, resp[0].ID)
+	assert.Equal(t, "Worker Zulu Default", resp[0].Name)
+	assert.Equal(t, "worker-zulu-model", resp[0].Model)
+	assert.Equal(t, 1, resp[0].Running)
+	assert.Equal(t, 2, resp[0].MaxWorkers)
+	assert.True(t, resp[0].HasCapacity)
+	assert.Equal(t, 1, resp[0].AvailableSlots)
+	assert.Equal(t, alpha.ID, resp[1].ID)
+	assert.Equal(t, "Worker Alpha", resp[1].Name)
+	assert.Equal(t, "worker-alpha-model", resp[1].Model)
+	assert.Equal(t, 0, resp[1].Running)
+	assert.Equal(t, 1, resp[1].MaxWorkers)
+	assert.True(t, resp[1].HasCapacity)
+	assert.Equal(t, 1, resp[1].AvailableSlots)
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact worker capacity query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if projection != "select id, name, model, max_workers" {
+		t.Fatalf("model capacity projection = %q, want compact worker fields in %s", projection, statements[0])
+	}
+	if !strings.Contains(stmt, "where max_workers > 0") || !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("model capacity query must filter and preserve ordering: %s", statements[0])
+	}
+	for _, forbidden := range []string{
+		"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url",
+		"oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json",
+		"custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "worker_timeout",
+	} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("model capacity query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
 }
 
 func TestHandler_GetModelCapacity(t *testing.T) {
