@@ -170,6 +170,9 @@ func IsRetryableError(err error) bool {
 	if isNonRetryableRateLimitMessage(msg) {
 		return false
 	}
+	if messageHasStatusCode(msg, http.StatusTooManyRequests) {
+		return false
+	}
 	for _, hint := range []string{"overloaded", "temporar", "unavailable", "server error", "internal_error", "received from peer", "retry your request", "try again"} {
 		if strings.Contains(msg, hint) {
 			return true
@@ -187,6 +190,17 @@ func IsRetryableError(err error) bool {
 func isNonRetryableRateLimitMessage(msg string) bool {
 	for _, hint := range []string{"rate_limit", "rate limit", "too many requests", "usage limit", "exceeded your account", "insufficient_quota", "quota exceeded"} {
 		if strings.Contains(msg, hint) {
+			return true
+		}
+	}
+	return false
+}
+
+func messageHasStatusCode(msg string, statusCode int) bool {
+	want := strconv.Itoa(statusCode)
+	for _, field := range strings.Fields(msg) {
+		field = strings.Trim(field, "()[]{}:;,.\"'")
+		if field == want {
 			return true
 		}
 	}
