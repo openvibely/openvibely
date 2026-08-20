@@ -1352,8 +1352,10 @@ func TestBuildChannelUtilityActionHandlersModelStatusToolsUseCompactRuntimeSumma
 
 	require.Contains(t, modelsOut, "Channel Default Model (default)")
 	require.Contains(t, modelsOut, "Channel Compact Model")
+	require.Contains(t, modelsOut, "max_workers: 4")
 	require.Contains(t, getOut, "Model: Channel Compact Model")
 	require.Contains(t, getOut, "Provider: openai_compatible")
+	require.Contains(t, getOut, "max_workers: 4")
 	require.Contains(t, settingsOut, "- Configured models: 2")
 	for _, out := range []string{modelsOut, getOut, settingsOut} {
 		require.NotContains(t, out, "secret")

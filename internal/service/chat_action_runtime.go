@@ -1505,7 +1505,11 @@ func channelListModelsResult(ctx context.Context, repo *repository.LLMConfigRepo
 		if auth == "" {
 			auth = string(models.AuthMethodAPIKey)
 		}
-		sb.WriteString(fmt.Sprintf("- %s%s — provider: %s, model: %s, auth: %s\n", c.Name, defaultStr, c.Provider, c.Model, auth))
+		workerInfo := ""
+		if c.MaxWorkers > 0 {
+			workerInfo = fmt.Sprintf(" | max_workers: %d", c.MaxWorkers)
+		}
+		sb.WriteString(fmt.Sprintf("- %s%s — provider: %s, model: %s, auth: %s%s\n", c.Name, defaultStr, c.Provider, c.Model, auth, workerInfo))
 	}
 	return strings.TrimSpace(sb.String())
 }
@@ -1531,7 +1535,11 @@ func channelGetModelResult(ctx context.Context, repo *repository.LLMConfigRepo, 
 		if auth == "" {
 			auth = string(models.AuthMethodAPIKey)
 		}
-		return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s", c.Name, defaultStr, c.Provider, c.Model, auth)
+		workerInfo := ""
+		if c.MaxWorkers > 0 {
+			workerInfo = fmt.Sprintf(", max_workers: %d", c.MaxWorkers)
+		}
+		return fmt.Sprintf("Model: %s%s\n  Provider: %s\n  Model ID: %s\n  Auth: %s%s", c.Name, defaultStr, c.Provider, c.Model, auth, workerInfo)
 	}
 	if req.ModelID != "" {
 		return fmt.Sprintf("Model with id %q not found.", req.ModelID)
