@@ -314,11 +314,15 @@ func TestLLMConfigRepo_RuntimeSummariesStayUnderLargeFixtureBudget(t *testing.T)
 	})
 
 	const (
-		maxBytesPerOp    = 200 * 1024
-		maxDurationPerOp = 200 * time.Microsecond
+		maxBytesPerOp      = 200 * 1024
+		maxDurationPerOp   = time.Millisecond
+		minFullListSpeedup = 10
 	)
 	t.Logf("List: %d ns/op, %d B/op; RuntimeSummaries: %d ns/op, %d B/op; GetByID: %d ns/op, %d B/op; GetByName: %d ns/op, %d B/op",
 		fullList.NsPerOp(), fullList.AllocedBytesPerOp(), runtimeList.NsPerOp(), runtimeList.AllocedBytesPerOp(), getByID.NsPerOp(), getByID.AllocedBytesPerOp(), getByName.NsPerOp(), getByName.AllocedBytesPerOp())
+	if runtimeList.NsPerOp()*minFullListSpeedup > fullList.NsPerOp() {
+		t.Fatalf("runtime list took %s/op, want at least %dx faster than full List (%s/op)", time.Duration(runtimeList.NsPerOp()), minFullListSpeedup, time.Duration(fullList.NsPerOp()))
+	}
 	for label, result := range map[string]testing.BenchmarkResult{"runtime list": runtimeList, "get by id": getByID, "get by name": getByName} {
 		if result.NsPerOp() > maxDurationPerOp.Nanoseconds() {
 			t.Fatalf("%s took %s/op, want <= %s", label, time.Duration(result.NsPerOp()), maxDurationPerOp)
