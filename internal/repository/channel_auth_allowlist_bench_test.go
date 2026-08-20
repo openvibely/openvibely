@@ -11,6 +11,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -185,6 +186,165 @@ func TestChannelAuthAllowlistListQueriesUseCoveringOrderIndexes(t *testing.T) {
 	}
 
 	assertAuthAllowlistRepositoryResults(t, db, 1500)
+}
+
+func TestChannelAuthCountByProjectRemainsSystemLevel(t *testing.T) {
+	db := newAuthAllowlistBenchDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`INSERT INTO projects (id, name, description, repo_path) VALUES ('auth-count-project-a', 'A', '', ''), ('auth-count-project-b', 'B', '', '')`); err != nil {
+		t.Fatalf("insert projects: %v", err)
+	}
+	slack := NewSlackAuthRepo(db)
+	discord := NewDiscordAuthRepo(db)
+	email := NewEmailAuthRepo(db)
+	telegram := NewTelegramAuthRepo(db)
+
+	for i, projectID := range []string{"auth-count-project-a", "auth-count-project-b"} {
+		require.NoError(t, slack.Create(ctx, &models.SlackAuthorizedUser{ProjectID: projectID, SlackUserID: "U-" + projectID, AddedBy: "test"}))
+		require.NoError(t, discord.Create(ctx, &models.DiscordAuthorizedUser{ProjectID: projectID, DiscordUserID: "D-" + projectID, AddedBy: "test"}))
+		require.NoError(t, email.Create(ctx, &models.EmailAuthorizedSender{ProjectID: projectID, EmailAddress: projectID + "@example.com", AddedBy: "test"}))
+		require.NoError(t, telegram.Create(ctx, &models.TelegramAuthorizedUser{ProjectID: projectID, TelegramUserID: int64(1000 + i), TelegramUsername: projectID, AddedBy: "test"}))
+	}
+
+	for _, projectID := range []string{"auth-count-project-a", "auth-count-project-b", "unrelated-project"} {
+		got, err := slack.CountByProject(ctx, projectID)
+		require.NoError(t, err)
+		require.Equal(t, 2, got, "slack count must remain system-level for %s", projectID)
+		got, err = discord.CountByProject(ctx, projectID)
+		require.NoError(t, err)
+		require.Equal(t, 2, got, "discord count must remain system-level for %s", projectID)
+		got, err = email.CountByProject(ctx, projectID)
+		require.NoError(t, err)
+		require.Equal(t, 2, got, "email count must remain system-level for %s", projectID)
+		got, err = telegram.CountByProject(ctx, projectID)
+		require.NoError(t, err)
+		require.Equal(t, 2, got, "telegram count must remain system-level for %s", projectID)
+	}
+}
+
+func TestChannelStatusAuthCountQueriesAvoidOrderedFullListPlans(t *testing.T) {
+	db := newAuthAllowlistBenchDB(t)
+	seedAuthAllowlistFixture(t, db, 1500)
+
+	countQueries := map[string]string{
+		"slack":    `SELECT COUNT(*) FROM slack_authorized_users`,
+		"discord":  `SELECT COUNT(*) FROM discord_authorized_users`,
+		"email":    `SELECT COUNT(*) FROM email_authorized_senders`,
+		"telegram": `SELECT COUNT(*) FROM telegram_authorized_users`,
+	}
+	for channel, query := range countQueries {
+		require.NotContains(t, strings.ToUpper(query), "ORDER BY", "%s status count query must not be an ordered full-list query", channel)
+		plan := authAllowlistExplain(t, db, query)
+		require.NotContains(t, plan, "USE TEMP B-TREE FOR ORDER BY", "%s status count plan must not sort", channel)
+	}
+}
+
+func seedChannelStatusTargetFixture(tb testing.TB, db *sql.DB, projectID string, rows int) {
+	tb.Helper()
+	if _, err := db.Exec(`WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
+		INSERT INTO channel_targets (id, project_id, platform, target_kind, name, target_id, thread_id, is_home, default_subject)
+		SELECT 'status-target-' || printf('%07d', n), ?,
+		       CASE n % 4 WHEN 0 THEN 'slack' WHEN 1 THEN 'telegram' WHEN 2 THEN 'discord' ELSE 'email' END,
+		       CASE n % 4 WHEN 1 THEN 'chat' WHEN 3 THEN 'email' WHEN 2 THEN CASE n % 8 WHEN 2 THEN 'user' ELSE 'channel' END ELSE CASE n % 8 WHEN 0 THEN 'user' ELSE 'channel' END END,
+		       CASE WHEN n % 3 = 0 THEN 'name-' || printf('%07d', n) ELSE '' END,
+		       'target-' || printf('%07d', n),
+		       CASE WHEN n % 5 = 0 THEN 'thread-' || printf('%07d', n) ELSE '' END,
+		       CASE WHEN n IN (1, 2, 3, 4) THEN 1 ELSE 0 END,
+		       'subject'
+		FROM seq`, rows, projectID); err != nil {
+		tb.Fatalf("insert channel target status fixture: %v", err)
+	}
+}
+
+func BenchmarkChannelStatusMaterializedVsAggregateSummary(b *testing.B) {
+	db := newAuthAllowlistBenchDB(b)
+	seedAuthAllowlistFixture(b, db, authAllowlistBenchRows)
+	seedChannelStatusTargetFixture(b, db, authAllowlistBenchProjectID, 25000)
+	ctx := context.Background()
+	repos := struct {
+		slack    *SlackAuthRepo
+		discord  *DiscordAuthRepo
+		email    *EmailAuthRepo
+		telegram *TelegramAuthRepo
+		targets  *ChannelTargetRepo
+	}{
+		slack:    NewSlackAuthRepo(db),
+		discord:  NewDiscordAuthRepo(db),
+		email:    NewEmailAuthRepo(db),
+		telegram: NewTelegramAuthRepo(db),
+		targets:  NewChannelTargetRepo(db),
+	}
+
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context) (int, error)
+	}{
+		{name: "materialized_lists", run: func(ctx context.Context) (int, error) {
+			count, err := listSettingsAuthAllowlists(ctx, repos.slack, repos.discord, repos.email, repos.telegram)
+			if err != nil {
+				return 0, err
+			}
+			targets, err := repos.targets.ListByProject(ctx, authAllowlistBenchProjectID)
+			if err != nil {
+				return 0, err
+			}
+			return count + len(targets), nil
+		}},
+		{name: "aggregate_summary", run: func(ctx context.Context) (int, error) {
+			slack, err := repos.slack.CountByProject(ctx, authAllowlistBenchProjectID)
+			if err != nil {
+				return 0, err
+			}
+			discord, err := repos.discord.CountByProject(ctx, authAllowlistBenchProjectID)
+			if err != nil {
+				return 0, err
+			}
+			email, err := repos.email.CountByProject(ctx, authAllowlistBenchProjectID)
+			if err != nil {
+				return 0, err
+			}
+			telegram, err := repos.telegram.CountByProject(ctx, authAllowlistBenchProjectID)
+			if err != nil {
+				return 0, err
+			}
+			targetSummary, err := repos.targets.SummarizeByProject(ctx, authAllowlistBenchProjectID)
+			if err != nil {
+				return 0, err
+			}
+			return slack + discord + email + telegram + targetSummary.Total, nil
+		}},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			warm, err := tc.run(ctx)
+			if err != nil {
+				b.Fatalf("warm channel status summary: %v", err)
+			}
+			if warm != authAllowlistBenchRows*4+25000 {
+				b.Fatalf("warm channel status rows = %d, want %d", warm, authAllowlistBenchRows*4+25000)
+			}
+			durations := make([]time.Duration, 0, b.N)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				start := time.Now()
+				got, err := tc.run(ctx)
+				elapsed := time.Since(start)
+				if err != nil {
+					b.Fatalf("channel status summary: %v", err)
+				}
+				if got != authAllowlistBenchRows*4+25000 {
+					b.Fatalf("channel status rows = %d, want %d", got, authAllowlistBenchRows*4+25000)
+				}
+				durations = append(durations, elapsed)
+			}
+			b.StopTimer()
+			if len(durations) > 0 {
+				sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+				median := durations[len(durations)/2]
+				b.ReportMetric(float64(median.Nanoseconds())/1e6, "p50_ms")
+			}
+		})
+	}
 }
 
 func TestChannelAuthAllowlistIdentityLookupPlansRemainIndexed(t *testing.T) {

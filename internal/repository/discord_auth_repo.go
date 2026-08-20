@@ -45,6 +45,12 @@ func (r *DiscordAuthRepo) ListByProject(ctx context.Context, projectID string) (
 	return r.allowlist.List(ctx)
 }
 
+// CountByProject returns the system-level Discord authorized-user count.
+// projectID is accepted for UI/status compatibility but does not scope inbound authorization.
+func (r *DiscordAuthRepo) CountByProject(ctx context.Context, projectID string) (int, error) {
+	return r.allowlist.Count(ctx)
+}
+
 // IsAuthorized checks whether a Discord user is authorized at the system channel level.
 // projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *DiscordAuthRepo) IsAuthorized(ctx context.Context, projectID, discordUserID string) (bool, error) {
