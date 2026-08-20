@@ -247,6 +247,190 @@ func BenchmarkLLMConfigRepoHasAnyVsListLargeCustomProviders(b *testing.B) {
 	})
 }
 
+func TestLLMConfigRepo_ListUsageAccountSummariesUsesBoundedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	largeBody := strings.Repeat("x", 1024*1024)
+	alpha := &models.LLMConfig{
+		Name: "Usage Alpha", Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodOAuth,
+		Model: "usage-alpha-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientSecret: "secret-client", OAuthAccountID: "acct-alpha",
+		BaseURL: "https://example.com/v1/", OllamaBaseURL: "http://localhost:11434",
+		ModelsURL: "https://example.com/models", OAuthAuthorizeURL: "https://example.com/auth",
+		OAuthTokenURL: "https://example.com/token", Transport: "chat_completions", PresetSlug: "custom",
+		ExtraHeadersJSON: `{"secret":"header"}`, ExtraBodyJSON: largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`, CustomAuthStateJSON: `{"token":"secret"}`,
+		MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, alpha); err != nil {
+		t.Fatal(err)
+	}
+	zuluDefault := &models.LLMConfig{
+		Name: "Usage Zulu Default", Provider: models.ProviderAnthropic, AuthMethod: models.AuthMethodOAuth,
+		Model: "usage-zulu-model", OAuthAccountID: "acct-zulu", IsDefault: true,
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, zuluDefault); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := repo.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter.Reset()
+	counter.SetEnabled(true)
+	summaries, err := repo.ListUsageAccountSummaries(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != len(full) {
+		t.Fatalf("summary len = %d, full len = %d", len(summaries), len(full))
+	}
+	for i := range full {
+		if summaries[i].ID != full[i].ID || summaries[i].Name != full[i].Name ||
+			summaries[i].Provider != full[i].Provider || summaries[i].Model != full[i].Model ||
+			summaries[i].AuthMethod != full[i].AuthMethod || summaries[i].OAuthAccountID != full[i].OAuthAccountID {
+			t.Fatalf("summary[%d] = %#v, full[%d] = %#v", i, summaries[i], i, full[i])
+		}
+	}
+
+	byID := make(map[string]models.LLMConfig, len(summaries))
+	for _, summary := range summaries {
+		byID[summary.ID] = summary
+	}
+	customSummary := byID[alpha.ID]
+	if customSummary.OAuthAccessToken != "present" {
+		t.Fatalf("OAuth token presence sentinel = %q, want present", customSummary.OAuthAccessToken)
+	}
+	withoutToken := byID[zuluDefault.ID]
+	if withoutToken.OAuthAccessToken != "" {
+		t.Fatalf("missing OAuth token should not set presence sentinel: %#v", withoutToken)
+	}
+	if customSummary.APIKey != "" || customSummary.OAuthRefreshToken != "" || customSummary.OAuthClientSecret != "" ||
+		customSummary.BaseURL != "" || customSummary.OllamaBaseURL != "" || customSummary.ModelsURL != "" ||
+		customSummary.OAuthAuthorizeURL != "" || customSummary.OAuthTokenURL != "" || customSummary.ExtraHeadersJSON != "" ||
+		customSummary.ExtraBodyJSON != "" || customSummary.CustomAuthConfigJSON != "" ||
+		customSummary.CustomAuthStateJSON != "" || customSummary.MixtureConfigJSON != "" {
+		t.Fatalf("usage account summary materialized credential, endpoint, or large-body fields: %#v", customSummary)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact usage account summary query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, provider, model, auth_method, oauth_account_id") || !strings.Contains(projection, "then 1 else 0 end") {
+		t.Fatalf("usage account summary projection = %q, want compact account fields and token-presence sentinel in %s", projection, statements[0])
+	}
+	for _, forbidden := range []string{"api_key", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("usage account summary query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(stmt, "order by is_default desc, name asc") {
+		t.Fatalf("usage account summary query must preserve default/name ordering: %s", statements[0])
+	}
+}
+
+func TestLLMConfigRepo_UsageAccountSummariesStayUnderLargeFixtureBudget(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping usage account summary performance guard in short mode")
+	}
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
+
+	fullList := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+	accountSummaries := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListUsageAccountSummaries(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+
+	const (
+		maxBytesPerOp      = 200 * 1024
+		maxDurationPerOp   = 200 * time.Microsecond
+		minFullListSpeedup = 10
+	)
+	t.Logf("List: %d ns/op, %d B/op; UsageAccountSummaries: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), accountSummaries.NsPerOp(), accountSummaries.AllocedBytesPerOp())
+	if accountSummaries.NsPerOp() > maxDurationPerOp.Nanoseconds() {
+		t.Fatalf("usage account summaries took %s/op, want <= %s", time.Duration(accountSummaries.NsPerOp()), maxDurationPerOp)
+	}
+	if accountSummaries.AllocedBytesPerOp() > maxBytesPerOp {
+		t.Fatalf("usage account summaries allocated %d B/op, want <= %d", accountSummaries.AllocedBytesPerOp(), maxBytesPerOp)
+	}
+	if fullList.NsPerOp() < accountSummaries.NsPerOp()*minFullListSpeedup {
+		t.Fatalf("usage account summaries are not at least %dx faster: List %d ns/op, summaries %d ns/op", minFullListSpeedup, fullList.NsPerOp(), accountSummaries.NsPerOp())
+	}
+	if fullList.AllocedBytesPerOp() < accountSummaries.AllocedBytesPerOp()*20 {
+		t.Fatalf("usage account summaries are not at least 20x lower allocation: List %d B/op, summaries %d B/op", fullList.AllocedBytesPerOp(), accountSummaries.AllocedBytesPerOp())
+	}
+}
+
+func BenchmarkLLMConfigRepoUsageAccountSummariesLargeCustomProviders(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		b.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
+
+	b.Run("full_list", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+	b.Run("usage_account_summaries", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListUsageAccountSummaries(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 {
+				b.Fatalf("expected 50 configs, got %d", len(configs))
+			}
+		}
+	})
+}
+
 func TestLLMConfigRepo_RuntimeSummariesStayUnderLargeFixtureBudget(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping runtime model summary performance guard in short mode")

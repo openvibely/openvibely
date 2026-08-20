@@ -250,6 +250,178 @@ func TestUsageAnalyticsService_BuildAnalyticsUsageIncludesSnapshotsAndLocalUsage
 	}
 }
 
+func TestUsageAnalyticsService_BuildLocalAnalyticsUsageUsesCompactRuntimePath(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	usageRepo := repository.NewUsageRepo(db)
+	configRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	project := &models.Project{Name: "Usage Runtime Project", RepoPath: t.TempDir()}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	configs := seedUsageAnalyticsLargeModelConfigs(t, ctx, configRepo, 50)
+	baseTime := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 6; i++ {
+		cfg := configs[i%len(configs)]
+		cost := float64(i+1) / 100
+		if err := usageRepo.RecordUsageEvent(ctx, &models.LLMUsageEvent{
+			Provider:      string(models.ProviderOpenAICompatible),
+			ProjectID:     project.ID,
+			AgentConfigID: cfg.ID,
+			Model:         fmt.Sprintf("runtime-model-%02d", i%3),
+			Operation:     "task",
+			InputTokens:   100 + i,
+			OutputTokens:  50 + i,
+			TotalTokens:   150 + i*2,
+			CostUSD:       &cost,
+			OccurredAt:    baseTime.Add(time.Duration(i) * time.Hour),
+		}); err != nil {
+			t.Fatalf("record usage event %d: %v", i, err)
+		}
+	}
+
+	filter := repository.UsageFilter{ProjectID: project.ID, Provider: string(models.ProviderOpenAICompatible), DateFrom: baseTime.Add(-24 * time.Hour), DateTo: baseTime.Add(24 * time.Hour), GroupBy: "hour"}
+	dashboardSvc := NewUsageAnalyticsService(usageRepo, configRepo)
+	counter.Reset()
+	counter.SetEnabled(true)
+	dashboardView, err := dashboardSvc.BuildAnalyticsUsage(ctx, filter)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("BuildAnalyticsUsage dashboard baseline: %v", err)
+	}
+	if len(dashboardView.DailyUsage) == 0 || len(dashboardView.DailyUsageByModel) == 0 || len(dashboardView.UsageRateByModel) == 0 {
+		t.Fatalf("dashboard view should keep dashboard-only series, got daily=%d dailyByModel=%d rateByModel=%d", len(dashboardView.DailyUsage), len(dashboardView.DailyUsageByModel), len(dashboardView.UsageRateByModel))
+	}
+	dashboardUsageAggregates := countUsageAnalyticsAggregateStatements(counter.Statements())
+	if dashboardUsageAggregates != 6 {
+		t.Fatalf("dashboard aggregate statements = %d, want 6; statements=%#v", dashboardUsageAggregates, counter.Statements())
+	}
+
+	localSvc := NewUsageAnalyticsService(usageRepo, configRepo)
+	counter.Reset()
+	counter.SetEnabled(true)
+	view, err := localSvc.BuildLocalAnalyticsUsage(ctx, filter)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("BuildLocalAnalyticsUsage: %v", err)
+	}
+	if view.Totals.CallCount != 6 || view.Totals.TotalTokens == 0 || !view.Totals.CostAvailable || view.Totals.CostUSD == nil {
+		t.Fatalf("local totals not preserved: %+v", view.Totals)
+	}
+	if len(view.ModelBreakdown) != 3 || len(view.UsageRate) != 6 {
+		t.Fatalf("local compact response fields not preserved: breakdown=%+v rate=%+v", view.ModelBreakdown, view.UsageRate)
+	}
+	if len(view.DailyUsage) != 0 || len(view.DailyUsageByModel) != 0 || len(view.UsageRateByModel) != 0 {
+		t.Fatalf("local runtime path populated dashboard-only series: daily=%+v dailyByModel=%+v rateByModel=%+v", view.DailyUsage, view.DailyUsageByModel, view.UsageRateByModel)
+	}
+	localStatements := counter.Statements()
+	localUsageAggregates := countUsageAnalyticsAggregateStatements(localStatements)
+	if localUsageAggregates != 3 {
+		t.Fatalf("local aggregate statements = %d, want 3; statements=%#v", localUsageAggregates, localStatements)
+	}
+	if dashboardUsageAggregates-localUsageAggregates < 3 {
+		t.Fatalf("local path saved %d aggregate statements, want at least 3", dashboardUsageAggregates-localUsageAggregates)
+	}
+	assertUsageAnalyticsRuntimeConfigProjection(t, localStatements)
+
+	input := json.RawMessage(`{"range":"all","provider":"openai_compatible","group_by":"hour","top_limit":2,"recent_bucket_limit":3}`)
+	counter.Reset()
+	counter.SetEnabled(true)
+	output, err := ExecuteViewUsageAnalyticsTool(ctx, localSvc, project.ID, input)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ExecuteViewUsageAnalyticsTool: %v", err)
+	}
+	assertUsageAnalyticsRuntimeConfigProjection(t, counter.Statements())
+	if got := countUsageAnalyticsAggregateStatements(counter.Statements()); got != 3 {
+		t.Fatalf("runtime action aggregate statements = %d, want 3; statements=%#v", got, counter.Statements())
+	}
+	var response usageAnalyticsActionResponse
+	if err := json.Unmarshal([]byte(output), &response); err != nil {
+		t.Fatalf("decode runtime response: %v\n%s", err, output)
+	}
+	if !response.OK || response.ProjectID != project.ID || !response.LocalOnly || response.ProviderRefreshed || response.Filter.Range != "all" || response.Filter.GroupBy != "hour" || response.Filter.Provider != "openai_compatible" {
+		t.Fatalf("runtime response metadata changed: %+v", response)
+	}
+	if len(response.TopModels) != 2 || len(response.RecentBuckets) != 3 || len(response.TopProviders) != 1 {
+		t.Fatalf("runtime response limits changed: topModels=%d recent=%d providers=%d response=%+v", len(response.TopModels), len(response.RecentBuckets), len(response.TopProviders), response)
+	}
+	if !response.Cost.Available || response.CostAvailability != "available" || response.Cost.TotalUSD == nil {
+		t.Fatalf("runtime cost availability changed: %+v", response.Cost)
+	}
+}
+
+func seedUsageAnalyticsLargeModelConfigs(tb testing.TB, ctx context.Context, repo *repository.LLMConfigRepo, count int) []models.LLMConfig {
+	tb.Helper()
+	largeBody := strings.Repeat("x", 64*1024)
+	configs := make([]models.LLMConfig, 0, count)
+	for i := 0; i < count; i++ {
+		cfg := &models.LLMConfig{
+			Name:                 fmt.Sprintf("Usage Runtime Large Custom %02d", i),
+			Provider:             models.ProviderOpenAICompatible,
+			AuthMethod:           models.AuthMethodOAuth,
+			Model:                fmt.Sprintf("runtime-model-%02d", i%3),
+			APIKey:               "secret-key",
+			OAuthAccessToken:     "secret-token",
+			OAuthRefreshToken:    "secret-refresh",
+			OAuthClientSecret:    "secret-client",
+			BaseURL:              "https://example.com/v1/",
+			Transport:            "chat_completions",
+			PresetSlug:           "custom",
+			ExtraHeadersJSON:     `{"secret":"header"}`,
+			ExtraBodyJSON:        largeBody,
+			CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+			CustomAuthStateJSON:  `{"token":"secret"}`,
+			MixtureConfigJSON:    `{"large":"` + largeBody + `"}`,
+		}
+		if err := repo.Create(ctx, cfg); err != nil {
+			tb.Fatalf("create large usage model config %d: %v", i, err)
+		}
+		configs = append(configs, *cfg)
+	}
+	return configs
+}
+
+func countUsageAnalyticsAggregateStatements(statements []string) int {
+	count := 0
+	for _, statement := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(stmt, "from llm_usage_events") && strings.HasPrefix(stmt, "select ") && !strings.Contains(stmt, "order by occurred_at desc") {
+			count++
+		}
+	}
+	return count
+}
+
+func assertUsageAnalyticsRuntimeConfigProjection(t *testing.T, statements []string) {
+	t.Helper()
+	modelConfigQueries := 0
+	for _, statement := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if !strings.Contains(stmt, " from agent_configs ") {
+			continue
+		}
+		modelConfigQueries++
+		projection := strings.Split(stmt, " from agent_configs ")[0]
+		if !strings.Contains(projection, "select id, name, provider, model, auth_method, oauth_account_id") || !strings.Contains(projection, "then 1 else 0 end") {
+			t.Fatalf("runtime usage analytics model projection = %q, want compact account summary fields in %s", projection, statement)
+		}
+		for _, forbidden := range []string{"api_key", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("runtime usage analytics selected forbidden model-config column %q: %s", forbidden, statement)
+			}
+		}
+	}
+	if modelConfigQueries != 1 {
+		t.Fatalf("runtime usage analytics model config queries = %d, want exactly one compact query; statements=%#v", modelConfigQueries, statements)
+	}
+}
+
 func TestUsageAnalyticsService_APIKeyUsageDoesNotCreateAccountLimitCards(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	usageRepo := repository.NewUsageRepo(db)

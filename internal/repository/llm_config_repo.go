@@ -63,6 +63,12 @@ const llmConfigBadgeColumns = `id, name, model, is_default`
 // per-model worker pools.
 const llmConfigRuntimeSummaryColumns = `id, name, provider, model, is_default, auth_method, max_workers, worker_timeout`
 
+// llmConfigUsageAccountSummaryColumns is the compact local usage-analytics
+// account projection. It preserves only fields needed to merge stored account
+// snapshots and produce OAuth placeholders; OAuth token bodies are represented as
+// a non-secret presence sentinel.
+const llmConfigUsageAccountSummaryColumns = `id, name, provider, model, auth_method, oauth_account_id, CASE WHEN oauth_access_token != '' THEN 1 ELSE 0 END`
+
 func scanLLMConfig(row interface{ Scan(dest ...any) error }, a *models.LLMConfig) error {
 	return row.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.ReasoningEffort, &a.APIKey,
 		&a.MaxTokens, &a.Temperature, &a.IsDefault, &a.CreatedAt, &a.UpdatedAt,
@@ -273,6 +279,36 @@ func (r *LLMConfigRepo) ListBadgeOptions(ctx context.Context) ([]models.LLMConfi
 
 func scanLLMConfigRuntimeSummary(row interface{ Scan(dest ...any) error }, a *models.LLMConfig) error {
 	return row.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault, &a.AuthMethod, &a.MaxWorkers, &a.WorkerTimeout)
+}
+
+// ListUsageAccountSummaries returns compact model config identity rows for the
+// local-only usage analytics runtime path. The returned LLMConfig values are
+// intentionally incomplete and must not be used for provider execution, model
+// editing, credential access, OAuth refresh, or persistence.
+func (r *LLMConfigRepo) ListUsageAccountSummaries(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+llmConfigUsageAccountSummaryColumns+`
+							 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing usage account model summaries: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var (
+			a           models.LLMConfig
+			hasOAuthKey bool
+		)
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.AuthMethod, &a.OAuthAccountID, &hasOAuthKey); err != nil {
+			return nil, fmt.Errorf("scanning usage account model summary: %w", err)
+		}
+		if hasOAuthKey {
+			a.OAuthAccessToken = "present"
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
 }
 
 // ListRuntimeSummaries returns only the bounded model fields displayed by

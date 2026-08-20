@@ -122,7 +122,7 @@ func (s *UsageAnalyticsService) BuildLocalAnalyticsUsage(ctx context.Context, fi
 	view := &models.AnalyticsUsageViewModel{}
 	configsByID := map[string]models.LLMConfig{}
 	if s.llmConfigRepo != nil {
-		configs, err := s.llmConfigRepo.List(ctx)
+		configs, err := s.llmConfigRepo.ListUsageAccountSummaries(ctx)
 		if err != nil {
 			view.Errors = append(view.Errors, fmt.Sprintf("listing OAuth accounts: %v", err))
 		} else {
@@ -133,7 +133,7 @@ func (s *UsageAnalyticsService) BuildLocalAnalyticsUsage(ctx context.Context, fi
 		}
 	}
 
-	if err := s.populateAnalyticsUsageView(ctx, filter, view, configsByID, nil); err != nil {
+	if err := s.populateLocalAnalyticsUsageView(ctx, filter, view, configsByID); err != nil {
 		return nil, err
 	}
 	if latestUsageAt, err := s.usageRepo.GetLatestUsageEventTime(ctx, filter); err != nil {
@@ -447,26 +447,9 @@ func compactUsageAnalyticsAccountRows(accounts []models.AccountUsageView) []usag
 }
 
 func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
-	snapshots, err := s.usageRepo.GetLatestAccountUsageSnapshots(ctx, filter.Provider)
-	if err != nil {
-		view.Errors = append(view.Errors, fmt.Sprintf("loading account snapshots: %v", err))
-	} else {
-		view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, snapshots, configsByID)
-		view.AccountLimits = dedupeAccountUsageViews(view.AccountLimits, configsByID)
-		view.AccountLimits = applyAccountErrors(view.AccountLimits, refreshErrors, configsByID)
-		for _, snapshot := range snapshots {
-			if view.LastUpdatedAt == nil || snapshot.FetchedAt.After(*view.LastUpdatedAt) {
-				updated := snapshot.FetchedAt
-				view.LastUpdatedAt = &updated
-			}
-		}
-	}
-
-	totals, err := s.usageRepo.GetUsageTotals(ctx, filter)
-	if err != nil {
+	if err := s.populateCommonAnalyticsUsageView(ctx, filter, view, configsByID, refreshErrors); err != nil {
 		return err
 	}
-	view.Totals = *totals
 
 	daily, err := s.usageRepo.GetDailyUsage(ctx, filter)
 	if err != nil {
@@ -499,6 +482,53 @@ func (s *UsageAnalyticsService) populateAnalyticsUsageView(ctx context.Context, 
 		return err
 	}
 	view.ModelBreakdown = breakdown
+	return nil
+}
+
+func (s *UsageAnalyticsService) populateLocalAnalyticsUsageView(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig) error {
+	if err := s.populateCommonAnalyticsUsageView(ctx, filter, view, configsByID, nil); err != nil {
+		return err
+	}
+
+	rateFilter := filter
+	if rateFilter.GroupBy == "" {
+		rateFilter.GroupBy = "day"
+	}
+	rate, err := s.usageRepo.GetUsageRateBuckets(ctx, rateFilter)
+	if err != nil {
+		return err
+	}
+	view.UsageRate = rate
+
+	breakdown, err := s.usageRepo.GetModelUsageBreakdown(ctx, filter)
+	if err != nil {
+		return err
+	}
+	view.ModelBreakdown = breakdown
+	return nil
+}
+
+func (s *UsageAnalyticsService) populateCommonAnalyticsUsageView(ctx context.Context, filter repository.UsageFilter, view *models.AnalyticsUsageViewModel, configsByID map[string]models.LLMConfig, refreshErrors map[string]string) error {
+	snapshots, err := s.usageRepo.GetLatestAccountUsageSnapshots(ctx, filter.Provider)
+	if err != nil {
+		view.Errors = append(view.Errors, fmt.Sprintf("loading account snapshots: %v", err))
+	} else {
+		view.AccountLimits = mergeAccountSnapshots(view.AccountLimits, snapshots, configsByID)
+		view.AccountLimits = dedupeAccountUsageViews(view.AccountLimits, configsByID)
+		view.AccountLimits = applyAccountErrors(view.AccountLimits, refreshErrors, configsByID)
+		for _, snapshot := range snapshots {
+			if view.LastUpdatedAt == nil || snapshot.FetchedAt.After(*view.LastUpdatedAt) {
+				updated := snapshot.FetchedAt
+				view.LastUpdatedAt = &updated
+			}
+		}
+	}
+
+	totals, err := s.usageRepo.GetUsageTotals(ctx, filter)
+	if err != nil {
+		return err
+	}
+	view.Totals = *totals
 	return nil
 }
 
