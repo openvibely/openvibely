@@ -22,6 +22,19 @@ func TestRegistry_AllActionsHaveValidJSON(t *testing.T) {
 	}
 }
 
+func TestRegistry_ListTasksDescriptionDiscouragesLifecycleEnumeration(t *testing.T) {
+	def := Get("list_tasks")
+	if def == nil {
+		t.Fatal("list_tasks action missing")
+	}
+	if !strings.Contains(def.Description, "Omit category/status to search all visible task categories and statuses") {
+		t.Fatalf("list_tasks description should explain broad category/status search, got %q", def.Description)
+	}
+	if !strings.Contains(def.Description, "do not enumerate lifecycle filters after an empty total=0, has_more=false result") {
+		t.Fatalf("list_tasks description should discourage empty lifecycle enumeration, got %q", def.Description)
+	}
+}
+
 func TestRegistry_SendMessageTargetDescriptionMentionsAuthorizedRecipients(t *testing.T) {
 	def := Get("send_message")
 	if def == nil {
