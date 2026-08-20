@@ -423,22 +423,3 @@ func TestExecuteTool_UnknownTool(t *testing.T) {
 		t.Errorf("error = %q", err.Error())
 	}
 }
-
-func TestResolvePath(t *testing.T) {
-	tests := []struct {
-		workDir  string
-		filePath string
-		want     string
-	}{
-		{"/home/user", "file.txt", "/home/user/file.txt"},
-		{"/home/user", "sub/dir/file.txt", "/home/user/sub/dir/file.txt"},
-		{"/home/user", "/abs/path.txt", "/abs/path.txt"},
-	}
-
-	for _, tt := range tests {
-		got := resolvePath(tt.workDir, tt.filePath)
-		if got != tt.want {
-			t.Errorf("resolvePath(%q, %q) = %q, want %q", tt.workDir, tt.filePath, got, tt.want)
-		}
-	}
-}

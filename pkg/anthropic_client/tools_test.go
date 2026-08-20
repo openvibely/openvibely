@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/openvibely/openvibely/pkg/agenttools"
 )
 
 func TestExecReadFile(t *testing.T) {
@@ -284,8 +286,8 @@ func TestNormalizeExecBashTimeout(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeExecBashTimeout(tt.in); got != tt.want {
-				t.Fatalf("normalizeExecBashTimeout(%d) = %d, want %d", tt.in, got, tt.want)
+			if got := agenttools.NormalizeBashTimeout(tt.in, agenttools.BashPolicy{DefaultTimeoutSeconds: defaultExecBashTimeoutSeconds}); got != tt.want {
+				t.Fatalf("NormalizeBashTimeout(%d) = %d, want %d", tt.in, got, tt.want)
 			}
 		})
 	}
