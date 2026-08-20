@@ -3197,7 +3197,7 @@ func (h *Handler) executeSetPersonality(ctx context.Context, req service.SetPers
 
 // executeListModels returns available model configurations.
 func (h *Handler) executeListModels(ctx context.Context) string {
-	configs, err := h.llmConfigRepo.List(ctx)
+	configs, err := h.llmConfigRepo.ListRuntimeSummaries(ctx)
 	if err != nil {
 		return "Model Settings:\n- Error retrieving model configurations: " + err.Error()
 	}
@@ -3272,7 +3272,7 @@ func (h *Handler) executeViewSettings(ctx context.Context) string {
 	sb.WriteString(fmt.Sprintf("- **Personality:** %s\n", personality))
 
 	// Model count
-	configs, err := h.llmConfigRepo.List(ctx)
+	configs, err := h.llmConfigRepo.ListRuntimeSummaries(ctx)
 	if err != nil {
 		applog.Infof("[handler] executeViewSettings error listing models: %v", err)
 	} else {
