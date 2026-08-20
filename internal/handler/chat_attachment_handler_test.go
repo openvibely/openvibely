@@ -392,6 +392,45 @@ func TestUploadChatAttachment_AllowsValidMultiFileUploadAboveSingleFileRequestCa
 	}
 }
 
+func TestUploadChatAttachment_AllowsPaddedBoundaryDelimiterWhitespace(t *testing.T) {
+	useTempUploadsDir(t)
+
+	db := testutil.NewTestDB(t)
+	h := &Handler{
+		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
+		threadInputRepo:    repository.NewThreadInputRepo(db),
+	}
+	e := echo.New()
+	files := []taskAttachmentTestFile{
+		{name: "padded-first.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("a"), 6<<20)},
+		{name: "padded-second.bin", contentType: "application/octet-stream", content: bytes.Repeat([]byte("b"), 6<<20)},
+	}
+	body, contentType := newPaddedDelimiterMultipartBody(t, nil, "files", files)
+	require.Greater(t, int64(body.Len()), browserAttachmentRequestLimit(maxChatUploadSize))
+	require.LessOrEqual(t, int64(body.Len()), attachmentRequestLimit(maxChatUploadSize, maxFilesPerUpload))
+
+	req := httptest.NewRequest(http.MethodPost, "/chat/attachments", body)
+	req.Header.Set("Content-Type", contentType)
+	rec := httptest.NewRecorder()
+	require.NoError(t, h.UploadChatAttachment(e.NewContext(req, rec)))
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var response struct {
+		SessionID   string `json:"session_id"`
+		Attachments []struct {
+			Filename string `json:"filename"`
+			Size     int64  `json:"size"`
+		} `json:"attachments"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &response))
+	require.NotEmpty(t, response.SessionID)
+	require.Len(t, response.Attachments, 2)
+	for _, attachment := range response.Attachments {
+		assert.Equal(t, int64(6<<20), attachment.Size)
+		assert.FileExists(t, filepath.Join(uploadsDir, "chat", "pending", response.SessionID, attachment.Filename))
+	}
+}
+
 func TestUploadChatAttachment_OversizedMultipartRequestIsBoundedBeforePendingSession(t *testing.T) {
 	useTempUploadsDir(t)
 	tmpMultipartDir := t.TempDir()
