@@ -619,6 +619,110 @@ func TestResetDefaultMarketplacesAddsMissingRemovesTempAndAggregatesErrors(t *te
 	}
 }
 
+func TestPluginRemoteCloneUsesCandidatesRefsAndSourcePaths(t *testing.T) {
+	tmp := t.TempDir()
+	marketplaceDir := filepath.Join(tmp, "market")
+	remotePlugin := filepath.Join(tmp, "remote", "plugins", "worker")
+	if err := os.MkdirAll(remotePlugin, 0o755); err != nil {
+		t.Fatalf("mkdir remote plugin: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(remotePlugin, "plugin.txt"), []byte("payload"), 0o644); err != nil {
+		t.Fatalf("write plugin payload: %v", err)
+	}
+
+	origRun := runCommandCombinedFn
+	defer func() { runCommandCombinedFn = origRun }()
+	var calls [][]string
+	runCommandCombinedFn = func(ctx context.Context, name string, args ...string) error {
+		call := append([]string{name}, args...)
+		calls = append(calls, call)
+		if name != "git" {
+			return errors.New("unexpected command")
+		}
+		if len(args) >= 5 && args[0] == "clone" {
+			target := args[len(args)-1]
+			if err := os.RemoveAll(target); err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Join(target, "plugins"), 0o755); err != nil {
+				return err
+			}
+			return copyDir(filepath.Join(tmp, "remote"), target)
+		}
+		if len(args) >= 4 && args[0] == "-C" && args[2] == "checkout" {
+			return nil
+		}
+		return errors.New("unexpected git args")
+	}
+
+	target := filepath.Join(tmp, "installed")
+	if err := materializePluginSource(context.Background(), marketplaceDir, map[string]interface{}{
+		"repo": "openvibely/worker-plugin",
+		"path": "plugins/worker",
+		"ref":  "abcdef1234567",
+	}, target); err != nil {
+		t.Fatalf("materialize remote plugin: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(target, "plugin.txt")); err != nil || string(data) != "payload" {
+		t.Fatalf("installed plugin payload=%q err=%v", data, err)
+	}
+	joined := strings.Join(func() []string {
+		out := make([]string, 0, len(calls))
+		for _, call := range calls {
+			out = append(out, strings.Join(call, " "))
+		}
+		return out
+	}(), "\n")
+	if !strings.Contains(joined, "clone --depth 1 https://github.com/openvibely/worker-plugin.git") {
+		t.Fatalf("clone candidates did not include normalized github URL: %s", joined)
+	}
+	if !strings.Contains(joined, "checkout abcdef1234567") {
+		t.Fatalf("commit ref checkout missing: %s", joined)
+	}
+}
+
+func TestLocalMarketplaceDirectoryDiscoveryAndLookup(t *testing.T) {
+	tmp := t.TempDir()
+	pluginRoot := filepath.Join(tmp, "plugins")
+	valid := filepath.Join(pluginRoot, "marketplaces", "valid", ".claude-plugin")
+	alias := filepath.Join(pluginRoot, "marketplaces", "alias", ".claude-plugin")
+	invalid := filepath.Join(pluginRoot, "marketplaces", "invalid")
+	for _, dir := range []string{valid, alias, invalid} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir marketplace dir: %v", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(valid, "marketplace.json"), []byte(`{"name":"valid","plugins":[{"name":"worker","source":"plugins/worker"}]}`), 0o644); err != nil {
+		t.Fatalf("write valid manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(alias, "marketplace.json"), []byte(`{"name":"Display Name","plugins":[]}`), 0o644); err != nil {
+		t.Fatalf("write alias manifest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(invalid, "marketplace.json"), []byte(`not-json`), 0o644); err != nil {
+		t.Fatalf("write invalid manifest: %v", err)
+	}
+
+	origUserPluginBase := userPluginBaseFn
+	defer func() { userPluginBaseFn = origUserPluginBase }()
+	userPluginBaseFn = func() string { return pluginRoot }
+
+	dirs := listLocalMarketplaceDirs()
+	if len(dirs) != 2 || !strings.Contains(strings.Join(dirs, "\n"), filepath.Join("marketplaces", "valid")) || !strings.Contains(strings.Join(dirs, "\n"), filepath.Join("marketplaces", "alias")) {
+		t.Fatalf("expected only valid marketplace dirs, got %#v", dirs)
+	}
+	aliasDir, manifest, err := findMarketplaceDirByName("display name")
+	if err != nil || filepath.Base(aliasDir) != "alias" || manifest.Name != "Display Name" {
+		t.Fatalf("find alias marketplace dir=%q manifest=%#v err=%v", aliasDir, manifest, err)
+	}
+	validDir, manifest, err := findMarketplaceDirByName("valid")
+	if err != nil || filepath.Base(validDir) != "valid" || len(manifest.Plugins) != 1 {
+		t.Fatalf("find direct marketplace dir=%q manifest=%#v err=%v", validDir, manifest, err)
+	}
+	if _, _, err := findMarketplaceDirByName("missing"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected missing marketplace error, got %v", err)
+	}
+}
+
 func TestPluginMCPRuntimeWrappersUseResolvedServers(t *testing.T) {
 	tmp := t.TempDir()
 	pluginRoot := filepath.Join(tmp, "plugins")

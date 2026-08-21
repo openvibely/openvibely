@@ -210,6 +210,150 @@ func TestParseGitStatusFileStats(t *testing.T) {
 	}
 }
 
+func TestWorktreeGitStateHelpersDetectMergedBranchesAndConflicts(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	ws := &WorktreeService{}
+
+	if ws.isBranchTipMergedIntoTarget(repoDir, "", "main") {
+		t.Fatal("blank branch should not be considered merged")
+	}
+	if ws.isBranchTipMergedIntoTarget(repoDir, "missing", "main") {
+		t.Fatal("missing branch should not be considered merged")
+	}
+
+	runGitTest(t, repoDir, "checkout", "-b", "feature")
+	writeAndCommitTestFile(t, repoDir, "feature.txt", "feature", "add feature")
+	if ws.isBranchTipMergedIntoTarget(repoDir, "feature", "main") {
+		t.Fatal("unmerged feature branch reported merged")
+	}
+	if !ws.branchHasCommitsBeyondTarget(repoDir, "feature", "main") {
+		t.Fatal("feature branch should have commits beyond main")
+	}
+
+	runGitTest(t, repoDir, "checkout", "main")
+	runGitTest(t, repoDir, "merge", "--ff-only", "feature")
+	if !ws.isBranchTipMergedIntoTarget(repoDir, "feature", "main") {
+		t.Fatal("merged feature branch was not detected")
+	}
+	if ws.branchHasCommitsBeyondTarget(repoDir, "feature", "main") {
+		t.Fatal("merged feature branch should not have commits beyond main")
+	}
+	if IsBranchBehindTarget(repoDir, "feature", "main") {
+		t.Fatal("fast-forwarded branch should not be behind main")
+	}
+
+	runGitTest(t, repoDir, "checkout", "-b", "diverged")
+	writeAndCommitTestFile(t, repoDir, "diverged.txt", "branch", "branch-only commit")
+	runGitTest(t, repoDir, "checkout", "main")
+	writeAndCommitTestFile(t, repoDir, "main.txt", "target", "target-only commit")
+	if !IsBranchBehindTarget(repoDir, "diverged", "main") {
+		t.Fatal("diverged branch should be behind target")
+	}
+	if !IsBranchDivergedFromTarget(repoDir, "diverged", "main") {
+		t.Fatal("diverged branch was not detected")
+	}
+	stats := GetWorktreeFileStats(repoDir, "diverged", "main")
+	if len(stats) != 1 || stats[0].Path != "diverged.txt" || stats[0].Status != "added" {
+		t.Fatalf("branch file stats = %#v", stats)
+	}
+
+	mergeHead := filepath.Join(repoDir, ".git", "MERGE_HEAD")
+	if err := os.WriteFile(mergeHead, []byte("pending"), 0o644); err != nil {
+		t.Fatalf("write MERGE_HEAD: %v", err)
+	}
+	if !worktreeHasActiveMerge(repoDir) {
+		t.Fatal("active merge was not detected")
+	}
+	if err := os.Remove(mergeHead); err != nil {
+		t.Fatalf("remove MERGE_HEAD: %v", err)
+	}
+	if worktreeHasActiveMerge(repoDir) {
+		t.Fatal("active merge remained after MERGE_HEAD removal")
+	}
+
+	writeAndCommitTestFile(t, repoDir, "conflicted.txt", "base\n", "add conflict base")
+	runGitTest(t, repoDir, "checkout", "-b", "left")
+	writeAndCommitTestFile(t, repoDir, "conflicted.txt", "left\n", "left conflict")
+	runGitTest(t, repoDir, "checkout", "main")
+	runGitTest(t, repoDir, "checkout", "-b", "right")
+	writeAndCommitTestFile(t, repoDir, "conflicted.txt", "right\n", "right conflict")
+	runGitTest(t, repoDir, "checkout", "left")
+	mergeCmd := exec.Command("git", "merge", "right")
+	mergeCmd.Dir = repoDir
+	if err := mergeCmd.Run(); err == nil {
+		t.Fatal("expected merge conflict")
+	}
+	if !worktreeHasConflictFiles(repoDir) {
+		t.Fatal("unmerged conflict file was not detected")
+	}
+	if err := AbortMerge(repoDir); err != nil {
+		t.Fatalf("abort merge: %v", err)
+	}
+	if worktreeHasConflictFiles(repoDir) {
+		t.Fatal("clean file reported as conflicted")
+	}
+}
+
+func TestClearStaleConflictStatusIfCleanUpdatesTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := repository.NewTaskRepo(db, nil)
+	settingsRepo := repository.NewSettingsRepo(db)
+	ws := NewWorktreeService(taskRepo, repository.NewProjectRepo(db), settingsRepo)
+	repoDir := createTestGitRepo(t)
+
+	if err := settingsRepo.Set(ctx, "worktree_auto_merge", "true"); err != nil {
+		t.Fatalf("set auto merge: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, "worktree_cleanup", "manual"); err != nil {
+		t.Fatalf("set cleanup policy: %v", err)
+	}
+	if err := settingsRepo.Set(ctx, "worktree_merge_target", "release"); err != nil {
+		t.Fatalf("set merge target: %v", err)
+	}
+	if !ws.GetGlobalAutoMerge(ctx) || ws.GetCleanupPolicy(ctx) != "manual" || ws.getGlobalMergeTarget(ctx) != "release" {
+		t.Fatal("persisted worktree merge settings were not read")
+	}
+
+	task := &models.Task{
+		ProjectID:         "default",
+		Title:             "Stale Conflict",
+		Category:          models.CategoryActive,
+		Status:            models.StatusCompleted,
+		WorktreePath:      repoDir,
+		WorktreeBranch:    "feature",
+		MergeTargetBranch: "main",
+		MergeStatus:       models.MergeStatusConflict,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	ws.clearStaleConflictStatusIfClean(ctx, task)
+	if task.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("task merge status = %q, want pending", task.MergeStatus)
+	}
+	persisted, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if persisted.MergeStatus != models.MergeStatusPending {
+		t.Fatalf("persisted merge status = %q, want pending", persisted.MergeStatus)
+	}
+
+	if err := taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
+		t.Fatalf("reset conflict status: %v", err)
+	}
+	task.MergeStatus = models.MergeStatusConflict
+	if err := os.WriteFile(filepath.Join(repoDir, "dirty.txt"), []byte("dirty"), 0o644); err != nil {
+		t.Fatalf("write dirty file: %v", err)
+	}
+	ws.clearStaleConflictStatusIfClean(ctx, task)
+	if task.MergeStatus != models.MergeStatusConflict {
+		t.Fatalf("dirty task merge status = %q, want conflict", task.MergeStatus)
+	}
+}
+
 func TestSetupWorktree(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
