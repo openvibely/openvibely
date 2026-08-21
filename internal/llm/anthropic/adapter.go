@@ -162,52 +162,28 @@ func agentSkipDefaultTools(agentDef *models.Agent) bool {
 	return agentDef != nil && agentDef.ToolConfig.SkipDefaultTools
 }
 
-func runtimeSkipDefaultTools(rt *llmcontracts.RuntimeTools) bool {
-	return rt != nil && rt.SkipDefaultTools
-}
-
 func agentAllowsBuiltInTool(agentDef *models.Agent, toolName string) bool {
-	if agentSkipDefaultTools(agentDef) {
-		return false
+	var configuredTools []string
+	if agentDef != nil {
+		configuredTools = agentDef.Tools
 	}
-	if agentDef == nil || len(agentDef.Tools) == 0 {
-		return true
-	}
-	mapped := mapBuiltInToolName(toolName)
-	if mapped == "" {
-		return true
-	}
-	for _, t := range agentDef.Tools {
-		if strings.EqualFold(strings.TrimSpace(t), mapped) {
-			return true
-		}
-	}
-	return false
+	return llmcontracts.AllowsBuiltInTool(toolName, llmcontracts.BuiltInToolPolicyOptions{
+		SkipDefaultTools: agentSkipDefaultTools(agentDef),
+		ConfiguredTools:  configuredTools,
+		MapToolName:      mapBuiltInToolName,
+	})
 }
 
 func planModeAllowsReadOnlyTool(name string) bool {
+	if llmcontracts.DefaultPlanModeAllowsReadOnlyTool(name) {
+		return true
+	}
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "read_file", "list_files", "grep_search",
-		"web_search", "web_search_20250305", "web_search_20260209",
-		"web_fetch", "web_fetch_20250910", "web_fetch_20260209", "web_fetch_20260309": // provider-native search is read-only
+	case "web_search_20250305", "web_search_20260209",
+		"web_fetch", "web_fetch_20250910", "web_fetch_20260209", "web_fetch_20260309":
 		return true
 	default:
 		return false
-	}
-}
-
-func wrapToolFilterForPlanMode(base func(string) bool, isTaskFollowup bool, chatMode models.ChatMode) func(string) bool {
-	if isTaskFollowup || chatMode != models.ChatModePlan {
-		return base
-	}
-	return func(name string) bool {
-		if !planModeAllowsReadOnlyTool(name) {
-			return false
-		}
-		if base == nil {
-			return true
-		}
-		return base(name)
 	}
 }
 
@@ -245,33 +221,6 @@ func anthropicRuntimeToolCanonicalName(name string) string {
 	return name
 }
 
-func runtimeToolAccessMap(rt *llmcontracts.RuntimeTools) map[string]llmcontracts.RuntimeToolAccess {
-	if rt == nil || len(rt.Definitions) == 0 {
-		return nil
-	}
-	out := make(map[string]llmcontracts.RuntimeToolAccess, len(rt.Definitions))
-	for _, def := range rt.Definitions {
-		n := strings.ToLower(strings.TrimSpace(def.Name))
-		if n == "" {
-			continue
-		}
-		access := def.Access
-		if access == "" {
-			access = llmcontracts.RuntimeToolAccessWrite
-		}
-		out[n] = access
-	}
-	return out
-}
-
-func runtimeToolAccess(runtimeTools map[string]llmcontracts.RuntimeToolAccess, name string) (llmcontracts.RuntimeToolAccess, bool) {
-	if len(runtimeTools) == 0 {
-		return "", false
-	}
-	access, ok := runtimeTools[strings.ToLower(strings.TrimSpace(anthropicRuntimeToolCanonicalName(name)))]
-	return access, ok
-}
-
 func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessage) (string, bool, error), rt *llmcontracts.RuntimeTools) func(context.Context, string, json.RawMessage) (string, bool, error) {
 	if rt == nil || rt.Executor == nil {
 		return base
@@ -288,51 +237,17 @@ func composeRuntimeToolExecutor(base func(context.Context, string, json.RawMessa
 	}
 }
 
-func composeRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTools, isTaskFollowup bool, chatMode models.ChatMode) func(string) bool {
-	runtimeTools := runtimeToolAccessMap(rt)
-	return func(name string) bool {
-		access, isRuntimeTool := runtimeToolAccess(runtimeTools, name)
-		if !isTaskFollowup {
-			switch chatMode {
-			case models.ChatModePlan:
-				// Plan mode: read-only exploration tools only; no write/action tools.
-				if isRuntimeTool && access != llmcontracts.RuntimeToolAccessRead {
-					return false
-				}
-				if !isRuntimeTool && !planModeAllowsReadOnlyTool(name) {
-					return false
-				}
-			default:
-				// Orchestrate mode: action/runtime tools only (no filesystem/mcp tools).
-				if !isRuntimeTool {
-					return false
-				}
-			}
-		}
-
-		if isRuntimeTool {
-			if rt != nil && rt.Filter != nil {
-				allow, handled := rt.Filter(anthropicRuntimeToolCanonicalName(name))
-				if handled {
-					return allow
-				}
-			}
-			return true
-		}
-
-		if rt != nil && rt.SkipDefaultTools {
-			return false
-		}
-
-		if base != nil {
-			return base(name)
-		}
-		return true
+func runtimeToolPolicyOptions(isTaskFollowup bool, chatMode models.ChatMode) llmcontracts.RuntimeToolPolicyOptions {
+	return llmcontracts.RuntimeToolPolicyOptions{
+		IsTaskFollowup:     isTaskFollowup,
+		ChatMode:           chatMode,
+		CanonicalName:      anthropicRuntimeToolCanonicalName,
+		AllowsReadOnlyTool: planModeAllowsReadOnlyTool,
 	}
 }
 
 func composeTaskRuntimeToolFilter(base func(string) bool, rt *llmcontracts.RuntimeTools) func(string) bool {
-	return composeRuntimeToolFilter(base, rt, true, models.ChatModeOrchestrate)
+	return llmcontracts.ComposeRuntimeToolFilter(base, rt, runtimeToolPolicyOptions(true, models.ChatModeOrchestrate))
 }
 
 func appendToolModeSystemPrompt(base string, rt *llmcontracts.RuntimeTools, chatMode models.ChatMode) string {
@@ -467,11 +382,11 @@ func (a *Adapter) Call(ctx context.Context, req llmcontracts.AgentRequest, workD
 		rt := llmcontracts.RuntimeToolsFromContext(ctx)
 		extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
 		toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
-		toolFilter = composeRuntimeToolFilter(toolFilter, rt, false, models.ChatModeOrchestrate)
+		toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(false, models.ChatModeOrchestrate))
 		if rt != nil && len(rt.Definitions) > 0 {
 			req.DisableTools = false
 		}
-		skipDefaultTools := agentSkipDefaultTools(req.AgentDefinition) || runtimeSkipDefaultTools(rt)
+		skipDefaultTools := agentSkipDefaultTools(req.AgentDefinition) || llmcontracts.RuntimeSkipDefaultTools(rt)
 		output, usage, err := a.callDirect(ctx, req.Message, req.Attachments, agent, workDir, req.ProjectInstructions, extraTools, toolExecutor, toolFilter, req.DisableTools, skipDefaultTools, req.RawDirectPrompt, req.LifecycleHookCall)
 		return llmcontracts.AgentResult{
 			Output:     output,
@@ -576,9 +491,9 @@ func (a *Adapter) callChatStreaming(ctx context.Context, message string, attachm
 
 	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
-	toolFilter = composeRuntimeToolFilter(toolFilter, rt, isTaskFollowup, chatMode)
+	toolFilter = llmcontracts.ComposeRuntimeToolFilter(toolFilter, rt, runtimeToolPolicyOptions(isTaskFollowup, chatMode))
 	disableTools, skipDefaultTools := resolveChatToolPolicy(isTaskFollowup, chatMode, rt)
-	skipDefaultTools = skipDefaultTools || agentSkipDefaults || runtimeSkipDefaultTools(rt)
+	skipDefaultTools = skipDefaultTools || agentSkipDefaults || llmcontracts.RuntimeSkipDefaultTools(rt)
 	chatInThinking := false
 	opts := &anthropicclient.AgenticOptions{
 		Model:                  agent.Model,
@@ -671,7 +586,7 @@ func (a *Adapter) callStreaming(ctx context.Context, prompt string, attachments 
 	extraTools = append(extraTools, runtimeAnthropicTools(rt)...)
 	toolExecutor = composeRuntimeToolExecutor(toolExecutor, rt)
 	toolFilter = composeTaskRuntimeToolFilter(toolFilter, rt)
-	skipDefaultTools := agentSkipDefaults || runtimeSkipDefaultTools(rt)
+	skipDefaultTools := agentSkipDefaults || llmcontracts.RuntimeSkipDefaultTools(rt)
 
 	inThinking := false
 	opts := &anthropicclient.AgenticOptions{

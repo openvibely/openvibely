@@ -11,57 +11,6 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-func TestComposeRuntimeToolFilter_AllowsFilteredReadOnlyRuntimeToolInPlanMode(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
-			{Name: "write_file", Description: "write selected file", Parameters: json.RawMessage(`{"type":"object"}`)},
-		},
-		Filter: func(name string) (bool, bool) {
-			switch name {
-			case "memory_view", "write_file":
-				return true, true
-			default:
-				return false, false
-			}
-		},
-	}
-	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModePlan)
-	if !filter("memory_view") {
-		t.Fatal("expected filtered selected-memory runtime tools to be allowed in plan mode")
-	}
-	if filter("write_file") {
-		t.Fatal("did not expect unrelated runtime action tool in plan mode")
-	}
-}
-
-func TestComposeRuntimeToolFilter_OrchestrateAllowsMemoryViewWithoutFilesystemRead(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
-			{Name: "create_task", Description: "create task", Parameters: json.RawMessage(`{"type":"object"}`)},
-		},
-		Filter: func(name string) (bool, bool) {
-			switch name {
-			case "memory_view", "create_task":
-				return true, true
-			default:
-				return false, false
-			}
-		},
-	}
-	filter := composeRuntimeToolFilter(func(name string) bool { return true }, rt, false, models.ChatModeOrchestrate)
-	if !filter("memory_view") {
-		t.Fatal("expected selected-memory runtime tools to be allowed in orchestrate mode")
-	}
-	if !filter("create_task") {
-		t.Fatal("expected action runtime tool to be allowed in orchestrate mode")
-	}
-	if filter("read_file") || filter("Read") || filter("list_files") {
-		t.Fatal("did not expect filesystem/default read tools to be allowed in orchestrate mode")
-	}
-}
-
 func TestRuntimeAnthropicToolsAliasesSkillsListWireName(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
 		Definitions: []llmcontracts.RuntimeToolDefinition{
@@ -112,7 +61,7 @@ func TestComposeRuntimeToolFilterCanonicalizesAnthropicSkillListAlias(t *testing
 		},
 	}
 
-	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModeOrchestrate)
+	filter := llmcontracts.ComposeRuntimeToolFilter(nil, rt, runtimeToolPolicyOptions(false, models.ChatModeOrchestrate))
 	if !filter("skill_list") {
 		t.Fatalf("expected aliased skills_list tool to be allowed through canonical runtime filter")
 	}
@@ -133,9 +82,6 @@ func TestAnthropicRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 			t.Fatalf("mapBuiltInToolName(%q)=%q want %q", name, got, want)
 		}
 	}
-	if runtimeSkipDefaultTools(nil) || !runtimeSkipDefaultTools(&llmcontracts.RuntimeTools{SkipDefaultTools: true}) {
-		t.Fatal("runtime skip-default helpers changed")
-	}
 	if !agentAllowsBuiltInTool(nil, "bash") || agentAllowsBuiltInTool(&models.Agent{ToolConfig: models.AgentToolConfig{SkipDefaultTools: true}}, "bash") {
 		t.Fatal("agent built-in skip/default behavior changed")
 	}
@@ -145,10 +91,6 @@ func TestAnthropicRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 	if !planModeAllowsReadOnlyTool("web_fetch_20250910") || planModeAllowsReadOnlyTool("write_file") {
 		t.Fatal("plan-mode Anthropic tool classification changed")
 	}
-	planFilter := wrapToolFilterForPlanMode(func(name string) bool { return name != "web_fetch" }, false, models.ChatModePlan)
-	if !planFilter("read_file") || planFilter("write_file") || planFilter("web_fetch") {
-		t.Fatal("wrapped plan filter returned unexpected result")
-	}
 
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: " skills_list ", Description: " list skills ", Access: llmcontracts.RuntimeToolAccessRead, Parameters: json.RawMessage(`{"type":"object"}`)}, {Name: "write_task"}, {Name: " "}}}
 	tools := runtimeAnthropicTools(rt)
@@ -157,16 +99,6 @@ func TestAnthropicRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 	}
 	if runtimeAnthropicTools(nil) != nil {
 		t.Fatal("nil runtime tools should not produce Anthropic tools")
-	}
-	accessMap := runtimeToolAccessMap(rt)
-	if access, ok := runtimeToolAccess(accessMap, "skill_list"); !ok || access != llmcontracts.RuntimeToolAccessRead {
-		t.Fatalf("skill_list access=%q ok=%v", access, ok)
-	}
-	if access, ok := runtimeToolAccess(accessMap, "write_task"); !ok || access != llmcontracts.RuntimeToolAccessWrite {
-		t.Fatalf("write_task access=%q ok=%v", access, ok)
-	}
-	if _, ok := runtimeToolAccess(nil, "write_task"); ok {
-		t.Fatal("nil runtime access map should not resolve")
 	}
 
 	baseExec := func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
@@ -194,10 +126,6 @@ func TestAnthropicRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 		t.Fatalf("missing executor isErr=%v err=%v", isErr, err)
 	}
 
-	runtimeFilter := composeRuntimeToolFilter(func(name string) bool { return name == "read_file" }, &llmcontracts.RuntimeTools{Definitions: rt.Definitions, Filter: func(name string) (bool, bool) { return name != "write_task", true }}, false, models.ChatModePlan)
-	if !runtimeFilter("skill_list") || runtimeFilter("write_task") || !runtimeFilter("read_file") || runtimeFilter("bash") {
-		t.Fatal("runtime filter returned unexpected plan-mode result")
-	}
 }
 
 func TestClaudeCodeMaxOutputTokens(t *testing.T) {
