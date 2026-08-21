@@ -627,6 +627,7 @@ func TestViewSystemUpdateRuntimeTool_RegisteredAndReadOnly(t *testing.T) {
 type testPulseToolResponse struct {
 	OK             bool                 `json:"ok"`
 	ProjectID      string               `json:"project_id"`
+	GeneratedAt    time.Time            `json:"generated_at"`
 	LookaheadDays  int                  `json:"lookahead_days"`
 	RunningTasks   []testPulseTaskEntry `json:"running_tasks"`
 	PendingTasks   []testPulseTaskEntry `json:"pending_tasks"`
@@ -740,7 +741,12 @@ func TestViewPulseRuntimeToolReturnsUpcomingAgenda(t *testing.T) {
 	require.Equal(t, 2, got.TaskSummary.Category.Active)
 	require.Equal(t, 2, got.TaskSummary.Category.Scheduled)
 	require.Equal(t, 0, got.TaskSummary.Scheduled.Overdue)
-	require.Equal(t, 1, got.TaskSummary.Scheduled.DueToday)
+	endOfGeneratedDay := time.Date(got.GeneratedAt.Year(), got.GeneratedAt.Month(), got.GeneratedAt.Day(), 23, 59, 59, 0, got.GeneratedAt.Location())
+	expectedDueToday := 0
+	if !scheduled.RunAt.After(endOfGeneratedDay) {
+		expectedDueToday = 1
+	}
+	require.Equal(t, expectedDueToday, got.TaskSummary.Scheduled.DueToday)
 	require.Equal(t, 1, got.TaskSummary.Scheduled.DueThisWeek)
 }
 
