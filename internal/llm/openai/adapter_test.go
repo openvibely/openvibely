@@ -755,3 +755,139 @@ func TestCallDirectRawPromptOmitsInteractiveAgentFraming(t *testing.T) {
 		t.Fatalf("raw direct request lost caller prompt: %s", body)
 	}
 }
+
+func TestCallStreamingUsesAgenticResponsesCallbacksAndUsage(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/responses" {
+			t.Fatalf("path=%q want /v1/responses", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			`data: {"type":"response.reasoning_summary_text.delta","delta":"thinking"}` + "\n\n" +
+				`data: {"type":"response.output_text.delta","delta":"Task done."}` + "\n\n" +
+				`data: {"type":"response.completed","response":{"id":"resp_stream","status":"completed","model":"gpt-test","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"Task done."}]}],"usage":{"input_tokens":21,"output_tokens":9,"input_tokens_details":{"cached_tokens":4},"output_tokens_details":{"reasoning_tokens":3}}}}` + "\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = oldBaseURL }()
+
+	adapter := New(nil, nil, nil)
+	out, textOnly, usage, err := adapter.CallStreaming(context.Background(), "Finish this", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key", ReasoningEffort: "medium",
+	}, "exec-agentic-stream", "", "project instructions", nil)
+	if err != nil {
+		t.Fatalf("CallStreaming: %v", err)
+	}
+	if !strings.Contains(out, "Task done.") || textOnly != "Task done." {
+		t.Fatalf("unexpected streaming output=%q textOnly=%q", out, textOnly)
+	}
+	if usage.InputTokens != 21 || usage.OutputTokens != 9 || usage.CachedInputTokens != 4 || usage.ReasoningTokens != 3 {
+		t.Fatalf("unexpected usage: %+v", usage)
+	}
+	if gotBody["model"] != "gpt-test" || gotBody["instructions"] == nil || gotBody["tools"] == nil {
+		t.Fatalf("request missing expected agentic fields: %#v", gotBody)
+	}
+	encodedInput, _ := json.Marshal(gotBody["input"])
+	if !strings.Contains(string(encodedInput), "Finish this") || !strings.Contains(string(encodedInput), "STATUS: SUCCESS") {
+		t.Fatalf("input missing task/status prompt: %s", encodedInput)
+	}
+}
+
+func TestCallChatStreamingUsesHistoryRuntimeAndDisableToolsPolicy(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			`data: {"type":"response.reasoning_summary_text.delta","delta":"reviewing"}` + "\n\n" +
+				`data: {"type":"response.output_text.delta","delta":"Chat answer"}` + "\n\n" +
+				`data: {"type":"response.completed","response":{"id":"resp_chat","status":"completed","model":"gpt-test","output":[{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"output_text","text":"Chat answer"}]}],"usage":{"input_tokens":13,"output_tokens":7}}}` + "\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	oldBaseURL := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = oldBaseURL }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "list", Access: llmcontracts.RuntimeToolAccessRead}}})
+	adapter := New(nil, nil, nil)
+	out, usage, err := adapter.CallChatStreaming(ctx, "What changed?", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, "exec-chat-stream", "transport-scope", []models.Execution{{PromptSent: "previous prompt", Output: "previous output", Status: models.ExecCompleted}}, "project chat context", false, models.ChatModePlan, "", nil)
+	if err != nil {
+		t.Fatalf("CallChatStreaming: %v", err)
+	}
+	if !strings.Contains(out, "Chat answer") || usage.InputTokens != 13 || usage.OutputTokens != 7 {
+		t.Fatalf("unexpected chat output=%q usage=%+v", out, usage)
+	}
+	if gotBody["model"] != "gpt-test" || gotBody["instructions"] == nil || gotBody["tools"] == nil {
+		t.Fatalf("chat request missing model/instructions/tools: %#v", gotBody)
+	}
+	if gotBody["tool_choice"] != nil {
+		t.Fatalf("plan-mode runtime tools should not disable tools: %#v", gotBody)
+	}
+	encoded, _ := json.Marshal(gotBody["input"])
+	if !strings.Contains(string(encoded), "What changed?") || !strings.Contains(string(encoded), "previous prompt") {
+		t.Fatalf("chat input missing message/history: %s", encoded)
+	}
+}
+
+func TestCallCompletionsChatStreamingUsesHistoryRuntimeAndUsage(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %s, want /v1/chat/completions", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request: %v", err)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"choices\":[{\"delta\":{\"content\":\"chat chunk\"}}]}\n\n" +
+				"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":13,\"completion_tokens\":6,\"prompt_tokens_details\":{\"cached_tokens\":4},\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer srv.Close()
+
+	original := openaiclient.OpenAIAPIBaseURL
+	openaiclient.OpenAIAPIBaseURL = srv.URL + "/v1/"
+	defer func() { openaiclient.OpenAIAPIBaseURL = original }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "List tasks", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+	adapter := New(nil, nil, nil)
+	output, usage, err := adapter.CallCompletionsChatStreaming(ctx, "What changed?", nil, models.LLMConfig{
+		Provider: models.ProviderOpenAI, AuthMethod: models.AuthMethodAPIKey, Model: "gpt-test", APIKey: "test-key",
+	}, "exec-completions-chat", []models.Execution{{PromptSent: "Earlier prompt", Output: "Earlier answer", Status: models.ExecCompleted}}, "CHAT_CONTEXT_SENTINEL", true, models.ChatModeOrchestrate, "/repo/worktree", nil)
+	if err != nil {
+		t.Fatalf("CallCompletionsChatStreaming: %v", err)
+	}
+	if !strings.Contains(output, "chat chunk") {
+		t.Fatalf("output = %q", output)
+	}
+	if usage.InputTokens != 13 || usage.OutputTokens != 6 || usage.CachedInputTokens != 4 || usage.ReasoningTokens != 2 {
+		t.Fatalf("usage = %#v", usage)
+	}
+	payload := fmt.Sprint(gotBody)
+	for _, want := range []string{"Earlier prompt", "Earlier answer", "What changed?", "CHAT_CONTEXT_SENTINEL", "list_tasks"} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("request body missing %q: %#v", want, gotBody)
+		}
+	}
+	if !strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
+		t.Fatalf("chat completions prompt missing runtime action guidance: %#v", gotBody)
+	}
+}

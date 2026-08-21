@@ -545,3 +545,136 @@ func TestCallDirectLifecycleHookDropsCodingAgentFraming(t *testing.T) {
 		t.Fatalf("lifecycle hook must not receive provider web tools, got %s", tools)
 	}
 }
+
+func TestCallStreamingUsesAgenticStreamCallbacksAndRuntimeTools(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		if got := r.Header.Get("x-api-key"); got != "test-key" {
+			t.Fatalf("x-api-key = %q, want test-key", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, evt := range []string{
+			`{"type":"message_start","message":{"id":"msg_stream","model":"claude-opus-5","usage":{"input_tokens":11,"cache_creation_input_tokens":2,"cache_read_input_tokens":3}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"consider options"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_1","name":"create_task","input":{"title":"ship it"}}}`,
+			`{"type":"content_block_stop","index":1}`,
+			`{"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"streamed answer"}}`,
+			`{"type":"content_block_stop","index":2}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":5}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "create_task", Description: "Create task", Parameters: json.RawMessage(`{"type":"object"}`)}},
+		Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+			if name != "create_task" || !strings.Contains(string(input), "ship it") {
+				t.Fatalf("runtime tool call = %s %s", name, string(input))
+			}
+			return `{"created":true}`, true, false, nil
+		},
+		SkipDefaultTools: true,
+	})
+
+	adapter := New(nil, nil, nil)
+	output, textOnly, usage, err := adapter.callStreaming(ctx, "Finish task", nil, models.LLMConfig{
+		Name:            "Claude API",
+		Provider:        models.ProviderAnthropic,
+		Model:           "claude-opus-5",
+		ReasoningEffort: "low",
+		AuthMethod:      models.AuthMethodAPIKey,
+		APIKey:          "test-key",
+	}, "exec-stream", "/repo/worktree", "project rules", nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("callStreaming: %v", err)
+	}
+	if !strings.Contains(output, "streamed answer") || !strings.Contains(output, "consider options") {
+		t.Fatalf("stream output missing thinking/text events: %q", output)
+	}
+	if textOnly != "streamed answer" {
+		t.Fatalf("textOnly = %q, want streamed answer", textOnly)
+	}
+	if usage.InputTokens != 11 || usage.OutputTokens != 5 || usage.TotalTokens != 16 {
+		t.Fatalf("usage = %#v", usage)
+	}
+	payload := fmt.Sprint(gotBody)
+	if !strings.Contains(payload, "Finish task") || !strings.Contains(payload, "project rules") || !strings.Contains(payload, "create_task") {
+		t.Fatalf("request body missing prompt/system/runtime tools: %#v", gotBody)
+	}
+	if strings.Contains(payload, "Bash") {
+		t.Fatalf("SkipDefaultTools should omit default tools, got %#v", gotBody["tools"])
+	}
+}
+
+func TestCallChatStreamingUsesRuntimePolicyHistoryAndSystemContext(t *testing.T) {
+	var gotBody map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if err := json.Unmarshal(body, &gotBody); err != nil {
+			t.Fatalf("unmarshal request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, evt := range []string{
+			`{"type":"message_start","message":{"id":"msg_chat","model":"claude-opus-5","usage":{"input_tokens":7}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"chat answer"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}`,
+			`{"type":"message_stop"}`,
+		} {
+			fmt.Fprintf(w, "data: %s\n\n", evt)
+		}
+	}))
+	defer server.Close()
+
+	origHost := anthropicclient.AnthropicAPIHost
+	anthropicclient.AnthropicAPIHost = server.URL
+	defer func() { anthropicclient.AnthropicAPIHost = origHost }()
+
+	ctx := llmcontracts.WithRuntimeTools(context.Background(), &llmcontracts.RuntimeTools{
+		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "list_tasks", Description: "List tasks", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+	adapter := New(nil, nil, nil)
+	output, usage, err := adapter.callChatStreaming(ctx, "What next?", nil, models.LLMConfig{
+		Name:            "Claude API",
+		Provider:        models.ProviderAnthropic,
+		Model:           "claude-opus-5",
+		ReasoningEffort: "low",
+		AuthMethod:      models.AuthMethodAPIKey,
+		APIKey:          "test-key",
+	}, "exec-chat", []models.Execution{{PromptSent: "Earlier question", Output: "Earlier answer", Status: models.ExecCompleted}}, "CHAT_SYSTEM_SENTINEL", true, models.ChatModeOrchestrate, "/repo/worktree", nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("callChatStreaming: %v", err)
+	}
+	if !strings.Contains(output, "chat answer") {
+		t.Fatalf("output = %q", output)
+	}
+	if usage.InputTokens != 7 || usage.OutputTokens != 4 {
+		t.Fatalf("usage = %#v", usage)
+	}
+	payload := fmt.Sprint(gotBody)
+	for _, want := range []string{"What next?", "Earlier question", "Earlier answer", "CHAT_SYSTEM_SENTINEL", "list_tasks"} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("request body missing %q: %#v", want, gotBody)
+		}
+	}
+	if !strings.Contains(payload, llmprompt.ChatActionToolModeInstructions) {
+		t.Fatalf("chat runtime tools should enable action guidance: %#v", gotBody["system"])
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -3719,3 +3720,60 @@ func benchmarkCreateGitHubTree(b *testing.B, fileCount int) {
 func BenchmarkCreateGitHubTree10Files(b *testing.B)  { benchmarkCreateGitHubTree(b, 10) }
 func BenchmarkCreateGitHubTree50Files(b *testing.B)  { benchmarkCreateGitHubTree(b, 50) }
 func BenchmarkCreateGitHubTree200Files(b *testing.B) { benchmarkCreateGitHubTree(b, 200) }
+
+func TestGitHubLocalCommitSHAAndErrorHelpers(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, strings.TrimSpace(string(out)))
+		}
+	}
+	runGit("init", "-b", "main")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	runGit("add", "README.md")
+	runGit("commit", "-m", "initial")
+	sha, err := localCommitSHA(ctx, repoDir, "main")
+	if err != nil {
+		t.Fatalf("localCommitSHA main: %v", err)
+	}
+	if len(sha) != 40 {
+		t.Fatalf("sha = %q, want 40 hex chars", sha)
+	}
+	if _, err := localCommitSHA(ctx, repoDir, " "); err == nil || !strings.Contains(err.Error(), "ref is required") {
+		t.Fatalf("blank ref error = %v", err)
+	}
+	if _, err := localCommitSHA(ctx, repoDir, "missing"); err == nil || !strings.Contains(err.Error(), "git rev-parse missing") {
+		t.Fatalf("missing ref error = %v", err)
+	}
+
+	if got := pathEscapeGitRef("refs/heads/feature/test branch"); got != "refs/heads/feature/test%20branch" {
+		t.Fatalf("pathEscapeGitRef = %q", got)
+	}
+	cases := []struct {
+		name string
+		err  error
+		fn   func(error) bool
+		want bool
+	}{
+		{"not found", errors.New("github API request failed (404): nope"), isGitHubNotFoundError, true},
+		{"already exists", errors.New("GitHub API request failed (422): already_exists"), isGitHubAlreadyExistsError, true},
+		{"missing ref message", errors.New("reference does not exist"), isGitHubRefMissingError, true},
+		{"ref exists", errors.New("github API request failed (422): reference already exists"), isGitHubRefAlreadyExistsError, true},
+		{"non fast forward", errors.New("github API request failed (422): update is not a fast forward"), isGitHubNonFastForwardError, true},
+		{"nil", nil, isGitHubNonFastForwardError, false},
+	}
+	for _, tc := range cases {
+		if got := tc.fn(tc.err); got != tc.want {
+			t.Fatalf("%s = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

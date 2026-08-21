@@ -1452,3 +1452,46 @@ func testOAuthJWT(accountID string) string {
 	signature := base64.RawURLEncoding.EncodeToString([]byte("sig"))
 	return header + "." + payload + "." + signature
 }
+
+func TestOpenAIToolMarkersAndTextEmitterHelpers(t *testing.T) {
+	longCommand := strings.Repeat("x", openAIToolDetailMaxLen+20) + "]"
+	inputs := []struct {
+		name string
+		args any
+		want string
+	}{
+		{name: "read_file", args: `{"file_path":"/tmp/project/main.go"}`, want: "main.go"},
+		{name: "grep_search", args: map[string]any{"pattern": "func Test"}, want: "func Test"},
+		{name: "bash", args: map[string]any{"command": longCommand}, want: strings.Repeat("x", openAIToolDetailMaxLen-3) + "..."},
+		{name: "custom", args: `{"path":"/tmp/project/custom.txt"}`, want: "custom.txt"},
+		{name: "custom", args: `{"command":"run tests"}`, want: "run tests"},
+	}
+	for _, tt := range inputs {
+		if got := openAIToolDetailFromArguments(tt.name, tt.args); got != tt.want {
+			t.Fatalf("openAIToolDetailFromArguments(%s) = %q, want %q", tt.name, got, tt.want)
+		}
+	}
+	if got := openAIFormatUsingToolMarker("shell_command", "go test ./..."); got != "\n[Using tool: Bash | go test ./...]\n" {
+		t.Fatalf("using marker = %q", got)
+	}
+	if got := openAIFormatUsingToolMarker("", ""); got != "\n[Using tool: tool]\n" {
+		t.Fatalf("empty marker = %q", got)
+	}
+	if !strings.Contains(openAIFormatToolResultMarker("web_search", "", ""), "[Tool WebSearch done]\n(no output)") {
+		t.Fatalf("empty tool result marker mismatch")
+	}
+	if !openAIIsMarkerChunk("prefix [Using tool: Bash]") || !openAIIsMarkerChunk("[Tool Bash done]") || openAIIsMarkerChunk("plain text") {
+		t.Fatalf("marker chunk detection mismatch")
+	}
+
+	var emitted []string
+	emitter := newOpenAITextStreamEmitter(func(delta string) { emitted = append(emitted, delta) })
+	emitter.Write("")
+	emitter.Write("one")
+	emitter.Flush()
+	emitter.FlushBoundary()
+	emitter.Write("two")
+	if strings.Join(emitted, ",") != "one,two" {
+		t.Fatalf("emitted = %#v", emitted)
+	}
+}
