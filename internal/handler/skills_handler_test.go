@@ -69,6 +69,9 @@ func TestSkillsPageDeleteConfirmationDialog(t *testing.T) {
 	for _, want := range []string{
 		`id="delete_skill_confirm_modal" class="modal"`,
 		`id="delete_skill_confirm_name"`,
+		`data-destructive-confirm-dialog`,
+		`window.openDestructiveConfirmDialog = function(dialogID, nameID, displayName)`,
+		`openDestructiveConfirmDialog('delete_skill_confirm_modal', 'delete_skill_confirm_name', button.dataset.skillName || deleteSkillHandle)`,
 		`onclick="delete_skill_confirm_modal.close()"`,
 		`onclick="confirmDeleteSkill()"`,
 		`class="btn btn-error"`,

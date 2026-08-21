@@ -160,7 +160,7 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 						<button
 							type="button"
 							class="btn btn-error btn-outline mr-auto"
-							onclick="document.getElementById('delete_project_confirm_modal').showModal()"
+							onclick="window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')"
 						>Delete Project</button>
 					}
 					<button type="button" class="btn" onclick="edit_project_modal.close()">Cancel</button>
@@ -173,35 +173,15 @@ templ EditProjectDialog(project *models.Project, agents []models.LLMConfig, loca
 		</form>
 	</dialog>
 	if !project.IsDefault {
-		<dialog id="delete_project_confirm_modal" class="modal">
-			<div class="modal-box">
-				@ModalCloseButton("delete_project_confirm_modal", "Close delete project confirmation")
-				<h3 class="font-bold text-lg text-error pr-10">Delete Project</h3>
-				<p class="py-4">
-					Are you sure you want to delete <strong>{ project.Name }</strong>? This action cannot be undone.
-				</p>
-				<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">
-					<p class="font-medium mb-1">The following data will be permanently deleted:</p>
-					<ul class="list-disc list-inside space-y-1">
-						<li>All tasks and their execution history</li>
-						<li>All scheduled runs</li>
-						<li>Chat history for this project</li>
-						<li>Project-specific settings and configurations</li>
-					</ul>
-				</div>
-				<div class="modal-action">
-					<button type="button" class="btn" onclick="delete_project_confirm_modal.close()">Cancel</button>
-					<button
-						type="button"
-						class="btn btn-error"
-						onclick={ deleteProjectAction(project.ID) }
-					>Delete Permanently</button>
-				</div>
-			</div>
-			<form method="dialog" class="modal-backdrop">
-				<button>close</button>
-			</form>
-		</dialog>
+			@DestructiveConfirmDialog("delete_project_confirm_modal", "Close delete project confirmation", "Delete Project", "Are you sure you want to delete ", "", project.Name, "? This action cannot be undone.", templ.ComponentScript{Call: "delete_project_confirm_modal.close()"}, deleteProjectAction(project.ID)) {
+				<p class="font-medium mb-1">The following data will be permanently deleted:</p>
+				<ul class="list-disc list-inside space-y-1">
+					<li>All tasks and their execution history</li>
+					<li>All scheduled runs</li>
+					<li>Chat history for this project</li>
+					<li>Project-specific settings and configurations</li>
+				</ul>
+			}
 	}
 	<script>
 		(function() {

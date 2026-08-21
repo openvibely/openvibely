@@ -176,19 +176,9 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 				}
 			</div>
 		}
-			<dialog id="delete_skill_confirm_modal" class="modal">
-				<div class="modal-box">
-					@ModalCloseButton("delete_skill_confirm_modal", "Close delete skill confirmation")
-					<h3 class="font-bold text-lg text-error pr-10">Delete Skill</h3>
-					<p class="py-4">Are you sure you want to delete <strong id="delete_skill_confirm_name"></strong>? This action cannot be undone.</p>
-					<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">The skill package and its indexed registration will be removed from the selected scope.</div>
-					<div class="modal-action">
-						<button type="button" class="btn" onclick="delete_skill_confirm_modal.close()">Cancel</button>
-						<button type="button" class="btn btn-error" onclick="confirmDeleteSkill()">Delete Permanently</button>
-					</div>
-				</div>
-				<form method="dialog" class="modal-backdrop"><button>close</button></form>
-			</dialog>
+				@DestructiveConfirmDialog("delete_skill_confirm_modal", "Close delete skill confirmation", "Delete Skill", "Are you sure you want to delete ", "delete_skill_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_skill_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteSkill()"}) {
+					The skill package and its indexed registration will be removed from the selected scope.
+				}
 
 			<dialog id="skill_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">			<div class="modal-box">
 				@ModalCloseButton("skill_modal", "Close skill dialog")
@@ -587,10 +577,7 @@ templ skillsContent(skills []SkillCard, canManage bool) {
 					deleteSkillHandle = button.dataset.skillHandle || '';
 					deleteSkillScope = button.dataset.skillScope || 'project';
 					if (!deleteSkillHandle) return;
-					var nameEl = document.getElementById('delete_skill_confirm_name');
-					if (nameEl) nameEl.textContent = button.dataset.skillName || deleteSkillHandle;
-					var modal = document.getElementById('delete_skill_confirm_modal');
-					if (modal) modal.showModal();
+						window.openDestructiveConfirmDialog('delete_skill_confirm_modal', 'delete_skill_confirm_name', button.dataset.skillName || deleteSkillHandle);
 				}
 
 				function confirmDeleteSkill() {

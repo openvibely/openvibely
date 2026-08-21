@@ -1474,8 +1474,19 @@ func TestDeleteProject(t *testing.T) {
 		if !strings.Contains(body, "Delete Project") {
 			t.Error("edit dialog for non-default project should contain 'Delete Project' button")
 		}
-		if !strings.Contains(body, "Delete Permanently") {
-			t.Error("edit dialog for non-default project should contain confirmation modal")
+		for _, want := range []string{
+			`id="delete_project_confirm_modal" class="modal"`,
+			`data-destructive-confirm-dialog`,
+			`window.openDestructiveConfirmDialog = function(dialogID, nameID, displayName)`,
+			`onclick="window.openDestructiveConfirmDialog('delete_project_confirm_modal', '', '')"`,
+			`onclick="delete_project_confirm_modal.close()"`,
+			`Delete Permanently`,
+			`var editModal = document.getElementById('edit_project_modal');`,
+			`htmx.ajax('DELETE', '/projects/' + projectID, {target: 'body', swap: 'none'});`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("edit dialog for non-default project should contain %q", want)
+			}
 		}
 	})
 

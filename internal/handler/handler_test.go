@@ -1571,10 +1571,14 @@ func TestHandler_ListModels_DeleteConfirmationDialog(t *testing.T) {
 	for _, want := range []string{
 		`id="delete_model_confirm_modal" class="modal"`,
 		`id="delete_model_confirm_name"`,
+		`data-destructive-confirm-dialog`,
+		`openDestructiveConfirmDialog('delete_model_confirm_modal', 'delete_model_confirm_name', _deleteModelName)`,
 		`onclick="delete_model_confirm_modal.close()"`,
 		`onclick="confirmDeleteModel()"`,
 		`class="btn btn-error"`,
 		`modal.showModal()`,
+		`if (_deleteModelIsDefault)`,
+		`reassign_default_modal.showModal();`,
 		`htmx.ajax('DELETE', modelMutationURL('/models/' + _deleteModelId)`,
 	} {
 		if !strings.Contains(body, want) {
@@ -3183,10 +3187,14 @@ func TestHandler_ViewSchedule_DeleteConfirmationDialog(t *testing.T) {
 	for _, want := range []string{
 		`id="delete_schedule_confirm_modal" class="modal"`,
 		`id="delete_schedule_confirm_name"`,
+		`data-destructive-confirm-dialog`,
+		`openDestructiveConfirmDialog('delete_schedule_confirm_modal', 'delete_schedule_confirm_name', button.dataset.scheduleTitle || 'this task')`,
 		`onclick="delete_schedule_confirm_modal.close()"`,
 		`onclick="confirmDeleteSchedule()"`,
 		`class="btn btn-error"`,
 		`function openDeleteScheduleConfirm(button)`,
+		`deleteScheduleTarget = button.dataset.scheduleTarget || '#schedule-content';`,
+		`deleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML show:none';`,
 		`modal.showModal()`,
 		`htmx.ajax('DELETE', '/schedules/' + deleteScheduleID`,
 	} {

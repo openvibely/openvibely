@@ -40,11 +40,16 @@ func TestHandler_GetTask_ScheduleDeleteConfirmationDialog(t *testing.T) {
 	for _, want := range []string{
 		`id="delete_schedule_confirm_modal" class="modal"`,
 		`id="delete_schedule_confirm_name"`,
+		`data-destructive-confirm-dialog`,
+		`openDestructiveConfirmDialog('delete_schedule_confirm_modal', 'delete_schedule_confirm_name', button.dataset.scheduleTitle || 'this task')`,
 		`onclick="delete_schedule_confirm_modal.close()"`,
 		`onclick="confirmDeleteSchedule()"`,
 		`class="btn btn-error"`,
 		`onclick="openDeleteScheduleConfirm(this)"`,
 		`data-schedule-title="Scheduled Delete Dialog Task"`,
+		`deleteScheduleTarget = button.dataset.scheduleTarget || '#task-detail-content';`,
+		`deleteScheduleTargetElement = deleteScheduleTarget.indexOf('closest ') === 0 ? button.closest(deleteScheduleTarget.replace(/^closest\s+/, '')) : null;`,
+		`deleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML';`,
 		`modal.showModal()`,
 		`htmx.ajax('DELETE', '/schedules/' + deleteScheduleID`,
 	} {
