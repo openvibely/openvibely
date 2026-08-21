@@ -272,14 +272,34 @@ func SetUploadsDir(dir string) {
 	}
 }
 
+func (h *Handler) attachmentMutationProjectID(c echo.Context) string {
+	if projectID := strings.TrimSpace(c.QueryParam("project_id")); projectID != "" {
+		return projectID
+	}
+	if h.settingsRepo == nil {
+		return ""
+	}
+	selectedProjectID, err := h.settingsRepo.Get(c.Request().Context(), uiPreferenceSelectedProjectIDKey)
+	if err != nil {
+		applog.Debugf("[handler] failed to load selected project preference for attachment mutation: %v", err)
+		return ""
+	}
+	return strings.TrimSpace(selectedProjectID)
+}
+
 func (h *Handler) UploadAttachment(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] UploadAttachment task=%s", taskID)
 
-	// Verify task exists
+	// Verify task exists and belongs to the active/requested project before parsing or writing files.
 	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
 	if err != nil || task == nil {
 		applog.Infof("[handler] UploadAttachment task not found: %v", err)
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	projectID := h.attachmentMutationProjectID(c)
+	if projectID != "" && task.ProjectID != projectID {
+		applog.Infof("[handler] UploadAttachment task not found in project=%s", projectID)
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
@@ -314,7 +334,7 @@ func (h *Handler) UploadAttachment(c echo.Context) error {
 
 	// Return updated attachments list
 	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-	return render(c, http.StatusOK, components.AttachmentListOnly(attachments))
+	return render(c, http.StatusOK, components.AttachmentListOnly(attachments, task.ProjectID))
 }
 
 type taskAttachmentUploadResult struct {
@@ -396,17 +416,36 @@ func (h *Handler) DeleteAttachment(c echo.Context) error {
 	attachmentID := c.Param("id")
 	applog.Infof("[handler] DeleteAttachment id=%s", attachmentID)
 
-	// Get attachment to find the file path
-	attachment, err := h.attachmentRepo.GetByID(c.Request().Context(), attachmentID)
+	ctx := c.Request().Context()
+	projectID := h.attachmentMutationProjectID(c)
+
+	// Get attachment to find the parent task and file path, scoped to the active/requested project when present.
+	var (
+		attachment *models.Attachment
+		err        error
+	)
+	if projectID != "" {
+		attachment, err = h.attachmentRepo.GetByIDForProject(ctx, attachmentID, projectID)
+	} else {
+		attachment, err = h.attachmentRepo.GetByID(ctx, attachmentID)
+	}
 	if err != nil || attachment == nil {
 		applog.Infof("[handler] DeleteAttachment not found: %v", err)
 		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
 	}
 
-	taskID := attachment.TaskID
+	task, err := h.taskSvc.GetByID(ctx, attachment.TaskID)
+	if err != nil || task == nil {
+		applog.Infof("[handler] DeleteAttachment parent task not found: %v", err)
+		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
+	}
+	if projectID != "" && task.ProjectID != projectID {
+		applog.Infof("[handler] DeleteAttachment attachment not found in project=%s", projectID)
+		return echo.NewHTTPError(http.StatusNotFound, "attachment not found")
+	}
 
-	// Delete from database
-	if err := h.attachmentRepo.Delete(c.Request().Context(), attachmentID); err != nil {
+	// Delete from database with the same project guard used for lookup.
+	if err := h.attachmentRepo.DeleteByIDForProject(ctx, attachmentID, task.ProjectID); err != nil {
 		applog.Infof("[handler] DeleteAttachment error deleting from db: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete attachment")
 	}
@@ -419,6 +458,6 @@ func (h *Handler) DeleteAttachment(c echo.Context) error {
 	applog.Infof("[handler] DeleteAttachment success id=%s", attachmentID)
 
 	// Return updated attachments list
-	attachments, _ := h.attachmentRepo.ListByTask(c.Request().Context(), taskID)
-	return render(c, http.StatusOK, components.AttachmentListOnly(attachments))
+	attachments, _ := h.attachmentRepo.ListByTask(ctx, task.ID)
+	return render(c, http.StatusOK, components.AttachmentListOnly(attachments, task.ProjectID))
 }

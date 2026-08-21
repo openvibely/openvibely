@@ -2,8 +2,26 @@ package components
 
 import (
 	"fmt"
+	"net/url"
+
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TaskAttachmentUploadURL(taskID, projectID string) string {
+	base := fmt.Sprintf("/tasks/%s/attachments", taskID)
+	if projectID == "" {
+		return base
+	}
+	return base + "?project_id=" + url.QueryEscape(projectID)
+}
+
+func TaskAttachmentDeleteURL(attachmentID, projectID string) string {
+	base := fmt.Sprintf("/attachments/%s", attachmentID)
+	if projectID == "" {
+		return base
+	}
+	return base + "?project_id=" + url.QueryEscape(projectID)
+}
 
 templ AttachmentList(attachments []models.Attachment, projectID string, taskID string) {
 	<div>
@@ -16,13 +34,12 @@ templ AttachmentList(attachments []models.Attachment, projectID string, taskID s
 			>
 				+ Add Attachment
 			</button>
-
 			<div id="attachment-upload-form" class="hidden mt-3 card bg-base-200 shadow-sm border border-base-300">
 				<div class="card-body p-4">
 					<form
 						method="post"
 						id="attachment-form"
-						hx-post={ fmt.Sprintf("/tasks/%s/attachments", taskID) }
+						hx-post={ TaskAttachmentUploadURL(taskID, projectID) }
 						hx-target="#attachment-list"
 						hx-swap="outerHTML"
 						hx-encoding="multipart/form-data"
@@ -41,7 +58,6 @@ templ AttachmentList(attachments []models.Attachment, projectID string, taskID s
 								required
 							/>
 						</div>
-
 						<div class="flex gap-2">
 							<button
 								type="button"
@@ -52,7 +68,6 @@ templ AttachmentList(attachments []models.Attachment, projectID string, taskID s
 							</button>
 						</div>
 					</form>
-
 					<script>
 						// Reset form and show button after successful upload
 						document.body.addEventListener('htmx:afterSwap', function(event) {
@@ -71,13 +86,12 @@ templ AttachmentList(attachments []models.Attachment, projectID string, taskID s
 				</div>
 			</div>
 		</div>
-
 		<!-- Attachments List -->
-		@AttachmentListOnly(attachments)
+		@AttachmentListOnly(attachments, projectID)
 	</div>
 }
 
-templ AttachmentListOnly(attachments []models.Attachment) {
+templ AttachmentListOnly(attachments []models.Attachment, projectID string) {
 	<div id="attachment-list" class="space-y-2">
 		if len(attachments) == 0 {
 			<p class="text-sm opacity-50">No attachments</p>
@@ -95,7 +109,7 @@ templ AttachmentListOnly(attachments []models.Attachment) {
 					</div>
 					<button
 						class="btn btn-ghost btn-xs text-error"
-						hx-delete={ fmt.Sprintf("/attachments/%s", att.ID) }
+						hx-delete={ TaskAttachmentDeleteURL(att.ID, projectID) }
 						hx-target="#attachment-list"
 						hx-swap="outerHTML"
 					>
