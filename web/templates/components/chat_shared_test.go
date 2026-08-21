@@ -1594,6 +1594,22 @@ func TestChatAttachmentListOnlyCarriesProjectContext(t *testing.T) {
 	}
 }
 
+func TestTaskAttachmentListCarriesProjectContext(t *testing.T) {
+	attachments := []models.Attachment{{ID: "att-list", FileName: "notes.txt", MediaType: "text/plain", FileSize: 42}}
+
+	var buf bytes.Buffer
+	if err := AttachmentList(attachments, "project-a", "task-a").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render AttachmentList: %v", err)
+	}
+	content := buf.String()
+	if !strings.Contains(content, `hx-post="/tasks/task-a/attachments?project_id=project-a"`) {
+		t.Fatalf("upload URL must carry project context, got: %s", content)
+	}
+	if !strings.Contains(content, `hx-delete="/attachments/att-list?project_id=project-a"`) {
+		t.Fatalf("delete URL must carry project context, got: %s", content)
+	}
+}
+
 func TestChatAutoScrollScript_BindsAttachmentImageSmartScroll(t *testing.T) {
 	var buf bytes.Buffer
 	if err := ChatAutoScrollScript().Render(context.Background(), &buf); err != nil {

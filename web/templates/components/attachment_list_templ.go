@@ -10,8 +10,26 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import (
 	"fmt"
+	"net/url"
+
 	"github.com/openvibely/openvibely/internal/models"
 )
+
+func TaskAttachmentUploadURL(taskID, projectID string) string {
+	base := fmt.Sprintf("/tasks/%s/attachments", taskID)
+	if projectID == "" {
+		return base
+	}
+	return base + "?project_id=" + url.QueryEscape(projectID)
+}
+
+func TaskAttachmentDeleteURL(attachmentID, projectID string) string {
+	base := fmt.Sprintf("/attachments/%s", attachmentID)
+	if projectID == "" {
+		return base
+	}
+	return base + "?project_id=" + url.QueryEscape(projectID)
+}
 
 func AttachmentList(attachments []models.Attachment, projectID string, taskID string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
@@ -39,9 +57,9 @@ func AttachmentList(attachments []models.Attachment, projectID string, taskID st
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var2 string
-		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/attachments", taskID))
+		templ_7745c5c3_Var2, templ_7745c5c3_Err = templ.ResolveAttributeValue(TaskAttachmentUploadURL(taskID, projectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/attachment_list.templ`, Line: 25, Col: 60}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/attachment_list.templ`, Line: 42, Col: 58}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var2)
 		if templ_7745c5c3_Err != nil {
@@ -51,7 +69,7 @@ func AttachmentList(attachments []models.Attachment, projectID string, taskID st
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = AttachmentListOnly(attachments).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = AttachmentListOnly(attachments, projectID).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -63,7 +81,7 @@ func AttachmentList(attachments []models.Attachment, projectID string, taskID st
 	})
 }
 
-func AttachmentListOnly(attachments []models.Attachment) templ.Component {
+func AttachmentListOnly(attachments []models.Attachment, projectID string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -102,7 +120,7 @@ func AttachmentListOnly(attachments []models.Attachment) templ.Component {
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(att.FileName)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/attachment_list.templ`, Line: 92, Col: 52}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/attachment_list.templ`, Line: 106, Col: 52}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -115,7 +133,7 @@ func AttachmentListOnly(attachments []models.Attachment) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(FormatFileSize(att.FileSize))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/attachment_list.templ`, Line: 93, Col: 77}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/attachment_list.templ`, Line: 107, Col: 77}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -126,9 +144,9 @@ func AttachmentListOnly(attachments []models.Attachment) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var6 string
-				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/attachments/%s", att.ID))
+				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(TaskAttachmentDeleteURL(att.ID, projectID))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/attachment_list.templ`, Line: 98, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/attachment_list.templ`, Line: 112, Col: 60}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 				if templ_7745c5c3_Err != nil {
