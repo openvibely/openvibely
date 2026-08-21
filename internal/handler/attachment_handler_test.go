@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -47,10 +49,8 @@ func TestUploadAttachment_Success(t *testing.T) {
 	p := tc.CreateProject().Build()
 	task := tc.CreateTask(p.ID).Build()
 
-	tmpDir := t.TempDir()
-	origDir := uploadsDir
-	SetUploadsDir(tmpDir)
-	t.Cleanup(func() { SetUploadsDir(origDir) })
+	uploadsRoot := withTaskAttachmentUploadsDir(t)
+	content := []byte("hello world")
 
 	body := &bytes.Buffer{}
 	w := multipart.NewWriter(body)
@@ -58,16 +58,104 @@ func TestUploadAttachment_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
 	}
-	fw.Write([]byte("hello world"))
+	if _, err := fw.Write(content); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
 	w.Close()
 
-	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/attachments", body)
+	req := httptest.NewRequest(http.MethodPost, "/tasks/"+task.ID+"/attachments?project_id="+url.QueryEscape(p.ID), body)
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	rec := httptest.NewRecorder()
 	tc.echo.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `id="attachment-list"`) || !strings.Contains(rec.Body.String(), "hello.txt") {
+		t.Fatalf("expected updated attachment list with uploaded file, body=%s", rec.Body.String())
+	}
+
+	attachments, err := tc.attachmentRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("list attachments: %v", err)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("expected 1 attachment, got %d", len(attachments))
+	}
+	att := attachments[0]
+	wantPath := filepath.Join(uploadsRoot, task.ID, "hello.txt")
+	if att.TaskID != task.ID || att.FileName != "hello.txt" || att.FilePath != wantPath || att.FileSize != int64(len(content)) {
+		t.Fatalf("unexpected attachment row: %+v", att)
+	}
+	stored, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("read uploaded file: %v", err)
+	}
+	if !bytes.Equal(stored, content) {
+		t.Fatalf("uploaded content=%q want=%q", stored, content)
+	}
+}
+
+func TestUploadAttachment_RejectsCrossProjectBeforePersistence(t *testing.T) {
+	for _, tcCase := range []struct {
+		name               string
+		target             func(taskID, foreignProjectID string) string
+		useSelectedProject bool
+	}{
+		{
+			name: "query project",
+			target: func(taskID, foreignProjectID string) string {
+				return "/tasks/" + taskID + "/attachments?project_id=" + url.QueryEscape(foreignProjectID)
+			},
+		},
+		{
+			name:               "selected project",
+			target:             func(taskID, foreignProjectID string) string { return "/tasks/" + taskID + "/attachments" },
+			useSelectedProject: true,
+		},
+	} {
+		t.Run(tcCase.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			owningProject := tc.CreateProject().WithName("Attachment owner").Build()
+			foreignProject := tc.CreateProject().WithName("Attachment foreign").Build()
+			task := tc.CreateTask(owningProject.ID).Build()
+			uploadsRoot := withTaskAttachmentUploadsDir(t)
+			if tcCase.useSelectedProject {
+				if err := tc.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, foreignProject.ID); err != nil {
+					t.Fatalf("set selected project: %v", err)
+				}
+			}
+
+			body := &bytes.Buffer{}
+			w := multipart.NewWriter(body)
+			fw, err := w.CreateFormFile("files", "secret.txt")
+			if err != nil {
+				t.Fatalf("create form file: %v", err)
+			}
+			if _, err := fw.Write([]byte("project A secret")); err != nil {
+				t.Fatalf("write form file: %v", err)
+			}
+			w.Close()
+
+			req := httptest.NewRequest(http.MethodPost, tcCase.target(task.ID, foreignProject.ID), body)
+			req.Header.Set("Content-Type", w.FormDataContentType())
+			rec := httptest.NewRecorder()
+			tc.echo.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("expected 404, got %d; body=%s", rec.Code, rec.Body.String())
+			}
+			attachments, err := tc.attachmentRepo.ListByTask(context.Background(), task.ID)
+			if err != nil {
+				t.Fatalf("list attachments: %v", err)
+			}
+			if len(attachments) != 0 {
+				t.Fatalf("expected no attachment rows, got %+v", attachments)
+			}
+			if _, err := os.Stat(filepath.Join(uploadsRoot, task.ID)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("expected no task attachment directory, stat err=%v", err)
+			}
+		})
 	}
 }
 
@@ -836,14 +924,18 @@ func TestDeleteAttachment_Success(t *testing.T) {
 	task := tc.CreateTask(p.ID).Build()
 
 	tmpDir := t.TempDir()
-	origDir := uploadsDir
-	SetUploadsDir(tmpDir)
-	t.Cleanup(func() { SetUploadsDir(origDir) })
+	attachmentPath := filepath.Join(tmpDir, task.ID, "test.txt")
+	if err := os.MkdirAll(filepath.Dir(attachmentPath), 0755); err != nil {
+		t.Fatalf("create attachment dir: %v", err)
+	}
+	if err := os.WriteFile(attachmentPath, []byte("test"), 0644); err != nil {
+		t.Fatalf("write attachment file: %v", err)
+	}
 
 	attachment := &models.Attachment{
 		TaskID:    task.ID,
 		FileName:  "test.txt",
-		FilePath:  filepath.Join(tmpDir, "test.txt"),
+		FilePath:  attachmentPath,
 		MediaType: "text/plain",
 		FileSize:  4,
 	}
@@ -851,6 +943,91 @@ func TestDeleteAttachment_Success(t *testing.T) {
 		t.Fatalf("create attachment: %v", err)
 	}
 
-	rec := tc.HTTP().Delete("/attachments/" + attachment.ID).Execute()
+	rec := tc.HTTP().Delete("/attachments/" + attachment.ID + "?project_id=" + url.QueryEscape(p.ID)).Execute()
 	tc.Assert(rec).StatusCode(http.StatusOK)
+	if !strings.Contains(rec.Body.String(), `id="attachment-list"`) || !strings.Contains(rec.Body.String(), "No attachments") {
+		t.Fatalf("expected updated empty attachment list, body=%s", rec.Body.String())
+	}
+
+	attachments, err := tc.attachmentRepo.ListByTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("list attachments: %v", err)
+	}
+	if len(attachments) != 0 {
+		t.Fatalf("expected attachment row deleted, got %+v", attachments)
+	}
+	if _, err := os.Stat(attachmentPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected attachment file deleted, stat err=%v", err)
+	}
+}
+
+func TestDeleteAttachment_RejectsCrossProjectBeforeDeletingRowOrFile(t *testing.T) {
+	for _, tcCase := range []struct {
+		name               string
+		target             func(attachmentID, foreignProjectID string) string
+		useSelectedProject bool
+	}{
+		{
+			name: "query project",
+			target: func(attachmentID, foreignProjectID string) string {
+				return "/attachments/" + attachmentID + "?project_id=" + url.QueryEscape(foreignProjectID)
+			},
+		},
+		{
+			name:               "selected project",
+			target:             func(attachmentID, foreignProjectID string) string { return "/attachments/" + attachmentID },
+			useSelectedProject: true,
+		},
+	} {
+		t.Run(tcCase.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			owningProject := tc.CreateProject().WithName("Attachment delete owner").Build()
+			foreignProject := tc.CreateProject().WithName("Attachment delete foreign").Build()
+			task := tc.CreateTask(owningProject.ID).Build()
+			if tcCase.useSelectedProject {
+				if err := tc.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, foreignProject.ID); err != nil {
+					t.Fatalf("set selected project: %v", err)
+				}
+			}
+
+			tmpDir := t.TempDir()
+			attachmentPath := filepath.Join(tmpDir, task.ID, "secret.txt")
+			if err := os.MkdirAll(filepath.Dir(attachmentPath), 0755); err != nil {
+				t.Fatalf("create attachment dir: %v", err)
+			}
+			content := []byte("project A secret")
+			if err := os.WriteFile(attachmentPath, content, 0644); err != nil {
+				t.Fatalf("write attachment file: %v", err)
+			}
+
+			attachment := &models.Attachment{
+				TaskID:    task.ID,
+				FileName:  "secret.txt",
+				FilePath:  attachmentPath,
+				MediaType: "text/plain",
+				FileSize:  int64(len(content)),
+			}
+			if err := tc.attachmentRepo.Create(context.Background(), attachment); err != nil {
+				t.Fatalf("create attachment: %v", err)
+			}
+
+			rec := tc.HTTP().Delete(tcCase.target(attachment.ID, foreignProject.ID)).Execute()
+			tc.Assert(rec).StatusCode(http.StatusNotFound)
+
+			attachments, err := tc.attachmentRepo.ListByTask(context.Background(), task.ID)
+			if err != nil {
+				t.Fatalf("list attachments: %v", err)
+			}
+			if len(attachments) != 1 || attachments[0].ID != attachment.ID {
+				t.Fatalf("expected original attachment row to remain, got %+v", attachments)
+			}
+			stored, err := os.ReadFile(attachmentPath)
+			if err != nil {
+				t.Fatalf("read attachment file: %v", err)
+			}
+			if !bytes.Equal(stored, content) {
+				t.Fatalf("attachment file content=%q want=%q", stored, content)
+			}
+		})
+	}
 }

@@ -39,12 +39,26 @@ func (r *AttachmentRepo) Create(ctx context.Context, att *models.Attachment) err
 
 func (r *AttachmentRepo) GetByID(ctx context.Context, id string) (*models.Attachment, error) {
 	query := `
-		SELECT id, task_id, file_name, file_path, media_type, file_size, created_at
-		FROM task_attachments
-		WHERE id = ?
-	`
+			SELECT id, task_id, file_name, file_path, media_type, file_size, created_at
+			FROM task_attachments
+			WHERE id = ?
+		`
+	return r.getByQuery(ctx, query, id)
+}
+
+func (r *AttachmentRepo) GetByIDForProject(ctx context.Context, id, projectID string) (*models.Attachment, error) {
+	query := `
+			SELECT a.id, a.task_id, a.file_name, a.file_path, a.media_type, a.file_size, a.created_at
+			FROM task_attachments a
+			JOIN tasks t ON t.id = a.task_id
+			WHERE a.id = ? AND t.project_id = ?
+		`
+	return r.getByQuery(ctx, query, id, projectID)
+}
+
+func (r *AttachmentRepo) getByQuery(ctx context.Context, query string, args ...any) (*models.Attachment, error) {
 	var att models.Attachment
-	err := r.db.QueryRowContext(ctx, query, id).Scan(
+	err := r.db.QueryRowContext(ctx, query, args...).Scan(
 		&att.ID,
 		&att.TaskID,
 		&att.FileName,
@@ -99,7 +113,20 @@ func (r *AttachmentRepo) ListByTask(ctx context.Context, taskID string) ([]model
 
 func (r *AttachmentRepo) Delete(ctx context.Context, id string) error {
 	query := `DELETE FROM task_attachments WHERE id = ?`
-	result, err := r.db.ExecContext(ctx, query, id)
+	return r.deleteByQuery(ctx, query, id)
+}
+
+func (r *AttachmentRepo) DeleteByIDForProject(ctx context.Context, id, projectID string) error {
+	query := `
+		DELETE FROM task_attachments
+		WHERE id = ?
+			AND task_id IN (SELECT id FROM tasks WHERE project_id = ?)
+	`
+	return r.deleteByQuery(ctx, query, id, projectID)
+}
+
+func (r *AttachmentRepo) deleteByQuery(ctx context.Context, query string, args ...any) error {
+	result, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("deleting attachment: %w", err)
 	}
