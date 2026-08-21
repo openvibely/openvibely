@@ -207,18 +207,26 @@ jobs:
 
       - name: Run native packaged-update tests
         shell: bash
-        run: go test ./internal/update -count=1 -timeout 120s
+        run: go test ./internal/update -count=1 -timeout 120s -coverpkg=./internal/update -coverprofile=coverage.update-native.out
 
       - name: Run binary packaged update E2E
         shell: bash
         env:
           OPENVIBELY_UPDATE_E2E: "1"
           OPENVIBELY_UPDATE_E2E_DISTRIBUTION: binary
-        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 300s
+        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 300s -coverpkg=./internal/update -coverprofile=coverage.update-binary.out
 
       - name: Run desktop packaged update E2E
         shell: bash
         env:
           OPENVIBELY_UPDATE_E2E: "1"
           OPENVIBELY_UPDATE_E2E_DISTRIBUTION: desktop
-        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 180s
+        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 180s -coverpkg=./internal/update -coverprofile=coverage.update-desktop.out
+
+      - name: Upload packaged-update coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.update-native.out,coverage.update-binary.out,coverage.update-desktop.out
+          disable_search: true
+          flags: packaged-update-${{ matrix.os }}-${{ matrix.arch }}
