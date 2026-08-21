@@ -291,7 +291,7 @@ func (a *Adapter) callDirect(ctx context.Context, req llmcontracts.AgentRequest,
 		System:           systemPrompt,
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
-		SkipDefaultTools: runtimeSkipDefaultTools(ctx),
+		SkipDefaultTools: llmcontracts.RuntimeSkipDefaultTools(llmcontracts.RuntimeToolsFromContext(ctx)),
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
@@ -345,7 +345,7 @@ func (a *Adapter) callTaskStreaming(ctx context.Context, req llmcontracts.AgentR
 		System:           llmprompt.BuildAgentSystemPrompt(req.ProjectInstructions, effectiveWorkDir(workDir)),
 		WorkDir:          effectiveWorkDir(workDir),
 		DisableTools:     req.DisableTools,
-		SkipDefaultTools: runtimeSkipDefaultTools(ctx),
+		SkipDefaultTools: llmcontracts.RuntimeSkipDefaultTools(llmcontracts.RuntimeToolsFromContext(ctx)),
 		Attachments:      attachments,
 		ExtraTools:       runtimeTools(ctx),
 		ExtraHeaders:     extraHeaders,
@@ -616,77 +616,19 @@ func toolExecutor(ctx context.Context, workDir string) func(context.Context, str
 	}
 }
 
-func runtimeSkipDefaultTools(ctx context.Context) bool {
-	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	return rt != nil && rt.SkipDefaultTools
-}
-
 func chatSkipDefaultTools(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMode) bool {
 	if isTaskFollowup || chatMode == models.ChatModePlan {
-		return runtimeSkipDefaultTools(ctx)
+		return llmcontracts.RuntimeSkipDefaultTools(llmcontracts.RuntimeToolsFromContext(ctx))
 	}
 	return true
 }
 
 func toolFilter(ctx context.Context, isTaskFollowup bool, chatMode models.ChatMode) func(string) bool {
-	rt := llmcontracts.RuntimeToolsFromContext(ctx)
-	return func(name string) bool {
-		isRuntimeTool, access := runtimeToolAccess(rt, name)
-		if !isTaskFollowup {
-			switch chatMode {
-			case models.ChatModePlan:
-				if isRuntimeTool {
-					if access != llmcontracts.RuntimeToolAccessRead {
-						return false
-					}
-				} else if !planModeAllowsReadOnlyTool(name) {
-					return false
-				}
-			default:
-				if !isRuntimeTool {
-					return false
-				}
-			}
-		}
-		if isRuntimeTool {
-			if rt != nil && rt.Filter != nil {
-				allow, handled := rt.Filter(name)
-				if handled {
-					return allow
-				}
-			}
-			return true
-		}
-		if rt != nil && rt.SkipDefaultTools {
-			return false
-		}
-		return true
-	}
-}
-
-func runtimeToolAccess(rt *llmcontracts.RuntimeTools, name string) (bool, llmcontracts.RuntimeToolAccess) {
-	if rt == nil {
-		return false, ""
-	}
-	for _, def := range rt.Definitions {
-		if strings.EqualFold(def.Name, name) {
-			access := def.Access
-			if access == "" {
-				access = llmcontracts.RuntimeToolAccessWrite
-			}
-			return true, access
-		}
-	}
-	return false, ""
-}
-
-func planModeAllowsReadOnlyTool(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "read_file", "list_files", "grep_search", "web_search", "web_search_preview":
-		return true
-	default:
-		return false
-	}
+	return llmcontracts.ComposeRuntimeToolFilter(nil, llmcontracts.RuntimeToolsFromContext(ctx), llmcontracts.RuntimeToolPolicyOptions{
+		IsTaskFollowup:     isTaskFollowup,
+		ChatMode:           chatMode,
+		AllowsReadOnlyTool: llmcontracts.DefaultPlanModeAllowsReadOnlyTool,
+	})
 }
 
 func buildClientHistory(chatHistory []models.Execution, preserveReasoningContent bool) []openaiclient.CompletionsHistoryMessage {

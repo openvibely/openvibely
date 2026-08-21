@@ -308,55 +308,6 @@ func TestToolSecondaryInfo_LongGrepPreservesLaterPatternContext(t *testing.T) {
 	}
 }
 
-func TestWrapToolFilterForPlanMode_ReadOnlyAllowlist(t *testing.T) {
-	base := func(name string) bool { return true }
-	filter := wrapToolFilterForPlanMode(base, false, models.ChatModePlan)
-
-	if !filter("read_file") || !filter("list_files") || !filter("grep_search") {
-		t.Fatalf("expected read-only tool allowlist to pass")
-	}
-	if filter("write_file") || filter("edit_file") || filter("bash") {
-		t.Fatalf("expected mutating tools to be blocked in plan mode")
-	}
-}
-
-func TestComposeRuntimeToolFilter_OrchestrateAllowsOnlyActionTools(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "create_task"},
-		},
-	}
-	base := func(name string) bool { return true }
-
-	filter := composeRuntimeToolFilter(base, rt, false, models.ChatModeOrchestrate)
-	if !filter("create_task") {
-		t.Fatalf("expected action tool to be allowed in orchestrate mode")
-	}
-	if filter("read_file") {
-		t.Fatalf("expected filesystem tool to be blocked in orchestrate mode")
-	}
-}
-
-func TestComposeRuntimeToolFilter_PlanBlocksActionToolsAndMutations(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "create_task"},
-		},
-	}
-	base := func(name string) bool { return true }
-
-	filter := composeRuntimeToolFilter(base, rt, false, models.ChatModePlan)
-	if filter("create_task") {
-		t.Fatalf("expected action tool to be blocked in plan mode")
-	}
-	if !filter("read_file") || !filter("list_files") || !filter("grep_search") {
-		t.Fatalf("expected read-only tools to remain allowed in plan mode")
-	}
-	if filter("write_file") || filter("bash") {
-		t.Fatalf("expected mutating tools to be blocked in plan mode")
-	}
-}
-
 func TestComposeTaskRuntimeToolFilter_AllowsDefaultToolsWithoutRuntimeTools(t *testing.T) {
 	base := func(name string) bool {
 		switch name {

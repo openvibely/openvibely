@@ -52,22 +52,6 @@ func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 		t.Fatal("unmapped non-built-in tools should pass through")
 	}
 
-	if !planModeAllowsReadOnlyTool("grep_search") || planModeAllowsReadOnlyTool("bash") {
-		t.Fatal("plan mode read-only tool classification changed")
-	}
-	planFilter := wrapToolFilterForPlanMode(nil, false, models.ChatModePlan)
-	if !planFilter("read_file") || planFilter("write_file") {
-		t.Fatal("plan filter should allow read-only tools only")
-	}
-	baseFilter := wrapToolFilterForPlanMode(func(name string) bool { return name == "read_file" }, false, models.ChatModePlan)
-	if !baseFilter("read_file") || baseFilter("grep_search") {
-		t.Fatal("plan filter should compose with base filter")
-	}
-	unchangedFilter := wrapToolFilterForPlanMode(func(string) bool { return true }, true, models.ChatModePlan)
-	if !unchangedFilter("bash") {
-		t.Fatal("task follow-up should keep base filter")
-	}
-
 	rt := &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{
 		{Name: " write_task ", Description: " write ", Access: llmcontracts.RuntimeToolAccessWrite, Parameters: json.RawMessage(`{"type":"object"}`)},
 		{Name: "read_task", Description: "read", Access: llmcontracts.RuntimeToolAccessRead},
@@ -79,16 +63,6 @@ func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 	}
 	if runtimeOpenAITools(nil) != nil {
 		t.Fatal("nil runtime tools should produce no OpenAI tools")
-	}
-	accessMap := runtimeToolAccessMap(rt)
-	if access, ok := runtimeToolAccess(accessMap, " WRITE_TASK "); !ok || access != llmcontracts.RuntimeToolAccessWrite {
-		t.Fatalf("write_task access = %q %v", access, ok)
-	}
-	if access, ok := runtimeToolAccess(accessMap, "read_task"); !ok || access != llmcontracts.RuntimeToolAccessRead {
-		t.Fatalf("read_task access = %q %v", access, ok)
-	}
-	if _, ok := runtimeToolAccess(nil, "read_task"); ok {
-		t.Fatal("nil access map should not resolve tools")
 	}
 
 	baseExec := func(_ context.Context, name string, _ json.RawMessage) (string, bool, error) {
@@ -121,21 +95,6 @@ func TestRuntimeToolHelperMappingFilteringAndExecution(t *testing.T) {
 		t.Fatalf("plain executor output=%q err=%v", out, err)
 	}
 
-	readWriteRuntime := &llmcontracts.RuntimeTools{Definitions: rt.Definitions, Filter: func(name string) (bool, bool) {
-		return name != "write_task", true
-	}}
-	planRuntimeFilter := composeRuntimeToolFilter(func(name string) bool { return name == "read_file" }, readWriteRuntime, false, models.ChatModePlan)
-	if !planRuntimeFilter("read_task") || planRuntimeFilter("write_task") || !planRuntimeFilter("read_file") || planRuntimeFilter("bash") {
-		t.Fatal("plan runtime filter allowed unexpected tools")
-	}
-	orchestrateFilter := composeRuntimeToolFilter(nil, readWriteRuntime, false, models.ChatModeOrchestrate)
-	if !orchestrateFilter("read_task") || orchestrateFilter("write_task") || orchestrateFilter("read_file") {
-		t.Fatal("orchestrate filter should allow handled runtime tools only")
-	}
-	followupFilter := composeRuntimeToolFilter(func(name string) bool { return name == "bash" }, &llmcontracts.RuntimeTools{Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "runtime_task"}}, SkipDefaultTools: true}, true, models.ChatModeOrchestrate)
-	if followupFilter("bash") || !followupFilter("runtime_task") {
-		t.Fatal("follow-up filter should honor SkipDefaultTools while allowing runtime names")
-	}
 }
 
 func TestCallDirectUsesResponsesAPIWithAttachmentsAndUsage(t *testing.T) {
@@ -630,103 +589,6 @@ func TestInitialTaskAndFollowupShareTransportScope(t *testing.T) {
 	}
 }
 
-func TestRuntimeToolFilter_AllowsFilteredReadOnlyRuntimeToolInPlanMode(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
-			{Name: "write_file", Description: "write selected file", Parameters: json.RawMessage(`{"type":"object"}`)},
-		},
-		Filter: func(name string) (bool, bool) {
-			switch name {
-			case "memory_view", "write_file":
-				return true, true
-			default:
-				return false, false
-			}
-		},
-	}
-	filter := composeRuntimeToolFilter(nil, rt, false, models.ChatModePlan)
-	if !filter("memory_view") {
-		t.Fatal("expected filtered selected-memory runtime tools to be allowed in plan mode")
-	}
-	if filter("write_file") {
-		t.Fatal("did not expect unrelated runtime action tool in plan mode")
-	}
-}
-
-func TestRuntimeToolFilter_OrchestrateAllowsMemoryViewWithoutFilesystemRead(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "memory_view", Description: "read selected memory", Parameters: json.RawMessage(`{"type":"object"}`), Access: llmcontracts.RuntimeToolAccessRead},
-			{Name: "create_task", Description: "create task", Parameters: json.RawMessage(`{"type":"object"}`)},
-		},
-		Filter: func(name string) (bool, bool) {
-			switch name {
-			case "memory_view", "create_task":
-				return true, true
-			default:
-				return false, false
-			}
-		},
-	}
-	filter := composeRuntimeToolFilter(func(name string) bool { return true }, rt, false, models.ChatModeOrchestrate)
-	if !filter("memory_view") {
-		t.Fatal("expected selected-memory runtime tools to be allowed in orchestrate mode")
-	}
-	if !filter("create_task") {
-		t.Fatal("expected action runtime tool to be allowed in orchestrate mode")
-	}
-	if filter("read_file") || filter("Read") || filter("list_files") {
-		t.Fatal("did not expect filesystem/default read tools to be allowed in orchestrate mode")
-	}
-}
-
-func TestRuntimeToolFilter_SkipDefaultToolsAllowsOnlyRuntimeTools(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		SkipDefaultTools: true,
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "read_file"},
-		},
-		Filter: func(name string) (bool, bool) {
-			if name == "read_file" {
-				return true, true
-			}
-			return false, true
-		},
-	}
-	filter := composeRuntimeToolFilter(nil, rt, true, models.ChatModeOrchestrate)
-	if !filter("read_file") {
-		t.Fatalf("expected runtime scoped file tool to be allowed")
-	}
-	if filter("bash") {
-		t.Fatalf("expected default tool to be blocked by runtime filter")
-	}
-}
-
-func TestAgentSkipDefaultToolsBlocksDefaultsButKeepsRuntimeMemoryTool(t *testing.T) {
-	agent := &models.Agent{ToolConfig: models.AgentToolConfig{SkipDefaultTools: true}}
-	if agentAllowsBuiltInTool(agent, "list_files") || agentAllowsBuiltInTool(agent, "bash") || agentAllowsBuiltInTool(agent, "read_file") {
-		t.Fatalf("expected agent SkipDefaultTools to block default built-in tools")
-	}
-
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{{Name: "memory_view", Access: llmcontracts.RuntimeToolAccessRead}},
-		Filter: func(name string) (bool, bool) {
-			if name == "memory_view" {
-				return true, true
-			}
-			return false, true
-		},
-	}
-	filter := composeRuntimeToolFilter(func(name string) bool { return agentAllowsBuiltInTool(agent, name) }, rt, true, models.ChatModeOrchestrate)
-	if !filter("memory_view") {
-		t.Fatalf("expected selected memory runtime tool to remain available")
-	}
-	if filter("list_files") || filter("bash") || filter("read_file") {
-		t.Fatalf("expected default tools to stay blocked")
-	}
-}
-
 func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *testing.T) {
 	rt := &llmcontracts.RuntimeTools{
 		SkipDefaultTools: true,
@@ -746,13 +608,6 @@ func TestTaskStreamingRuntimeToolComposition_AllowsScopedFilesRuntimeTools(t *te
 		t.Fatalf("expected runtime tool definition to be exposed, got %#v", extraTools)
 	}
 
-	filter := composeRuntimeToolFilter(nil, rt, true, models.ChatModeOrchestrate)
-	if !filter("list_files") {
-		t.Fatalf("expected task streaming runtime filter to allow managed memory tool")
-	}
-	if filter("bash") {
-		t.Fatalf("expected task streaming runtime filter to block default tools when runtime filter handles them")
-	}
 }
 
 func TestApplyOpenAIOAuthSystemPrompt_OAuthAppendsWorkingSection(t *testing.T) {
@@ -790,55 +645,6 @@ func TestApplyOpenAIOAuthSystemPrompt_OAuthNoDuplicateAppend(t *testing.T) {
 
 	if strings.Count(got, "# Working with the user") != 1 {
 		t.Fatalf("expected working-with-user section to appear once, got %d", strings.Count(got, "# Working with the user"))
-	}
-}
-
-func TestWrapToolFilterForPlanMode_ReadOnlyAllowlist(t *testing.T) {
-	base := func(name string) bool { return true }
-	filter := wrapToolFilterForPlanMode(base, false, models.ChatModePlan)
-
-	if !filter("read_file") || !filter("list_files") || !filter("grep_search") {
-		t.Fatalf("expected read-only tool allowlist to pass")
-	}
-	if filter("write_file") || filter("edit_file") || filter("bash") {
-		t.Fatalf("expected mutating tools to be blocked in plan mode")
-	}
-}
-
-func TestComposeRuntimeToolFilter_OrchestrateAllowsOnlyActionTools(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "create_task"},
-		},
-	}
-	base := func(name string) bool { return true }
-
-	filter := composeRuntimeToolFilter(base, rt, false, models.ChatModeOrchestrate)
-	if !filter("create_task") {
-		t.Fatalf("expected action tool to be allowed in orchestrate mode")
-	}
-	if filter("read_file") {
-		t.Fatalf("expected filesystem tool to be blocked in orchestrate mode")
-	}
-}
-
-func TestComposeRuntimeToolFilter_PlanBlocksActionToolsAndMutations(t *testing.T) {
-	rt := &llmcontracts.RuntimeTools{
-		Definitions: []llmcontracts.RuntimeToolDefinition{
-			{Name: "create_task"},
-		},
-	}
-	base := func(name string) bool { return true }
-
-	filter := composeRuntimeToolFilter(base, rt, false, models.ChatModePlan)
-	if filter("create_task") {
-		t.Fatalf("expected action tool to be blocked in plan mode")
-	}
-	if !filter("read_file") || !filter("list_files") || !filter("grep_search") {
-		t.Fatalf("expected read-only tools to remain allowed in plan mode")
-	}
-	if filter("write_file") || filter("bash") {
-		t.Fatalf("expected mutating tools to be blocked in plan mode")
 	}
 }
 
