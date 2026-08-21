@@ -692,7 +692,7 @@ func TestViewPulseRuntimeToolReturnsUpcomingAgenda(t *testing.T) {
 	require.NoError(t, h.taskRepo.Create(ctx, foreignTask))
 
 	now := time.Now().UTC()
-	scheduled := &models.Schedule{TaskID: scheduledTask.ID, RunAt: now.Add(2 * time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	scheduled := &models.Schedule{TaskID: scheduledTask.ID, RunAt: now.Add(time.Minute), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, h.scheduleRepo.Create(ctx, scheduled))
 	future := &models.Schedule{TaskID: futureTask.ID, RunAt: now.AddDate(0, 0, 8), RepeatType: models.RepeatWeekly, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, h.scheduleRepo.Create(ctx, future))
