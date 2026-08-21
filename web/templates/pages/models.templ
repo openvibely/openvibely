@@ -355,20 +355,9 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 				<button>close</button>
 			</form>
 		</dialog>
-
-			<dialog id="delete_model_confirm_modal" class="modal">
-				<div class="modal-box">
-					@ModalCloseButton("delete_model_confirm_modal", "Close delete model confirmation")
-					<h3 class="font-bold text-lg text-error pr-10">Delete Model</h3>
-					<p class="py-4">Are you sure you want to delete <strong id="delete_model_confirm_name"></strong>? This action cannot be undone.</p>
-					<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">Tasks using this model will no longer be able to select it.</div>
-					<div class="modal-action">
-						<button type="button" class="btn" onclick="delete_model_confirm_modal.close()">Cancel</button>
-						<button type="button" class="btn btn-error" onclick="confirmDeleteModel()">Delete Permanently</button>
-					</div>
-				</div>
-				<form method="dialog" class="modal-backdrop"><button>close</button></form>
-			</dialog>
+				@DestructiveConfirmDialog("delete_model_confirm_modal", "Close delete model confirmation", "Delete Model", "Are you sure you want to delete ", "delete_model_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_model_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteModel()"}) {
+					Tasks using this model will no longer be able to select it.
+				}
 
 			<!-- Model Modal (for both create and edit) -->		<dialog id="new_model_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">
 			<div class="modal-box">
@@ -1659,10 +1648,7 @@ templ modelsContent(agents []models.LLMConfig, modelWorkerStats map[string]int, 
 					_deleteModelId = id;
 					_deleteModelName = name || 'this model';
 					_deleteModelIsDefault = isDefault;
-					var nameEl = document.getElementById('delete_model_confirm_name');
-					if (nameEl) nameEl.textContent = _deleteModelName;
-					var modal = document.getElementById('delete_model_confirm_modal');
-					if (modal) modal.showModal();
+						window.openDestructiveConfirmDialog('delete_model_confirm_modal', 'delete_model_confirm_name', _deleteModelName);
 				}
 
 				function confirmDeleteModel() {

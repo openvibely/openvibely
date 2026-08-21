@@ -1065,19 +1065,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 			</div>
 		</div>
 		<!-- End Tab: Thread -->
-		<dialog id="delete_schedule_confirm_modal" class="modal">
-			<div class="modal-box">
-				@ModalCloseButton("delete_schedule_confirm_modal", "Close delete schedule confirmation")
-				<h3 class="font-bold text-lg text-error pr-10">Delete Schedule</h3>
-				<p class="py-4">Are you sure you want to delete the schedule for <strong id="delete_schedule_confirm_name"></strong>? This action cannot be undone.</p>
-				<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">The task will remain, but it will no longer run on this schedule.</div>
-				<div class="modal-action">
-					<button type="button" class="btn" onclick="delete_schedule_confirm_modal.close()">Cancel</button>
-					<button type="button" class="btn btn-error" onclick="confirmDeleteSchedule()">Delete Permanently</button>
-				</div>
-			</div>
-			<form method="dialog" class="modal-backdrop"><button>close</button></form>
-		</dialog>
+		@DestructiveConfirmDialog("delete_schedule_confirm_modal", "Close delete schedule confirmation", "Delete Schedule", "Are you sure you want to delete the schedule for ", "delete_schedule_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_schedule_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteSchedule()"}) {
+			The task will remain, but it will no longer run on this schedule.
+		}
 		<script>
 							var deleteScheduleID = '';
 							var deleteScheduleTarget = '#task-detail-content';
@@ -1091,10 +1081,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 								deleteScheduleTarget = button.dataset.scheduleTarget || '#task-detail-content';
 								deleteScheduleTargetElement = deleteScheduleTarget.indexOf('closest ') === 0 ? button.closest(deleteScheduleTarget.replace(/^closest\s+/, '')) : null;
 								deleteScheduleSwap = button.dataset.scheduleSwap || 'outerHTML';
-								var nameEl = document.getElementById('delete_schedule_confirm_name');
-								if (nameEl) nameEl.textContent = button.dataset.scheduleTitle || 'this task';
-								var modal = document.getElementById('delete_schedule_confirm_modal');
-								if (modal) modal.showModal();
+								window.openDestructiveConfirmDialog('delete_schedule_confirm_modal', 'delete_schedule_confirm_name', button.dataset.scheduleTitle || 'this task');
 							}
 
 							function confirmDeleteSchedule() {

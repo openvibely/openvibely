@@ -58,6 +58,9 @@ func TestHandler_ListAgents_DeleteConfirmationDialog(t *testing.T) {
 	for _, want := range []string{
 		`id="delete_agent_confirm_modal" class="modal"`,
 		`id="delete_agent_confirm_name"`,
+		`data-destructive-confirm-dialog`,
+		`window.openDestructiveConfirmDialog = function(dialogID, nameID, displayName)`,
+		`openDestructiveConfirmDialog('delete_agent_confirm_modal', 'delete_agent_confirm_name', button.dataset.agentName || 'this agent')`,
 		`onclick="delete_agent_confirm_modal.close()"`,
 		`onclick="confirmDeleteAgent()"`,
 		`class="btn btn-error"`,

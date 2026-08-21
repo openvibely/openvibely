@@ -155,20 +155,9 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 				}
 			</div>
 		}
-
-			<dialog id="delete_agent_confirm_modal" class="modal">
-				<div class="modal-box">
-					@ModalCloseButton("delete_agent_confirm_modal", "Close delete agent confirmation")
-					<h3 class="font-bold text-lg text-error pr-10">Delete Agent</h3>
-					<p class="py-4">Are you sure you want to delete <strong id="delete_agent_confirm_name"></strong>? This action cannot be undone.</p>
-					<div class="text-sm text-base-content/70 bg-base-200 rounded-lg p-3 mb-4">Tasks using this agent will be unlinked.</div>
-					<div class="modal-action">
-						<button type="button" class="btn" onclick="delete_agent_confirm_modal.close()">Cancel</button>
-						<button type="button" class="btn btn-error" onclick="confirmDeleteAgent()">Delete Permanently</button>
-					</div>
-				</div>
-				<form method="dialog" class="modal-backdrop"><button>close</button></form>
-			</dialog>
+				@DestructiveConfirmDialog("delete_agent_confirm_modal", "Close delete agent confirmation", "Delete Agent", "Are you sure you want to delete ", "delete_agent_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_agent_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteAgent()"}) {
+					Tasks using this agent will be unlinked.
+				}
 
 			<dialog id="agent_modal" class="modal" onclose="if (typeof syncToastContainerHost === 'function') syncToastContainerHost()">			<div class="modal-box max-w-4xl p-0 overflow-hidden">
 				@ModalCloseButton("agent_modal", "Close agent dialog")
@@ -489,10 +478,7 @@ templ agentsContent(agents []models.Agent, modelOptions []models.AgentModelOptio
 					if (!button) return;
 					deleteAgentID = button.dataset.agentId || '';
 					if (!deleteAgentID) return;
-					var nameEl = document.getElementById('delete_agent_confirm_name');
-					if (nameEl) nameEl.textContent = button.dataset.agentName || 'this agent';
-					var modal = document.getElementById('delete_agent_confirm_modal');
-					if (modal) modal.showModal();
+						window.openDestructiveConfirmDialog('delete_agent_confirm_modal', 'delete_agent_confirm_name', button.dataset.agentName || 'this agent');
 				}
 
 				async function confirmDeleteAgent() {
