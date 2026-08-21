@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-20
+updated: 2026-08-21
 source: after_complete_update
-source_id: be36f80de298ab77ddf1500419f9d9ba:f8423a4478b8140e
+source_id: 8837543b3d212564719100cb96dda7ad:86795ac23d356fa2
 confidence: high
 title: Provider Architecture
 ---
@@ -23,7 +23,7 @@ Normalized provider direction:
 Provider and model selection:
 - Provider/model selection is based on selected `models.LLMConfig`, especially `Provider`, `Model`, and `AuthMethod`; model string alone does not choose the provider.
 - Normal task runs and task-thread execution starts select model config in this order: current `Task.AgentID`, project `DefaultAgentConfigID`, global default `agent_configs.is_default = 1`. Stored per-run/queued model IDs are history/accounting evidence, not immutable rerun assignment.
-- Interactive Chat differs: explicit `agent_id` uses that model config, `agent_id=default` uses global default, and empty/`auto` triggers complexity/vision-based model selection.
+- Interactive Chat differs from task runs today: explicit `agent_id` uses that model config, empty/`auto` triggers complexity/vision-based model selection, and `agent_id=default` currently resolves to the global default even in project-scoped browser Chat. Open bug `#767` tracks that browser Chat should honor `projects.default_agent_config_id` for `Default` after loading project context.
 - API Chat immediate and queued execution paths should use compact model-selection/context rows before auto-selection or prompt-context rendering, then hydrate only the selected full `LLMConfig` at provider execution.
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not provider/model.
 - The actual per-run model identity is stored but not shown in task-thread execution history; issue `#128` tracks exposing it.
@@ -75,8 +75,9 @@ Provider-native and runtime tools:
 - Runtime tools are request-scoped, provider-generic, and carried through the LLM service/provider adapter path. Tool definitions carry read/write access classification.
 - Shared runtime executor behavior includes a request-scoped guard for consecutive identical exhausted-empty `list_tasks` calls: after a `total=0`, `has_more=false`, empty-task response for canonicalized parameters, the next identical call is answered as `duplicate_noop=true` with guidance instead of re-querying. Different parameters, non-`list_tasks` calls, handler errors, or nonempty/pageable results clear the guard so intervening mutations can be observed.
 - Runtime-tool-capable providers currently include OpenAI API/OAuth, Anthropic API/OAuth, and OpenAI-compatible API-key Chat Completions. Unsupported providers/transports receive no unusable native tool definitions and no legacy marker fallback.
-- Resolved `#687` in PR `#752`: provider-local built-in file/shell tool execution for OpenAI and Anthropic is centralized in `pkg/agenttools`; `pkg/openai_client` and `pkg/anthropic_client` retain provider-specific schema definitions and thin `ExecuteTool` wrappers. A 2026-08-20 final audit found no material issues and verified the published PR file list/content matched the audited issue-scoped implementation.
+- Resolved `#687`: provider-local built-in file/shell tool execution for OpenAI and Anthropic is centralized in `pkg/agenttools`; `pkg/openai_client` and `pkg/anthropic_client` retain provider-specific schema definitions and thin `ExecuteTool` wrappers.
 - Runtime-tool prompt guidance names are extracted through shared `RuntimeTools.DefinitionNames()` in `internal/llm/contracts`; OpenAI, Anthropic, and OpenAI-compatible adapters should use this provider-neutral helper rather than adapter-local name-list conversions.
+- Resolved `#771`: runtime-tool allow/deny policy for OpenAI, Anthropic, and OpenAI-compatible adapters is centralized in `internal/llm/contracts`. The shared helper owns plan mode, orchestration chat, task follow-ups, runtime access defaults, runtime filters, and `SkipDefaultTools`; provider adapters should keep only provider-specific naming/schema wrappers, Anthropic `skill_list`/`skills_list` canonicalization, Anthropic web-fetch read-only allowances, OpenAI/OpenAI-compatible web-search read-only behavior, and OpenAI local built-in grants. A 2026-08-21 strict audit found no material issues; PR `#781` live issue-scoped file blobs matched the audited local content.
 - Provider-local bash timeout policy is explicit configuration on the shared `pkg/agenttools` executor: OpenAI passes its timeout policy through the wrapper, while Anthropic defaults to 10 minutes only when no positive timeout is provided and preserves any positive explicit timeout.
 - Memory tool exposure is a request/tool-profile decision, not a global provider-adapter default.
 - Anthropic has a provider-side name-combination collision for `skill_view`, `skills_list`, and `skill_manage`; the adapter aliases canonical internal `skills_list` to wire name `skill_list` and translates back locally.

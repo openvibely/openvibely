@@ -281,8 +281,12 @@ always_use:
 
 ## openvibely_worker_capacity_projection_workflow
 
-[OpenVibely Worker Capacity Projection Workflow](openvibely_worker_capacity_projection_workflow/SKILL.md) — Optimize OpenVibely worker/model-capacity stats without hydrating full model configuration secrets or blobs.
+[OpenVibely Worker Capacity Projection Workflow](openvibely_worker_capacity_projection_workflow/SKILL.md) — Optimize OpenVibely worker/model/project-capacity stats without hydrating full configuration or repeatedly scanning task history.
 
 ## openvibely_pulse_upcoming_workflow
 
 [OpenVibely Pulse Upcoming Workflow](openvibely_pulse_upcoming_workflow/SKILL.md) — Implement and audit the Pulse upcoming-work agenda, projections, and Chat/tool surfaces without exposing unbounded task data.
+
+## openvibely_destructive_confirm_dialog_workflow
+
+[OpenVibely Destructive Confirm Dialog Workflow](openvibely_destructive_confirm_dialog_workflow/SKILL.md) — Consolidate and regress OpenVibely destructive delete-confirmation dialogs without over-generalizing entity-specific delete behavior.

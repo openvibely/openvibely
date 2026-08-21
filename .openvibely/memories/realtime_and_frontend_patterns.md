@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-20
+updated: 2026-08-21
 source: after_complete_update
-source_id: fd37f46bb8f14052236f06e2550dd109:aff2dbbe03cabdb2
+source_id: fd37f46bb8f14052236f06e2550dd109:1263e360b284c22d
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -70,7 +70,8 @@ Transcript safety and navigation:
 - Known review navigation gaps: execution detail pages exist but normal Thread/Reflection review surfaces do not expose visible links (`#365`, `#380`).
 - Forced task-thread refreshes must close per-exec EventSources before replacement, but revision no-op checks run before cleanup.
 - Older-history pagination captures scroll intent revision and cancels stale restoration if newer send/scroll changes intent.
-- Known frontend duplication gaps include task-thread scroll-state helpers, terminal UI/composer reconciliation, live queued-row construction, task-thread post-swap hydration, schedule repeat-interval controllers, Task Templates dashboard refresh, execution status badge rendering, and destructive delete-confirmation dialog scripts/components across active settings and management pages (`#756`).
+- Known frontend duplication gaps include task-thread scroll-state helpers, terminal UI/composer reconciliation, live queued-row construction, task-thread post-swap hydration, schedule repeat-interval controllers, Task Templates dashboard refresh, execution status badge rendering, Kanban priority bulk-action label mapping (`#766`), and browser clipboard-copy helper behavior (`#776`).
+- Resolved `#756` in PR `#775`: Agent, Model, Skill, Schedule, Task Detail schedule, and Project destructive-delete confirmations render through shared `web/templates/pages/destructive_confirm_dialog.templ` while keeping entity-specific delete behavior local, including model default reassignment, skills viewport preservation, schedule target/swap selection, project modal closing, and agent container/toast refresh. A strict 2026-08-21 audit found no material issues, and the PR tree matched the audited workspace despite a different commit SHA.
 - Task detail HTMX refresh assembly and task-board mutation/sort HTMX refresh assembly should stay centralized through private helpers while preserving route-specific behavior.
 
 Responsive and shared UI contracts:

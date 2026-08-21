@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-08-20
+updated: 2026-08-21
 source: after_complete_update
-source_id: ce58dc08ee6cf3e3ca6d281fba596f35:3871531709cffc9e
+source_id: fd37f46bb8f14052236f06e2550dd109:1263e360b284c22d
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -58,6 +58,7 @@ Documentation, logging, validation, and release preferences:
 - Published docs links in README/project-facing docs should use new-tab HTML anchors where supported; local relative links stay Markdown.
 - Very high-frequency or low-value debug traces should be commented `applog.Debugf` examples instead of active gated calls when method-call overhead could accumulate.
 - Full validation should prefer project Makefile targets or `go test ./... -count=1 -timeout 120s`; prompt-only changes use focused prompt/template contract tests plus normal build/suite when shared templates are affected.
+- For coverage tasks, the user expects real tests and realistic hosted-coverage estimates; do not substitute Codecov config/profile workarounds or optimistic local statement percentages for actual covered-line gains.
 - For Markdown-only merge-conflict resolutions, the user prefers skipping tests/build unless code or generated artifacts are touched.
 - Release workflow must include a documentation update pass for new or meaningfully changed features before publishing/tagging.
 - Release agents should install missing required local tools such as `gh` when feasible; hand back only if installation/authentication fails or requires unavailable credentials/permissions.
@@ -76,5 +77,5 @@ Release-note and release-boundary preferences:
 - `.openvibely/skills/openvibely_release_workflow/scripts/release.sh` is tracked without executable bit; invoke release rehearsals through `bash` until mode is corrected.
 
 Current durable rotation state:
-- Redundancy Finder recently inspected task-goal runtime actions, alert handler refresh tails, Automation save validation, task/worktree Changes diff-state resolution, task-board kanban refresh, dashboard page-shell rendering, execution stream terminal mapping, attachment orphan cleanup, agent create/update dialog payload parsing, browser/runtime schedule mutations, project create/update repository-source handling, model/provider form normalization, channel connection-test feedback, channel authorization allowlist persistence, Task Templates dashboard refresh, Personality settings cards, Insights dashboard grade rendering, Analytics/Insights failed-task-pattern logic, execution status badge rendering, HTMX toast notification/event-contract rendering (`#715`), task tag badge rendering (`#731`), and destructive delete-confirmation dialogs (`#756`). Future Redundancy Finder runs should pick a different bounded component unless explicitly asked to revisit these workflows.
-- Bug Finder recently inspected browser Task Detail primary-Agent edit validation (`#725`, resolved) and task attachment upload/delete project ownership (`#757`, open). Future Bug Finder runs should choose a different bounded component unless explicitly asked to revisit task edit Agent validation or task attachment ownership.
+- Redundancy Finder should avoid rechecking recently inspected bounded components unless explicitly asked: task-goal runtime actions, alert refresh tails, Automation save validation, Worktree Changes diff-state resolution, task-board refresh, dashboard page shell, execution-stream terminal mapping, attachment orphan cleanup, Agent dialog payload parsing, schedule mutations, project repository-source handling, model/provider form normalization, channel test/authorization flows, Task Templates, Personality cards, Insights/Analytics failed-task rendering, execution status badges, HTMX toast contracts, task tag badges, destructive delete confirmations, Kanban backlog priority bulk actions, and browser clipboard-copy helpers.
+- Bug Finder should choose a new bounded component unless explicitly asked to revisit browser Task Detail primary-Agent edit validation (`#725`, resolved) or task attachment upload/delete project ownership (`#757`, resolved after a fresh 2026-08-21 strict audit).
