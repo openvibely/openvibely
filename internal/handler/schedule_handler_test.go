@@ -1124,14 +1124,51 @@ func TestGetExecution_NotFound(t *testing.T) {
 func TestGetExecution_Success(t *testing.T) {
 	tc := NewTestContext(t)
 	agent := tc.CreateLLMConfig().Build()
-	project := tc.CreateProject().Build()
-	task := tc.CreateTask(project.ID).Build()
-	exec := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithOutput("done").Build()
+	project := tc.CreateProject().WithName("Execution Detail Project").Build()
+	task := tc.CreateTask(project.ID).WithPrompt("same-project task prompt").Build()
+	exec := tc.CreateExecution(task.ID, agent.ID).
+		WithStatus(models.ExecRunning).
+		WithPromptSent("same-project prompt sent").
+		Build()
+	if err := tc.execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, "same-project output", "", 0, 0); err != nil {
+		t.Fatalf("complete execution: %v", err)
+	}
 
-	rec := tc.HTTP().Get("/executions/" + exec.ID).Execute()
+	rec := tc.HTTP().Get("/executions/" + exec.ID + "?project_id=" + url.QueryEscape(project.ID)).Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
+	tc.Assert(rec).
+		Contains("same-project prompt sent").
+		Contains("same-project output")
+}
+
+func TestGetExecution_RejectsForeignProjectExecution(t *testing.T) {
+	tc := NewTestContext(t)
+	agent := tc.CreateLLMConfig().Build()
+	projectA := tc.CreateProject().WithName("Execution Detail Project A").Build()
+	projectB := tc.CreateProject().WithName("Execution Detail Project B").Build()
+	foreignTask := tc.CreateTask(projectA.ID).
+		WithTitle("foreign execution task").
+		WithPrompt("foreign task prompt sentinel").
+		Build()
+	exec := tc.CreateExecution(foreignTask.ID, agent.ID).
+		WithStatus(models.ExecRunning).
+		WithPromptSent("foreign prompt sentinel").
+		Build()
+	if err := tc.execRepo.Complete(context.Background(), exec.ID, models.ExecFailed, "foreign output sentinel", "foreign error sentinel", 0, 0); err != nil {
+		t.Fatalf("complete foreign execution: %v", err)
+	}
+
+	rec := tc.HTTP().Get("/executions/" + exec.ID + "?project_id=" + url.QueryEscape(projectB.ID)).Execute()
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	tc.Assert(rec).
+		NotContains("foreign task prompt sentinel").
+		NotContains("foreign prompt sentinel").
+		NotContains("foreign output sentinel").
+		NotContains("foreign error sentinel")
 }
 
 // ---- WorkerSettings ----

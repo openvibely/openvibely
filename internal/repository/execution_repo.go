@@ -42,8 +42,11 @@ const executionSelectColumns = `id, task_id, COALESCE(agent_config_id, ''), stat
 const executionSelectColumnsLight = `id, task_id, COALESCE(agent_config_id, ''), status, prompt_sent, output, '' AS reasoning_content, error_message,
 		tokens_used, duration_ms, is_followup, starts_new_context, '' AS diff_output, cli_session_id, COALESCE(dispatch_id, ''), started_at, completed_at`
 
+const executionSelectColumnsAlias = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, e.reasoning_content, e.error_message,
+			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, e.diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
+
 const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_config_id, ''), e.status, e.prompt_sent, e.output, '' AS reasoning_content, e.error_message,
-		e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
+			e.tokens_used, e.duration_ms, e.is_followup, e.starts_new_context, '' AS diff_output, e.cli_session_id, COALESCE(e.dispatch_id, ''), e.started_at, e.completed_at`
 
 const taskExecutionHistoryPageSQL = `SELECT ` + executionSelectColumnsLight + ` FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`
 
@@ -193,6 +196,21 @@ func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Executi
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting execution: %w", err)
+	}
+	return &e, nil
+}
+
+func (r *ExecutionRepo) GetByIDForProject(ctx context.Context, id, projectID string) (*models.Execution, error) {
+	e, err := scanExecutionRow(r.db.QueryRowContext(ctx,
+		`SELECT `+executionSelectColumnsAlias+`
+		 FROM executions e
+		 JOIN tasks t ON t.id = e.task_id
+		 WHERE e.id = ? AND t.project_id = ?`, id, projectID))
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting project execution: %w", err)
 	}
 	return &e, nil
 }
