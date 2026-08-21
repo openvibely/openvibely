@@ -33,6 +33,9 @@ func TestRegistry_ListTasksDescriptionDiscouragesLifecycleEnumeration(t *testing
 	if !strings.Contains(def.Description, "Supplying category or status restricts results to only that lifecycle state") {
 		t.Fatalf("list_tasks description should explain category/status filters are restrictive, got %q", def.Description)
 	}
+	if !strings.Contains(def.Description, "Returned filter values echo the parameters you sent") {
+		t.Fatalf("list_tasks description should explain returned filters are echoes, got %q", def.Description)
+	}
 	if !strings.Contains(def.Description, "Do not enumerate lifecycle filters after an empty total=0, has_more=false result") {
 		t.Fatalf("list_tasks description should discourage empty lifecycle enumeration, got %q", def.Description)
 	}

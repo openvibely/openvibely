@@ -109,7 +109,7 @@ func TestExecuteListTasksTool(t *testing.T) {
 		t.Fatalf("list_tasks empty query: %v", err)
 	}
 	empty := decodeListTasksResult(t, out)
-	if empty.Total != 0 || empty.Count != 0 || empty.HasMore || empty.Filter.Query != "missing issue" || !strings.Contains(empty.Note, "No tasks matched this exact list_tasks query/filter") {
+	if empty.Total != 0 || empty.Count != 0 || empty.HasMore || empty.Filter.Query != "missing issue" || !strings.Contains(empty.Note, "No tasks matched this exact list_tasks query/filter") || !strings.Contains(empty.Note, "filter object echoes the parameters you sent") {
 		t.Fatalf("unexpected exhausted empty response: %+v", empty)
 	}
 
