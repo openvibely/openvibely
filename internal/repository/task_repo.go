@@ -23,6 +23,8 @@ const swarmChildTaskSelectColumns = `id, project_id, title, category, priority, 
 
 const scheduleCalendarTaskSelectColumns = `t.id, t.project_id, t.title, t.category, t.status`
 
+const countPendingByProjectSQL = `SELECT project_id, COUNT(*) FROM tasks WHERE category = 'active' AND status IN ('pending', 'queued') GROUP BY project_id`
+
 const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 			EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
 			t.created_at, t.updated_at, t.completed_at`
@@ -1425,8 +1427,7 @@ func (r *TaskRepo) CountByProjectAndCategory(ctx context.Context, projectID stri
 // execution for each project. This includes ordinary active pending tasks and
 // active queued tasks that are blocked behind task-thread FIFO/capacity.
 func (r *TaskRepo) CountPendingByProject(ctx context.Context) (map[string]int, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT project_id, COUNT(*) FROM tasks WHERE category = 'active' AND status IN ('pending', 'queued') GROUP BY project_id`)
+	rows, err := r.db.QueryContext(ctx, countPendingByProjectSQL)
 	if err != nil {
 		return nil, fmt.Errorf("counting pending tasks by project: %w", err)
 	}

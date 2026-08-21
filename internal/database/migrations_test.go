@@ -336,6 +336,69 @@ func TestMigration170IndexesSystemUpdateQueuedThreadInputCount(t *testing.T) {
 	}
 }
 
+const projectCapacityCountQuery171 = `SELECT project_id, COUNT(*) FROM tasks WHERE category = 'active' AND status IN ('pending', 'queued') GROUP BY project_id`
+
+func TestMigration171IndexesTaskProjectCapacityCounts(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "tasks-project-capacity-counts-171.db")
+	db := openMigrationTestDB(t, dbPath)
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 170); err != nil {
+		t.Fatal(err)
+	}
+	seedMigration171ProjectCapacityFixture(t, db)
+
+	before := explainQueryPlan(t, db, projectCapacityCountQuery171)
+	if !strings.Contains(before, "SEARCH tasks USING INDEX idx_tasks_category (category=?)") {
+		t.Fatalf("migration 170 project-capacity plan = %q, want category-only active task scan baseline", before)
+	}
+
+	if err := goose.UpTo(db, ".", 171); err != nil {
+		t.Fatal(err)
+	}
+
+	counts := map[string]int{}
+	rows, err := db.Query(projectCapacityCountQuery171)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var projectID string
+		var count int
+		if err := rows.Scan(&projectID, &count); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		counts[projectID] = count
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatal(err)
+	}
+	rows.Close()
+	if counts["project-171-a"] != 2 || counts["project-171-b"] != 1 || len(counts) != 2 {
+		t.Fatalf("project-capacity counts = %#v, want only active pending/queued tasks for two projects", counts)
+	}
+
+	after := explainQueryPlan(t, db, projectCapacityCountQuery171)
+	if !strings.Contains(after, "SEARCH tasks USING COVERING INDEX idx_tasks_active_pending_capacity_counts") {
+		t.Fatalf("migration 171 project-capacity plan = %q, want covering capacity-count index", after)
+	}
+	if strings.Contains(after, "idx_tasks_category") {
+		t.Fatalf("migration 171 project-capacity plan = %q, want no category-only active task scan", after)
+	}
+
+	boardPlan := explainQueryPlan(t, db, `SELECT id FROM tasks WHERE project_id = ? AND category = ? ORDER BY display_order ASC, created_at ASC`, "project-171-a", "active")
+	if !strings.Contains(boardPlan, "idx_tasks_display_order") {
+		t.Fatalf("task board ordering plan after migration 171 = %q, want display-order index", boardPlan)
+	}
+	if strings.Contains(boardPlan, "idx_tasks_active_pending_capacity_counts") {
+		t.Fatalf("task board ordering plan after migration 171 = %q, want capacity-count index not to replace ordering index", boardPlan)
+	}
+}
+
 func TestMigration159IndexesTaskLifecycleActivityOrdering(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "lifecycle-task-started-index-159.db")
 	db := openMigrationTestDB(t, dbPath)
@@ -497,6 +560,27 @@ func TestMigration131RetiredAttachmentSessionRejectsNewOwners(t *testing.T) {
 		  AND attachment_session_id IS NOT NULL AND attachment_session_id <> ''`, sessionID)
 	if !strings.Contains(plan, "USING COVERING INDEX idx_thread_inputs_attachment_session_id") {
 		t.Fatalf("attachment session ownership plan = %q, want covering ownership index", plan)
+	}
+}
+
+func seedMigration171ProjectCapacityFixture(tb testing.TB, db *sql.DB) {
+	tb.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES
+			('project-171-a', 'Migration 171 A', '', ''),
+			('project-171-b', 'Migration 171 B', '', ''),
+			('project-171-empty', 'Migration 171 Empty', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt, display_order) VALUES
+			('task-171-a-pending', 'project-171-a', 'A Pending', 'active', 0, 'pending', 'p', 1),
+			('task-171-a-queued', 'project-171-a', 'A Queued', 'active', 0, 'queued', 'p', 2),
+			('task-171-a-completed-active', 'project-171-a', 'A Completed Active', 'active', 0, 'completed', 'p', 3),
+			('task-171-a-backlog-pending', 'project-171-a', 'A Backlog Pending', 'backlog', 0, 'pending', 'p', 4),
+			('task-171-b-pending', 'project-171-b', 'B Pending', 'active', 0, 'pending', 'p', 1),
+			('task-171-b-cancelled', 'project-171-b', 'B Cancelled', 'active', 0, 'cancelled', 'p', 2),
+			('task-171-empty-completed', 'project-171-empty', 'Empty Completed', 'active', 0, 'completed', 'p', 1),
+			('task-171-empty-backlog', 'project-171-empty', 'Empty Backlog Pending', 'backlog', 0, 'pending', 'p', 2);
+	`); err != nil {
+		tb.Fatalf("seed migration 171 project capacity fixture: %v", err)
 	}
 }
 
@@ -1036,8 +1120,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 170 {
-		t.Fatalf("max goose version = %d, want 170", maxVersion)
+	if maxVersion != 171 {
+		t.Fatalf("max goose version = %d, want 171", maxVersion)
 	}
 }
 
@@ -1176,8 +1260,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 170 {
-		t.Fatalf("max goose version = %d, want 170", maxVersion)
+	if maxVersion != 171 {
+		t.Fatalf("max goose version = %d, want 171", maxVersion)
 	}
 }
 
@@ -1625,8 +1709,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 170 {
-		t.Fatalf("max goose version = %d, want 170", maxVersion)
+	if maxVersion != 171 {
+		t.Fatalf("max goose version = %d, want 171", maxVersion)
 	}
 }
 
@@ -1961,8 +2045,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 170 {
-		t.Fatalf("max goose version = %d, want 170", maxVersion)
+	if maxVersion != 171 {
+		t.Fatalf("max goose version = %d, want 171", maxVersion)
 	}
 }
 

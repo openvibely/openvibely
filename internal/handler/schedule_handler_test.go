@@ -1241,6 +1241,79 @@ func TestProjectWorkerStats(t *testing.T) {
 	}
 }
 
+func TestProjectCapacityEndpointsPreserveCountsAndTableShape(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	limit := 2
+	project := tc.CreateProject().WithName("Capacity Endpoint Project").Build()
+	project.MaxWorkers = &limit
+	if err := tc.projectRepo.Update(ctx, project); err != nil {
+		t.Fatalf("update project worker limit: %v", err)
+	}
+	tc.handler.workerSvc.SetProjectRepo(tc.projectRepo)
+
+	tc.CreateTask(project.ID).WithTitle("Capacity active pending").WithCategory(models.CategoryActive).WithStatus(models.StatusPending).Build()
+	tc.CreateTask(project.ID).WithTitle("Capacity active queued").WithCategory(models.CategoryActive).WithStatus(models.StatusQueued).Build()
+	tc.CreateTask(project.ID).WithTitle("Capacity active completed").WithCategory(models.CategoryActive).WithStatus(models.StatusCompleted).Build()
+	tc.CreateTask(project.ID).WithTitle("Capacity backlog pending").WithCategory(models.CategoryBacklog).WithStatus(models.StatusPending).Build()
+	if !tc.handler.workerSvc.TryAcquireProjectSlot(project.ID) {
+		t.Fatal("expected project worker slot acquisition")
+	}
+	defer tc.handler.workerSvc.ReleaseProjectSlot(project.ID)
+
+	tableRec := tc.HTTP().Get("/workers/stats/projects").Execute()
+	if tableRec.Code != http.StatusOK {
+		t.Fatalf("expected workers stats 200, got %d body=%s", tableRec.Code, tableRec.Body.String())
+	}
+	table := tableRec.Body.String()
+	for _, want := range []string{
+		`id="project-stats-tbody"`,
+		`hx-get="/workers/stats/projects"`,
+		`id="project-row-` + project.ID + `"`,
+		`Capacity Endpoint Project`,
+		`id="limit-input-` + project.ID + `"`,
+		`value="2"`,
+	} {
+		if !strings.Contains(table, want) {
+			t.Fatalf("workers project stats table missing %q in body:\n%s", want, table)
+		}
+	}
+
+	allRec := tc.HTTP().Get("/api/capacity/projects").Execute()
+	if allRec.Code != http.StatusOK {
+		t.Fatalf("expected project capacities 200, got %d body=%s", allRec.Code, allRec.Body.String())
+	}
+	var all []ProjectCapacityResponse
+	if err := json.NewDecoder(allRec.Body).Decode(&all); err != nil {
+		t.Fatalf("decode project capacities: %v", err)
+	}
+	var fromAll *ProjectCapacityResponse
+	for i := range all {
+		if all[i].ID == project.ID {
+			fromAll = &all[i]
+			break
+		}
+	}
+	if fromAll == nil {
+		t.Fatalf("project %s missing from all capacity response: %#v", project.ID, all)
+	}
+	if fromAll.QueueSize != 2 || fromAll.Running != 1 || fromAll.MaxWorkers == nil || *fromAll.MaxWorkers != 2 || !fromAll.HasCapacity || fromAll.AvailableSlots == nil || *fromAll.AvailableSlots != 1 {
+		t.Fatalf("all-project capacity response = %#v, want queue=2 running=1 max=2 available=1 has_capacity=true", *fromAll)
+	}
+
+	singleRec := tc.HTTP().Get("/api/capacity/projects/" + project.ID).Execute()
+	if singleRec.Code != http.StatusOK {
+		t.Fatalf("expected single project capacity 200, got %d body=%s", singleRec.Code, singleRec.Body.String())
+	}
+	var single ProjectCapacityResponse
+	if err := json.NewDecoder(singleRec.Body).Decode(&single); err != nil {
+		t.Fatalf("decode single project capacity: %v", err)
+	}
+	if single.ID != fromAll.ID || single.QueueSize != fromAll.QueueSize || single.Running != fromAll.Running || single.MaxWorkers == nil || *single.MaxWorkers != *fromAll.MaxWorkers || single.AvailableSlots == nil || *single.AvailableSlots != *fromAll.AvailableSlots || single.HasCapacity != fromAll.HasCapacity {
+		t.Fatalf("single capacity response = %#v, want fields matching all-project response %#v", single, *fromAll)
+	}
+}
+
 func TestModelWorkerStats(t *testing.T) {
 	tc := NewTestContext(t)
 	rec := tc.HTTP().Get("/workers/stats/models").Execute()

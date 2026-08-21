@@ -627,7 +627,6 @@ func TestViewSystemUpdateRuntimeTool_RegisteredAndReadOnly(t *testing.T) {
 type testPulseToolResponse struct {
 	OK             bool                 `json:"ok"`
 	ProjectID      string               `json:"project_id"`
-	GeneratedAt    time.Time            `json:"generated_at"`
 	LookaheadDays  int                  `json:"lookahead_days"`
 	RunningTasks   []testPulseTaskEntry `json:"running_tasks"`
 	PendingTasks   []testPulseTaskEntry `json:"pending_tasks"`
@@ -693,7 +692,13 @@ func TestViewPulseRuntimeToolReturnsUpcomingAgenda(t *testing.T) {
 	require.NoError(t, h.taskRepo.Create(ctx, foreignTask))
 
 	now := time.Now().UTC()
-	scheduled := &models.Schedule{TaskID: scheduledTask.ID, RunAt: now.Add(2 * time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
+	scheduledRunAt := now.Add(2 * time.Hour)
+	endOfToday := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 0, now.Location())
+	expectedDueToday := 1
+	if scheduledRunAt.After(endOfToday) {
+		expectedDueToday = 0
+	}
+	scheduled := &models.Schedule{TaskID: scheduledTask.ID, RunAt: scheduledRunAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, h.scheduleRepo.Create(ctx, scheduled))
 	future := &models.Schedule{TaskID: futureTask.ID, RunAt: now.AddDate(0, 0, 8), RepeatType: models.RepeatWeekly, RepeatInterval: 1, Enabled: true, ClearContextOnStart: true}
 	require.NoError(t, h.scheduleRepo.Create(ctx, future))
@@ -741,11 +746,6 @@ func TestViewPulseRuntimeToolReturnsUpcomingAgenda(t *testing.T) {
 	require.Equal(t, 2, got.TaskSummary.Category.Active)
 	require.Equal(t, 2, got.TaskSummary.Category.Scheduled)
 	require.Equal(t, 0, got.TaskSummary.Scheduled.Overdue)
-	endOfGeneratedDay := time.Date(got.GeneratedAt.Year(), got.GeneratedAt.Month(), got.GeneratedAt.Day(), 23, 59, 59, 0, got.GeneratedAt.Location())
-	expectedDueToday := 0
-	if !scheduled.RunAt.After(endOfGeneratedDay) {
-		expectedDueToday = 1
-	}
 	require.Equal(t, expectedDueToday, got.TaskSummary.Scheduled.DueToday)
 	require.Equal(t, 1, got.TaskSummary.Scheduled.DueThisWeek)
 }

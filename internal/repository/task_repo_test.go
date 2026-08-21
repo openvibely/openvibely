@@ -21,6 +21,29 @@ func getDefaultProjectID(t *testing.T, db interface {
 	return "default"
 }
 
+func explainTaskRepoQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
+	}
+	defer rows.Close()
+
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	return strings.Join(details, "; ")
+}
+
 func TestTaskRepo_CreateAndGetByID(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
@@ -370,50 +393,100 @@ func TestTaskRepo_CountPendingByProject(t *testing.T) {
 	projectRepo := NewProjectRepo(db)
 	ctx := context.Background()
 
-	// Create a second project
 	project2 := &models.Project{Name: "Project2", RepoPath: "/tmp/test2"}
 	if err := projectRepo.Create(ctx, project2); err != nil {
 		t.Fatalf("Create project2: %v", err)
 	}
+	projectWithoutQueuedWork := &models.Project{Name: "No Queued Work", RepoPath: "/tmp/no-queued-work"}
+	if err := projectRepo.Create(ctx, projectWithoutQueuedWork); err != nil {
+		t.Fatalf("Create projectWithoutQueuedWork: %v", err)
+	}
 
-	// Create active pending/queued tasks for default project (should be counted as queue)
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "P1", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "P1b", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "Q1", Category: models.CategoryActive, Status: models.StatusQueued, Prompt: "p"})
+	createTask := func(task *models.Task) {
+		t.Helper()
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create task %q: %v", task.Title, err)
+		}
+	}
 
-	// Create backlog+pending task (should NOT be counted - not in active queue)
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "P2", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"})
+	createTask(&models.Task{ProjectID: "default", Title: "Default pending 1", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
+	createTask(&models.Task{ProjectID: "default", Title: "Default pending 2", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
+	createTask(&models.Task{ProjectID: "default", Title: "Default queued", Category: models.CategoryActive, Status: models.StatusQueued, Prompt: "p"})
+	createTask(&models.Task{ProjectID: "default", Title: "Default backlog pending", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"})
+	createTask(&models.Task{ProjectID: "default", Title: "Default active running", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"})
+	createTask(&models.Task{ProjectID: "default", Title: "Default active completed", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"})
+	createTask(&models.Task{ProjectID: "default", Title: "Default chat pending", Category: models.CategoryChat, Status: models.StatusPending, Prompt: "p"})
 
-	// Create a running task for default project (should not be counted)
-	repo.Create(ctx, &models.Task{ProjectID: "default", Title: "R1", Category: models.CategoryActive, Status: models.StatusRunning, Prompt: "p"})
+	createTask(&models.Task{ProjectID: project2.ID, Title: "Project2 pending", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
+	createTask(&models.Task{ProjectID: project2.ID, Title: "Project2 completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"})
+	createTask(&models.Task{ProjectID: project2.ID, Title: "Project2 scheduled pending", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "p"})
 
-	// Create active+pending task for project2
-	repo.Create(ctx, &models.Task{ProjectID: project2.ID, Title: "P3", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"})
-
-	// Create completed task for project2 (should not be counted)
-	repo.Create(ctx, &models.Task{ProjectID: project2.ID, Title: "C1", Category: models.CategoryCompleted, Status: models.StatusCompleted, Prompt: "p"})
-
-	// Create scheduled+pending task for project2 (should NOT be counted - not in active queue)
-	repo.Create(ctx, &models.Task{ProjectID: project2.ID, Title: "S1", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "p"})
+	createTask(&models.Task{ProjectID: projectWithoutQueuedWork.ID, Title: "No Work active completed", Category: models.CategoryActive, Status: models.StatusCompleted, Prompt: "p"})
+	createTask(&models.Task{ProjectID: projectWithoutQueuedWork.ID, Title: "No Work backlog pending", Category: models.CategoryBacklog, Status: models.StatusPending, Prompt: "p"})
 
 	counts, err := repo.CountPendingByProject(ctx)
 	if err != nil {
 		t.Fatalf("CountPendingByProject: %v", err)
 	}
 
-	// Should count only active pending/queued tasks for default project (3, not backlog/running)
 	if counts["default"] != 3 {
-		t.Errorf("expected default=3, got %d", counts["default"])
+		t.Errorf("expected default=3 active pending/queued tasks only, got %d", counts["default"])
 	}
-
-	// Should count 1 active+pending task for project2 (not scheduled or completed)
 	if counts[project2.ID] != 1 {
-		t.Errorf("expected project2=1, got %d", counts[project2.ID])
+		t.Errorf("expected project2=1 active pending task only, got %d", counts[project2.ID])
+	}
+	if _, ok := counts[projectWithoutQueuedWork.ID]; ok {
+		t.Errorf("project with no active pending/queued work appeared in counts: %v", counts)
+	}
+	if len(counts) != 2 {
+		t.Errorf("expected 2 projects in map, got %d: %v", len(counts), counts)
+	}
+}
+
+func TestTaskRepo_CountPendingByProjectUsesCapacityCountIndex(t *testing.T) {
+	db := testutil.NewTestDB(t)
+
+	plan := explainTaskRepoQueryPlan(t, db, countPendingByProjectSQL)
+	if !strings.Contains(plan, "SEARCH tasks USING COVERING INDEX idx_tasks_active_pending_capacity_counts") {
+		t.Fatalf("CountPendingByProject plan = %q, want covering project-capacity index", plan)
+	}
+	if strings.Contains(plan, "idx_tasks_category") {
+		t.Fatalf("CountPendingByProject plan = %q, want no category-only active task scan", plan)
+	}
+}
+
+func TestTaskRepo_CapacityCountIndexDoesNotReplaceHotTaskPlans(t *testing.T) {
+	db := testutil.NewTestDB(t)
+
+	boardPlan := explainTaskRepoQueryPlan(t, db, `SELECT `+taskBoardSelectColumnsWithGoal+`
+		FROM tasks t WHERE t.project_id = ? AND category = ?
+		ORDER BY display_order ASC, created_at ASC`, "default", string(models.CategoryActive))
+	if !strings.Contains(boardPlan, "idx_tasks_display_order") {
+		t.Fatalf("task board plan = %q, want display-order index", boardPlan)
+	}
+	if strings.Contains(boardPlan, "idx_tasks_active_pending_capacity_counts") {
+		t.Fatalf("task board plan = %q, want capacity-count index not to replace board ordering index", boardPlan)
 	}
 
-	// Should not include projects with no active+pending tasks in the map
-	if len(counts) != 2 {
-		t.Errorf("expected 2 projects in map, got %d", len(counts))
+	categoryOrderPlan := explainTaskRepoQueryPlan(t, db,
+		`SELECT MAX(display_order) FROM tasks WHERE project_id = ? AND category = ?`, "default", string(models.CategoryBacklog))
+	if !strings.Contains(categoryOrderPlan, "idx_tasks_display_order") {
+		t.Fatalf("UpdateCategory display-order lookup plan = %q, want display-order index", categoryOrderPlan)
+	}
+	if strings.Contains(categoryOrderPlan, "idx_tasks_active_pending_capacity_counts") {
+		t.Fatalf("UpdateCategory display-order lookup plan = %q, want capacity-count index not to replace ordering lookup", categoryOrderPlan)
+	}
+
+	statusUpdatePlan := explainTaskRepoQueryPlan(t, db,
+		`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`, string(models.StatusQueued), "task-id")
+	if strings.Contains(statusUpdatePlan, "idx_tasks_active_pending_capacity_counts") || strings.Contains(statusUpdatePlan, "SCAN tasks") {
+		t.Fatalf("UpdateStatus plan = %q, want primary-key update without capacity-count index scan", statusUpdatePlan)
+	}
+
+	categoryUpdatePlan := explainTaskRepoQueryPlan(t, db,
+		`UPDATE tasks SET category = ?, display_order = ?, updated_at = datetime('now'), completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END WHERE id = ?`, string(models.CategoryActive), 1, string(models.CategoryActive), "task-id")
+	if strings.Contains(categoryUpdatePlan, "idx_tasks_active_pending_capacity_counts") || strings.Contains(categoryUpdatePlan, "SCAN tasks") {
+		t.Fatalf("UpdateCategory write plan = %q, want primary-key update without capacity-count index scan", categoryUpdatePlan)
 	}
 }
 
