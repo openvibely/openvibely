@@ -644,23 +644,38 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 
 func (h *Handler) GetExecution(c echo.Context) error {
 	id := c.Param("id")
+	ctx := c.Request().Context()
 	applog.Infof("[handler] GetExecution id=%s", id)
 
-	exec, err := h.execRepo.GetByID(c.Request().Context(), id)
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		applog.Infof("[handler] GetExecution project error: %v", err)
+		return err
+	}
+
+	exec, err := h.execRepo.GetByIDForProject(ctx, id, projectID)
 	if err != nil {
 		applog.Infof("[handler] GetExecution error: %v", err)
 		return err
 	}
 	if exec == nil {
-		applog.Infof("[handler] GetExecution not found id=%s", id)
+		applog.Infof("[handler] GetExecution not found id=%s project=%s", id, projectID)
 		return echo.NewHTTPError(http.StatusNotFound, "execution not found")
 	}
 
-	task, _ := h.taskSvc.GetByID(c.Request().Context(), exec.TaskID)
-	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
+	task, err := h.taskSvc.GetByID(ctx, exec.TaskID)
+	if err != nil {
+		applog.Infof("[handler] GetExecution task error: %v", err)
+		return err
+	}
+	if task == nil {
+		applog.Infof("[handler] GetExecution task not found task=%s project=%s", exec.TaskID, projectID)
+		return echo.NewHTTPError(http.StatusNotFound, "execution not found")
+	}
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
 
-	applog.Infof("[handler] GetExecution id=%s status=%s tokens=%d duration=%dms",
-		id, exec.Status, exec.TokensUsed, exec.DurationMs)
+	applog.Infof("[handler] GetExecution id=%s project=%s status=%s tokens=%d duration=%dms",
+		id, projectID, exec.Status, exec.TokensUsed, exec.DurationMs)
 	return render(c, http.StatusOK, pages.ExecutionDetail(projects, exec, task))
 }
 
