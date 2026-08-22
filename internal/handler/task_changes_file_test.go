@@ -230,7 +230,7 @@ func TestHandler_GetTaskChangesFile_LoadsTargetedWorktreeUntrackedFile(t *testin
 	}
 	task.WorktreePath = worktreePath
 	task.WorktreeBranch = worktreeBranch
-	if err := h.taskRepo.Update(ctx, task); err != nil {
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, worktreeBranch); err != nil {
 		t.Fatalf("update task worktree metadata: %v", err)
 	}
 
@@ -251,6 +251,91 @@ func TestHandler_GetTaskChangesFile_LoadsTargetedWorktreeUntrackedFile(t *testin
 	}
 	if strings.Contains(body, "tracked change") {
 		t.Fatalf("expected targeted lazy response to omit other file hunks, got:\n%s", body)
+	}
+}
+
+func TestHandler_GetTaskChangesFile_FallsBackToPreservedDiffWhenNonActiveBranchAlreadyMerged(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+	}
+	runGit(repoDir, "init", "-b", "main")
+	runGit(repoDir, "config", "user.email", "test@example.com")
+	runGit(repoDir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "base.txt"), []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(repoDir, "add", "base.txt")
+	runGit(repoDir, "commit", "-m", "initial")
+
+	project := &models.Project{Name: "already merged lazy fallback", RepoPath: repoDir}
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := createTask(t, h, project.ID, "Already merged lazy fallback", func(task *models.Task) {
+		task.Category = models.CategoryCompleted
+		task.Status = models.StatusCompleted
+		task.MergeStatus = ""
+		task.MergeTargetBranch = "main"
+	})
+
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	worktreeBranch := "task/" + task.ID[:8] + "-already-merged"
+	runGit(repoDir, "worktree", "add", "-b", worktreeBranch, worktreePath, "main")
+	if err := os.WriteFile(filepath.Join(worktreePath, "merged.txt"), []byte("merged task output\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CommitWorktreeChanges(worktreePath, "add merged task output"); err != nil {
+		t.Fatalf("commit task output: %v", err)
+	}
+	runGit(repoDir, "merge", "--no-ff", "--no-edit", worktreeBranch)
+
+	task.WorktreePath = worktreePath
+	task.WorktreeBranch = worktreeBranch
+	if err := h.taskRepo.UpdateWorktreeInfo(ctx, task.ID, worktreePath, worktreeBranch); err != nil {
+		t.Fatalf("update task worktree metadata: %v", err)
+	}
+
+	agents, err := h.llmConfigRepo.List(ctx)
+	if err != nil || len(agents) == 0 {
+		t.Fatalf("list agents: %v", err)
+	}
+	execution := &models.Execution{TaskID: task.ID, AgentConfigID: agents[0].ID, Status: models.ExecCompleted, PromptSent: task.Prompt}
+	if err := h.execRepo.Create(ctx, execution); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	preservedDiff := "diff --git a/merged.txt b/merged.txt\nnew file mode 100644\n--- /dev/null\n+++ b/merged.txt\n@@ -0,0 +1 @@\n+merged task output\n"
+	if err := h.execRepo.UpdateDiffOutput(ctx, execution.ID, preservedDiff); err != nil {
+		t.Fatalf("store preserved execution diff: %v", err)
+	}
+	if diff, ok := service.GetWorktreeDiffFileWithUncommitted(repoDir, worktreeBranch, "main", worktreePath, 0); ok || strings.TrimSpace(diff) != "" {
+		t.Fatalf("expected already-merged live targeted diff to be empty before fallback, ok=%v diff:\n%s", ok, diff)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=0&view=inline", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+	if err := h.GetTaskChangesFile(c); err != nil {
+		t.Fatalf("GetTaskChangesFile: %v", err)
+	}
+
+	body := rec.Body.String()
+	if strings.Contains(body, "Unable to load diff file") {
+		t.Fatalf("expected already-merged stale task to fall back to preserved diff, got:\n%s", body)
+	}
+	if !strings.Contains(body, "merged.txt") || !strings.Contains(body, "merged task output") {
+		t.Fatalf("expected preserved execution diff for already-merged stale task, got:\n%s", body)
 	}
 }
 

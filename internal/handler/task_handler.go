@@ -990,6 +990,9 @@ func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.T
 		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, "", fileIndex)
 	}
 	if !ok {
+		if !isActive && (h.reconcileAlreadyMergedBranch(ctx, task) || service.IsBranchMerged(project.RepoPath, task.WorktreeBranch, targetBranch)) {
+			return preservedMeta()
+		}
 		return components.DiffFileRenderMeta{}, false
 	}
 	meta, ok := components.DiffRenderMetaByIndex(diffOutput, 0)
