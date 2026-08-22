@@ -550,52 +550,85 @@ func changedFilesFromJSON(changedFilesJSON string) []string {
 
 func forEachChangedFileInJSON(changedFilesJSON string, fn func(file string)) {
 	s := strings.TrimSpace(changedFilesJSON)
-	if len(s) < 2 || s[0] != '[' {
+	if !scanChangedFileJSONArray(s, nil) {
 		return
 	}
-	for i := 1; i < len(s); {
-		for i < len(s) && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t' || s[i] == ',') {
-			i++
+	scanChangedFileJSONArray(s, fn)
+}
+
+func scanChangedFileJSONArray(s string, fn func(file string)) bool {
+	if len(s) < 2 || s[0] != '[' {
+		return false
+	}
+	i := skipJSONWhitespace(s, 1)
+	if i < len(s) && s[i] == ']' {
+		i = skipJSONWhitespace(s, i+1)
+		return i == len(s)
+	}
+	for {
+		if i >= len(s) || s[i] != '"' {
+			return false
 		}
-		if i >= len(s) || s[i] == ']' {
-			return
+		value, next, ok := parseJSONStringToken(s, i)
+		if !ok {
+			return false
 		}
-		if s[i] != '"' {
-			return
-		}
-		valueStart := i + 1
-		escaped := false
-		j := valueStart
-		for ; j < len(s); j++ {
-			if s[j] == '\\' {
-				escaped = true
-				j++
-				continue
-			}
-			if s[j] == '"' {
-				break
-			}
-		}
-		if j >= len(s) || s[j] != '"' {
-			return
-		}
-		if escaped {
-			value, err := strconv.Unquote(s[i : j+1])
-			if err != nil {
-				return
-			}
+		if fn != nil {
 			fn(value)
-		} else {
-			fn(s[valueStart:j])
 		}
-		i = j + 1
-		for i < len(s) && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t') {
-			i++
+		i = skipJSONWhitespace(s, next)
+		if i >= len(s) {
+			return false
 		}
-		if i < len(s) && s[i] != ',' && s[i] != ']' {
-			return
+		switch s[i] {
+		case ',':
+			i = skipJSONWhitespace(s, i+1)
+			if i < len(s) && s[i] == ']' {
+				return false
+			}
+		case ']':
+			i = skipJSONWhitespace(s, i+1)
+			return i == len(s)
+		default:
+			return false
 		}
 	}
+}
+
+func parseJSONStringToken(s string, start int) (string, int, bool) {
+	valueStart := start + 1
+	escaped := false
+	for i := valueStart; i < len(s); i++ {
+		switch s[i] {
+		case '"':
+			if escaped {
+				var value string
+				if err := json.Unmarshal([]byte(s[start:i+1]), &value); err != nil {
+					return "", 0, false
+				}
+				return value, i + 1, true
+			}
+			return s[valueStart:i], i + 1, true
+		case '\\':
+			escaped = true
+			i++
+			if i >= len(s) {
+				return "", 0, false
+			}
+		default:
+			if s[i] < 0x20 {
+				return "", 0, false
+			}
+		}
+	}
+	return "", 0, false
+}
+
+func skipJSONWhitespace(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t') {
+		i++
+	}
+	return i
 }
 
 // GeneratePulseSummary generates an AI summary of the current project state

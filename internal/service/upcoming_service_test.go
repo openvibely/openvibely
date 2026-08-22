@@ -449,7 +449,11 @@ func TestGenerateHistoryTaskCommitStatsCompactPreviewPreservesTotals(t *testing.
 			subject = fmt.Sprintf("Refactor config %02d", i)
 		}
 		changedFilesJSON := `{not-json`
-		if i != 0 {
+		if i == 1 {
+			changedFilesJSON = `["partial_valid.go", bad]`
+		} else if i == 2 {
+			changedFilesJSON = `["trailing_valid.go"] garbage`
+		} else if i != 0 {
 			payload, err := json.Marshal([]string{"shared.go", fmt.Sprintf("dir/file_%02d.ext%d", i, i)})
 			if err != nil {
 				t.Fatalf("marshal changed files: %v", err)
@@ -485,8 +489,8 @@ func TestGenerateHistoryTaskCommitStatsCompactPreviewPreservesTotals(t *testing.
 		if pc.TotalCommits != 24 || pc.TotalInsertions != totalInsertions || pc.TotalDeletions != totalDeletions {
 			t.Fatalf("%s totals = commits:%d +%d -%d, want 24 +%d -%d", tr, pc.TotalCommits, pc.TotalInsertions, pc.TotalDeletions, totalInsertions, totalDeletions)
 		}
-		if pc.FilesChanged != 24 {
-			t.Fatalf("%s FilesChanged = %d, want 24 unique files despite duplicate shared.go and one malformed JSON payload", tr, pc.FilesChanged)
+		if pc.FilesChanged != 22 {
+			t.Fatalf("%s FilesChanged = %d, want 22 unique files despite duplicate shared.go and malformed JSON payloads", tr, pc.FilesChanged)
 		}
 		if len(pc.Commits) != 10 {
 			t.Fatalf("%s rendered commit examples = %d, want capped 10", tr, len(pc.Commits))
