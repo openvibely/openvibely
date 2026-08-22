@@ -26,6 +26,8 @@ const (
 	githubPATNotConfiguredErrorFragment = "github personal access token is not configured"
 	githubPATSetupLinkURL               = "/channels"
 	githubPATSetupLinkText              = "Open Channels"
+	projectMaxWorkersMin                = 1
+	projectMaxWorkersMax                = 10
 )
 
 func (h *Handler) Home(c echo.Context) error {
@@ -126,8 +128,15 @@ func parseProjectFormSettings(c echo.Context, opts projectFormSettingsOptions) (
 	if agentID := c.FormValue("default_agent_config_id"); agentID != "" {
 		settings.DefaultAgentConfigID = &agentID
 	}
-	if mw := c.FormValue("max_workers"); mw != "" {
-		if v, err := strconv.Atoi(mw); err == nil && v > 0 {
+	if mw := strings.TrimSpace(c.FormValue("max_workers")); mw != "" {
+		v, err := strconv.Atoi(mw)
+		if err != nil {
+			return settings, fmt.Errorf("Max concurrent workers must be a number from %d to %d, or 0 for no project limit", projectMaxWorkersMin, projectMaxWorkersMax)
+		}
+		if v < 0 || v > projectMaxWorkersMax {
+			return settings, fmt.Errorf("Max concurrent workers must be between %d and %d, or 0 for no project limit", projectMaxWorkersMin, projectMaxWorkersMax)
+		}
+		if v >= projectMaxWorkersMin {
 			settings.MaxWorkers = &v
 		}
 	}

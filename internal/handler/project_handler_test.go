@@ -312,6 +312,76 @@ func TestUpdateProject_TrimsSurroundingWhitespaceInName(t *testing.T) {
 	}
 }
 
+func TestUpdateProject_InvalidMaxWorkersRejectedWithoutMutation(t *testing.T) {
+	for _, maxWorkers := range []string{"-1", "not-a-number"} {
+		t.Run(maxWorkers, func(t *testing.T) {
+			tc := NewTestContext(t)
+			limit := 2
+			project := &models.Project{Name: "Worker Limited Project", MaxWorkers: &limit}
+			if err := tc.handler.projectSvc.Create(context.Background(), project); err != nil {
+				t.Fatalf("create project: %v", err)
+			}
+
+			rec := tc.HTMX().Put("/projects/" + project.ID).WithForm(url.Values{
+				"name":        {"Unexpected Rename"},
+				"repo_source": {"local"},
+				"repo_path":   {""},
+				"max_workers": {maxWorkers},
+			}).Execute()
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("expected 204 validation toast, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			trigger := rec.Header().Get("HX-Trigger")
+			if !strings.Contains(trigger, "openvibelyToast") || !strings.Contains(trigger, "Max concurrent workers") {
+				t.Fatalf("expected max-workers validation toast, got %q", trigger)
+			}
+
+			reloaded, err := tc.handler.projectSvc.GetByID(context.Background(), project.ID)
+			if err != nil {
+				t.Fatalf("reloading project failed: %v", err)
+			}
+			if reloaded == nil {
+				t.Fatal("expected project to remain")
+			}
+			if reloaded.Name != "Worker Limited Project" {
+				t.Fatalf("expected name to remain unchanged, got %q", reloaded.Name)
+			}
+			if reloaded.MaxWorkers == nil || *reloaded.MaxWorkers != 2 {
+				t.Fatalf("expected max_workers=2 to remain unchanged, got %v", reloaded.MaxWorkers)
+			}
+		})
+	}
+}
+
+func TestCreateProject_InvalidMaxWorkersRejectedWithoutCreate(t *testing.T) {
+	tc := NewTestContext(t)
+	before, err := tc.handler.projectSvc.List(context.Background())
+	if err != nil {
+		t.Fatalf("listing projects before create failed: %v", err)
+	}
+
+	rec := tc.HTTP().Post("/projects").WithForm(url.Values{
+		"name":        {"Invalid Workers Project"},
+		"repo_source": {"local"},
+		"repo_path":   {""},
+		"max_workers": {"not-a-number"},
+	}).Execute()
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 validation error, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Max concurrent workers") {
+		t.Fatalf("expected max-workers validation error, got body=%s", rec.Body.String())
+	}
+
+	after, err := tc.handler.projectSvc.List(context.Background())
+	if err != nil {
+		t.Fatalf("listing projects after create failed: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("expected no project to be created, before=%d after=%d", len(before), len(after))
+	}
+}
+
 // ---- DeleteProject ----
 
 func TestDeleteProject_DefaultProject_Rejected(t *testing.T) {
@@ -531,6 +601,68 @@ func TestParseProjectFormSettings_NormalizesCommonFieldsAndSourceValidation(t *t
 	if !settings.PreserveLegacyLocalProject {
 		t.Fatal("expected legacy local preservation marker")
 	}
+}
+
+func TestParseProjectFormSettings_ValidatesMaxWorkersContract(t *testing.T) {
+	tc := NewTestContext(t)
+
+	parse := func(maxWorkers string, includeField bool) (projectFormSettings, error) {
+		form := url.Values{}
+		form.Set("name", "Worker Limit Project")
+		form.Set("repo_source", "local")
+		if includeField {
+			form.Set("max_workers", maxWorkers)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/projects", strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return parseProjectFormSettings(tc.echo.NewContext(req, httptest.NewRecorder()), projectFormSettingsOptions{
+			LocalRepoPathEnabled: true,
+		})
+	}
+
+	validCases := []struct {
+		name         string
+		value        string
+		includeField bool
+		want         *int
+	}{
+		{name: "omitted clears", includeField: false},
+		{name: "empty clears", value: "", includeField: true},
+		{name: "zero clears", value: "0", includeField: true},
+		{name: "minimum saves", value: "1", includeField: true, want: intPointer(1)},
+		{name: "maximum saves", value: "10", includeField: true, want: intPointer(10)},
+		{name: "trimmed finite saves", value: " 5 ", includeField: true, want: intPointer(5)},
+	}
+	for _, tc := range validCases {
+		t.Run(tc.name, func(t *testing.T) {
+			settings, err := parse(tc.value, tc.includeField)
+			if err != nil {
+				t.Fatalf("expected valid max_workers %q, got error %v", tc.value, err)
+			}
+			if tc.want == nil {
+				if settings.MaxWorkers != nil {
+					t.Fatalf("expected max_workers to clear, got %d", *settings.MaxWorkers)
+				}
+				return
+			}
+			if settings.MaxWorkers == nil || *settings.MaxWorkers != *tc.want {
+				t.Fatalf("expected max_workers=%d, got %v", *tc.want, settings.MaxWorkers)
+			}
+		})
+	}
+
+	for _, value := range []string{"-1", "11", "not-a-number"} {
+		t.Run("rejects "+value, func(t *testing.T) {
+			_, err := parse(value, true)
+			if err == nil || !strings.Contains(err.Error(), "Max concurrent workers") {
+				t.Fatalf("expected max-workers validation error for %q, got %v", value, err)
+			}
+		})
+	}
+}
+
+func intPointer(v int) *int {
+	return &v
 }
 
 func TestParseProjectFormSettings_TrimsNameAndRejectsBlank(t *testing.T) {
