@@ -3777,3 +3777,56 @@ func TestGitHubLocalCommitSHAAndErrorHelpers(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishExistingLocalCommitWithTokenUpdatesOrCreatesRefs(t *testing.T) {
+	ctx := context.Background()
+	type requestRecord struct {
+		method string
+		path   string
+		body   string
+		auth   string
+	}
+	var requests []requestRecord
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, requestRecord{method: r.Method, path: r.URL.Path, body: string(body), auth: r.Header.Get("Authorization")})
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/existing":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/existing"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/feature/topic":
+			http.Error(w, `{"message":"Reference does not exist"}`, http.StatusNotFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/refs":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/feature/topic"}`))
+		default:
+			t.Fatalf("unexpected GitHub request %s %s body=%s", r.Method, r.URL.Path, body)
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(nil, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+	if err := svc.publishExistingLocalCommitWithToken(ctx, "token-1", repo, " existing ", " abc123 ", true); err != nil {
+		t.Fatalf("publish existing ref: %v", err)
+	}
+	if err := svc.publishExistingLocalCommitWithToken(ctx, "token-2", repo, "feature/topic", "def456", false); err != nil {
+		t.Fatalf("publish missing ref: %v", err)
+	}
+	if len(requests) != 3 {
+		t.Fatalf("expected 3 GitHub requests, got %#v", requests)
+	}
+	if requests[0].method != http.MethodPatch || requests[0].auth != "Bearer token-1" || !strings.Contains(requests[0].body, `"force":true`) || !strings.Contains(requests[0].body, `"sha":"abc123"`) {
+		t.Fatalf("unexpected existing-ref patch: %#v", requests[0])
+	}
+	if requests[1].method != http.MethodPatch || requests[1].path != "/repos/openvibely/openvibely/git/refs/heads/feature/topic" {
+		t.Fatalf("unexpected missing-ref patch: %#v", requests[1])
+	}
+	if requests[2].method != http.MethodPost || !strings.Contains(requests[2].body, `"ref":"refs/heads/feature/topic"`) || !strings.Contains(requests[2].body, `"sha":"def456"`) {
+		t.Fatalf("unexpected ref create: %#v", requests[2])
+	}
+	if err := svc.publishExistingLocalCommitWithToken(ctx, "token", repo, " ", "sha", false); err == nil || !strings.Contains(err.Error(), "branch and sha are required") {
+		t.Fatalf("expected blank branch validation error, got %v", err)
+	}
+}
