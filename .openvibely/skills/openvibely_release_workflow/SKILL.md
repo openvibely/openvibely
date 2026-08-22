@@ -59,6 +59,8 @@ Before a real non-dry-run release, confirm the exact commit that will receive th
 | `zip` | Package Windows and macOS archives | pre-installed macOS/Linux |
 | `tar` | Package server tarballs | pre-installed |
 | `sha256sum` / `shasum` | Generate SHA256SUMS | pre-installed (Linux/macOS) |
+| `java` | Run `jsign` for Azure Artifact Signing | installed locally under `.tools/jre` by signing setup when missing |
+| `az` | Fetch Azure Artifact Signing access token | installed locally under `.tools/azure-cli` when Python 3.13+ is available, or replaced by `AZURE_ACCESS_TOKEN` |
 | `docker` *(optional)* | Build and push Docker image | https://docker.com |
 | `x86_64-w64-mingw32-gcc` *(optional)* | Cross-compile Windows desktop-cli | `brew install mingw-w64` |
 
@@ -139,14 +141,16 @@ bash $SCRIPTS/release-preflight.sh 0.1.1
 
 # 2. Build artifacts. Official artifacts require the embedded Ed25519 trust
 #    root. The signing check creates/loads .release-signing.env and downloads
-#    native osslsigncode into .tools/ when needed. Credentials are supplied by
-#    the release environment and are never generated.
+#    native signing/verification tools into .tools/ when needed. Credentials are
+#    supplied by the release environment and are never generated.
 OPENVIBELY_RELEASE_KEY_ID=openvibely-release-1
 OPENVIBELY_RELEASE_PUBLIC_KEY='<base64-encoded-32-byte-Ed25519-public-key>'
 OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Example (TEAMID)'
 OPENVIBELY_MACOS_NOTARY_PROFILE='openvibely-notary'
-WINDOWS_CERT_P12='/secure/path/to/windows-code-signing.pfx'
-WINDOWS_CERT_PASSWORD='<certificate-password>'
+OPENVIBELY_AZURE_SIGNING_ENDPOINT='<azure-region>.codesigning.azure.net'
+OPENVIBELY_AZURE_SIGNING_ACCOUNT='<artifact-signing-account-name>'
+OPENVIBELY_AZURE_SIGNING_PROFILE='<certificate-profile-name>'
+OPENVIBELY_AZURE_SUBSCRIPTION_ID='<optional-azure-subscription-id>'
 OPENVIBELY_WINDOWS_SIGN_COMMAND="$(pwd)/$SCRIPTS/sign-windows.sh"
 OPENVIBELY_WINDOWS_VERIFY_COMMAND="$(pwd)/$SCRIPTS/verify-windows.sh"
 # On a non-Windows/non-Linux release coordinator, provide binaries built by
@@ -245,7 +249,7 @@ bin/OpenVibely.app/
 
 Treat `bin/openvibely-desktop` as a staging/intermediate Unix executable, not the user-facing desktop app and not a release asset by itself. It exists so the bundle can copy it into `Contents/MacOS/OpenVibely`; the useful macOS artifact is the `.app` bundle, packaged as `.app.zip` for GitHub releases.
 
-The release script delegates OS signing to skill-local helpers: `sign-macos.sh`, `notarize-macos-archive.sh`, `sign-windows.sh`, and `verify-windows.sh`. macOS bundles are hardened-runtime signed with a secure timestamp, notarized, stapled, and Gatekeeper-assessed before packaging. Windows executables are Authenticode signed and timestamped with `osslsigncode` on macOS.
+The release script delegates OS signing to skill-local helpers: `sign-macos.sh`, `notarize-macos-archive.sh`, `sign-windows.sh`, and `verify-windows.sh`. macOS bundles are hardened-runtime signed with a secure timestamp, notarized, stapled, and Gatekeeper-assessed before packaging. Windows executables are Authenticode signed and timestamped with Azure Artifact Signing through `jsign` on macOS, then verified with `osslsigncode`.
 
 ### macOS app archive verification
 

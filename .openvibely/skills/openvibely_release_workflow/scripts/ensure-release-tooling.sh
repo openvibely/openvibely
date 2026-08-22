@@ -6,6 +6,15 @@ tool_runs() {
     TOOL="$tool" bash -c '"$TOOL" --help >/dev/null 2>&1' 2>/dev/null
 }
 
+repo_root() {
+    local root
+    root="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null | tail -n 1 || true)"
+    if [[ -z "$root" ]]; then
+        root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd -P)"
+    fi
+    printf '%s\n' "$root"
+}
+
 download_ghcr_blob() {
     local scope="$1" url="$2" output="$3"
     local token
@@ -15,6 +24,61 @@ download_ghcr_blob() {
         return 1
     fi
     curl -fsSL -H "Authorization: Bearer ${token}" -o "$output" "$url"
+}
+
+install_java_runtime() {
+    local root tool_dir java_bin
+    root="$(repo_root)"
+    tool_dir="${root}/.tools/jre"
+    java_bin="${tool_dir}/Contents/Home/bin/java"
+
+    if command -v java >/dev/null 2>&1 && java -version >/dev/null 2>&1; then
+        echo "ok tool: java ($(command -v java))"
+        return 0
+    fi
+
+    if [[ -x "$java_bin" ]] && "$java_bin" -version >/dev/null 2>&1; then
+        echo "ok tool: java ($java_bin)"
+        return 0
+    fi
+
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        echo "java runtime not found; install Java 17+ or set OPENVIBELY_JAVA_BIN" >&2
+        return 1
+    fi
+
+    local arch adoptium_arch url tmp extracted jre_root
+    arch="$(uname -m)"
+    case "$arch" in
+        arm64) adoptium_arch="aarch64" ;;
+        x86_64) adoptium_arch="x64" ;;
+        *)
+            echo "unsupported macOS architecture for local Java runtime: $arch" >&2
+            return 1
+            ;;
+    esac
+
+    echo "java runtime not found; downloading local Temurin JRE..." >&2
+    url="https://api.adoptium.net/v3/binary/latest/21/ga/mac/${adoptium_arch}/jre/hotspot/normal/eclipse"
+    tmp="$(mktemp -d)"
+    extracted="${tmp}/extract"
+    mkdir -p "$extracted"
+    curl -fL -o "${tmp}/jre.tar.gz" "$url"
+    tar -xzf "${tmp}/jre.tar.gz" -C "$extracted"
+    jre_root="$(find "$extracted" -type f -path '*/Contents/Home/bin/java' -print -quit | sed 's#/Contents/Home/bin/java$##')"
+    if [[ -z "$jre_root" ]]; then
+        echo "downloaded Java runtime did not contain Contents/Home/bin/java" >&2
+        return 1
+    fi
+    rm -rf "$tool_dir"
+    mkdir -p "$(dirname "$tool_dir")"
+    mv "$jre_root" "$tool_dir"
+    if [[ -x "$java_bin" ]] && "$java_bin" -version >/dev/null 2>&1; then
+        echo "ok tool: java ($java_bin)"
+        return 0
+    fi
+    echo "downloaded Java runtime is not runnable" >&2
+    return 1
 }
 
 install_macos_openssl_runtime() {
@@ -100,10 +164,7 @@ patch_macos_osslsigncode_runtime() {
 
 install_osslsigncode() {
     local repo_root
-    repo_root="$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel 2>/dev/null | tail -n 1 || true)"
-    if [[ -z "$repo_root" ]]; then
-        repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd -P)"
-    fi
+    repo_root="$(repo_root)"
     local tool_dir="${repo_root}/.tools/osslsigncode"
     local tool_bin="${tool_dir}/bin/osslsigncode"
 
@@ -187,4 +248,126 @@ install_osslsigncode() {
     return 127
 }
 
+install_jsign() {
+    local repo_root
+    repo_root="$(repo_root)"
+
+    if command -v jsign >/dev/null 2>&1; then
+        echo "ok tool: jsign ($(command -v jsign))"
+        return 0
+    fi
+
+    local tool_dir="${repo_root}/.tools/jsign"
+    local bin_dir="${tool_dir}/bin"
+    local jar="${tool_dir}/jsign-7.5.jar"
+    local wrapper="${bin_dir}/jsign"
+
+    if [[ ! -f "$jar" ]]; then
+        echo "jsign not found; downloading local jsign..." >&2
+        local url="https://github.com/ebourg/jsign/releases/download/7.5/jsign-7.5.jar"
+        local sha256="602a51c3545a6dc4fb99bd2ea7152b26d1345916d0c93ddfbd5936cb735af91c"
+        local tmp actual
+        tmp="$(mktemp -d)"
+        curl -fsSL -o "${tmp}/jsign.jar" "$url"
+        actual="$(shasum -a 256 "${tmp}/jsign.jar" | awk '{print $1}')"
+        if [[ "$actual" != "$sha256" ]]; then
+            echo "jsign download checksum mismatch" >&2
+            echo "expected: $sha256" >&2
+            echo "actual:   $actual" >&2
+            return 1
+        fi
+        mkdir -p "$tool_dir"
+        mv "${tmp}/jsign.jar" "$jar"
+    fi
+
+    mkdir -p "$bin_dir"
+    cat > "$wrapper" <<EOF
+#!/usr/bin/env bash
+repo_root="$repo_root"
+if [[ -n "\${OPENVIBELY_JAVA_BIN:-}" ]]; then
+    exec "\$OPENVIBELY_JAVA_BIN" -jar "$jar" "\$@"
+elif [[ -x "\${repo_root}/.tools/jre/Contents/Home/bin/java" ]]; then
+    exec "\${repo_root}/.tools/jre/Contents/Home/bin/java" -jar "$jar" "\$@"
+else
+    exec java -jar "$jar" "\$@"
+fi
+EOF
+    chmod +x "$wrapper"
+    echo "ok tool: jsign ($wrapper)"
+}
+
+python_version_at_least() {
+    local python="$1" min_major="$2" min_minor="$3"
+    "$python" - "$min_major" "$min_minor" <<'PY'
+import sys
+major, minor = map(int, sys.argv[1:3])
+raise SystemExit(0 if sys.version_info[:2] >= (major, minor) else 1)
+PY
+}
+
+install_azure_cli() {
+    if [[ -n "${AZURE_ACCESS_TOKEN:-}" ]]; then
+        echo "ok env: AZURE_ACCESS_TOKEN (skipping az install)"
+        return 0
+    fi
+    if command -v az >/dev/null 2>&1; then
+        echo "ok tool: az ($(command -v az))"
+        return 0
+    fi
+
+    local root tool_dir az_bin
+    root="$(repo_root)"
+    tool_dir="${root}/.tools/azure-cli"
+    az_bin="${tool_dir}/bin/az"
+
+    if [[ -x "$az_bin" ]]; then
+        echo "ok tool: az ($az_bin)"
+        return 0
+    fi
+
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        echo "az not found; install Azure CLI or set AZURE_ACCESS_TOKEN" >&2
+        return 1
+    fi
+    if ! command -v python3 >/dev/null 2>&1 || ! python_version_at_least "$(command -v python3)" 3 13; then
+        echo "az not found; Azure CLI tarball install requires Python 3.13+ on macOS" >&2
+        echo "install Azure CLI manually, install Python 3.13+, or set AZURE_ACCESS_TOKEN" >&2
+        return 1
+    fi
+
+    local arch version url tmp
+    arch="$(uname -m)"
+    case "$arch" in
+        arm64|x86_64) ;;
+        *)
+            echo "unsupported macOS architecture for Azure CLI tarball: $arch" >&2
+            return 1
+            ;;
+    esac
+
+    echo "az not found; downloading local Azure CLI tarball..." >&2
+    version="$(curl -fsSL https://api.github.com/repos/Azure/azure-cli/releases/latest | sed -n 's/.*"tag_name":[[:space:]]*"azure-cli-\([^"]*\)".*/\1/p' | head -1)"
+    if [[ -z "$version" ]]; then
+        echo "could not determine latest Azure CLI version" >&2
+        return 1
+    fi
+    url="https://github.com/Azure/azure-cli/releases/download/azure-cli-${version}/azure-cli-${version}-macos-${arch}.tar.gz"
+    tmp="$(mktemp -d)"
+    curl -fL -o "${tmp}/az.tar.gz" "$url"
+    rm -rf "$tool_dir"
+    mkdir -p "$tool_dir"
+    tar -xzf "${tmp}/az.tar.gz" -C "$tool_dir"
+    if [[ -x "$az_bin" ]]; then
+        echo "ok tool: az ($az_bin)"
+        return 0
+    fi
+    echo "downloaded Azure CLI tarball did not contain bin/az" >&2
+    return 1
+}
+
 install_osslsigncode
+if [[ "${SKIP_AZURE_SIGNING_TOOLING:-0}" != "1" ]]; then
+    install_java_runtime
+    install_jsign
+    install_azure_cli
+fi

@@ -7,7 +7,7 @@ if [[ $# -ne 1 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-"${SCRIPT_DIR}/ensure-release-tooling.sh"
+SKIP_AZURE_SIGNING_TOOLING=1 "${SCRIPT_DIR}/ensure-release-tooling.sh"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null | tail -n 1 || true)"
 if [[ -z "$REPO_ROOT" ]]; then
     REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd -P)"

@@ -24,22 +24,23 @@ OPENVIBELY_MACOS_NOTARY_PROFILE='openvibely-notary'
 
 ## Windows From macOS
 
-You need a Windows code-signing certificate as `.p12` or `.pfx`.
+You need an Azure Artifact Signing account with completed identity validation
+and an active Public Trust certificate profile.
 
-1. Put the certificate outside the repo, for example:
-
-```bash
-mkdir -p ~/secure/openvibely
-```
-
-2. Put these in `.release-signing.env`:
+Put these in `.release-signing.env`:
 
 ```bash
-WINDOWS_CERT_P12="$HOME/secure/openvibely/windows-code-signing.pfx"
-WINDOWS_CERT_PASSWORD='<certificate-password>'
+OPENVIBELY_AZURE_SIGNING_ENDPOINT='<azure-region>.codesigning.azure.net'
+OPENVIBELY_AZURE_SIGNING_ACCOUNT='<artifact-signing-account-name>'
+OPENVIBELY_AZURE_SIGNING_PROFILE='<certificate-profile-name>'
+OPENVIBELY_AZURE_SUBSCRIPTION_ID='<optional-azure-subscription-id>'
 OPENVIBELY_WINDOWS_SIGN_COMMAND='/absolute/path/to/openvibely/.openvibely/skills/openvibely_release_workflow/scripts/sign-windows.sh'
 OPENVIBELY_WINDOWS_VERIFY_COMMAND='/absolute/path/to/openvibely/.openvibely/skills/openvibely_release_workflow/scripts/verify-windows.sh'
 ```
+
+The signer uses `jsign` locally on macOS and obtains a short-lived Azure access
+token with `az account get-access-token`. If `AZURE_ACCESS_TOKEN` is already set,
+the script uses that token and does not call `az`.
 
 ## Check Readiness
 
@@ -47,7 +48,19 @@ OPENVIBELY_WINDOWS_VERIFY_COMMAND='/absolute/path/to/openvibely/.openvibely/skil
 .openvibely/skills/openvibely_release_workflow/scripts/check-release-signing.sh
 ```
 
-On macOS, the scripts download the official native `osslsigncode` release into `.tools/osslsigncode` when it is not already installed. No Homebrew, Docker, or Java is required. The check must pass before publishing official macOS or Windows auto-update artifacts.
+On macOS, the scripts install local release tooling under `.tools/` when needed:
+
+- `.tools/osslsigncode` for Windows signature verification.
+- `.tools/jsign` for Azure Artifact Signing.
+- `.tools/jre` for the Java runtime used by `jsign` when no runnable system Java
+  is present.
+- `.tools/azure-cli` for `az` when the Azure CLI is absent and Python 3.13+ is
+  available.
+
+If Python 3.13+ is not available, install Azure CLI manually or provide
+`AZURE_ACCESS_TOKEN` before signing. No Homebrew or Docker is required by the
+release scripts. The check must pass before publishing official macOS or Windows
+auto-update artifacts.
 
 The normal release command runs this setup/check automatically:
 

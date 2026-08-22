@@ -60,8 +60,8 @@ run() {
 
 load_release_env_defaults() {
     local env_file="$1"
-    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_win_p12=0 had_win_pass=0 had_win_desktop=0 had_linux_desktop=0
-    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_win_p12="" saved_win_pass="" saved_win_desktop="" saved_linux_desktop=""
+    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_azure_endpoint=0 had_azure_account=0 had_azure_profile=0 had_azure_sub=0 had_win_desktop=0 had_linux_desktop=0
+    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_azure_endpoint="" saved_azure_account="" saved_azure_profile="" saved_azure_sub="" saved_win_desktop="" saved_linux_desktop=""
 
     [[ ${OPENVIBELY_RELEASE_KEY_ID+x} ]] && { had_key=1; saved_key="$OPENVIBELY_RELEASE_KEY_ID"; }
     [[ ${OPENVIBELY_RELEASE_PUBLIC_KEY+x} ]] && { had_pub=1; saved_pub="$OPENVIBELY_RELEASE_PUBLIC_KEY"; }
@@ -69,8 +69,10 @@ load_release_env_defaults() {
     [[ ${OPENVIBELY_MACOS_NOTARY_PROFILE+x} ]] && { had_notary=1; saved_notary="$OPENVIBELY_MACOS_NOTARY_PROFILE"; }
     [[ ${OPENVIBELY_WINDOWS_SIGN_COMMAND+x} ]] && { had_win_sign=1; saved_win_sign="$OPENVIBELY_WINDOWS_SIGN_COMMAND"; }
     [[ ${OPENVIBELY_WINDOWS_VERIFY_COMMAND+x} ]] && { had_win_verify=1; saved_win_verify="$OPENVIBELY_WINDOWS_VERIFY_COMMAND"; }
-    [[ ${WINDOWS_CERT_P12+x} ]] && { had_win_p12=1; saved_win_p12="$WINDOWS_CERT_P12"; }
-    [[ ${WINDOWS_CERT_PASSWORD+x} ]] && { had_win_pass=1; saved_win_pass="$WINDOWS_CERT_PASSWORD"; }
+    [[ ${OPENVIBELY_AZURE_SIGNING_ENDPOINT+x} ]] && { had_azure_endpoint=1; saved_azure_endpoint="$OPENVIBELY_AZURE_SIGNING_ENDPOINT"; }
+    [[ ${OPENVIBELY_AZURE_SIGNING_ACCOUNT+x} ]] && { had_azure_account=1; saved_azure_account="$OPENVIBELY_AZURE_SIGNING_ACCOUNT"; }
+    [[ ${OPENVIBELY_AZURE_SIGNING_PROFILE+x} ]] && { had_azure_profile=1; saved_azure_profile="$OPENVIBELY_AZURE_SIGNING_PROFILE"; }
+    [[ ${OPENVIBELY_AZURE_SUBSCRIPTION_ID+x} ]] && { had_azure_sub=1; saved_azure_sub="$OPENVIBELY_AZURE_SUBSCRIPTION_ID"; }
     [[ ${OPENVIBELY_WINDOWS_DESKTOP_BINARY+x} ]] && { had_win_desktop=1; saved_win_desktop="$OPENVIBELY_WINDOWS_DESKTOP_BINARY"; }
     [[ ${OPENVIBELY_LINUX_DESKTOP_BINARY+x} ]] && { had_linux_desktop=1; saved_linux_desktop="$OPENVIBELY_LINUX_DESKTOP_BINARY"; }
 
@@ -83,8 +85,10 @@ load_release_env_defaults() {
     [[ "$had_notary" == "1" ]] && OPENVIBELY_MACOS_NOTARY_PROFILE="$saved_notary"
     [[ "$had_win_sign" == "1" ]] && OPENVIBELY_WINDOWS_SIGN_COMMAND="$saved_win_sign"
     [[ "$had_win_verify" == "1" ]] && OPENVIBELY_WINDOWS_VERIFY_COMMAND="$saved_win_verify"
-    [[ "$had_win_p12" == "1" ]] && WINDOWS_CERT_P12="$saved_win_p12"
-    [[ "$had_win_pass" == "1" ]] && WINDOWS_CERT_PASSWORD="$saved_win_pass"
+    [[ "$had_azure_endpoint" == "1" ]] && OPENVIBELY_AZURE_SIGNING_ENDPOINT="$saved_azure_endpoint"
+    [[ "$had_azure_account" == "1" ]] && OPENVIBELY_AZURE_SIGNING_ACCOUNT="$saved_azure_account"
+    [[ "$had_azure_profile" == "1" ]] && OPENVIBELY_AZURE_SIGNING_PROFILE="$saved_azure_profile"
+    [[ "$had_azure_sub" == "1" ]] && OPENVIBELY_AZURE_SUBSCRIPTION_ID="$saved_azure_sub"
     [[ "$had_win_desktop" == "1" ]] && OPENVIBELY_WINDOWS_DESKTOP_BINARY="$saved_win_desktop"
     [[ "$had_linux_desktop" == "1" ]] && OPENVIBELY_LINUX_DESKTOP_BINARY="$saved_linux_desktop"
     return 0
@@ -109,7 +113,6 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 if [[ "${SKIP_RELEASE_SIGNING_ENV:-0}" != "1" && -n "$REPO_ROOT" && -f "${REPO_ROOT}/.release-signing.env" ]]; then
     load_release_env_defaults "${REPO_ROOT}/.release-signing.env"
 fi
-export -n WINDOWS_CERT_PASSWORD 2>/dev/null || true
 if [[ "${SKIP_SIGNING_CHECK:-0}" != "1" && "${DRY_RUN:-0}" != "1" && -x "${SCRIPT_DIR}/check-release-signing.sh" ]]; then
     "${SCRIPT_DIR}/check-release-signing.sh"
 fi
@@ -201,8 +204,13 @@ sign_windows_binary() {
         echo -e "${YELLOW}[DRY-RUN]${NC} $WINDOWS_SIGN_COMMAND $binary"
         echo -e "${YELLOW}[DRY-RUN]${NC} $WINDOWS_VERIFY_COMMAND $binary"
     else
-        WINDOWS_CERT_P12="${WINDOWS_CERT_P12:-}" WINDOWS_CERT_PASSWORD="${WINDOWS_CERT_PASSWORD:-}" "$WINDOWS_SIGN_COMMAND" "$binary"
-        WINDOWS_CERT_P12="${WINDOWS_CERT_P12:-}" "$WINDOWS_VERIFY_COMMAND" "$binary"
+        OPENVIBELY_AZURE_SIGNING_ENDPOINT="${OPENVIBELY_AZURE_SIGNING_ENDPOINT:-}" \
+            OPENVIBELY_AZURE_SIGNING_ACCOUNT="${OPENVIBELY_AZURE_SIGNING_ACCOUNT:-}" \
+            OPENVIBELY_AZURE_SIGNING_PROFILE="${OPENVIBELY_AZURE_SIGNING_PROFILE:-}" \
+            OPENVIBELY_AZURE_SUBSCRIPTION_ID="${OPENVIBELY_AZURE_SUBSCRIPTION_ID:-}" \
+            AZURE_ACCESS_TOKEN="${AZURE_ACCESS_TOKEN:-}" \
+            "$WINDOWS_SIGN_COMMAND" "$binary"
+        "$WINDOWS_VERIFY_COMMAND" "$binary"
     fi
 }
 

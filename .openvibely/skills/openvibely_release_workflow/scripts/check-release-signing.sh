@@ -39,8 +39,10 @@ OPENVIBELY_RELEASE_PUBLIC_KEY='<base64-ed25519-public-key>'
 OPENVIBELY_MACOS_SIGN_IDENTITY='Developer ID Application: Your Name or Company (TEAMID)'
 OPENVIBELY_MACOS_NOTARY_PROFILE='openvibely-notary'
 
-WINDOWS_CERT_P12="\$HOME/secure/openvibely/windows-code-signing.pfx"
-WINDOWS_CERT_PASSWORD='<certificate-password>'
+OPENVIBELY_AZURE_SIGNING_ENDPOINT='<azure-region>.codesigning.azure.net'
+OPENVIBELY_AZURE_SIGNING_ACCOUNT='<artifact-signing-account-name>'
+OPENVIBELY_AZURE_SIGNING_PROFILE='<certificate-profile-name>'
+OPENVIBELY_AZURE_SUBSCRIPTION_ID='<optional-azure-subscription-id>'
 OPENVIBELY_WINDOWS_SIGN_COMMAND="${REPO_ROOT}/.openvibely/skills/openvibely_release_workflow/scripts/sign-windows.sh"
 OPENVIBELY_WINDOWS_VERIFY_COMMAND="${REPO_ROOT}/.openvibely/skills/openvibely_release_workflow/scripts/verify-windows.sh"
 
@@ -52,8 +54,8 @@ EOF
 
 load_release_env_defaults() {
     local env_file="$1"
-    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_win_p12=0 had_win_pass=0 had_linux_desktop=0
-    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_win_p12="" saved_win_pass="" saved_linux_desktop=""
+    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_azure_endpoint=0 had_azure_account=0 had_azure_profile=0 had_azure_sub=0 had_linux_desktop=0
+    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_azure_endpoint="" saved_azure_account="" saved_azure_profile="" saved_azure_sub="" saved_linux_desktop=""
 
     [[ ${OPENVIBELY_RELEASE_KEY_ID+x} ]] && { had_key=1; saved_key="$OPENVIBELY_RELEASE_KEY_ID"; }
     [[ ${OPENVIBELY_RELEASE_PUBLIC_KEY+x} ]] && { had_pub=1; saved_pub="$OPENVIBELY_RELEASE_PUBLIC_KEY"; }
@@ -61,8 +63,10 @@ load_release_env_defaults() {
     [[ ${OPENVIBELY_MACOS_NOTARY_PROFILE+x} ]] && { had_notary=1; saved_notary="$OPENVIBELY_MACOS_NOTARY_PROFILE"; }
     [[ ${OPENVIBELY_WINDOWS_SIGN_COMMAND+x} ]] && { had_win_sign=1; saved_win_sign="$OPENVIBELY_WINDOWS_SIGN_COMMAND"; }
     [[ ${OPENVIBELY_WINDOWS_VERIFY_COMMAND+x} ]] && { had_win_verify=1; saved_win_verify="$OPENVIBELY_WINDOWS_VERIFY_COMMAND"; }
-    [[ ${WINDOWS_CERT_P12+x} ]] && { had_win_p12=1; saved_win_p12="$WINDOWS_CERT_P12"; }
-    [[ ${WINDOWS_CERT_PASSWORD+x} ]] && { had_win_pass=1; saved_win_pass="$WINDOWS_CERT_PASSWORD"; }
+    [[ ${OPENVIBELY_AZURE_SIGNING_ENDPOINT+x} ]] && { had_azure_endpoint=1; saved_azure_endpoint="$OPENVIBELY_AZURE_SIGNING_ENDPOINT"; }
+    [[ ${OPENVIBELY_AZURE_SIGNING_ACCOUNT+x} ]] && { had_azure_account=1; saved_azure_account="$OPENVIBELY_AZURE_SIGNING_ACCOUNT"; }
+    [[ ${OPENVIBELY_AZURE_SIGNING_PROFILE+x} ]] && { had_azure_profile=1; saved_azure_profile="$OPENVIBELY_AZURE_SIGNING_PROFILE"; }
+    [[ ${OPENVIBELY_AZURE_SUBSCRIPTION_ID+x} ]] && { had_azure_sub=1; saved_azure_sub="$OPENVIBELY_AZURE_SUBSCRIPTION_ID"; }
     [[ ${OPENVIBELY_LINUX_DESKTOP_BINARY+x} ]] && { had_linux_desktop=1; saved_linux_desktop="$OPENVIBELY_LINUX_DESKTOP_BINARY"; }
 
     # shellcheck source=/dev/null
@@ -74,8 +78,10 @@ load_release_env_defaults() {
     [[ "$had_notary" == "1" ]] && OPENVIBELY_MACOS_NOTARY_PROFILE="$saved_notary"
     [[ "$had_win_sign" == "1" ]] && OPENVIBELY_WINDOWS_SIGN_COMMAND="$saved_win_sign"
     [[ "$had_win_verify" == "1" ]] && OPENVIBELY_WINDOWS_VERIFY_COMMAND="$saved_win_verify"
-    [[ "$had_win_p12" == "1" ]] && WINDOWS_CERT_P12="$saved_win_p12"
-    [[ "$had_win_pass" == "1" ]] && WINDOWS_CERT_PASSWORD="$saved_win_pass"
+    [[ "$had_azure_endpoint" == "1" ]] && OPENVIBELY_AZURE_SIGNING_ENDPOINT="$saved_azure_endpoint"
+    [[ "$had_azure_account" == "1" ]] && OPENVIBELY_AZURE_SIGNING_ACCOUNT="$saved_azure_account"
+    [[ "$had_azure_profile" == "1" ]] && OPENVIBELY_AZURE_SIGNING_PROFILE="$saved_azure_profile"
+    [[ "$had_azure_sub" == "1" ]] && OPENVIBELY_AZURE_SUBSCRIPTION_ID="$saved_azure_sub"
     [[ "$had_linux_desktop" == "1" ]] && OPENVIBELY_LINUX_DESKTOP_BINARY="$saved_linux_desktop"
     return 0
 }
@@ -88,7 +94,6 @@ if [[ "${SKIP_RELEASE_SIGNING_ENV:-0}" != "1" && -f "$LOCAL_ENV" ]]; then
     load_release_env_defaults "$LOCAL_ENV"
     echo "loaded local env: $LOCAL_ENV"
 fi
-export -n WINDOWS_CERT_PASSWORD 2>/dev/null || true
 
 check_env() {
     local name="$1"
@@ -170,8 +175,9 @@ check_env OPENVIBELY_RELEASE_KEY_ID
 check_env OPENVIBELY_RELEASE_PUBLIC_KEY
 check_env OPENVIBELY_WINDOWS_SIGN_COMMAND
 check_env OPENVIBELY_WINDOWS_VERIFY_COMMAND
-check_env WINDOWS_CERT_P12
-check_env WINDOWS_CERT_PASSWORD
+check_env OPENVIBELY_AZURE_SIGNING_ENDPOINT
+check_env OPENVIBELY_AZURE_SIGNING_ACCOUNT
+check_env OPENVIBELY_AZURE_SIGNING_PROFILE
 
 for hook_var in OPENVIBELY_WINDOWS_SIGN_COMMAND OPENVIBELY_WINDOWS_VERIFY_COMMAND; do
     hook_path="${!hook_var:-}"
@@ -185,18 +191,31 @@ for hook_var in OPENVIBELY_WINDOWS_SIGN_COMMAND OPENVIBELY_WINDOWS_VERIFY_COMMAN
     fi
 done
 
-if [[ -n "${WINDOWS_CERT_P12:-}" && "$WINDOWS_CERT_P12" != *"<"*">"* && ! -f "$WINDOWS_CERT_P12" ]]; then
-    echo "missing file: WINDOWS_CERT_P12=$WINDOWS_CERT_P12"
-    missing=1
-fi
-
 if [[ "$INSTALL_TOOLING" == "1" ]]; then
     if ! "${SCRIPT_DIR}/ensure-release-tooling.sh"; then
         missing=1
     fi
 fi
 export PATH="${REPO_ROOT}/.tools/osslsigncode/bin:${PATH}"
+export PATH="${REPO_ROOT}/.tools/jsign/bin:${PATH}"
+export PATH="${REPO_ROOT}/.tools/azure-cli/bin:${PATH}"
 check_osslsigncode
+if [[ -n "${OPENVIBELY_JAVA_BIN:-}" && -x "$OPENVIBELY_JAVA_BIN" ]]; then
+    echo "ok tool: java ($OPENVIBELY_JAVA_BIN)"
+elif [[ -x "${REPO_ROOT}/.tools/jre/Contents/Home/bin/java" ]]; then
+    echo "ok tool: java (${REPO_ROOT}/.tools/jre/Contents/Home/bin/java)"
+elif command -v java >/dev/null 2>&1 && java -version >/dev/null 2>&1; then
+    echo "ok tool: java ($(command -v java))"
+else
+    echo "missing/broken tool: java"
+    missing=1
+fi
+check_cmd jsign
+if [[ -z "${AZURE_ACCESS_TOKEN:-}" ]]; then
+    check_cmd az
+else
+    echo "ok env: AZURE_ACCESS_TOKEN"
+fi
 
 if [[ -n "${OPENVIBELY_MACOS_SIGN_IDENTITY:-}" && "$OPENVIBELY_MACOS_SIGN_IDENTITY" != *"<"*">"* && "$OPENVIBELY_MACOS_SIGN_IDENTITY" != *"Your Name or Company"* ]]; then
     if security find-identity -v -p codesigning | grep -F "$OPENVIBELY_MACOS_SIGN_IDENTITY" >/dev/null; then
