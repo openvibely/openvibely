@@ -1025,6 +1025,170 @@ func TestHandler_completeOAuthFlow(t *testing.T) {
 		replay := h.completeOAuthFlow(state, "code")
 		require.Equal(t, oauthCompletionInvalidState, replay.Outcome)
 	})
+
+	for _, tc := range []struct {
+		name        string
+		provider    models.LLMProvider
+		model       string
+		clientID    string
+		redirectURI string
+	}{
+		{
+			name:        "openai",
+			provider:    models.ProviderOpenAI,
+			model:       "gpt-4",
+			clientID:    openAIOAuthClientID,
+			redirectURI: "http://localhost:1455/auth/callback",
+		},
+		{
+			name:        "anthropic",
+			provider:    models.ProviderAnthropic,
+			model:       "claude-sonnet-4-5-20250929",
+			clientID:    oauthClientID,
+			redirectURI: "http://localhost:53692/callback",
+		},
+	} {
+		t.Run("succeeds unchanged "+tc.name+" oauth flow", func(t *testing.T) {
+			h, _, repo := setupTestHandler(t)
+			model := &models.LLMConfig{
+				Name:       "Unchanged " + tc.name + " OAuth",
+				Provider:   tc.provider,
+				AuthMethod: models.AuthMethodOAuth,
+				Model:      tc.model,
+			}
+			require.NoError(t, repo.Create(context.Background(), model))
+
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"access_token":  "fresh-" + tc.name + "-access",
+					"refresh_token": "fresh-" + tc.name + "-refresh",
+					"expires_in":    3600,
+				})
+			}))
+			defer tokenServer.Close()
+
+			state := fmt.Sprintf("unchanged-%s-%d", tc.name, time.Now().UnixNano())
+			oauthFlowsMu.Lock()
+			oauthFlows[state] = &oauthPendingFlow{
+				ConfigID:       model.ID,
+				Verifier:       "verifier-" + tc.name,
+				State:          state,
+				RedirectURI:    tc.redirectURI,
+				CreatedAt:      time.Now(),
+				Provider:       tc.provider,
+				ClientID:       tc.clientID,
+				TokenURL:       tokenServer.URL,
+				ConfigRevision: model.OAuthConfigRevision,
+			}
+			oauthFlowsMu.Unlock()
+
+			result := h.completeOAuthFlow(state, "fresh-code")
+			require.Equal(t, oauthCompletionSucceeded, result.Outcome)
+			require.NoError(t, result.Err)
+
+			stored, err := repo.GetByID(context.Background(), model.ID)
+			require.NoError(t, err)
+			require.Equal(t, "fresh-"+tc.name+"-access", stored.OAuthAccessToken)
+			require.Equal(t, "fresh-"+tc.name+"-refresh", stored.OAuthRefreshToken)
+		})
+
+		t.Run("rejects stale edited "+tc.name+" oauth flow", func(t *testing.T) {
+			h, _, repo := setupTestHandler(t)
+			model := &models.LLMConfig{
+				Name:       "Stale " + tc.name + " OAuth",
+				Provider:   tc.provider,
+				AuthMethod: models.AuthMethodOAuth,
+				Model:      tc.model,
+			}
+			require.NoError(t, repo.Create(context.Background(), model))
+
+			tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]interface{}{
+					"access_token":  "stale-" + tc.name + "-access",
+					"refresh_token": "stale-" + tc.name + "-refresh",
+					"expires_in":    3600,
+				})
+			}))
+			defer tokenServer.Close()
+
+			state := fmt.Sprintf("stale-%s-%d", tc.name, time.Now().UnixNano())
+			oauthFlowsMu.Lock()
+			oauthFlows[state] = &oauthPendingFlow{
+				ConfigID:       model.ID,
+				Verifier:       "verifier-" + tc.name,
+				State:          state,
+				RedirectURI:    tc.redirectURI,
+				CreatedAt:      time.Now(),
+				Provider:       tc.provider,
+				ClientID:       tc.clientID,
+				TokenURL:       tokenServer.URL,
+				ConfigRevision: model.OAuthConfigRevision,
+			}
+			oauthFlowsMu.Unlock()
+
+			edited := *model
+			edited.AuthMethod = models.AuthMethodAPIKey
+			require.NoError(t, repo.Update(context.Background(), &edited))
+
+			result := h.completeOAuthFlow(state, "stale-code")
+			require.Equal(t, oauthCompletionExchangeFailed, result.Outcome)
+			require.ErrorContains(t, result.Err, "configuration changed")
+
+			stored, err := repo.GetByID(context.Background(), model.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.AuthMethodAPIKey, stored.AuthMethod)
+			require.Empty(t, stored.OAuthAccessToken)
+			require.Empty(t, stored.OAuthRefreshToken)
+		})
+	}
+
+	t.Run("rejects deleted standard oauth flow", func(t *testing.T) {
+		h, _, repo := setupTestHandler(t)
+		model := &models.LLMConfig{
+			Name:       "Deleted OpenAI OAuth",
+			Provider:   models.ProviderOpenAI,
+			AuthMethod: models.AuthMethodOAuth,
+			Model:      "gpt-4",
+		}
+		require.NoError(t, repo.Create(context.Background(), model))
+
+		tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"access_token":  "deleted-access",
+				"refresh_token": "deleted-refresh",
+				"expires_in":    3600,
+			})
+		}))
+		defer tokenServer.Close()
+
+		state := fmt.Sprintf("deleted-openai-%d", time.Now().UnixNano())
+		oauthFlowsMu.Lock()
+		oauthFlows[state] = &oauthPendingFlow{
+			ConfigID:       model.ID,
+			Verifier:       "deleted-verifier",
+			State:          state,
+			RedirectURI:    "http://localhost:1455/auth/callback",
+			CreatedAt:      time.Now(),
+			Provider:       models.ProviderOpenAI,
+			ClientID:       openAIOAuthClientID,
+			TokenURL:       tokenServer.URL,
+			ConfigRevision: model.OAuthConfigRevision,
+		}
+		oauthFlowsMu.Unlock()
+
+		require.NoError(t, repo.Delete(context.Background(), model.ID))
+
+		result := h.completeOAuthFlow(state, "deleted-code")
+		require.Equal(t, oauthCompletionExchangeFailed, result.Outcome)
+		require.ErrorContains(t, result.Err, "configuration changed")
+
+		stored, err := repo.GetByID(context.Background(), model.ID)
+		require.NoError(t, err)
+		require.Nil(t, stored)
+	})
 }
 
 func TestHandler_OAuthManualComplete(t *testing.T) {

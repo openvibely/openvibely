@@ -101,6 +101,17 @@ func TestLLMConfigRepo_UpdateOAuthTokens(t *testing.T) {
 	}
 }
 
+func TestLLMConfigRepo_UpdateOAuthTokensMissingConfigFails(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+
+	err := repo.UpdateOAuthTokens(ctx, "missing-model", "access-token", "refresh-token", 1900000000000)
+	if err == nil {
+		t.Fatal("expected UpdateOAuthTokens to fail when no config row is updated")
+	}
+}
+
 func TestLLMConfigRepo_UpdateClearsOAuthTokens(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
