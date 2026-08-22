@@ -37,10 +37,6 @@ fail() { err "$*"; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=release-version.sh
 source "${SCRIPT_DIR}/release-version.sh"
-REPO_ROOT_FOR_TOOLS="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
-if [[ -n "$REPO_ROOT_FOR_TOOLS" ]]; then
-    export PATH="${REPO_ROOT_FOR_TOOLS}/.tools/gh/bin:${PATH}"
-fi
 
 run() {
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
@@ -64,6 +60,11 @@ TAG="v${VERSION}"
 
 if ! is_valid_release_version "$VERSION"; then
     fail "Invalid semver: '$RAW_VERSION'."
+fi
+
+REPO_ROOT_FOR_TOOLS="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$REPO_ROOT_FOR_TOOLS" ]]; then
+    export PATH="${REPO_ROOT_FOR_TOOLS}/.tools/gh/bin:${PATH}"
 fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || fail "Not in a git repository.")"
@@ -97,12 +98,18 @@ require_release_artifact() {
         warn "${name} not present because this is a non-writing dry run; using the planned path."
         return
     fi
-    fail "Required desktop artifact not found: ${DIST_DIR}/${name}. Run the complete release-build workflow first."
+    fail "Required release artifact not found: ${DIST_DIR}/${name}. Run the complete release-build workflow first."
 }
+require_release_artifact "openvibely_${VERSION}_darwin_amd64_server.zip"
+require_release_artifact "openvibely_${VERSION}_darwin_arm64_server.zip"
+require_release_artifact "openvibely_${VERSION}_linux_amd64_server.tar.gz"
+require_release_artifact "openvibely_${VERSION}_linux_arm64_server.tar.gz"
+require_release_artifact "openvibely_${VERSION}_windows_amd64_server.zip"
+require_release_artifact "openvibely_${VERSION}_windows_arm64_server.zip"
 require_release_artifact "OpenVibely_${VERSION}_darwin_amd64.app.zip"
 require_release_artifact "OpenVibely_${VERSION}_darwin_arm64.app.zip"
-require_release_artifact "openvibely_${VERSION}_windows_amd64_desktop-cli.zip"
-require_release_artifact "openvibely_${VERSION}_windows_arm64_desktop-cli.zip"
+require_release_artifact "openvibely_${VERSION}_windows_amd64_desktop.zip"
+require_release_artifact "openvibely_${VERSION}_windows_arm64_desktop.zip"
 require_release_artifact "openvibely_${VERSION}_linux_amd64_desktop.tar.gz"
 require_release_artifact "openvibely_${VERSION}_linux_arm64_desktop.tar.gz"
 
@@ -194,8 +201,8 @@ if [[ ${#ARTIFACTS[@]} -eq 0 && "${DRY_RUN:-0}" == "1" ]]; then
         "${DIST_DIR}/openvibely_${VERSION}_linux_arm64_server.tar.gz"
         "${DIST_DIR}/openvibely_${VERSION}_windows_amd64_server.zip"
         "${DIST_DIR}/openvibely_${VERSION}_windows_arm64_server.zip"
-        "${DIST_DIR}/openvibely_${VERSION}_windows_amd64_desktop-cli.zip"
-        "${DIST_DIR}/openvibely_${VERSION}_windows_arm64_desktop-cli.zip"
+        "${DIST_DIR}/openvibely_${VERSION}_windows_amd64_desktop.zip"
+        "${DIST_DIR}/openvibely_${VERSION}_windows_arm64_desktop.zip"
         "${DIST_DIR}/openvibely_${VERSION}_linux_amd64_desktop.tar.gz"
         "${DIST_DIR}/openvibely_${VERSION}_linux_arm64_desktop.tar.gz"
     )

@@ -278,11 +278,11 @@ check_artifact_name "$VERSION" "openvibely_<version>_windows_amd64_server.zip" \
 check_artifact_name "$VERSION" "openvibely_<version>_windows_arm64_server.zip" \
     "openvibely_0.1.1_windows_arm64_server.zip"
 
-# Windows desktop-cli zip
-check_artifact_name "$VERSION" "openvibely_<version>_windows_amd64_desktop-cli.zip" \
-    "openvibely_0.1.1_windows_amd64_desktop-cli.zip"
-check_artifact_name "$VERSION" "openvibely_<version>_windows_arm64_desktop-cli.zip" \
-    "openvibely_0.1.1_windows_arm64_desktop-cli.zip"
+# Windows desktop zip
+check_artifact_name "$VERSION" "openvibely_<version>_windows_amd64_desktop.zip" \
+    "openvibely_0.1.1_windows_amd64_desktop.zip"
+check_artifact_name "$VERSION" "openvibely_<version>_windows_arm64_desktop.zip" \
+    "openvibely_0.1.1_windows_arm64_desktop.zip"
 
 # Linux desktop tarball
 check_artifact_name "$VERSION" "openvibely_<version>_linux_amd64_desktop.tar.gz" \
@@ -319,11 +319,11 @@ for required_call in 'sign-macos.sh' 'notarize-macos-archive.sh' 'xcrun stapler 
     fi
 done
 PUBLISH_SCRIPT="${SCRIPT_DIR}/release-publish.sh"
-for required_artifact in 'require_release_artifact "OpenVibely_${VERSION}_darwin_amd64.app.zip"' 'require_release_artifact "OpenVibely_${VERSION}_darwin_arm64.app.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_amd64_desktop-cli.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_arm64_desktop-cli.zip"' 'require_release_artifact "openvibely_${VERSION}_linux_amd64_desktop.tar.gz"' 'require_release_artifact "openvibely_${VERSION}_linux_arm64_desktop.tar.gz"'; do
+for required_artifact in 'require_release_artifact "openvibely_${VERSION}_darwin_amd64_server.zip"' 'require_release_artifact "openvibely_${VERSION}_darwin_arm64_server.zip"' 'require_release_artifact "openvibely_${VERSION}_linux_amd64_server.tar.gz"' 'require_release_artifact "openvibely_${VERSION}_linux_arm64_server.tar.gz"' 'require_release_artifact "openvibely_${VERSION}_windows_amd64_server.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_arm64_server.zip"' 'require_release_artifact "OpenVibely_${VERSION}_darwin_amd64.app.zip"' 'require_release_artifact "OpenVibely_${VERSION}_darwin_arm64.app.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_amd64_desktop.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_arm64_desktop.zip"' 'require_release_artifact "openvibely_${VERSION}_linux_amd64_desktop.tar.gz"' 'require_release_artifact "openvibely_${VERSION}_linux_arm64_desktop.tar.gz"'; do
     if grep -Fq "$required_artifact" "$PUBLISH_SCRIPT"; then
-        pass "release publish requires desktop artifact: ${required_artifact}"
+        pass "release publish requires artifact: ${required_artifact}"
     else
-        fail "release publish can omit required desktop artifact: ${required_artifact}"
+        fail "release publish can omit required artifact: ${required_artifact}"
     fi
 done
 

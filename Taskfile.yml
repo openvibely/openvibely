@@ -4,7 +4,7 @@ vars:
   APP_NAME: openvibely-desktop
   BIN_DIR: bin
   DESKTOP_PACKAGE: ./cmd/desktop
-  CROSS_IMAGE: '{{.CROSS_IMAGE | default "wails-cross"}}'
+  CROSS_IMAGE: '{{.CROSS_IMAGE | default "wails-cross-amd64"}}'
   CROSS_PLATFORM: '{{.CROSS_PLATFORM | default "linux/amd64"}}'
 
 tasks:

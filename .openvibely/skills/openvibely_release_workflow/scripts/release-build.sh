@@ -15,8 +15,8 @@
 #   openvibely_<version>_linux_arm64_server.tar.gz
 #   openvibely_<version>_windows_amd64_server.zip
 #   openvibely_<version>_windows_arm64_server.zip
-#   openvibely_<version>_windows_amd64_desktop-cli.zip
-#   openvibely_<version>_windows_arm64_desktop-cli.zip
+#   openvibely_<version>_windows_amd64_desktop.zip
+#   openvibely_<version>_windows_arm64_desktop.zip
 #   openvibely_<version>_linux_amd64_desktop.tar.gz
 #   openvibely_<version>_linux_arm64_desktop.tar.gz
 #   SHA256SUMS
@@ -223,14 +223,10 @@ BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 build_binary() {
     local output="$1" pkg="$2" goos="$3" goarch="$4"
     local cgo="${5:-0}"
-    local cc="${6:-}"
-    local artifact="binary"
-    [[ "$pkg" == "./cmd/desktop" ]] && artifact="desktop"
-    local ldflags="-s -w -X github.com/openvibely/openvibely/internal/buildinfo.Version=${VERSION} -X github.com/openvibely/openvibely/internal/buildinfo.Commit=${BUILD_COMMIT} -X github.com/openvibely/openvibely/internal/buildinfo.BuildTime=${BUILD_TIME} -X github.com/openvibely/openvibely/internal/buildinfo.Artifact=${artifact} -X github.com/openvibely/openvibely/internal/buildinfo.ReleaseKeyID=${RELEASE_KEY_ID} -X github.com/openvibely/openvibely/internal/buildinfo.ReleasePublicKey=${RELEASE_PUBLIC_KEY}"
+    local ldflags="-s -w -X github.com/openvibely/openvibely/internal/buildinfo.Version=${VERSION} -X github.com/openvibely/openvibely/internal/buildinfo.Commit=${BUILD_COMMIT} -X github.com/openvibely/openvibely/internal/buildinfo.BuildTime=${BUILD_TIME} -X github.com/openvibely/openvibely/internal/buildinfo.Artifact=binary -X github.com/openvibely/openvibely/internal/buildinfo.ReleaseKeyID=${RELEASE_KEY_ID} -X github.com/openvibely/openvibely/internal/buildinfo.ReleasePublicKey=${RELEASE_PUBLIC_KEY}"
 
     log "Building $goos/$goarch → $output (CGO_ENABLED=${cgo})"
     local cmd=(env GOOS="$goos" GOARCH="$goarch" CGO_ENABLED="$cgo")
-    [[ -n "$cc" ]] && cmd+=(CC="$cc")
     cmd+=(go build -ldflags="$ldflags" -o "$output" "$pkg")
     run "${cmd[@]}"
 }
@@ -443,7 +439,7 @@ else
 fi
 
 ###############################################################################
-# 6. Windows desktop-cli
+# 6. Windows desktop
 ###############################################################################
 
 if [[ -n "$WINDOWS_DESKTOP_BINARY" ]]; then
@@ -462,7 +458,7 @@ fi
 if [[ "${DRY_RUN:-0}" != "1" && ! -f "$TMP_BIN/desktop_windows_arm64.exe" ]]; then
     fail "Official releases require a Windows arm64 desktop build."
 elif [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo -e "${YELLOW}[DRY-RUN]${NC} Would build Windows desktop-cli artifacts with Go cross-compilation"
+    echo -e "${YELLOW}[DRY-RUN]${NC} Would build Windows desktop artifacts with Go cross-compilation"
 fi
 sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe"
 sign_windows_binary "$TMP_BIN/desktop_windows_arm64.exe"
@@ -566,7 +562,7 @@ package_server_zip windows arm64
 
 package_windows_desktop_zip() {
     local goarch="$1"
-    local artifact="openvibely_${VERSION}_windows_${goarch}_desktop-cli.zip"
+    local artifact="openvibely_${VERSION}_windows_${goarch}_desktop.zip"
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}[DRY-RUN]${NC} Would package $artifact"
         return

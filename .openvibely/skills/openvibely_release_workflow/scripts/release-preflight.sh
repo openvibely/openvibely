@@ -29,11 +29,6 @@ fail() { err "$*"; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=release-version.sh
 source "${SCRIPT_DIR}/release-version.sh"
-REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
-if [[ -n "$REPO_ROOT" ]]; then
-    export PATH="${REPO_ROOT}/.tools/gh/bin:${PATH}"
-    export PATH="${REPO_ROOT}/.tools/wails3/bin:${PATH}"
-fi
 
 ###############################################################################
 # 1. Input: parse and normalize semver
@@ -53,6 +48,12 @@ fi
 
 TAG="v${VERSION}"
 log "Normalized version: ${VERSION}  Tag: ${TAG}"
+
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$REPO_ROOT" ]]; then
+    export PATH="${REPO_ROOT}/.tools/gh/bin:${PATH}"
+    export PATH="${REPO_ROOT}/.tools/wails3/bin:${PATH}"
+fi
 
 ###############################################################################
 # 2. Required tools
@@ -190,15 +191,15 @@ fi
 
 # Windows desktop build check
 if [[ -n "${OPENVIBELY_WINDOWS_DESKTOP_BINARY:-}" ]]; then
-    log "Windows amd64 desktop-cli prebuilt artifact configured; Windows arm64 desktop-cli will be built with Go cross-compilation."
+    log "Windows amd64 desktop prebuilt artifact configured; Windows arm64 desktop will be built with Go cross-compilation."
 elif [[ "${OPENVIBELY_WINDOWS_DESKTOP_CGO:-0}" == "1" ]]; then
     if command -v x86_64-w64-mingw32-gcc &>/dev/null || { { command -v wails3 &>/dev/null || [[ -n "${OPENVIBELY_WAILS3:-}" ]]; } && command -v docker &>/dev/null; }; then
-        log "Windows amd64 desktop-cli CGO build supported through mingw-w64 or the Wails Docker path; Windows arm64 uses Go cross-compilation."
+        log "Windows amd64 desktop CGO build supported through mingw-w64 or the Wails Docker path; Windows arm64 uses Go cross-compilation."
     else
         warn "OPENVIBELY_WINDOWS_DESKTOP_CGO=1 but neither mingw-w64 nor wails3+Docker is available. Official release-build will fail."
     fi
 elif go env GOOS GOARCH >/dev/null 2>&1; then
-    log "Windows desktop-cli artifacts will be built for amd64 and arm64 with Go cross-compilation (CGO disabled)."
+    log "Windows desktop artifacts will be built for amd64 and arm64 with Go cross-compilation (CGO disabled)."
 else
     warn "Unable to verify Go cross-compilation support. Official release-build may fail."
 fi

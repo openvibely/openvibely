@@ -64,7 +64,7 @@ Before a real non-dry-run release, confirm the exact commit that will receive th
 | `az` | Fetch Azure Artifact Signing access token | installed locally under `.tools/azure-cli`, or replaced by `AZURE_ACCESS_TOKEN` |
 | `docker` *(optional)* | Build/push Docker image and host Wails Linux desktop cross-builds | https://docker.com |
 | `wails3` | Run desktop Taskfile builds and Wails Docker build paths | installed locally under `.tools/wails3` by signing setup when missing |
-| `x86_64-w64-mingw32-gcc` *(optional)* | CGO-enabled Windows desktop-cli fallback | `brew install mingw-w64` |
+| `x86_64-w64-mingw32-gcc` *(optional)* | CGO-enabled Windows desktop fallback | `brew install mingw-w64` |
 
 **Platform builds:** macOS desktop `.app` bundles require a macOS host. Linux desktop binaries for amd64 and arm64 require native Linux build jobs, Wails v3 Docker/Taskfile builds, or `OPENVIBELY_LINUX_DESKTOP_BINARY` plus `OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY`. Windows desktop binaries for amd64 and arm64 normally build through Wails with Go cross-compilation (`CGO_ENABLED=0`); `OPENVIBELY_WINDOWS_DESKTOP_BINARY` can supply a prebuilt amd64 artifact, and `OPENVIBELY_WINDOWS_DESKTOP_CGO=1` uses either `mingw-w64` or the Wails Docker path for a CGO-enabled Windows amd64 build. Official release builds fail if any required desktop artifact is unavailable.
 
@@ -238,8 +238,8 @@ Use the preferred style from `references/release-note-style.md` when rewriting r
 | `openvibely_<version>_linux_arm64_server.tar.gz` | Linux server binary (ARM64) |
 | `openvibely_<version>_windows_amd64_server.zip` | Windows server binary zip (x86_64) |
 | `openvibely_<version>_windows_arm64_server.zip` | Windows server binary zip (ARM64) |
-| `openvibely_<version>_windows_amd64_desktop-cli.zip` | Signed Windows desktop binary zip (x86_64) |
-| `openvibely_<version>_windows_arm64_desktop-cli.zip` | Signed Windows desktop binary zip (ARM64) |
+| `openvibely_<version>_windows_amd64_desktop.zip` | Signed Windows desktop binary zip (x86_64) |
+| `openvibely_<version>_windows_arm64_desktop.zip` | Signed Windows desktop binary zip (ARM64) |
 | `openvibely_<version>_linux_amd64_desktop.tar.gz` | Linux desktop binary tarball (x86_64) |
 | `openvibely_<version>_linux_arm64_desktop.tar.gz` | Linux desktop binary tarball (ARM64) |
 | `SHA256SUMS` | SHA-256 checksums for all artifacts |
@@ -384,7 +384,7 @@ Before publishing, verify the docs changes are included in the release branch/ta
 These are preserved from v0.1.0 and should appear in every release's notes unless resolved:
 
 1. **Linux desktop** — Artifacts are built for amd64 and arm64, either natively on Linux with GTK/WebKit dependencies, through Wails v3 Docker/Taskfile builds, or supplied through `OPENVIBELY_LINUX_DESKTOP_BINARY` and `OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY`; an official release fails if either artifact is unavailable.
-2. **Windows desktop-cli** — Artifacts are signed executable zips, not installers, for amd64 and arm64. They normally build through Wails with Go cross-compilation (`CGO_ENABLED=0`); use `OPENVIBELY_WINDOWS_DESKTOP_BINARY` to supply a prebuilt amd64 artifact, or `OPENVIBELY_WINDOWS_DESKTOP_CGO=1` plus `mingw-w64`/Wails Docker for a CGO-enabled Windows amd64 build. An official release fails if either artifact is unavailable.
+2. **Windows desktop** — Artifacts are signed executable zips, not installers, for amd64 and arm64. They normally build through Wails with Go cross-compilation (`CGO_ENABLED=0`); use `OPENVIBELY_WINDOWS_DESKTOP_BINARY` to supply a prebuilt amd64 artifact, or `OPENVIBELY_WINDOWS_DESKTOP_CGO=1` plus `mingw-w64`/Wails Docker for a CGO-enabled Windows amd64 build. An official release fails if either artifact is unavailable.
 3. **Docker / VPS storage** — Mount `/data` as a persistent volume; do not rely on the container filesystem for database or repos.
 
 ---
@@ -457,8 +457,8 @@ dist/<version>/
 ├── openvibely_<version>_linux_arm64_server.tar.gz
 ├── openvibely_<version>_windows_amd64_server.zip
 ├── openvibely_<version>_windows_arm64_server.zip
-├── openvibely_<version>_windows_amd64_desktop-cli.zip
-├── openvibely_<version>_windows_arm64_desktop-cli.zip
+├── openvibely_<version>_windows_amd64_desktop.zip
+├── openvibely_<version>_windows_arm64_desktop.zip
 ├── openvibely_<version>_linux_amd64_desktop.tar.gz
 ├── openvibely_<version>_linux_arm64_desktop.tar.gz
 ├── SHA256SUMS
@@ -495,5 +495,5 @@ Tests cover:
 
 - Tag: `v0.1.0` — commit `d654a06`
 - GitHub release title: `OpenVibely 0.1.0`
-- Assets published: darwin amd64/arm64 desktop `.app.zip`, linux amd64/arm64 desktop tarballs, darwin/linux amd64/arm64 server archives, windows amd64/arm64 server zips, windows amd64/arm64 desktop-cli zips, SHA256SUMS
+- Assets published: darwin amd64/arm64 desktop `.app.zip`, linux amd64/arm64 desktop tarballs, darwin/linux amd64/arm64 server archives, windows amd64/arm64 server zips, windows amd64/arm64 desktop zips, SHA256SUMS
 - Docker image: `openvibely/openvibely:0.1.0`
