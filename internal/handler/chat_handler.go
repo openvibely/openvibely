@@ -315,7 +315,7 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	}
 	agentMsg := components.ChatBubbleStreaming("Assistant", exec.ID, "chat-messages", "", false)
 	// Build context and spawn LLM processing goroutine
-	availableModels, _ := h.llmConfigRepo.List(c.Request().Context())
+	availableModels, _ := h.llmConfigRepo.ListChatSelectionOptions(c.Request().Context())
 	taskContext := h.buildChatContext(c.Request().Context(), projectID, availableModels)
 	personalityContext := h.getPersonalityContext(c.Request().Context(), projectID)
 	workDir := h.resolveWorkDir(c.Request().Context(), projectID)
