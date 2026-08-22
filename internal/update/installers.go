@@ -442,6 +442,9 @@ func currentApplicationBundle() (string, error) {
 		return "", err
 	}
 	if runtime.GOOS != "darwin" {
+		if root, ok := bootstrapManagedDesktopRootForExecutable(path); ok {
+			return root, nil
+		}
 		return path, nil
 	}
 	for path != filepath.Dir(path) {
@@ -453,6 +456,35 @@ func currentApplicationBundle() (string, error) {
 	return "", errors.New("desktop executable is not inside an application bundle")
 }
 
+func bootstrapManagedDesktopRootForExecutable(executable string) (string, bool) {
+	dir := filepath.Dir(executable)
+	for {
+		if isBootstrapManagedDesktopRoot(dir) {
+			return dir, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+func isBootstrapManagedDesktopRoot(path string) bool {
+	data, err := os.ReadFile(filepath.Join(path, ".openvibely-bootstrap.json"))
+	if err != nil {
+		return false
+	}
+	var metadata struct {
+		ManagedBy string `json:"managed_by"`
+		Variant   string `json:"variant"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return false
+	}
+	return metadata.ManagedBy == "openvibely-bootstrap" && metadata.Variant == "desktop"
+}
+
 func validateDesktopDataBoundaries(staged LocalStagedUpdate, protectedPaths []string) error {
 	if !filepath.IsAbs(staged.InstallPath) || staged.BackupPath != staged.InstallPath+".openvibely-backup" {
 		return errors.New("desktop backup paths must identify an absolute application install unit")
@@ -462,8 +494,8 @@ func validateDesktopDataBoundaries(staged LocalStagedUpdate, protectedPaths []st
 		return err
 	}
 	if info.IsDir() {
-		if filepath.Ext(staged.InstallPath) != ".app" {
-			return errors.New("desktop application directory must be a macOS app bundle")
+		if filepath.Ext(staged.InstallPath) != ".app" && !isBootstrapManagedDesktopRoot(staged.InstallPath) {
+			return errors.New("desktop application directory must be a macOS app bundle or bootstrap-managed desktop root")
 		}
 	} else if !info.Mode().IsRegular() {
 		return errors.New("desktop application executable must be a regular file")
