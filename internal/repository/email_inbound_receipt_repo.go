@@ -44,34 +44,17 @@ func (r *EmailInboundReceiptRepo) Record(ctx context.Context, mailboxAddress, me
 // work created for that message. If the receipt already exists, persist is not
 // called and alreadyHandedOff is true.
 func (r *EmailInboundReceiptRepo) WithHandoff(ctx context.Context, mailboxAddress, messageKey string, persist func(SQLExecutor) error) (alreadyHandedOff bool, err error) {
-	if r == nil || r.db == nil {
-		return false, fmt.Errorf("email inbound receipt repository is not configured")
+	var db *sql.DB
+	if r != nil {
+		db = r.db
 	}
-	if persist == nil {
-		return false, fmt.Errorf("email inbound handoff persistence is required")
-	}
-	threadRepo := NewThreadInputRepo(r.db)
-	err = threadRepo.WithImmediateTx(ctx, func(exec SQLExecutor) error {
-		result, err := exec.ExecContext(ctx,
-			`INSERT INTO email_inbound_receipts (mailbox_address, message_key) VALUES (?, ?)
+	return inboundReceiptHandoff(ctx, db, inboundReceiptHandoffSpec{
+		notConfiguredError:   "email inbound receipt repository is not configured",
+		persistRequiredError: "email inbound handoff persistence is required",
+		insertSQL: `INSERT INTO email_inbound_receipts (mailbox_address, message_key) VALUES (?, ?)
 			 ON CONFLICT(mailbox_address, message_key) DO NOTHING`,
-			mailboxAddress, messageKey,
-		)
-		if err != nil {
-			return fmt.Errorf("record email inbound receipt: %w", err)
-		}
-		inserted, err := result.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("check email inbound receipt insertion: %w", err)
-		}
-		if inserted == 0 {
-			alreadyHandedOff = true
-			return nil
-		}
-		if err := persist(exec); err != nil {
-			return err
-		}
-		return nil
-	})
-	return alreadyHandedOff, err
+		insertArgs:        []interface{}{mailboxAddress, messageKey},
+		recordError:       "record email inbound receipt",
+		rowsAffectedError: "check email inbound receipt insertion",
+	}, persist)
 }
