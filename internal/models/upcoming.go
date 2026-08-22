@@ -95,9 +95,12 @@ type FileTypeCount struct {
 
 // ChangeSummary categorizes a commit as feature, bugfix, config, etc.
 type ChangeSummary struct {
-	Features      []string // Commits identified as new features
-	BugFixes      []string // Commits identified as bug fixes
-	ConfigChanges []string // Architecture or configuration changes
+	Features          []string // Example commits identified as new features
+	BugFixes          []string // Example commits identified as bug fixes
+	ConfigChanges     []string // Example architecture or configuration changes
+	FeatureCount      int      // Total feature commits represented by this summary
+	BugFixCount       int      // Total bug-fix commits represented by this summary
+	ConfigChangeCount int      // Total config/refactor commits represented by this summary
 }
 
 // ProjectChanges holds a summary of recent git activity for a project

@@ -713,15 +713,15 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if len(pc.Changes.Features) > 0 {
+		if featureCount := changeCategoryCount(pc.Changes.Features, pc.Changes.FeatureCount); featureCount > 0 {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "<div><div class=\"flex items-center gap-2 mb-1\"><span class=\"badge badge-primary badge-sm\">Features</span> <span class=\"text-xs opacity-60\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var39 string
-			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(pc.Changes.Features)))
+			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", featureCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 230, Col: 86}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 230, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {
@@ -739,7 +739,7 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 				var templ_7745c5c3_Var40 string
 				templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(f)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 234, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 234, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 				if templ_7745c5c3_Err != nil {
@@ -750,15 +750,15 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			if len(pc.Changes.Features) > 5 {
+			if featureCount > 5 {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "<li class=\"opacity-50\">+")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var41 string
-				templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(pc.Changes.Features)-5))
+				templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", featureCount-5))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 237, Col: 80}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 237, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 				if templ_7745c5c3_Err != nil {
@@ -774,15 +774,15 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		if len(pc.Changes.BugFixes) > 0 {
+		if bugFixCount := changeCategoryCount(pc.Changes.BugFixes, pc.Changes.BugFixCount); bugFixCount > 0 {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "<div><div class=\"flex items-center gap-2 mb-1\"><span class=\"badge badge-error badge-sm\">Bug Fixes</span> <span class=\"text-xs opacity-60\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var42 string
-			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(pc.Changes.BugFixes)))
+			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", bugFixCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 246, Col: 86}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 246, Col: 74}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 			if templ_7745c5c3_Err != nil {
@@ -800,7 +800,7 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 				var templ_7745c5c3_Var43 string
 				templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(f)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 250, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 250, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 				if templ_7745c5c3_Err != nil {
@@ -811,15 +811,15 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			if len(pc.Changes.BugFixes) > 5 {
+			if bugFixCount > 5 {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 70, "<li class=\"opacity-50\">+")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var44 string
-				templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(pc.Changes.BugFixes)-5))
+				templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", bugFixCount-5))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 253, Col: 80}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 253, Col: 68}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 				if templ_7745c5c3_Err != nil {
@@ -835,15 +835,15 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		if len(pc.Changes.ConfigChanges) > 0 {
+		if configChangeCount := changeCategoryCount(pc.Changes.ConfigChanges, pc.Changes.ConfigChangeCount); configChangeCount > 0 {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "<div><div class=\"flex items-center gap-2 mb-1\"><span class=\"badge badge-warning badge-sm\">Config / Refactor</span> <span class=\"text-xs opacity-60\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var45 string
-			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(pc.Changes.ConfigChanges)))
+			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", configChangeCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 262, Col: 91}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 262, Col: 80}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 			if templ_7745c5c3_Err != nil {
@@ -861,7 +861,7 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 				var templ_7745c5c3_Var46 string
 				templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(f)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 266, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 266, Col: 34}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 				if templ_7745c5c3_Err != nil {
@@ -872,15 +872,15 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			if len(pc.Changes.ConfigChanges) > 5 {
+			if configChangeCount > 5 {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 77, "<li class=\"opacity-50\">+")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var47 string
-				templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(pc.Changes.ConfigChanges)-5))
+				templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", configChangeCount-5))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 269, Col: 85}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 269, Col: 74}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 				if templ_7745c5c3_Err != nil {
@@ -896,7 +896,7 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		if len(pc.Changes.Features) == 0 && len(pc.Changes.BugFixes) == 0 && len(pc.Changes.ConfigChanges) == 0 {
+		if changeCategoryCount(pc.Changes.Features, pc.Changes.FeatureCount) == 0 && changeCategoryCount(pc.Changes.BugFixes, pc.Changes.BugFixCount) == 0 && changeCategoryCount(pc.Changes.ConfigChanges, pc.Changes.ConfigChangeCount) == 0 {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 80, "<p class=\"text-xs opacity-50\">No categorized changes</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -1000,15 +1000,15 @@ func projectChangesSection(pc *models.ProjectChanges) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		if len(pc.Commits) > 10 {
+		if pc.TotalCommits > len(pc.Commits) {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 91, "<p class=\"text-xs opacity-50 text-center pt-1\">+")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var54 string
-			templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(pc.Commits)-10))
+			templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", pc.TotalCommits-len(pc.Commits)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 303, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/history.templ`, Line: 303, Col: 107}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 			if templ_7745c5c3_Err != nil {
@@ -1116,6 +1116,13 @@ func topFileTypes(fts []models.FileTypeCount) string {
 		parts[i] = fmt.Sprintf("%s (%d)", fts[i].Extension, fts[i].Count)
 	}
 	return strings.Join(parts, ", ")
+}
+
+func changeCategoryCount(items []string, total int) int {
+	if total > 0 || len(items) == 0 {
+		return total
+	}
+	return len(items)
 }
 
 func limitItems(items []string, max int) []string {
