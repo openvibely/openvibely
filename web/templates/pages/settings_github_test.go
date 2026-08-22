@@ -17,6 +17,7 @@ func TestSettingsContent_RendersGitHubStatusVariants(t *testing.T) {
 		expectClass string
 	}{
 		{name: "not configured", status: service.GitHubConnectionStatus{Configured: false}, expectLabel: "Not Configured", expectClass: "badge-ghost"},
+		{name: "not configured with installation", status: service.GitHubConnectionStatus{Configured: false, Connected: true, InstallationID: "123", AccountLogin: "openvibely"}, expectLabel: "Not Configured", expectClass: "badge-ghost"},
 		{name: "not connected", status: service.GitHubConnectionStatus{Configured: true, Connected: false}, expectLabel: "Not Connected", expectClass: "badge-warning"},
 		{name: "connected", status: service.GitHubConnectionStatus{Configured: true, Connected: true, InstallationID: "123", AccountLogin: "openvibely"}, expectLabel: "Connected", expectClass: "badge-success"},
 	}
@@ -76,6 +77,7 @@ func TestChannelConnectionStatusBadgeMapping(t *testing.T) {
 		expectClass string
 	}{
 		{name: "not configured", expectLabel: "Not Configured", expectClass: "badge-ghost"},
+		{name: "not configured wins over connected", connected: true, expectLabel: "Not Configured", expectClass: "badge-ghost"},
 		{name: "connected", configured: true, connected: true, expectLabel: "Connected", expectClass: "badge-success"},
 		{name: "configured offline", configured: true, expectLabel: "Not Connected", expectClass: "badge-warning"},
 		{name: "custom configured label", configured: true, options: channelStatusBadgeOptions{ConfiguredLabel: "Gateway Offline"}, expectLabel: "Gateway Offline", expectClass: "badge-warning"},

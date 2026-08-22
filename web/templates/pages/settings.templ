@@ -37,13 +37,13 @@ func channelConnectionStatusBadge(configured, connectedOrRunning bool, options c
 		notConfiguredClass = "badge-ghost"
 	}
 
+	if !configured {
+		return channelStatusBadge{Label: notConfiguredLabel, Class: notConfiguredClass}
+	}
 	if connectedOrRunning {
 		return channelStatusBadge{Label: "Connected", Class: "badge-success"}
 	}
-	if configured {
-		return channelStatusBadge{Label: configuredLabel, Class: "badge-warning"}
-	}
-	return channelStatusBadge{Label: notConfiguredLabel, Class: notConfiguredClass}
+	return channelStatusBadge{Label: configuredLabel, Class: "badge-warning"}
 }
 
 func githubConnectionBadge(status service.GitHubConnectionStatus) channelStatusBadge {
