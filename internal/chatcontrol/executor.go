@@ -176,7 +176,7 @@ func markDuplicateNoopDiscovery(output string) string {
 		return output
 	}
 	result["duplicate_noop"] = true
-	result["note"] = "Identical list_tasks parameters already returned no tasks with total=0 and has_more=false in this run; use a different query/filter/offset or proceed without repeating this no-op discovery."
+	result["note"] = "Identical list_tasks parameters already returned no tasks with total=0 and has_more=false in this run; do not repeat this no-op discovery or try alternate lifecycle filters for the same query."
 	encoded, err := json.Marshal(result)
 	if err != nil {
 		return output

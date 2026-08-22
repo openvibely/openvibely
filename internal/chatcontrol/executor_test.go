@@ -107,8 +107,11 @@ func TestBuildRuntimeToolExecutor_ListTasksDuplicateEmptyNoopIsGuarded(t *testin
 	if err != nil || !handled || isError || calls != 1 {
 		t.Fatalf("expected non-consecutive duplicate list_tasks call to be guarded, calls=%d handled=%v isError=%v err=%v out=%s", calls, handled, isError, err, out)
 	}
-	if !strings.Contains(out, `"duplicate_noop":true`) || !strings.Contains(out, "Identical list_tasks parameters already returned no tasks") {
-		t.Fatalf("expected duplicate noop marker and note, got %s", out)
+	if !strings.Contains(out, `"duplicate_noop":true`) || !strings.Contains(out, "Identical list_tasks parameters already returned no tasks") || !strings.Contains(out, "do not repeat this no-op discovery") {
+		t.Fatalf("expected duplicate noop marker and stop-repeating note, got %s", out)
+	}
+	if strings.Contains(out, "use a different query/filter/offset") {
+		t.Fatalf("duplicate noop note should not encourage alternate lifecycle filters, got %s", out)
 	}
 
 	out, handled, isError, err = executor(ctx, "list_tasks", json.RawMessage(`{"limit":10,"offset":10,"query":"#999"}`))

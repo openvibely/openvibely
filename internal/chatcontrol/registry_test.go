@@ -36,6 +36,9 @@ func TestRegistry_ListTasksDescriptionDiscouragesLifecycleEnumeration(t *testing
 	if !strings.Contains(def.Description, "Returned filter values echo the parameters you sent") {
 		t.Fatalf("list_tasks description should explain returned filters are echoes, got %q", def.Description)
 	}
+	if !strings.Contains(def.Description, "do not immediately repeat the same query just to get an unfiltered echo") {
+		t.Fatalf("list_tasks description should discourage retrying for an unfiltered echo, got %q", def.Description)
+	}
 	if !strings.Contains(def.Description, "Do not enumerate lifecycle filters after an empty total=0, has_more=false result") {
 		t.Fatalf("list_tasks description should discourage empty lifecycle enumeration, got %q", def.Description)
 	}

@@ -181,7 +181,7 @@ func ExecuteListTasksTool(ctx context.Context, taskRepo *repository.TaskRepo, pr
 		},
 	}
 	if result.Total == 0 && !result.HasMore {
-		result.Note = "No tasks matched this exact list_tasks query/filter in the current project; has_more=false means there are no further pages for these parameters. The filter object echoes the parameters you sent; category/status values in it are not runtime defaults and are not a reason to retry the same query."
+		result.Note = "No tasks matched this exact list_tasks query/filter in the current project; has_more=false means there are no further pages for these parameters. The filter object echoes the parameters you sent; category/status values in it are not runtime defaults and are not a reason to retry the same query. If you accidentally supplied category/status, do not immediately repeat the same query just to get an unfiltered echo."
 	}
 	b, err := json.Marshal(result)
 	if err != nil {

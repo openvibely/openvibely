@@ -481,7 +481,8 @@ func TestGitHubSDLCPromptsUseRepositoryFallbackAndTrustedLocalDeduplication(t *t
 	require.Contains(t, githubSDLCDevInboxPrompt, "omit `category` and `status` for a broad search across all visible task categories and statuses")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Supplying `category` or `status` restricts results to only that lifecycle state")
 	require.Contains(t, githubSDLCDevInboxPrompt, "A returned `filter` object only echoes the parameters sent to `list_tasks`")
-	require.Contains(t, githubSDLCDevInboxPrompt, "do not treat those values as runtime defaults and do not retry the same issue query just to correct the echo")
+	require.Contains(t, githubSDLCDevInboxPrompt, "count that lookup as the reconciliation attempt for that issue")
+	require.Contains(t, githubSDLCDevInboxPrompt, "do not retry the same issue query just to obtain an unfiltered echo")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not enumerate lifecycle state combinations after an empty result with `total=0` and `has_more=false`")
 	require.Contains(t, githubSDLCDevInboxPrompt, "Do not call `execute_tasks` for a newly created Active task")
 	require.Contains(t, githubSDLCDevInboxPrompt, "After `create_task` succeeds for a newly created Active task, do not call `list_tasks` again for that issue")
@@ -910,7 +911,8 @@ func TestCustomAutomationValidatesGitHubHandoffsAndRejectsHumanBoundaryBypasses(
 	require.Contains(t, prompt, "omit category and status for a broad search across all visible task categories and statuses")
 	require.Contains(t, prompt, "Supplying category or status restricts results to only that lifecycle state")
 	require.Contains(t, prompt, "A returned filter object only echoes the parameters sent to list_tasks")
-	require.Contains(t, prompt, "do not treat those values as runtime defaults and do not retry the same issue query just to correct the echo")
+	require.Contains(t, prompt, "count that lookup as the reconciliation attempt for that issue")
+	require.Contains(t, prompt, "do not retry the same issue query just to obtain an unfiltered echo")
 	require.Contains(t, prompt, "After create_task succeeds for a newly created Active task, do not call list_tasks again for that issue")
 
 	backlogImplementation := candidate
