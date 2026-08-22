@@ -336,6 +336,115 @@ func TestMigration170IndexesSystemUpdateQueuedThreadInputCount(t *testing.T) {
 	}
 }
 
+const recoverableQueuedChatProjectIDsAfterQuery = `
+	SELECT ti.project_id
+	FROM thread_inputs ti
+	LEFT JOIN executions guarded ON guarded.id = ti.run_execution_id
+	WHERE ti.scope = 'chat'
+	  AND ti.input_mode = 'queued'
+	  AND ti.input_status = 'pending'
+	  AND COALESCE(ti.project_id, '') != ''
+	  AND ti.project_id > ?
+	  AND (ti.run_execution_id IS NULL OR guarded.status IN ('completed', 'failed', 'cancelled'))
+	  AND NOT EXISTS (
+	    SELECT 1
+	    FROM executions active
+	    JOIN tasks active_task ON active_task.id = active.task_id
+	    WHERE active_task.project_id = ti.project_id
+	      AND active_task.category = 'chat'
+	      AND active.status = 'running'
+	  )
+	GROUP BY ti.project_id
+	ORDER BY ti.project_id
+	LIMIT ?`
+
+func TestMigration171IndexesRecoverableQueuedChatProjectPaging(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "thread-inputs-recover-chat-171.db")
+	db := openMigrationTestDB(t, dbPath)
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 170); err != nil {
+		t.Fatal(err)
+	}
+	seedMigration171RecoverableChatFixture(t, db, 5000, 10)
+
+	before := explainQueryPlan(t, db, recoverableQueuedChatProjectIDsAfterQuery, "", 100)
+	if !strings.Contains(before, "USING INDEX idx_thread_inputs_pending_chat") {
+		t.Fatalf("migration 170 recoverable chat plan = %q, want existing project-ordered chat index baseline", before)
+	}
+	if !strings.Contains(before, "scope=? AND project_id>?") {
+		t.Fatalf("migration 170 recoverable chat plan = %q, want project-keyed baseline before pending filters", before)
+	}
+
+	if err := goose.UpTo(db, ".", 171); err != nil {
+		t.Fatal(err)
+	}
+
+	var ids []string
+	rows, err := db.Query(recoverableQueuedChatProjectIDsAfterQuery, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 10 || ids[0] != "recover-chat-00991" || ids[len(ids)-1] != "recover-chat-01000" {
+		t.Fatalf("recoverable chat ids = %#v, want sparse pending projects 00991..01000", ids)
+	}
+
+	after := explainQueryPlan(t, db, recoverableQueuedChatProjectIDsAfterQuery, "", 100)
+	if !strings.Contains(after, "SEARCH ti USING COVERING INDEX idx_thread_inputs_recover_chat_project") {
+		t.Fatalf("migration 171 recoverable chat plan = %q, want recovery covering index", after)
+	}
+	if !strings.Contains(after, "scope=? AND input_status=? AND input_mode=? AND project_id>?") {
+		t.Fatalf("migration 171 recoverable chat plan = %q, want keyset search by scope/status/mode/project", after)
+	}
+	if strings.Contains(after, "USING INDEX idx_thread_inputs_pending_chat (scope=? AND project_id>?") {
+		t.Fatalf("migration 171 recoverable chat plan = %q, want no historical chat scan by project before pending filters", after)
+	}
+
+	scopedPlans := map[string]struct {
+		query string
+		args  []any
+		index string
+	}{
+		"chat promotion": {
+			query: `SELECT id FROM thread_inputs WHERE scope = 'chat' AND input_mode = 'queued' AND input_status = 'pending' AND project_id = ? ORDER BY queue_position ASC, created_at ASC, rowid ASC LIMIT 1`,
+			args:  []any{"recover-chat-00991"},
+			index: "idx_thread_inputs_pending_chat",
+		},
+		"chat pending list": {
+			query: `SELECT id FROM thread_inputs WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending' AND NOT (input_mode = 'steering' AND COALESCE(expected_turn_id, '') = '') ORDER BY queue_position ASC, created_at ASC, rowid ASC`,
+			args:  []any{"recover-chat-00991"},
+			index: "idx_thread_inputs_pending_chat",
+		},
+	}
+	for name, tc := range scopedPlans {
+		plan := explainQueryPlan(t, db, tc.query, tc.args...)
+		if !strings.Contains(plan, tc.index) {
+			t.Fatalf("%s plan after migration 171 = %q, want %s", name, plan, tc.index)
+		}
+		if name == "chat promotion" && strings.Contains(plan, "USE TEMP B-TREE") {
+			t.Fatalf("%s plan after migration 171 = %q, want existing FIFO ordering index without temp sort", name, plan)
+		}
+	}
+
+	countPlan := explainQueryPlan(t, db, systemUpdateQueuedCountQuery)
+	if !strings.Contains(countPlan, "SEARCH thread_inputs USING COVERING INDEX idx_thread_inputs_pending_queued_count") {
+		t.Fatalf("migration 171 update queued-count plan = %q, want global pending queued count index", countPlan)
+	}
+}
+
 func TestMigration159IndexesTaskLifecycleActivityOrdering(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "lifecycle-task-started-index-159.db")
 	db := openMigrationTestDB(t, dbPath)
@@ -533,6 +642,52 @@ func seedMigration170QueuedCountFixture(tb testing.TB, db *sql.DB, threadInputs 
 			('chat-pending-170', 'chat', 'target-project-170', NULL, 'queued', 'pending', 'chat pending', 1, '2026-01-02 00:00:01');
 	`); err != nil {
 		tb.Fatalf("seed migration 170 sparse pending thread inputs: %v", err)
+	}
+}
+
+func seedMigration171RecoverableChatFixture(tb testing.TB, db *sql.DB, historicalInputs, pendingProjects int) {
+	tb.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO projects (id, name, description, repo_path) VALUES ('recover-chat-default', 'Migration 171 default', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt) VALUES ('recover-chat-task-171', 'recover-chat-default', 'Migration 171 Task', 'active', 0, 'completed', 'p')`); err != nil {
+		tb.Fatalf("seed migration 171 default rows: %v", err)
+	}
+	if _, err := db.Exec(`
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 1000)
+		INSERT INTO projects (id, name, description, repo_path)
+		SELECT 'recover-chat-' || printf('%05d', n), 'Recover Chat ' || n, '', ''
+		FROM seq`); err != nil {
+		tb.Fatalf("seed migration 171 projects: %v", err)
+	}
+	if _, err := db.Exec(`
+		WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM seq WHERE n < ?)
+		INSERT INTO thread_inputs (id, scope, project_id, input_mode, input_status, content, queue_position, created_at)
+		SELECT
+			'recover-hist-171-' || printf('%06d', n),
+			'chat',
+			'recover-chat-' || printf('%05d', ((n - 1) % 1000) + 1),
+			'queued',
+			CASE WHEN n % 2 = 0 THEN 'applied' ELSE 'cancelled' END,
+			'historical chat input',
+			n,
+			datetime('2026-01-01 00:00:00', '+' || n || ' seconds')
+		FROM seq`, historicalInputs); err != nil {
+		tb.Fatalf("seed migration 171 historical thread inputs: %v", err)
+	}
+	if _, err := db.Exec(`
+		WITH RECURSIVE seq(n) AS (SELECT 1000 - ? + 1 UNION ALL SELECT n + 1 FROM seq WHERE n < 1000)
+		INSERT INTO thread_inputs (id, scope, project_id, input_mode, input_status, content, queue_position, created_at)
+		SELECT
+			'recover-pending-171-' || printf('%05d', n),
+			'chat',
+			'recover-chat-' || printf('%05d', n),
+			'queued',
+			'pending',
+			'pending chat input',
+			n,
+			'2026-01-02 00:00:00'
+		FROM seq`, pendingProjects); err != nil {
+		tb.Fatalf("seed migration 171 pending thread inputs: %v", err)
 	}
 }
 
@@ -1036,8 +1191,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 170 {
-		t.Fatalf("max goose version = %d, want 170", maxVersion)
+	if maxVersion != 171 {
+		t.Fatalf("max goose version = %d, want 171", maxVersion)
 	}
 }
 
@@ -1176,8 +1331,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 170 {
-		t.Fatalf("max goose version = %d, want 170", maxVersion)
+	if maxVersion != 171 {
+		t.Fatalf("max goose version = %d, want 171", maxVersion)
 	}
 }
 
@@ -1625,8 +1780,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 170 {
-		t.Fatalf("max goose version = %d, want 170", maxVersion)
+	if maxVersion != 171 {
+		t.Fatalf("max goose version = %d, want 171", maxVersion)
 	}
 }
 
@@ -1961,8 +2116,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 170 {
-		t.Fatalf("max goose version = %d, want 170", maxVersion)
+	if maxVersion != 171 {
+		t.Fatalf("max goose version = %d, want 171", maxVersion)
 	}
 }
 

@@ -215,6 +215,84 @@ func TestThreadInputRepo_ListRecoverableQueuedChatProjectIDs(t *testing.T) {
 	}
 }
 
+func TestThreadInputRepo_ListRecoverableQueuedChatProjectIDs_KeysetPagesAndGuards(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO projects (id, name, description, repo_path) VALUES
+			('chat-recover-001', 'Chat Recover 001', '', ''),
+			('chat-recover-002', 'Chat Recover 002', '', ''),
+			('chat-recover-003', 'Chat Recover 003', '', ''),
+			('chat-recover-004', 'Chat Recover 004', '', ''),
+			('chat-recover-005', 'Chat Recover 005', '', ''),
+			('chat-recover-006', 'Chat Recover 006', '', ''),
+			('chat-recover-007', 'Chat Recover 007', '', '');
+		INSERT INTO tasks (id, project_id, title, category, priority, status, prompt) VALUES
+			('chat-recover-terminal-task', 'chat-recover-003', 'Terminal guard', 'active', 2, 'completed', 'p'),
+			('chat-recover-active-chat-task', 'chat-recover-004', 'Active Chat', 'chat', 2, 'running', 'p'),
+			('chat-recover-running-guard-task', 'chat-recover-005', 'Running guard', 'active', 2, 'running', 'p'),
+			('chat-recover-cancelled-task', 'chat-recover-006', 'Cancelled guard', 'active', 2, 'cancelled', 'p');
+		INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent) VALUES
+			('chat-recover-completed-exec', 'chat-recover-terminal-task', ?, 'completed', 'done'),
+			('chat-recover-active-chat-exec', 'chat-recover-active-chat-task', ?, 'running', 'active'),
+			('chat-recover-running-guard-exec', 'chat-recover-running-guard-task', ?, 'running', 'active'),
+			('chat-recover-cancelled-exec', 'chat-recover-cancelled-task', ?, 'cancelled', 'cancelled');
+		INSERT INTO thread_inputs (id, scope, project_id, run_execution_id, agent_config_id, input_mode, input_status, content, queue_position, chat_mode) VALUES
+			('chat-recover-history', 'chat', 'chat-recover-001', NULL, ?, 'queued', 'applied', 'old applied', 1, 'orchestrate'),
+			('chat-recover-eligible-002-a', 'chat', 'chat-recover-002', NULL, ?, 'queued', 'pending', 'first pending', 1, 'orchestrate'),
+			('chat-recover-eligible-002-b', 'chat', 'chat-recover-002', NULL, ?, 'queued', 'pending', 'second pending same project', 2, 'orchestrate'),
+			('chat-recover-eligible-003', 'chat', 'chat-recover-003', 'chat-recover-completed-exec', ?, 'queued', 'pending', 'completed guard', 1, 'orchestrate'),
+			('chat-recover-active-004', 'chat', 'chat-recover-004', NULL, ?, 'queued', 'pending', 'active chat should skip', 1, 'orchestrate'),
+			('chat-recover-running-guard-005', 'chat', 'chat-recover-005', 'chat-recover-running-guard-exec', ?, 'queued', 'pending', 'running guard should skip', 1, 'orchestrate'),
+			('chat-recover-cancelled-006', 'chat', 'chat-recover-006', 'chat-recover-cancelled-exec', ?, 'queued', 'pending', 'cancelled guard', 1, 'orchestrate'),
+			('chat-recover-eligible-007', 'chat', 'chat-recover-007', NULL, ?, 'queued', 'pending', 'later pending', 1, 'orchestrate')`, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID, agent.ID); err != nil {
+		t.Fatalf("seed recoverable chat fixture: %v", err)
+	}
+
+	firstPage, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, "", 2)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedChatProjectIDsAfter first page: %v", err)
+	}
+	wantFirst := []string{"chat-recover-002", "chat-recover-003"}
+	if strings.Join(firstPage, ",") != strings.Join(wantFirst, ",") {
+		t.Fatalf("first recovery page = %#v, want %#v", firstPage, wantFirst)
+	}
+
+	secondPage, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, firstPage[len(firstPage)-1], 2)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedChatProjectIDsAfter second page: %v", err)
+	}
+	wantSecond := []string{"chat-recover-006", "chat-recover-007"}
+	if strings.Join(secondPage, ",") != strings.Join(wantSecond, ",") {
+		t.Fatalf("second recovery page = %#v, want %#v", secondPage, wantSecond)
+	}
+
+	thirdPage, err := repo.ListRecoverableQueuedChatProjectIDsAfter(ctx, secondPage[len(secondPage)-1], 2)
+	if err != nil {
+		t.Fatalf("ListRecoverableQueuedChatProjectIDsAfter third page: %v", err)
+	}
+	if len(thirdPage) != 0 {
+		t.Fatalf("third recovery page = %#v, want none", thirdPage)
+	}
+}
+
+func TestThreadInputRepo_ListRecoverableQueuedChatProjectIDsAfterQueryPlan(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	plan := explainThreadInputQueryPlan(t, db, listRecoverableQueuedChatProjectIDsAfterSQL, "", 100)
+	if !strings.Contains(plan, "SEARCH ti USING COVERING INDEX idx_thread_inputs_recover_chat_project") {
+		t.Fatalf("recoverable chat project plan = %q, want recovery covering index", plan)
+	}
+	if !strings.Contains(plan, "scope=? AND input_status=? AND input_mode=? AND project_id>?") {
+		t.Fatalf("recoverable chat project plan = %q, want keyset search by scope/status/mode/project", plan)
+	}
+	if strings.Contains(plan, "USING INDEX idx_thread_inputs_pending_chat (scope=? AND project_id>?") {
+		t.Fatalf("recoverable chat project plan = %q, want no historical chat scan by project before pending filters", plan)
+	}
+}
+
 func TestThreadInputRepo_ClaimQueuedForTaskExecutionRequiresNoActiveExecution(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -1605,6 +1683,28 @@ func TestThreadInputRepo_QueuedPromotionBlockedByOrdinaryTaskClaim(t *testing.T)
 	if exec.ID != "" {
 		t.Fatalf("blocked promotion created execution %s", exec.ID)
 	}
+}
+
+func explainThreadInputQueryPlan(t testing.TB, db *sql.DB, query string, args ...any) string {
+	t.Helper()
+	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatalf("explain query plan: %v", err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	return strings.Join(details, "; ")
 }
 
 func createThreadInputProject(t *testing.T, ctx context.Context, db *sql.DB) *models.Project {
