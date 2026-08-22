@@ -251,6 +251,43 @@ func TestRegistry_DestructiveActionsNeedConfirmation(t *testing.T) {
 	}
 }
 
+func TestSaveCustomPersonalityRegisteredOrchestrateOnly(t *testing.T) {
+	def := Get("save_custom_personality")
+	if def == nil {
+		t.Fatal("save_custom_personality missing from registry")
+	}
+	if def.Domain != DomainPersonality || def.Access != AccessWrite {
+		t.Fatalf("save_custom_personality domain/access = %s/%s, want personality/write", def.Domain, def.Access)
+	}
+	for _, surface := range AllSurfaces {
+		if err := IsAllowed("save_custom_personality", models.ChatModeOrchestrate, surface); err != nil {
+			t.Fatalf("save_custom_personality should be allowed in orchestrate on %s: %v", surface, err)
+		}
+		mustContain(t, toolDefNames(ToolDefsForContext(models.ChatModeOrchestrate, surface, true)), "save_custom_personality")
+		if err := IsAllowed("save_custom_personality", models.ChatModePlan, surface); err == nil {
+			t.Fatalf("save_custom_personality should be denied in plan on %s", surface)
+		}
+		mustNotContain(t, toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true)), "save_custom_personality")
+	}
+	var schema struct {
+		Required   []string                   `json:"required"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	for _, name := range []string{"mode", "name", "system_prompt", "key", "description", "activate"} {
+		if _, ok := schema.Properties[name]; !ok {
+			t.Fatalf("save_custom_personality schema missing %s", name)
+		}
+	}
+	required := map[string]bool{}
+	for _, name := range schema.Required {
+		required[name] = true
+	}
+	mustContain(t, required, "mode", "name", "system_prompt")
+}
+
 func TestCreateProjectRegisteredOrchestrateOnly(t *testing.T) {
 	def := Get("create_project")
 	if def == nil {
@@ -353,7 +390,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 
 	// Must NOT have write actions
 	mustNotContain(t, names, "create_task", "edit_task", "execute_tasks",
-		"set_personality", "schedule_task", "delete_schedule", "modify_schedule",
+		"set_personality", "save_custom_personality", "schedule_task", "delete_schedule", "modify_schedule",
 		"create_alert", "create_notification", "delete_alert", "toggle_alert", "create_project", "update_project_settings", "switch_project",
 		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
 		"save_automation", "run_automation_now", "pause_automation", "resume_automation")

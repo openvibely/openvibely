@@ -535,6 +535,13 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			}
 			return strings.TrimSpace(h.executeSetPersonality(ctx, req)), nil
 		},
+		"save_custom_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return service.ExecuteSaveCustomPersonalityRuntime(ctx, service.CustomPersonalitySaveOptions{
+				Input:                 input,
+				CustomPersonalityRepo: h.customPersonalityRepo,
+				SettingsRepo:          h.settingsRepo,
+			})
+		},
 		"list_models": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeListModels(ctx)), nil
 		},

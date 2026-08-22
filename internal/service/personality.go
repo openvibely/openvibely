@@ -2,7 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 )
@@ -13,6 +17,74 @@ type PersonalityInfo struct {
 	Name        string
 	Description string
 	IsCustom    bool
+}
+
+type CustomPersonalitySaveInput struct {
+	Mode         string `json:"mode"`
+	Name         string `json:"name"`
+	Key          string `json:"key"`
+	Description  string `json:"description"`
+	SystemPrompt string `json:"system_prompt"`
+	Activate     bool   `json:"activate"`
+}
+
+type CustomPersonalitySaveOptions struct {
+	Input                 json.RawMessage
+	CustomPersonalityRepo *repository.CustomPersonalityRepo
+	SettingsRepo          *repository.SettingsRepo
+}
+
+type customPersonalitySaveResponse struct {
+	OK          bool   `json:"ok"`
+	Mode        string `json:"mode"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Activated   bool   `json:"activated"`
+	Message     string `json:"message"`
+}
+
+// NormalizeCustomPersonalityKey creates a URL-safe key from a user-provided name or key.
+func NormalizeCustomPersonalityKey(value string) string {
+	key := strings.ToLower(strings.TrimSpace(value))
+	key = strings.ReplaceAll(key, " ", "_")
+	key = strings.ReplaceAll(key, "-", "_")
+	var sb strings.Builder
+	for _, r := range key {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
+}
+
+func ValidateCustomPersonalityFields(name, systemPrompt string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("Name is required")
+	}
+	prompt := strings.TrimSpace(systemPrompt)
+	if prompt == "" {
+		return fmt.Errorf("System prompt is required")
+	}
+	if len(prompt) < 20 {
+		return fmt.Errorf("System prompt must be at least 20 characters")
+	}
+	return nil
+}
+
+func NewCustomPersonalityFromFields(name, key, description, systemPrompt string) (*models.CustomPersonality, error) {
+	name = strings.TrimSpace(name)
+	description = strings.TrimSpace(description)
+	systemPrompt = strings.TrimSpace(systemPrompt)
+	if err := ValidateCustomPersonalityFields(name, systemPrompt); err != nil {
+		return nil, err
+	}
+	return &models.CustomPersonality{
+		Name:         name,
+		Key:          strings.TrimSpace(key),
+		Description:  description,
+		SystemPrompt: systemPrompt,
+	}, nil
 }
 
 // presetPersonalities returns the hardcoded personality presets.
@@ -89,6 +161,93 @@ func FindPersonality(ctx context.Context, key string, repo *repository.CustomPer
 func IsAvailablePersonalityKey(ctx context.Context, key string, repo *repository.CustomPersonalityRepo) bool {
 	_, ok := FindPersonality(ctx, key, repo)
 	return ok
+}
+
+func ExecuteSaveCustomPersonalityRuntime(ctx context.Context, opts CustomPersonalitySaveOptions) (string, error) {
+	if opts.CustomPersonalityRepo == nil {
+		return "", fmt.Errorf("save_custom_personality: custom personality repository not configured")
+	}
+	var req CustomPersonalitySaveInput
+	if err := chatcontrol.DecodeRuntimeToolInput(opts.Input, &req); err != nil {
+		return "", err
+	}
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "" {
+		return "", fmt.Errorf("save_custom_personality requires mode create or update")
+	}
+	if mode != "create" && mode != "update" {
+		return "", fmt.Errorf("save_custom_personality mode must be create or update")
+	}
+	if req.Activate && opts.SettingsRepo == nil {
+		return "", fmt.Errorf("save_custom_personality: settings repository not configured for activation")
+	}
+	p, err := NewCustomPersonalityFromFields(req.Name, req.Key, req.Description, req.SystemPrompt)
+	if err != nil {
+		return "", err
+	}
+
+	key := ""
+	verb := "created"
+	if mode == "create" {
+		key = NormalizeCustomPersonalityKey(p.Key)
+		if key == "" {
+			key = NormalizeCustomPersonalityKey(p.Name)
+		}
+		if key == "" {
+			return "", fmt.Errorf("Key is required")
+		}
+		existing, err := opts.CustomPersonalityRepo.GetByKey(ctx, key)
+		if err != nil {
+			return "", fmt.Errorf("checking custom personality key: %w", err)
+		}
+		if existing != nil {
+			return "", fmt.Errorf("A custom personality with key %q already exists", key)
+		}
+		p.Key = key
+		if err := opts.CustomPersonalityRepo.Create(ctx, p); err != nil {
+			return "", fmt.Errorf("creating custom personality: %w", err)
+		}
+	} else {
+		key = strings.TrimSpace(req.Key)
+		if NormalizeCustomPersonalityKey(key) == "" {
+			return "", fmt.Errorf("Key is required")
+		}
+		existing, err := opts.CustomPersonalityRepo.GetByKey(ctx, key)
+		if err != nil {
+			return "", fmt.Errorf("loading custom personality: %w", err)
+		}
+		if existing == nil {
+			if IsPresetPersonality(key) {
+				return "", fmt.Errorf("Cannot update built-in personality %q; create a custom personality instead", key)
+			}
+			return "", fmt.Errorf("Custom personality %q not found", key)
+		}
+		p.Key = key
+		if err := opts.CustomPersonalityRepo.Update(ctx, key, p); err != nil {
+			return "", fmt.Errorf("updating custom personality: %w", err)
+		}
+		verb = "updated"
+	}
+
+	if req.Activate {
+		if err := opts.SettingsRepo.Set(ctx, "personality", key); err != nil {
+			return "", fmt.Errorf("activating custom personality %q: %w", key, err)
+		}
+	}
+	response := customPersonalitySaveResponse{
+		OK:          true,
+		Mode:        mode,
+		Key:         key,
+		Name:        p.Name,
+		Description: p.Description,
+		Activated:   req.Activate,
+		Message:     fmt.Sprintf("Custom personality %s: %s (%s)", verb, p.Name, key),
+	}
+	b, err := json.Marshal(response)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // personalityPrompts maps personality keys to their system prompt modifiers.

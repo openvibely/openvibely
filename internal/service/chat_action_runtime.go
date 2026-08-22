@@ -585,13 +585,13 @@ func buildChannelProjectActionHandlers(opts channelProjectActionHandlerOptions) 
 
 func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
 	handlers := map[string]chatcontrol.RuntimeActionHandler{
-			"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
-				return ExecuteListTasksTool(ctx, opts.TaskRepo, opts.ProjectID, input)
-			},
-			"view_swarm": func(ctx context.Context, input json.RawMessage) (string, error) {
-				return ExecuteViewSwarmTool(ctx, opts.TaskRepo, opts.ProjectID, input)
-			},
-			"list_automations": func(ctx context.Context, input json.RawMessage) (string, error) {
+		"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return ExecuteListTasksTool(ctx, opts.TaskRepo, opts.ProjectID, input)
+		},
+		"view_swarm": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return ExecuteViewSwarmTool(ctx, opts.TaskRepo, opts.ProjectID, input)
+		},
+		"list_automations": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return channelListAutomationsResult(ctx, opts.AutomationGraphSvc, opts.ProjectID, input)
 		},
 		"get_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
@@ -620,6 +620,13 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		},
 		"set_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return channelSetPersonalityResult(ctx, opts.SettingsRepo, opts.CustomPersonalityRepo, input), nil
+		},
+		"save_custom_personality": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return ExecuteSaveCustomPersonalityRuntime(ctx, CustomPersonalitySaveOptions{
+				Input:                 input,
+				CustomPersonalityRepo: opts.CustomPersonalityRepo,
+				SettingsRepo:          opts.SettingsRepo,
+			})
 		},
 		"get_personality": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return channelGetPersonalityResult(ctx, opts.SettingsRepo), nil
