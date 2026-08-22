@@ -223,55 +223,55 @@ templ projectChangesSection(pc *models.ProjectChanges) {
 			<div class="card-body p-4">
 				<h3 class="font-semibold text-sm mb-3">Change Categories</h3>
 				<div class="space-y-3">
-					if len(pc.Changes.Features) > 0 {
-						<div>
-							<div class="flex items-center gap-2 mb-1">
-								<span class="badge badge-primary badge-sm">Features</span>
-								<span class="text-xs opacity-60">{ fmt.Sprintf("%d", len(pc.Changes.Features)) }</span>
+						if featureCount := changeCategoryCount(pc.Changes.Features, pc.Changes.FeatureCount); featureCount > 0 {
+							<div>
+								<div class="flex items-center gap-2 mb-1">
+									<span class="badge badge-primary badge-sm">Features</span>
+									<span class="text-xs opacity-60">{ fmt.Sprintf("%d", featureCount) }</span>
+								</div>
+								<ul class="text-xs opacity-70 ml-4 space-y-0.5">
+									for _, f := range limitItems(pc.Changes.Features, 5) {
+										<li class="truncate">{ f }</li>
+									}
+									if featureCount > 5 {
+										<li class="opacity-50">+{ fmt.Sprintf("%d", featureCount-5) } more</li>
+									}
+								</ul>
 							</div>
-							<ul class="text-xs opacity-70 ml-4 space-y-0.5">
-								for _, f := range limitItems(pc.Changes.Features, 5) {
-									<li class="truncate">{ f }</li>
-								}
-								if len(pc.Changes.Features) > 5 {
-									<li class="opacity-50">+{ fmt.Sprintf("%d", len(pc.Changes.Features)-5) } more</li>
-								}
-							</ul>
-						</div>
-					}
-					if len(pc.Changes.BugFixes) > 0 {
-						<div>
-							<div class="flex items-center gap-2 mb-1">
-								<span class="badge badge-error badge-sm">Bug Fixes</span>
-								<span class="text-xs opacity-60">{ fmt.Sprintf("%d", len(pc.Changes.BugFixes)) }</span>
+						}
+						if bugFixCount := changeCategoryCount(pc.Changes.BugFixes, pc.Changes.BugFixCount); bugFixCount > 0 {
+							<div>
+								<div class="flex items-center gap-2 mb-1">
+									<span class="badge badge-error badge-sm">Bug Fixes</span>
+									<span class="text-xs opacity-60">{ fmt.Sprintf("%d", bugFixCount) }</span>
+								</div>
+								<ul class="text-xs opacity-70 ml-4 space-y-0.5">
+									for _, f := range limitItems(pc.Changes.BugFixes, 5) {
+										<li class="truncate">{ f }</li>
+									}
+									if bugFixCount > 5 {
+										<li class="opacity-50">+{ fmt.Sprintf("%d", bugFixCount-5) } more</li>
+									}
+								</ul>
 							</div>
-							<ul class="text-xs opacity-70 ml-4 space-y-0.5">
-								for _, f := range limitItems(pc.Changes.BugFixes, 5) {
-									<li class="truncate">{ f }</li>
-								}
-								if len(pc.Changes.BugFixes) > 5 {
-									<li class="opacity-50">+{ fmt.Sprintf("%d", len(pc.Changes.BugFixes)-5) } more</li>
-								}
-							</ul>
-						</div>
-					}
-					if len(pc.Changes.ConfigChanges) > 0 {
-						<div>
-							<div class="flex items-center gap-2 mb-1">
-								<span class="badge badge-warning badge-sm">Config / Refactor</span>
-								<span class="text-xs opacity-60">{ fmt.Sprintf("%d", len(pc.Changes.ConfigChanges)) }</span>
+						}
+						if configChangeCount := changeCategoryCount(pc.Changes.ConfigChanges, pc.Changes.ConfigChangeCount); configChangeCount > 0 {
+							<div>
+								<div class="flex items-center gap-2 mb-1">
+									<span class="badge badge-warning badge-sm">Config / Refactor</span>
+									<span class="text-xs opacity-60">{ fmt.Sprintf("%d", configChangeCount) }</span>
+								</div>
+								<ul class="text-xs opacity-70 ml-4 space-y-0.5">
+									for _, f := range limitItems(pc.Changes.ConfigChanges, 5) {
+										<li class="truncate">{ f }</li>
+									}
+									if configChangeCount > 5 {
+										<li class="opacity-50">+{ fmt.Sprintf("%d", configChangeCount-5) } more</li>
+									}
+								</ul>
 							</div>
-							<ul class="text-xs opacity-70 ml-4 space-y-0.5">
-								for _, f := range limitItems(pc.Changes.ConfigChanges, 5) {
-									<li class="truncate">{ f }</li>
-								}
-								if len(pc.Changes.ConfigChanges) > 5 {
-									<li class="opacity-50">+{ fmt.Sprintf("%d", len(pc.Changes.ConfigChanges)-5) } more</li>
-								}
-							</ul>
-						</div>
-					}
-					if len(pc.Changes.Features) == 0 && len(pc.Changes.BugFixes) == 0 && len(pc.Changes.ConfigChanges) == 0 {
+						}
+						if changeCategoryCount(pc.Changes.Features, pc.Changes.FeatureCount) == 0 && changeCategoryCount(pc.Changes.BugFixes, pc.Changes.BugFixCount) == 0 && changeCategoryCount(pc.Changes.ConfigChanges, pc.Changes.ConfigChangeCount) == 0 {
 						<p class="text-xs opacity-50">No categorized changes</p>
 					}
 				</div>
@@ -299,9 +299,9 @@ templ projectChangesSection(pc *models.ProjectChanges) {
 							</div>
 						</div>
 					}
-					if len(pc.Commits) > 10 {
-						<p class="text-xs opacity-50 text-center pt-1">+{ fmt.Sprintf("%d", len(pc.Commits)-10) } more commits</p>
-					}
+						if pc.TotalCommits > len(pc.Commits) {
+							<p class="text-xs opacity-50 text-center pt-1">+{ fmt.Sprintf("%d", pc.TotalCommits-len(pc.Commits)) } more commits</p>
+						}
 				</div>
 			</div>
 		</div>
@@ -356,6 +356,13 @@ func topFileTypes(fts []models.FileTypeCount) string {
 		parts[i] = fmt.Sprintf("%s (%d)", fts[i].Extension, fts[i].Count)
 	}
 	return strings.Join(parts, ", ")
+}
+
+func changeCategoryCount(items []string, total int) int {
+	if total > 0 || len(items) == 0 {
+		return total
+	}
+	return len(items)
 }
 
 func limitItems(items []string, max int) []string {

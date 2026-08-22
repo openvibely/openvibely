@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -420,6 +422,99 @@ func TestGenerateHistoryUsesTaskCommitStatsForProjectChanges(t *testing.T) {
 	}
 }
 
+func TestGenerateHistoryTaskCommitStatsCompactPreviewPreservesTotals(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	project := &models.Project{Name: "Reflection Compact Stats"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Reflect compact task", Category: models.CategoryActive, Status: models.StatusCompleted}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	baseTime := time.Now().UTC().Add(-10 * time.Minute).Truncate(time.Second)
+	totalInsertions := 0
+	totalDeletions := 0
+	for i := 0; i < 24; i++ {
+		subject := fmt.Sprintf("Add feature %02d", i)
+		if i%3 == 1 {
+			subject = fmt.Sprintf("Fix bug %02d", i)
+		} else if i%3 == 2 {
+			subject = fmt.Sprintf("Refactor config %02d", i)
+		}
+		changedFilesJSON := `{not-json`
+		if i != 0 {
+			payload, err := json.Marshal([]string{"shared.go", fmt.Sprintf("dir/file_%02d.ext%d", i, i)})
+			if err != nil {
+				t.Fatalf("marshal changed files: %v", err)
+			}
+			changedFilesJSON = string(payload)
+		}
+		insertions := i + 1
+		deletions := i % 4
+		totalInsertions += insertions
+		totalDeletions += deletions
+		stat := &models.TaskCommitStat{
+			ProjectID: project.ID, TaskID: task.ID,
+			CommitSHA: fmt.Sprintf("%040d", i+1), ShortSHA: fmt.Sprintf("%07d", i+1),
+			Subject: subject, Author: "OpenVibely Bot", ProducedAt: baseTime.Add(-time.Duration(i) * time.Minute),
+			Insertions: insertions, Deletions: deletions, FilesChanged: 2, ChangedFilesJSON: changedFilesJSON,
+		}
+		if err := statRepo.UpsertProducedCommitStat(ctx, stat); err != nil {
+			t.Fatalf("upsert stat %d: %v", i, err)
+		}
+	}
+
+	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	svc.SetTaskCommitStatRepo(statRepo)
+	for _, tr := range []models.TimeRange{models.TimeRangeHour, models.TimeRangeDay, models.TimeRangeWeek} {
+		history, err := svc.GenerateHistory(ctx, project.ID, tr)
+		if err != nil {
+			t.Fatalf("GenerateHistory(%s): %v", tr, err)
+		}
+		pc := history.ProjectChanges
+		if pc == nil || !pc.Available {
+			t.Fatalf("ProjectChanges unavailable for %s: %#v", tr, pc)
+		}
+		if pc.TotalCommits != 24 || pc.TotalInsertions != totalInsertions || pc.TotalDeletions != totalDeletions {
+			t.Fatalf("%s totals = commits:%d +%d -%d, want 24 +%d -%d", tr, pc.TotalCommits, pc.TotalInsertions, pc.TotalDeletions, totalInsertions, totalDeletions)
+		}
+		if pc.FilesChanged != 24 {
+			t.Fatalf("%s FilesChanged = %d, want 24 unique files despite duplicate shared.go and one malformed JSON payload", tr, pc.FilesChanged)
+		}
+		if len(pc.Commits) != 10 {
+			t.Fatalf("%s rendered commit examples = %d, want capped 10", tr, len(pc.Commits))
+		}
+		for i, commit := range pc.Commits {
+			want := fmt.Sprintf("%07d", i+1)
+			if commit.ShortHash != want {
+				t.Fatalf("%s commit[%d] short hash = %q, want newest-first %q", tr, i, commit.ShortHash, want)
+			}
+		}
+		if got := changeSummaryFeatureCount(pc.Changes); got != 8 {
+			t.Fatalf("%s feature count = %d, want 8", tr, got)
+		}
+		if got := changeSummaryBugFixCount(pc.Changes); got != 8 {
+			t.Fatalf("%s bugfix count = %d, want 8", tr, got)
+		}
+		if got := changeSummaryConfigChangeCount(pc.Changes); got != 8 {
+			t.Fatalf("%s config count = %d, want 8", tr, got)
+		}
+		if len(pc.Changes.Features) != 5 || len(pc.Changes.BugFixes) != 5 || len(pc.Changes.ConfigChanges) != 5 {
+			t.Fatalf("%s category examples = features:%d bugs:%d config:%d, want all capped at 5", tr, len(pc.Changes.Features), len(pc.Changes.BugFixes), len(pc.Changes.ConfigChanges))
+		}
+		if len(pc.FileTypes) <= 12 {
+			t.Fatalf("%s file types = %d, want more than 12 for badge overflow coverage", tr, len(pc.FileTypes))
+		}
+	}
+}
+
 func TestGenerateHistoryCombinesFallbackBeforeFirstTaskCommitStat(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)
@@ -549,6 +644,94 @@ func TestGenerateHistoryDoesNotFallbackDuringCoveredQuietGap(t *testing.T) {
 	if len(pc.Commits) != 1 || pc.Commits[0].Subject != "Current DB stat" {
 		t.Fatalf("commits = %#v, want only current DB stat", pc.Commits)
 	}
+}
+
+var benchmarkHistoryProjectChanges *models.ProjectChanges
+
+func BenchmarkTaskCommitStatHistoryProjection(b *testing.B) {
+	b.Run("baseline_full_list", func(b *testing.B) {
+		svc, statRepo, projectID, since := setupTaskCommitStatHistoryBenchmarkFixture(b, 1000, 50)
+		_ = svc
+		b.ReportAllocs()
+		b.ReportMetric(1, "sql/op")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			stats, err := statRepo.ListProducedCommitStats(context.Background(), projectID, since)
+			if err != nil {
+				b.Fatalf("ListProducedCommitStats: %v", err)
+			}
+			pc, _ := buildProjectChangesFromTaskCommitStatsWithFiles(stats)
+			if pc == nil || pc.TotalCommits != 1000 || len(pc.Commits) != 1000 {
+				b.Fatalf("baseline project changes = %#v", pc)
+			}
+			benchmarkHistoryProjectChanges = pc
+		}
+	})
+	b.Run("compact_aggregate_preview", func(b *testing.B) {
+		svc, _, projectID, since := setupTaskCommitStatHistoryBenchmarkFixture(b, 1000, 50)
+		b.ReportAllocs()
+		b.ReportMetric(4, "sql/op")
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			pc, _, err := svc.buildProjectChangesFromTaskCommitStats(context.Background(), projectID, since)
+			if err != nil {
+				b.Fatalf("buildProjectChangesFromTaskCommitStats: %v", err)
+			}
+			if pc == nil || pc.TotalCommits != 1000 || len(pc.Commits) != projectChangeCommitPreviewLimit {
+				b.Fatalf("compact project changes = %#v", pc)
+			}
+			benchmarkHistoryProjectChanges = pc
+		}
+	})
+}
+
+func setupTaskCommitStatHistoryBenchmarkFixture(tb testing.TB, rows, pathsPerCommit int) (*UpcomingService, *repository.TaskCommitStatRepo, string, time.Time) {
+	tb.Helper()
+	ctx := context.Background()
+	db := testutil.NewTestDB(tb)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	statRepo := repository.NewTaskCommitStatRepo(db)
+
+	project := &models.Project{Name: "Reflection Benchmark"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		tb.Fatalf("create project: %v", err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Benchmark task", Category: models.CategoryActive, Status: models.StatusCompleted}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		tb.Fatalf("create task: %v", err)
+	}
+
+	baseTime := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	for i := 0; i < rows; i++ {
+		files := make([]string, 0, pathsPerCommit)
+		for j := 0; j < pathsPerCommit; j++ {
+			files = append(files, fmt.Sprintf("pkg/shared/file_%02d.ext%d", j, j%25))
+		}
+		payload, err := json.Marshal(files)
+		if err != nil {
+			tb.Fatalf("marshal changed files: %v", err)
+		}
+		subject := fmt.Sprintf("Add benchmark feature %04d", i)
+		if i%3 == 1 {
+			subject = fmt.Sprintf("Fix benchmark bug %04d", i)
+		} else if i%3 == 2 {
+			subject = fmt.Sprintf("Refactor benchmark config %04d", i)
+		}
+		stat := &models.TaskCommitStat{
+			ProjectID: project.ID, TaskID: task.ID,
+			CommitSHA: fmt.Sprintf("%040d", i+1), ShortSHA: fmt.Sprintf("%07d", i+1),
+			Subject: subject, Author: "OpenVibely Bot", ProducedAt: baseTime.Add(-time.Duration(i) * time.Second),
+			Insertions: i%200 + 1, Deletions: i % 50, FilesChanged: pathsPerCommit, ChangedFilesJSON: string(payload),
+		}
+		if err := statRepo.UpsertProducedCommitStat(ctx, stat); err != nil {
+			tb.Fatalf("upsert stat %d: %v", i, err)
+		}
+	}
+
+	svc := NewUpcomingService(repository.NewUpcomingRepo(db))
+	svc.SetTaskCommitStatRepo(statRepo)
+	return svc, statRepo, project.ID, baseTime.Add(-time.Duration(rows+1) * time.Second)
 }
 
 func runGit(t *testing.T, dir string, extraEnv []string, args ...string) {

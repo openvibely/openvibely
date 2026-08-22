@@ -299,11 +299,11 @@ func (s *UpcomingService) GenerateHistory(ctx context.Context, projectID string,
 			firstProjectStatProducedAt = firstProducedAt
 		}
 
-		stats, err := s.taskCommitStatRepo.ListProducedCommitStats(ctx, projectID, since)
+		changes, changedFiles, err := s.buildProjectChangesFromTaskCommitStats(ctx, projectID, since)
 		if err != nil {
-			applog.Infof("[upcoming-svc] error listing task commit stats (non-fatal): %v", err)
-		} else if len(stats) > 0 {
-			projectChanges, projectChangeFiles = buildProjectChangesFromTaskCommitStatsWithFiles(stats)
+			applog.Infof("[upcoming-svc] error summarizing task commit stats (non-fatal): %v", err)
+		} else if changes != nil {
+			projectChanges, projectChangeFiles = changes, changedFiles
 		}
 	}
 
@@ -362,6 +362,77 @@ func computeSince(now time.Time, timeRange models.TimeRange) time.Time {
 	}
 }
 
+const (
+	projectChangeCommitPreviewLimit   = 10
+	projectChangeCategoryPreviewLimit = 5
+)
+
+func (s *UpcomingService) buildProjectChangesFromTaskCommitStats(ctx context.Context, projectID string, since time.Time) (*models.ProjectChanges, []string, error) {
+	aggregate, err := s.taskCommitStatRepo.ProducedCommitStatAggregate(ctx, projectID, since)
+	if err != nil {
+		return nil, nil, err
+	}
+	if aggregate.TotalCommits == 0 {
+		return nil, nil, nil
+	}
+
+	commits, err := s.taskCommitStatRepo.ListProducedCommitStatCommits(ctx, projectID, since, projectChangeCommitPreviewLimit)
+	if err != nil {
+		return nil, nil, err
+	}
+	changes, err := s.summarizeProducedCommitStatCategories(ctx, projectID, since)
+	if err != nil {
+		return nil, nil, err
+	}
+	files, err := s.uniqueProducedCommitStatFiles(ctx, projectID, since)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pc := &models.ProjectChanges{
+		Available:       true,
+		TotalCommits:    aggregate.TotalCommits,
+		TotalInsertions: aggregate.TotalInsertions,
+		TotalDeletions:  aggregate.TotalDeletions,
+		FilesChanged:    len(files),
+		Commits:         commits,
+		FileTypes:       fileTypeCountsFromFiles(files),
+		Changes:         changes,
+	}
+	return pc, files, nil
+}
+
+func (s *UpcomingService) summarizeProducedCommitStatCategories(ctx context.Context, projectID string, since time.Time) (models.ChangeSummary, error) {
+	var summary models.ChangeSummary
+	err := s.taskCommitStatRepo.ForEachProducedCommitStatSubject(ctx, projectID, since, func(subject string) error {
+		addSubjectToChangeSummary(&summary, subject, projectChangeCategoryPreviewLimit)
+		return nil
+	})
+	return summary, err
+}
+
+func (s *UpcomingService) uniqueProducedCommitStatFiles(ctx context.Context, projectID string, since time.Time) ([]string, error) {
+	uniqueFiles := map[string]bool{}
+	err := s.taskCommitStatRepo.ForEachProducedCommitStatChangedFilesJSON(ctx, projectID, since, func(changedFilesJSON string) error {
+		forEachChangedFileInJSON(changedFilesJSON, func(file string) {
+			if file == "" || uniqueFiles[file] {
+				return
+			}
+			uniqueFiles[strings.Clone(file)] = true
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	files := make([]string, 0, len(uniqueFiles))
+	for file := range uniqueFiles {
+		files = append(files, file)
+	}
+	sort.Strings(files)
+	return files, nil
+}
+
 func buildProjectChangesFromTaskCommitStats(stats []models.TaskCommitStat) *models.ProjectChanges {
 	pc, _ := buildProjectChangesFromTaskCommitStatsWithFiles(stats)
 	return pc
@@ -405,7 +476,7 @@ func buildProjectChangesFromTaskCommitStatsWithFiles(stats []models.TaskCommitSt
 		files = append(files, file)
 	}
 	sort.Strings(files)
-	pc.FileTypes = parseFileTypes(strings.Join(files, "\n"))
+	pc.FileTypes = fileTypeCountsFromFiles(files)
 
 	return pc, files
 }
@@ -424,6 +495,9 @@ func mergeProjectChangesWithFiles(first *models.ProjectChanges, firstFiles []str
 	sort.Slice(merged.Commits, func(i, j int) bool {
 		return merged.Commits[i].Date.After(merged.Commits[j].Date)
 	})
+	if len(merged.Commits) > projectChangeCommitPreviewLimit {
+		merged.Commits = merged.Commits[:projectChangeCommitPreviewLimit]
+	}
 	uniqueFiles := map[string]bool{}
 	for _, file := range append(firstFiles, secondFiles...) {
 		if file != "" {
@@ -436,17 +510,92 @@ func mergeProjectChangesWithFiles(first *models.ProjectChanges, firstFiles []str
 	}
 	sort.Strings(files)
 	merged.FilesChanged = len(files)
-	merged.FileTypes = parseFileTypes(strings.Join(files, "\n"))
-	merged.Changes = categorizeCommits(merged.Commits)
+	merged.FileTypes = fileTypeCountsFromFiles(files)
+	var summaries []models.ChangeSummary
+	if first != nil && second != nil && latestCommitDate(second.Commits).After(latestCommitDate(first.Commits)) {
+		summaries = append(summaries, second.Changes, first.Changes)
+	} else {
+		if first != nil {
+			summaries = append(summaries, first.Changes)
+		}
+		if second != nil {
+			summaries = append(summaries, second.Changes)
+		}
+	}
+	merged.Changes = mergeChangeSummaries(summaries...)
 	return merged
 }
 
+func latestCommitDate(commits []models.GitCommit) time.Time {
+	var latest time.Time
+	for _, commit := range commits {
+		if commit.Date.After(latest) {
+			latest = commit.Date
+		}
+	}
+	return latest
+}
+
 func changedFilesFromStat(stat models.TaskCommitStat) []string {
+	return changedFilesFromJSON(stat.ChangedFilesJSON)
+}
+
+func changedFilesFromJSON(changedFilesJSON string) []string {
 	var files []string
-	if err := json.Unmarshal([]byte(stat.ChangedFilesJSON), &files); err != nil {
+	if err := json.Unmarshal([]byte(changedFilesJSON), &files); err != nil {
 		return nil
 	}
 	return files
+}
+
+func forEachChangedFileInJSON(changedFilesJSON string, fn func(file string)) {
+	s := strings.TrimSpace(changedFilesJSON)
+	if len(s) < 2 || s[0] != '[' {
+		return
+	}
+	for i := 1; i < len(s); {
+		for i < len(s) && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t' || s[i] == ',') {
+			i++
+		}
+		if i >= len(s) || s[i] == ']' {
+			return
+		}
+		if s[i] != '"' {
+			return
+		}
+		valueStart := i + 1
+		escaped := false
+		j := valueStart
+		for ; j < len(s); j++ {
+			if s[j] == '\\' {
+				escaped = true
+				j++
+				continue
+			}
+			if s[j] == '"' {
+				break
+			}
+		}
+		if j >= len(s) || s[j] != '"' {
+			return
+		}
+		if escaped {
+			value, err := strconv.Unquote(s[i : j+1])
+			if err != nil {
+				return
+			}
+			fn(value)
+		} else {
+			fn(s[valueStart:j])
+		}
+		i = j + 1
+		for i < len(s) && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t') {
+			i++
+		}
+		if i < len(s) && s[i] != ',' && s[i] != ']' {
+			return
+		}
+	}
 }
 
 // GeneratePulseSummary generates an AI summary of the current project state
@@ -554,11 +703,11 @@ func (s *UpcomingService) GenerateReflectionSummary(ctx context.Context, project
 		pc := history.ProjectChanges
 		sb.WriteString(fmt.Sprintf("Code changes: %d commits, +%d/-%d lines, %d files\n",
 			pc.TotalCommits, pc.TotalInsertions, pc.TotalDeletions, pc.FilesChanged))
-		if len(pc.Changes.Features) > 0 {
-			sb.WriteString(fmt.Sprintf("  Features: %d\n", len(pc.Changes.Features)))
+		if featureCount := changeSummaryFeatureCount(pc.Changes); featureCount > 0 {
+			sb.WriteString(fmt.Sprintf("  Features: %d\n", featureCount))
 		}
-		if len(pc.Changes.BugFixes) > 0 {
-			sb.WriteString(fmt.Sprintf("  Bug fixes: %d\n", len(pc.Changes.BugFixes)))
+		if bugFixCount := changeSummaryBugFixCount(pc.Changes); bugFixCount > 0 {
+			sb.WriteString(fmt.Sprintf("  Bug fixes: %d\n", bugFixCount))
 		}
 	}
 
@@ -742,63 +891,141 @@ func parseShortStat(line string, commit *models.GitCommit) {
 	}
 }
 
-// parseFileTypes counts changed files by extension
+// parseFileTypes counts changed files by extension.
 func parseFileTypes(output string) []models.FileTypeCount {
-	counts := map[string]int{}
+	var files []string
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return fileTypeCountsFromFiles(files)
+}
+
+func fileTypeCountsFromFiles(files []string) []models.FileTypeCount {
+	counts := map[string]int{}
+	for _, file := range files {
+		file = strings.TrimSpace(file)
+		if file == "" {
 			continue
 		}
-		ext := filepath.Ext(line)
+		ext := filepath.Ext(file)
 		if ext == "" {
-			ext = filepath.Base(line)
+			ext = filepath.Base(file)
 		}
 		counts[ext]++
 	}
 
-	var result []models.FileTypeCount
+	result := make([]models.FileTypeCount, 0, len(counts))
 	for ext, count := range counts {
 		result = append(result, models.FileTypeCount{Extension: ext, Count: count})
 	}
-
-	// Sort by count descending
 	sort.Slice(result, func(i, j int) bool {
+		if result[i].Count == result[j].Count {
+			return result[i].Extension < result[j].Extension
+		}
 		return result[i].Count > result[j].Count
 	})
-
 	return result
 }
 
-// categorizeCommits analyzes commit messages to classify changes
+// categorizeCommits analyzes commit messages to classify changes.
 func categorizeCommits(commits []models.GitCommit) models.ChangeSummary {
 	var cs models.ChangeSummary
 	for _, c := range commits {
-		subject := strings.ToLower(c.Subject)
-		switch {
-		case strings.HasPrefix(subject, "fix") ||
-			strings.Contains(subject, "bug") ||
-			strings.Contains(subject, "patch") ||
-			strings.Contains(subject, "hotfix"):
-			cs.BugFixes = append(cs.BugFixes, c.Subject)
-		case strings.HasPrefix(subject, "feat") ||
-			strings.Contains(subject, "add ") ||
-			strings.Contains(subject, "new ") ||
-			strings.Contains(subject, "implement") ||
-			strings.Contains(subject, "enhance"):
-			cs.Features = append(cs.Features, c.Subject)
-		case strings.Contains(subject, "config") ||
-			strings.Contains(subject, "refactor") ||
-			strings.Contains(subject, "migrate") ||
-			strings.Contains(subject, "rename") ||
-			strings.Contains(subject, "restructure") ||
-			strings.Contains(subject, "architect"):
-			cs.ConfigChanges = append(cs.ConfigChanges, c.Subject)
-		default:
-			// Default to features for general commits
-			cs.Features = append(cs.Features, c.Subject)
-		}
+		addSubjectToChangeSummary(&cs, c.Subject, 0)
 	}
 	return cs
+}
+
+func addSubjectToChangeSummary(cs *models.ChangeSummary, subject string, exampleLimit int) {
+	switch changeCategory(subject) {
+	case "bugfix":
+		cs.BugFixCount++
+		if exampleLimit <= 0 || len(cs.BugFixes) < exampleLimit {
+			cs.BugFixes = append(cs.BugFixes, subject)
+		}
+	case "config":
+		cs.ConfigChangeCount++
+		if exampleLimit <= 0 || len(cs.ConfigChanges) < exampleLimit {
+			cs.ConfigChanges = append(cs.ConfigChanges, subject)
+		}
+	default:
+		cs.FeatureCount++
+		if exampleLimit <= 0 || len(cs.Features) < exampleLimit {
+			cs.Features = append(cs.Features, subject)
+		}
+	}
+}
+
+func changeCategory(subject string) string {
+	normalized := strings.ToLower(subject)
+	switch {
+	case strings.HasPrefix(normalized, "fix") ||
+		strings.Contains(normalized, "bug") ||
+		strings.Contains(normalized, "patch") ||
+		strings.Contains(normalized, "hotfix"):
+		return "bugfix"
+	case strings.HasPrefix(normalized, "feat") ||
+		strings.Contains(normalized, "add ") ||
+		strings.Contains(normalized, "new ") ||
+		strings.Contains(normalized, "implement") ||
+		strings.Contains(normalized, "enhance"):
+		return "feature"
+	case strings.Contains(normalized, "config") ||
+		strings.Contains(normalized, "refactor") ||
+		strings.Contains(normalized, "migrate") ||
+		strings.Contains(normalized, "rename") ||
+		strings.Contains(normalized, "restructure") ||
+		strings.Contains(normalized, "architect"):
+		return "config"
+	default:
+		return "feature"
+	}
+}
+
+func mergeChangeSummaries(summaries ...models.ChangeSummary) models.ChangeSummary {
+	var merged models.ChangeSummary
+	for _, summary := range summaries {
+		merged.FeatureCount += changeSummaryFeatureCount(summary)
+		merged.BugFixCount += changeSummaryBugFixCount(summary)
+		merged.ConfigChangeCount += changeSummaryConfigChangeCount(summary)
+		merged.Features = appendLimitedStrings(merged.Features, summary.Features, projectChangeCategoryPreviewLimit)
+		merged.BugFixes = appendLimitedStrings(merged.BugFixes, summary.BugFixes, projectChangeCategoryPreviewLimit)
+		merged.ConfigChanges = appendLimitedStrings(merged.ConfigChanges, summary.ConfigChanges, projectChangeCategoryPreviewLimit)
+	}
+	return merged
+}
+
+func appendLimitedStrings(dst, src []string, limit int) []string {
+	for _, item := range src {
+		if len(dst) >= limit {
+			break
+		}
+		dst = append(dst, item)
+	}
+	return dst
+}
+
+func changeSummaryFeatureCount(summary models.ChangeSummary) int {
+	if summary.FeatureCount > 0 || len(summary.Features) == 0 {
+		return summary.FeatureCount
+	}
+	return len(summary.Features)
+}
+
+func changeSummaryBugFixCount(summary models.ChangeSummary) int {
+	if summary.BugFixCount > 0 || len(summary.BugFixes) == 0 {
+		return summary.BugFixCount
+	}
+	return len(summary.BugFixes)
+}
+
+func changeSummaryConfigChangeCount(summary models.ChangeSummary) int {
+	if summary.ConfigChangeCount > 0 || len(summary.ConfigChanges) == 0 {
+		return summary.ConfigChangeCount
+	}
+	return len(summary.ConfigChanges)
 }
