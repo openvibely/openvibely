@@ -99,6 +99,10 @@ type channelTaskActionHandlerOptions struct {
 	ProjectID           string
 	TaskSvc             *TaskService
 	SwarmSvc            *SwarmService
+	TaskRepo            *repository.TaskRepo
+	ExecRepo            *repository.ExecutionRepo
+	ThreadInputRepo     *repository.ThreadInputRepo
+	ExecutionStreamHub  *events.ExecutionStreamHub
 	LLMConfigRepo       *repository.LLMConfigRepo
 	Collector           *channelActionSummaryCollector
 	PrepareTaskCreation func(context.Context, *TaskCreationRequest) error
@@ -394,6 +398,115 @@ func workerFromTaskService(taskSvc *TaskService) *WorkerService {
 	return taskSvc.workerSvc
 }
 
+func swarmFromTaskService(taskSvc *TaskService) *SwarmService {
+	if taskSvc == nil {
+		return nil
+	}
+	return taskSvc.swarmSvc
+}
+
+type cancelTaskRuntimeInput struct {
+	TaskID string `json:"task_id"`
+	Title  string `json:"title"`
+}
+
+type cancelTaskRuntimeResponse struct {
+	OK               bool                `json:"ok"`
+	Accepted         bool                `json:"accepted"`
+	TaskID           string              `json:"task_id"`
+	Title            string              `json:"title"`
+	PreviousStatus   models.TaskStatus   `json:"previous_status"`
+	PreviousCategory models.TaskCategory `json:"previous_category"`
+	FinalStatus      models.TaskStatus   `json:"final_status"`
+	FinalCategory    models.TaskCategory `json:"final_category"`
+	Message          string              `json:"message"`
+}
+
+func taskIsCancellableByUser(task *models.Task) bool {
+	if task == nil {
+		return false
+	}
+	return task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) || (task.SwarmRole == models.SwarmRoleParent && task.Status == models.StatusBlocked && task.Category == models.CategoryActive)
+}
+
+func taskRepoFromChannelTaskOptions(opts channelTaskActionHandlerOptions) *repository.TaskRepo {
+	if opts.TaskRepo != nil {
+		return opts.TaskRepo
+	}
+	if opts.TaskSvc != nil {
+		return opts.TaskSvc.repo
+	}
+	return nil
+}
+
+func runChannelCancelTaskAction(ctx context.Context, opts channelTaskActionHandlerOptions, input json.RawMessage) (string, error) {
+	var req cancelTaskRuntimeInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	taskID := strings.TrimSpace(req.TaskID)
+	title := strings.TrimSpace(req.Title)
+	if taskID == "" && title == "" {
+		return "", fmt.Errorf("cancel_task requires task_id or title")
+	}
+	taskRepo := taskRepoFromChannelTaskOptions(opts)
+	task, err := resolveChannelTaskReference(ctx, taskRepo, opts.ProjectID, taskID, title)
+	if err != nil {
+		return "", err
+	}
+	if taskID == "" && title != "" && !strings.EqualFold(strings.TrimSpace(task.Title), title) {
+		return "", fmt.Errorf("no task found with exact title %q", title)
+	}
+	result := cancelTaskRuntimeResponse{OK: true, TaskID: task.ID, Title: task.Title, PreviousStatus: task.Status, PreviousCategory: task.Category, FinalStatus: task.Status, FinalCategory: task.Category}
+	if !taskIsCancellableByUser(task) {
+		result.Message = fmt.Sprintf("Task is not currently cancellable (status=%s, category=%s).", task.Status, task.Category)
+		b, err := json.Marshal(result)
+		return string(b), err
+	}
+	workerSvc := workerFromTaskService(opts.TaskSvc)
+	if workerSvc != nil {
+		workerSvc.MarkCancellationRequested(task.ID)
+	}
+	if opts.ThreadInputRepo != nil {
+		if err := opts.ThreadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
+			applog.Infof("[channel-runtime] cancel_task error cancelling pending thread inputs task=%s: %v", task.ID, err)
+		}
+	}
+	swarmSvc := opts.SwarmSvc
+	if swarmSvc == nil {
+		swarmSvc = swarmFromTaskService(opts.TaskSvc)
+	}
+	if task.SwarmRole == models.SwarmRoleParent && swarmSvc != nil {
+		if err := swarmSvc.CancelSwarm(ctx, task.ID); err != nil {
+			return "", err
+		}
+	} else if opts.TaskSvc != nil {
+		if err := opts.TaskSvc.CancelTask(ctx, task.ID); err != nil {
+			return "", err
+		}
+	} else {
+		return "", fmt.Errorf("task service not configured")
+	}
+	if opts.ExecRepo != nil {
+		cancelledIDs, err := opts.ExecRepo.CancelActiveByTaskReturningIDs(ctx, task.ID)
+		if err != nil {
+			applog.Infof("[channel-runtime] cancel_task error cancelling active executions task=%s: %v", task.ID, err)
+		} else if opts.ExecutionStreamHub != nil {
+			for _, execID := range cancelledIDs {
+				opts.ExecutionStreamHub.CloseTerminal(execID, models.ExecCancelled, "cancelled")
+			}
+		}
+	}
+	if updated, err := taskRepo.GetByID(ctx, task.ID); err == nil && updated != nil {
+		result.FinalStatus = updated.Status
+		result.FinalCategory = updated.Category
+	}
+	result.Accepted = true
+	result.Message = "Cancellation requested."
+	b, err := json.Marshal(result)
+	return string(b), err
+}
+
 func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
@@ -460,6 +573,9 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 				return "", fmt.Errorf("execute_tasks requires task_id/title or tags/min_priority")
 			}
 			return strings.TrimSpace(ExecuteTaskExecutions(ctx, []TaskExecutionRequest{req}, opts.ProjectID, opts.TaskSvc)), nil
+		},
+		"cancel_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return runChannelCancelTaskAction(ctx, opts, input)
 		},
 	}
 }

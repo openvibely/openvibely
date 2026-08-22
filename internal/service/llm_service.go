@@ -443,11 +443,14 @@ func (s *LLMService) taskControlRuntimeTools(task models.Task) *llmcontracts.Run
 		return nil
 	}
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
-		ProjectID:     task.ProjectID,
-		TaskSvc:       s.taskSvc,
-		SwarmSvc:      nil,
-		LLMConfigRepo: s.llmConfigRepo,
-		PrepareTaskCreation: func(ctx context.Context, request *TaskCreationRequest) error {
+		ProjectID:          task.ProjectID,
+		TaskSvc:            s.taskSvc,
+		SwarmSvc:           nil,
+		TaskRepo:           s.taskRepo,
+		ExecRepo:           s.execRepo,
+		ThreadInputRepo:    s.threadInputRepo,
+		ExecutionStreamHub: s.executionStreamHub,
+		LLMConfigRepo:      s.llmConfigRepo, PrepareTaskCreation: func(ctx context.Context, request *TaskCreationRequest) error {
 			return s.prepareAutomationTaskCreation(ctx, task.ProjectID, request)
 		},
 		CreatePreparedTask: func(ctx context.Context, request TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
