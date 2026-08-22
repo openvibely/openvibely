@@ -2006,11 +2006,32 @@ func DecodeUpdateAgentRuntimeInput(input json.RawMessage) (UpdateAgentRuntimeInp
 			return UpdateAgentRuntimeInput{}, fmt.Errorf("update_agent does not support %q", key)
 		}
 	}
+	if scopedFilesRaw, ok := raw["scoped_files"]; ok {
+		if err := validateRuntimeScopedFilesJSON(scopedFilesRaw, "update_agent"); err != nil {
+			return UpdateAgentRuntimeInput{}, err
+		}
+	}
 	var req UpdateAgentRuntimeInput
 	if err := json.Unmarshal([]byte(payload), &req); err != nil {
 		return UpdateAgentRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
 	}
 	return req, nil
+}
+
+func validateRuntimeScopedFilesJSON(raw json.RawMessage, action string) error {
+	var entries []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	allowed := map[string]bool{"directory": true, "permissions": true}
+	for i, entry := range entries {
+		for key := range entry {
+			if !allowed[key] {
+				return fmt.Errorf("%s scoped_files[%d] does not support %q", action, i, key)
+			}
+		}
+	}
+	return nil
 }
 
 func resolveRuntimeAgentTarget(ctx context.Context, repo *repository.AgentRepo, req UpdateAgentRuntimeInput) (*models.Agent, error) {
