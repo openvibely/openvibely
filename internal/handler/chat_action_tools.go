@@ -352,44 +352,44 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			return h.executeCreateSwarmTaskTool(ctx, params, input, collector)
 		},
 		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			var req service.TaskCreationRequest
-			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
 			if strings.TrimSpace(params.ProjectID) == "" {
 				return "", fmt.Errorf("create_task: no current project — cannot create task without a project context")
 			}
-			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
-				return "", fmt.Errorf("create_task requires title and prompt")
-			}
-			if req.Priority == 0 {
-				req.Priority = 2
-			}
-			agents, err := h.llmConfigRepo.List(ctx)
-			if err != nil {
-				agents = nil
-			}
-			summary, _ := h.executeChatTaskCreationRequests(ctx, params.ExecID, params.ProjectID, []service.TaskCreationRequest{req}, agents, params.ChannelReply)
-			createdIDs := extractTaskIDsFromOutput(summary)
-			if len(createdIDs) == 0 {
-				return summary, fmt.Errorf("create_task: no tasks were persisted (see summary for details)")
-			}
-			if h.taskRepo != nil {
-				var missing []string
-				for _, id := range createdIDs {
-					task, getErr := h.taskRepo.GetByID(ctx, id)
-					if getErr != nil || task == nil || task.ProjectID != params.ProjectID {
-						missing = append(missing, id)
+			out, _, err := service.ExecuteCreateTaskRuntimeAction(ctx, input, service.RuntimeTaskCreationOptions{
+				ProjectID:     params.ProjectID,
+				TaskSvc:       h.taskSvc,
+				LLMConfigRepo: h.llmConfigRepo,
+				CreateTask: func(ctx context.Context, req service.TaskCreationRequest, agents []models.LLMConfig) ([]models.Task, string, bool, error) {
+					summary, _ := h.executeChatTaskCreationRequests(ctx, params.ExecID, params.ProjectID, []service.TaskCreationRequest{req}, agents, params.ChannelReply)
+					return nil, summary, true, nil
+				},
+				VerifyCreated: func(ctx context.Context, summary string, _ []models.Task) error {
+					createdIDs := extractTaskIDsFromOutput(summary)
+					if len(createdIDs) == 0 {
+						return fmt.Errorf("create_task: no tasks were persisted (see summary for details)")
 					}
-				}
-				if len(missing) > 0 {
-					return summary, fmt.Errorf("create_task: %d task(s) reported as created are not present in project %s: %s", len(missing), params.ProjectID, strings.Join(missing, ", "))
-				}
-			}
-			if collector != nil {
-				collector.addCreated(summary)
-			}
-			return strings.TrimSpace(summary), nil
+					if h.taskRepo == nil {
+						return nil
+					}
+					var missing []string
+					for _, id := range createdIDs {
+						task, getErr := h.taskRepo.GetByID(ctx, id)
+						if getErr != nil || task == nil || task.ProjectID != params.ProjectID {
+							missing = append(missing, id)
+						}
+					}
+					if len(missing) > 0 {
+						return fmt.Errorf("create_task: %d task(s) reported as created are not present in project %s: %s", len(missing), params.ProjectID, strings.Join(missing, ", "))
+					}
+					return nil
+				},
+				AddCreatedSummary: func(summary string) {
+					if collector != nil {
+						collector.addCreated(summary)
+					}
+				},
+			})
+			return out, err
 		},
 		"edit_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req service.TaskEditRequest
