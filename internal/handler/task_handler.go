@@ -942,6 +942,64 @@ func (h *Handler) resolveTaskChangesDiffOutput(ctx context.Context, task *models
 	return h.resolveTaskChangesWorktreeState(ctx, task).DiffOutput
 }
 
+// resolveTaskChangesFileMeta resolves one lazy diff-card target without forcing
+// worktree-backed requests through whole-task diff and stats generation.
+func (h *Handler) resolveTaskChangesFileMeta(ctx context.Context, task *models.Task, fileIndex int) (components.DiffFileRenderMeta, bool) {
+	if task == nil || fileIndex < 0 {
+		return components.DiffFileRenderMeta{}, false
+	}
+
+	project, _ := h.projectRepo.GetByID(ctx, task.ProjectID)
+	h.recoverTaskWorktreeState(ctx, task, project)
+
+	preservedMeta := func() (components.DiffFileRenderMeta, bool) {
+		diffOutput, _ := h.execRepo.GetLatestNonEmptyDiffOutput(ctx, task.ID)
+		return components.DiffRenderMetaByIndex(diffOutput, fileIndex)
+	}
+
+	if task.WorktreeBranch == "" {
+		return preservedMeta()
+	}
+
+	isActive := task.Status == models.StatusRunning || task.Status == models.StatusQueued
+	if !isActive && task.MergeStatus == models.MergeStatusMerged {
+		return preservedMeta()
+	}
+
+	if task.WorktreePath == "" || project == nil || project.RepoPath == "" {
+		return preservedMeta()
+	}
+	if _, err := os.Stat(task.WorktreePath); err != nil {
+		return preservedMeta()
+	}
+
+	targetBranch := task.MergeTargetBranch
+	if targetBranch == "" {
+		targetBranch = service.GetDefaultBranch(project.RepoPath)
+	}
+	if targetBranch == "" {
+		return components.DiffFileRenderMeta{}, false
+	}
+
+	useLiveUncommitted := isActive || task.MergeStatus != models.MergeStatusMerged
+	var diffOutput string
+	var ok bool
+	if useLiveUncommitted {
+		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, task.WorktreePath, fileIndex)
+	} else {
+		diffOutput, ok = service.GetWorktreeDiffFileWithUncommitted(project.RepoPath, task.WorktreeBranch, targetBranch, "", fileIndex)
+	}
+	if !ok {
+		return components.DiffFileRenderMeta{}, false
+	}
+	meta, ok := components.DiffRenderMetaByIndex(diffOutput, 0)
+	if !ok {
+		return components.DiffFileRenderMeta{}, false
+	}
+	meta.Index = fileIndex
+	return meta, true
+}
+
 // GetTaskChanges returns just the changes tab content for fresh updates when switching tabs.
 // If the task has a worktree branch, it shows the worktree-specific diff.
 func (h *Handler) GetTaskChanges(c echo.Context) error {
@@ -1006,8 +1064,8 @@ func (h *Handler) GetTaskChangesFile(c echo.Context) error {
 		reviewComments, _ = h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
 	}
 
-	diffOutput := h.resolveTaskChangesDiffOutput(c.Request().Context(), task)
-	return render(c, http.StatusOK, components.LoadDiffFileCard(diffOutput, fileIndex, view, taskID, reviewComments, reviewMode))
+	meta, exists := h.resolveTaskChangesFileMeta(c.Request().Context(), task, fileIndex)
+	return render(c, http.StatusOK, components.LoadDiffFileCardMeta(meta, exists, view, taskID, reviewComments, reviewMode))
 }
 
 // GetTaskChangesLive returns only the diff viewer fragment for realtime updates.

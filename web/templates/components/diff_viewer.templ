@@ -2580,40 +2580,185 @@ func buildDiffRenderMetas(files []DiffFile) []DiffFileRenderMeta {
 		}
 
 		lineCount, charCount := diffFileMetrics(f)
-		meta := DiffFileRenderMeta{
-			Index:     i,
-			File:      f,
-			LineCount: lineCount,
-			CharCount: charCount,
-		}
-
-		switch {
-		case lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars:
-			meta.BlockedReason = fmt.Sprintf(
-				"This file exceeds single-file limit (%d lines or %s raw diff).",
-				maxLoadableFileDiffLines,
-				formatByteSize(maxLoadableFileDiffChars),
-			)
-		case cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars:
-			meta.BlockedReason = fmt.Sprintf(
-				"Total diff load limit reached (%d lines or %s raw diff).",
-				maxLoadableTotalDiffLines,
-				formatByteSize(maxLoadableTotalDiffChars),
-			)
-		default:
+		meta := buildDiffRenderMeta(f, i, lineCount, charCount, cumulativeLines, cumulativeChars)
+		if meta.AutoLoad || meta.CanLoadOnDemand {
 			cumulativeLines += lineCount
 			cumulativeChars += charCount
-			if lineCount <= autoLoadFileDiffLines && charCount <= autoLoadFileDiffChars {
-				meta.AutoLoad = true
-			} else {
-				meta.CanLoadOnDemand = true
-			}
 		}
 
 		metas = append(metas, meta)
 	}
 
 	return metas
+}
+
+func buildDiffRenderMeta(f DiffFile, index int, lineCount int, charCount int, cumulativeLines int, cumulativeChars int) DiffFileRenderMeta {
+	meta := DiffFileRenderMeta{
+		Index:     index,
+		File:      f,
+		LineCount: lineCount,
+		CharCount: charCount,
+	}
+
+	switch {
+	case lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars:
+		meta.BlockedReason = fmt.Sprintf(
+			"This file exceeds single-file limit (%d lines or %s raw diff).",
+			maxLoadableFileDiffLines,
+			formatByteSize(maxLoadableFileDiffChars),
+		)
+	case cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars:
+		meta.BlockedReason = fmt.Sprintf(
+			"Total diff load limit reached (%d lines or %s raw diff).",
+			maxLoadableTotalDiffLines,
+			formatByteSize(maxLoadableTotalDiffChars),
+		)
+	default:
+		if lineCount <= autoLoadFileDiffLines && charCount <= autoLoadFileDiffChars {
+			meta.AutoLoad = true
+		} else {
+			meta.CanLoadOnDemand = true
+		}
+	}
+
+	return meta
+}
+
+// DiffRenderMetaByIndex extracts render metadata for one diff file without
+// parsing every later file in the diff output. It preserves the same per-file
+// and cumulative load-limit decisions as buildDiffRenderMetas for the requested
+// index by scanning previous file blocks only for their rendered line metrics.
+func DiffRenderMetaByIndex(diffOutput string, fileIndex int) (DiffFileRenderMeta, bool) {
+	meta, _, ok := diffRenderMetaByIndexWithParsedBytes(diffOutput, fileIndex)
+	return meta, ok
+}
+
+func diffRenderMetaByIndexWithParsedBytes(diffOutput string, fileIndex int) (DiffFileRenderMeta, int, bool) {
+	if diffOutput == "" || fileIndex < 0 || fileIndex >= maxDiffFiles {
+		return DiffFileRenderMeta{}, 0, false
+	}
+
+	cumulativeLines := 0
+	cumulativeChars := 0
+	currentIndex := -1
+	blockStart := -1
+	parsedBytes := 0
+
+	for lineStart := 0; lineStart <= len(diffOutput); {
+		if lineStart == len(diffOutput) {
+			break
+		}
+		lineEnd := strings.IndexByte(diffOutput[lineStart:], '\n')
+		nextLineStart := len(diffOutput)
+		line := diffOutput[lineStart:]
+		if lineEnd >= 0 {
+			nextLineStart = lineStart + lineEnd + 1
+			line = diffOutput[lineStart : lineStart+lineEnd]
+		}
+
+		if strings.HasPrefix(line, "diff --git ") {
+			if currentIndex >= 0 {
+				blockEnd := lineStart
+				if currentIndex == fileIndex {
+					return diffRenderMetaFromBlock(diffOutput[blockStart:blockEnd], fileIndex, cumulativeLines, cumulativeChars), blockEnd, true
+				}
+				lines, chars := diffBlockMetrics(diffOutput[blockStart:blockEnd])
+				if previousDiffFileCountsTowardTotal(lines, chars, cumulativeLines, cumulativeChars) {
+					cumulativeLines += lines
+					cumulativeChars += chars
+				}
+			}
+			currentIndex++
+			if currentIndex >= maxDiffFiles {
+				return DiffFileRenderMeta{}, lineStart, false
+			}
+			blockStart = lineStart
+		}
+
+		if nextLineStart == len(diffOutput) {
+			break
+		}
+		lineStart = nextLineStart
+	}
+
+	if currentIndex == fileIndex && blockStart >= 0 {
+		parsedBytes = len(diffOutput)
+		return diffRenderMetaFromBlock(diffOutput[blockStart:], fileIndex, cumulativeLines, cumulativeChars), parsedBytes, true
+	}
+	if blockStart >= 0 {
+		parsedBytes = len(diffOutput)
+	}
+	return DiffFileRenderMeta{}, parsedBytes, false
+}
+
+func diffRenderMetaFromBlock(block string, fileIndex int, cumulativeLines int, cumulativeChars int) DiffFileRenderMeta {
+	files := ParseDiffOutput(block)
+	if len(files) == 0 {
+		return DiffFileRenderMeta{}
+	}
+	lineCount, charCount := diffFileMetrics(files[0])
+	return buildDiffRenderMeta(files[0], fileIndex, lineCount, charCount, cumulativeLines, cumulativeChars)
+}
+
+func previousDiffFileCountsTowardTotal(lineCount int, charCount int, cumulativeLines int, cumulativeChars int) bool {
+	if lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars {
+		return false
+	}
+	if cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars {
+		return false
+	}
+	return true
+}
+
+func diffBlockMetrics(block string) (int, int) {
+	lineCount := 0
+	charCount := 0
+	inHunk := false
+	for lineStart := 0; lineStart <= len(block); {
+		if lineStart == len(block) {
+			break
+		}
+		lineEnd := strings.IndexByte(block[lineStart:], '\n')
+		nextLineStart := len(block)
+		line := block[lineStart:]
+		if lineEnd >= 0 {
+			nextLineStart = lineStart + lineEnd + 1
+			line = block[lineStart : lineStart+lineEnd]
+		}
+
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+			charCount += len(line)
+		case line == `\ No newline at end of file`:
+		case inHunk && (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") || line == ""):
+			lineCount++
+			if line == "" {
+				break
+			}
+			charCount += len(line) - 1
+		case !inHunk && diffLineWouldSynthesizeHunk(line):
+			inHunk = true
+			lineCount++
+			charCount += len(line) - 1
+		}
+
+		if nextLineStart == len(block) {
+			break
+		}
+		lineStart = nextLineStart
+	}
+	return lineCount, charCount
+}
+
+func diffLineWouldSynthesizeHunk(line string) bool {
+	if line == "" || strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+		return false
+	}
+	if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "new file") || strings.HasPrefix(line, "deleted file") || strings.HasPrefix(line, "old mode") || strings.HasPrefix(line, "new mode") || strings.HasPrefix(line, "Binary files") || strings.HasPrefix(line, "# Untracked") || strings.HasPrefix(line, "# + ") {
+		return false
+	}
+	return strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ")
 }
 
 func diffFileCardID(idx int, view string) string {
@@ -2665,25 +2810,33 @@ templ deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view st
 }
 
 templ LoadDiffFileCard(diffOutput string, fileIndex int, view string, taskID string, reviewComments []models.ReviewComment, reviewMode bool) {
-	if !diffFileMetaExists(diffOutput, fileIndex) {
+	if meta, exists := DiffRenderMetaByIndex(diffOutput, fileIndex); exists {
+		@LoadDiffFileCardMeta(meta, true, view, taskID, reviewComments, reviewMode)
+	} else {
+		@LoadDiffFileCardMeta(DiffFileRenderMeta{}, false, view, taskID, reviewComments, reviewMode)
+	}
+}
+
+templ LoadDiffFileCardMeta(meta DiffFileRenderMeta, exists bool, view string, taskID string, reviewComments []models.ReviewComment, reviewMode bool) {
+	if !exists {
 		<div class="alert alert-warning">
 			<span>Unable to load diff file.</span>
 		</div>
-	} else if !isDiffFileLoadable(diffOutput, fileIndex) {
+	} else if !isDiffRenderMetaLoadable(meta) {
 		<div class="alert alert-warning">
-			<span>{ getDiffFileBlockedReason(diffOutput, fileIndex) }</span>
+			<span>{ meta.BlockedReason }</span>
 		</div>
 	} else if view == "split" {
 		if reviewMode {
-			@splitDiffFileWithReview(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true, taskID, buildCommentMap(reviewComments))
+			@splitDiffFileWithReview(meta.File, meta.Index, true, taskID, buildCommentMap(reviewComments))
 		} else {
-			@splitDiffFile(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true)
+			@splitDiffFile(meta.File, meta.Index, true)
 		}
 	} else {
 		if reviewMode {
-			@inlineDiffFileWithReview(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true, taskID, buildCommentMap(reviewComments))
+			@inlineDiffFileWithReview(meta.File, meta.Index, true, taskID, buildCommentMap(reviewComments))
 		} else {
-			@inlineDiffFile(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true)
+			@inlineDiffFile(meta.File, meta.Index, true)
 		}
 	}
 }
@@ -2699,22 +2852,17 @@ func getDiffRenderMetaByIndex(files []DiffFile, fileIndex int) (DiffFileRenderMe
 }
 
 func diffFileMetaExists(diffOutput string, fileIndex int) bool {
-	_, ok := getDiffRenderMetaByIndex(ParseDiffOutput(diffOutput), fileIndex)
+	_, ok := DiffRenderMetaByIndex(diffOutput, fileIndex)
 	return ok
 }
 
-func getDiffRenderMeta(diffOutput string, fileIndex int) DiffFileRenderMeta {
-	meta, _ := getDiffRenderMetaByIndex(ParseDiffOutput(diffOutput), fileIndex)
+func diffRenderMetaByIndexOrZero(diffOutput string, fileIndex int) DiffFileRenderMeta {
+	meta, _ := DiffRenderMetaByIndex(diffOutput, fileIndex)
 	return meta
 }
 
-func isDiffFileLoadable(diffOutput string, fileIndex int) bool {
-	meta := getDiffRenderMeta(diffOutput, fileIndex)
+func isDiffRenderMetaLoadable(meta DiffFileRenderMeta) bool {
 	return meta.AutoLoad || meta.CanLoadOnDemand
-}
-
-func getDiffFileBlockedReason(diffOutput string, fileIndex int) string {
-	return getDiffRenderMeta(diffOutput, fileIndex).BlockedReason
 }
 
 func diffViewerStateKey(metas []DiffFileRenderMeta, taskID string) string {

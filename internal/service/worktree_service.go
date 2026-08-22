@@ -1731,6 +1731,30 @@ func GetWorktreeDiffWithUncommitted(repoDir string, branchName string, targetBra
 	return GetWorktreeDiff(repoDir, branchName, targetBranch)
 }
 
+// GetWorktreeDiffFileWithUncommitted returns only the requested file-index diff
+// for the same target-to-current-worktree view as GetWorktreeDiffWithUncommitted.
+// It resolves the changed-file order from compact name-status/untracked output,
+// then runs a path-scoped git diff or synthesizes one untracked-file diff.
+func GetWorktreeDiffFileWithUncommitted(repoDir string, branchName string, targetBranch string, worktreePath string, fileIndex int) (string, bool) {
+	if fileIndex < 0 || targetBranch == "" {
+		return "", false
+	}
+	if worktreePath != "" && isGitWorktreeDir(worktreePath) && gitRefExists(worktreePath, targetBranch) {
+		mergeBaseOut, err := gitOutput(worktreePath, "merge-base", targetBranch, "HEAD")
+		if err == nil {
+			mergeBase := strings.TrimSpace(string(mergeBaseOut))
+			if mergeBase != "" {
+				return captureWorktreeDiffFileAgainstMergeBase(worktreePath, mergeBase, fileIndex)
+			}
+		}
+	}
+
+	if branchName == "" || targetBranch == "" || !isGitRepoDir(repoDir) || !gitRefExists(repoDir, branchName) || !gitRefExists(repoDir, targetBranch) {
+		return "", false
+	}
+	return captureCommittedDiffFile(repoDir, targetBranch+"..."+branchName, fileIndex)
+}
+
 // captureWorktreeDiffAgainstTarget captures tracked changes between the
 // target/HEAD merge base and the worktree's current working tree, including
 // staged and unstaged changes.
@@ -1781,6 +1805,104 @@ func gitRefExists(repoDir, ref string) bool {
 	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", ref+"^{commit}")
 	cmd.Dir = repoDir
 	return cmd.Run() == nil
+}
+
+type worktreeDiffFileTarget struct {
+	Path      string
+	Pathspecs []string
+	Untracked bool
+}
+
+func captureWorktreeDiffFileAgainstMergeBase(worktreePath string, mergeBase string, fileIndex int) (string, bool) {
+	targets, err := worktreeDiffFileTargets(worktreePath, mergeBase)
+	if err != nil || fileIndex < 0 || fileIndex >= len(targets) {
+		return "", false
+	}
+	target := targets[fileIndex]
+	if target.Untracked {
+		diff := generateNewFileDiffForWorktree(worktreePath, target.Path)
+		return diff, diff != ""
+	}
+	return captureTrackedDiffFile(worktreePath, mergeBase, target.Pathspecs)
+}
+
+func worktreeDiffFileTargets(worktreePath string, mergeBase string) ([]worktreeDiffFileTarget, error) {
+	trackedCmd := exec.Command("git", "diff", "--name-status", mergeBase)
+	trackedCmd.Dir = worktreePath
+	trackedOut, err := trackedCmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	targets := parseWorktreeDiffFileTargets(trackedOut)
+
+	untrackedCmd := exec.Command("git", "ls-files", "--others", "--exclude-standard")
+	untrackedCmd.Dir = worktreePath
+	untrackedOut, err := untrackedCmd.Output()
+	if err != nil {
+		return targets, nil
+	}
+	for _, path := range strings.Split(strings.TrimSpace(string(untrackedOut)), "\n") {
+		if path = strings.TrimSpace(path); path != "" {
+			targets = append(targets, worktreeDiffFileTarget{Path: path, Pathspecs: []string{path}, Untracked: true})
+		}
+	}
+	return targets, nil
+}
+
+func parseWorktreeDiffFileTargets(out []byte) []worktreeDiffFileTarget {
+	var targets []worktreeDiffFileTarget
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "\t")
+		if len(parts) < 2 {
+			continue
+		}
+		status := parts[0]
+		if (strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C")) && len(parts) >= 3 {
+			targets = append(targets, worktreeDiffFileTarget{Path: parts[2], Pathspecs: []string{parts[1], parts[2]}})
+			continue
+		}
+		targets = append(targets, worktreeDiffFileTarget{Path: parts[1], Pathspecs: []string{parts[1]}})
+	}
+	return targets
+}
+
+func captureTrackedDiffFile(worktreePath string, base string, pathspecs []string) (string, bool) {
+	if len(pathspecs) == 0 {
+		return "", false
+	}
+	args := append([]string{"diff", base, "--"}, pathspecs...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = worktreePath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		applog.Infof("[worktree] error getting path-scoped live worktree diff path=%s base=%s file=%s: %v: %s", worktreePath, base, strings.Join(pathspecs, ","), err, strings.TrimSpace(string(out)))
+		return "", false
+	}
+	return string(out), strings.TrimSpace(string(out)) != ""
+}
+
+func captureCommittedDiffFile(repoDir string, revision string, fileIndex int) (string, bool) {
+	targetsCmd := exec.Command("git", "diff", "--name-status", revision)
+	targetsCmd.Dir = repoDir
+	targetsOut, err := targetsCmd.Output()
+	if err != nil {
+		return "", false
+	}
+	targets := parseWorktreeDiffFileTargets(targetsOut)
+	if fileIndex < 0 || fileIndex >= len(targets) {
+		return "", false
+	}
+	args := append([]string{"diff", revision, "--"}, targets[fileIndex].Pathspecs...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", false
+	}
+	return string(out), strings.TrimSpace(string(out)) != ""
 }
 
 // captureWorktreeUntracked captures untracked files in a worktree directory as

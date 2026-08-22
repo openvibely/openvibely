@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -4091,6 +4092,173 @@ func TestGetWorktreeDiffWithUncommitted(t *testing.T) {
 	if strings.Contains(diff, "uncommitted.txt") {
 		t.Error("should not show untracked files when worktree path is empty")
 	}
+}
+
+func TestGetWorktreeDiffFileWithUncommittedTargetsOneChangedFile(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	if err := os.WriteFile(filepath.Join(repoDir, "delete-me.txt"), []byte("delete me\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "rename-old.txt"), []byte("rename me\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "binary.bin"), []byte{0, 1, 2}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, repoDir, "add", ".")
+	runGitTest(t, repoDir, "commit", "-m", "add target fixtures")
+
+	targetBranch := GetDefaultBranch(repoDir)
+	branchName := "task/lazy-file-target"
+	worktreePath := filepath.Join(repoDir, ".worktrees", "lazy-file-target")
+	runGitTest(t, repoDir, "worktree", "add", "-b", branchName, worktreePath, targetBranch)
+
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("# Test\ntracked edit\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(worktreePath, "delete-me.txt")); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, worktreePath, "mv", "rename-old.txt", "rename-new.txt")
+	if err := os.WriteFile(filepath.Join(worktreePath, "rename-new.txt"), []byte("renamed content\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "binary.bin"), []byte{0, 3, 4}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "untracked.txt"), []byte("only this untracked file\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mergeBase := runGitTest(t, worktreePath, "merge-base", targetBranch, "HEAD")
+	targets, err := worktreeDiffFileTargets(worktreePath, mergeBase)
+	if err != nil {
+		t.Fatalf("targets: %v", err)
+	}
+	indexes := map[string]int{}
+	for i, target := range targets {
+		indexes[target.Path] = i
+	}
+
+	cases := []struct {
+		path   string
+		want   string
+		forbid string
+	}{
+		{path: "README.md", want: "tracked edit", forbid: "only this untracked file"},
+		{path: "delete-me.txt", want: "deleted file mode", forbid: "tracked edit"},
+		{path: "binary.bin", want: "Binary files", forbid: "delete-me.txt"},
+		{path: "untracked.txt", want: "only this untracked file", forbid: "tracked edit"},
+	}
+	for _, tc := range cases {
+		idx, ok := indexes[tc.path]
+		if !ok {
+			t.Fatalf("missing target %s in %#v", tc.path, targets)
+		}
+		diff, ok := GetWorktreeDiffFileWithUncommitted(repoDir, branchName, targetBranch, worktreePath, idx)
+		if !ok {
+			t.Fatalf("expected diff for %s", tc.path)
+		}
+		if !strings.Contains(diff, tc.want) || strings.Contains(diff, tc.forbid) {
+			t.Fatalf("unexpected targeted diff for %s:\n%s", tc.path, diff)
+		}
+	}
+
+	renameIdx, ok := indexes["rename-new.txt"]
+	if !ok {
+		t.Fatalf("missing rename target in %#v", targets)
+	}
+	renameDiff, ok := GetWorktreeDiffFileWithUncommitted(repoDir, branchName, targetBranch, worktreePath, renameIdx)
+	if !ok || !strings.Contains(renameDiff, "rename-new.txt") || strings.Contains(renameDiff, "only this untracked file") {
+		t.Fatalf("unexpected rename targeted diff:\n%s", renameDiff)
+	}
+}
+
+func TestGetWorktreeDiffFileWithUncommittedUsesPathScopedGitDiff(t *testing.T) {
+	repoDir := createTestGitRepo(t)
+	for i := 0; i < 200; i++ {
+		path := filepath.Join(repoDir, "bulk", "file-"+leftPad3(i)+".txt")
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("base\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGitTest(t, repoDir, "add", ".")
+	runGitTest(t, repoDir, "commit", "-m", "add bulk files")
+
+	targetBranch := GetDefaultBranch(repoDir)
+	branchName := "task/lazy-path-count"
+	worktreePath := filepath.Join(repoDir, ".worktrees", "lazy-path-count")
+	runGitTest(t, repoDir, "worktree", "add", "-b", branchName, worktreePath, targetBranch)
+	for i := 0; i < 200; i++ {
+		path := filepath.Join(worktreePath, "bulk", "file-"+leftPad3(i)+".txt")
+		if err := os.WriteFile(path, []byte("base\nchanged file "+leftPad3(i)+"\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("find git: %v", err)
+	}
+	shimDir := t.TempDir()
+	logPath := filepath.Join(shimDir, "git.log")
+	shimPath := filepath.Join(shimDir, "git")
+	shim := "#!/bin/sh\n" +
+		"for arg in \"$@\"; do printf '%s\\t' \"$arg\"; done >> " + shellQuoteForTest(logPath) + "\n" +
+		"printf '\\n' >> " + shellQuoteForTest(logPath) + "\n" +
+		"exec " + shellQuoteForTest(realGit) + " \"$@\"\n"
+	if err := os.WriteFile(shimPath, []byte(shim), 0755); err != nil {
+		t.Fatalf("write git shim: %v", err)
+	}
+	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	start := time.Now()
+	diff, ok := GetWorktreeDiffFileWithUncommitted(repoDir, branchName, targetBranch, worktreePath, 123)
+	elapsed := time.Since(start)
+	if !ok {
+		t.Fatal("expected targeted diff")
+	}
+	if !strings.Contains(diff, "changed file 123") || strings.Contains(diff, "changed file 122") || strings.Contains(diff, "changed file 124") {
+		t.Fatalf("expected only requested file diff, got:\n%s", diff)
+	}
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read git log: %v", err)
+	}
+	commands := strings.FieldsFunc(strings.TrimSpace(string(logBytes)), func(r rune) bool { return r == '\n' })
+	if len(commands) > 6 {
+		t.Fatalf("expected bounded git subprocess count, got %d commands:\n%s", len(commands), logBytes)
+	}
+	pathScopedPatchDiff := false
+	for _, command := range commands {
+		if strings.HasPrefix(command, "diff\t") && strings.Contains(command, "--\tbulk/file-123.txt") {
+			pathScopedPatchDiff = true
+		}
+		if strings.HasPrefix(command, "diff\t") && !strings.Contains(command, "--name-status") && !strings.Contains(command, "--\t") {
+			t.Fatalf("unexpected full patch diff command %q in:\n%s", command, logBytes)
+		}
+	}
+	if !pathScopedPatchDiff {
+		t.Fatalf("expected one path-scoped patch diff command, got:\n%s", logBytes)
+	}
+	t.Logf("targeted 200-file lazy diff used %d git subprocesses in %s", len(commands), elapsed)
+}
+
+func leftPad3(i int) string {
+	if i < 10 {
+		return "00" + string(rune('0'+i))
+	}
+	if i < 100 {
+		return "0" + string(rune('0'+i/10)) + string(rune('0'+i%10))
+	}
+	return string(rune('0'+i/100)) + string(rune('0'+(i/10)%10)) + string(rune('0'+i%10))
+}
+
+func shellQuoteForTest(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 func TestGetWorktreeFileStatsWithUncommittedMatchesNetTargetDiff(t *testing.T) {
