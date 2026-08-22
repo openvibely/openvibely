@@ -570,7 +570,25 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 				},
 			})
 			return out, err
-		}, "view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
+		},
+		"update_agent": func(ctx context.Context, input json.RawMessage) (string, error) {
+			req, err := service.DecodeUpdateAgentRuntimeInput(input)
+			if err != nil {
+				return "", err
+			}
+			out, _, err := service.ExecuteUpdateAgentRuntime(ctx, service.UpdateAgentRuntimeOptions{
+				ProjectID:     params.ProjectID,
+				Input:         req,
+				AgentRepo:     h.agentRepo,
+				LLMConfigRepo: h.llmConfigRepo,
+				ProjectRepo:   h.projectRepo,
+				Materialize: func(ctx context.Context, agent *models.Agent) error {
+					return h.materializeRuntimeAgentFromChat(ctx, params.ProjectID, agent)
+				},
+			})
+			return out, err
+		},
+		"view_settings": func(ctx context.Context, _ json.RawMessage) (string, error) {
 			return strings.TrimSpace(h.executeViewSettings(ctx)), nil
 		},
 		"list_channels": func(ctx context.Context, _ json.RawMessage) (string, error) {

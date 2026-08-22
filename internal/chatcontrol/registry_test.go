@@ -720,7 +720,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"view_task_thread", "send_to_task",
 		"schedule_task", "delete_schedule", "modify_schedule",
 		"list_personalities", "set_personality",
-		"list_models", "list_agents", "create_agent",
+		"list_models", "list_agents", "create_agent", "update_agent",
 		"view_settings", "list_channels", "view_system_update", "project_info",
 		"list_projects", "create_project", "update_project_settings", "switch_project",
 		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "delete_alert", "toggle_alert",
@@ -1179,22 +1179,31 @@ func TestRegistry_TaskGoalToolsAndCreateTaskGoalSchema(t *testing.T) {
 
 func TestCreateAgentRegistryModesAndSurfaces(t *testing.T) {
 	for _, def := range ToolDefsForContext(models.ChatModePlan, SurfaceWeb, true) {
-		if def.Name == "create_agent" {
-			t.Fatal("create_agent must not be exposed in plan mode")
+		if def.Name == "create_agent" || def.Name == "update_agent" {
+			t.Fatalf("%s must not be exposed in plan mode", def.Name)
 		}
 	}
 	for _, surface := range []Surface{SurfaceWeb, SurfaceAPI, SurfaceSlack, SurfaceTelegram, SurfaceDiscord, SurfaceEmail} {
-		found := false
+		foundCreate := false
+		foundUpdate := false
 		for _, def := range ToolDefsForContext(models.ChatModeOrchestrate, surface, false) {
-			if def.Name == "create_agent" {
-				found = true
-				if strings.Contains(string(def.Parameters), "mcp_servers") || strings.Contains(string(def.Parameters), "api_key") || strings.Contains(string(def.Parameters), "oauth") || strings.Contains(string(def.Parameters), "plugins") {
-					t.Fatalf("create_agent schema for surface %s exposes unsupported secret/plugin fields: %s", surface, string(def.Parameters))
+			if def.Name == "create_agent" || def.Name == "update_agent" {
+				if strings.Contains(string(def.Parameters), "mcp_servers") || strings.Contains(string(def.Parameters), "api_key") || strings.Contains(string(def.Parameters), "oauth") || strings.Contains(string(def.Parameters), "plugins") || strings.Contains(string(def.Parameters), "skills") || strings.Contains(string(def.Parameters), "lifecycle") {
+					t.Fatalf("%s schema for surface %s exposes unsupported fields: %s", def.Name, surface, string(def.Parameters))
 				}
 			}
+			if def.Name == "create_agent" {
+				foundCreate = true
+			}
+			if def.Name == "update_agent" {
+				foundUpdate = true
+			}
 		}
-		if !found {
+		if !foundCreate {
 			t.Fatalf("create_agent not exposed in orchestrate mode for surface %s", surface)
+		}
+		if !foundUpdate {
+			t.Fatalf("update_agent not exposed in orchestrate mode for surface %s", surface)
 		}
 	}
 }

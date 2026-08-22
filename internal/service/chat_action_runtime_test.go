@@ -2301,6 +2301,181 @@ func TestCreateAgentRuntimeCreatesAgentAndRejectsUnsafeInputs(t *testing.T) {
 	require.Contains(t, decodeErr.Error(), `create_agent does not support "id"`)
 }
 
+func TestUpdateAgentRuntimePatchesSafeFieldsAndPreservesOwnership(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Runtime Agent Update Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	model := &models.LLMConfig{Name: "Specific Runtime Model", Provider: models.ProviderTest, Model: "specific-model"}
+	require.NoError(t, llmConfigRepo.Create(ctx, model))
+
+	agent := &models.Agent{
+		Name:                "Docs Reviewer",
+		Description:         "Old description",
+		SystemPrompt:        "Old prompt",
+		Model:               "specific-model",
+		Tools:               []string{"Read", "Bash", "Grep", models.AgentToolScopedFiles},
+		ToolConfig:          models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{Directory: "docs", Permissions: []string{"read", "write"}}}},
+		Plugins:             []string{"github@marketplace"},
+		MCPServers:          []models.MCPServerConfig{{Name: "secret-server", Env: map[string]string{"API_KEY": "secret"}, Headers: map[string]string{"Authorization": "Bearer secret"}}},
+		Skills:              []models.SkillConfig{{Name: "owned", Content: "preserve"}},
+		Key:                 "docs_reviewer",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           project.ID,
+		SelectableAsPrimary: true,
+		Enabled:             true,
+		CreatedBy:           models.AgentCreatedByUser,
+		GeneratedStatus:     models.AgentStatusUserEdited,
+	}
+	require.NoError(t, agentRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "Historical Task", Prompt: "Use existing agent", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentDefinitionID: &agent.ID}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	out, updated, err := ExecuteUpdateAgentRuntime(ctx, UpdateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input: UpdateAgentRuntimeInput{
+			AgentName:           "Docs Reviewer",
+			Description:         ptrString("New description"),
+			SystemPrompt:        ptrString("New prompt"),
+			Model:               ptrString("inherit"),
+			Tools:               &[]string{"Read", "Grep"},
+			ScopedFiles:         &[]models.ScopedFilesConfig{{Directory: "src/docs", Permissions: []string{"read"}}},
+			Enabled:             ptrBool(false),
+			SelectableAsPrimary: ptrBool(false),
+		},
+	})
+	require.NoError(t, err, out)
+	require.NotNil(t, updated)
+	require.Contains(t, out, `"ok":true`)
+	require.ElementsMatch(t, []string{"description", "system_prompt", "model", "tools", "scoped_files", "enabled", "selectable_as_primary"}, decodeUpdateAgentChangedFields(t, out))
+
+	stored, err := agentRepo.GetByID(ctx, agent.ID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	require.Equal(t, "Docs Reviewer", stored.Name)
+	require.Equal(t, "New description", stored.Description)
+	require.Equal(t, "New prompt", stored.SystemPrompt)
+	require.Equal(t, "inherit", stored.Model)
+	require.Equal(t, []string{"Read", "Grep", models.AgentToolScopedFiles}, stored.Tools)
+	require.Equal(t, []models.ScopedFilesConfig{{Directory: "src/docs", Permissions: []string{"read"}}}, stored.ToolConfig.ScopedFiles)
+	require.False(t, stored.Enabled)
+	require.False(t, stored.SelectableAsPrimary)
+	require.Equal(t, models.AgentScopeProject, stored.Scope)
+	require.Equal(t, project.ID, stored.ProjectID)
+	require.Equal(t, []string{"github@marketplace"}, stored.Plugins)
+	require.Equal(t, "secret", stored.MCPServers[0].Env["API_KEY"])
+	require.Equal(t, []models.SkillConfig{{Name: "owned", Content: "preserve"}}, stored.Skills)
+
+	out, updated, err = ExecuteUpdateAgentRuntime(ctx, UpdateAgentRuntimeOptions{
+		ProjectID:     project.ID,
+		AgentRepo:     agentRepo,
+		LLMConfigRepo: llmConfigRepo,
+		ProjectRepo:   projectRepo,
+		Input:         UpdateAgentRuntimeInput{Key: "docs_reviewer", Description: ptrString("Updated by key")},
+	})
+	require.NoError(t, err, out)
+	require.NotNil(t, updated)
+	require.Equal(t, "Updated by key", updated.Description)
+
+	selectable, err := agentRepo.ListSelectableForProject(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Empty(t, selectable)
+	storedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedTask.AgentDefinitionID)
+	require.Equal(t, agent.ID, *storedTask.AgentDefinitionID)
+}
+
+func TestUpdateAgentRuntimeRejectsUnsafeTargetsAndInputsWithoutPartialSave(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	project := &models.Project{Name: "Runtime Agent Reject Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	foreign := &models.Project{Name: "Foreign Runtime Agent Project"}
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+
+	base := &models.Agent{Name: "Safe Agent", Description: "original", SystemPrompt: "original prompt", Model: "inherit", Tools: []string{"Read", "Bash"}, Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true, GeneratedStatus: models.AgentStatusUserEdited}
+	require.NoError(t, agentRepo.Create(ctx, base))
+	duplicate := &models.Agent{Name: "Taken Name", SystemPrompt: "duplicate", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true, GeneratedStatus: models.AgentStatusUserEdited}
+	require.NoError(t, agentRepo.Create(ctx, duplicate))
+	protected := &models.Agent{Name: "System: Goal Agent", Key: models.AgentSystemKindGoal, SystemKind: models.AgentSystemKindGoal, SystemPrompt: "protected", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeGlobal, Enabled: true, SelectableAsPrimary: false, GeneratedStatus: models.AgentStatusProtected}
+	require.NoError(t, agentRepo.Create(ctx, protected))
+	archived := &models.Agent{Name: "Archived Agent", SystemPrompt: "archived", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeGlobal, Enabled: false, SelectableAsPrimary: false, GeneratedStatus: models.AgentStatusArchived}
+	require.NoError(t, agentRepo.Create(ctx, archived))
+	foreignAgent := &models.Agent{Name: "Foreign Agent", SystemPrompt: "foreign", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeProject, ProjectID: foreign.ID, Enabled: true, SelectableAsPrimary: true, GeneratedStatus: models.AgentStatusUserEdited}
+	require.NoError(t, agentRepo.Create(ctx, foreignAgent))
+	ambiguousOne := &models.Agent{Name: "Ambiguous Agent", SystemPrompt: "one", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeGlobal, Enabled: false, SelectableAsPrimary: false, GeneratedStatus: models.AgentStatusUserEdited}
+	require.NoError(t, agentRepo.Create(ctx, ambiguousOne))
+	ambiguousTwo := &models.Agent{Name: "Ambiguous Agent", SystemPrompt: "two", Model: "inherit", Tools: []string{"Read"}, Scope: models.AgentScopeGlobal, Enabled: false, SelectableAsPrimary: false, GeneratedStatus: models.AgentStatusUserEdited}
+	require.NoError(t, agentRepo.Create(ctx, ambiguousTwo))
+
+	for _, tc := range []struct {
+		name      string
+		input     UpdateAgentRuntimeInput
+		wantError string
+	}{
+		{name: "missing target", input: UpdateAgentRuntimeInput{Description: ptrString("bad")}, wantError: "requires agent_id, agent_name, or key"},
+		{name: "ambiguous selector fields", input: UpdateAgentRuntimeInput{AgentID: base.ID, Key: "safe"}, wantError: "only one target selector"},
+		{name: "ambiguous name", input: UpdateAgentRuntimeInput{AgentName: "Ambiguous Agent", Description: ptrString("bad")}, wantError: `agent name "Ambiguous Agent" is ambiguous`},
+		{name: "unknown tool", input: UpdateAgentRuntimeInput{AgentID: base.ID, Tools: &[]string{"Read", "RootShell"}}, wantError: `unknown tool "RootShell"`},
+		{name: "invalid scoped directory", input: UpdateAgentRuntimeInput{AgentID: base.ID, ScopedFiles: &[]models.ScopedFilesConfig{{Directory: "../secrets", Permissions: []string{"read"}}}}, wantError: "scoped file directory must stay inside the project"},
+		{name: "duplicate selectable name", input: UpdateAgentRuntimeInput{AgentID: base.ID, Name: ptrString("Taken Name")}, wantError: "enabled selectable primary agent name already exists"},
+		{name: "protected", input: UpdateAgentRuntimeInput{AgentID: protected.ID, Description: ptrString("bad")}, wantError: "protected system agents cannot be updated"},
+		{name: "archived", input: UpdateAgentRuntimeInput{AgentID: archived.ID, Description: ptrString("bad")}, wantError: "archived agents cannot be updated"},
+		{name: "cross project", input: UpdateAgentRuntimeInput{AgentID: foreignAgent.ID, Description: ptrString("bad")}, wantError: "belongs to a different project"},
+		{name: "foreign project assertion", input: UpdateAgentRuntimeInput{AgentID: base.ID, ProjectID: foreign.ID, Description: ptrString("bad")}, wantError: "project_id must match"},
+		{name: "blank system prompt", input: UpdateAgentRuntimeInput{AgentID: base.ID, SystemPrompt: ptrString("  ")}, wantError: "system_prompt cannot be blank"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, updated, err := ExecuteUpdateAgentRuntime(ctx, UpdateAgentRuntimeOptions{ProjectID: project.ID, AgentRepo: agentRepo, LLMConfigRepo: llmConfigRepo, ProjectRepo: projectRepo, Input: tc.input})
+			require.Error(t, err)
+			require.Nil(t, updated)
+			require.Contains(t, err.Error(), tc.wantError)
+			stored, getErr := agentRepo.GetByID(ctx, base.ID)
+			require.NoError(t, getErr)
+			require.Equal(t, "Safe Agent", stored.Name)
+			require.Equal(t, "original", stored.Description)
+			require.Equal(t, "original prompt", stored.SystemPrompt)
+			require.Equal(t, []string{"Read", "Bash"}, stored.Tools)
+		})
+	}
+
+	for _, raw := range []string{
+		`{"agent_id":"` + base.ID + `","mcp_servers":[{"env":{"API_KEY":"secret"}}]}`,
+		`{"agent_id":"` + base.ID + `","plugins":["github@marketplace"]}`,
+		`{"agent_id":"` + base.ID + `","skills":[{"content":"mutate"}]}`,
+		`{"agent_id":"` + base.ID + `","lifecycle_hooks":[{"slot":"after_complete"}]}`,
+		`{"agent_id":"` + base.ID + `","delete":true}`,
+		`{"agent_id":"` + base.ID + `","api_key":"secret"}`,
+		`{"agent_id":"` + base.ID + `","oauth_token":"secret"}`,
+	} {
+		_, err := DecodeUpdateAgentRuntimeInput(json.RawMessage(raw))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "update_agent does not support")
+	}
+}
+
+func ptrString(v string) *string { return &v }
+
+func ptrBool(v bool) *bool { return &v }
+
+func decodeUpdateAgentChangedFields(t *testing.T, out string) []string {
+	t.Helper()
+	var resp updateAgentRuntimeResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	return resp.ChangedFields
+}
+
 func TestChannelUtilityCreateAgentRuntimeAndCompactListAgents(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -2323,10 +2498,21 @@ func TestChannelUtilityCreateAgentRuntimeAndCompactListAgents(t *testing.T) {
 	require.Equal(t, project.ID, stored.ProjectID)
 	require.Equal(t, []string{"Read"}, stored.Tools)
 
+	updateHandler := handlers["update_agent"]
+	require.NotNil(t, updateHandler)
+	out, err = updateHandler(ctx, json.RawMessage(fmt.Sprintf(`{"agent_id":%q,"description":"Updated from channel.","tools":["Read","Grep"],"enabled":false}`, stored.ID)))
+	require.NoError(t, err, out)
+	require.Contains(t, out, `"ok":true`)
+	stored, err = agentRepo.GetByID(ctx, stored.ID)
+	require.NoError(t, err)
+	require.Equal(t, "Updated from channel.", stored.Description)
+	require.Equal(t, []string{"Read", "Grep"}, stored.Tools)
+	require.False(t, stored.Enabled)
+
 	listOut, err := handlers["list_agents"](ctx, nil)
 	require.NoError(t, err)
 	require.Contains(t, listOut, "Channel Reuser")
-	require.Contains(t, listOut, "Reusable from channel.")
+	require.Contains(t, listOut, "Updated from channel.")
 	require.NotContains(t, listOut, "Act as a reusable channel-created Agent")
 }
 
