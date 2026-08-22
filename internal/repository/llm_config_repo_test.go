@@ -1534,6 +1534,96 @@ func BenchmarkAPIChatModelSelectionFullListVsCompactSelectionThenGet(b *testing.
 	})
 }
 
+func TestLLMConfigRepo_BrowserChatContextModelLoadingProjectionIsFasterAndLowerAllocationThanFullListOnLargeFixture(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping browser Chat context model-loading performance guard in short mode")
+	}
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
+
+	measure := func(label string, sampleOps int, load func() ([]models.LLMConfig, error)) (time.Duration, uint64) {
+		t.Helper()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		allocBefore := ms.TotalAlloc
+		startedAt := time.Now()
+		for i := 0; i < sampleOps; i++ {
+			configs, err := load()
+			if err != nil {
+				t.Fatalf("%s load: %v", label, err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				t.Fatalf("%s fixture returned %d configs", label, len(configs))
+			}
+		}
+		runtime.ReadMemStats(&ms)
+		return time.Since(startedAt) / time.Duration(sampleOps), (ms.TotalAlloc - allocBefore) / uint64(sampleOps)
+	}
+
+	const (
+		sampleOps              = 5
+		maxCompactDuration     = 200 * time.Microsecond
+		maxCompactBytesPerOp   = 300 * 1024
+		minFullListImprovement = 20
+	)
+	fullDuration, fullBytes := measure("full List", sampleOps, func() ([]models.LLMConfig, error) { return repo.List(ctx) })
+	compactDuration, compactBytes := measure("browser Chat context selection", sampleOps, func() ([]models.LLMConfig, error) { return repo.ListChatSelectionOptions(ctx) })
+
+	t.Logf("full List: %s/op, %d B/op; browser Chat context selection: %s/op, %d B/op", fullDuration, fullBytes, compactDuration, compactBytes)
+	if compactDuration > maxCompactDuration {
+		t.Fatalf("browser Chat context selection took %s/op, want <= %s/op", compactDuration, maxCompactDuration)
+	}
+	if compactBytes > maxCompactBytesPerOp {
+		t.Fatalf("browser Chat context selection allocated %d B/op, want <= %d", compactBytes, maxCompactBytesPerOp)
+	}
+	if compactDuration*time.Duration(minFullListImprovement) > fullDuration {
+		t.Fatalf("browser Chat context selection took %s/op, want at least %dx faster than full List (%s/op)", compactDuration, minFullListImprovement, fullDuration)
+	}
+	if compactBytes*minFullListImprovement > fullBytes {
+		t.Fatalf("browser Chat context selection allocated %d B/op, want at least %dx lower than full List (%d B/op)", compactBytes, minFullListImprovement, fullBytes)
+	}
+}
+
+func BenchmarkBrowserChatContextModelLoadingFullListVsCompactProjection(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		b.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
+
+	b.Run("full_list_context_baseline", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" || configs[0].APIKey == "" {
+				b.Fatalf("full context fixture returned incomplete configs: %d %#v", len(configs), configs[0])
+			}
+		}
+	})
+	b.Run("compact_context_projection", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListChatSelectionOptions(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				b.Fatalf("compact browser Chat context fixture returned %d configs", len(configs))
+			}
+		}
+	})
+}
+
 func BenchmarkProjectDialogModelProjection(b *testing.B) {
 	db := testutil.NewTestDB(b)
 	repo := NewLLMConfigRepo(db)

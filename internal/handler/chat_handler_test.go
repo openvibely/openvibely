@@ -188,6 +188,30 @@ func assertChatModelPickerQuery(t *testing.T, statements []string) {
 	}
 }
 
+func assertBrowserChatContextModelStatements(t *testing.T, statements []string) {
+	t.Helper()
+	var contextStatements []string
+	for _, statement := range statements {
+		normalized := strings.Join(strings.Fields(statement), " ")
+		if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
+			contextStatements = append(contextStatements, normalized)
+		}
+	}
+	if len(contextStatements) != 1 {
+		t.Fatalf("expected exactly one browser Chat context model query, got %d in statements: %q", len(contextStatements), statements)
+	}
+	contextQuery := contextStatements[0]
+	projection := strings.Split(strings.ToLower(contextQuery), " from agent_configs ")[0]
+	if !strings.Contains(projection, "select id, name, provider, model, is_default") {
+		t.Fatalf("browser Chat context query does not use id/name/provider/model/is_default projection: %s", contextQuery)
+	}
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("browser Chat context query selected forbidden column %q: %s", forbidden, contextQuery)
+		}
+	}
+}
+
 func TestHandler_Chat_LayoutNoFixedHeights(t *testing.T) {
 	// Regression test: chat-messages must not have fixed min-height/max-height
 	// that cause the plan-complete prompt to push the composer out of view.
@@ -408,6 +432,76 @@ func TestHandler_ChatSend(t *testing.T) {
 	if !strings.Contains(body, `title="Stop response"`) || !strings.Contains(body, `/chat/stop?project_id=default`) {
 		t.Error("expected chat send response to turn composer action into stop")
 	}
+}
+
+func TestHandler_ChatSend_UsesCompactContextModelProjectionAndHydratesSelectedModel(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+
+	largeProviderJSON := strings.Repeat("large-browser-chat-provider-json", 4096)
+	agent := &models.LLMConfig{
+		Name: "Hydrated Browser Chat Model", Provider: models.ProviderTest, AuthMethod: models.AuthMethodAPIKey,
+		Model: "claude-sonnet-browser-chat", APIKey: "browser-secret-api-key", OAuthAccessToken: "browser-secret-oauth-token",
+		OAuthRefreshToken: "browser-secret-refresh-token", OAuthClientSecret: "browser-secret-client-secret",
+		BaseURL: "https://example.com/v1/", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largeProviderJSON, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largeProviderJSON + `"}`,
+		IsDefault: true,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+
+	projects, err := h.projectSvc.List(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, projects)
+	projectID := projects[0].ID
+
+	mock := testutil.NewMockLLMCaller()
+	providerCalled := make(chan struct{}, 1)
+	mock.OnCall = func(context.Context, testutil.MockLLMCall) {
+		providerCalled <- struct{}{}
+	}
+	h.llmSvc.SetLLMCaller(mock)
+
+	form := url.Values{}
+	form.Set("message", "Hello from compact browser chat")
+	form.Set("agent_id", agent.ID)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	req := httptest.NewRequest(http.MethodPost, "/chat/send?project_id="+url.QueryEscape(projectID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	select {
+	case <-providerCalled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mock provider call")
+	}
+
+	assertBrowserChatContextModelStatements(t, counter.Statements())
+	call := mock.LastCall()
+	require.Equal(t, agent.ID, call.Agent.ID)
+	require.Equal(t, "browser-secret-api-key", call.Agent.APIKey)
+	require.Equal(t, "browser-secret-oauth-token", call.Agent.OAuthAccessToken)
+	require.Equal(t, "browser-secret-refresh-token", call.Agent.OAuthRefreshToken)
+	require.Equal(t, "browser-secret-client-secret", call.Agent.OAuthClientSecret)
+	require.Equal(t, largeProviderJSON, call.Agent.ExtraBodyJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthConfigJSON)
+	require.NotEmpty(t, call.Agent.CustomAuthStateJSON)
+	require.NotEmpty(t, call.Agent.MixtureConfigJSON)
+
+	request := mock.LastAgentRequest()
+	modelContextLine := fmt.Sprintf("- [ID:%s] %q (model: %s, provider: %s) (default)", agent.ID, agent.Name, agent.Model, agent.Provider)
+	require.Contains(t, request.ChatSystemContext, modelContextLine)
+	require.NotContains(t, request.ChatSystemContext, "browser-secret-api-key")
+	require.NotContains(t, request.ChatSystemContext, largeProviderJSON)
 }
 
 func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeTool(t *testing.T) {
