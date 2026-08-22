@@ -29,6 +29,10 @@ fail() { err "$*"; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=release-version.sh
 source "${SCRIPT_DIR}/release-version.sh"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$REPO_ROOT" ]]; then
+    export PATH="${REPO_ROOT}/.tools/gh/bin:${PATH}"
+fi
 
 ###############################################################################
 # 1. Input: parse and normalize semver

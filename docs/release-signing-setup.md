@@ -51,6 +51,8 @@ the script uses that token and does not call `az`.
 On macOS, the scripts install local release tooling under `.tools/` when needed:
 
 - `.tools/osslsigncode` for Windows signature verification.
+- `.tools/gh` for GitHub release publishing when no runnable system GitHub CLI
+  is present.
 - `.tools/jsign` for Azure Artifact Signing.
 - `.tools/jre` for the Java runtime used by `jsign` when no runnable system Java
   is present.

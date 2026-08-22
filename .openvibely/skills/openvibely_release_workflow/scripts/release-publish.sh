@@ -37,6 +37,10 @@ fail() { err "$*"; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=release-version.sh
 source "${SCRIPT_DIR}/release-version.sh"
+REPO_ROOT_FOR_TOOLS="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$REPO_ROOT_FOR_TOOLS" ]]; then
+    export PATH="${REPO_ROOT_FOR_TOOLS}/.tools/gh/bin:${PATH}"
+fi
 
 run() {
     if [[ "${DRY_RUN:-0}" == "1" ]]; then

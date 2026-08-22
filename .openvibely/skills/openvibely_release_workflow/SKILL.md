@@ -55,7 +55,7 @@ Before a real non-dry-run release, confirm the exact commit that will receive th
 |------|---------|---------|
 | `go` | Build server/desktop binaries | https://go.dev/dl |
 | `git` | Tag, branch, commit range | pre-installed |
-| `gh` (GitHub CLI) | Create GitHub release, upload assets | `brew install gh` or https://cli.github.com |
+| `gh` (GitHub CLI) | Create GitHub release, upload assets | installed locally under `.tools/gh` by signing setup when missing |
 | `zip` | Package Windows and macOS archives | pre-installed macOS/Linux |
 | `tar` | Package server tarballs | pre-installed |
 | `sha256sum` / `shasum` | Generate SHA256SUMS | pre-installed (Linux/macOS) |
@@ -71,7 +71,7 @@ Before a real non-dry-run release, confirm the exact commit that will receive th
 
 If preflight or a dry run reports a required release tool as missing, install it during the task before continuing. Do not stop at "tool missing" unless installation fails, requires unavailable privileges, or requires user-owned credentials/auth that cannot be completed non-interactively.
 
-Common macOS installs:
+Common macOS installs when local `.tools` bootstrapping is unavailable:
 
 ```bash
 brew install gh

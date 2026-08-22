@@ -397,6 +397,83 @@ EOF
     echo "ok tool: jsign ($wrapper)"
 }
 
+install_github_cli() {
+    local root tool_dir gh_bin
+    root="$(repo_root)"
+    tool_dir="${root}/.tools/gh"
+    gh_bin="${tool_dir}/bin/gh"
+
+    if command -v gh >/dev/null 2>&1; then
+        echo "ok tool: gh ($(command -v gh))"
+        return 0
+    fi
+    if [[ -x "$gh_bin" ]]; then
+        echo "ok tool: gh ($gh_bin)"
+        return 0
+    fi
+
+    if [[ "$(uname -s)" != "Darwin" ]]; then
+        echo "gh not found; install GitHub CLI or add it to PATH" >&2
+        return 1
+    fi
+
+    local arch gh_arch url tmp gh_root
+    arch="$(uname -m)"
+    case "$arch" in
+        arm64) gh_arch="arm64" ;;
+        x86_64) gh_arch="amd64" ;;
+        *)
+            echo "unsupported macOS architecture for local GitHub CLI: $arch" >&2
+            return 1
+            ;;
+    esac
+
+    echo "gh not found; downloading local GitHub CLI..." >&2
+    url="$(GH_ARCH="$gh_arch" python3 <<'PY'
+import json
+import os
+import sys
+import urllib.request
+
+arch = os.environ["GH_ARCH"]
+api = "https://api.github.com/repos/cli/cli/releases/latest"
+with urllib.request.urlopen(api, timeout=30) as response:
+    release = json.load(response)
+
+suffix = f"_macOS_{arch}.zip"
+for asset in release.get("assets", []):
+    name = asset.get("name", "")
+    if name.endswith(suffix):
+        print(asset["browser_download_url"])
+        break
+else:
+    sys.exit(f"no GitHub CLI macOS {arch} asset found")
+PY
+)"
+    if [[ -z "$url" ]]; then
+        echo "could not discover GitHub CLI download URL" >&2
+        return 1
+    fi
+
+    tmp="$(mktemp -d)"
+    curl -fL -o "${tmp}/gh.zip" "$url"
+    unzip -q "${tmp}/gh.zip" -d "${tmp}/extract"
+    gh_root="$(find "${tmp}/extract" -type f -path '*/bin/gh' -print -quit | sed 's#/bin/gh$##')"
+    if [[ -z "$gh_root" ]]; then
+        echo "downloaded GitHub CLI archive did not contain bin/gh" >&2
+        return 1
+    fi
+    rm -rf "$tool_dir"
+    mkdir -p "$(dirname "$tool_dir")"
+    mv "$gh_root" "$tool_dir"
+    if [[ -x "$gh_bin" ]]; then
+        echo "ok tool: gh ($gh_bin)"
+        return 0
+    fi
+    echo "downloaded GitHub CLI is not runnable" >&2
+    return 1
+}
+
 install_azure_cli() {
     if [[ -n "${AZURE_ACCESS_TOKEN:-}" ]]; then
         echo "ok env: AZURE_ACCESS_TOKEN (skipping az install)"
@@ -483,6 +560,7 @@ EOF
 }
 
 install_osslsigncode
+install_github_cli
 if [[ "${SKIP_AZURE_SIGNING_TOOLING:-0}" != "1" ]]; then
     install_java_runtime
     install_python_runtime 14
