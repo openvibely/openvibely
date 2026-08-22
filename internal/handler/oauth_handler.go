@@ -664,14 +664,17 @@ func (h *Handler) exchangeOAuthCodeAndSaveTokens(flow *oauthPendingFlow, code, s
 	}
 
 	bgCtx := context.Background()
+	updated := false
 	if openAIAccountID != "" {
-		if err := h.llmConfigRepo.UpdateOAuthTokens(bgCtx, flow.ConfigID, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID); err != nil {
-			return 0, err
-		}
+		updated, err = h.llmConfigRepo.UpdateStandardOAuthTokensIfRevision(bgCtx, flow.ConfigID, flow.ConfigRevision, flow.Provider, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt, openAIAccountID)
 	} else {
-		if err := h.llmConfigRepo.UpdateOAuthTokens(bgCtx, flow.ConfigID, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt); err != nil {
-			return 0, err
-		}
+		updated, err = h.llmConfigRepo.UpdateStandardOAuthTokensIfRevision(bgCtx, flow.ConfigID, flow.ConfigRevision, flow.Provider, tokenResult.AccessToken, tokenResult.RefreshToken, expiresAt)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if !updated {
+		return 0, fmt.Errorf("OAuth configuration changed while authorization was in progress; reconnect using the current configuration")
 	}
 
 	return expiresAt, nil

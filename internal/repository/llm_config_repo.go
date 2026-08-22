@@ -627,15 +627,16 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 // UpdateOAuthTokens updates only the OAuth token fields for a config.
 func (r *LLMConfigRepo) UpdateOAuthTokens(ctx context.Context, id string, accessToken, refreshToken string, expiresAt int64, accountID ...string) error {
 	var (
-		err error
+		result sql.Result
+		err    error
 	)
 	if len(accountID) > 0 {
-		_, err = r.db.ExecContext(ctx,
+		result, err = r.db.ExecContext(ctx,
 			`UPDATE agent_configs SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
 			accessToken, refreshToken, expiresAt, accountID[0], id)
 	} else {
-		_, err = r.db.ExecContext(ctx,
+		result, err = r.db.ExecContext(ctx,
 			`UPDATE agent_configs SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
 			accessToken, refreshToken, expiresAt, id)
@@ -643,7 +644,42 @@ func (r *LLMConfigRepo) UpdateOAuthTokens(ctx context.Context, id string, access
 	if err != nil {
 		return fmt.Errorf("updating OAuth tokens: %w", err)
 	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking OAuth token update: %w", err)
+	}
+	if changed != 1 {
+		return fmt.Errorf("updating OAuth tokens: model config not found")
+	}
 	return nil
+}
+
+func (r *LLMConfigRepo) UpdateStandardOAuthTokensIfRevision(ctx context.Context, id string, expectedRevision int64, provider models.LLMProvider, accessToken, refreshToken string, expiresAt int64, accountID ...string) (bool, error) {
+	var (
+		result sql.Result
+		err    error
+	)
+	if len(accountID) > 0 {
+		result, err = r.db.ExecContext(ctx,
+			`UPDATE agent_configs
+			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?, updated_at = datetime('now')
+			 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
+			accessToken, refreshToken, expiresAt, accountID[0], id, expectedRevision, provider, models.AuthMethodOAuth)
+	} else {
+		result, err = r.db.ExecContext(ctx,
+			`UPDATE agent_configs
+			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, updated_at = datetime('now')
+			 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
+			accessToken, refreshToken, expiresAt, id, expectedRevision, provider, models.AuthMethodOAuth)
+	}
+	if err != nil {
+		return false, fmt.Errorf("conditionally updating OAuth tokens: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("checking conditional OAuth token update: %w", err)
+	}
+	return changed == 1, nil
 }
 
 func (r *LLMConfigRepo) UpdateCustomAuthState(ctx context.Context, id, stateJSON string) error {
