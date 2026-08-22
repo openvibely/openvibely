@@ -477,7 +477,7 @@ func (h *Handler) APIChatMessageStatus(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "message id is required"})
 	}
 
-	exec, err := h.execRepo.GetByID(c.Request().Context(), execID)
+	exec, err := h.execRepo.GetAPIChatStatusByID(c.Request().Context(), execID)
 	if err != nil {
 		applog.Infof("[handler] APIChatMessageStatus exec=%s error: %v", execID, err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve message status"})
@@ -491,7 +491,7 @@ func (h *Handler) APIChatMessageStatus(c echo.Context) error {
 			}
 			if input != nil {
 				if input.InputStatus == models.ThreadInputApplied && input.RunExecutionID != "" {
-					exec, err = h.execRepo.GetByID(c.Request().Context(), input.RunExecutionID)
+					exec, err = h.execRepo.GetAPIChatStatusByID(c.Request().Context(), input.RunExecutionID)
 					if err != nil {
 						applog.Infof("[handler] APIChatMessageStatus promoted exec=%s error: %v", input.RunExecutionID, err)
 						return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to retrieve promoted message status"})
@@ -525,8 +525,13 @@ func (h *Handler) apiChatExecutionStatus(c echo.Context, exec *models.Execution)
 		resp.TokensUsed = exec.TokensUsed
 		resp.DurationMs = exec.DurationMs
 
-		for _, taskID := range extractTaskIDsFromOutput(exec.Output) {
-			if task, taskErr := h.taskRepo.GetByID(c.Request().Context(), taskID); taskErr == nil && task != nil && task.Category != models.CategoryChat {
+		taskIDs := extractTaskIDsFromOutput(exec.Output)
+		allowedTaskIDs, taskErr := h.taskRepo.FilterNonChatTaskIDs(c.Request().Context(), taskIDs)
+		if taskErr != nil {
+			applog.Infof("[handler] APIChatMessageStatus task filter error: %v", taskErr)
+		}
+		for _, taskID := range taskIDs {
+			if allowedTaskIDs[taskID] {
 				resp.TaskIDs = append(resp.TaskIDs, taskID)
 			}
 		}

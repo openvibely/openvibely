@@ -10,20 +10,6 @@ import (
 	"github.com/openvibely/openvibely/web/templates/pages"
 )
 
-// generatePersonalityKey creates a URL-safe key from a name.
-func generatePersonalityKey(name string) string {
-	key := strings.ToLower(strings.TrimSpace(name))
-	key = strings.ReplaceAll(key, " ", "_")
-	key = strings.ReplaceAll(key, "-", "_")
-	var sb strings.Builder
-	for _, r := range key {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
-			sb.WriteRune(r)
-		}
-	}
-	return sb.String()
-}
-
 // renderPersonalitySection re-renders the personality section with current data.
 func (h *Handler) renderPersonalitySection(c echo.Context) error {
 	ctx := c.Request().Context()
@@ -75,24 +61,14 @@ func parseCustomPersonalitySavePayload(c echo.Context, key string) (*customPerso
 		systemPrompt = strings.TrimSpace(c.FormValue("system_prompt"))
 	}
 
-	if name == "" {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "Name is required")
-	}
-	if systemPrompt == "" {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "System prompt is required")
-	}
-	if len(systemPrompt) < 20 {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "System prompt must be at least 20 characters")
+	p, err := service.NewCustomPersonalityFromFields(name, key, description, systemPrompt)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	return &customPersonalitySavePayload{
-		Personality: &models.CustomPersonality{
-			Name:         name,
-			Key:          key,
-			Description:  description,
-			SystemPrompt: systemPrompt,
-		},
-		IsJSON: isJSON,
+		Personality: p,
+		IsJSON:      isJSON,
 	}, nil
 }
 
@@ -108,7 +84,7 @@ func (h *Handler) CreateCustomPersonality(c echo.Context) error {
 	}
 	p := payload.Personality
 	if !payload.IsJSON || p.Key == "" {
-		p.Key = generatePersonalityKey(p.Name)
+		p.Key = service.NormalizeCustomPersonalityKey(p.Name)
 	}
 	if p.Key == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "Key is required")

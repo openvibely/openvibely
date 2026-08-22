@@ -57,7 +57,7 @@ func parseScheduleForm(c echo.Context, defaultRepeatType models.RepeatType) (sch
 	}, nil
 }
 
-func (h *Handler) scheduleMutationProjectID(c echo.Context) string {
+func (h *Handler) mutationProjectID(c echo.Context) string {
 	if projectID := strings.TrimSpace(c.QueryParam("project_id")); projectID != "" {
 		return projectID
 	}
@@ -118,7 +118,7 @@ func (h *Handler) scheduleAgentAssignmentFromForm(c echo.Context, taskID string)
 	if c.FormValue("schedule_agent_definition_present") == "" {
 		return false, nil, nil
 	}
-	task, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.scheduleMutationProjectID(c))
+	task, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.mutationProjectID(c))
 	if err != nil {
 		return false, nil, err
 	}
@@ -175,7 +175,7 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 
 	clearContextOnStart := formBoolEnabled(c, "clear_context_on_start", true)
 
-	if _, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.scheduleMutationProjectID(c)); err != nil {
+	if _, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.mutationProjectID(c)); err != nil {
 		return err
 	}
 
@@ -185,7 +185,7 @@ func (h *Handler) CreateSchedule(c echo.Context) error {
 	}
 
 	result, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).CreateAbsoluteForTask(c.Request().Context(), service.CreateAbsoluteScheduleForTaskRequest{
-		ProjectID:              h.scheduleMutationProjectID(c),
+		ProjectID:              h.mutationProjectID(c),
 		TaskID:                 taskID,
 		RunAt:                  formValues.runAt,
 		RepeatType:             formValues.repeatType,
@@ -220,7 +220,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 		id, runAtStr, c.FormValue("repeat_type"), c.FormValue("repeat_interval"), isHTMX)
 
 	// Get the existing schedule and verify it belongs to the requested project.
-	schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, h.scheduleMutationProjectID(c))
+	schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, h.mutationProjectID(c))
 	if err != nil {
 		applog.Infof("[handler] UpdateSchedule error getting schedule: %v", err)
 		return err
@@ -247,7 +247,7 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 	}
 
 	result, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).ModifyAbsolute(c.Request().Context(), service.ModifyAbsoluteScheduleRequest{
-		ProjectID:              h.scheduleMutationProjectID(c),
+		ProjectID:              h.mutationProjectID(c),
 		ScheduleID:             schedule.ID,
 		RunAt:                  formValues.runAt,
 		RepeatType:             formValues.repeatType,
@@ -328,7 +328,7 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 	id := c.Param("id")
 	ctx := c.Request().Context()
 
-	result, err := h.toggleScheduleEnabled(ctx, id, h.scheduleMutationProjectID(c))
+	result, err := h.toggleScheduleEnabled(ctx, id, h.mutationProjectID(c))
 	if err != nil {
 		if result.errorOperation == "lookup" {
 			applog.Infof("[handler] ToggleScheduleEnabled error getting schedule: %v", err)
@@ -365,7 +365,7 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 // @Router /api/schedules/{id}/toggle [post]
 func (h *Handler) APIToggleScheduleEnabled(c echo.Context) error {
 	id := c.Param("id")
-	result, err := h.toggleScheduleEnabled(c.Request().Context(), id, h.scheduleMutationProjectID(c))
+	result, err := h.toggleScheduleEnabled(c.Request().Context(), id, h.mutationProjectID(c))
 	if err != nil {
 		return err
 	}
@@ -382,7 +382,7 @@ func (h *Handler) DeleteSchedule(c echo.Context) error {
 	id := c.Param("id")
 	applog.Infof("[handler] DeleteSchedule id=%s", id)
 
-	if _, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, h.scheduleMutationProjectID(c)); err != nil {
+	if _, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, h.mutationProjectID(c)); err != nil {
 		applog.Infof("[handler] DeleteSchedule error getting schedule: %v", err)
 		return err
 	}
@@ -585,7 +585,7 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 	}
 
 	// Get the existing schedule and verify it belongs to the requested project.
-	schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), scheduleID, h.scheduleMutationProjectID(c))
+	schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), scheduleID, h.mutationProjectID(c))
 	if err != nil {
 		applog.Infof("[handler] RescheduleTask error getting schedule: %v", err)
 		return err

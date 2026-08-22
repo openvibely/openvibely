@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"mime/multipart"
@@ -15,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -1422,6 +1424,242 @@ func TestAPIChatMessageStatus_Completed(t *testing.T) {
 	assert.Equal(t, "AI response text", resp.Response)
 	assert.Equal(t, 100, resp.TokensUsed)
 	assert.Equal(t, int64(2500), resp.DurationMs)
+}
+
+func TestAPIChatMessageStatus_CompletedManyTaskMarkersUsesCompactQueries(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, _ := setupTestHandlerForDB(t, db)
+	execID, expectedTaskIDs := setupAPIChatStatusMarkerFixture(t, h, db, 25, false)
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := serveAPIChatMessageStatusCompact(t, h, e, execID)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var resp ChatMessageStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, execID, resp.MessageID)
+	assert.Equal(t, expectedTaskIDs, resp.TaskIDs)
+
+	assertAPIChatStatusCompactStatements(t, counter.Statements(), 1)
+}
+
+func TestAPIChatMessageStatus_CompletedWithoutTaskMarkersSkipsTaskLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	agent := createAgentTB(t, llmConfigRepo)
+	project := createProjectTB(t, h, "API Chat Status No Markers Project")
+	chatTask := createTaskTB(t, h, project.ID, "No Marker Chat", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+	})
+	exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: strings.Repeat("prompt ", 1024)}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+	require.NoError(t, h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, "AI response text", "", 100, 2500))
+	require.NoError(t, setAPIChatStatusHeavyExecutionFields(ctx, db, exec.ID))
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := serveAPIChatMessageStatusCompact(t, h, e, exec.ID)
+	counter.SetEnabled(false)
+
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var resp ChatMessageStatusResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	assert.Equal(t, "completed", resp.Status)
+	assert.Equal(t, "AI response text", resp.Response)
+	assert.Empty(t, resp.TaskIDs)
+	assertAPIChatStatusCompactStatements(t, counter.Statements(), 0)
+}
+
+func BenchmarkAPIChatMessageStatusCompactProjection(b *testing.B) {
+	db, counter := testutil.NewStatementCountingTestDB(b)
+	h, e, _ := setupTestHandlerForDB(b, db)
+	execID, _ := setupAPIChatStatusMarkerFixture(b, h, db, 25, true)
+
+	b.Run("full_row_n_plus_one", func(b *testing.B) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		serveAPIChatMessageStatusBaselineNPlusOne(b, h, e, execID)
+		counter.SetEnabled(false)
+		statementCount := len(counter.Statements())
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			serveAPIChatMessageStatusBaselineNPlusOne(b, h, e, execID)
+		}
+		b.ReportMetric(float64(statementCount), "sqlite-statements/op")
+	})
+
+	b.Run("compact_batched", func(b *testing.B) {
+		counter.Reset()
+		counter.SetEnabled(true)
+		serveAPIChatMessageStatusCompact(b, h, e, execID)
+		counter.SetEnabled(false)
+		statementCount := len(counter.Statements())
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			serveAPIChatMessageStatusCompact(b, h, e, execID)
+		}
+		b.ReportMetric(float64(statementCount), "sqlite-statements/op")
+	})
+}
+
+func setupAPIChatStatusMarkerFixture(tb testing.TB, h *Handler, db *sql.DB, markerCount int, large bool) (string, []string) {
+	tb.Helper()
+	ctx := context.Background()
+	agent := createAgentTB(tb, h.llmConfigRepo)
+	project := createProjectTB(tb, h, "API Chat Status Marker Project")
+
+	largeTaskPayload := "task prompt"
+	if large {
+		largeTaskPayload = strings.Repeat("large task payload ", 4096)
+	}
+	taskIDs := make([]string, 0, markerCount)
+	for i := 0; i < markerCount; i++ {
+		task := createTaskTB(tb, h, project.ID, fmt.Sprintf("Referenced Task %02d", i), func(tk *models.Task) {
+			tk.Category = models.CategoryBacklog
+			tk.Status = models.StatusPending
+			tk.Prompt = largeTaskPayload
+			tk.ChainConfig = largeTaskPayload
+			tk.SwarmConfig = largeTaskPayload
+		})
+		taskIDs = append(taskIDs, task.ID)
+	}
+	chatMarkerTask := createTaskTB(tb, h, project.ID, "Referenced Chat Task", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusCompleted
+		tk.Prompt = largeTaskPayload
+		tk.ChainConfig = largeTaskPayload
+		tk.SwarmConfig = largeTaskPayload
+	})
+	chatTask := createTaskTB(tb, h, project.ID, "Status Chat Execution", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &agent.ID
+		tk.Prompt = largeTaskPayload
+	})
+
+	var output strings.Builder
+	expected := make([]string, 0, markerCount+1)
+	for i, taskID := range taskIDs {
+		fmt.Fprintf(&output, "created task %02d [TASK_ID:%s]\n", i, taskID)
+		expected = append(expected, taskID)
+		if i == 5 {
+			fmt.Fprintf(&output, "duplicate marker [TASK_ID:%s]\n", taskIDs[0])
+			expected = append(expected, taskIDs[0])
+		}
+	}
+	fmt.Fprintf(&output, "chat task should be hidden [TASK_ID:%s]\n", chatMarkerTask.ID)
+	fmt.Fprintln(&output, "missing task should be hidden [TASK_ID:missing-task-id]")
+
+	promptSent := "chat prompt"
+	if large {
+		promptSent = strings.Repeat("large prompt sent ", 8192)
+	}
+	exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: promptSent}
+	require.NoError(tb, h.execRepo.Create(ctx, exec))
+	require.NoError(tb, h.execRepo.Complete(ctx, exec.ID, models.ExecCompleted, output.String(), "", 123, 4567))
+	require.NoError(tb, setAPIChatStatusHeavyExecutionFields(ctx, db, exec.ID))
+	return exec.ID, expected
+}
+
+func setAPIChatStatusHeavyExecutionFields(ctx context.Context, db *sql.DB, execID string) error {
+	largeReasoning := strings.Repeat("large reasoning content ", 8192)
+	largeDiff := strings.Repeat("large diff output ", 8192)
+	_, err := db.ExecContext(ctx, `UPDATE executions SET reasoning_content = ?, diff_output = ? WHERE id = ?`, largeReasoning, largeDiff, execID)
+	return err
+}
+
+func serveAPIChatMessageStatusCompact(tb testing.TB, h *Handler, e *echo.Echo, execID string) *httptest.ResponseRecorder {
+	tb.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/message/"+execID, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(execID)
+	require.NoError(tb, h.APIChatMessageStatus(c))
+	return rec
+}
+
+func serveAPIChatMessageStatusBaselineNPlusOne(tb testing.TB, h *Handler, e *echo.Echo, execID string) *httptest.ResponseRecorder {
+	tb.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/message/"+execID, nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	exec, err := h.execRepo.GetByID(req.Context(), execID)
+	require.NoError(tb, err)
+	require.NotNil(tb, exec)
+
+	resp := ChatMessageStatusResponse{MessageID: exec.ID}
+	switch exec.Status {
+	case models.ExecCompleted:
+		resp.Status = "completed"
+		resp.Response = exec.Output
+		resp.TokensUsed = exec.TokensUsed
+		resp.DurationMs = exec.DurationMs
+		for _, taskID := range extractTaskIDsFromOutput(exec.Output) {
+			if task, taskErr := h.taskRepo.GetByID(req.Context(), taskID); taskErr == nil && task != nil && task.Category != models.CategoryChat {
+				resp.TaskIDs = append(resp.TaskIDs, taskID)
+			}
+		}
+	case models.ExecFailed:
+		resp.Status = "failed"
+		resp.Error = exec.ErrorMessage
+		resp.DurationMs = exec.DurationMs
+	case models.ExecCancelled:
+		resp.Status = "cancelled"
+		resp.Error = exec.ErrorMessage
+		resp.Response = exec.Output
+		resp.DurationMs = exec.DurationMs
+	default:
+		resp.Status = "processing"
+		if exec.Output != "" {
+			resp.Response = exec.Output
+		}
+	}
+	require.NoError(tb, c.JSON(http.StatusOK, resp))
+	return rec
+}
+
+func assertAPIChatStatusCompactStatements(t *testing.T, statements []string, wantTaskQueries int) {
+	t.Helper()
+	statusQueries := 0
+	taskQueries := 0
+	for _, statement := range statements {
+		normalized := strings.ToLower(strings.Join(strings.Fields(statement), " "))
+		if strings.Contains(normalized, "from executions where id = ?") {
+			statusQueries++
+			projection := strings.Split(normalized, " from executions where id = ?")[0]
+			if !strings.Contains(projection, "select id, status") {
+				t.Fatalf("API Chat status query does not use compact execution projection: %s", statement)
+			}
+			for _, forbidden := range []string{"prompt_sent", "reasoning_content", "diff_output"} {
+				if strings.Contains(projection, forbidden) {
+					t.Fatalf("API Chat status query selected forbidden column %q: %s", forbidden, statement)
+				}
+			}
+		}
+		if strings.Contains(normalized, "select id from tasks where id in") && strings.Contains(normalized, "category != ?") {
+			taskQueries++
+		}
+		if strings.Contains(normalized, "from tasks where id = ?") {
+			t.Fatalf("API Chat status used per-marker full task lookup: %s", statement)
+		}
+	}
+	if statusQueries != 1 {
+		t.Fatalf("API Chat status execution queries = %d, want 1; statements: %#v", statusQueries, statements)
+	}
+	if taskQueries != wantTaskQueries {
+		t.Fatalf("API Chat status task filter queries = %d, want %d; statements: %#v", taskQueries, wantTaskQueries, statements)
+	}
 }
 
 func TestAPIChatMessageStatus_Failed(t *testing.T) {
