@@ -458,3 +458,38 @@ func TestTaskCard_RendersGoalBadge(t *testing.T) {
 		t.Fatalf("expected goal badge label in task card, got %s", body)
 	}
 }
+
+func TestTaskCard_RendersPriorityBadgeLabels(t *testing.T) {
+	for _, tt := range []struct {
+		priority int
+		label    string
+	}{
+		{priority: 1, label: "Low"},
+		{priority: 2, label: "Normal"},
+		{priority: 3, label: "High"},
+		{priority: 4, label: "Urgent"},
+	} {
+		t.Run(tt.label, func(t *testing.T) {
+			if got := PriorityLabel(tt.priority); got != tt.label {
+				t.Fatalf("test expectation drifted from PriorityLabel(%d): got %q want %q", tt.priority, got, tt.label)
+			}
+			task := models.Task{
+				ID:        "task-priority-badge",
+				ProjectID: "default",
+				Title:     "Priority badge task",
+				Category:  models.CategoryBacklog,
+				Status:    models.StatusPending,
+				Priority:  tt.priority,
+			}
+
+			var buf bytes.Buffer
+			if err := TaskCard(task, "default", "", nil, nil).Render(context.Background(), &buf); err != nil {
+				t.Fatalf("render task card: %v", err)
+			}
+			want := ">" + tt.label + "</span>"
+			if !strings.Contains(buf.String(), want) {
+				t.Fatalf("expected priority badge label %q in %s", tt.label, buf.String())
+			}
+		})
+	}
+}

@@ -375,57 +375,20 @@ templ KanbanColumn(tasks []models.Task, projectID string, category models.TaskCa
 										{ fmt.Sprintf("Execute All (%d)", countEligibleBacklogTasks(tasks)) }
 									</a>
 								</li>
-								if countEligibleBacklogByPriority(tasks, 4) > 0 {
-									<li>
-										<a
-											hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=4", projectID) }
-											hx-target="#kanban-board"
-											hx-swap="outerHTML"
-											hx-confirm={ fmt.Sprintf("Execute %d urgent priority backlog tasks?", countEligibleBacklogByPriority(tasks, 4)) }
-											class="text-sm pl-8 min-h-11"
-										>
-											{ fmt.Sprintf("Execute Urgent (%d)", countEligibleBacklogByPriority(tasks, 4)) }
-										</a>
-									</li>
-								}
-								if countEligibleBacklogByPriority(tasks, 3) > 0 {
-									<li>
-										<a
-											hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=3", projectID) }
-											hx-target="#kanban-board"
-											hx-swap="outerHTML"
-											hx-confirm={ fmt.Sprintf("Execute %d high priority backlog tasks?", countEligibleBacklogByPriority(tasks, 3)) }
-											class="text-sm pl-8 min-h-11"
-										>
-											{ fmt.Sprintf("Execute High (%d)", countEligibleBacklogByPriority(tasks, 3)) }
-										</a>
-									</li>
-								}
-								if countEligibleBacklogByPriority(tasks, 2) > 0 {
-									<li>
-										<a
-											hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=2", projectID) }
-											hx-target="#kanban-board"
-											hx-swap="outerHTML"
-											hx-confirm={ fmt.Sprintf("Execute %d normal priority backlog tasks?", countEligibleBacklogByPriority(tasks, 2)) }
-											class="text-sm pl-8 min-h-11"
-										>
-											{ fmt.Sprintf("Execute Normal (%d)", countEligibleBacklogByPriority(tasks, 2)) }
-										</a>
-									</li>
-								}
-								if countEligibleBacklogByPriority(tasks, 1) > 0 {
-									<li>
-										<a
-											hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=1", projectID) }
-											hx-target="#kanban-board"
-											hx-swap="outerHTML"
-											hx-confirm={ fmt.Sprintf("Execute %d low priority backlog tasks?", countEligibleBacklogByPriority(tasks, 1)) }
-											class="text-sm pl-8 min-h-11"
-										>
-											{ fmt.Sprintf("Execute Low (%d)", countEligibleBacklogByPriority(tasks, 1)) }
-										</a>
-									</li>
+								for _, priority := range []int{4, 3, 2, 1} {
+									if count := countEligibleBacklogByPriority(tasks, priority); count > 0 {
+										<li>
+											<a
+												hx-post={ fmt.Sprintf("/tasks/backlog/execute?project_id=%s&priority=%d", projectID, priority) }
+												hx-target="#kanban-board"
+												hx-swap="outerHTML"
+												hx-confirm={ fmt.Sprintf("Execute %d %s priority backlog tasks?", count, strings.ToLower(PriorityLabel(priority))) }
+												class="text-sm pl-8 min-h-11"
+											>
+												{ fmt.Sprintf("Execute %s (%d)", PriorityLabel(priority), count) }
+											</a>
+										</li>
+									}
 								}
 							}
 							<li>
