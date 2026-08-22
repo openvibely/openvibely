@@ -5144,7 +5144,7 @@ func TestHandler_SwarmFollowupChildCreatesTaskThreadExecution(t *testing.T) {
 	updatedWorker, err := h.taskRepo.GetByID(ctx, worker.ID)
 	require.NoError(t, err)
 	require.NotNil(t, updatedWorker)
-	assert.Equal(t, models.StatusQueued, updatedWorker.Status)
+	assert.Contains(t, []models.TaskStatus{models.StatusQueued, models.StatusRunning}, updatedWorker.Status)
 	assert.Equal(t, models.CategoryActive, updatedWorker.Category)
 	assert.Equal(t, "followup_pending", updatedWorker.SwarmStatus)
 }

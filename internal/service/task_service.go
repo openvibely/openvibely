@@ -82,6 +82,9 @@ func (s *TaskService) submitActivatedTask(ctx context.Context, task models.Task,
 		applog.Infof("[task-svc] activating swarm parent id=%s via planner start", task.ID)
 		return s.swarmSvc.StartPlanner(ctx, task.ID)
 	}
+	if s.workerSvc == nil {
+		return errors.New("worker service unavailable")
+	}
 	s.workerSvc.Submit(task)
 	return nil
 }
