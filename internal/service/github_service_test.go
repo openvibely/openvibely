@@ -1080,29 +1080,6 @@ func TestListPullRequestFeedbackTraversesAllPagesAndSortsMergedSources(t *testin
 	}
 }
 
-func TestGitHubAssignedIssueTaskCreationCompletenessRequiresExplicitMarker(t *testing.T) {
-	issue := GitHubIssue{
-		Number:    42,
-		URL:       "https://github.com/openvibely/openvibely/issues/42",
-		Title:     "Complete-looking issue",
-		Body:      "Acceptance notes",
-		State:     "open",
-		Assignees: []string{"dev-bot"},
-		Labels:    []string{"performance"},
-	}
-	if githubAssignedIssueHasTaskCreationFields(issue) {
-		t.Fatal("issue list entries without an explicit completeness marker must be hydrated before task creation")
-	}
-	issue.TaskCreationCompletenessKnown = true
-	if githubAssignedIssueHasTaskCreationFields(issue) {
-		t.Fatal("known-incomplete issue list entries must be hydrated before task creation")
-	}
-	issue.CompleteForTaskCreation = true
-	if !githubAssignedIssueHasTaskCreationFields(issue) {
-		t.Fatal("known-complete issue list entries should be used without detail hydration")
-	}
-}
-
 func TestDevInboxAssignedIssueScanSkipsDetailFetchesForCompleteListEntries(t *testing.T) {
 	ctx := context.Background()
 	var listRequests, detailRequests atomic.Int32
@@ -1139,8 +1116,8 @@ func TestDevInboxAssignedIssueScanSkipsDetailFetchesForCompleteListEntries(t *te
 	if got := detailRequests.Load(); got != 0 {
 		t.Fatalf("issue detail requests during default list scan = %d, want 0", got)
 	}
-	if !strings.Contains(out, `"Number":100`) || !strings.Contains(out, `"Body":"Acceptance notes for issue 100"`) || !strings.Contains(out, `"Labels":["performance"]`) || !strings.Contains(out, `"Assignees":["dev-bot"]`) {
-		t.Fatalf("assigned issue output lost task-creation fields: %s", out)
+	if !strings.Contains(out, `"number":100`) || !strings.Contains(out, `"labels":["performance"]`) || !strings.Contains(out, `"assignees":["dev-bot"]`) || !strings.Contains(out, `"detail_required":true`) || !strings.Contains(out, `"complete_for_task_creation":false`) || strings.Contains(out, "Acceptance notes for issue 100") || strings.Contains(out, "body_excerpt") {
+		t.Fatalf("compact assigned issue output should be body-free while retaining candidate fields: %s", out)
 	}
 
 	_, err = handlers["github_get_issue"](ctx, json.RawMessage(`{"issue_number":42,"repo_url":"https://github.com/openvibely/openvibely"}`))
@@ -1152,7 +1129,7 @@ func TestDevInboxAssignedIssueScanSkipsDetailFetchesForCompleteListEntries(t *te
 	}
 }
 
-func TestDevInboxAssignedIssueScanFetchesOnlyIncompleteListEntries(t *testing.T) {
+func TestDevInboxAssignedIssueScanDoesNotHydrateListEntries(t *testing.T) {
 	ctx := context.Background()
 	var listRequests, detailRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1199,32 +1176,32 @@ func TestDevInboxAssignedIssueScanFetchesOnlyIncompleteListEntries(t *testing.T)
 	if got := listRequests.Load(); got != 1 {
 		t.Fatalf("assigned issue list requests = %d, want 1", got)
 	}
-	if got := detailRequests.Load(); got != 1 {
-		t.Fatalf("issue detail requests = %d, want 1", got)
+	if got := detailRequests.Load(); got != 0 {
+		t.Fatalf("issue detail requests during assigned list scan = %d, want 0", got)
 	}
-	if !strings.Contains(out, `"Title":"Hydrated two"`) || !strings.Contains(out, `"Body":"Hydrated acceptance notes"`) || !strings.Contains(out, `"Title":"Complete three"`) {
-		t.Fatalf("assigned issue output did not retain hydrated and complete entries: %s", out)
+	if !strings.Contains(out, `"title":"Partial two"`) || !strings.Contains(out, `"title":"Complete three"`) || strings.Contains(out, "Hydrated acceptance notes") || strings.Contains(out, "Body three") || strings.Contains(out, "body_excerpt") {
+		t.Fatalf("compact assigned issue output should retain listed candidate metadata without body text or hydration: %s", out)
 	}
 
 	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"other-bot","repo_url":"https://github.com/openvibely/openvibely"}`))
 	if err != nil {
 		t.Fatalf("github_list_assigned_issues for second assignee: %v", err)
 	}
-	if !strings.Contains(out, `"Title":"Hydrated two"`) || !strings.Contains(out, `"Title":"Complete four"`) {
-		t.Fatalf("second assignee output did not use hydrated cache and complete entry: %s", out)
+	if !strings.Contains(out, `"title":"Partial two again"`) || !strings.Contains(out, `"title":"Complete four"`) || strings.Contains(out, "Body four") {
+		t.Fatalf("second assignee output should use listed metadata without body text: %s", out)
 	}
 	out, err = handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(`{"repo_url":"https://github.com/openvibely/openvibely"}`))
 	if err != nil {
 		t.Fatalf("github_list_my_assigned_issues: %v", err)
 	}
-	if !strings.Contains(out, `"Title":"Hydrated two"`) || !strings.Contains(out, `"Title":"Complete five"`) || !strings.Contains(out, `"login":"pat-owner"`) {
-		t.Fatalf("PAT-owner output did not use hydrated cache and complete entry: %s", out)
+	if !strings.Contains(out, `"title":"Partial two from PAT scan"`) || !strings.Contains(out, `"title":"Complete five"`) || !strings.Contains(out, `"login":"pat-owner"`) || strings.Contains(out, "Body five") {
+		t.Fatalf("PAT-owner output should use listed metadata without body text: %s", out)
 	}
 	if got := listRequests.Load(); got != 3 {
 		t.Fatalf("assigned issue list requests after multiple scans = %d, want 3", got)
 	}
-	if got := detailRequests.Load(); got != 1 {
-		t.Fatalf("issue detail requests after overlapping incomplete scans = %d, want 1", got)
+	if got := detailRequests.Load(); got != 0 {
+		t.Fatalf("issue detail requests after assigned list scans = %d, want 0", got)
 	}
 }
 
@@ -3775,5 +3752,58 @@ func TestGitHubLocalCommitSHAAndErrorHelpers(t *testing.T) {
 		if got := tc.fn(tc.err); got != tc.want {
 			t.Fatalf("%s = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestPublishExistingLocalCommitWithTokenUpdatesOrCreatesRefs(t *testing.T) {
+	ctx := context.Background()
+	type requestRecord struct {
+		method string
+		path   string
+		body   string
+		auth   string
+	}
+	var requests []requestRecord
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, requestRecord{method: r.Method, path: r.URL.Path, body: string(body), auth: r.Header.Get("Authorization")})
+		switch {
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/existing":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/existing"}`))
+		case r.Method == http.MethodPatch && r.URL.Path == "/repos/openvibely/openvibely/git/refs/heads/feature/topic":
+			http.Error(w, `{"message":"Reference does not exist"}`, http.StatusNotFound)
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/openvibely/openvibely/git/refs":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"ref":"refs/heads/feature/topic"}`))
+		default:
+			t.Fatalf("unexpected GitHub request %s %s body=%s", r.Method, r.URL.Path, body)
+		}
+	}))
+	defer server.Close()
+
+	svc := NewGitHubService(nil, "", "", "", "")
+	svc.apiBaseURL = server.URL
+	repo := &GitHubRepoRef{Owner: "openvibely", Name: "openvibely"}
+	if err := svc.publishExistingLocalCommitWithToken(ctx, "token-1", repo, " existing ", " abc123 ", true); err != nil {
+		t.Fatalf("publish existing ref: %v", err)
+	}
+	if err := svc.publishExistingLocalCommitWithToken(ctx, "token-2", repo, "feature/topic", "def456", false); err != nil {
+		t.Fatalf("publish missing ref: %v", err)
+	}
+	if len(requests) != 3 {
+		t.Fatalf("expected 3 GitHub requests, got %#v", requests)
+	}
+	if requests[0].method != http.MethodPatch || requests[0].auth != "Bearer token-1" || !strings.Contains(requests[0].body, `"force":true`) || !strings.Contains(requests[0].body, `"sha":"abc123"`) {
+		t.Fatalf("unexpected existing-ref patch: %#v", requests[0])
+	}
+	if requests[1].method != http.MethodPatch || requests[1].path != "/repos/openvibely/openvibely/git/refs/heads/feature/topic" {
+		t.Fatalf("unexpected missing-ref patch: %#v", requests[1])
+	}
+	if requests[2].method != http.MethodPost || !strings.Contains(requests[2].body, `"ref":"refs/heads/feature/topic"`) || !strings.Contains(requests[2].body, `"sha":"def456"`) {
+		t.Fatalf("unexpected ref create: %#v", requests[2])
+	}
+	if err := svc.publishExistingLocalCommitWithToken(ctx, "token", repo, " ", "sha", false); err == nil || !strings.Contains(err.Error(), "branch and sha are required") {
+		t.Fatalf("expected blank branch validation error, got %v", err)
 	}
 }

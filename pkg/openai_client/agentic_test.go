@@ -3922,3 +3922,60 @@ func TestExternallyManagedOAuthSkipsPackagePreflightRefresh(t *testing.T) {
 		t.Fatalf("client auth changed unexpectedly: %#v", client.CurrentAuth())
 	}
 }
+
+func TestOpenAIAgenticCompactionTranscriptAndImageHelpers(t *testing.T) {
+	if got := openAICompactionOutputTokens(0); got != 4096 {
+		t.Fatalf("default compaction tokens = %d", got)
+	}
+	if got := openAICompactionOutputTokens(128); got != 512 {
+		t.Fatalf("minimum compaction tokens = %d", got)
+	}
+	if got := openAICompactionOutputTokens(2048); got != 2048 {
+		t.Fatalf("explicit compaction tokens = %d", got)
+	}
+	if got := openAICompactionOutputTokens(9999); got != 4096 {
+		t.Fatalf("max compaction tokens = %d", got)
+	}
+
+	transcript := openAIInputItemsTranscript([]any{
+		map[string]any{"type": "message", "role": "system", "content": "system note"},
+		map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "hello"}, map[string]any{"type": "input_image", "image_url": "ignored"}}},
+		map[string]any{"type": "function_call", "name": "read_file", "arguments": `{"file_path":"README.md"}`},
+		map[string]any{"type": "function_call_output", "call_id": "call-1", "output": map[string]any{"text": "file output"}},
+		map[string]any{"type": "unknown", "value": "kept"},
+		"ignored",
+	})
+	for _, want := range []string{"SYSTEM:\nsystem note", "USER:\nhello", "TOOL_CALL read_file", `{"file_path":"README.md"}`, "TOOL_RESULT call-1", "file output", `"type":"unknown"`} {
+		if !strings.Contains(transcript, want) {
+			t.Fatalf("transcript missing %q in:\n%s", want, transcript)
+		}
+	}
+	if got := openAIInputItemsTranscript([]any{map[string]any{"type": "message", "role": "user", "content": "   "}}); got != "" {
+		t.Fatalf("blank transcript item should be omitted, got %q", got)
+	}
+
+	short := "short transcript"
+	if got := clampCompactionTranscript(short); got != short {
+		t.Fatalf("short transcript should not be clamped: %q", got)
+	}
+	long := strings.Repeat("a", openAICompactionTranscriptLimit+100) + "tail"
+	clamped := clampCompactionTranscript(long)
+	if len([]rune(clamped)) > openAICompactionTranscriptLimit || !strings.Contains(clamped, openAICompactionTranscriptGap) || !strings.HasSuffix(clamped, "tail") {
+		t.Fatalf("unexpected clamped transcript length=%d value suffix=%q", len([]rune(clamped)), clamped[len(clamped)-10:])
+	}
+
+	const onePixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+	dataURL := "data:image/png;base64," + onePixelPNG
+	if payload, ok := parseAgenticBase64DataURL(dataURL, "image/"); !ok || payload != onePixelPNG {
+		t.Fatalf("parseAgenticBase64DataURL = %q, %v", payload, ok)
+	}
+	if _, ok := parseAgenticBase64DataURL("data:text/plain;base64,"+onePixelPNG, "image/"); ok {
+		t.Fatal("text data URL should not match image prefix")
+	}
+	if got := estimateAgenticOriginalImageBytes(dataURL); got <= 0 || got == openAIResizedImageBytesEstimate {
+		t.Fatalf("expected data URL image byte estimate from dimensions, got %d", got)
+	}
+	if got := estimateAgenticOriginalImageBytes("https://example.test/image.png"); got != openAIResizedImageBytesEstimate {
+		t.Fatalf("non-data URL estimate = %d", got)
+	}
+}

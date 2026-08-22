@@ -410,3 +410,34 @@ func channelTargetExplainQueryPlan(tb testing.TB, db *sql.DB, query string, args
 	}
 	return strings.Join(details, "\n")
 }
+
+func TestChannelTargetRepo_DeleteForProjectAndDeleteProjectExcept(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	projectA := &models.Project{Name: "Channel Delete Project A"}
+	projectB := &models.Project{Name: "Channel Delete Project B"}
+	require.NoError(t, projectRepo.Create(ctx, projectA))
+	require.NoError(t, projectRepo.Create(ctx, projectB))
+	repo := NewChannelTargetRepo(db)
+	targets := []models.ChannelTarget{
+		{ID: "delete-a", ProjectID: projectA.ID, Platform: "email", TargetID: "delete@example.com"},
+		{ID: "keep-a", ProjectID: projectA.ID, Platform: "slack", TargetID: "C1", Name: "keep"},
+		{ID: "remove-a", ProjectID: projectA.ID, Platform: "discord", TargetID: "D1", Name: "remove"},
+		{ID: "foreign-b", ProjectID: projectB.ID, Platform: "email", TargetID: "foreign@example.com"},
+	}
+	for _, target := range targets {
+		require.NoError(t, repo.Upsert(ctx, target))
+	}
+	require.ErrorContains(t, repo.DeleteForProject(ctx, projectB.ID, "delete-a"), "channel target not found")
+	require.NoError(t, repo.DeleteForProject(ctx, projectA.ID, "delete-a"))
+	require.NoError(t, repo.DeleteProjectExcept(ctx, projectA.ID, []string{" keep-a ", ""}))
+	remaining, err := repo.ListByProject(ctx, projectA.ID)
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+	require.Equal(t, "keep-a", remaining[0].ID)
+	foreign, err := repo.ListByProject(ctx, projectB.ID)
+	require.NoError(t, err)
+	require.Len(t, foreign, 1)
+	require.Equal(t, "foreign-b", foreign[0].ID)
+}

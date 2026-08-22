@@ -279,6 +279,44 @@ type createAgentRuntimeResponse struct {
 	SelectableAsPrimary bool   `json:"selectable_as_primary"`
 }
 
+type UpdateAgentRuntimeInput struct {
+	AgentID             string                      `json:"agent_id"`
+	AgentName           string                      `json:"agent_name"`
+	Key                 string                      `json:"key"`
+	ProjectID           string                      `json:"project_id"`
+	Name                *string                     `json:"name"`
+	Description         *string                     `json:"description"`
+	SystemPrompt        *string                     `json:"system_prompt"`
+	Model               *string                     `json:"model"`
+	Tools               *[]string                   `json:"tools"`
+	ScopedFiles         *[]models.ScopedFilesConfig `json:"scoped_files"`
+	Enabled             *bool                       `json:"enabled"`
+	SelectableAsPrimary *bool                       `json:"selectable_as_primary"`
+}
+
+type UpdateAgentRuntimeOptions struct {
+	ProjectID     string
+	Input         UpdateAgentRuntimeInput
+	AgentRepo     *repository.AgentRepo
+	LLMConfigRepo *repository.LLMConfigRepo
+	ProjectRepo   *repository.ProjectRepo
+	Materialize   func(context.Context, *models.Agent) error
+}
+
+type updateAgentRuntimeResponse struct {
+	OK                  bool     `json:"ok"`
+	Error               string   `json:"error,omitempty"`
+	AgentID             string   `json:"agent_id,omitempty"`
+	Name                string   `json:"name,omitempty"`
+	Description         string   `json:"description,omitempty"`
+	Model               string   `json:"model,omitempty"`
+	Scope               string   `json:"scope,omitempty"`
+	ProjectID           string   `json:"project_id,omitempty"`
+	Enabled             bool     `json:"enabled"`
+	SelectableAsPrimary bool     `json:"selectable_as_primary"`
+	ChangedFields       []string `json:"changed_fields,omitempty"`
+}
+
 type channelUtilityActionHandlerOptions struct {
 	ProjectID                 string
 	CallerTaskID              string
@@ -341,50 +379,22 @@ func workerFromTaskService(taskSvc *TaskService) *WorkerService {
 func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			if opts.TaskSvc == nil {
-				return "", fmt.Errorf("create_task: task service unavailable")
-			}
-			var req TaskCreationRequest
-			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			if opts.PrepareTaskCreation != nil {
-				if err := opts.PrepareTaskCreation(ctx, &req); err != nil {
-					return "", err
-				}
-			}
-			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
-				return "", fmt.Errorf("create_task requires title and prompt")
-			}
-			if req.Priority == 0 {
-				req.Priority = 2
-			}
-			agents := []models.LLMConfig{}
-			if opts.LLMConfigRepo != nil {
-				agents, _ = opts.LLMConfigRepo.ListTaskCreationSelectionOptions(ctx)
-			}
-			createdTasks := []models.Task(nil)
-			summary := ""
-			creationHandled := false
-			if opts.CreatePreparedTask != nil {
-				var err error
-				createdTasks, summary, creationHandled, err = opts.CreatePreparedTask(ctx, req, agents)
-				if err != nil {
-					return "", err
-				}
-			}
-			if !creationHandled {
-				createdTasks, summary = ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, opts.ProjectID, opts.TaskSvc, agents)
-			}
-			if !creationHandled && opts.OnTasksCreated != nil && len(createdTasks) > 0 {
-				if err := opts.OnTasksCreated(ctx, []TaskCreationRequest{req}, createdTasks); err != nil {
-					return "", err
-				}
-			}
-			if opts.Collector != nil {
-				opts.Collector.addCreated(summary)
-			}
-			return strings.TrimSpace(summary), nil
+
+			out, _, err := ExecuteCreateTaskRuntimeAction(ctx, input, RuntimeTaskCreationOptions{
+				ProjectID:           opts.ProjectID,
+				TaskSvc:             opts.TaskSvc,
+				LLMConfigRepo:       opts.LLMConfigRepo,
+				PrepareTaskCreation: opts.PrepareTaskCreation,
+				CreateTask:          opts.CreatePreparedTask,
+				OnTasksCreated:      opts.OnTasksCreated,
+				AddCreatedSummary: func(summary string) {
+					if opts.Collector != nil {
+						opts.Collector.addCreated(summary)
+					}
+				},
+			})
+			return out, err
+
 		},
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req SwarmTaskRuntimeInput
@@ -646,6 +656,20 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 				return "", err
 			}
 			out, _, err := ExecuteCreateAgentRuntime(ctx, CreateAgentRuntimeOptions{
+				ProjectID:     opts.ProjectID,
+				Input:         req,
+				AgentRepo:     opts.AgentRepo,
+				LLMConfigRepo: opts.LLMConfigRepo,
+				ProjectRepo:   opts.ProjectRepo,
+			})
+			return out, err
+		},
+		"update_agent": func(ctx context.Context, input json.RawMessage) (string, error) {
+			req, err := DecodeUpdateAgentRuntimeInput(input)
+			if err != nil {
+				return "", err
+			}
+			out, _, err := ExecuteUpdateAgentRuntime(ctx, UpdateAgentRuntimeOptions{
 				ProjectID:     opts.ProjectID,
 				Input:         req,
 				AgentRepo:     opts.AgentRepo,
@@ -1793,6 +1817,314 @@ func ExecuteCreateAgentRuntime(ctx context.Context, opts CreateAgentRuntimeOptio
 		return "", nil, err
 	}
 	return string(b), agent, nil
+}
+
+func ExecuteUpdateAgentRuntime(ctx context.Context, opts UpdateAgentRuntimeOptions) (string, *models.Agent, error) {
+	respond := func(response updateAgentRuntimeResponse, agent *models.Agent) (string, *models.Agent, error) {
+		b, err := json.Marshal(response)
+		if err != nil {
+			return "", nil, err
+		}
+		if response.Error != "" {
+			return string(b), nil, errors.New(response.Error)
+		}
+		return string(b), agent, nil
+	}
+	fail := func(msg string) (string, *models.Agent, error) {
+		msg = strings.TrimSpace(msg)
+		if msg == "" {
+			msg = "update_agent failed"
+		}
+		return respond(updateAgentRuntimeResponse{OK: false, Error: msg}, nil)
+	}
+
+	if opts.AgentRepo == nil {
+		return fail("agent repository is not configured")
+	}
+	if opts.LLMConfigRepo == nil {
+		return fail("model repository is not configured")
+	}
+	projectID := strings.TrimSpace(opts.ProjectID)
+	req := opts.Input
+	agent, err := resolveRuntimeAgentTarget(ctx, opts.AgentRepo, req)
+	if err != nil {
+		return fail(err.Error())
+	}
+	if agent == nil {
+		return fail("agent target not found")
+	}
+	if err := validateRuntimeAgentUpdateTarget(ctx, opts.ProjectRepo, projectID, strings.TrimSpace(req.ProjectID), agent); err != nil {
+		return fail(err.Error())
+	}
+
+	changed := []string{}
+	markChanged := func(field string) {
+		for _, existing := range changed {
+			if existing == field {
+				return
+			}
+		}
+		changed = append(changed, field)
+	}
+	if req.Name != nil {
+		value := strings.TrimSpace(*req.Name)
+		if agent.Name != value {
+			agent.Name = value
+			markChanged("name")
+		}
+	}
+	if req.Description != nil {
+		value := strings.TrimSpace(*req.Description)
+		if agent.Description != value {
+			agent.Description = value
+			markChanged("description")
+		}
+	}
+	if req.SystemPrompt != nil {
+		value := strings.TrimSpace(*req.SystemPrompt)
+		if value == "" {
+			return fail("system_prompt cannot be blank")
+		}
+		if agent.SystemPrompt != value {
+			agent.SystemPrompt = value
+			markChanged("system_prompt")
+		}
+	}
+	if req.Model != nil {
+		model, err := resolveRuntimeAgentModel(ctx, opts.LLMConfigRepo, *req.Model)
+		if err != nil {
+			return fail(err.Error())
+		}
+		if agent.Model != model {
+			agent.Model = model
+			markChanged("model")
+		}
+	}
+	if req.Tools != nil {
+		tools, err := normalizeRuntimeAgentToolsForUpdate(*req.Tools)
+		if err != nil {
+			return fail(err.Error())
+		}
+		if !stringSlicesEqual(agent.Tools, tools) {
+			agent.Tools = tools
+			markChanged("tools")
+		}
+		if !runtimeAgentToolListContains(agent.Tools, models.AgentToolScopedFiles) && len(agent.ToolConfig.ScopedFiles) > 0 {
+			agent.ToolConfig.ScopedFiles = nil
+			markChanged("scoped_files")
+		}
+	}
+	if req.ScopedFiles != nil {
+		scopedFiles, err := normalizeRuntimeScopedFiles(*req.ScopedFiles)
+		if err != nil {
+			return fail(err.Error())
+		}
+		if len(scopedFiles) > 0 && !runtimeAgentToolListContains(agent.Tools, models.AgentToolScopedFiles) {
+			agent.Tools = append(agent.Tools, models.AgentToolScopedFiles)
+			markChanged("tools")
+		}
+		if !scopedFilesEqual(agent.ToolConfig.ScopedFiles, scopedFiles) {
+			agent.ToolConfig.ScopedFiles = scopedFiles
+			markChanged("scoped_files")
+		}
+	}
+	if req.Enabled != nil && agent.Enabled != *req.Enabled {
+		agent.Enabled = *req.Enabled
+		markChanged("enabled")
+	}
+	if req.SelectableAsPrimary != nil && agent.SelectableAsPrimary != *req.SelectableAsPrimary {
+		agent.SelectableAsPrimary = *req.SelectableAsPrimary
+		markChanged("selectable_as_primary")
+	}
+
+	if err := opts.AgentRepo.Update(ctx, agent); err != nil {
+		return fail(runtimeAgentCreateError(err))
+	}
+	if opts.Materialize != nil {
+		if err := opts.Materialize(ctx, agent); err != nil {
+			return fail(err.Error())
+		}
+	}
+	return respond(updateAgentRuntimeResponse{
+		OK:                  true,
+		AgentID:             agent.ID,
+		Name:                agent.Name,
+		Description:         agent.Description,
+		Model:               agent.Model,
+		Scope:               string(agent.Scope),
+		ProjectID:           agent.ProjectID,
+		Enabled:             agent.Enabled,
+		SelectableAsPrimary: agent.SelectableAsPrimary,
+		ChangedFields:       changed,
+	}, agent)
+}
+
+func DecodeUpdateAgentRuntimeInput(input json.RawMessage) (UpdateAgentRuntimeInput, error) {
+	payload := strings.TrimSpace(string(input))
+	if payload == "" {
+		payload = `{}`
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+		return UpdateAgentRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
+	}
+	allowed := map[string]bool{
+		"agent_id": true, "agent_name": true, "key": true, "project_id": true,
+		"name": true, "description": true, "system_prompt": true, "model": true, "tools": true,
+		"scoped_files": true, "enabled": true, "selectable_as_primary": true,
+	}
+	for key := range raw {
+		if !allowed[key] {
+			return UpdateAgentRuntimeInput{}, fmt.Errorf("update_agent does not support %q", key)
+		}
+	}
+	if scopedFilesRaw, ok := raw["scoped_files"]; ok {
+		if err := validateRuntimeScopedFilesJSON(scopedFilesRaw, "update_agent"); err != nil {
+			return UpdateAgentRuntimeInput{}, err
+		}
+	}
+	var req UpdateAgentRuntimeInput
+	if err := json.Unmarshal([]byte(payload), &req); err != nil {
+		return UpdateAgentRuntimeInput{}, fmt.Errorf("invalid tool input JSON: %w", err)
+	}
+	return req, nil
+}
+
+func validateRuntimeScopedFilesJSON(raw json.RawMessage, action string) error {
+	var entries []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil
+	}
+	allowed := map[string]bool{"directory": true, "permissions": true}
+	for i, entry := range entries {
+		for key := range entry {
+			if !allowed[key] {
+				return fmt.Errorf("%s scoped_files[%d] does not support %q", action, i, key)
+			}
+		}
+	}
+	return nil
+}
+
+func resolveRuntimeAgentTarget(ctx context.Context, repo *repository.AgentRepo, req UpdateAgentRuntimeInput) (*models.Agent, error) {
+	agentID := strings.TrimSpace(req.AgentID)
+	agentName := strings.TrimSpace(req.AgentName)
+	key := strings.TrimSpace(req.Key)
+	targets := 0
+	if agentID != "" {
+		targets++
+	}
+	if agentName != "" {
+		targets++
+	}
+	if key != "" {
+		targets++
+	}
+	if targets == 0 {
+		return nil, fmt.Errorf("update_agent requires agent_id, agent_name, or key")
+	}
+	if targets > 1 {
+		return nil, fmt.Errorf("update_agent accepts only one target selector")
+	}
+	if agentID != "" {
+		return repo.GetByID(ctx, agentID)
+	}
+	if key != "" {
+		return repo.GetByKeyIncludingArchived(ctx, key)
+	}
+	agents, err := repo.ListByName(ctx, agentName)
+	if err != nil {
+		return nil, err
+	}
+	if len(agents) == 0 {
+		return nil, nil
+	}
+	if len(agents) > 1 {
+		return nil, fmt.Errorf("agent name %q is ambiguous", agentName)
+	}
+	return &agents[0], nil
+}
+
+func validateRuntimeAgentUpdateTarget(ctx context.Context, projectRepo *repository.ProjectRepo, currentProjectID, assertedProjectID string, agent *models.Agent) error {
+	if agent == nil {
+		return fmt.Errorf("agent target not found")
+	}
+	if agent.GeneratedStatus == models.AgentStatusProtected || strings.TrimSpace(agent.SystemKind) != "" {
+		return fmt.Errorf("protected system agents cannot be updated through Chat")
+	}
+	if agent.GeneratedStatus == models.AgentStatusArchived || agent.ArchivedAt != nil {
+		return fmt.Errorf("archived agents cannot be updated through Chat")
+	}
+	if assertedProjectID != "" && assertedProjectID != currentProjectID {
+		return fmt.Errorf("project_id must match the current project context")
+	}
+	if agent.Scope == models.AgentScopeProject {
+		if currentProjectID == "" {
+			return fmt.Errorf("project-scoped agents require a current project")
+		}
+		if strings.TrimSpace(agent.ProjectID) != currentProjectID {
+			return fmt.Errorf("project-scoped agent belongs to a different project")
+		}
+		if projectRepo != nil {
+			project, err := projectRepo.GetByID(ctx, currentProjectID)
+			if err != nil {
+				return fmt.Errorf("loading current project: %w", err)
+			}
+			if project == nil {
+				return fmt.Errorf("project-scoped agents require a valid current project")
+			}
+		}
+	}
+	return nil
+}
+
+func normalizeRuntimeAgentToolsForUpdate(input []string) ([]string, error) {
+	canonical := make(map[string]string, len(models.AllAgentTools))
+	for _, tool := range models.AllAgentTools {
+		canonical[strings.ToLower(tool)] = tool
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(input))
+	for _, raw := range input {
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" {
+			continue
+		}
+		tool, ok := canonical[strings.ToLower(trimmed)]
+		if !ok {
+			return nil, fmt.Errorf("unknown tool %q", trimmed)
+		}
+		if _, exists := seen[tool]; exists {
+			continue
+		}
+		seen[tool] = struct{}{}
+		out = append(out, tool)
+	}
+	return out, nil
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func scopedFilesEqual(a, b []models.ScopedFilesConfig) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Directory != b[i].Directory || !stringSlicesEqual(a[i].Permissions, b[i].Permissions) {
+			return false
+		}
+	}
+	return true
 }
 
 func DecodeCreateAgentRuntimeInput(input json.RawMessage) (CreateAgentRuntimeInput, error) {

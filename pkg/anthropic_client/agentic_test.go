@@ -2709,3 +2709,49 @@ func TestSendAgenticTurnRecoversOAuthUnauthorizedAndRetries(t *testing.T) {
 		t.Fatalf("client auth not updated: %#v", client.Auth())
 	}
 }
+
+func TestAnthropicProviderToolActivityHelpers(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  json.RawMessage
+		want string
+	}{
+		{name: "empty", raw: nil, want: ""},
+		{name: "invalid", raw: json.RawMessage(`{`), want: ""},
+		{name: "web fetch", raw: json.RawMessage(`{"type":"web_fetch_result"}`), want: "web_fetch"},
+		{name: "nested web search", raw: json.RawMessage(`{"content":[{"type":"web_search_20250305_result"}]}`), want: "web_search"},
+		{name: "code execution", raw: json.RawMessage(`{"output":{"type":"code_execution_20250825_result"}}`), want: "code_execution"},
+		{name: "generic result", raw: json.RawMessage(`{"type":"custom_tool_result"}`), want: "custom_tool"},
+		{name: "not result", raw: json.RawMessage(`{"type":"message"}`), want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := inferProviderResultToolName(tc.raw); got != tc.want {
+				t.Fatalf("inferProviderResultToolName = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	for _, name := range []string{"code_execution", "code_execution_20250825", "bash_code_execution", " CODE_EXECUTION "} {
+		if !isAnthropicCodeExecutionToolName(name) {
+			t.Fatalf("expected %q to be treated as code execution", name)
+		}
+	}
+	if isAnthropicCodeExecutionToolName("web_search") {
+		t.Fatal("web_search should not be code execution")
+	}
+	if !anthropicTurnHasWebToolActivity([]agenticBlock{{Type: "server_tool_use", Name: "web_search"}}) {
+		t.Fatal("expected server web tool use activity")
+	}
+	if !anthropicTurnHasWebToolActivity([]agenticBlock{{Type: "server_tool_result", Content: json.RawMessage(`{"type":"web_fetch_result"}`)}}) {
+		t.Fatal("expected inferred server web tool result activity")
+	}
+	if anthropicTurnHasWebToolActivity([]agenticBlock{{Type: "tool_use", Name: "local_tool"}}) {
+		t.Fatal("local tool should not count as provider web activity")
+	}
+	if !anthropicTurnHasCodeExecutionTooManyRequests([]agenticBlock{{Type: "server_tool_result", Content: json.RawMessage(`{"type":"code_execution_result","error_code":"too_many_requests"}`)}}) {
+		t.Fatal("expected code execution too_many_requests detection")
+	}
+	if anthropicTurnHasCodeExecutionTooManyRequests([]agenticBlock{{Type: "server_tool_result", Content: json.RawMessage(`{"type":"web_search_result","error_code":"too_many_requests"}`)}}) {
+		t.Fatal("web search rate limit should not count as code execution rate limit")
+	}
+}

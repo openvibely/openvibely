@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/buildinfo"
+	wailsupdater "github.com/wailsapp/wails/v3/pkg/updater"
 )
 
 func TestDesktopInstallerReplacesCompleteBundleAndRollsBack(t *testing.T) {
@@ -1716,5 +1718,96 @@ func TestBinaryHelperRollsBackWhenReportedVersionDoesNotMatch(t *testing.T) {
 	data, _ := os.ReadFile(current)
 	if string(data) != "old" || starts != 2 {
 		t.Fatalf("rollback current=%q starts=%d", data, starts)
+	}
+}
+
+func TestWailsProviderCheckAndDownloadContracts(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 8, 22, 12, 0, 0, 0, time.UTC)
+	artifact := []byte("desktop artifact payload")
+	digest := sha256.Sum256(artifact)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/artifact.zip" {
+			t.Fatalf("unexpected artifact path %s", r.URL.Path)
+		}
+		_, _ = w.Write(artifact)
+	}))
+	defer server.Close()
+
+	client := NewClient(ClientConfig{Channel: "stable", Now: func() time.Time { return now }, HTTPClient: server.Client()})
+	current := CurrentBuild{Build: buildinfo.Build{Version: "1.0.0", OS: "linux", Arch: "amd64"}}
+	release := VerifiedRelease{
+		Metadata: ReleaseMetadata{SchemaVersion: 1, Version: "1.1.0", Channel: "stable", PublishedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), ReleaseNotesURL: "https://example.test/notes"},
+		Target:   Target{Kind: "desktop", OS: "linux", Arch: "amd64", URL: server.URL + "/artifact.zip", Filename: "openvibely.zip", Filetype: "zip", Size: int64(len(artifact)), SHA256: hex.EncodeToString(digest[:])},
+		Action:   "install",
+	}
+	provider := &WailsProvider{Client: client, Current: current, Release: &release}
+	if provider.Name() != "openvibely" {
+		t.Fatalf("unexpected provider name %q", provider.Name())
+	}
+	checked, err := provider.Check(ctx, wailsupdater.CheckRequest{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if checked == nil || checked.Version != "1.1.0" || checked.Artifact.Filename != "openvibely.zip" || checked.Verification == nil || !bytes.Equal(checked.Verification.Digest, digest[:]) {
+		t.Fatalf("unexpected checked release: %#v", checked)
+	}
+	var downloaded bytes.Buffer
+	var progress []int64
+	if err := provider.Download(ctx, checked, &downloaded, func(written, total int64) { progress = append(progress, written, total) }); err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if downloaded.String() != string(artifact) {
+		t.Fatalf("unexpected downloaded artifact %q", downloaded.String())
+	}
+	if len(progress) != 2 || progress[0] != int64(len(artifact)) || progress[1] != int64(len(artifact)) {
+		t.Fatalf("unexpected download progress %#v", progress)
+	}
+
+	provider.Release = nil
+	if checked, err := provider.Check(ctx, wailsupdater.CheckRequest{}); err != nil || checked != nil {
+		t.Fatalf("nil release Check = %#v, %v", checked, err)
+	}
+	if err := provider.Download(ctx, nil, io.Discard, nil); err == nil || !strings.Contains(err.Error(), "no verified desktop release") {
+		t.Fatalf("expected missing release Download error, got %v", err)
+	}
+	badDigest := release
+	badDigest.Target.SHA256 = "not-hex"
+	provider.Release = &badDigest
+	if _, err := provider.Check(ctx, wailsupdater.CheckRequest{}); err == nil || !strings.Contains(err.Error(), "invalid byte") {
+		t.Fatalf("expected bad digest Check error, got %v", err)
+	}
+	manual := release
+	manual.Action = "manual"
+	provider.Release = &manual
+	if _, err := provider.Check(ctx, wailsupdater.CheckRequest{}); err == nil || !strings.Contains(err.Error(), "manual-only") {
+		t.Fatalf("expected validation Check error, got %v", err)
+	}
+}
+
+func TestWailsInstallerValidationAndRestartContracts(t *testing.T) {
+	installer := &WailsInstaller{}
+	if err := installer.Validate(context.Background(), ReleaseMetadata{}); err == nil || !strings.Contains(err.Error(), "version is empty") {
+		t.Fatalf("expected empty version validation error, got %v", err)
+	}
+	if err := installer.Validate(context.Background(), ReleaseMetadata{Version: "1.2.3"}); err != nil {
+		t.Fatalf("Validate with version: %v", err)
+	}
+	if !installer.RequiresRestartValidation() {
+		t.Fatal("Wails installer should require restart validation")
+	}
+	if installer.RecoveryReady() {
+		t.Fatal("installer without health/shutdown should not be recovery-ready")
+	}
+	installer.HealthURL = "http://127.0.0.1:1234/health"
+	installer.Shutdown = func() {}
+	if !installer.RecoveryReady() {
+		t.Fatal("installer with health/shutdown should be recovery-ready")
+	}
+	if err := installer.Apply(context.Background(), "not staged"); err == nil || !strings.Contains(err.Error(), "invalid Wails desktop staged update") {
+		t.Fatalf("expected invalid apply value error, got %v", err)
+	}
+	if err := installer.Rollback(context.Background(), "not staged"); err == nil || !strings.Contains(err.Error(), "invalid Wails desktop staged update") {
+		t.Fatalf("expected invalid rollback value error, got %v", err)
 	}
 }

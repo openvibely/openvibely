@@ -914,10 +914,13 @@ func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
 		input           json.RawMessage
 		wantError       string
 		wantStoredTitle string
+		wantPriority    int
 	}{
 		{name: "empty", input: nil, wantError: "create_task requires title and prompt"},
 		{name: "whitespace", input: json.RawMessage(" \n\t "), wantError: "create_task requires title and prompt"},
-		{name: "valid", input: json.RawMessage(`{"title":" Decoded task ","prompt":" Create this task ","category":"backlog"}`), wantStoredTitle: "Decoded task"},
+		{name: "missing title", input: json.RawMessage(`{"prompt":"Create this task"}`), wantError: "create_task requires title and prompt"},
+		{name: "missing prompt", input: json.RawMessage(`{"title":"Decoded task"}`), wantError: "create_task requires title and prompt"},
+		{name: "valid", input: json.RawMessage(`{"title":" Decoded task ","prompt":" Create this task ","category":"backlog"}`), wantStoredTitle: "Decoded task", wantPriority: 2},
 		{name: "malformed", input: json.RawMessage(`{"title":`), wantError: "invalid tool input JSON:"},
 	}
 
@@ -947,6 +950,7 @@ func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
 				require.NoError(t, listErr)
 				require.Len(t, tasks, 1)
 				require.Equal(t, tt.wantStoredTitle, tasks[0].Title)
+				require.Equal(t, tt.wantPriority, tasks[0].Priority)
 			}
 		})
 	}
@@ -2319,14 +2323,14 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("github_list_my_assigned_issues returned error: %v", err)
 	}
-	if !sawMyAssignedIssues || !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"Number":5`) {
+	if !sawMyAssignedIssues || !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"number":5`) || !strings.Contains(out, `"returned":1`) {
 		t.Fatalf("expected authenticated assigned issues output, saw=%v out=%s", sawMyAssignedIssues, out)
 	}
 	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"Dev-Bot"}`))
 	if err != nil {
 		t.Fatalf("github_list_assigned_issues returned error: %v", err)
 	}
-	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
+	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"number":6`) || !strings.Contains(out, `"returned":1`) {
 		t.Fatalf("expected explicit-assignee assigned issues output, got %s", out)
 	}
 	if _, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"mallory"}`)); err == nil || !strings.Contains(err.Error(), "not authorized") {
@@ -2336,14 +2340,14 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("github_list_my_assigned_issues with repo_url returned error: %v", err)
 	}
-	if !strings.Contains(out, `"Number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) {
+	if !strings.Contains(out, `"number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) {
 		t.Fatalf("expected explicit repo_url my-assigned issues output, got %s", out)
 	}
 	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"Dev-Bot","repo_url":"https://github.com/example/other"}`))
 	if err != nil {
 		t.Fatalf("github_list_assigned_issues with repo_url returned error: %v", err)
 	}
-	if !strings.Contains(out, `"Number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
+	if !strings.Contains(out, `"number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
 		t.Fatalf("expected explicit repo_url assigned issues output, got %s", out)
 	}
 	out, err = handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"URL issue","body":"Created by URL","labels":["bug"],"assignees":["dev-bot"],"repo_url":"https://github.com/example/other"}`))
@@ -2473,6 +2477,23 @@ func TestCreateAgentRuntimeTool_WebAPICreatesProjectScopedAgentAndMaterializes(t
 			body, readErr := os.ReadFile(declPath)
 			require.NoError(t, readErr)
 			require.Contains(t, string(body), name)
+
+			updateHandler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, surface)["update_agent"]
+			require.NotNil(t, updateHandler)
+			out, err = updateHandler(ctx, json.RawMessage(fmt.Sprintf(`{"agent_id":%q,"system_prompt":"Tightened prompt.","model":"inherit","tools":["Read"],"selectable_as_primary":false}`, stored.ID)))
+			require.NoError(t, err, out)
+			require.Contains(t, out, `"ok":true`)
+
+			updated, err := agentRepo.GetByID(ctx, stored.ID)
+			require.NoError(t, err)
+			require.Equal(t, "Tightened prompt.", updated.SystemPrompt)
+			require.Equal(t, "inherit", updated.Model)
+			require.Equal(t, []string{"Read"}, updated.Tools)
+			require.False(t, updated.SelectableAsPrimary)
+			body, readErr = os.ReadFile(declPath)
+			require.NoError(t, readErr)
+			require.Contains(t, string(body), "Tightened prompt.")
+			require.NotContains(t, string(body), "Bash")
 		})
 	}
 }
@@ -2483,6 +2504,7 @@ func TestCreateAgentRuntimeTool_PlanModeDoesNotExposeWriteAction(t *testing.T) {
 	defs := chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true)
 	for _, def := range defs {
 		require.NotEqual(t, "create_agent", def.Name)
+		require.NotEqual(t, "update_agent", def.Name)
 	}
 	rt := h.buildChatActionToolRuntimeFromDefs(
 		streamingResponseParams{ChatMode: models.ChatModePlan},
@@ -2492,6 +2514,12 @@ func TestCreateAgentRuntimeTool_PlanModeDoesNotExposeWriteAction(t *testing.T) {
 		chatcontrol.SurfaceWeb,
 	)
 	out, handled, isErr, err := rt.Executor(ctx, "create_agent", json.RawMessage(`{"name":"Nope","system_prompt":"No write in plan."}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Contains(t, out, "not available")
+
+	out, handled, isErr, err = rt.Executor(ctx, "update_agent", json.RawMessage(`{"agent_id":"nope","description":"No write in plan."}`))
 	require.NoError(t, err)
 	require.True(t, handled)
 	require.True(t, isErr)
