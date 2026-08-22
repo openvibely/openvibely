@@ -29,7 +29,6 @@
 #   OPENVIBELY_MACOS_NOTARY_PROFILE     notarytool keychain profile.
 #   OPENVIBELY_WINDOWS_SIGN_COMMAND     Executable invoked with each Windows binary path.
 #   OPENVIBELY_WINDOWS_VERIFY_COMMAND   Executable that fails unless that binary is Authenticode signed and timestamped.
-#   OPENVIBELY_WINDOWS_DESKTOP_CGO=1    Build Windows amd64 desktop with CGO/mingw-w64 instead of Go cross-compile.
 #   OPENVIBELY_WAILS3                  Optional wails3 executable path/command.
 #
 # Known limitations (matches v0.1.0):
@@ -163,7 +162,6 @@ HOST_OS="$(uname -s)"
 WINDOWS_SIGN_COMMAND="${OPENVIBELY_WINDOWS_SIGN_COMMAND:-}"
 WINDOWS_VERIFY_COMMAND="${OPENVIBELY_WINDOWS_VERIFY_COMMAND:-}"
 WINDOWS_DESKTOP_BINARY="${OPENVIBELY_WINDOWS_DESKTOP_BINARY:-}"
-WINDOWS_DESKTOP_CGO="${OPENVIBELY_WINDOWS_DESKTOP_CGO:-0}"
 LINUX_DESKTOP_BINARY="${OPENVIBELY_LINUX_DESKTOP_BINARY:-}"
 LINUX_ARM64_DESKTOP_BINARY="${OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY:-}"
 [[ -n "$WINDOWS_SIGN_COMMAND" ]] || fail "OPENVIBELY_WINDOWS_SIGN_COMMAND is required for official Windows release artifacts."
@@ -445,8 +443,6 @@ fi
 if [[ -n "$WINDOWS_DESKTOP_BINARY" ]]; then
     [[ "${DRY_RUN:-0}" == "1" || -f "$WINDOWS_DESKTOP_BINARY" ]] || fail "OPENVIBELY_WINDOWS_DESKTOP_BINARY does not exist."
     run cp "$WINDOWS_DESKTOP_BINARY" "$TMP_BIN/desktop_windows_amd64.exe"
-elif [[ "$WINDOWS_DESKTOP_CGO" == "1" ]]; then
-    build_desktop_binary "$TMP_BIN/desktop_windows_amd64.exe" windows amd64 1
 else
     build_desktop_binary "$TMP_BIN/desktop_windows_amd64.exe" windows amd64 0
 fi

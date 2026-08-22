@@ -192,12 +192,6 @@ fi
 # Windows desktop build check
 if [[ -n "${OPENVIBELY_WINDOWS_DESKTOP_BINARY:-}" ]]; then
     log "Windows amd64 desktop prebuilt artifact configured; Windows arm64 desktop will be built with Go cross-compilation."
-elif [[ "${OPENVIBELY_WINDOWS_DESKTOP_CGO:-0}" == "1" ]]; then
-    if command -v x86_64-w64-mingw32-gcc &>/dev/null || { { command -v wails3 &>/dev/null || [[ -n "${OPENVIBELY_WAILS3:-}" ]]; } && command -v docker &>/dev/null; }; then
-        log "Windows amd64 desktop CGO build supported through mingw-w64 or the Wails Docker path; Windows arm64 uses Go cross-compilation."
-    else
-        warn "OPENVIBELY_WINDOWS_DESKTOP_CGO=1 but neither mingw-w64 nor wails3+Docker is available. Official release-build will fail."
-    fi
 elif go env GOOS GOARCH >/dev/null 2>&1; then
     log "Windows desktop artifacts will be built for amd64 and arm64 with Go cross-compilation (CGO disabled)."
 else
