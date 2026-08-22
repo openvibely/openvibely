@@ -12,24 +12,42 @@ import (
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
-func githubConnectionBadgeClass(status service.GitHubConnectionStatus) string {
-	if !status.Configured {
-		return "badge-ghost"
-	}
-	if status.Connected {
-		return "badge-success"
-	}
-	return "badge-warning"
+type channelStatusBadge struct {
+	Label string
+	Class string
 }
 
-func githubConnectionLabel(status service.GitHubConnectionStatus) string {
-	if !status.Configured {
-		return "Not Configured"
+type channelStatusBadgeOptions struct {
+	ConfiguredLabel    string
+	NotConfiguredLabel string
+	NotConfiguredClass string
+}
+
+func channelConnectionStatusBadge(configured, connectedOrRunning bool, options channelStatusBadgeOptions) channelStatusBadge {
+	configuredLabel := options.ConfiguredLabel
+	if configuredLabel == "" {
+		configuredLabel = "Not Connected"
 	}
-	if status.Connected {
-		return "Connected"
+	notConfiguredLabel := options.NotConfiguredLabel
+	if notConfiguredLabel == "" {
+		notConfiguredLabel = "Not Configured"
 	}
-	return "Not Connected"
+	notConfiguredClass := options.NotConfiguredClass
+	if notConfiguredClass == "" {
+		notConfiguredClass = "badge-ghost"
+	}
+
+	if connectedOrRunning {
+		return channelStatusBadge{Label: "Connected", Class: "badge-success"}
+	}
+	if configured {
+		return channelStatusBadge{Label: configuredLabel, Class: "badge-warning"}
+	}
+	return channelStatusBadge{Label: notConfiguredLabel, Class: notConfiguredClass}
+}
+
+func githubConnectionBadge(status service.GitHubConnectionStatus) channelStatusBadge {
+	return channelConnectionStatusBadge(status.Configured, status.Connected, channelStatusBadgeOptions{})
 }
 
 func githubPrivateKeyPlaceholder(hasPrivateKey bool) string {
@@ -46,24 +64,8 @@ func githubPATPlaceholder(hasPAT bool) string {
 	return "Paste a GitHub personal access token (classic or fine-grained)."
 }
 
-func slackConnectionBadgeClass(status service.SlackConnectionStatus) string {
-	if !status.Configured {
-		return "badge-ghost"
-	}
-	if status.Connected {
-		return "badge-success"
-	}
-	return "badge-warning"
-}
-
-func slackConnectionLabel(status service.SlackConnectionStatus) string {
-	if !status.Configured {
-		return "Not Configured"
-	}
-	if status.Connected {
-		return "Connected"
-	}
-	return "Not Connected"
+func slackConnectionBadge(status service.SlackConnectionStatus) channelStatusBadge {
+	return channelConnectionStatusBadge(status.Configured, status.Connected, channelStatusBadgeOptions{})
 }
 
 func slackSecretPlaceholder(hasSecret bool, label string) string {
@@ -73,24 +75,12 @@ func slackSecretPlaceholder(hasSecret bool, label string) string {
 	return "Enter " + label + "."
 }
 
-func discordConnectionBadgeClass(status service.DiscordConnectionStatus) string {
-	if !status.Configured {
-		return "badge-ghost"
-	}
-	if status.Running {
-		return "badge-success"
-	}
-	return "badge-warning"
+func discordConnectionBadge(status service.DiscordConnectionStatus) channelStatusBadge {
+	return channelConnectionStatusBadge(status.Configured, status.Running, channelStatusBadgeOptions{ConfiguredLabel: "Gateway Offline"})
 }
 
-func discordConnectionLabel(status service.DiscordConnectionStatus) string {
-	if !status.Configured {
-		return "Not Configured"
-	}
-	if status.Running {
-		return "Connected"
-	}
-	return "Gateway Offline"
+func telegramConnectionBadge(isBotRunning bool) channelStatusBadge {
+	return channelConnectionStatusBadge(true, isBotRunning, channelStatusBadgeOptions{})
 }
 
 func telegramChannelStatusText(isBotRunning bool) string {
@@ -98,6 +88,14 @@ func telegramChannelStatusText(isBotRunning bool) string {
 		return "Running"
 	}
 	return "Not Running"
+}
+
+func emailConnectionBadge(status service.EmailConnectionStatus) channelStatusBadge {
+	return channelConnectionStatusBadge(status.Configured, status.Running, channelStatusBadgeOptions{
+		ConfiguredLabel:    "Configured",
+		NotConfiguredLabel: "Not Connected",
+		NotConfiguredClass: "badge-warning",
+	})
 }
 
 func selectedWebhookAgentIDs(webhooks []models.WebhookEndpoint, webhookAgents map[string][]models.WebhookEndpointAgent, webhookID string) string {
@@ -235,7 +233,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="github"
 					data-search-card
-					data-search-text={ "GitHub " + githubConnectionLabel(view.GitHubStatus) }
+					data-search-text={ "GitHub " + githubConnectionBadge(view.GitHubStatus).Label }
 					onclick="editChannelFromData(this)"
 				>
 					<div class="card-body relative">
@@ -283,7 +281,7 @@ templ settingsContent(view ChannelsSettingsView) {
 								<p class="text-sm opacity-60">Account: { view.GitHubStatus.AccountLogin }</p>
 							}
 							<div class="mt-3 flex items-center gap-2">
-								<span class={ "badge badge-sm", githubConnectionBadgeClass(view.GitHubStatus) }>{ githubConnectionLabel(view.GitHubStatus) }</span>
+								<span class={ "badge badge-sm", githubConnectionBadge(view.GitHubStatus).Class }>{ githubConnectionBadge(view.GitHubStatus).Label }</span>
 							</div>
 							if view.GitHubStatus.AuthMode == service.GitHubAuthModeApp {
 								<div class="mt-3">
@@ -309,7 +307,7 @@ templ settingsContent(view ChannelsSettingsView) {
 					class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 					data-channel-type="slack"
 					data-search-card
-					data-search-text={ "Slack " + slackConnectionLabel(view.SlackStatus) }
+					data-search-text={ "Slack " + slackConnectionBadge(view.SlackStatus).Label }
 					onclick="editChannelFromData(this)"
 				>
 					<div class="card-body relative">
@@ -367,7 +365,7 @@ templ settingsContent(view ChannelsSettingsView) {
 								</div>
 							}
 							<div class="mt-3 flex items-center gap-2">
-								<span class={ "badge badge-sm", slackConnectionBadgeClass(view.SlackStatus) }>{ slackConnectionLabel(view.SlackStatus) }</span>
+								<span class={ "badge badge-sm", slackConnectionBadge(view.SlackStatus).Class }>{ slackConnectionBadge(view.SlackStatus).Label }</span>
 							</div>
 							<div class="mt-3" onclick="event.stopPropagation()">
 								if view.SlackStatus.Configured && !view.SlackStatus.Connected {
@@ -446,11 +444,7 @@ templ settingsContent(view ChannelsSettingsView) {
 								</div>
 							}
 							<div class="mt-3 flex items-center gap-2">
-								if view.IsBotRunning {
-									<span class="badge badge-success badge-sm">Connected</span>
-								} else {
-									<span class="badge badge-warning badge-sm">Not Connected</span>
-								}
+								<span class={ "badge badge-sm", telegramConnectionBadge(view.IsBotRunning).Class }>{ telegramConnectionBadge(view.IsBotRunning).Label }</span>
 							</div>
 							<div id="test-result-telegram" class="mt-2"></div>
 						</div>
@@ -463,7 +457,7 @@ templ settingsContent(view ChannelsSettingsView) {
 						class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all"
 						data-channel-type="discord"
 						data-search-card
-						data-search-text={ "Discord " + discordConnectionLabel(view.DiscordStatus) }
+						data-search-text={ "Discord " + discordConnectionBadge(view.DiscordStatus).Label }
 						onclick="editChannelFromData(this)"
 					>
 						<div class="card-body relative">
@@ -505,7 +499,7 @@ templ settingsContent(view ChannelsSettingsView) {
 									</div>
 								}
 								<div class="mt-3 flex items-center gap-2">
-									<span class={ "badge badge-sm", discordConnectionBadgeClass(view.DiscordStatus) }>{ discordConnectionLabel(view.DiscordStatus) }</span>
+									<span class={ "badge badge-sm", discordConnectionBadge(view.DiscordStatus).Class }>{ discordConnectionBadge(view.DiscordStatus).Label }</span>
 									if view.DiscordStatus.Running {
 										<span class="badge badge-sm badge-success">Gateway running</span>
 									} else if view.DiscordStatus.Configured {
@@ -556,13 +550,7 @@ templ settingsContent(view ChannelsSettingsView) {
 									<span class="badge badge-sm badge-ghost">{ fmt.Sprintf("%d sender(s)", len(view.EmailAuthorizedSenders)) }</span>
 								</div>
 								<div class="mt-3 flex items-center gap-2">
-									if view.EmailStatus.Running {
-										<span class="badge badge-success badge-sm">Connected</span>
-									} else if view.EmailStatus.Configured {
-										<span class="badge badge-warning badge-sm">Configured</span>
-									} else {
-										<span class="badge badge-warning badge-sm">Not Connected</span>
-									}
+									<span class={ "badge badge-sm", emailConnectionBadge(view.EmailStatus).Class }>{ emailConnectionBadge(view.EmailStatus).Label }</span>
 								</div>
 								<div id="test-result-email" class="mt-2"></div>
 							</div>
