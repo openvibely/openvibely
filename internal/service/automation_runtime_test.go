@@ -1760,7 +1760,7 @@ func TestAutomationRuntimeAuthorizedAssigneeScanReanchorsStaleIssueProjection(t 
 
 	out, err := handlers["github_list_assigned_issues"](inboxCtx, json.RawMessage(`{"assignee":"dubee"}`))
 	require.NoError(t, err)
-	require.Contains(t, out, `"Number":288`)
+	require.Contains(t, out, `"number":288`)
 	var originVersionID, title string
 	require.NoError(t, fixture.repo.DB().QueryRowContext(ctx, `SELECT origin_version_id, title FROM automation_work_items
 		WHERE automation_id = ? AND work_item_key = ?`, fixture.definition.Automation.ID, resourceID).Scan(&originVersionID, &title))
@@ -1978,10 +1978,10 @@ func TestAutomationRuntimeGitHubIssueInboxAndPRProvenance(t *testing.T) {
 	require.Equal(t, int32(1), createCalls.Load(), "an Automation node without a create-issue edge must fail closed")
 	assignedOutput, err := handlers["github_list_my_assigned_issues"](inboxCtx, json.RawMessage(`{}`))
 	require.NoError(t, err)
-	require.Contains(t, assignedOutput, `"Number":42`)
-	require.Contains(t, assignedOutput, `"Number":43`)
-	require.Contains(t, assignedOutput, `"Number":44`)
-	require.Contains(t, assignedOutput, `"Number":45`)
+	require.Contains(t, assignedOutput, `"number":42`)
+	require.Contains(t, assignedOutput, `"number":43`)
+	require.Contains(t, assignedOutput, `"number":44`)
+	require.Contains(t, assignedOutput, `"number":45`)
 	var issueItems int
 	require.NoError(t, fixture.repo.DB().QueryRow(`SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND kind = 'github_issue'`, fixture.definition.Automation.ID).Scan(&issueItems))
 	require.Equal(t, 4, issueItems, "the inbox must record every issue returned by an authorized assignment scan, including manually created issues")

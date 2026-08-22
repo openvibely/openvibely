@@ -150,7 +150,11 @@ func (c *GitHubIssueActionCore) ExecuteIsActorAuthorized(ctx context.Context, in
 }
 
 func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context, input json.RawMessage, postprocess GitHubAssignedIssuesPostprocessor) (string, error) {
-	_, repo, err := c.requestAndRepo(ctx, input, nil)
+	req, repo, err := c.requestAndRepo(ctx, input, nil)
+	if err != nil {
+		return "", err
+	}
+	limit, offset, err := assignedIssueListPage(req)
 	if err != nil {
 		return "", err
 	}
@@ -162,7 +166,8 @@ func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context,
 	if err != nil {
 		return "", err
 	}
-	return githubIssueActionJSON(map[string]any{"ok": true, "account": user, "issues": issues})
+	summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
+	return githubIssueActionJSON(map[string]any{"ok": true, "account": user, "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 }
 
 func (c *GitHubIssueActionCore) ExecuteListExistingAutomationIssues(ctx context.Context, input json.RawMessage) (string, error) {
@@ -219,6 +224,10 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, i
 	if err != nil {
 		return "", err
 	}
+	limit, offset, err := assignedIssueListPage(req)
+	if err != nil {
+		return "", err
+	}
 	assignee := strings.TrimSpace(req.Assignee)
 	if assignee == "" {
 		return "", fmt.Errorf("assignee is required")
@@ -238,7 +247,63 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, i
 	if err != nil {
 		return "", err
 	}
-	return githubIssueActionJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": issues})
+	summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
+	return githubIssueActionJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
+}
+
+const assignedIssueBodyExcerptLimit = 700
+
+func assignedIssueListPage(req GitHubIssueActionRequest) (int, int, error) {
+	limit := req.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	if limit < 1 || limit > 100 || req.Offset < 0 {
+		return 0, 0, fmt.Errorf("limit must be 1-100 and offset must be non-negative")
+	}
+	return limit, req.Offset, nil
+}
+
+func compactAssignedGitHubIssues(issues []GitHubIssue, limit, offset int) ([]map[string]any, int) {
+	if offset >= len(issues) {
+		return []map[string]any{}, 0
+	}
+	end := offset + limit
+	if end > len(issues) {
+		end = len(issues)
+	}
+	summaries := make([]map[string]any, 0, end-offset)
+	for _, issue := range issues[offset:end] {
+		bodyExcerpt, bodyTruncated := assignedIssueBodyExcerpt(issue.Body)
+		completeForTaskCreation := issue.TaskCreationCompletenessKnown && issue.CompleteForTaskCreation && !bodyTruncated
+		summaries = append(summaries, map[string]any{
+			"number":                           issue.Number,
+			"url":                              issue.URL,
+			"title":                            issue.Title,
+			"state":                            issue.State,
+			"created_by":                       issue.UserLogin,
+			"assignees":                        issue.Assignees,
+			"labels":                           issue.Labels,
+			"body_excerpt":                     bodyExcerpt,
+			"body_truncated":                   bodyTruncated,
+			"complete_for_task_creation":       completeForTaskCreation,
+			"task_creation_completeness_known": issue.TaskCreationCompletenessKnown && !bodyTruncated,
+		})
+	}
+	nextOffset := 0
+	if end < len(issues) {
+		nextOffset = end
+	}
+	return summaries, nextOffset
+}
+
+func assignedIssueBodyExcerpt(body string) (string, bool) {
+	body = strings.TrimSpace(body)
+	runes := []rune(body)
+	if len(runes) <= assignedIssueBodyExcerptLimit {
+		return body, false
+	}
+	return string(runes[:assignedIssueBodyExcerptLimit]), true
 }
 
 func (c *GitHubIssueActionCore) ExecuteListAssignedIssuesWithPRs(ctx context.Context, input json.RawMessage) (string, error) {

@@ -2192,14 +2192,14 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("github_list_my_assigned_issues returned error: %v", err)
 	}
-	if !sawMyAssignedIssues || !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"Number":5`) {
+	if !sawMyAssignedIssues || !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"number":5`) || !strings.Contains(out, `"returned":1`) {
 		t.Fatalf("expected authenticated assigned issues output, saw=%v out=%s", sawMyAssignedIssues, out)
 	}
 	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"Dev-Bot"}`))
 	if err != nil {
 		t.Fatalf("github_list_assigned_issues returned error: %v", err)
 	}
-	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
+	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"number":6`) || !strings.Contains(out, `"returned":1`) {
 		t.Fatalf("expected explicit-assignee assigned issues output, got %s", out)
 	}
 	if _, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"mallory"}`)); err == nil || !strings.Contains(err.Error(), "not authorized") {
@@ -2209,14 +2209,14 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if err != nil {
 		t.Fatalf("github_list_my_assigned_issues with repo_url returned error: %v", err)
 	}
-	if !strings.Contains(out, `"Number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) {
+	if !strings.Contains(out, `"number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) {
 		t.Fatalf("expected explicit repo_url my-assigned issues output, got %s", out)
 	}
 	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"Dev-Bot","repo_url":"https://github.com/example/other"}`))
 	if err != nil {
 		t.Fatalf("github_list_assigned_issues with repo_url returned error: %v", err)
 	}
-	if !strings.Contains(out, `"Number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
+	if !strings.Contains(out, `"number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
 		t.Fatalf("expected explicit repo_url assigned issues output, got %s", out)
 	}
 	out, err = handlers["github_create_issue"](ctx, json.RawMessage(`{"title":"URL issue","body":"Created by URL","labels":["bug"],"assignees":["dev-bot"],"repo_url":"https://github.com/example/other"}`))

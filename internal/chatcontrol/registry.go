@@ -156,8 +156,9 @@ const sendMessageParams = `{"type":"object","properties":{"action":{"type":"stri
 const githubRepoURLProperty = `"repo_url":{"type":"string","description":"Optional GitHub repository URL. Defaults to the current project repository."}`
 const githubCreateIssueParams = `{"type":"object","properties":{"title":{"type":"string"},"body":{"type":"string"},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as suggestion, bug, approved, in-progress. Do not use an openvibely: prefix."},"assignees":{"type":"array","items":{"type":"string"}},` + githubRepoURLProperty + `},"required":["title"],"additionalProperties":false}`
 const githubIssueNumberParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},` + githubRepoURLProperty + `},"required":["issue_number"],"additionalProperties":false}`
-const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login whose assigned open issues should be listed."},` + githubRepoURLProperty + `},"required":["assignee"],"additionalProperties":false}`
-const githubListMyAssignedIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + `},"additionalProperties":false}`
+const githubAssignedIssuePaginationProperties = `,"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum number of assigned issues to return for this page; defaults to 100."},"offset":{"type":"integer","minimum":0,"description":"Number of assigned issues to skip for pagination; use next_offset from the previous response."}`
+const githubListAssignedIssuesParams = `{"type":"object","properties":{"assignee":{"type":"string","description":"GitHub login whose assigned open issues should be listed."},` + githubRepoURLProperty + githubAssignedIssuePaginationProperties + `},"required":["assignee"],"additionalProperties":false}`
+const githubListMyAssignedIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + githubAssignedIssuePaginationProperties + `},"additionalProperties":false}`
 const githubListExistingAutomationIssuesParams = `{"type":"object","properties":{` + githubRepoURLProperty + `,"limit":{"type":"integer","minimum":1,"maximum":100,"description":"Maximum number of newest issues to return for this page; defaults to 50."},"offset":{"type":"integer","minimum":0,"description":"Number of newest matching issues to skip for pagination; use next_offset from the previous response."}},"additionalProperties":false}`
 const githubCommentIssueParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"body":{"type":"string"},` + githubRepoURLProperty + `},"required":["issue_number","body"],"additionalProperties":false}`
 const githubAddLabelsParams = `{"type":"object","properties":{"issue_number":{"type":"integer","minimum":1},"labels":{"type":"array","items":{"type":"string"},"description":"Plain GitHub labels such as approved, in-progress, pr-opened. Do not use an openvibely: prefix."},` + githubRepoURLProperty + `},"required":["issue_number","labels"],"additionalProperties":false}`
@@ -391,7 +392,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_my_assigned_issues",
-		Description:  "List open GitHub issues assigned to the authenticated PAT user configured for the GitHub channel, defaulting to the current project repository. Pass repo_url for a specific GitHub repository URL. For GitHub App installations or custom inboxes, use github_list_assigned_issues with an explicit assignee.",
+		Description:  "List open GitHub issues assigned to the authenticated PAT user configured for the GitHub channel, defaulting to the current project repository. Returns compact issue summaries with bounded body excerpts and pagination metadata; use github_get_issue for a specific issue when the full body is needed. Pass repo_url for a specific GitHub repository URL. For GitHub App installations or custom inboxes, use github_list_assigned_issues with an explicit assignee.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -411,7 +412,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_assigned_issues",
-		Description:  "List open GitHub issues assigned to a configured GitHub Authorized User, defaulting to the current project repository. Pull request objects are omitted. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
+		Description:  "List open GitHub issues assigned to a configured GitHub Authorized User, defaulting to the current project repository. Pull request objects are omitted. Returns compact issue summaries with bounded body excerpts and pagination metadata; use github_get_issue for a specific issue when the full body is needed. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,

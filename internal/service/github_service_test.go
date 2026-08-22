@@ -1139,8 +1139,8 @@ func TestDevInboxAssignedIssueScanSkipsDetailFetchesForCompleteListEntries(t *te
 	if got := detailRequests.Load(); got != 0 {
 		t.Fatalf("issue detail requests during default list scan = %d, want 0", got)
 	}
-	if !strings.Contains(out, `"Number":100`) || !strings.Contains(out, `"Body":"Acceptance notes for issue 100"`) || !strings.Contains(out, `"Labels":["performance"]`) || !strings.Contains(out, `"Assignees":["dev-bot"]`) {
-		t.Fatalf("assigned issue output lost task-creation fields: %s", out)
+	if !strings.Contains(out, `"number":100`) || !strings.Contains(out, `"body_excerpt":"Acceptance notes for issue 100"`) || !strings.Contains(out, `"labels":["performance"]`) || !strings.Contains(out, `"assignees":["dev-bot"]`) || !strings.Contains(out, `"complete_for_task_creation":true`) {
+		t.Fatalf("compact assigned issue output lost task-creation fields: %s", out)
 	}
 
 	_, err = handlers["github_get_issue"](ctx, json.RawMessage(`{"issue_number":42,"repo_url":"https://github.com/openvibely/openvibely"}`))
@@ -1202,22 +1202,22 @@ func TestDevInboxAssignedIssueScanFetchesOnlyIncompleteListEntries(t *testing.T)
 	if got := detailRequests.Load(); got != 1 {
 		t.Fatalf("issue detail requests = %d, want 1", got)
 	}
-	if !strings.Contains(out, `"Title":"Hydrated two"`) || !strings.Contains(out, `"Body":"Hydrated acceptance notes"`) || !strings.Contains(out, `"Title":"Complete three"`) {
-		t.Fatalf("assigned issue output did not retain hydrated and complete entries: %s", out)
+	if !strings.Contains(out, `"title":"Hydrated two"`) || !strings.Contains(out, `"body_excerpt":"Hydrated acceptance notes"`) || !strings.Contains(out, `"title":"Complete three"`) {
+		t.Fatalf("compact assigned issue output did not retain hydrated and complete entries: %s", out)
 	}
 
 	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"other-bot","repo_url":"https://github.com/openvibely/openvibely"}`))
 	if err != nil {
 		t.Fatalf("github_list_assigned_issues for second assignee: %v", err)
 	}
-	if !strings.Contains(out, `"Title":"Hydrated two"`) || !strings.Contains(out, `"Title":"Complete four"`) {
+	if !strings.Contains(out, `"title":"Hydrated two"`) || !strings.Contains(out, `"title":"Complete four"`) {
 		t.Fatalf("second assignee output did not use hydrated cache and complete entry: %s", out)
 	}
 	out, err = handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(`{"repo_url":"https://github.com/openvibely/openvibely"}`))
 	if err != nil {
 		t.Fatalf("github_list_my_assigned_issues: %v", err)
 	}
-	if !strings.Contains(out, `"Title":"Hydrated two"`) || !strings.Contains(out, `"Title":"Complete five"`) || !strings.Contains(out, `"login":"pat-owner"`) {
+	if !strings.Contains(out, `"title":"Hydrated two"`) || !strings.Contains(out, `"title":"Complete five"`) || !strings.Contains(out, `"login":"pat-owner"`) {
 		t.Fatalf("PAT-owner output did not use hydrated cache and complete entry: %s", out)
 	}
 	if got := listRequests.Load(); got != 3 {

@@ -4295,29 +4295,29 @@ func TestGitHubIssueRuntimeToolsExposeDefaultTaskToolsAndPreserveSafetyRules(t *
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected my assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"Number":5`) {
-		t.Fatalf("expected authenticated assigned issues output, got %s", out)
+	if !strings.Contains(out, `"login":"channel-user"`) || !strings.Contains(out, `"number":5`) || !strings.Contains(out, `"returned":1`) {
+		t.Fatalf("expected compact authenticated assigned issues output, got %s", out)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "github_list_assigned_issues", []byte(`{"assignee":"Dev-Bot"}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected explicit assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":6`) {
-		t.Fatalf("expected explicit assigned issues output, got %s", out)
+	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"number":6`) || !strings.Contains(out, `"returned":1`) {
+		t.Fatalf("expected compact explicit assigned issues output, got %s", out)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "github_list_my_assigned_issues", []byte(`{"repo_url":"https://github.com/example/other"}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected explicit repo_url my assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, `"Number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) {
-		t.Fatalf("expected explicit repo_url my assigned issues output, got %s", out)
+	if !strings.Contains(out, `"number":7`) || !strings.Contains(out, `"https://github.com/example/other/issues/7"`) || !strings.Contains(out, `"returned":1`) {
+		t.Fatalf("expected compact explicit repo_url my assigned issues output, got %s", out)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "github_list_assigned_issues", []byte(`{"assignee":"Dev-Bot","repo_url":"https://github.com/example/other"}`))
 	if !handled || isErr || err != nil {
 		t.Fatalf("expected explicit repo_url assigned issues success handled=%v isErr=%v err=%v out=%s", handled, isErr, err, out)
 	}
-	if !strings.Contains(out, `"Number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) {
-		t.Fatalf("expected explicit repo_url assigned issues output, got %s", out)
+	if !strings.Contains(out, `"number":8`) || !strings.Contains(out, `"https://github.com/example/other/issues/8"`) || !strings.Contains(out, `"returned":1`) {
+		t.Fatalf("expected compact explicit repo_url assigned issues output, got %s", out)
 	}
 	out, handled, isErr, err = rt.Executor(ctx, "github_create_issue", []byte(`{"title":"URL issue","body":"Created by URL","labels":["bug"],"assignees":["dev-bot"],"repo_url":"https://github.com/example/other"}`))
 	if !handled || isErr || err != nil {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,13 +13,15 @@ import (
 )
 
 type fakeGitHubIssueActionProvider struct {
-	getIssueNumber int
-	commentNumber  int
-	commentBody    string
-	labelNumber    int
-	labels         []string
-	closeNumber    int
-	createdIssues  []GitHubIssue
+	getIssueNumber   int
+	commentNumber    int
+	commentBody      string
+	labelNumber      int
+	labels           []string
+	closeNumber      int
+	createdIssues    []GitHubIssue
+	myAssignedIssues []GitHubIssue
+	assignedIssues   []GitHubIssue
 }
 
 func (f *fakeGitHubIssueActionProvider) GetIssue(_ context.Context, _ *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {
@@ -26,6 +29,9 @@ func (f *fakeGitHubIssueActionProvider) GetIssue(_ context.Context, _ *GitHubRep
 	return &GitHubIssue{Number: issueNumber, Title: "shared"}, nil
 }
 func (f *fakeGitHubIssueActionProvider) ListAuthenticatedAssignedIssues(_ context.Context, _ *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+	if f.myAssignedIssues != nil {
+		return &GitHubAuthenticatedUser{Login: "Me"}, f.myAssignedIssues, nil
+	}
 	return &GitHubAuthenticatedUser{Login: "Me"}, []GitHubIssue{{Number: 1}}, nil
 }
 func (f *fakeGitHubIssueActionProvider) ListAuthenticatedCreatedIssues(_ context.Context, _ *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
@@ -35,6 +41,9 @@ func (f *fakeGitHubIssueActionProvider) ListAuthenticatedCreatedIssues(_ context
 	return &GitHubAuthenticatedUser{Login: "Me"}, []GitHubIssue{{Number: 9, URL: "https://github.com/owner/repo/issues/9", Title: "Existing issue", Body: "Detailed existing issue body", State: "open", UserLogin: "Me", Labels: []string{"bug"}}}, nil
 }
 func (f *fakeGitHubIssueActionProvider) ListAssignedIssues(_ context.Context, _ *GitHubRepoRef, _ string) ([]GitHubIssue, error) {
+	if f.assignedIssues != nil {
+		return f.assignedIssues, nil
+	}
 	return []GitHubIssue{{Number: 2}}, nil
 }
 func (f *fakeGitHubIssueActionProvider) ListAssignedIssuesWithPullRequests(_ context.Context, _ *GitHubRepoRef, _ string) ([]GitHubIssueWithPullRequest, error) {
@@ -107,11 +116,11 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 		return append(issues, GitHubIssue{Number: 9}), nil
 	}
 	out, err = core.ExecuteListMyAssignedIssues(ctx, json.RawMessage(`{"repo_url":"my-assigned"}`), postprocess)
-	if err != nil || !strings.Contains(out, `"account":{"login":"Me"`) || !strings.Contains(out, `"Number":1`) || !strings.Contains(out, `"Number":9`) {
+	if err != nil || !strings.Contains(out, `"account":{"login":"Me"`) || !strings.Contains(out, `"number":1`) || !strings.Contains(out, `"number":9`) || !strings.Contains(out, `"returned":2`) || !strings.Contains(out, `"total":2`) {
 		t.Fatalf("my assigned output=%q err=%v", out, err)
 	}
 	out, err = core.ExecuteListAssignedIssues(ctx, json.RawMessage(`{"assignee":" Dev-Bot ","repo_url":"assigned"}`), postprocess)
-	if err != nil || !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"Number":2`) || !strings.Contains(out, `"Number":9`) {
+	if err != nil || !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"number":2`) || !strings.Contains(out, `"number":9`) || !strings.Contains(out, `"returned":2`) || !strings.Contains(out, `"total":2`) {
 		t.Fatalf("assigned output=%q err=%v", out, err)
 	}
 	out, err = core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"repo_url":"created","limit":1}`))
@@ -196,6 +205,93 @@ func TestGitHubIssueActionCoreListExistingAutomationIssuesPaginatesCallerVisible
 
 	if _, err := core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"offset":-1}`)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
 		t.Fatalf("negative offset error=%v, want validation error", err)
+	}
+}
+
+func TestGitHubIssueActionCoreAssignedIssuesReturnCompactCompleteCandidateList(t *testing.T) {
+	issueNumbers := []int{792, 791, 789, 783, 776, 768, 767, 766, 755}
+	issues := make([]GitHubIssue, 0, len(issueNumbers))
+	for _, number := range issueNumbers {
+		issues = append(issues, GitHubIssue{
+			Number:                        number,
+			URL:                           fmt.Sprintf("https://github.com/openvibely/openvibely/issues/%d", number),
+			Title:                         fmt.Sprintf("Issue %d", number),
+			Body:                          fmt.Sprintf("body-%d-", number) + strings.Repeat("long body text ", 600),
+			State:                         "open",
+			UserLogin:                     "openvibely",
+			Assignees:                     []string{"openvibely"},
+			Labels:                        []string{"suggestion", "feature"},
+			CompleteForTaskCreation:       true,
+			TaskCreationCompletenessKnown: true,
+		})
+	}
+	provider := &fakeGitHubIssueActionProvider{assignedIssues: issues}
+	core := NewGitHubIssueActionCore(provider, fakeGitHubIssueAuthorizationStore{}, "project-1",
+		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
+		func(context.Context, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{FullName: "openvibely/openvibely"}, nil
+		})
+
+	out, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely"}`), nil)
+	if err != nil {
+		t.Fatalf("assigned issues output err=%v", err)
+	}
+	for _, want := range []string{`"returned":9`, `"total":9`, `"truncated":false`, `"next_offset":0`} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("compact assigned issue output missing %s: %s", want, out)
+		}
+	}
+	for _, number := range issueNumbers {
+		if !strings.Contains(out, fmt.Sprintf(`"number":%d`, number)) || !strings.Contains(out, fmt.Sprintf(`"Issue %d"`, number)) {
+			t.Fatalf("compact assigned issue output omitted issue #%d: %s", number, out)
+		}
+	}
+	if strings.Contains(out, strings.Repeat("long body text ", 80)) {
+		t.Fatalf("compact assigned issue output should not include full long bodies: %d bytes", len(out))
+	}
+	if !strings.Contains(out, `"body_truncated":true`) || !strings.Contains(out, `"complete_for_task_creation":false`) {
+		t.Fatalf("truncated assigned issue output should require targeted detail hydration: %s", out)
+	}
+	if len(out) > 15000 {
+		t.Fatalf("compact assigned issue output is too large: %d bytes", len(out))
+	}
+}
+
+func TestGitHubIssueActionCoreAssignedIssuesPaginateCompactCandidateList(t *testing.T) {
+	provider := &fakeGitHubIssueActionProvider{assignedIssues: []GitHubIssue{
+		{Number: 1, Title: "First", Body: "small body", TaskCreationCompletenessKnown: true, CompleteForTaskCreation: true},
+		{Number: 2, Title: "Second", Body: "small body", TaskCreationCompletenessKnown: true, CompleteForTaskCreation: true},
+		{Number: 3, Title: "Third", Body: "small body", TaskCreationCompletenessKnown: true, CompleteForTaskCreation: true},
+	}}
+	core := NewGitHubIssueActionCore(provider, fakeGitHubIssueAuthorizationStore{}, "project-1",
+		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
+		func(context.Context, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{FullName: "owner/repo"}, nil
+		})
+
+	first, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":2}`), nil)
+	if err != nil {
+		t.Fatalf("first page err=%v", err)
+	}
+	for _, want := range []string{`"returned":2`, `"total":3`, `"offset":0`, `"next_offset":2`, `"truncated":true`, `"number":1`, `"number":2`} {
+		if !strings.Contains(first, want) {
+			t.Fatalf("first page missing %s: %s", want, first)
+		}
+	}
+	if strings.Contains(first, `"number":3`) {
+		t.Fatalf("first page included second-page issue: %s", first)
+	}
+	second, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":2,"offset":2}`), nil)
+	if err != nil {
+		t.Fatalf("second page err=%v", err)
+	}
+	for _, want := range []string{`"returned":1`, `"total":3`, `"offset":2`, `"next_offset":0`, `"truncated":false`, `"number":3`} {
+		if !strings.Contains(second, want) {
+			t.Fatalf("second page missing %s: %s", want, second)
+		}
+	}
+	if _, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":101}`), nil); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+		t.Fatalf("invalid limit error=%v, want validation error", err)
 	}
 }
 
