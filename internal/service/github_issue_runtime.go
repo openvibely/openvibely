@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -113,20 +112,15 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 		func(ctx context.Context, repoURL string) (*GitHubRepoRef, error) {
 			return resolveGitHubRepoForRuntimeToolURL(ctx, opts, repoURL)
 		})
-	assignedIssueDetails := newGitHubAssignedIssueDetailHydrator(opts.GitHub)
-	postprocessAssigned := func(ctx context.Context, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
+	filterAndRecordAssigned := func(ctx context.Context, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
 		filtered, err := filterGitHubAssignedIssuesForAutomationInbox(ctx, opts, repo, issues)
 		if err != nil {
 			return nil, err
 		}
-		hydrated, err := assignedIssueDetails.hydrate(ctx, repo, filtered)
-		if err != nil {
+		if err := recordGitHubAssignedIssues(ctx, opts, repo, filtered); err != nil {
 			return nil, err
 		}
-		if err := recordGitHubAssignedIssues(ctx, opts, repo, hydrated); err != nil {
-			return nil, err
-		}
-		return hydrated, nil
+		return filtered, nil
 	}
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"github_create_issue": func(ctx context.Context, input json.RawMessage) (string, error) {
@@ -296,11 +290,56 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 		"github_get_project_inbox":   core.ExecuteGetProjectInbox,
 		"github_is_actor_authorized": core.ExecuteIsActorAuthorized,
 		"github_list_my_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return core.ExecuteListMyAssignedIssues(ctx, input, postprocessAssigned)
+			req, repo, err := core.requestAndRepo(ctx, input, nil)
+			if err != nil {
+				return "", err
+			}
+			limit, offset, err := assignedIssueListPage(req)
+			if err != nil {
+				return "", err
+			}
+			user, issues, err := opts.GitHub.ListAuthenticatedAssignedIssues(ctx, repo)
+			if err != nil {
+				return "", err
+			}
+			issues, err = filterAndRecordAssigned(ctx, repo, issues)
+			if err != nil {
+				return "", err
+			}
+			summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "account": user, "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 		},
 		"github_list_existing_automation_issues": core.ExecuteListExistingAutomationIssues,
 		"github_list_assigned_issues": func(ctx context.Context, input json.RawMessage) (string, error) {
-			return core.ExecuteListAssignedIssues(ctx, input, postprocessAssigned)
+			req, err := core.request(input)
+			if err != nil {
+				return "", err
+			}
+			limit, offset, err := assignedIssueListPage(req)
+			if err != nil {
+				return "", err
+			}
+			assignee := strings.TrimSpace(req.Assignee)
+			if assignee == "" {
+				return "", fmt.Errorf("assignee is required")
+			}
+			if err := core.requireAuthorizedAssignee(ctx, assignee); err != nil {
+				return "", err
+			}
+			repo, err := resolveGitHubRepoForRuntimeToolURL(ctx, opts, req.RepoURL)
+			if err != nil {
+				return "", err
+			}
+			issues, err := opts.GitHub.ListAssignedIssues(ctx, repo, assignee)
+			if err != nil {
+				return "", err
+			}
+			issues, err = filterAndRecordAssigned(ctx, repo, issues)
+			if err != nil {
+				return "", err
+			}
+			summaries, nextOffset := compactAssignedGitHubIssues(issues, limit, offset)
+			return githubIssueRuntimeJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 		},
 		"github_list_assigned_issues_with_prs": core.ExecuteListAssignedIssuesWithPRs,
 		"github_comment_on_issue":              core.ExecuteCommentOnIssue,
@@ -1131,66 +1170,6 @@ func recordGitHubIssueCreated(ctx context.Context, opts githubIssueRuntimeOption
 
 func filterGitHubAssignedIssuesForAutomationInbox(_ context.Context, _ githubIssueRuntimeOptions, _ *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
 	return issues, nil
-}
-
-type githubAssignedIssueDetailHydrator struct {
-	provider GitHubIssueRuntimeProvider
-	mu       sync.Mutex
-	cache    map[string]GitHubIssue
-}
-
-func newGitHubAssignedIssueDetailHydrator(provider GitHubIssueRuntimeProvider) *githubAssignedIssueDetailHydrator {
-	return &githubAssignedIssueDetailHydrator{provider: provider, cache: make(map[string]GitHubIssue)}
-}
-
-func (h *githubAssignedIssueDetailHydrator) hydrate(ctx context.Context, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
-	if h == nil || h.provider == nil || len(issues) == 0 {
-		return issues, nil
-	}
-	out := append([]GitHubIssue(nil), issues...)
-	for i, issue := range out {
-		if githubAssignedIssueHasTaskCreationFields(issue) || issue.Number <= 0 {
-			continue
-		}
-		key := githubAssignedIssueDetailCacheKey(repo, issue.Number)
-		h.mu.Lock()
-		cached, ok := h.cache[key]
-		h.mu.Unlock()
-		if ok {
-			out[i] = cached
-			continue
-		}
-		detail, err := h.provider.GetIssue(ctx, repo, issue.Number)
-		if err != nil {
-			return nil, fmt.Errorf("hydrating assigned GitHub issue #%d: %w", issue.Number, err)
-		}
-		if detail == nil || detail.Number != issue.Number {
-			return nil, fmt.Errorf("hydrating assigned GitHub issue #%d returned mismatched issue", issue.Number)
-		}
-		h.mu.Lock()
-		h.cache[key] = *detail
-		h.mu.Unlock()
-		out[i] = *detail
-	}
-	return out, nil
-}
-
-func githubAssignedIssueHasTaskCreationFields(issue GitHubIssue) bool {
-	if issue.TaskCreationCompletenessKnown {
-		return issue.CompleteForTaskCreation
-	}
-	return false
-}
-
-func githubAssignedIssueDetailCacheKey(repo *GitHubRepoRef, issueNumber int) string {
-	repoKey := ""
-	if repo != nil {
-		repoKey = strings.ToLower(strings.TrimSpace(repo.FullName))
-		if repoKey == "" && strings.TrimSpace(repo.Owner) != "" && strings.TrimSpace(repo.Name) != "" {
-			repoKey = strings.ToLower(strings.TrimSpace(repo.Owner)) + "/" + strings.ToLower(strings.TrimSpace(repo.Name))
-		}
-	}
-	return fmt.Sprintf("%s#%d", repoKey, issueNumber)
 }
 
 func recordGitHubAssignedIssues(ctx context.Context, opts githubIssueRuntimeOptions, repo *GitHubRepoRef, issues []GitHubIssue) error {

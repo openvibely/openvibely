@@ -107,20 +107,12 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 		t.Fatalf("authorization output=%q err=%v", out, err)
 	}
 
-	postprocessCalls := 0
-	postprocess := func(_ context.Context, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error) {
-		postprocessCalls++
-		if repo == nil || repo.FullName != "owner/repo" {
-			t.Fatalf("postprocess repo=%v, want owner/repo", repo)
-		}
-		return append(issues, GitHubIssue{Number: 9}), nil
-	}
-	out, err = core.ExecuteListMyAssignedIssues(ctx, json.RawMessage(`{"repo_url":"my-assigned"}`), postprocess)
-	if err != nil || !strings.Contains(out, `"account":{"login":"Me"`) || !strings.Contains(out, `"number":1`) || !strings.Contains(out, `"number":9`) || !strings.Contains(out, `"returned":2`) || !strings.Contains(out, `"total":2`) {
+	out, err = core.ExecuteListMyAssignedIssues(ctx, json.RawMessage(`{"repo_url":"my-assigned"}`))
+	if err != nil || !strings.Contains(out, `"account":{"login":"Me"`) || !strings.Contains(out, `"number":1`) || !strings.Contains(out, `"returned":1`) || !strings.Contains(out, `"total":1`) {
 		t.Fatalf("my assigned output=%q err=%v", out, err)
 	}
-	out, err = core.ExecuteListAssignedIssues(ctx, json.RawMessage(`{"assignee":" Dev-Bot ","repo_url":"assigned"}`), postprocess)
-	if err != nil || !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"number":2`) || !strings.Contains(out, `"number":9`) || !strings.Contains(out, `"returned":2`) || !strings.Contains(out, `"total":2`) {
+	out, err = core.ExecuteListAssignedIssues(ctx, json.RawMessage(`{"assignee":" Dev-Bot ","repo_url":"assigned"}`))
+	if err != nil || !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"number":2`) || !strings.Contains(out, `"returned":1`) || !strings.Contains(out, `"total":1`) {
 		t.Fatalf("assigned output=%q err=%v", out, err)
 	}
 	out, err = core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"repo_url":"created","limit":1}`))
@@ -129,9 +121,6 @@ func TestGitHubIssueActionCoreCommonActionsAndAssignedIssuePostprocessing(t *tes
 	}
 	if strings.Contains(out, `"body_excerpt"`) || strings.Contains(out, "Detailed existing issue body") {
 		t.Fatalf("existing Automation issues should omit compact body text: %q", out)
-	}
-	if postprocessCalls != 2 {
-		t.Fatalf("postprocess calls=%d, want 2", postprocessCalls)
 	}
 
 	out, err = core.ExecuteListAssignedIssuesWithPRs(ctx, json.RawMessage(`{"assignee":"Dev-Bot","repo_url":"assigned-with-prs"}`))
@@ -232,7 +221,7 @@ func TestGitHubIssueActionCoreAssignedIssuesReturnCompactCompleteCandidateList(t
 			return &GitHubRepoRef{FullName: "openvibely/openvibely"}, nil
 		})
 
-	out, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely"}`), nil)
+	out, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely"}`))
 	if err != nil {
 		t.Fatalf("assigned issues output err=%v", err)
 	}
@@ -269,7 +258,7 @@ func TestGitHubIssueActionCoreAssignedIssuesPaginateCompactCandidateList(t *test
 			return &GitHubRepoRef{FullName: "owner/repo"}, nil
 		})
 
-	first, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":2}`), nil)
+	first, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":2}`))
 	if err != nil {
 		t.Fatalf("first page err=%v", err)
 	}
@@ -281,7 +270,7 @@ func TestGitHubIssueActionCoreAssignedIssuesPaginateCompactCandidateList(t *test
 	if strings.Contains(first, `"number":3`) {
 		t.Fatalf("first page included second-page issue: %s", first)
 	}
-	second, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":2,"offset":2}`), nil)
+	second, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":2,"offset":2}`))
 	if err != nil {
 		t.Fatalf("second page err=%v", err)
 	}
@@ -290,7 +279,7 @@ func TestGitHubIssueActionCoreAssignedIssuesPaginateCompactCandidateList(t *test
 			t.Fatalf("second page missing %s: %s", want, second)
 		}
 	}
-	if _, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":101}`), nil); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+	if _, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":101}`)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
 		t.Fatalf("invalid limit error=%v, want validation error", err)
 	}
 }
@@ -306,7 +295,7 @@ func TestGitHubIssueActionCoreAssignedIssueValidationPrecedesRepoResolution(t *t
 
 	for _, execute := range []func(context.Context, json.RawMessage) (string, error){
 		func(ctx context.Context, input json.RawMessage) (string, error) {
-			return core.ExecuteListAssignedIssues(ctx, input, nil)
+			return core.ExecuteListAssignedIssues(ctx, input)
 		},
 		core.ExecuteListAssignedIssuesWithPRs,
 	} {
@@ -331,7 +320,7 @@ func TestGitHubIssueActionCoreListAssignedIssuesRejectsUnauthorizedAssigneeBefor
 
 	for _, execute := range []func(context.Context, json.RawMessage) (string, error){
 		func(ctx context.Context, input json.RawMessage) (string, error) {
-			return core.ExecuteListAssignedIssues(ctx, input, nil)
+			return core.ExecuteListAssignedIssues(ctx, input)
 		},
 		core.ExecuteListAssignedIssuesWithPRs,
 	} {

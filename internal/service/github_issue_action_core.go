@@ -51,7 +51,6 @@ type GitHubIssueAuthorizationStore interface {
 
 type GitHubIssueActionDecoder func(input json.RawMessage, dst any) error
 type GitHubIssueRepoResolver func(ctx context.Context, repoURL string) (*GitHubRepoRef, error)
-type GitHubAssignedIssuesPostprocessor func(ctx context.Context, repo *GitHubRepoRef, issues []GitHubIssue) ([]GitHubIssue, error)
 
 type GitHubIssueActionCore struct {
 	provider  GitHubIssueActionProvider
@@ -88,13 +87,6 @@ func (c *GitHubIssueActionCore) requestAndRepo(ctx context.Context, input json.R
 		return req, nil, err
 	}
 	return req, repo, nil
-}
-
-func (c *GitHubIssueActionCore) postprocessAssignedIssues(ctx context.Context, repo *GitHubRepoRef, issues []GitHubIssue, postprocess GitHubAssignedIssuesPostprocessor) ([]GitHubIssue, error) {
-	if postprocess == nil {
-		return issues, nil
-	}
-	return postprocess(ctx, repo, issues)
 }
 
 func (c *GitHubIssueActionCore) ExecuteGetIssue(ctx context.Context, input json.RawMessage) (string, error) {
@@ -149,7 +141,7 @@ func (c *GitHubIssueActionCore) ExecuteIsActorAuthorized(ctx context.Context, in
 	return githubIssueActionJSON(map[string]any{"ok": true, "github_login": repository.NormalizeGitHubLogin(login), "authorized": authorized})
 }
 
-func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context, input json.RawMessage, postprocess GitHubAssignedIssuesPostprocessor) (string, error) {
+func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context, input json.RawMessage) (string, error) {
 	req, repo, err := c.requestAndRepo(ctx, input, nil)
 	if err != nil {
 		return "", err
@@ -159,10 +151,6 @@ func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context,
 		return "", err
 	}
 	user, issues, err := c.provider.ListAuthenticatedAssignedIssues(ctx, repo)
-	if err != nil {
-		return "", err
-	}
-	issues, err = c.postprocessAssignedIssues(ctx, repo, issues, postprocess)
 	if err != nil {
 		return "", err
 	}
@@ -219,7 +207,7 @@ func compactExistingGitHubIssues(issues []GitHubIssue, limit, offset int) []map[
 	return summaries
 }
 
-func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, input json.RawMessage, postprocess GitHubAssignedIssuesPostprocessor) (string, error) {
+func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, input json.RawMessage) (string, error) {
 	req, err := c.request(input)
 	if err != nil {
 		return "", err
@@ -240,10 +228,6 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, i
 		return "", err
 	}
 	issues, err := c.provider.ListAssignedIssues(ctx, repo, assignee)
-	if err != nil {
-		return "", err
-	}
-	issues, err = c.postprocessAssignedIssues(ctx, repo, issues, postprocess)
 	if err != nil {
 		return "", err
 	}

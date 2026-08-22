@@ -764,7 +764,7 @@ func (h *Handler) executeGitHubIsActorAuthorizedTool(ctx context.Context, input 
 }
 
 func (h *Handler) executeGitHubListMyAssignedIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	return h.githubIssueActionCore(projectID).ExecuteListMyAssignedIssues(ctx, input, nil)
+	return h.githubIssueActionCore(projectID).ExecuteListMyAssignedIssues(ctx, input)
 }
 
 func (h *Handler) executeGitHubListExistingAutomationIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
@@ -772,7 +772,7 @@ func (h *Handler) executeGitHubListExistingAutomationIssuesTool(ctx context.Cont
 }
 
 func (h *Handler) executeGitHubListAssignedIssuesTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {
-	return h.githubIssueActionCore(projectID).ExecuteListAssignedIssues(ctx, input, nil)
+	return h.githubIssueActionCore(projectID).ExecuteListAssignedIssues(ctx, input)
 }
 
 func (h *Handler) executeGitHubListAssignedIssuesWithPRsTool(ctx context.Context, projectID string, input json.RawMessage) (string, error) {

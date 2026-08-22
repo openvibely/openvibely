@@ -1080,29 +1080,6 @@ func TestListPullRequestFeedbackTraversesAllPagesAndSortsMergedSources(t *testin
 	}
 }
 
-func TestGitHubAssignedIssueTaskCreationCompletenessRequiresExplicitMarker(t *testing.T) {
-	issue := GitHubIssue{
-		Number:    42,
-		URL:       "https://github.com/openvibely/openvibely/issues/42",
-		Title:     "Complete-looking issue",
-		Body:      "Acceptance notes",
-		State:     "open",
-		Assignees: []string{"dev-bot"},
-		Labels:    []string{"performance"},
-	}
-	if githubAssignedIssueHasTaskCreationFields(issue) {
-		t.Fatal("issue list entries without an explicit completeness marker must be hydrated before task creation")
-	}
-	issue.TaskCreationCompletenessKnown = true
-	if githubAssignedIssueHasTaskCreationFields(issue) {
-		t.Fatal("known-incomplete issue list entries must be hydrated before task creation")
-	}
-	issue.CompleteForTaskCreation = true
-	if !githubAssignedIssueHasTaskCreationFields(issue) {
-		t.Fatal("known-complete issue list entries should be used without detail hydration")
-	}
-}
-
 func TestDevInboxAssignedIssueScanSkipsDetailFetchesForCompleteListEntries(t *testing.T) {
 	ctx := context.Background()
 	var listRequests, detailRequests atomic.Int32
@@ -1152,7 +1129,7 @@ func TestDevInboxAssignedIssueScanSkipsDetailFetchesForCompleteListEntries(t *te
 	}
 }
 
-func TestDevInboxAssignedIssueScanFetchesOnlyIncompleteListEntries(t *testing.T) {
+func TestDevInboxAssignedIssueScanDoesNotHydrateListEntries(t *testing.T) {
 	ctx := context.Background()
 	var listRequests, detailRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1199,32 +1176,32 @@ func TestDevInboxAssignedIssueScanFetchesOnlyIncompleteListEntries(t *testing.T)
 	if got := listRequests.Load(); got != 1 {
 		t.Fatalf("assigned issue list requests = %d, want 1", got)
 	}
-	if got := detailRequests.Load(); got != 1 {
-		t.Fatalf("issue detail requests = %d, want 1", got)
+	if got := detailRequests.Load(); got != 0 {
+		t.Fatalf("issue detail requests during assigned list scan = %d, want 0", got)
 	}
-	if !strings.Contains(out, `"title":"Hydrated two"`) || !strings.Contains(out, `"title":"Complete three"`) || strings.Contains(out, "Hydrated acceptance notes") || strings.Contains(out, "body_excerpt") {
-		t.Fatalf("compact assigned issue output should retain hydrated candidate metadata without body text: %s", out)
+	if !strings.Contains(out, `"title":"Partial two"`) || !strings.Contains(out, `"title":"Complete three"`) || strings.Contains(out, "Hydrated acceptance notes") || strings.Contains(out, "Body three") || strings.Contains(out, "body_excerpt") {
+		t.Fatalf("compact assigned issue output should retain listed candidate metadata without body text or hydration: %s", out)
 	}
 
 	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"other-bot","repo_url":"https://github.com/openvibely/openvibely"}`))
 	if err != nil {
 		t.Fatalf("github_list_assigned_issues for second assignee: %v", err)
 	}
-	if !strings.Contains(out, `"title":"Hydrated two"`) || !strings.Contains(out, `"title":"Complete four"`) {
-		t.Fatalf("second assignee output did not use hydrated cache and complete entry: %s", out)
+	if !strings.Contains(out, `"title":"Partial two again"`) || !strings.Contains(out, `"title":"Complete four"`) || strings.Contains(out, "Body four") {
+		t.Fatalf("second assignee output should use listed metadata without body text: %s", out)
 	}
 	out, err = handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(`{"repo_url":"https://github.com/openvibely/openvibely"}`))
 	if err != nil {
 		t.Fatalf("github_list_my_assigned_issues: %v", err)
 	}
-	if !strings.Contains(out, `"title":"Hydrated two"`) || !strings.Contains(out, `"title":"Complete five"`) || !strings.Contains(out, `"login":"pat-owner"`) {
-		t.Fatalf("PAT-owner output did not use hydrated cache and complete entry: %s", out)
+	if !strings.Contains(out, `"title":"Partial two from PAT scan"`) || !strings.Contains(out, `"title":"Complete five"`) || !strings.Contains(out, `"login":"pat-owner"`) || strings.Contains(out, "Body five") {
+		t.Fatalf("PAT-owner output should use listed metadata without body text: %s", out)
 	}
 	if got := listRequests.Load(); got != 3 {
 		t.Fatalf("assigned issue list requests after multiple scans = %d, want 3", got)
 	}
-	if got := detailRequests.Load(); got != 1 {
-		t.Fatalf("issue detail requests after overlapping incomplete scans = %d, want 1", got)
+	if got := detailRequests.Load(); got != 0 {
+		t.Fatalf("issue detail requests after assigned list scans = %d, want 0", got)
 	}
 }
 
