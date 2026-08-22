@@ -1051,24 +1051,24 @@ func TestChannelsPageStatusBadgesRenderAtBottomOfDetailsSection(t *testing.T) {
 	)
 
 	telegramCard := cardSectionByType(body, "telegram")
-	if !strings.Contains(telegramCard, `<span class="badge badge-warning badge-sm">Not Connected</span>`) && !strings.Contains(telegramCard, `<span class="badge badge-success badge-sm">Connected</span>`) {
+	if !strings.Contains(telegramCard, `<span class="badge badge-sm badge-warning">Not Connected</span>`) && !strings.Contains(telegramCard, `<span class="badge badge-sm badge-success">Connected</span>`) {
 		t.Fatal("expected telegram status badge in details section")
 	}
-	if strings.Contains(telegramCard, `<span class="badge badge-warning badge-sm">Not Connected</span>`) {
+	if strings.Contains(telegramCard, `<span class="badge badge-sm badge-warning">Not Connected</span>`) {
 		assertIndexOrder(
 			t,
 			telegramCard,
 			`Authorized users:</span>`,
-			`<span class="badge badge-warning badge-sm">Not Connected</span>`,
+			`<span class="badge badge-sm badge-warning">Not Connected</span>`,
 			"expected telegram status badge below authorized users",
 		)
 	}
-	if strings.Contains(telegramCard, `<span class="badge badge-success badge-sm">Connected</span>`) {
+	if strings.Contains(telegramCard, `<span class="badge badge-sm badge-success">Connected</span>`) {
 		assertIndexOrder(
 			t,
 			telegramCard,
 			`Authorized users:</span>`,
-			`<span class="badge badge-success badge-sm">Connected</span>`,
+			`<span class="badge badge-sm badge-success">Connected</span>`,
 			"expected telegram status badge below authorized users",
 		)
 	}
