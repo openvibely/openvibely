@@ -416,6 +416,9 @@ install_azure_cli() {
 
     if [[ -x "$real_az" && -x "$python_bin" ]]; then
         mkdir -p "${tool_dir}/bin"
+        if [[ -L "$az_bin" ]]; then
+            unlink "$az_bin"
+        fi
         cat > "$az_bin" <<EOF
 #!/usr/bin/env bash
 export AZ_PYTHON="\${AZ_PYTHON:-$python_bin}"
@@ -463,6 +466,9 @@ EOF
     tar -xzf "${tmp}/az.tar.gz" -C "$tool_dir"
     if [[ -x "$real_az" ]]; then
         mkdir -p "${tool_dir}/bin"
+        if [[ -L "$az_bin" ]]; then
+            unlink "$az_bin"
+        fi
         cat > "$az_bin" <<EOF
 #!/usr/bin/env bash
 export AZ_PYTHON="\${AZ_PYTHON:-$python_bin}"
