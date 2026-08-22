@@ -327,10 +327,8 @@ func TestWailsInstallUnitSupportsNativeDesktopLayouts(t *testing.T) {
 		name    string
 		install string
 		isDir   bool
-		managed bool
 	}{
 		{name: "macOS app bundle", install: "OpenVibely.app", isDir: true},
-		{name: "Bootstrap-managed desktop root", install: "OpenVibely", isDir: true, managed: true},
 		{name: "Windows executable", install: "openvibely-desktop.exe"},
 		{name: "Linux executable", install: "openvibely-desktop"},
 	} {
@@ -343,11 +341,6 @@ func TestWailsInstallUnitSupportsNativeDesktopLayouts(t *testing.T) {
 				}
 				if err := os.WriteFile(filepath.Join(installed, "Contents", "MacOS", "OpenVibely"), []byte("old"), 0o755); err != nil {
 					t.Fatal(err)
-				}
-				if tc.managed {
-					if err := os.WriteFile(filepath.Join(installed, ".openvibely-bootstrap.json"), []byte(`{"managed_by":"openvibely-bootstrap","variant":"desktop"}`), 0o644); err != nil {
-						t.Fatal(err)
-					}
 				}
 			} else if err := os.WriteFile(installed, []byte("old"), 0o755); err != nil {
 				t.Fatal(err)
@@ -376,11 +369,6 @@ func TestWailsInstallUnitSupportsNativeDesktopLayouts(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(installed, "Contents", "MacOS", "OpenVibely"), []byte("new"), 0o755); err != nil {
 					t.Fatal(err)
 				}
-				if tc.managed {
-					if err := os.WriteFile(filepath.Join(installed, ".openvibely-bootstrap.json"), []byte(`{"managed_by":"openvibely-bootstrap","variant":"desktop"}`), 0o644); err != nil {
-						t.Fatal(err)
-					}
-				}
 			} else if err := os.WriteFile(installed, []byte("new"), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -404,33 +392,6 @@ func TestWailsInstallUnitSupportsNativeDesktopLayouts(t *testing.T) {
 				t.Fatalf("restored install unit = %q, err = %v", restored, err)
 			}
 		})
-	}
-}
-
-func TestBootstrapManagedDesktopRootDiscovery(t *testing.T) {
-	root := t.TempDir()
-	installRoot := filepath.Join(root, "OpenVibely")
-	executable := filepath.Join(installRoot, "resources", executableName("OpenVibely"))
-	if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(executable, []byte("desktop"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := bootstrapManagedDesktopRootForExecutable(executable); ok {
-		t.Fatal("unmanaged directory was detected as bootstrap-managed")
-	}
-	if err := os.WriteFile(filepath.Join(installRoot, ".openvibely-bootstrap.json"), []byte(`{"managed_by":"openvibely-bootstrap","variant":"binary"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := bootstrapManagedDesktopRootForExecutable(executable); ok {
-		t.Fatal("binary bootstrap root was detected as desktop-managed")
-	}
-	if err := os.WriteFile(filepath.Join(installRoot, ".openvibely-bootstrap.json"), []byte(`{"managed_by":"openvibely-bootstrap","variant":"desktop"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok := bootstrapManagedDesktopRootForExecutable(executable); !ok || got != installRoot {
-		t.Fatalf("bootstrap root = %q, %v; want %q, true", got, ok, installRoot)
 	}
 }
 

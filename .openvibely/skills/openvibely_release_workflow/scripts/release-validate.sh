@@ -318,6 +318,13 @@ for required_call in 'sign-macos.sh' 'notarize-macos-archive.sh' 'xcrun stapler 
         fail "release build lacks signing step: ${required_call}"
     fi
 done
+for required_layout in 'zip '\''${DIST_DIR}/${artifact}'\'' openvibely-desktop.exe' 'tar -czf "${DIST_DIR}/${artifact}" -C "$linux_pkg" openvibely-desktop'; do
+    if grep -Fq "$required_layout" "$BUILD_SCRIPT"; then
+        pass "desktop package preserves flat executable artifact: ${required_layout}"
+    else
+        fail "desktop package does not preserve flat executable artifact: ${required_layout}"
+    fi
+done
 PUBLISH_SCRIPT="${SCRIPT_DIR}/release-publish.sh"
 for required_artifact in 'require_release_artifact "openvibely_${VERSION}_darwin_amd64_server.zip"' 'require_release_artifact "openvibely_${VERSION}_darwin_arm64_server.zip"' 'require_release_artifact "openvibely_${VERSION}_linux_amd64_server.tar.gz"' 'require_release_artifact "openvibely_${VERSION}_linux_arm64_server.tar.gz"' 'require_release_artifact "openvibely_${VERSION}_windows_amd64_server.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_arm64_server.zip"' 'require_release_artifact "OpenVibely_${VERSION}_darwin_amd64.app.zip"' 'require_release_artifact "OpenVibely_${VERSION}_darwin_arm64.app.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_amd64_desktop.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_arm64_desktop.zip"' 'require_release_artifact "openvibely_${VERSION}_linux_amd64_desktop.tar.gz"' 'require_release_artifact "openvibely_${VERSION}_linux_arm64_desktop.tar.gz"'; do
     if grep -Fq "$required_artifact" "$PUBLISH_SCRIPT"; then
