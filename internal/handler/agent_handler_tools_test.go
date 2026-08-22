@@ -38,6 +38,7 @@ func TestNormalizeAgentToolsKeepsRuntimeMessagingGitHubAndTaskGoalTools(t *testi
 		"create_notification",
 		"list_alerts",
 		"get_alert",
+		"decide_alert",
 		"claim_alert",
 		"create_alert_implementation_task",
 		"link_alert_implementation_task",

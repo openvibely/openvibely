@@ -320,6 +320,80 @@ func TestAlertRuntimeSuggestionApprovalClaimAndTaskLinkage(t *testing.T) {
 	require.Equal(t, linked.ImplementationTaskID, *final.ImplementationTaskID)
 }
 
+func TestAlertRuntimeDecideAlertApprovesRejectsAndValidates(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Runtime Alert Decisions"}
+	foreign := &models.Project{Name: "Foreign Runtime Alert Decisions"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+	caller := &models.Task{ProjectID: project.ID, Title: "Decision caller", Prompt: "review", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	foreignCaller := &models.Task{ProjectID: foreign.ID, Title: "Foreign decision caller", Prompt: "review", Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2}
+	require.NoError(t, taskRepo.Create(ctx, caller))
+	require.NoError(t, taskRepo.Create(ctx, foreignCaller))
+	alertSvc := NewAlertService(repository.NewAlertRepo(db), nil)
+	handlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: project.ID, CallerTaskID: caller.ID, Source: "chat", AlertSvc: alertSvc})
+	foreignHandlers := BuildAlertRuntimeActionHandlers(AlertRuntimeOptions{ProjectID: foreign.ID, CallerTaskID: foreignCaller.ID, Source: "chat", AlertSvc: alertSvc})
+
+	create := func(t *testing.T, runtime map[string]chatcontrol.RuntimeActionHandler, title string) models.Alert {
+		t.Helper()
+		out, err := runtime["create_notification"](ctx, json.RawMessage(`{"type":"product_suggestion","title":"`+title+`"}`))
+		require.NoError(t, err)
+		var payload struct {
+			Notification models.Alert `json:"notification"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(out), &payload))
+		require.Equal(t, models.AlertDecisionPending, payload.Notification.DecisionState)
+		return payload.Notification
+	}
+
+	approved := create(t, handlers, "Approve from Chat")
+	approveJSON, err := handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+approved.ID+`","decision":"approved"}`))
+	require.NoError(t, err)
+	require.Contains(t, approveJSON, `"decision_state":"approved"`)
+	storedApproved, err := alertSvc.GetByID(ctx, project.ID, approved.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertDecisionApproved, storedApproved.DecisionState)
+	require.NotNil(t, storedApproved.DecidedAt)
+	_, err = handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+approved.ID+`"}`))
+	require.NoError(t, err, "approved notifications must remain claimable by the inbox flow")
+
+	rejected := create(t, handlers, "Reject from Chat")
+	rejectJSON, err := handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+rejected.ID+`","decision":"rejected"}`))
+	require.NoError(t, err)
+	require.Contains(t, rejectJSON, `"decision_state":"rejected"`)
+	storedRejected, err := alertSvc.GetByID(ctx, project.ID, rejected.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertDecisionRejected, storedRejected.DecisionState)
+	_, err = handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+rejected.ID+`"}`))
+	require.ErrorContains(t, err, "alert is not claimable")
+
+	dismissed := create(t, handlers, "Dismiss from Chat")
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+dismissed.ID+`","decision":"dismissed"}`))
+	require.NoError(t, err)
+	_, err = handlers["claim_alert"](ctx, json.RawMessage(`{"alert_id":"`+dismissed.ID+`"}`))
+	require.ErrorContains(t, err, "alert is not claimable")
+
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"decision":"approved"}`))
+	require.ErrorContains(t, err, "alert_id is required")
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+rejected.ID+`","decision":"pending"}`))
+	require.ErrorContains(t, err, "decision must be one of approved, rejected, or dismissed")
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"missing-alert","decision":"approved"}`))
+	require.ErrorContains(t, err, "alert not found or not pending")
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+rejected.ID+`","decision":"approved"}`))
+	require.ErrorContains(t, err, "alert decision is rejected, not pending")
+
+	foreignNotification := create(t, foreignHandlers, "Foreign alert")
+	_, err = handlers["decide_alert"](ctx, json.RawMessage(`{"alert_id":"`+foreignNotification.ID+`","decision":"approved"}`))
+	require.ErrorContains(t, err, "alert not found or not pending")
+	require.NotContains(t, err.Error(), foreign.ID)
+	unchangedForeign, err := alertSvc.GetByID(ctx, foreign.ID, foreignNotification.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertDecisionPending, unchangedForeign.DecisionState)
+}
+
 func TestAlertRuntimeClaimAlertValidatesLeaseSeconds(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

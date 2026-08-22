@@ -630,11 +630,13 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		},
 		"switch_project": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeSwitchProject(ctx, params.ProjectID, input), nil
-		}, "list_alerts": alertHandlers["list_alerts"],
+		},
+		"list_alerts":                            alertHandlers["list_alerts"],
 		"get_alert":                              alertHandlers["get_alert"],
 		"list_existing_automation_notifications": alertHandlers["list_existing_automation_notifications"],
 		"create_alert":                           alertHandlers["create_alert"],
 		"create_notification":                    alertHandlers["create_notification"],
+		"decide_alert":                           alertHandlers["decide_alert"],
 		"claim_alert":                            alertHandlers["claim_alert"],
 		"create_alert_implementation_task":       alertHandlers["create_alert_implementation_task"],
 		"link_alert_implementation_task":         alertHandlers["link_alert_implementation_task"],
@@ -1422,6 +1424,7 @@ func taskThreadAllowedRuntimeToolNames(agentDef *models.Agent) map[string]bool {
 		"list_alerts":                            true,
 		"get_alert":                              true,
 		"list_existing_automation_notifications": true,
+		"decide_alert":                           true,
 		"claim_alert":                            true,
 		"create_alert_implementation_task":       true,
 		"link_alert_implementation_task":         true,
