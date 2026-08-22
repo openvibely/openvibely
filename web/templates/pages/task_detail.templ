@@ -924,12 +924,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				<div class="card-body">
 					<div class="flex items-center justify-between mb-3">
 						<h4 class="text-lg font-bold">Lifecycle Activity</h4>
-						<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "')"} }>Refresh</button>
+						<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
 					</div>
-					<p class="text-sm opacity-70 mb-3">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p>
-					<div id="lifecycle-activity-list" data-task-id={ task.ID } class="space-y-2">
-						<p class="text-sm opacity-50">Loading lifecycle activity...</p>
-					</div>
+						<p class="text-sm opacity-70 mb-3">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p>
+						<div id="lifecycle-activity-list" data-task-id={ task.ID } data-project-id={ task.ProjectID } class="space-y-2">
+							<p class="text-sm opacity-50">Loading lifecycle activity...</p>
+						</div>
 				</div>
 			</div>
 			<script>
@@ -963,11 +963,13 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 							if (!Array.isArray(memories)) return [];
 							return memories.map(function(m) { return m.file || m.topic || ''; });
 						}
-						window.refreshLifecycleActivity = async function(taskID) {
-							var container = document.getElementById('lifecycle-activity-list');
-							if (!container) return;
-							try {
-								var response = await fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions', { headers: { 'Accept': 'application/json' } });
+							window.refreshLifecycleActivity = async function(taskID, projectID) {
+								var container = document.getElementById('lifecycle-activity-list');
+								if (!container) return;
+								projectID = projectID || container.dataset.projectId || '';
+								var query = projectID ? '?project_id=' + encodeURIComponent(projectID) : '';
+								try {
+									var response = await fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions' + query, { headers: { 'Accept': 'application/json' } });
 								if (!response.ok) throw new Error('failed to load lifecycle executions');
 								var rows = await response.json();
 								if (!Array.isArray(rows) || rows.length === 0) {

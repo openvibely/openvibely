@@ -474,14 +474,54 @@ func (r *LifecycleRepo) AppendExecutionEvent(ctx context.Context, event *models.
 // ListExecutionEvents returns trace events for a lifecycle execution in emitted order.
 func (r *LifecycleRepo) ListExecutionEvents(ctx context.Context, lifecycleExecutionID string) ([]models.LifecycleExecutionEvent, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, lifecycle_execution_id, seq, event_type, payload_json, created_at
-		FROM lifecycle_execution_events
-		WHERE lifecycle_execution_id = ?
-		ORDER BY seq ASC`, lifecycleExecutionID)
+			SELECT id, lifecycle_execution_id, seq, event_type, payload_json, created_at
+			FROM lifecycle_execution_events
+			WHERE lifecycle_execution_id = ?
+			ORDER BY seq ASC`, lifecycleExecutionID)
 	if err != nil {
 		return nil, fmt.Errorf("listing lifecycle execution events: %w", err)
 	}
 	defer rows.Close()
+	return scanLifecycleExecutionEvents(rows)
+}
+
+// ListExecutionEventsForProject returns trace events only when the lifecycle
+// execution belongs to a task in projectID. The boolean reports whether the
+// execution exists within that project, so callers can distinguish an empty
+// trace from an unknown or foreign execution ID without leaking which case it is.
+func (r *LifecycleRepo) ListExecutionEventsForProject(ctx context.Context, lifecycleExecutionID, projectID string) ([]models.LifecycleExecutionEvent, bool, error) {
+	var exists int
+	if err := r.db.QueryRowContext(ctx, `
+			SELECT EXISTS(
+				SELECT 1
+				FROM lifecycle_executions le
+				JOIN tasks t ON t.id = le.task_id
+				WHERE le.id = ? AND t.project_id = ?
+			)`, lifecycleExecutionID, projectID).Scan(&exists); err != nil {
+		return nil, false, fmt.Errorf("checking lifecycle execution project ownership: %w", err)
+	}
+	if exists == 0 {
+		return nil, false, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+			SELECT ev.id, ev.lifecycle_execution_id, ev.seq, ev.event_type, ev.payload_json, ev.created_at
+			FROM lifecycle_execution_events ev
+			JOIN lifecycle_executions le ON le.id = ev.lifecycle_execution_id
+			JOIN tasks t ON t.id = le.task_id
+			WHERE ev.lifecycle_execution_id = ? AND t.project_id = ?
+			ORDER BY ev.seq ASC`, lifecycleExecutionID, projectID)
+	if err != nil {
+		return nil, false, fmt.Errorf("listing lifecycle execution events for project: %w", err)
+	}
+	defer rows.Close()
+	events, err := scanLifecycleExecutionEvents(rows)
+	if err != nil {
+		return nil, false, err
+	}
+	return events, true, nil
+}
+
+func scanLifecycleExecutionEvents(rows *sql.Rows) ([]models.LifecycleExecutionEvent, error) {
 	var out []models.LifecycleExecutionEvent
 	for rows.Next() {
 		var e models.LifecycleExecutionEvent
