@@ -60,7 +60,7 @@ Before a real non-dry-run release, confirm the exact commit that will receive th
 | `tar` | Package server tarballs | pre-installed |
 | `sha256sum` / `shasum` | Generate SHA256SUMS | pre-installed (Linux/macOS) |
 | `java` | Run `jsign` for Azure Artifact Signing | installed locally under `.tools/jre` by signing setup when missing |
-| `python3` | Bootstrap local Azure CLI when system `az` is unavailable | installed locally under `.tools/python` when Python 3.13+ is missing |
+| `python3` | Bootstrap local Azure CLI when system `az` is unavailable | installed locally under `.tools/python` when Python 3.14+ is missing |
 | `az` | Fetch Azure Artifact Signing access token | installed locally under `.tools/azure-cli`, or replaced by `AZURE_ACCESS_TOKEN` |
 | `docker` *(optional)* | Build and push Docker image | https://docker.com |
 | `x86_64-w64-mingw32-gcc` *(optional)* | Cross-compile Windows desktop-cli | `brew install mingw-w64` |

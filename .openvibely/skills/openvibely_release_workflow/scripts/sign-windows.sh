@@ -42,6 +42,9 @@ if ! "$java_bin" -version >/dev/null 2>&1; then
     exit 127
 fi
 export OPENVIBELY_JAVA_BIN="$java_bin"
+if [[ -x "${REPO_ROOT}/.tools/python/bin/python3" && -z "${AZ_PYTHON:-}" ]]; then
+    export AZ_PYTHON="${REPO_ROOT}/.tools/python/bin/python3"
+fi
 if ! command -v jsign >/dev/null 2>&1; then
     echo "jsign is unavailable after tooling setup" >&2
     exit 127

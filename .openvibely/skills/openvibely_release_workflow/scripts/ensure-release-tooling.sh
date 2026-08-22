@@ -91,27 +91,28 @@ install_java_runtime() {
 }
 
 install_python_runtime() {
+    local required_minor="${1:-14}"
     local root tool_dir python_bin
     root="$(repo_root)"
     tool_dir="${root}/.tools/python"
     python_bin="${tool_dir}/bin/python3"
 
-    if command -v python3 >/dev/null 2>&1 && python_version_at_least "$(command -v python3)" 3 13; then
+    if command -v python3 >/dev/null 2>&1 && python_version_at_least "$(command -v python3)" 3 "$required_minor"; then
         echo "ok tool: python3 ($(command -v python3))"
         return 0
     fi
 
-    if [[ -x "$python_bin" ]] && python_version_at_least "$python_bin" 3 13; then
+    if [[ -x "$python_bin" ]] && python_version_at_least "$python_bin" 3 "$required_minor"; then
         echo "ok tool: python3 ($python_bin)"
         return 0
     fi
 
     if [[ "$(uname -s)" != "Darwin" ]]; then
-        echo "python3.13 not found; install Python 3.13+ for local Azure CLI setup" >&2
+        echo "python3.${required_minor} not found; install Python 3.${required_minor}+ for local Azure CLI setup" >&2
         return 1
     fi
     if ! command -v python3 >/dev/null 2>&1; then
-        echo "python3 is required to discover the local Python 3.13 release asset" >&2
+        echo "python3 is required to discover the local Python runtime release asset" >&2
         return 1
     fi
 
@@ -126,14 +127,15 @@ install_python_runtime() {
             ;;
     esac
 
-    echo "python3.13 not found; downloading local Python 3.13 runtime..." >&2
-    url="$(PYTHON_ARCH="$python_arch" python3 <<'PY'
+    echo "python3.${required_minor} not found; downloading local Python 3.${required_minor} runtime..." >&2
+    url="$(PYTHON_ARCH="$python_arch" PYTHON_MINOR="$required_minor" python3 <<'PY'
 import json
 import os
 import sys
 import urllib.request
 
 arch = os.environ["PYTHON_ARCH"]
+minor = os.environ["PYTHON_MINOR"]
 api = "https://api.github.com/repos/astral-sh/python-build-standalone/releases/latest"
 with urllib.request.urlopen(api, timeout=30) as response:
     release = json.load(response)
@@ -141,15 +143,15 @@ with urllib.request.urlopen(api, timeout=30) as response:
 needle = f"{arch}-apple-darwin-install_only.tar.gz"
 for asset in release.get("assets", []):
     name = asset.get("name", "")
-    if name.startswith("cpython-3.13.") and needle in name:
+    if name.startswith(f"cpython-3.{minor}.") and needle in name:
         print(asset["browser_download_url"])
         break
 else:
-    sys.exit("no Python 3.13 macOS install_only asset found")
+    sys.exit(f"no Python 3.{minor} macOS install_only asset found")
 PY
 )"
     if [[ -z "$url" ]]; then
-        echo "could not discover Python 3.13 download URL" >&2
+        echo "could not discover Python 3.${required_minor} download URL" >&2
         return 1
     fi
 
@@ -157,7 +159,7 @@ PY
     curl -fL -o "${tmp}/python.tar.gz" "$url"
     mkdir -p "${tmp}/extract"
     tar -xzf "${tmp}/python.tar.gz" -C "${tmp}/extract"
-    if [[ -x "${tmp}/extract/python/bin/python3" || -x "${tmp}/extract/python/bin/python3.13" ]]; then
+    if [[ -x "${tmp}/extract/python/bin/python3" || -x "${tmp}/extract/python/bin/python3.${required_minor}" ]]; then
         python_root="${tmp}/extract/python"
     else
         python_root="$(find "${tmp}/extract" -type d -path '*/bin' -print -quit | sed 's#/bin$##')"
@@ -169,14 +171,14 @@ PY
     rm -rf "$tool_dir"
     mkdir -p "$(dirname "$tool_dir")"
     mv "$python_root" "$tool_dir"
-    if [[ ! -e "${tool_dir}/bin/python3" && -x "${tool_dir}/bin/python3.13" ]]; then
-        ln -s python3.13 "${tool_dir}/bin/python3"
+    if [[ ! -e "${tool_dir}/bin/python3" && -x "${tool_dir}/bin/python3.${required_minor}" ]]; then
+        ln -s "python3.${required_minor}" "${tool_dir}/bin/python3"
     fi
-    if [[ -x "$python_bin" ]] && python_version_at_least "$python_bin" 3 13; then
+    if [[ -x "$python_bin" ]] && python_version_at_least "$python_bin" 3 "$required_minor"; then
         echo "ok tool: python3 ($python_bin)"
         return 0
     fi
-    echo "downloaded Python runtime is not runnable or is not Python 3.13+" >&2
+    echo "downloaded Python runtime is not runnable or is not Python 3.${required_minor}+" >&2
     return 1
 }
 
@@ -400,17 +402,26 @@ install_azure_cli() {
         echo "ok env: AZURE_ACCESS_TOKEN (skipping az install)"
         return 0
     fi
-    if command -v az >/dev/null 2>&1; then
+    local root tool_dir az_bin real_az python_bin
+    root="$(repo_root)"
+    tool_dir="${root}/.tools/azure-cli"
+    az_bin="${tool_dir}/bin/az"
+    real_az="${tool_dir}/libexec/bin/az"
+    python_bin="${root}/.tools/python/bin/python3"
+
+    if command -v az >/dev/null 2>&1 && [[ "$(command -v az)" != "$az_bin" ]]; then
         echo "ok tool: az ($(command -v az))"
         return 0
     fi
 
-    local root tool_dir az_bin
-    root="$(repo_root)"
-    tool_dir="${root}/.tools/azure-cli"
-    az_bin="${tool_dir}/bin/az"
-
-    if [[ -x "$az_bin" ]]; then
+    if [[ -x "$real_az" && -x "$python_bin" ]]; then
+        mkdir -p "${tool_dir}/bin"
+        cat > "$az_bin" <<EOF
+#!/usr/bin/env bash
+export AZ_PYTHON="\${AZ_PYTHON:-$python_bin}"
+exec "$real_az" "\$@"
+EOF
+        chmod +x "$az_bin"
         echo "ok tool: az ($az_bin)"
         return 0
     fi
@@ -419,14 +430,12 @@ install_azure_cli() {
         echo "az not found; install Azure CLI or set AZURE_ACCESS_TOKEN" >&2
         return 1
     fi
-    local python_bin
-    python_bin="${root}/.tools/python/bin/python3"
     if [[ ! -x "$python_bin" ]]; then
         python_bin="$(command -v python3 2>/dev/null || true)"
     fi
-    if [[ -z "$python_bin" ]] || ! python_version_at_least "$python_bin" 3 13; then
-        echo "az not found; Azure CLI tarball install requires Python 3.13+ on macOS" >&2
-        echo "run ensure-release-tooling.sh to install local Python 3.13, install Azure CLI manually, or set AZURE_ACCESS_TOKEN" >&2
+    if [[ -z "$python_bin" ]] || ! python_version_at_least "$python_bin" 3 14; then
+        echo "az not found; Azure CLI tarball install requires Python 3.14+ on macOS" >&2
+        echo "run ensure-release-tooling.sh to install local Python 3.14, install Azure CLI manually, or set AZURE_ACCESS_TOKEN" >&2
         return 1
     fi
 
@@ -452,21 +461,25 @@ install_azure_cli() {
     rm -rf "$tool_dir"
     mkdir -p "$tool_dir"
     tar -xzf "${tmp}/az.tar.gz" -C "$tool_dir"
-    if [[ -f "${tool_dir}/az.completion.sh" ]]; then
-        :
-    fi
-    if [[ -x "$az_bin" ]]; then
+    if [[ -x "$real_az" ]]; then
+        mkdir -p "${tool_dir}/bin"
+        cat > "$az_bin" <<EOF
+#!/usr/bin/env bash
+export AZ_PYTHON="\${AZ_PYTHON:-$python_bin}"
+exec "$real_az" "\$@"
+EOF
+        chmod +x "$az_bin"
         echo "ok tool: az ($az_bin)"
         return 0
     fi
-    echo "downloaded Azure CLI tarball did not contain bin/az" >&2
+    echo "downloaded Azure CLI tarball did not contain libexec/bin/az" >&2
     return 1
 }
 
 install_osslsigncode
 if [[ "${SKIP_AZURE_SIGNING_TOOLING:-0}" != "1" ]]; then
     install_java_runtime
-    install_python_runtime
+    install_python_runtime 14
     install_jsign
     install_azure_cli
 fi

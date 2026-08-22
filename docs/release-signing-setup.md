@@ -54,8 +54,8 @@ On macOS, the scripts install local release tooling under `.tools/` when needed:
 - `.tools/jsign` for Azure Artifact Signing.
 - `.tools/jre` for the Java runtime used by `jsign` when no runnable system Java
   is present.
-- `.tools/python` for the Python 3.13 runtime used by local Azure CLI setup
-  when no runnable system Python 3.13+ is present.
+- `.tools/python` for the Python 3.14 runtime used by local Azure CLI setup
+  when no runnable system Python 3.14+ is present.
 - `.tools/azure-cli` for `az` when the Azure CLI is absent.
 
 You can also provide `AZURE_ACCESS_TOKEN` before signing to skip Azure CLI
