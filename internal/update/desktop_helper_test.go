@@ -2,6 +2,7 @@ package update
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -154,7 +155,11 @@ func TestDesktopHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 	}
 
 	var relaunch DesktopHelperConfig
-	metadata := `{"arguments":["OpenVibely","--flag"],"working_directory":"/tmp","executable_relative":"Contents/MacOS/OpenVibely"}`
+	metadataBytes, err := json.Marshal(binaryRelaunchMetadata{Arguments: []string{"OpenVibely", "--flag"}, WorkingDirectory: t.TempDir(), ExecutableRelative: "Contents/MacOS/OpenVibely"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := string(metadataBytes)
 	if err := LoadDesktopHelperRelaunch(strings.NewReader(metadata), &relaunch); err != nil {
 		t.Fatalf("LoadDesktopHelperRelaunch: %v", err)
 	}

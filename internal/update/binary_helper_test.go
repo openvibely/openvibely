@@ -1,6 +1,7 @@
 package update
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,7 +52,11 @@ func TestBinaryHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 	}
 
 	var relaunch BinaryHelperConfig
-	metadata := `{"arguments":["openvibely","serve"],"working_directory":"` + filepath.ToSlash(root) + `"}`
+	metadataBytes, err := json.Marshal(binaryRelaunchMetadata{Arguments: []string{"openvibely", "serve"}, WorkingDirectory: root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := string(metadataBytes)
 	if err := LoadBinaryHelperRelaunch(strings.NewReader(metadata), &relaunch); err != nil {
 		t.Fatalf("LoadBinaryHelperRelaunch: %v", err)
 	}
