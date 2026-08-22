@@ -397,6 +397,7 @@ func workerFromTaskService(taskSvc *TaskService) *WorkerService {
 func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+
 			out, _, err := ExecuteCreateTaskRuntimeAction(ctx, input, RuntimeTaskCreationOptions{
 				ProjectID:           opts.ProjectID,
 				TaskSvc:             opts.TaskSvc,
@@ -411,6 +412,7 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 				},
 			})
 			return out, err
+
 		},
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req SwarmTaskRuntimeInput

@@ -1251,6 +1251,198 @@ func TestLLMConfigRepo_ListChatSelectionOptionsUsesBoundedProjection(t *testing.
 	}
 }
 
+func TestLLMConfigRepo_ListTaskCreationSelectionOptionsUsesBoundedProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	largeBody := strings.Repeat("x", 1024*1024)
+	alpha := &models.LLMConfig{
+		Name: "Task Creation Alpha", Provider: models.ProviderOpenAICompatible, AuthMethod: models.AuthMethodOAuth,
+		Model: "alpha-model", APIKey: "secret-key", OAuthAccessToken: "secret-token",
+		OAuthRefreshToken: "secret-refresh", OAuthClientID: "client-id", OAuthClientSecret: "secret-client",
+		OAuthAuthorizeURL: "https://auth.example.com/authorize", OAuthTokenURL: "https://auth.example.com/token",
+		OAuthScopes: "models", OllamaBaseURL: "http://localhost:11434", BaseURL: "https://example.com/v1/",
+		Transport: "chat_completions", PresetSlug: "custom", ModelsURL: "https://example.com/v1/models",
+		AuthHeaderName: "X-API-Key", AuthHeaderValuePrefix: "Bearer", ExtraHeadersJSON: `{"secret":"header"}`,
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+		AutoStartTasks: true,
+	}
+	if err := repo.Create(ctx, alpha); err != nil {
+		t.Fatal(err)
+	}
+	zuluDefault := &models.LLMConfig{
+		Name: "Task Creation Zulu Default", Provider: models.ProviderTest, AuthMethod: models.AuthMethodAPIKey,
+		Model: "zulu-model", APIKey: "secret-key", IsDefault: true,
+		ExtraBodyJSON: largeBody, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"token":"secret"}`, MixtureConfigJSON: `{"large":"` + largeBody + `"}`,
+	}
+	if err := repo.Create(ctx, zuluDefault); err != nil {
+		t.Fatal(err)
+	}
+
+	full, err := repo.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter.Reset()
+	counter.SetEnabled(true)
+	selection, err := repo.ListTaskCreationSelectionOptions(ctx)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(selection) != len(full) {
+		t.Fatalf("selection len = %d, full len = %d", len(selection), len(full))
+	}
+	for i := range full {
+		if selection[i].ID != full[i].ID || selection[i].Name != full[i].Name ||
+			selection[i].Provider != full[i].Provider || selection[i].Model != full[i].Model ||
+			selection[i].IsDefault != full[i].IsDefault || selection[i].AutoStartTasks != full[i].AutoStartTasks {
+			t.Fatalf("task creation selection[%d] = %#v, full[%d] = %#v", i, selection[i], i, full[i])
+		}
+	}
+
+	byID := make(map[string]models.LLMConfig, len(selection))
+	for _, option := range selection {
+		byID[option.ID] = option
+	}
+	custom := byID[alpha.ID]
+	if custom.Name != "Task Creation Alpha" || custom.Provider != models.ProviderOpenAICompatible || custom.Model != "alpha-model" || !custom.AutoStartTasks {
+		t.Fatalf("task creation selection fields not preserved: %#v", custom)
+	}
+	assertTaskCreationSelectionProjectionOmitsConfigBlobs(t, custom)
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact task-creation selection query", statements)
+	}
+	assertTaskCreationSelectionStatement(t, statements[0])
+}
+
+func TestLLMConfigRepo_TaskCreationSelectionProjectionIsFasterAndLowerAllocationThanFullListOnLargeFixture(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping task creation selection performance guard in short mode")
+	}
+	db := testutil.NewTestDB(t)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
+
+	fullList := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				b.Fatalf("full task creation fixture returned %d configs", len(configs))
+			}
+		}
+	})
+	compact := testing.Benchmark(func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListTaskCreationSelectionOptions(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				b.Fatalf("compact task creation fixture returned %d configs", len(configs))
+			}
+		}
+	})
+
+	const (
+		maxBytesPerOp      = 250 * 1024
+		maxDurationPerOp   = 200 * time.Microsecond
+		minFullListSpeedup = 20
+	)
+	t.Logf("full List: %d ns/op, %d B/op; task creation selection: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), compact.NsPerOp(), compact.AllocedBytesPerOp())
+	if compact.NsPerOp()*minFullListSpeedup > fullList.NsPerOp() {
+		t.Fatalf("task creation selection took %s/op, want at least %dx faster than full List (%s/op)", time.Duration(compact.NsPerOp()), minFullListSpeedup, time.Duration(fullList.NsPerOp()))
+	}
+	if compact.AllocedBytesPerOp()*minFullListSpeedup > fullList.AllocedBytesPerOp() {
+		t.Fatalf("task creation selection allocated %d B/op, want at least %dx lower than full List (%d B/op)", compact.AllocedBytesPerOp(), minFullListSpeedup, fullList.AllocedBytesPerOp())
+	}
+	if compact.NsPerOp() > maxDurationPerOp.Nanoseconds() {
+		t.Fatalf("task creation selection took %s/op, want <= %s", time.Duration(compact.NsPerOp()), maxDurationPerOp)
+	}
+	if compact.AllocedBytesPerOp() > maxBytesPerOp {
+		t.Fatalf("task creation selection allocated %d B/op, want <= %d", compact.AllocedBytesPerOp(), maxBytesPerOp)
+	}
+}
+
+func BenchmarkTaskCreationModelSelectionFullListVsCompactProjection(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	repo := NewLLMConfigRepo(db)
+	ctx := context.Background()
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		b.Fatalf("clear model configs: %v", err)
+	}
+	seedLargeCustomProviderModelConfigs(b, ctx, repo, 50)
+
+	b.Run("full_list", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.List(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				b.Fatalf("full task creation fixture returned %d configs", len(configs))
+			}
+		}
+	})
+	b.Run("compact_task_creation_selection", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			configs, err := repo.ListTaskCreationSelectionOptions(ctx)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(configs) != 50 || configs[0].ID == "" {
+				b.Fatalf("compact task creation fixture returned %d configs", len(configs))
+			}
+		}
+	})
+}
+
+func assertTaskCreationSelectionProjectionOmitsConfigBlobs(tb testing.TB, cfg models.LLMConfig) {
+	tb.Helper()
+	if cfg.AuthMethod != "" || cfg.APIKey != "" || cfg.OAuthAccessToken != "" || cfg.OAuthRefreshToken != "" ||
+		cfg.OAuthClientID != "" || cfg.OAuthClientSecret != "" || cfg.OAuthAuthorizeURL != "" || cfg.OAuthTokenURL != "" ||
+		cfg.OAuthScopes != "" || cfg.OllamaBaseURL != "" || cfg.BaseURL != "" || cfg.Transport != "" || cfg.PresetSlug != "" ||
+		cfg.ModelsURL != "" || cfg.AuthHeaderName != "" || cfg.AuthHeaderValuePrefix != "" || cfg.ExtraHeadersJSON != "" ||
+		cfg.ExtraBodyJSON != "" || cfg.CustomAuthConfigJSON != "" || cfg.CustomAuthStateJSON != "" || cfg.MixtureConfigJSON != "" ||
+		cfg.MaxWorkers != 0 || cfg.WorkerTimeout != 0 || !cfg.CreatedAt.IsZero() || !cfg.UpdatedAt.IsZero() {
+		tb.Fatalf("task creation selection materialized credential/config fields: %#v", cfg)
+	}
+}
+
+func assertTaskCreationSelectionStatement(tb testing.TB, raw string) {
+	tb.Helper()
+	stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	if projection != "select id, name, provider, model, is_default, auto_start_tasks" {
+		tb.Fatalf("task creation selection projection = %q, want compact selection fields in %s", projection, raw)
+	}
+	for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_id", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "transport", "preset_slug", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "worker_timeout", "max_workers"} {
+		if strings.Contains(projection, forbidden) {
+			tb.Fatalf("task creation selection query selected forbidden column %q: %s", forbidden, raw)
+		}
+	}
+	if !strings.Contains(stmt, "order by is_default desc, name asc") {
+		tb.Fatalf("task creation selection query must preserve default/name ordering: %s", raw)
+	}
+}
+
 func TestLLMConfigRepo_APIChatSelectionProjectionIsFasterAndLowerAllocationThanFullListOnLargeFixture(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping benchmark ratio assertion in short mode")
