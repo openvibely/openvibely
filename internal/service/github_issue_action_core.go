@@ -251,8 +251,6 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, i
 	return githubIssueActionJSON(map[string]any{"ok": true, "assignee": repository.NormalizeGitHubLogin(assignee), "issues": summaries, "returned": len(summaries), "total": len(issues), "offset": offset, "next_offset": nextOffset, "truncated": nextOffset > 0})
 }
 
-const assignedIssueBodyExcerptLimit = 700
-
 func assignedIssueListPage(req GitHubIssueActionRequest) (int, int, error) {
 	limit := req.Limit
 	if limit == 0 {
@@ -274,8 +272,6 @@ func compactAssignedGitHubIssues(issues []GitHubIssue, limit, offset int) ([]map
 	}
 	summaries := make([]map[string]any, 0, end-offset)
 	for _, issue := range issues[offset:end] {
-		bodyExcerpt, bodyTruncated := assignedIssueBodyExcerpt(issue.Body)
-		completeForTaskCreation := issue.TaskCreationCompletenessKnown && issue.CompleteForTaskCreation && !bodyTruncated
 		summaries = append(summaries, map[string]any{
 			"number":                           issue.Number,
 			"url":                              issue.URL,
@@ -284,10 +280,9 @@ func compactAssignedGitHubIssues(issues []GitHubIssue, limit, offset int) ([]map
 			"created_by":                       issue.UserLogin,
 			"assignees":                        issue.Assignees,
 			"labels":                           issue.Labels,
-			"body_excerpt":                     bodyExcerpt,
-			"body_truncated":                   bodyTruncated,
-			"complete_for_task_creation":       completeForTaskCreation,
-			"task_creation_completeness_known": issue.TaskCreationCompletenessKnown && !bodyTruncated,
+			"complete_for_task_creation":       false,
+			"task_creation_completeness_known": false,
+			"detail_required":                  true,
 		})
 	}
 	nextOffset := 0
@@ -295,15 +290,6 @@ func compactAssignedGitHubIssues(issues []GitHubIssue, limit, offset int) ([]map
 		nextOffset = end
 	}
 	return summaries, nextOffset
-}
-
-func assignedIssueBodyExcerpt(body string) (string, bool) {
-	body = strings.TrimSpace(body)
-	runes := []rune(body)
-	if len(runes) <= assignedIssueBodyExcerptLimit {
-		return body, false
-	}
-	return string(runes[:assignedIssueBodyExcerptLimit]), true
 }
 
 func (c *GitHubIssueActionCore) ExecuteListAssignedIssuesWithPRs(ctx context.Context, input json.RawMessage) (string, error) {

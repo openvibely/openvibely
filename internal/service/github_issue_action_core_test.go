@@ -246,13 +246,13 @@ func TestGitHubIssueActionCoreAssignedIssuesReturnCompactCompleteCandidateList(t
 			t.Fatalf("compact assigned issue output omitted issue #%d: %s", number, out)
 		}
 	}
-	if strings.Contains(out, strings.Repeat("long body text ", 80)) {
-		t.Fatalf("compact assigned issue output should not include full long bodies: %d bytes", len(out))
+	if strings.Contains(out, "long body text") || strings.Contains(out, "body_excerpt") || strings.Contains(out, "body_truncated") {
+		t.Fatalf("compact assigned issue output should not include body text or body fields: %d bytes", len(out))
 	}
-	if !strings.Contains(out, `"body_truncated":true`) || !strings.Contains(out, `"complete_for_task_creation":false`) {
-		t.Fatalf("truncated assigned issue output should require targeted detail hydration: %s", out)
+	if !strings.Contains(out, `"detail_required":true`) || !strings.Contains(out, `"complete_for_task_creation":false`) || !strings.Contains(out, `"task_creation_completeness_known":false`) {
+		t.Fatalf("body-free assigned issue output should require targeted detail hydration: %s", out)
 	}
-	if len(out) > 15000 {
+	if len(out) > 8000 {
 		t.Fatalf("compact assigned issue output is too large: %d bytes", len(out))
 	}
 }

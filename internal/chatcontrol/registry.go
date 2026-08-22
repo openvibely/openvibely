@@ -392,7 +392,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_my_assigned_issues",
-		Description:  "List open GitHub issues assigned to the authenticated PAT user configured for the GitHub channel, defaulting to the current project repository. Returns compact issue summaries with bounded body excerpts and pagination metadata; use github_get_issue for a specific issue when the full body is needed. Pass repo_url for a specific GitHub repository URL. For GitHub App installations or custom inboxes, use github_list_assigned_issues with an explicit assignee.",
+		Description:  "List open GitHub issues assigned to the authenticated PAT user configured for the GitHub channel, defaulting to the current project repository. Returns compact body-free issue summaries with pagination metadata; use github_get_issue for a specific issue when body/details are needed for task creation. Pass repo_url for a specific GitHub repository URL. For GitHub App installations or custom inboxes, use github_list_assigned_issues with an explicit assignee.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,
@@ -412,7 +412,7 @@ var registry = []ActionDef{
 	},
 	{
 		Name:         "github_list_assigned_issues",
-		Description:  "List open GitHub issues assigned to a configured GitHub Authorized User, defaulting to the current project repository. Pull request objects are omitted. Returns compact issue summaries with bounded body excerpts and pagination metadata; use github_get_issue for a specific issue when the full body is needed. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
+		Description:  "List open GitHub issues assigned to a configured GitHub Authorized User, defaulting to the current project repository. Pull request objects are omitted. Returns compact body-free issue summaries with pagination metadata; use github_get_issue for a specific issue when body/details are needed for task creation. Pass repo_url for a specific GitHub repository URL. For GitHub App/custom setups, pass a login from github_get_project_inbox.",
 		Domain:       DomainGitHub,
 		Access:       AccessRead,
 		Sensitivity:  SensitivityNormal,

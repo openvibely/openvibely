@@ -1139,8 +1139,8 @@ func TestDevInboxAssignedIssueScanSkipsDetailFetchesForCompleteListEntries(t *te
 	if got := detailRequests.Load(); got != 0 {
 		t.Fatalf("issue detail requests during default list scan = %d, want 0", got)
 	}
-	if !strings.Contains(out, `"number":100`) || !strings.Contains(out, `"body_excerpt":"Acceptance notes for issue 100"`) || !strings.Contains(out, `"labels":["performance"]`) || !strings.Contains(out, `"assignees":["dev-bot"]`) || !strings.Contains(out, `"complete_for_task_creation":true`) {
-		t.Fatalf("compact assigned issue output lost task-creation fields: %s", out)
+	if !strings.Contains(out, `"number":100`) || !strings.Contains(out, `"labels":["performance"]`) || !strings.Contains(out, `"assignees":["dev-bot"]`) || !strings.Contains(out, `"detail_required":true`) || !strings.Contains(out, `"complete_for_task_creation":false`) || strings.Contains(out, "Acceptance notes for issue 100") || strings.Contains(out, "body_excerpt") {
+		t.Fatalf("compact assigned issue output should be body-free while retaining candidate fields: %s", out)
 	}
 
 	_, err = handlers["github_get_issue"](ctx, json.RawMessage(`{"issue_number":42,"repo_url":"https://github.com/openvibely/openvibely"}`))
@@ -1202,8 +1202,8 @@ func TestDevInboxAssignedIssueScanFetchesOnlyIncompleteListEntries(t *testing.T)
 	if got := detailRequests.Load(); got != 1 {
 		t.Fatalf("issue detail requests = %d, want 1", got)
 	}
-	if !strings.Contains(out, `"title":"Hydrated two"`) || !strings.Contains(out, `"body_excerpt":"Hydrated acceptance notes"`) || !strings.Contains(out, `"title":"Complete three"`) {
-		t.Fatalf("compact assigned issue output did not retain hydrated and complete entries: %s", out)
+	if !strings.Contains(out, `"title":"Hydrated two"`) || !strings.Contains(out, `"title":"Complete three"`) || strings.Contains(out, "Hydrated acceptance notes") || strings.Contains(out, "body_excerpt") {
+		t.Fatalf("compact assigned issue output should retain hydrated candidate metadata without body text: %s", out)
 	}
 
 	out, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"other-bot","repo_url":"https://github.com/openvibely/openvibely"}`))
