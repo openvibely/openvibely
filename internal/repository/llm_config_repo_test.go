@@ -1336,46 +1336,46 @@ func TestLLMConfigRepo_TaskCreationSelectionProjectionIsFasterAndLowerAllocation
 	}
 	seedLargeCustomProviderModelConfigs(t, ctx, repo, 50)
 
-	fullList := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.List(ctx)
+	measure := func(label string, sampleOps int, load func() ([]models.LLMConfig, error)) (time.Duration, uint64) {
+		t.Helper()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		allocBefore := ms.TotalAlloc
+		startedAt := time.Now()
+		for i := 0; i < sampleOps; i++ {
+			configs, err := load()
 			if err != nil {
-				b.Fatal(err)
+				t.Fatalf("%s load: %v", label, err)
 			}
 			if len(configs) != 50 || configs[0].ID == "" {
-				b.Fatalf("full task creation fixture returned %d configs", len(configs))
+				t.Fatalf("%s task creation fixture returned %d configs", label, len(configs))
 			}
 		}
-	})
-	compact := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
-			configs, err := repo.ListTaskCreationSelectionOptions(ctx)
-			if err != nil {
-				b.Fatal(err)
-			}
-			if len(configs) != 50 || configs[0].ID == "" {
-				b.Fatalf("compact task creation fixture returned %d configs", len(configs))
-			}
-		}
-	})
+		runtime.ReadMemStats(&ms)
+		return time.Since(startedAt) / time.Duration(sampleOps), (ms.TotalAlloc - allocBefore) / uint64(sampleOps)
+	}
 
 	const (
+		sampleOps          = 5
 		maxBytesPerOp      = 250 * 1024
 		maxDurationPerOp   = 200 * time.Microsecond
 		minFullListSpeedup = 20
 	)
-	t.Logf("full List: %d ns/op, %d B/op; task creation selection: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), compact.NsPerOp(), compact.AllocedBytesPerOp())
-	if compact.NsPerOp()*minFullListSpeedup > fullList.NsPerOp() {
-		t.Fatalf("task creation selection took %s/op, want at least %dx faster than full List (%s/op)", time.Duration(compact.NsPerOp()), minFullListSpeedup, time.Duration(fullList.NsPerOp()))
+	fullDuration, fullBytes := measure("full List", sampleOps, func() ([]models.LLMConfig, error) { return repo.List(ctx) })
+	compactDuration, compactBytes := measure("task creation selection", sampleOps, func() ([]models.LLMConfig, error) { return repo.ListTaskCreationSelectionOptions(ctx) })
+
+	t.Logf("full List: %s/op, %d B/op; task creation selection: %s/op, %d B/op", fullDuration, fullBytes, compactDuration, compactBytes)
+	if compactDuration*time.Duration(minFullListSpeedup) > fullDuration {
+		t.Fatalf("task creation selection took %s/op, want at least %dx faster than full List (%s/op)", compactDuration, minFullListSpeedup, fullDuration)
 	}
-	if compact.AllocedBytesPerOp()*minFullListSpeedup > fullList.AllocedBytesPerOp() {
-		t.Fatalf("task creation selection allocated %d B/op, want at least %dx lower than full List (%d B/op)", compact.AllocedBytesPerOp(), minFullListSpeedup, fullList.AllocedBytesPerOp())
+	if compactBytes*minFullListSpeedup > fullBytes {
+		t.Fatalf("task creation selection allocated %d B/op, want at least %dx lower than full List (%d B/op)", compactBytes, minFullListSpeedup, fullBytes)
 	}
-	if compact.NsPerOp() > maxDurationPerOp.Nanoseconds() {
-		t.Fatalf("task creation selection took %s/op, want <= %s", time.Duration(compact.NsPerOp()), maxDurationPerOp)
+	if compactDuration > maxDurationPerOp {
+		t.Fatalf("task creation selection took %s/op, want <= %s", compactDuration, maxDurationPerOp)
 	}
-	if compact.AllocedBytesPerOp() > maxBytesPerOp {
-		t.Fatalf("task creation selection allocated %d B/op, want <= %d", compact.AllocedBytesPerOp(), maxBytesPerOp)
+	if compactBytes > maxBytesPerOp {
+		t.Fatalf("task creation selection allocated %d B/op, want <= %d", compactBytes, maxBytesPerOp)
 	}
 }
 
