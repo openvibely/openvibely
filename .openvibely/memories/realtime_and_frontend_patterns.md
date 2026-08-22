@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-21
+updated: 2026-08-22
 source: after_complete_update
-source_id: fd37f46bb8f14052236f06e2550dd109:1263e360b284c22d
+source_id: ede97ed591a75fcf255c6818c1ea4e90:146ad778168e7538
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -70,7 +70,9 @@ Transcript safety and navigation:
 - Known review navigation gaps: execution detail pages exist but normal Thread/Reflection review surfaces do not expose visible links (`#365`, `#380`).
 - Forced task-thread refreshes must close per-exec EventSources before replacement, but revision no-op checks run before cleanup.
 - Older-history pagination captures scroll intent revision and cancels stale restoration if newer send/scroll changes intent.
-- Known frontend duplication gaps include task-thread scroll-state helpers, terminal UI/composer reconciliation, live queued-row construction, task-thread post-swap hydration, schedule repeat-interval controllers, Task Templates dashboard refresh, execution status badge rendering, Kanban priority bulk-action label mapping (`#766`), and browser clipboard-copy helper behavior (`#776`).
+- Known frontend duplication gaps include task-thread scroll-state helpers, terminal UI/composer reconciliation, live queued-row construction, task-thread post-swap hydration, schedule repeat-interval controllers, Task Templates dashboard refresh, and execution status badge rendering.
+- Resolved `#776` in PR `#816`: browser clipboard writes route through the shared base-layout `window.openVibelyCopyText` helper, which owns Clipboard API use, hidden-textarea fallback, fallback cleanup, and timed feedback restoration. Task output/error copy, diff path copy, alert detail copy, code block copy, and webhook URL copy should keep surface-specific wrappers/labels/icons/toasts while delegating generic copy/fallback behavior to the shared helper; diff file path copy should stay centralized rather than reintroduced separately for review and non-review renders. A strict 2026-08-22 audit found no material issues and confirmed PR `#816` was open/non-draft, issue-scoped to the 16 expected template/generated/test files, and blob-matched the audited local `HEAD` despite a different remote branch SHA.
+- Resolved `#766` in PR `#801`: Kanban backlog priority bulk-execution actions loop over priorities `4, 3, 2, 1`, gate with `countEligibleBacklogByPriority`, preserve `/tasks/backlog/execute?project_id=<project>&priority=<priority>` routes, and derive confirm/visible labels from `PriorityLabel` so task-card badges and bulk-action labels share the canonical mapping. A strict 2026-08-21 audit found no material issues, and the PR/source branch tree matched the audited local tree despite different commit metadata.
 - Resolved `#756` in PR `#775`: Agent, Model, Skill, Schedule, Task Detail schedule, and Project destructive-delete confirmations render through shared `web/templates/pages/destructive_confirm_dialog.templ` while keeping entity-specific delete behavior local, including model default reassignment, skills viewport preservation, schedule target/swap selection, project modal closing, and agent container/toast refresh. A strict 2026-08-21 audit found no material issues, and the PR tree matched the audited workspace despite a different commit SHA.
 - Task detail HTMX refresh assembly and task-board mutation/sort HTMX refresh assembly should stay centralized through private helpers while preserving route-specific behavior.
 

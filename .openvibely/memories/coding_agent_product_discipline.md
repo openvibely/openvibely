@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-08-21
+updated: 2026-08-22
 source: after_complete_update
-source_id: fd37f46bb8f14052236f06e2550dd109:1263e360b284c22d
+source_id: d1f202496617b9f0009cff4609029ac7:c9949ec07042d14d
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -19,6 +19,7 @@ User interaction and scope preferences:
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
 - Ask before rewriting or collapsing meaningful Git history. Preserve a clearly named backup ref when history must be recovered or rewritten, but do not treat that backup as approval.
 - Treat memory/skill-maintenance-only requests, explicit path limits, and audit exclusions as hard scope boundaries. Do not add repository changes, generated files, tests, rebase work, or implementation work outside the requested boundary.
+- For narrow rebase or fast-forward-conflict repair requests, do not expand into Docker/Linux reproduction or broad CI triage unless the user explicitly asks; complete the requested rebase/publication verification and report remaining CI state separately.
 - When managed memory is explicitly excluded from an audit, do not inspect, cite, reconcile, or use it as evidence. When memory/skill drift must be ignored, inspect repository/worktree evidence first and ground the verdict there.
 - Do not delegate tasks or create child-agent work unless the user explicitly asks. This applies especially to memory updates.
 - When diagnosing autonomous loops or system-owned schedules, do not manually push live objects through as a substitute for fixing the product path; validation should prove the scheduled/tool/runtime behavior works end-to-end.
@@ -77,5 +78,5 @@ Release-note and release-boundary preferences:
 - `.openvibely/skills/openvibely_release_workflow/scripts/release.sh` is tracked without executable bit; invoke release rehearsals through `bash` until mode is corrected.
 
 Current durable rotation state:
-- Redundancy Finder should avoid rechecking recently inspected bounded components unless explicitly asked: task-goal runtime actions, alert refresh tails, Automation save validation, Worktree Changes diff-state resolution, task-board refresh, dashboard page shell, execution-stream terminal mapping, attachment orphan cleanup, Agent dialog payload parsing, schedule mutations, project repository-source handling, model/provider form normalization, channel test/authorization flows, Task Templates, Personality cards, Insights/Analytics failed-task rendering, execution status badges, HTMX toast contracts, task tag badges, destructive delete confirmations, Kanban backlog priority bulk actions, and browser clipboard-copy helpers.
+- Redundancy Finder should avoid rechecking recently inspected bounded components unless explicitly asked: task-goal runtime actions, alert refresh tails, Automation save validation, Worktree Changes diff-state resolution, task-board refresh, dashboard page shell, execution-stream terminal mapping, attachment orphan cleanup, Agent dialog payload parsing, schedule mutations, project repository-source handling, model/provider form normalization, channel test/authorization flows, Task Templates, Personality cards, Insights/Analytics failed-task rendering, execution status badges, HTMX toast contracts, task tag badges, destructive delete confirmations, Kanban backlog priority bulk actions, browser clipboard-copy helpers, ordinary Chat `create_task` runtime handling, and LLM structured JSON reply parsing across Generate Agent/lifecycle hooks/Insights (`#798`).
 - Bug Finder should choose a new bounded component unless explicitly asked to revisit browser Task Detail primary-Agent edit validation (`#725`, resolved) or task attachment upload/delete project ownership (`#757`, resolved after a fresh 2026-08-21 strict audit).

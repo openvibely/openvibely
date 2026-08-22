@@ -2,9 +2,9 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-08-19
-source: consolidation
-source_id: memory_consolidation_2026_08_19
+updated: 2026-08-22
+source: after_complete_update
+source_id: 670ee91a928cec23138531be2cb9bc8d:2c6aaa44b5ac537d
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -26,7 +26,7 @@ Runtime tool contracts:
 - `create_notification` creates a pending project-scoped actionable notification, binds trusted source-task identity from persisted caller task, accepts structured metadata, and keeps optional backend/direct-caller idempotency support. The model-facing schema ignores hidden `idempotency_key` input.
 - Native SDLC duplicate prevention is existing-work-first, not idempotency-key based. Finders inspect existing notifications and hydrate likely matches before creating at most one new notification.
 - Initial tasks, scheduled tasks, task-thread follow-ups, web/API Chat, Slack, Telegram, Discord, and Email expose `create_notification` when the selected provider/auth path supports runtime tools. Dispatch derives project/source identity from persisted execution context.
-- Ordinary Chat exposes full notification lifecycle in Orchestrate mode and only read operations in Plan mode. Runtime-tool-incapable providers receive no notification tools and no bracket-marker fallback.
+- Ordinary Chat exposes notification read, creation, claim/linkage, processing, deletion, read-state, and explicit pending-notification decision tools in Orchestrate mode. `decide_alert` accepts approved/rejected/dismissed decisions and delegates to `AlertService.SetDecision`; Plan mode exposes only read operations. Runtime-tool-incapable providers receive no notification tools and no bracket-marker fallback.
 - The structured runtime surface covers filtered/paginated listing, detail, atomic claim, implementation-task creation/linkage, explicit linkage, completion/failure, and claim release/retry.
 - Claims are lease-based and atomic. Explicit `lease_seconds` is validated as `1..86400`; omitted uses repository default.
 - `create_alert_implementation_task` requires a non-empty title/prompt and a notification currently claimed by the persisted caller task. It transactionally returns an already-linked task or creates a same-project Backlog/Pending system-agent task, links it, marks processing `implementation_task_linked`, and clears claim expiry. It does not start the task, mark processing complete, merge, release, or deploy.
@@ -38,6 +38,7 @@ Runtime tool contracts:
 - If Native creation, linkage, or execution fails, the inbox records failed processing rather than reporting completion; claim release remains valid only before any task is linked.
 - Open gap `#352`: `complete_alert_processing` can mark an approved notification completed from a merely claimed state without requiring a linked implementation task.
 - Open gap `#612`: Automation-bound non-Native-Inbox tasks can list project-wide notification summaries because zero Native Inbox bindings are treated as unscoped project list; fix should fail closed or return no rows.
+- Resolved `#783`: Chat/runtime `decide_alert` records explicit user-directed approved/rejected/dismissed decisions for pending actionable notifications in Orchestrate mode without changing the browser Alerts approve/reject path. Missing, unknown, foreign-project, invalid-decision, and already-decided inputs fail without leaking cross-project details; approved notifications remain claimable by Native inbox flow while rejected/dismissed notifications are not claimable. PR `#814` passed a 2026-08-22 fresh strict read-only audit and its GitHub PR file blob SHAs matched audited local `HEAD` for all nine changed files.
 - Slack, Telegram, Discord, and Email first-turn channel runtimes are constructed only after the channel Chat task is persisted, so channel lifecycle handlers receive trusted caller identity.
 - Alert lifecycle mutations publish project-scoped alert invalidation events.
 - Alert approval/claim/release/linkage/task creation/processing/idempotent creation/Automation rebind mutations use shared immediate-transaction scaffolding while mutation-specific SQL/validation/projections stay local.

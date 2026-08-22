@@ -182,10 +182,6 @@ always_use:
 ## openvibely_model_release_audit_workflow
 
 [OpenVibely Model Release Audit Workflow](openvibely_model_release_audit_workflow/SKILL.md) — Audit authoritative provider releases against OpenVibely support and hand off only verified model-support gaps.
-
-## openvibely_github_implementation_inbox_workflow
-
-[OpenVibely GitHub Implementation Inbox Workflow](openvibely_github_implementation_inbox_workflow/SKILL.md) — Poll GitHub implementation mailboxes, reconcile assigned issues with OpenVibely tasks, and start approved work without duplicate submissions.
 ## openvibely_docker_image_workflow
 
 [OpenVibely Docker Image Workflow](openvibely_docker_image_workflow/SKILL.md) — Safely change OpenVibely production and coding-agent images while keeping consumers, release publishing, documentation, runtime validation, and sandbox boundaries aligned.
@@ -277,7 +273,7 @@ always_use:
 
 ## openvibely_chat_agent_creation_workflow
 
-[OpenVibely Chat Agent Creation Workflow](openvibely_chat_agent_creation_workflow/SKILL.md) — Implement and audit Chat/runtime actions that save reusable user-managed Agent profiles.
+[OpenVibely Chat Agent Profile Workflow](openvibely_chat_agent_creation_workflow/SKILL.md) — Implement and audit Chat/runtime actions that create or update reusable user-managed Agent profiles.
 
 ## openvibely_worker_capacity_projection_workflow
 
@@ -290,3 +286,15 @@ always_use:
 ## openvibely_destructive_confirm_dialog_workflow
 
 [OpenVibely Destructive Confirm Dialog Workflow](openvibely_destructive_confirm_dialog_workflow/SKILL.md) — Consolidate and regress OpenVibely destructive delete-confirmation dialogs without over-generalizing entity-specific delete behavior.
+
+## openvibely_github_implementation_inbox_workflow
+
+[OpenVibely GitHub Implementation Inbox Workflow](openvibely_github_implementation_inbox_workflow/SKILL.md) — Poll GitHub implementation inbox work and PR review feedback using OpenVibely runtime tools without duplicate tasks.
+
+## openvibely_llm_json_reply_extraction_workflow
+
+[OpenVibely LLM JSON Reply Extraction Workflow](openvibely_llm_json_reply_extraction_workflow/SKILL.md) — Implement and audit structured JSON extraction from model replies without duplicating parser mechanics.
+
+## openvibely_browser_clipboard_workflow
+
+[OpenVibely Browser Clipboard Workflow](openvibely_browser_clipboard_workflow/SKILL.md) — Implement and audit OpenVibely browser copy-to-clipboard helpers, fallbacks, feedback, and templ regressions.

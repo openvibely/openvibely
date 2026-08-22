@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-08-20
-source: after_complete_update
-source_id: 934f30938ce25f51f6f1fdb7e9e460d0:6e3a872cceea2e5d
+updated: 2026-08-22
+source: consolidation
+source_id: memory_consolidation_2026_08_22
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -19,7 +19,7 @@ Agent and skill catalog facts:
 - Agents are global by default and reusable across projects. Project-scoped agents/skills live under `<project_root>/.openvibely/agents/...`; global agents live under the app/config agents root.
 - The on-disk per-agent `SKILLS.md` declaration is authoritative for agent skills, lifecycle hooks, task loading, tool permissions, enabled/disabled state, and declarations. Declaration import/sync must preserve `agent.enabled: false`; missing enabled metadata defaults to enabled, and archived generated agents remain disabled.
 - Deleting filesystem-backed non-protected agents must remove the database row, `agents/<key>/`, and the `## <key>` section from `agents/AGENTS.md`; otherwise declaration sync can rematerialize the agent. Protected system agents remain non-deletable and should surface disabled delete UI plus backend rejection.
-- Project-scoped agent create/update/delete and related UI/API requests must preserve active project context. Backend cleanup/materialization should prefer persisted `ProjectID` when resolving the project skill root, and frontend agent-specific URLs should carry active `project_id`.
+- Project-scoped agent create/update/delete and related UI/API requests must preserve active project context. Backend cleanup/materialization and agent-owned skill routes should prefer persisted `ProjectID` when resolving the project skill root, and frontend agent-specific URLs should carry active `project_id`. Resolved `#784` via PR `#796`: project-scoped agent skill list/create/update/archive routes reject explicit foreign `project_id` requests before filesystem mutation and omitted `project_id` resolves to the agent's owning project root; global agent skill management remains unchanged. A 2026-08-21 strict read-only audit found no material issues.
 - Agent create/update normalizes visible names by trimming whitespace, rejects blank-looking names, and rejects normalized case-insensitive duplicates among enabled/selectable primary agents. Disabled or non-primary duplicates remain allowed; genuinely ambiguous legacy normalized duplicates remain rejected.
 - Standalone skills are filesystem-backed packages. `<root>/skills/SKILLS.md` headings are canonical handles and match `<root>/skills/<handle>/SKILL.md`.
 - Indexed standalone skills are unusable unless the matching package body exists in the checkout loaded by the running app. Creating the package only inside an isolated task worktree leaves the main catalog pointing at a dead path.
@@ -33,6 +33,7 @@ Agent and skill catalog facts:
 - Generated/native OpenVibely declarations include explicit `kind` frontmatter. Import surfaces should materialize packages through shared normalization into `<root>/skills/<handle>/SKILL.md` and update `<root>/skills/SKILLS.md`.
 - Skill import normalization guarantees YAML frontmatter with at least `name`, `description`, `kind: skill`, and `enabled: true`, supporting raw Markdown bodies, common package forms, and existing declarations without clobbering valid fields.
 - Browser-dialog request-to-declaration conversion for standalone and agent-owned skill saves is centralized before importer persistence. Standalone saves reject agent-root/`agent.key` declarations; agent-owned saves validate `agent.key` scope.
+- Open duplication gap `#806`: agent plugin MCP server resolution is duplicated between `ResolveRuntimeBundle` and `pluginServersForIDs`, covering selected-plugin parsing, auto-install/load, deduplication, and sorting for runtime bundles and persistent MCP process reconciliation.
 - `skill_import` is a skill-library write capability alongside `skill_manage`; grant it to write-authorized skill/curation agents rather than ordinary task turns.
 - The standalone `git_worktree_discipline` skill is intentionally compact at routing time; detailed recovery and prompt-orientation references live in support files.
 
@@ -61,6 +62,7 @@ Lifecycle facts:
 - Maintenance/system agents are excluded from auto-routing via `selectable_as_primary=false`.
 - Lifecycle visibility renders structured selected-skill and selected-memory route decisions as compact prompt-safe badges/pills; text summaries remain useful for non-route hook rows.
 - Known lifecycle-evidence gaps include prompt-safe lifecycle trace events, persisted skill-mutation outcomes, and richer selected-memory context not yet exposed from task-detail Lifecycle views. Open issues include `#161`, `#168`, `#175`, `#177`, `#201`, `#205`, `#209`, `#219`, `#220`, `#299`, `#313`, `#319`, `#324`, `#363`, `#512`, and `#553`.
+- Resolved `#792`: Task-detail lifecycle activity APIs `/api/tasks/:id/lifecycle-executions` and `/api/lifecycle-executions/:id/events` are project-scoped. Foreign or unknown task/execution IDs return controlled not-found-style responses without exposing selected skills, selected memories, summaries, errors, or event payloads; same-project lifecycle list/event APIs and the Task Detail Lifecycle tab remain supported. A later 2026-08-22 strict audit found PR `#803` repaired and issue-scoped.
 - Lifecycle output contracts constrain final stored/validated results, not the agent's working notes or tool use.
 - Strict audit-only turns can be invalidated if routing/context injection or managed memory/skill reads occur before repository/task evidence when the strict-audit skill requires repository evidence first. Future strict audits should gather repository/task evidence first when such a gate applies.
 - Agent root `SKILLS.md` lifecycle hook declarations can include `payload:` blocks naming context extras. Missing/empty payload means the hook receives every slot-produced block. Protected reconciliation repairs stale hook rows so built-ins keep declared payload scopes.

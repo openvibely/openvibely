@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-21
+updated: 2026-08-22
 source: after_complete_update
-source_id: 8837543b3d212564719100cb96dda7ad:86795ac23d356fa2
+source_id: d1f202496617b9f0009cff4609029ac7:e139f6dccabdb5fd
 confidence: high
 title: Provider Architecture
 ---
@@ -23,8 +23,9 @@ Normalized provider direction:
 Provider and model selection:
 - Provider/model selection is based on selected `models.LLMConfig`, especially `Provider`, `Model`, and `AuthMethod`; model string alone does not choose the provider.
 - Normal task runs and task-thread execution starts select model config in this order: current `Task.AgentID`, project `DefaultAgentConfigID`, global default `agent_configs.is_default = 1`. Stored per-run/queued model IDs are history/accounting evidence, not immutable rerun assignment.
-- Interactive Chat differs from task runs today: explicit `agent_id` uses that model config, empty/`auto` triggers complexity/vision-based model selection, and `agent_id=default` currently resolves to the global default even in project-scoped browser Chat. Open bug `#767` tracks that browser Chat should honor `projects.default_agent_config_id` for `Default` after loading project context.
+- Interactive Chat model selection: explicit `agent_id` uses that model config, empty/`auto` triggers complexity/vision-based model selection, and browser Chat `agent_id=default` resolves after selected-project loading so it prefers `projects.default_agent_config_id` before global default. Queued browser Chat inputs preserve that same project-aware effective default model ID. Resolved in PR `#812` for issue `#767`; a 2026-08-22 fresh strict read-only audit found no material issues and confirmed live PR file blobs matched audited local files.
 - API Chat immediate and queued execution paths should use compact model-selection/context rows before auto-selection or prompt-context rendering, then hydrate only the selected full `LLMConfig` at provider execution.
+- Resolved `#791`: runtime `create_task` model selection in browser Chat and shared channel/Automation paths uses compact task-creation selection rows containing only `ID`, `Name`, `Provider`, `Model`, `IsDefault`, and `AutoStartTasks`; full configs should be hydrated only when provider execution needs them. A 2026-08-22 fresh strict audit found no material issues for PR `#804`.
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not provider/model.
 - The actual per-run model identity is stored but not shown in task-thread execution history; issue `#128` tracks exposing it.
 - Model Settings normalize names and runnable model slugs. Trimmed blank names or model slugs are rejected for concrete providers; case-insensitive duplicate trimmed names are rejected. Mixture remains a virtual provider and validates/defaults its virtual identifier separately.
@@ -51,6 +52,7 @@ OpenAI-compatible and Ollama facts:
 - Local/self-hosted OpenAI-compatible presets include Local vLLM, LM Studio, SGLang, LiteLLM, Inferrs Local, and ds4 Local. Ollama remains separate.
 - Excluded/unverified candidates such as xAI, GitHub Copilot, native Bedrock/Gemini, and MiniMax should not be surfaced as generic presets or auto-normalized without a new explicit decision.
 - Ollama uses `/api/chat`, defaults to `http://localhost:11434`, and currently cannot use runtime tools during task execution; issue `#264` tracks tool support for Ollama-backed agents.
+- The Models UI already renders non-secret endpoint/base URL details for OpenAI-compatible and non-default Ollama configs, but Chat model readouts currently omit them; issue `#808` tracks prompt-safe endpoint visibility in Chat without exposing credentials or advanced header/body blobs.
 
 Mixture of Models facts:
 - `ProviderMixture` is a virtual model config stored in `agent_configs` with `provider='mixture'` and `mixture_config_json`; routing goes through `internal/service/provider_adapter.go`.

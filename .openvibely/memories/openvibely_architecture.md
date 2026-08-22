@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-21
+updated: 2026-08-22
 source: after_complete_update
-source_id: 8a672032cfdcc5f13088e860457eca2d:3b7f710ff5c040b0
+source_id: 3091816d74657f54e36f58c1d08715ae:8be85b6e76fa9fa4
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -41,6 +41,7 @@ SQLite and runtime-state contracts:
 Worker and scheduling contracts:
 - Unlimited global worker limit is represented as `worker_settings.max_workers = 0`. Fresh DB initialization and repository fallback use `0`; dispatch and follow-up admission treat it as unbounded, API serialization preserves `0`, and Settings surfaces it as “Unlimited.” Existing finite limits must not be migrated to `0`.
 - No env/config override exists for global worker limit; it is persisted in settings. Task-thread follow-ups enforce finite global limits by atomically reserving global and project capacity before provider execution.
+- Open bug `#807`: browser Project Settings worker-limit saves treat malformed, negative, or non-numeric `max_workers` form values as omitted and can clear an existing project concurrency cap instead of rejecting the save without mutation. Regression coverage should prove invalid values preserve the existing `Project.MaxWorkers` and return controlled validation feedback.
 - Schedule repeat intervals have canonical bounded-positive contract `1..365` for every recurrence unit, enforced across browser handlers, repositories, Automation persistence/compilation, web runtime tools, and channel construction. Corrupt persisted intervals must not block later valid work.
 - Open bug `#116`: direct schedule create/update handlers can coerce malformed/overflowing repeat intervals to `1` or surface unsupported recurrence types as repository errors instead of controlled HTTP 400 responses.
 - New schedule creation is normalized through `ScheduleActionService.CreateForTask` for browser, scheduled-task creation, runtime, and channel paths. Browser routes use absolute-time form methods; runtime/channel methods keep HH:MM tool contracts.
@@ -81,8 +82,11 @@ Diagnostics, handlers, and local development:
 - For read-only live DB diagnostics, inspect schema with `PRAGMA table_info(<table>)` before writing SQL. Remember `tasks` uses `created_at`, not `started_at`; execution timing is on `executions`; swarm role/state columns are on `tasks`; execution failure/diff fields are `error_message` and `diff_output`.
 - `internal/handler` is the Echo HTTP boundary. `handler.go` owns shared dependency graph and route registration; feature-specific files attach tasks, projects, chat, models, auth, integrations, SSE, worktrees, and HTMX/API methods.
 - Resolved `#770`: browser execution detail route `/executions/:id` is project-scoped by resolving the current/requested project before loading the execution and requiring the execution's owning task to belong to that project. Foreign-project or unknown execution IDs return controlled `404 execution not found` responses without rendering foreign prompt, output, or error content; same-project detail rendering remains covered by regressions. A 2026-08-21 strict audit found no material issues.
+- Resolved `#779`: review submission `POST /tasks/:taskId/reviews/submit` is a project-scoped mutation. When an explicit or saved selected project is present, the handler must verify the route task belongs to that project before listing or clearing review comments, creating executions/thread inputs, resuming goals, or starting LLM work; routes without an explicit/saved project should not invent a fallback project solely for this mutation.
+- Resolved `#792`: Lifecycle activity APIs are project-scoped. `GET /api/tasks/:id/lifecycle-executions` verifies the route task belongs to the current/requested project before listing lifecycle summaries, and `GET /api/lifecycle-executions/:id/events` filters events through the lifecycle execution -> task -> project ownership chain. Foreign-project and unknown IDs return controlled not-found responses without leaking selected skills, selected memory metadata, errors, or event payloads; same-project list/event requests and Task Detail Lifecycle tab project-ID fetches are covered by regressions. PR `#803` passed a 2026-08-22 fresh strict audit.
 - Swagger/OpenAPI is generated with `swag init`; generated docs live under `docs/`, with UI at `/swagger/*`.
 - User-facing docs generally live under `docs/` as concise `*-user-guide.md` Markdown pages.
 - `make dev` currently delegates directly to `air`; without `.air.toml`, it provides backend rebuild/restart only, not browser hot reload.
 - Editing `.templ` files requires `templ generate` or a watch process. Tailwind/CSS changes require a separate Tailwind build/watch process.
 - OpenVibely logging uses `internal/applog`: `Infof` for operational logs and `Debugf` gated by `OPENVIBELY_LOG_LEVEL=debug`. Raw LLM/user content, high-frequency stream/SSE/diff/poll/routing traces, and provider headers/rate-limit dumps are debug-level diagnostics, not info logs.
+- Resolved `#798`: LLM JSON reply candidate extraction is centralized in `internal/util/json.go`. `JSONPayloadCandidates` owns fenced-block extraction, balanced object/array scanning, candidate ordering, and duplicate suppression. Generate Agent parsing, lifecycle contract extraction, and Insights `ExtractJSONObject`/`ExtractJSONArray` callers keep workflow-specific schema validation, repair behavior, wrapper/domain normalization, and error handling instead of reimplementing scanners. PR `#811` passed a 2026-08-22 strict read-only audit: local changes were limited to the four issue-scoped files, relevant validation evidence was present, and the PR file blob SHAs matched the audited local `HEAD`.
