@@ -156,14 +156,14 @@ else
     COMMIT_RANGE="HEAD"
 fi
 
-COMMIT_COUNT="$(git log "$COMMIT_RANGE" --oneline | wc -l | tr -d ' ')"
+COMMIT_COUNT="$(git --no-pager log "$COMMIT_RANGE" --oneline | wc -l | tr -d ' ')"
 log "Commits since ${PREV_TAG:-beginning}: ${COMMIT_COUNT}"
 
 if [[ "$COMMIT_COUNT" -eq 0 ]]; then
     warn "No commits found since $PREV_TAG. This may be a re-release or tag already points to HEAD."
 else
     info "--- Unreleased commits ---"
-    git log "$COMMIT_RANGE" --oneline --no-decorate
+    git --no-pager log "$COMMIT_RANGE" --oneline --no-decorate
     info "--- End of commits ---"
 fi
 
