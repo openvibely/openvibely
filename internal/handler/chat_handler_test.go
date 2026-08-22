@@ -410,6 +410,144 @@ func TestHandler_ChatSend(t *testing.T) {
 	}
 }
 
+func TestHandler_ChatSend_DefaultUsesProjectDefaultModel(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	globalDefault := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Global Default Chat Model"
+		a.IsDefault = true
+	})
+	projectDefault := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Project Default Chat Model"
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Chat Project Default")
+	project.DefaultAgentConfigID = &projectDefault.ID
+	require.NoError(t, h.projectRepo.Update(ctx, project))
+
+	form := url.Values{}
+	form.Set("message", "use the project default")
+	form.Set("agent_id", "default")
+	rec := htmxPost(e, "/chat/send?project_id="+project.ID, form)
+	assertCode(t, rec, http.StatusOK)
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.NotNil(t, tasks[0].AgentID)
+	assert.Equal(t, projectDefault.ID, *tasks[0].AgentID)
+	assert.NotEqual(t, globalDefault.ID, *tasks[0].AgentID)
+
+	history, err := h.execRepo.ListChatHistory(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	assert.Equal(t, projectDefault.ID, history[0].AgentConfigID)
+}
+
+func TestHandler_ChatSend_DefaultFallsBackToGlobalDefaultModel(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	globalDefault := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Global Fallback Chat Model"
+		a.IsDefault = true
+	})
+	project := createProject(t, h, "Chat Global Fallback")
+
+	form := url.Values{}
+	form.Set("message", "use the global default")
+	form.Set("agent_id", "default")
+	rec := htmxPost(e, "/chat/send?project_id="+project.ID, form)
+	assertCode(t, rec, http.StatusOK)
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.NotNil(t, tasks[0].AgentID)
+	assert.Equal(t, globalDefault.ID, *tasks[0].AgentID)
+
+	history, err := h.execRepo.ListChatHistory(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	assert.Equal(t, globalDefault.ID, history[0].AgentConfigID)
+}
+
+func TestHandler_ChatSend_ExplicitModelOverridesProjectDefault(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	explicit := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Explicit Chat Model"
+		a.IsDefault = true
+	})
+	projectDefault := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Ignored Project Default Chat Model"
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Chat Explicit Override")
+	project.DefaultAgentConfigID = &projectDefault.ID
+	require.NoError(t, h.projectRepo.Update(ctx, project))
+
+	form := url.Values{}
+	form.Set("message", "use the explicit model")
+	form.Set("agent_id", explicit.ID)
+	rec := htmxPost(e, "/chat/send?project_id="+project.ID, form)
+	assertCode(t, rec, http.StatusOK)
+
+	tasks, err := h.taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.NotNil(t, tasks[0].AgentID)
+	assert.Equal(t, explicit.ID, *tasks[0].AgentID)
+	assert.NotEqual(t, projectDefault.ID, *tasks[0].AgentID)
+
+	history, err := h.execRepo.ListChatHistory(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	assert.Equal(t, explicit.ID, history[0].AgentConfigID)
+}
+
+func TestHandler_ChatSend_QueuedDefaultUsesProjectDefaultModel(t *testing.T) {
+	h, e, llmConfigRepo := setupTestHandler(t)
+	ctx := context.Background()
+	globalDefault := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Global Queued Default Chat Model"
+		a.IsDefault = true
+	})
+	projectDefault := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) {
+		a.Name = "Project Queued Default Chat Model"
+		a.IsDefault = false
+	})
+	project := createProject(t, h, "Chat Queued Project Default")
+	project.DefaultAgentConfigID = &projectDefault.ID
+	require.NoError(t, h.projectRepo.Update(ctx, project))
+	activeTask := createTask(t, h, project.ID, "Active Chat For Default Queue", func(tk *models.Task) {
+		tk.Category = models.CategoryChat
+		tk.Status = models.StatusRunning
+		tk.AgentID = &globalDefault.ID
+	})
+	activeExec := createExec(t, h, activeTask.ID, globalDefault.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "active chat"
+	})
+
+	form := url.Values{}
+	form.Set("message", "queued default chat")
+	form.Set("agent_id", "default")
+	rec := htmxPost(e, "/chat/send?project_id="+project.ID, form)
+	assertCode(t, rec, http.StatusOK)
+
+	history, err := h.execRepo.ListChatHistory(ctx, project.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, history, 1)
+	assert.Equal(t, activeExec.ID, history[0].ID)
+
+	inputs, err := h.threadInputRepo.ListPendingForChat(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, inputs, 1)
+	assert.Equal(t, "queued default chat", inputs[0].Content)
+	assert.Equal(t, projectDefault.ID, inputs[0].AgentConfigID)
+	assert.NotEqual(t, globalDefault.ID, inputs[0].AgentConfigID)
+}
+
 func TestHandler_ChatSend_MixtureSupportedAggregatorCreatesTaskThroughRuntimeTool(t *testing.T) {
 	t.Setenv("OPENVIBELY_ALLOW_PRIVATE_MODEL_ENDPOINTS", "true")
 	h, e, llmConfigRepo := setupTestHandler(t)

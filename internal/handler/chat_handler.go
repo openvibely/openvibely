@@ -158,18 +158,18 @@ func (h *Handler) ChatSend(c echo.Context) error {
 	sessionID := c.FormValue("attachment_session_id")
 	hasImages := hasPendingImages(sessionID)
 
-	// Select agent (auto or explicit)
-	agent, err := h.selectAgent(c.Request().Context(), agentID, message, hasImages)
-	if err != nil {
-		applog.Infof("[handler] ChatSend agent selection error: %v", err)
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-
-	// Get project from query param or use default
+	// Get project from query param or use default before resolving "default" model selection.
 	projectID, err := h.getCurrentProjectID(c)
 	if err != nil || projectID == "" {
 		applog.Infof("[handler] ChatSend error getting project: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "no project available")
+	}
+
+	// Select agent (auto, explicit, or project-aware default)
+	agent, err := h.selectAgentForProject(c.Request().Context(), agentID, message, hasImages, projectID)
+	if err != nil {
+		applog.Infof("[handler] ChatSend agent selection error: %v", err)
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 
 	// Note: Interactive chat intentionally bypasses task worker capacity checks.

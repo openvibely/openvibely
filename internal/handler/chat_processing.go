@@ -2484,9 +2484,13 @@ func filterChatHistory(executions []models.Execution, currentExecID string) []mo
 // Returns the selected LLM configuration or an error if no suitable agent is found.
 // Logs a warning if a non-Anthropic agent is explicitly selected with image attachments.
 func (h *Handler) selectAgent(ctx context.Context, agentID, message string, hasImages bool) (*models.LLMConfig, error) {
+	return h.selectAgentForProject(ctx, agentID, message, hasImages, "")
+}
+
+func (h *Handler) selectAgentForProject(ctx context.Context, agentID, message string, hasImages bool, projectID string) (*models.LLMConfig, error) {
 	// Default model selection
 	if agentID == "default" {
-		return h.selectDefaultAgent(ctx, hasImages)
+		return h.selectDefaultAgentForProject(ctx, strings.TrimSpace(projectID), hasImages)
 	}
 
 	// Explicit agent selection
@@ -2498,7 +2502,29 @@ func (h *Handler) selectAgent(ctx context.Context, agentID, message string, hasI
 	return h.autoSelectAgent(ctx, message, hasImages)
 }
 
-// selectDefaultAgent retrieves the project's default model (the one marked IsDefault in agent_configs).
+func (h *Handler) selectDefaultAgentForProject(ctx context.Context, projectID string, hasImages bool) (*models.LLMConfig, error) {
+	if h.projectRepo != nil && projectID != "" {
+		project, err := h.projectRepo.GetByID(ctx, projectID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get project default agent: %w", err)
+		}
+		if project != nil && project.DefaultAgentConfigID != nil && strings.TrimSpace(*project.DefaultAgentConfigID) != "" {
+			agent, err := h.llmConfigRepo.GetByID(ctx, strings.TrimSpace(*project.DefaultAgentConfigID))
+			if err != nil {
+				return nil, fmt.Errorf("failed to get project default agent: %w", err)
+			}
+			if agent != nil {
+				if hasImages && !agent.IsAnthropicAPIKey() && !agent.IsOAuth() {
+					applog.Infof("[handler] selectDefaultAgent warning: agent %s may not support vision with image attachments", agent.Name)
+				}
+				return agent, nil
+			}
+		}
+	}
+	return h.selectDefaultAgent(ctx, hasImages)
+}
+
+// selectDefaultAgent retrieves the global default model (the one marked IsDefault in agent_configs).
 // Falls back to the first available agent if no default is configured.
 func (h *Handler) selectDefaultAgent(ctx context.Context, hasImages bool) (*models.LLMConfig, error) {
 	agent, err := h.llmConfigRepo.GetDefault(ctx)
