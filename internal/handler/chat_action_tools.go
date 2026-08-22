@@ -358,6 +358,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			if strings.TrimSpace(params.ProjectID) == "" {
 				return "", fmt.Errorf("create_task: no current project — cannot create task without a project context")
 			}
+
 			out, _, err := service.ExecuteCreateTaskRuntimeAction(ctx, input, service.RuntimeTaskCreationOptions{
 				ProjectID:     params.ProjectID,
 				TaskSvc:       h.taskSvc,
@@ -370,6 +371,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 					createdIDs := extractTaskIDsFromOutput(summary)
 					if len(createdIDs) == 0 {
 						return fmt.Errorf("create_task: no tasks were persisted (see summary for details)")
+
 					}
 					if h.taskRepo == nil {
 						return nil

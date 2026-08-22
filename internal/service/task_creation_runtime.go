@@ -54,7 +54,7 @@ func ExecuteCreateTaskRuntimeAction(ctx context.Context, input json.RawMessage, 
 
 	agents := []models.LLMConfig(nil)
 	if opts.LLMConfigRepo != nil {
-		if loaded, err := opts.LLMConfigRepo.List(ctx); err == nil {
+		if loaded, err := opts.LLMConfigRepo.ListTaskCreationSelectionOptions(ctx); err == nil {
 			agents = loaded
 		}
 	}

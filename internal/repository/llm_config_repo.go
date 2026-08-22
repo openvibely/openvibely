@@ -49,6 +49,12 @@ const llmConfigPickerColumns = `id, name, model`
 // default-marker semantics while excluding credentials and large provider JSON.
 const llmConfigChatSelectionColumns = `id, name, provider, model, is_default`
 
+// llmConfigTaskCreationSelectionColumns is the compact runtime create_task
+// selection/category projection. It adds auto_start_tasks to the Chat selection
+// fields while deliberately excluding credentials, endpoint settings, request
+// JSON, custom-auth state, and full mixture definitions.
+const llmConfigTaskCreationSelectionColumns = `id, name, provider, model, is_default, auto_start_tasks`
+
 // llmConfigBadgeColumns is the minimal projection for task-card model badges
 // and the chat-thread composer label. The model slug is included because the
 // thread composer renders "Name (model)" labels; id, name, and is_default are
@@ -246,6 +252,31 @@ func (r *LLMConfigRepo) ListChatSelectionOptions(ctx context.Context) ([]models.
 		var a models.LLMConfig
 		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault); err != nil {
 			return nil, fmt.Errorf("scanning chat model selection option: %w", err)
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
+}
+
+// ListTaskCreationSelectionOptions returns the compact rows needed by runtime
+// create_task handlers for model auto-selection, default/first fallback, explicit
+// model ID preservation, and auto_start_tasks category resolution. The returned
+// LLMConfig values are intentionally incomplete and must not be used for provider
+// execution, model editing, credential access, OAuth refresh, or persistence.
+func (r *LLMConfigRepo) ListTaskCreationSelectionOptions(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+llmConfigTaskCreationSelectionColumns+`
+					 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing task creation model selection options: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var a models.LLMConfig
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault, &a.AutoStartTasks); err != nil {
+			return nil, fmt.Errorf("scanning task creation model selection option: %w", err)
 		}
 		configs = append(configs, a)
 	}
