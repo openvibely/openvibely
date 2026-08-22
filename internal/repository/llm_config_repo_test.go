@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -1537,6 +1538,9 @@ func BenchmarkAPIChatModelSelectionFullListVsCompactSelectionThenGet(b *testing.
 func TestLLMConfigRepo_BrowserChatContextModelLoadingProjectionIsFasterAndLowerAllocationThanFullListOnLargeFixture(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping browser Chat context model-loading performance guard in short mode")
+	}
+	if os.Getenv("OPENVIBELY_SKIP_BROWSER_PERF") == "1" {
+		t.Skip("browser Chat context model-loading performance guard runs outside the main CI coverage job")
 	}
 	db := testutil.NewTestDB(t)
 	repo := NewLLMConfigRepo(db)
