@@ -187,6 +187,73 @@ func TestHandler_GetTaskChangesFile_RecoversLiveWorktreeLineage(t *testing.T) {
 	}
 }
 
+func TestHandler_GetTaskChangesFile_LoadsTargetedWorktreeUntrackedFile(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	defer db.Close()
+
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	runGit := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
+		}
+	}
+	runGit(repoDir, "init", "-b", "main")
+	runGit(repoDir, "config", "user.email", "test@example.com")
+	runGit(repoDir, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(repoDir, "tracked.txt"), []byte("base\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(repoDir, "add", "tracked.txt")
+	runGit(repoDir, "commit", "-m", "initial")
+
+	project := &models.Project{Name: "targeted lazy worktree", RepoPath: repoDir}
+	if err := h.projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	task := createTask(t, h, project.ID, "Target lazy untracked", func(task *models.Task) {
+		task.Category = models.CategoryActive
+		task.Status = models.StatusRunning
+		task.MergeTargetBranch = "main"
+	})
+	worktreePath := filepath.Join(repoDir, ".worktrees", "task_"+task.ID)
+	worktreeBranch := "task/" + task.ID[:8] + "-targeted-lazy"
+	runGit(repoDir, "worktree", "add", "-b", worktreeBranch, worktreePath, "main")
+	if err := os.WriteFile(filepath.Join(worktreePath, "tracked.txt"), []byte("base\ntracked change\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreePath, "untracked.txt"), []byte("untracked lazy body\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	task.WorktreePath = worktreePath
+	task.WorktreeBranch = worktreeBranch
+	if err := h.taskRepo.Update(ctx, task); err != nil {
+		t.Fatalf("update task worktree metadata: %v", err)
+	}
+
+	// Tracked git diff files are ordered before synthetic untracked files, so the
+	// second lazy card should resolve only the untracked file and not the tracked
+	// file's body.
+	req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/changes/file?file_index=1&view=split", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("taskId")
+	c.SetParamValues(task.ID)
+	if err := h.GetTaskChangesFile(c); err != nil {
+		t.Fatalf("GetTaskChangesFile: %v", err)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `id="diff-file-split-1"`) || !strings.Contains(body, "untracked.txt") || !strings.Contains(body, "untracked lazy body") {
+		t.Fatalf("expected split lazy card for untracked file, got:\n%s", body)
+	}
+	if strings.Contains(body, "tracked change") {
+		t.Fatalf("expected targeted lazy response to omit other file hunks, got:\n%s", body)
+	}
+}
+
 func TestCaptureTaskDiffOutput_UsesCurrentWorktreeLineageWhenMetadataIsStale(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	defer db.Close()

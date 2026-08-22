@@ -1781,6 +1781,197 @@ func TestLoadDiffFileCard_RendersRequestedView(t *testing.T) {
 	}
 }
 
+func TestLoadDiffFileCardMeta_MatchesFullParseForReviewInlineAndSplit(t *testing.T) {
+	diff := `diff --git a/ignored.txt b/ignored.txt
+--- a/ignored.txt
++++ b/ignored.txt
+@@ -1 +1 @@
+-old
++new
+diff --git a/src/review.go b/src/review.go
+--- a/src/review.go
++++ b/src/review.go
+@@ -7,4 +7,4 @@ func example() {
+ context line
+-removed only
+-old value
++new value
+ unchanged
++added tail
+`
+	fullMeta, ok := getDiffRenderMetaByIndex(ParseDiffOutput(diff), 1)
+	if !ok {
+		t.Fatal("expected full parse metadata")
+	}
+	targetedMeta, ok := DiffRenderMetaByIndex(diff, 1)
+	if !ok {
+		t.Fatal("expected targeted metadata")
+	}
+	if fullMeta.File.Path != targetedMeta.File.Path || fullMeta.File.Status != targetedMeta.File.Status || fullMeta.LineCount != targetedMeta.LineCount || fullMeta.CharCount != targetedMeta.CharCount {
+		t.Fatalf("targeted metadata differs from full parse: full=%#v targeted=%#v", fullMeta, targetedMeta)
+	}
+	if len(fullMeta.File.Hunks) != len(targetedMeta.File.Hunks) || len(fullMeta.File.Hunks[0].Lines) != len(targetedMeta.File.Hunks[0].Lines) {
+		t.Fatalf("targeted hunks differ from full parse: full=%#v targeted=%#v", fullMeta.File.Hunks, targetedMeta.File.Hunks)
+	}
+	for i, line := range fullMeta.File.Hunks[0].Lines {
+		got := targetedMeta.File.Hunks[0].Lines[i]
+		if line != got {
+			t.Fatalf("line %d differs: full=%#v targeted=%#v", i, line, got)
+		}
+	}
+
+	comments := []models.ReviewComment{
+		{ID: "old-comment", FilePath: "src/review.go", LineNumber: 9, LineType: "old", CommentText: "old line review"},
+		{ID: "new-comment", FilePath: "src/review.go", LineNumber: 8, LineType: "new", CommentText: "new line review"},
+		{ID: "ctx-comment", FilePath: "src/review.go", LineNumber: 9, LineType: "ctx", CommentText: "context review"},
+	}
+	for _, view := range []string{"inline", "split"} {
+		var buf bytes.Buffer
+		if err := LoadDiffFileCardMeta(targetedMeta, true, view, "task123", comments, true).Render(context.Background(), &buf); err != nil {
+			t.Fatalf("render %s failed: %v", view, err)
+		}
+		body := buf.String()
+		wants := []string{"src/review.go", `data-diff-status="modified"`, `@@ -7,4 +7,4 @@ func example()`, "old value", "new value", "added tail", "new line review", "context review", `data-line-num="8"`, `data-line-type="new"`, `data-line-type="ctx"`}
+		if view == "inline" {
+			wants = append(wants, "old line review", `data-line-type="old"`)
+		}
+		for _, want := range wants {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s render missing %q:\n%s", view, want, body)
+			}
+		}
+	}
+}
+
+func TestDiffRenderMetaByIndex_PreservesSpecialStatusesAndLimits(t *testing.T) {
+	tooLarge := strings.Repeat("+oversized line\n", maxLoadableFileDiffLines+1)
+	totalLimitFillerLines := maxLoadableTotalDiffLines - 2
+	totalLimitFiller := strings.Repeat("+filler line\n", totalLimitFillerLines)
+	diff := `diff --git a/untracked.txt b/untracked.txt
+new file mode 100644
+--- /dev/null
++++ b/untracked.txt
+@@ -0,0 +1,1 @@
++untracked
+diff --git a/old-name.txt b/new-name.txt
+similarity index 100%
+rename from old-name.txt
+rename to new-name.txt
+diff --git a/deleted.txt b/deleted.txt
+deleted file mode 100644
+--- a/deleted.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-gone
+diff --git a/image.bin b/image.bin
+new file mode 100644
+Binary files /dev/null and b/image.bin differ
+diff --git a/huge.txt b/huge.txt
+--- a/huge.txt
++++ b/huge.txt
+@@ -1 +1,` + fmt.Sprintf("%d", maxLoadableFileDiffLines+1) + ` @@
+` + tooLarge + `diff --git a/filler.txt b/filler.txt
+--- a/filler.txt
++++ b/filler.txt
+@@ -1 +1,` + fmt.Sprintf("%d", totalLimitFillerLines) + ` @@
+` + totalLimitFiller + `diff --git a/after-total.txt b/after-total.txt
+--- a/after-total.txt
++++ b/after-total.txt
+@@ -1 +1,2 @@
+ keep
++blocked by total
+`
+
+	cases := []struct {
+		index   int
+		path    string
+		status  string
+		binary  bool
+		blocked string
+	}{
+		{index: 0, path: "untracked.txt", status: "added"},
+		{index: 1, path: "new-name.txt", status: "renamed"},
+		{index: 2, path: "deleted.txt", status: "deleted"},
+		{index: 3, path: "image.bin", status: "added", binary: true},
+		{index: 4, path: "huge.txt", status: "modified", blocked: "single-file limit"},
+		{index: 6, path: "after-total.txt", status: "modified", blocked: "Total diff load limit"},
+	}
+	for _, tc := range cases {
+		meta, ok := DiffRenderMetaByIndex(diff, tc.index)
+		if !ok {
+			t.Fatalf("expected meta for index %d", tc.index)
+		}
+		if meta.File.Path != tc.path || meta.File.Status != tc.status || meta.File.IsBinary != tc.binary {
+			t.Fatalf("index %d metadata mismatch: %#v", tc.index, meta.File)
+		}
+		if tc.blocked != "" && !strings.Contains(meta.BlockedReason, tc.blocked) {
+			t.Fatalf("index %d expected blocked reason containing %q, got %q", tc.index, tc.blocked, meta.BlockedReason)
+		}
+	}
+}
+
+func TestDiffRenderMetaByIndex_LargeDiffProbeReducesParsedBytesAndAllocations(t *testing.T) {
+	diff := buildMixedLargeDiff(200)
+	const targetIndex = 9
+	legacyParsedBytes := len(diff) * 4
+	_, optimizedParsedBytes, ok := diffRenderMetaByIndexWithParsedBytes(diff, targetIndex)
+	if !ok {
+		t.Fatal("expected targeted metadata")
+	}
+	if optimizedParsedBytes > legacyParsedBytes/10 {
+		t.Fatalf("expected at least 90%% raw parsed-byte reduction, legacy=%d optimized=%d", legacyParsedBytes, optimizedParsedBytes)
+	}
+
+	legacyAllocs := testing.AllocsPerRun(20, func() {
+		legacyRepeatedParseMeta(diff, targetIndex)
+	})
+	optimizedAllocs := testing.AllocsPerRun(20, func() {
+		DiffRenderMetaByIndex(diff, targetIndex)
+	})
+	if optimizedAllocs > legacyAllocs*0.25 {
+		t.Fatalf("expected at least 75%% allocation reduction, legacy=%.0f optimized=%.0f", legacyAllocs, optimizedAllocs)
+	}
+}
+
+func BenchmarkDiffRenderMetaByIndexLargeDiff(b *testing.B) {
+	diff := buildMixedLargeDiff(200)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, ok := DiffRenderMetaByIndex(diff, 9); !ok {
+			b.Fatal("missing target file")
+		}
+	}
+}
+
+func legacyRepeatedParseMeta(diff string, fileIndex int) DiffFileRenderMeta {
+	if _, ok := getDiffRenderMetaByIndex(ParseDiffOutput(diff), fileIndex); !ok {
+		return DiffFileRenderMeta{}
+	}
+	meta, _ := getDiffRenderMetaByIndex(ParseDiffOutput(diff), fileIndex)
+	if !(meta.AutoLoad || meta.CanLoadOnDemand) {
+		return meta
+	}
+	getDiffRenderMetaByIndex(ParseDiffOutput(diff), fileIndex)
+	meta, _ = getDiffRenderMetaByIndex(ParseDiffOutput(diff), fileIndex)
+	return meta
+}
+
+func buildMixedLargeDiff(fileCount int) string {
+	var b strings.Builder
+	for i := 0; i < fileCount; i++ {
+		path := fmt.Sprintf("generated/file-%03d.txt", i)
+		lineCount := 6
+		if (i+1)%10 == 0 {
+			lineCount = autoLoadFileDiffLines + 50
+		}
+		b.WriteString(fmt.Sprintf("diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n@@ -1,1 +1,%d @@\n-old\n", path, path, path, path, lineCount))
+		for j := 0; j < lineCount; j++ {
+			b.WriteString(fmt.Sprintf("+generated line %03d for file %03d\n", j, i))
+		}
+	}
+	return b.String()
+}
+
 func TestDiffViewer_BlockedPlaceholderSupportsCollapse(t *testing.T) {
 	diff := "diff --git a/huge.txt b/huge.txt\n--- a/huge.txt\n+++ b/huge.txt\n@@ -0,0 +1,25000 @@\n" + strings.Repeat("+line\n", maxLoadableFileDiffLines+5)
 

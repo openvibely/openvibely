@@ -3081,40 +3081,185 @@ func buildDiffRenderMetas(files []DiffFile) []DiffFileRenderMeta {
 		}
 
 		lineCount, charCount := diffFileMetrics(f)
-		meta := DiffFileRenderMeta{
-			Index:     i,
-			File:      f,
-			LineCount: lineCount,
-			CharCount: charCount,
-		}
-
-		switch {
-		case lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars:
-			meta.BlockedReason = fmt.Sprintf(
-				"This file exceeds single-file limit (%d lines or %s raw diff).",
-				maxLoadableFileDiffLines,
-				formatByteSize(maxLoadableFileDiffChars),
-			)
-		case cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars:
-			meta.BlockedReason = fmt.Sprintf(
-				"Total diff load limit reached (%d lines or %s raw diff).",
-				maxLoadableTotalDiffLines,
-				formatByteSize(maxLoadableTotalDiffChars),
-			)
-		default:
+		meta := buildDiffRenderMeta(f, i, lineCount, charCount, cumulativeLines, cumulativeChars)
+		if meta.AutoLoad || meta.CanLoadOnDemand {
 			cumulativeLines += lineCount
 			cumulativeChars += charCount
-			if lineCount <= autoLoadFileDiffLines && charCount <= autoLoadFileDiffChars {
-				meta.AutoLoad = true
-			} else {
-				meta.CanLoadOnDemand = true
-			}
 		}
 
 		metas = append(metas, meta)
 	}
 
 	return metas
+}
+
+func buildDiffRenderMeta(f DiffFile, index int, lineCount int, charCount int, cumulativeLines int, cumulativeChars int) DiffFileRenderMeta {
+	meta := DiffFileRenderMeta{
+		Index:     index,
+		File:      f,
+		LineCount: lineCount,
+		CharCount: charCount,
+	}
+
+	switch {
+	case lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars:
+		meta.BlockedReason = fmt.Sprintf(
+			"This file exceeds single-file limit (%d lines or %s raw diff).",
+			maxLoadableFileDiffLines,
+			formatByteSize(maxLoadableFileDiffChars),
+		)
+	case cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars:
+		meta.BlockedReason = fmt.Sprintf(
+			"Total diff load limit reached (%d lines or %s raw diff).",
+			maxLoadableTotalDiffLines,
+			formatByteSize(maxLoadableTotalDiffChars),
+		)
+	default:
+		if lineCount <= autoLoadFileDiffLines && charCount <= autoLoadFileDiffChars {
+			meta.AutoLoad = true
+		} else {
+			meta.CanLoadOnDemand = true
+		}
+	}
+
+	return meta
+}
+
+// DiffRenderMetaByIndex extracts render metadata for one diff file without
+// parsing every later file in the diff output. It preserves the same per-file
+// and cumulative load-limit decisions as buildDiffRenderMetas for the requested
+// index by scanning previous file blocks only for their rendered line metrics.
+func DiffRenderMetaByIndex(diffOutput string, fileIndex int) (DiffFileRenderMeta, bool) {
+	meta, _, ok := diffRenderMetaByIndexWithParsedBytes(diffOutput, fileIndex)
+	return meta, ok
+}
+
+func diffRenderMetaByIndexWithParsedBytes(diffOutput string, fileIndex int) (DiffFileRenderMeta, int, bool) {
+	if diffOutput == "" || fileIndex < 0 || fileIndex >= maxDiffFiles {
+		return DiffFileRenderMeta{}, 0, false
+	}
+
+	cumulativeLines := 0
+	cumulativeChars := 0
+	currentIndex := -1
+	blockStart := -1
+	parsedBytes := 0
+
+	for lineStart := 0; lineStart <= len(diffOutput); {
+		if lineStart == len(diffOutput) {
+			break
+		}
+		lineEnd := strings.IndexByte(diffOutput[lineStart:], '\n')
+		nextLineStart := len(diffOutput)
+		line := diffOutput[lineStart:]
+		if lineEnd >= 0 {
+			nextLineStart = lineStart + lineEnd + 1
+			line = diffOutput[lineStart : lineStart+lineEnd]
+		}
+
+		if strings.HasPrefix(line, "diff --git ") {
+			if currentIndex >= 0 {
+				blockEnd := lineStart
+				if currentIndex == fileIndex {
+					return diffRenderMetaFromBlock(diffOutput[blockStart:blockEnd], fileIndex, cumulativeLines, cumulativeChars), blockEnd, true
+				}
+				lines, chars := diffBlockMetrics(diffOutput[blockStart:blockEnd])
+				if previousDiffFileCountsTowardTotal(lines, chars, cumulativeLines, cumulativeChars) {
+					cumulativeLines += lines
+					cumulativeChars += chars
+				}
+			}
+			currentIndex++
+			if currentIndex >= maxDiffFiles {
+				return DiffFileRenderMeta{}, lineStart, false
+			}
+			blockStart = lineStart
+		}
+
+		if nextLineStart == len(diffOutput) {
+			break
+		}
+		lineStart = nextLineStart
+	}
+
+	if currentIndex == fileIndex && blockStart >= 0 {
+		parsedBytes = len(diffOutput)
+		return diffRenderMetaFromBlock(diffOutput[blockStart:], fileIndex, cumulativeLines, cumulativeChars), parsedBytes, true
+	}
+	if blockStart >= 0 {
+		parsedBytes = len(diffOutput)
+	}
+	return DiffFileRenderMeta{}, parsedBytes, false
+}
+
+func diffRenderMetaFromBlock(block string, fileIndex int, cumulativeLines int, cumulativeChars int) DiffFileRenderMeta {
+	files := ParseDiffOutput(block)
+	if len(files) == 0 {
+		return DiffFileRenderMeta{}
+	}
+	lineCount, charCount := diffFileMetrics(files[0])
+	return buildDiffRenderMeta(files[0], fileIndex, lineCount, charCount, cumulativeLines, cumulativeChars)
+}
+
+func previousDiffFileCountsTowardTotal(lineCount int, charCount int, cumulativeLines int, cumulativeChars int) bool {
+	if lineCount > maxLoadableFileDiffLines || charCount > maxLoadableFileDiffChars {
+		return false
+	}
+	if cumulativeLines+lineCount > maxLoadableTotalDiffLines || cumulativeChars+charCount > maxLoadableTotalDiffChars {
+		return false
+	}
+	return true
+}
+
+func diffBlockMetrics(block string) (int, int) {
+	lineCount := 0
+	charCount := 0
+	inHunk := false
+	for lineStart := 0; lineStart <= len(block); {
+		if lineStart == len(block) {
+			break
+		}
+		lineEnd := strings.IndexByte(block[lineStart:], '\n')
+		nextLineStart := len(block)
+		line := block[lineStart:]
+		if lineEnd >= 0 {
+			nextLineStart = lineStart + lineEnd + 1
+			line = block[lineStart : lineStart+lineEnd]
+		}
+
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			inHunk = true
+			charCount += len(line)
+		case line == `\ No newline at end of file`:
+		case inHunk && (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ") || line == ""):
+			lineCount++
+			if line == "" {
+				break
+			}
+			charCount += len(line) - 1
+		case !inHunk && diffLineWouldSynthesizeHunk(line):
+			inHunk = true
+			lineCount++
+			charCount += len(line) - 1
+		}
+
+		if nextLineStart == len(block) {
+			break
+		}
+		lineStart = nextLineStart
+	}
+	return lineCount, charCount
+}
+
+func diffLineWouldSynthesizeHunk(line string) bool {
+	if line == "" || strings.HasPrefix(line, "diff --git ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+		return false
+	}
+	if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "new file") || strings.HasPrefix(line, "deleted file") || strings.HasPrefix(line, "old mode") || strings.HasPrefix(line, "new mode") || strings.HasPrefix(line, "Binary files") || strings.HasPrefix(line, "# Untracked") || strings.HasPrefix(line, "# + ") {
+		return false
+	}
+	return strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-") || strings.HasPrefix(line, " ")
 }
 
 func diffFileCardID(idx int, view string) string {
@@ -3156,7 +3301,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 		var templ_7745c5c3_Var133 string
 		templ_7745c5c3_Var133, templ_7745c5c3_Err = templ.ResolveAttributeValue(diffFileCardID(meta.Index, view))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2632, Col: 39}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2777, Col: 39}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var133)
 		if templ_7745c5c3_Err != nil {
@@ -3182,7 +3327,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var134 string
 			templ_7745c5c3_Var134, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("diff-body-split-%d", meta.Index))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2638, Col: 54}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2783, Col: 54}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var134)
 			if templ_7745c5c3_Err != nil {
@@ -3200,7 +3345,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var135 string
 			templ_7745c5c3_Var135, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("diff-body-%d", meta.Index))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2640, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2785, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var135)
 			if templ_7745c5c3_Err != nil {
@@ -3223,7 +3368,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var136 string
 			templ_7745c5c3_Var136, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d lines / %s", autoLoadFileDiffLines, formatByteSize(autoLoadFileDiffChars)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2648, Col: 122}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2793, Col: 122}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var136))
 			if templ_7745c5c3_Err != nil {
@@ -3236,7 +3381,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var137 string
 			templ_7745c5c3_Var137, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks/%s/changes/file?file_index=%d&view=%s&review=%t", taskID, meta.Index, view, reviewMode))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2652, Col: 122}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2797, Col: 122}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var137)
 			if templ_7745c5c3_Err != nil {
@@ -3249,7 +3394,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var138 string
 			templ_7745c5c3_Var138, templ_7745c5c3_Err = templ.ResolveAttributeValue(diffFileCardTargetSelector(meta.Index, view))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2653, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2798, Col: 62}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var138)
 			if templ_7745c5c3_Err != nil {
@@ -3267,7 +3412,7 @@ func deferredDiffFileWithReview(meta DiffFileRenderMeta, taskID string, view str
 			var templ_7745c5c3_Var139 string
 			templ_7745c5c3_Var139, templ_7745c5c3_Err = templ.JoinStringErrs(meta.BlockedReason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2660, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2805, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var139))
 			if templ_7745c5c3_Err != nil {
@@ -3307,22 +3452,58 @@ func LoadDiffFileCard(diffOutput string, fileIndex int, view string, taskID stri
 			templ_7745c5c3_Var140 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		if !diffFileMetaExists(diffOutput, fileIndex) {
+		if meta, exists := DiffRenderMetaByIndex(diffOutput, fileIndex); exists {
+			templ_7745c5c3_Err = LoadDiffFileCardMeta(meta, true, view, taskID, reviewComments, reviewMode).Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else {
+			templ_7745c5c3_Err = LoadDiffFileCardMeta(DiffFileRenderMeta{}, false, view, taskID, reviewComments, reviewMode).Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		return nil
+	})
+}
+
+func LoadDiffFileCardMeta(meta DiffFileRenderMeta, exists bool, view string, taskID string, reviewComments []models.ReviewComment, reviewMode bool) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var141 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var141 == nil {
+			templ_7745c5c3_Var141 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		if !exists {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 209, "<div class=\"alert alert-warning\"><span>Unable to load diff file.</span></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-		} else if !isDiffFileLoadable(diffOutput, fileIndex) {
+		} else if !isDiffRenderMetaLoadable(meta) {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 210, "<div class=\"alert alert-warning\"><span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var141 string
-			templ_7745c5c3_Var141, templ_7745c5c3_Err = templ.JoinStringErrs(getDiffFileBlockedReason(diffOutput, fileIndex))
+			var templ_7745c5c3_Var142 string
+			templ_7745c5c3_Var142, templ_7745c5c3_Err = templ.JoinStringErrs(meta.BlockedReason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2674, Col: 58}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/diff_viewer.templ`, Line: 2827, Col: 29}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var141))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var142))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -3332,24 +3513,24 @@ func LoadDiffFileCard(diffOutput string, fileIndex int, view string, taskID stri
 			}
 		} else if view == "split" {
 			if reviewMode {
-				templ_7745c5c3_Err = splitDiffFileWithReview(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true, taskID, buildCommentMap(reviewComments)).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = splitDiffFileWithReview(meta.File, meta.Index, true, taskID, buildCommentMap(reviewComments)).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = splitDiffFile(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = splitDiffFile(meta.File, meta.Index, true).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		} else {
 			if reviewMode {
-				templ_7745c5c3_Err = inlineDiffFileWithReview(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true, taskID, buildCommentMap(reviewComments)).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = inlineDiffFileWithReview(meta.File, meta.Index, true, taskID, buildCommentMap(reviewComments)).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = inlineDiffFile(getDiffRenderMeta(diffOutput, fileIndex).File, getDiffRenderMeta(diffOutput, fileIndex).Index, true).Render(ctx, templ_7745c5c3_Buffer)
+				templ_7745c5c3_Err = inlineDiffFile(meta.File, meta.Index, true).Render(ctx, templ_7745c5c3_Buffer)
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -3370,22 +3551,17 @@ func getDiffRenderMetaByIndex(files []DiffFile, fileIndex int) (DiffFileRenderMe
 }
 
 func diffFileMetaExists(diffOutput string, fileIndex int) bool {
-	_, ok := getDiffRenderMetaByIndex(ParseDiffOutput(diffOutput), fileIndex)
+	_, ok := DiffRenderMetaByIndex(diffOutput, fileIndex)
 	return ok
 }
 
-func getDiffRenderMeta(diffOutput string, fileIndex int) DiffFileRenderMeta {
-	meta, _ := getDiffRenderMetaByIndex(ParseDiffOutput(diffOutput), fileIndex)
+func diffRenderMetaByIndexOrZero(diffOutput string, fileIndex int) DiffFileRenderMeta {
+	meta, _ := DiffRenderMetaByIndex(diffOutput, fileIndex)
 	return meta
 }
 
-func isDiffFileLoadable(diffOutput string, fileIndex int) bool {
-	meta := getDiffRenderMeta(diffOutput, fileIndex)
+func isDiffRenderMetaLoadable(meta DiffFileRenderMeta) bool {
 	return meta.AutoLoad || meta.CanLoadOnDemand
-}
-
-func getDiffFileBlockedReason(diffOutput string, fileIndex int) string {
-	return getDiffRenderMeta(diffOutput, fileIndex).BlockedReason
 }
 
 func diffViewerStateKey(metas []DiffFileRenderMeta, taskID string) string {
