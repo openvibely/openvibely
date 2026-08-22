@@ -111,12 +111,22 @@ func (h *Handler) DeleteReviewComment(c echo.Context) error {
 
 // SubmitReview collects all review comments, sends them to the task chat, and clears them.
 func (h *Handler) SubmitReview(c echo.Context) error {
+	ctx := c.Request().Context()
 	taskID := c.Param("taskId")
 	if h.reviewCommentRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "review comments not configured")
 	}
 
-	comments, err := h.reviewCommentRepo.ListByTask(c.Request().Context(), taskID)
+	projectID := h.mutationProjectID(c)
+	task, err := h.requireTaskInRequestProject(ctx, taskID, projectID)
+	if err != nil {
+		if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusBadRequest {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+		return err
+	}
+
+	comments, err := h.reviewCommentRepo.ListByTask(ctx, taskID)
 	if err != nil || len(comments) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "no review comments to submit")
 	}
@@ -130,12 +140,6 @@ func (h *Handler) SubmitReview(c echo.Context) error {
 	sb.WriteString("Please address the above review comments and make the necessary changes.")
 
 	reviewMessage := sb.String()
-
-	// Get the task to check its state
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
 
 	// Select agent for processing the review
 	agent, err := h.selectAgent(c.Request().Context(), "", reviewMessage, false)
