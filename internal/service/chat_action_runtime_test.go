@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -1019,6 +1020,76 @@ func TestBuildChannelUtilityActionHandlersAutomationReadsRejectForeignProject(t 
 
 	_, err = handlers["get_automation"](ctx, json.RawMessage(`{"automation_id":"automation-1","project_id":"project-foreign"}`))
 	require.ErrorContains(t, err, `project_id "project-foreign" is outside the caller's authorized project context`)
+}
+
+func TestBuildChannelUtilityActionHandlersUpdateAutomationTemplate(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
+	project := &models.Project{Name: "Channel Automation Update"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	foreign := &models.Project{Name: "Foreign Channel Automation Update"}
+	require.NoError(t, projectRepo.Create(ctx, foreign))
+
+	registry := NewAutomationAdapterRegistry()
+	drafts := NewAutomationDraftService(automationRepo, registry)
+	validator := NewAutomationSaveValidator(registry, drafts)
+	compiler := NewAutomationCompiler(automationRepo, NewTaskService(taskRepo, nil, nil), taskRepo, scheduleRepo, validator)
+	graphSvc := NewAutomationGraphService(automationRepo)
+
+	candidate, err := drafts.TemplateCandidate(AutomationAdapterNativeSDLC)
+	require.NoError(t, err)
+	ApplyAutomationTemplateDefaultModel(&candidate)
+	candidate.Name = "Channel Native SDLC"
+	saved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: project.ID, Source: "template", CreatedVia: "chat", Candidate: candidate})
+	require.NoError(t, err)
+	automationID := saved.Definition.Automation.ID
+	currentRevision := CurrentAutomationTemplateRevision(AutomationAdapterNativeSDLC)
+	require.Positive(t, currentRevision)
+	_, err = db.Exec(`UPDATE automations SET template_revision = 0 WHERE id = ? AND project_id = ?`, automationID, project.ID)
+	require.NoError(t, err)
+
+	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID:          project.ID,
+		AutomationGraphSvc: graphSvc,
+		AutomationDraftSvc: drafts,
+		AutomationCompiler: compiler,
+	})
+	listOut, err := handlers["list_automations"](ctx, nil)
+	require.NoError(t, err)
+	require.Contains(t, listOut, `"template_update_available":true`)
+	require.Contains(t, listOut, fmt.Sprintf(`"current_template_revision":%d`, currentRevision))
+
+	beforeGraphID := channelAutomationPublishedGraphID(t, db, automationID)
+	updateOut, err := handlers["update_automation_template"](ctx, json.RawMessage(`{"name":"Channel Native SDLC"}`))
+	require.NoError(t, err)
+	require.Contains(t, updateOut, `"applied":true`)
+	require.Contains(t, updateOut, fmt.Sprintf(`"template_revision":%d`, currentRevision))
+	afterGraphID := channelAutomationPublishedGraphID(t, db, automationID)
+	require.NotEqual(t, beforeGraphID, afterGraphID)
+
+	currentOut, err := handlers["update_automation_template"](ctx, json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	require.NoError(t, err)
+	require.Contains(t, currentOut, `"applied":false`)
+	require.Contains(t, currentOut, `"reason":"already_current"`)
+	require.Equal(t, afterGraphID, channelAutomationPublishedGraphID(t, db, automationID))
+
+	foreignCandidate := candidate
+	foreignCandidate.Name = "Foreign Channel Native SDLC"
+	foreignSaved, err := compiler.Save(ctx, AutomationSaveRequest{ProjectID: foreign.ID, Source: "template", CreatedVia: "chat", Candidate: foreignCandidate})
+	require.NoError(t, err)
+	_, err = handlers["update_automation_template"](ctx, json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, foreignSaved.Definition.Automation.ID)))
+	require.ErrorContains(t, err, "not found in current project")
+}
+
+func channelAutomationPublishedGraphID(t *testing.T, db *sql.DB, automationID string) string {
+	t.Helper()
+	var graphID string
+	require.NoError(t, db.QueryRow(`SELECT published_version_id FROM automations WHERE id = ?`, automationID).Scan(&graphID))
+	return graphID
 }
 
 func TestBuildChannelUtilityActionHandlersListSchedulesDiscovery(t *testing.T) {

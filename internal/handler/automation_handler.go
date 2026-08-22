@@ -27,6 +27,10 @@ type automationGraphServiceSetter interface {
 	SetAutomationGraphService(*service.AutomationGraphService)
 }
 
+type automationTemplateUpdateServiceSetter interface {
+	SetAutomationTemplateUpdateServices(*service.AutomationDraftService, *service.AutomationCompiler)
+}
+
 func (h *Handler) setChannelAutomationGraphService(graph *service.AutomationGraphService) {
 	if h == nil {
 		return
@@ -59,6 +63,15 @@ func (h *Handler) SetAutomationBuilderServices(drafts *service.AutomationDraftSe
 		if compiler != nil {
 			compiler.SetAgentRepository(h.agentRepo)
 		}
+	}
+	if h.telegramService != nil {
+		h.telegramService.SetAutomationTemplateUpdateServices(drafts, compiler)
+	}
+	if setter, ok := h.slackSvc.(automationTemplateUpdateServiceSetter); ok {
+		setter.SetAutomationTemplateUpdateServices(drafts, compiler)
+	}
+	if setter, ok := h.discordSvc.(automationTemplateUpdateServiceSetter); ok {
+		setter.SetAutomationTemplateUpdateServices(drafts, compiler)
 	}
 }
 

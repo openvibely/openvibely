@@ -1992,6 +1992,97 @@ func TestAutomationChatLifecycleActionsRunPauseAndResumeSavedAutomation(t *testi
 	require.Equal(t, string(models.AutomationActive), automation["status"])
 }
 
+func TestAutomationChatUpdateTemplateAppliesNoopsAndRejectsUnsupportedTargets(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Automation template update Chat").Build()
+	foreign := tc.CreateProject().WithName("Foreign Automation template update Chat").Build()
+	drafts := configureAutomationChatRuntimeTestServices(t, tc)
+	params := streamingResponseParams{ProjectID: project.ID, PrincipalID: "alice"}
+	runtime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	planRuntime := tc.handler.buildChatActionToolRuntimeFromDefs(params, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true), models.ChatModePlan, chatcontrol.SurfaceWeb)
+	require.True(t, runtime.HasDefinition("update_automation_template"))
+	require.False(t, planRuntime.HasDefinition("update_automation_template"))
+
+	executeOK := func(rt *llmcontracts.RuntimeTools, name string, input json.RawMessage) map[string]any {
+		t.Helper()
+		output, handled, isError, execErr := rt.Executor(ctx, name, input)
+		require.NoError(t, execErr)
+		require.True(t, handled)
+		require.False(t, isError, output)
+		var result map[string]any
+		require.NoError(t, json.Unmarshal([]byte(output), &result))
+		return result
+	}
+
+	saved := executeOK(runtime, "save_automation", json.RawMessage(`{"source":"template","template_key":"native_sdlc"}`))
+	automationID, _ := saved["automation_id"].(string)
+	require.NotEmpty(t, automationID)
+	currentRevision := service.CurrentAutomationTemplateRevision(service.AutomationAdapterNativeSDLC)
+	require.Positive(t, currentRevision)
+	_, err := tc.db.Exec(`UPDATE automations SET template_revision = 0 WHERE id = ? AND project_id = ?`, automationID, project.ID)
+	require.NoError(t, err)
+
+	listed := executeOK(runtime, "list_automations", nil)
+	automations, _ := listed["automations"].([]any)
+	require.Len(t, automations, 1)
+	listedAutomation, _ := automations[0].(map[string]any)
+	require.Equal(t, true, listedAutomation["template_update_available"])
+	require.Equal(t, float64(currentRevision), listedAutomation["current_template_revision"])
+
+	got := executeOK(runtime, "get_automation", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	gotAutomation, _ := got["automation"].(map[string]any)
+	require.Equal(t, true, gotAutomation["template_update_available"])
+
+	beforeGraphID := currentAutomationPublishedGraphID(t, tc, automationID)
+	updated := executeOK(runtime, "update_automation_template", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	require.Equal(t, true, updated["ok"])
+	require.Equal(t, true, updated["applied"])
+	require.Equal(t, float64(currentRevision), updated["template_revision"])
+	updatedAutomation, _ := updated["automation"].(map[string]any)
+	require.Equal(t, false, updatedAutomation["template_update_available"])
+	require.Equal(t, float64(currentRevision), updatedAutomation["template_revision"])
+	afterGraphID := currentAutomationPublishedGraphID(t, tc, automationID)
+	require.NotEqual(t, beforeGraphID, afterGraphID, "outdated template update should replace the saved graph")
+
+	alreadyCurrent := executeOK(runtime, "update_automation_template", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, automationID)))
+	require.Equal(t, true, alreadyCurrent["ok"])
+	require.Equal(t, false, alreadyCurrent["applied"])
+	require.Equal(t, "already_current", alreadyCurrent["reason"])
+	require.Equal(t, afterGraphID, currentAutomationPublishedGraphID(t, tc, automationID), "already-current update must not replace the graph")
+
+	custom := automationChatCustomApprovalCandidate(t, drafts)
+	custom.Name = "Custom approval update guard"
+	customYAML, err := service.EncodeAutomationDraftYAML(custom)
+	require.NoError(t, err)
+	customPayload, err := json.Marshal(map[string]string{"source": "yaml", "automation_yaml": customYAML})
+	require.NoError(t, err)
+	customSaved := executeOK(runtime, "save_automation", customPayload)
+	customID, _ := customSaved["automation_id"].(string)
+	customGraphID := currentAutomationPublishedGraphID(t, tc, customID)
+	unsupported := executeOK(runtime, "update_automation_template", json.RawMessage(`{"name":"Custom approval update guard"}`))
+	require.Equal(t, false, unsupported["applied"])
+	require.Equal(t, "unsupported_template", unsupported["reason"])
+	require.Equal(t, customGraphID, currentAutomationPublishedGraphID(t, tc, customID), "custom Automation update must not mutate")
+
+	foreignRuntime := tc.handler.buildChatActionToolRuntimeFromDefs(streamingResponseParams{ProjectID: foreign.ID, PrincipalID: "alice"}, newChatActionSummaryCollector(), chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)
+	foreignSaved := executeOK(foreignRuntime, "save_automation", json.RawMessage(`{"source":"template","template_key":"native_sdlc"}`))
+	foreignID, _ := foreignSaved["automation_id"].(string)
+	foreignGraphID := currentAutomationPublishedGraphID(t, tc, foreignID)
+	_, handled, isError, err := runtime.Executor(ctx, "update_automation_template", json.RawMessage(fmt.Sprintf(`{"automation_id":%q}`, foreignID)))
+	require.True(t, handled)
+	require.True(t, isError)
+	require.ErrorContains(t, err, "not found in current project")
+	require.Equal(t, foreignGraphID, currentAutomationPublishedGraphID(t, tc, foreignID), "foreign Automation update must not mutate")
+}
+
+func currentAutomationPublishedGraphID(t *testing.T, tc *TestContext, automationID string) string {
+	t.Helper()
+	var graphID string
+	require.NoError(t, tc.db.QueryRow(`SELECT published_version_id FROM automations WHERE id = ?`, automationID).Scan(&graphID))
+	return graphID
+}
+
 func TestAutomationChatLifecycleActionsRejectAmbiguousForeignPlanAndArchivedTargets(t *testing.T) {
 	tc := NewTestContext(t)
 	ctx := context.Background()

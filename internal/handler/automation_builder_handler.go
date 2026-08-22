@@ -128,24 +128,7 @@ func (h *Handler) BuildAutomationWeb(c echo.Context) error {
 }
 
 func (h *Handler) applyAutomationTemplateDefaultModel(_ context.Context, _ string, candidate *models.AutomationDraftCandidate) {
-	if h == nil || candidate == nil {
-		return
-	}
-	for i := range candidate.Nodes {
-		node := &candidate.Nodes[i]
-		if node.Type != models.AutomationNodeTrigger && node.Type != models.AutomationNodeAgentTask {
-			continue
-		}
-		if node.Config == nil {
-			node.Config = map[string]any{}
-		}
-		if existing, ok := node.Config["model_config_id"].(string); ok && strings.TrimSpace(existing) != "" {
-			continue
-		}
-		if _, hasPrompt := node.Config["prompt"]; hasPrompt || node.Role == "implementation" {
-			node.Config["model_config_id"] = "default"
-		}
-	}
+	service.ApplyAutomationTemplateDefaultModel(candidate)
 }
 
 func (h *Handler) EditAutomationBuilder(c echo.Context) error {

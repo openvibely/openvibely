@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -323,6 +325,8 @@ type channelUtilityActionHandlerOptions struct {
 	TaskRepo                  *repository.TaskRepo
 	ScheduleRepo              *repository.ScheduleRepo
 	AutomationGraphSvc        *AutomationGraphService
+	AutomationDraftSvc        *AutomationDraftService
+	AutomationCompiler        *AutomationCompiler
 	WorkerSvc                 *WorkerService
 	LLMConfigRepo             *repository.LLMConfigRepo
 	AgentRepo                 *repository.AgentRepo
@@ -353,6 +357,19 @@ type channelListAutomationsInput struct {
 type channelGetAutomationInput struct {
 	AutomationID string `json:"automation_id"`
 	ProjectID    string `json:"project_id"`
+}
+
+type AutomationTemplateUpdateRuntimeInput struct {
+	AutomationID string `json:"automation_id"`
+	Name         string `json:"name"`
+}
+
+type AutomationTemplateUpdateRuntimeOptions struct {
+	ProjectID          string
+	Input              json.RawMessage
+	AutomationGraphSvc *AutomationGraphService
+	AutomationDraftSvc *AutomationDraftService
+	AutomationCompiler *AutomationCompiler
 }
 
 func usageAnalyticsServiceFromRepos(existing *UsageAnalyticsService, execRepo *repository.ExecutionRepo, llmConfigRepo *repository.LLMConfigRepo) *UsageAnalyticsService {
@@ -604,6 +621,15 @@ func buildChannelUtilityActionHandlers(opts channelUtilityActionHandlerOptions) 
 		},
 		"get_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return channelGetAutomationResult(ctx, opts.AutomationGraphSvc, opts.ProjectID, input)
+		},
+		"update_automation_template": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return ExecuteAutomationTemplateUpdateRuntime(ctx, AutomationTemplateUpdateRuntimeOptions{
+				ProjectID:          opts.ProjectID,
+				Input:              input,
+				AutomationGraphSvc: opts.AutomationGraphSvc,
+				AutomationDraftSvc: opts.AutomationDraftSvc,
+				AutomationCompiler: opts.AutomationCompiler,
+			})
 		},
 		"schedule_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return runChannelScheduleTask(ctx, opts, input), nil
@@ -1227,6 +1253,149 @@ func channelGetAutomationResult(ctx context.Context, graphSvc *AutomationGraphSe
 	return marshalChannelAutomationResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
 }
 
+func ExecuteAutomationTemplateUpdateRuntime(ctx context.Context, opts AutomationTemplateUpdateRuntimeOptions) (string, error) {
+	if opts.AutomationGraphSvc == nil || opts.AutomationDraftSvc == nil || opts.AutomationCompiler == nil {
+		return "", fmt.Errorf("update_automation_template: automation template update is unavailable")
+	}
+	projectID := strings.TrimSpace(opts.ProjectID)
+	if projectID == "" {
+		return "", fmt.Errorf("update_automation_template: no current project")
+	}
+	var req AutomationTemplateUpdateRuntimeInput
+	if err := chatcontrol.DecodeRuntimeToolInput(opts.Input, &req); err != nil {
+		return "", err
+	}
+	card, err := resolveAutomationTemplateUpdateTarget(ctx, opts.AutomationGraphSvc, projectID, req)
+	if err != nil {
+		return "", fmt.Errorf("update_automation_template: %w", err)
+	}
+	currentTemplateRevision := CurrentAutomationTemplateRevision(card.Version.AdapterKey)
+	if currentTemplateRevision <= 0 {
+		return marshalChannelAutomationResult(automationTemplateUpdateNoopResult(projectID, card, "unsupported_template", fmt.Sprintf("Automation %q uses adapter %q, which does not support maintained template updates", card.Automation.Name, card.Version.AdapterKey)))
+	}
+	if !card.TemplateUpdateAvailable {
+		return marshalChannelAutomationResult(automationTemplateUpdateNoopResult(projectID, card, "already_current", fmt.Sprintf("Automation %q already uses the latest maintained template", card.Automation.Name)))
+	}
+	opened, err := opts.AutomationDraftSvc.CurrentCandidate(ctx, projectID, card.Automation.ID)
+	if err != nil {
+		return "", err
+	}
+	template, err := opts.AutomationDraftSvc.TemplateCandidate(card.Version.AdapterKey)
+	if err != nil {
+		return "", err
+	}
+	ApplyAutomationTemplateDefaultModel(&template)
+	if opened != nil {
+		template.Name = opened.Candidate.Name
+	}
+	source := "manual"
+	if opened != nil && opened.Definition != nil && opened.Definition.Version.Source == "template" {
+		source = "template"
+	}
+	if _, err := opts.AutomationCompiler.Save(ctx, AutomationSaveRequest{
+		ProjectID: projectID, AutomationID: card.Automation.ID, Source: source, CreatedVia: "chat", Candidate: template,
+		UpdateToLatestTemplate: true,
+	}); err != nil {
+		return "", err
+	}
+	fresh, err := automationCardByIDForTemplateUpdate(ctx, opts.AutomationGraphSvc, projectID, card.Automation.ID)
+	if err != nil {
+		return "", err
+	}
+	if fresh == nil {
+		fresh = &card
+	}
+	result := automationTemplateUpdateBaseResult(projectID, *fresh)
+	result["ok"] = true
+	result["applied"] = true
+	result["message"] = fmt.Sprintf("Automation %q was updated to the latest maintained template", fresh.Automation.Name)
+	result["automation"] = channelAutomationCardSummary(*fresh)
+	return marshalChannelAutomationResult(result)
+}
+
+func resolveAutomationTemplateUpdateTarget(ctx context.Context, graphSvc *AutomationGraphService, projectID string, req AutomationTemplateUpdateRuntimeInput) (models.AutomationCard, error) {
+	cards, err := graphSvc.List(ctx, projectID)
+	if err != nil {
+		return models.AutomationCard{}, err
+	}
+	automationID := strings.TrimSpace(req.AutomationID)
+	name := strings.TrimSpace(req.Name)
+	if automationID == "" && name == "" {
+		return models.AutomationCard{}, errors.New("automation_id or name is required")
+	}
+	if automationID != "" {
+		for _, card := range cards {
+			if card.Automation.ID == automationID {
+				if name != "" && !strings.EqualFold(strings.TrimSpace(card.Automation.Name), name) {
+					return models.AutomationCard{}, fmt.Errorf("automation_id %q is named %q, not %q", automationID, card.Automation.Name, name)
+				}
+				return card, nil
+			}
+		}
+		return models.AutomationCard{}, fmt.Errorf("automation %q not found in current project", automationID)
+	}
+	var matches []models.AutomationCard
+	for _, card := range cards {
+		if strings.EqualFold(strings.TrimSpace(card.Automation.Name), name) {
+			matches = append(matches, card)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return models.AutomationCard{}, fmt.Errorf("automation named %q not found in current project", name)
+	case 1:
+		return matches[0], nil
+	default:
+		ids := make([]string, 0, len(matches))
+		for _, match := range matches {
+			ids = append(ids, match.Automation.ID)
+		}
+		sort.Strings(ids)
+		return models.AutomationCard{}, fmt.Errorf("automation name %q is ambiguous in current project; use automation_id (%s)", name, strings.Join(ids, ", "))
+	}
+}
+
+func automationCardByIDForTemplateUpdate(ctx context.Context, graphSvc *AutomationGraphService, projectID, automationID string) (*models.AutomationCard, error) {
+	cards, err := graphSvc.List(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	for _, card := range cards {
+		if card.Automation.ID == automationID {
+			return &card, nil
+		}
+	}
+	return nil, nil
+}
+
+func automationTemplateUpdateNoopResult(projectID string, card models.AutomationCard, reason, message string) map[string]any {
+	result := automationTemplateUpdateBaseResult(projectID, card)
+	result["ok"] = true
+	result["applied"] = false
+	result["reason"] = reason
+	result["message"] = message
+	result["automation"] = channelAutomationCardSummary(card)
+	return result
+}
+
+func automationTemplateUpdateBaseResult(projectID string, card models.AutomationCard) map[string]any {
+	result := map[string]any{
+		"action":          "update_automation_template",
+		"automation_id":   card.Automation.ID,
+		"name":            card.Automation.Name,
+		"lifecycle_state": string(card.Automation.LifecycleState),
+		"url":             "/automations/" + url.PathEscape(card.Automation.ID) + "?project_id=" + url.QueryEscape(projectID),
+		"adapter_key":     card.Version.AdapterKey,
+	}
+	if card.Automation.TemplateRevision != nil {
+		result["template_revision"] = *card.Automation.TemplateRevision
+	}
+	if current := CurrentAutomationTemplateRevision(card.Version.AdapterKey); current > 0 {
+		result["current_template_revision"] = current
+	}
+	return result
+}
+
 func resolveChannelAutomationProjectID(currentProjectID, requestedProjectID, toolName string) (string, error) {
 	currentProjectID = strings.TrimSpace(currentProjectID)
 	requestedProjectID = strings.TrimSpace(requestedProjectID)
@@ -1242,11 +1411,12 @@ func resolveChannelAutomationProjectID(currentProjectID, requestedProjectID, too
 func channelAutomationCardSummary(card models.AutomationCard) map[string]any {
 	paused := card.Automation.LifecycleState == models.AutomationPaused
 	summary := map[string]any{
-		"id":          card.Automation.ID,
-		"name":        card.Automation.Name,
-		"status":      string(card.Automation.LifecycleState),
-		"paused":      paused,
-		"adapter_key": card.Version.AdapterKey,
+		"id":                        card.Automation.ID,
+		"name":                      card.Automation.Name,
+		"status":                    string(card.Automation.LifecycleState),
+		"paused":                    paused,
+		"adapter_key":               card.Version.AdapterKey,
+		"template_update_available": card.TemplateUpdateAvailable,
 		"node_count": card.Counts.Running + card.Counts.Waiting +
 			card.Counts.Blocked + card.Counts.Failed + card.Counts.CompletedRecently,
 		"counts": map[string]int{
@@ -1256,6 +1426,12 @@ func channelAutomationCardSummary(card models.AutomationCard) map[string]any {
 			"failed":             card.Counts.Failed,
 			"completed_recently": card.Counts.CompletedRecently,
 		},
+	}
+	if card.Automation.TemplateRevision != nil {
+		summary["template_revision"] = *card.Automation.TemplateRevision
+	}
+	if current := CurrentAutomationTemplateRevision(card.Version.AdapterKey); current > 0 {
+		summary["current_template_revision"] = current
 	}
 	if card.NextRun != nil {
 		summary["next_run"] = card.NextRun.UTC().Format("2006-01-02T15:04:05Z")

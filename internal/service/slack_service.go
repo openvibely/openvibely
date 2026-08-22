@@ -92,6 +92,8 @@ type SlackService struct {
 	llmSvc                     *LLMService
 	workerSvc                  *WorkerService
 	automationGraphSvc         *AutomationGraphService
+	automationDraftSvc         *AutomationDraftService
+	automationCompiler         *AutomationCompiler
 	slackUserProjectRepo       *repository.SlackUserProjectRepo
 	slackTaskContextRepo       *repository.SlackTaskContextRepo
 	slackInboundReceiptRepo    *repository.SlackInboundReceiptRepo
@@ -262,6 +264,11 @@ func (s *SlackService) SetUpcomingService(svc *UpcomingService) {
 
 func (s *SlackService) SetAutomationGraphService(svc *AutomationGraphService) {
 	s.automationGraphSvc = svc
+}
+
+func (s *SlackService) SetAutomationTemplateUpdateServices(drafts *AutomationDraftService, compiler *AutomationCompiler) {
+	s.automationDraftSvc = drafts
+	s.automationCompiler = compiler
 }
 
 func (s *SlackService) SetChannelMessageRouter(router *ChannelMessageRouter) {
@@ -1467,14 +1474,15 @@ func (s *SlackService) slackActionHandlersForTask(projectID, callerTaskID string
 		},
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
-		ProjectID:             projectID,
-		CallerTaskID:          callerTaskID,
-		TaskRepo:              s.taskRepo,
-		ScheduleRepo:          s.scheduleRepo,
-		AutomationGraphSvc:    s.automationGraphSvc,
-		WorkerSvc:             s.workerSvc,
-		LLMConfigRepo:         s.llmConfigRepo,
-		AgentRepo:             s.agentRepo,
+		ProjectID:          projectID,
+		CallerTaskID:       callerTaskID,
+		TaskRepo:           s.taskRepo,
+		ScheduleRepo:       s.scheduleRepo,
+		AutomationGraphSvc: s.automationGraphSvc,
+		AutomationDraftSvc: s.automationDraftSvc,
+		AutomationCompiler: s.automationCompiler,
+		WorkerSvc:          s.workerSvc,
+		LLMConfigRepo:      s.llmConfigRepo, AgentRepo: s.agentRepo,
 		SettingsRepo:          s.settingsRepo,
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,

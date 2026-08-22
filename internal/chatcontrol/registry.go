@@ -13,7 +13,7 @@
 //   - personality: set_personality, save_custom_personality
 //   - projects: create_project, update_project_settings, switch_project
 //   - agents: create_agent, update_agent
-//   - automations: save_automation, run_automation_now, pause_automation, resume_automation
+//   - automations: save_automation, update_automation_template, run_automation_now, pause_automation, resume_automation
 //   - chat: set_chat_mode
 //
 // Chat read-only (plan + orchestrate):
@@ -926,6 +926,16 @@ var registry = []ActionDef{
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"source":{"type":"string","enum":["template","describe","blank","yaml"]},"template_key":{"type":"string","enum":["native_sdlc","github_sdlc"]},"description":{"type":"string","maxLength":4000},"automation_yaml":{"type":"string","description":"Canonical Automation YAML document to save when source is yaml.","minLength":1,"maxLength":65536}},"required":["source"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "update_automation_template",
+		Description:  "Update an outdated maintained Native SDLC or GitHub SDLC Automation to the latest shipped template by ID or exact unambiguous name in the current project. Replaces the graph using the same explicit maintained-template update path as the browser and preserves lifecycle state. Returns a clear no-op response when already current or unsupported.",
+		Domain:       DomainAutomations,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(automationLifecycleParams),
 	},
 	{
 		Name:         "run_automation_now",

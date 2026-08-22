@@ -113,7 +113,7 @@ func TestRegistry_AllActionsHaveDescription(t *testing.T) {
 
 func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 	readActions := []string{"list_automations", "get_automation", "preview_automation_description"}
-	writeActions := []string{"save_automation", "run_automation_now", "pause_automation", "resume_automation"}
+	writeActions := []string{"save_automation", "update_automation_template", "run_automation_now", "pause_automation", "resume_automation"}
 	for _, name := range append(readActions, writeActions...) {
 		def := Get(name)
 		if def == nil || def.Domain != DomainAutomations {
@@ -167,7 +167,7 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 	if strings.Contains(string(save.Parameters), `"candidate"`) || strings.Contains(save.Description, "structured candidate") {
 		t.Fatal("public Automation save action must not expose a candidate creation identity")
 	}
-	for _, name := range []string{"run_automation_now", "pause_automation", "resume_automation"} {
+	for _, name := range []string{"update_automation_template", "run_automation_now", "pause_automation", "resume_automation"} {
 		def := Get(name)
 		if def == nil {
 			t.Fatalf("%s is not registered", name)

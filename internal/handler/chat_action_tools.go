@@ -339,6 +339,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"save_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeAutomationSaveAction(ctx, params, input)
 		},
+		"update_automation_template": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeUpdateAutomationTemplateTool(ctx, params, input)
+		},
 		"run_automation_now": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeRunAutomationNowTool(ctx, params, input)
 		},

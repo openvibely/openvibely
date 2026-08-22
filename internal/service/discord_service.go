@@ -70,6 +70,8 @@ type DiscordService struct {
 	llmSvc                     *LLMService
 	workerSvc                  *WorkerService
 	automationGraphSvc         *AutomationGraphService
+	automationDraftSvc         *AutomationDraftService
+	automationCompiler         *AutomationCompiler
 	threadInputRepo            *repository.ThreadInputRepo
 	chatAttachmentRepo         *repository.ChatAttachmentRepo
 	customPersonalityRepo      *repository.CustomPersonalityRepo
@@ -178,6 +180,10 @@ func (s *DiscordService) SetWebhookRepo(repo *repository.WebhookRepo)     { s.we
 func (s *DiscordService) SetTaskGoalService(svc *TaskGoalService)         { s.taskGoalSvc = svc }
 func (s *DiscordService) SetAutomationGraphService(svc *AutomationGraphService) {
 	s.automationGraphSvc = svc
+}
+func (s *DiscordService) SetAutomationTemplateUpdateServices(drafts *AutomationDraftService, compiler *AutomationCompiler) {
+	s.automationDraftSvc = drafts
+	s.automationCompiler = compiler
 }
 func (s *DiscordService) SetQueuedTurnPromoter(promoter func(projectID string)) {
 	s.queuedTurnPromoter = promoter
@@ -758,14 +764,15 @@ func (s *DiscordService) discordActionHandlersForTask(projectID, callerTaskID st
 		FilterHistory: filterDiscordChatHistory,
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
-		ProjectID:             projectID,
-		CallerTaskID:          callerTaskID,
-		TaskRepo:              s.taskRepo,
-		ScheduleRepo:          s.scheduleRepo,
-		AutomationGraphSvc:    s.automationGraphSvc,
-		WorkerSvc:             s.workerSvc,
-		LLMConfigRepo:         s.llmConfigRepo,
-		AgentRepo:             s.agentRepo,
+		ProjectID:          projectID,
+		CallerTaskID:       callerTaskID,
+		TaskRepo:           s.taskRepo,
+		ScheduleRepo:       s.scheduleRepo,
+		AutomationGraphSvc: s.automationGraphSvc,
+		AutomationDraftSvc: s.automationDraftSvc,
+		AutomationCompiler: s.automationCompiler,
+		WorkerSvc:          s.workerSvc,
+		LLMConfigRepo:      s.llmConfigRepo, AgentRepo: s.agentRepo,
 		SettingsRepo:          s.settingsRepo,
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
