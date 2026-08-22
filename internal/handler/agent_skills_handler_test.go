@@ -168,6 +168,76 @@ func TestHandler_GetAgentSkills_ProjectSkillOverridesGlobalScope(t *testing.T) {
 	}
 }
 
+func TestHandler_AgentOwnedSkillRoutesRejectMismatchedProjectAndUseAgentProjectWhenOmitted(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	projectRepo := repository.NewProjectRepo(db)
+	projectARepoPath := t.TempDir()
+	projectBRepoPath := t.TempDir()
+	projectA := &models.Project{Name: "Project A", RepoPath: projectARepoPath}
+	if err := projectRepo.Create(t.Context(), projectA); err != nil {
+		t.Fatal(err)
+	}
+	projectB := &models.Project{Name: "Project B", RepoPath: projectBRepoPath}
+	if err := projectRepo.Create(t.Context(), projectB); err != nil {
+		t.Fatal(err)
+	}
+	projectARoot := filepath.Join(projectARepoPath, ".openvibely")
+	projectBRoot := filepath.Join(projectBRepoPath, ".openvibely")
+	agent := &models.Agent{Name: "Reviewer", Key: "reviewer", Scope: models.AgentScopeProject, ProjectID: projectB.ID, Enabled: true}
+	if err := repo.Create(t.Context(), agent); err != nil {
+		t.Fatal(err)
+	}
+	writeAgentOwnedSkillForTest(t, projectARoot, agent.Key, "review_migrations", "Project A Review", "Project A body")
+	writeAgentOwnedSkillForTest(t, projectBRoot, agent.Key, "review_migrations", "Project B Review", "Project B body")
+	projectAOriginal := mustReadFileForTest(t, filepath.Join(projectARoot, "agents", "reviewer", "skills", "review_migrations", "SKILL.md"))
+	projectBOriginal := mustReadFileForTest(t, filepath.Join(projectBRoot, "agents", "reviewer", "skills", "review_migrations", "SKILL.md"))
+	h := &Handler{agentRepo: repo, lifecycleRepo: lifecycleRepo, projectRepo: projectRepo, agentSkillRoot: t.TempDir()}
+
+	rec := performAgentSkillsRequest(t, h.GetAgentSkills, http.MethodGet, "/agents/"+agent.ID+"/skills?project_id="+projectA.ID, nil, agent.ID, "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "Project A Review") {
+		t.Fatalf("mismatched list leaked Project A skill: %s", rec.Body.String())
+	}
+
+	createPayload, _ := json.Marshal(agentSkillSaveRequest{Handle: "new_skill", Name: "New Skill", Scope: "project", Body: "new body"})
+	rec = performAgentSkillsRequest(t, h.CreateAgentOwnedSkill, http.MethodPost, "/agents/"+agent.ID+"/skills?project_id="+projectA.ID, createPayload, agent.ID, "")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("POST status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", "reviewer", "skills", "new_skill", "SKILL.md"))
+	assertNoFileForTest(t, filepath.Join(projectBRoot, "agents", "reviewer", "skills", "new_skill", "SKILL.md"))
+
+	updatePayload, _ := json.Marshal(agentSkillSaveRequest{Handle: "review_migrations", Scope: "project", Body: "Updated body"})
+	rec = performAgentSkillsRequest(t, h.UpdateAgentOwnedSkill, http.MethodPut, "/agents/"+agent.ID+"/skills/review_migrations?project_id="+projectA.ID, updatePayload, agent.ID, "review_migrations")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("PUT status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	assertFileContentForTest(t, filepath.Join(projectARoot, "agents", "reviewer", "skills", "review_migrations", "SKILL.md"), projectAOriginal)
+	assertFileContentForTest(t, filepath.Join(projectBRoot, "agents", "reviewer", "skills", "review_migrations", "SKILL.md"), projectBOriginal)
+
+	rec = performAgentSkillsRequest(t, h.ArchiveAgentOwnedSkill, http.MethodPost, "/agents/"+agent.ID+"/skills/review_migrations/archive?project_id="+projectA.ID, []byte(`{"reason":"wrong project"}`), agent.ID, "review_migrations")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("archive status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	assertFileContentForTest(t, filepath.Join(projectARoot, "agents", "reviewer", "skills", "review_migrations", "SKILL.md"), projectAOriginal)
+	assertFileContentForTest(t, filepath.Join(projectBRoot, "agents", "reviewer", "skills", "review_migrations", "SKILL.md"), projectBOriginal)
+
+	createPayload, _ = json.Marshal(agentSkillSaveRequest{Handle: "agent_project_skill", Name: "Agent Project Skill", Scope: "project", Body: "owned by Project B"})
+	rec = performAgentSkillsRequest(t, h.CreateAgentOwnedSkill, http.MethodPost, "/agents/"+agent.ID+"/skills", createPayload, agent.ID, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("omitted project_id POST status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", "reviewer", "skills", "agent_project_skill", "SKILL.md"))
+	content := mustReadFileForTest(t, filepath.Join(projectBRoot, "agents", "reviewer", "skills", "agent_project_skill", "SKILL.md"))
+	if !containsAll(content, "Agent Project Skill", "owned by Project B") {
+		t.Fatalf("omitted project_id did not write Project B skill correctly: %s", content)
+	}
+}
+
 func TestHandler_CreateAgentOwnedSkill_WritesIndexedSkill(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewAgentRepo(db)
@@ -438,4 +508,42 @@ func containsAll(s string, needles ...string) bool {
 		}
 	}
 	return true
+}
+
+func writeAgentOwnedSkillForTest(t *testing.T, root, agentKey, handle, name, body string) {
+	t.Helper()
+	imp := agentlibrary.NewImporter(agentlibrary.SkillRoots{Project: root}, nil)
+	if _, err := imp.WriteAgentOwnedSkill(t.Context(), "project", agentKey, &agentlibrary.SkillDeclaration{
+		Kind:    "openvibely.agent_skill",
+		Version: 1,
+		Skill: agentlibrary.SkillBlock{
+			Key:  handle,
+			Name: name,
+		},
+	}, body); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustReadFileForTest(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func assertFileContentForTest(t *testing.T, path, want string) {
+	t.Helper()
+	if got := mustReadFileForTest(t, path); got != want {
+		t.Fatalf("file %s changed\nwant:\n%s\ngot:\n%s", path, want, got)
+	}
+}
+
+func assertNoFileForTest(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected no file at %s, stat err=%v", path, err)
+	}
 }
