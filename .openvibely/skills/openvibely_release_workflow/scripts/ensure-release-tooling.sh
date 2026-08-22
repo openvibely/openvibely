@@ -474,6 +474,85 @@ PY
     return 1
 }
 
+install_wails3() {
+    local root tool_dir wails_bin version
+    root="$(repo_root)"
+    tool_dir="${root}/.tools/wails3"
+    wails_bin="${tool_dir}/bin/wails3"
+
+    if command -v wails3 >/dev/null 2>&1; then
+        echo "ok tool: wails3 ($(command -v wails3))"
+        return 0
+    fi
+    if [[ -x "$wails_bin" ]] && tool_runs "$wails_bin"; then
+        echo "ok tool: wails3 ($wails_bin)"
+        return 0
+    fi
+
+    version="$(cd "$root" && go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3 2>/dev/null || true)"
+    if [[ -z "$version" ]]; then
+        version="latest"
+    fi
+
+    echo "wails3 not found; installing local wails3 ${version}..." >&2
+    mkdir -p "${tool_dir}/bin"
+    (cd "$root" && GOBIN="${tool_dir}/bin" go install "github.com/wailsapp/wails/v3/cmd/wails3@${version}")
+    if [[ -x "$wails_bin" ]] && tool_runs "$wails_bin"; then
+        echo "ok tool: wails3 ($wails_bin)"
+        return 0
+    fi
+    echo "installed wails3 is not runnable" >&2
+    return 1
+}
+
+install_wails_cross_image() {
+    local root wails_path image_prefix expected_arches arch image image_arch
+    root="$(repo_root)"
+    wails_path="${root}/.tools/wails3/bin:${PATH}"
+    image_prefix="${OPENVIBELY_WAILS_CROSS_IMAGE_PREFIX:-wails-cross}"
+    if [[ -n "${OPENVIBELY_WAILS_CROSS_ARCH:-}" ]]; then
+        expected_arches="${OPENVIBELY_WAILS_CROSS_ARCH}"
+    else
+        expected_arches="${OPENVIBELY_WAILS_CROSS_ARCHES:-amd64 arm64}"
+    fi
+
+    if [[ "${SKIP_WAILS_DOCKER_SETUP:-0}" == "1" ]]; then
+        echo "skipping Wails Docker image setup (SKIP_WAILS_DOCKER_SETUP=1)"
+        return 0
+    fi
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "docker not found; skipping Wails Linux desktop Docker image setup" >&2
+        return 0
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        echo "docker is not running; skipping Wails Linux desktop Docker image setup" >&2
+        return 0
+    fi
+
+    for arch in $expected_arches; do
+        image="${image_prefix}-${arch}"
+        image_arch="$(docker image inspect "$image" --format '{{.Architecture}}' 2>/dev/null || true)"
+        if [[ "$image_arch" == "$arch" ]]; then
+            echo "ok docker image: $image"
+            continue
+        fi
+        if [[ -n "$image_arch" ]]; then
+            echo "Wails cross-compilation Docker image '$image' is $image_arch; rebuilding for $arch..." >&2
+        else
+            echo "Wails cross-compilation Docker image '$image' not found; building it..." >&2
+        fi
+
+        (cd "$root" && PATH="$wails_path" CROSS_IMAGE="$image" CROSS_PLATFORM="linux/${arch}" wails3 task setup:docker)
+        image_arch="$(docker image inspect "$image" --format '{{.Architecture}}' 2>/dev/null || true)"
+        if [[ "$image_arch" == "$arch" ]]; then
+            echo "ok docker image: $image"
+            continue
+        fi
+        echo "Wails Docker image setup did not produce '$image' for $arch" >&2
+        return 1
+    done
+}
+
 install_azure_cli() {
     if [[ -n "${AZURE_ACCESS_TOKEN:-}" ]]; then
         echo "ok env: AZURE_ACCESS_TOKEN (skipping az install)"
@@ -561,6 +640,8 @@ EOF
 
 install_osslsigncode
 install_github_cli
+install_wails3
+install_wails_cross_image
 if [[ "${SKIP_AZURE_SIGNING_TOOLING:-0}" != "1" ]]; then
     install_java_runtime
     install_python_runtime 14

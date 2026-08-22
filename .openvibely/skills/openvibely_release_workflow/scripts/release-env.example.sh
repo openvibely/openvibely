@@ -19,3 +19,4 @@ OPENVIBELY_WINDOWS_VERIFY_COMMAND='/absolute/path/to/openvibely/.openvibely/skil
 
 # Required if building the official release on macOS without a native Linux job.
 OPENVIBELY_LINUX_DESKTOP_BINARY='<path-to-linux-amd64-openvibely-desktop>'
+OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY='<path-to-linux-arm64-openvibely-desktop>'

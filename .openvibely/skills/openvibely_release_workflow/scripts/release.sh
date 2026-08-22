@@ -37,8 +37,8 @@ source "${SCRIPT_DIR}/release-version.sh"
 
 load_release_env_defaults() {
     local env_file="$1"
-    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_azure_endpoint=0 had_azure_account=0 had_azure_profile=0 had_azure_sub=0 had_win_desktop=0 had_linux_desktop=0
-    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_azure_endpoint="" saved_azure_account="" saved_azure_profile="" saved_azure_sub="" saved_win_desktop="" saved_linux_desktop=""
+    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_azure_endpoint=0 had_azure_account=0 had_azure_profile=0 had_azure_sub=0 had_win_desktop=0 had_linux_desktop=0 had_linux_arm64_desktop=0
+    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_azure_endpoint="" saved_azure_account="" saved_azure_profile="" saved_azure_sub="" saved_win_desktop="" saved_linux_desktop="" saved_linux_arm64_desktop=""
 
     [[ ${OPENVIBELY_RELEASE_KEY_ID+x} ]] && { had_key=1; saved_key="$OPENVIBELY_RELEASE_KEY_ID"; }
     [[ ${OPENVIBELY_RELEASE_PUBLIC_KEY+x} ]] && { had_pub=1; saved_pub="$OPENVIBELY_RELEASE_PUBLIC_KEY"; }
@@ -52,6 +52,7 @@ load_release_env_defaults() {
     [[ ${OPENVIBELY_AZURE_SUBSCRIPTION_ID+x} ]] && { had_azure_sub=1; saved_azure_sub="$OPENVIBELY_AZURE_SUBSCRIPTION_ID"; }
     [[ ${OPENVIBELY_WINDOWS_DESKTOP_BINARY+x} ]] && { had_win_desktop=1; saved_win_desktop="$OPENVIBELY_WINDOWS_DESKTOP_BINARY"; }
     [[ ${OPENVIBELY_LINUX_DESKTOP_BINARY+x} ]] && { had_linux_desktop=1; saved_linux_desktop="$OPENVIBELY_LINUX_DESKTOP_BINARY"; }
+    [[ ${OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY+x} ]] && { had_linux_arm64_desktop=1; saved_linux_arm64_desktop="$OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY"; }
 
     # shellcheck source=/dev/null
     source "$env_file"
@@ -68,6 +69,7 @@ load_release_env_defaults() {
     [[ "$had_azure_sub" == "1" ]] && OPENVIBELY_AZURE_SUBSCRIPTION_ID="$saved_azure_sub"
     [[ "$had_win_desktop" == "1" ]] && OPENVIBELY_WINDOWS_DESKTOP_BINARY="$saved_win_desktop"
     [[ "$had_linux_desktop" == "1" ]] && OPENVIBELY_LINUX_DESKTOP_BINARY="$saved_linux_desktop"
+    [[ "$had_linux_arm64_desktop" == "1" ]] && OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY="$saved_linux_arm64_desktop"
     return 0
 }
 

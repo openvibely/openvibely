@@ -275,14 +275,20 @@ check_artifact_name "$VERSION" "openvibely_<version>_linux_arm64_server.tar.gz" 
 # Windows server zip
 check_artifact_name "$VERSION" "openvibely_<version>_windows_amd64_server.zip" \
     "openvibely_0.1.1_windows_amd64_server.zip"
+check_artifact_name "$VERSION" "openvibely_<version>_windows_arm64_server.zip" \
+    "openvibely_0.1.1_windows_arm64_server.zip"
 
 # Windows desktop-cli zip
 check_artifact_name "$VERSION" "openvibely_<version>_windows_amd64_desktop-cli.zip" \
     "openvibely_0.1.1_windows_amd64_desktop-cli.zip"
+check_artifact_name "$VERSION" "openvibely_<version>_windows_arm64_desktop-cli.zip" \
+    "openvibely_0.1.1_windows_arm64_desktop-cli.zip"
 
 # Linux desktop tarball
 check_artifact_name "$VERSION" "openvibely_<version>_linux_amd64_desktop.tar.gz" \
     "openvibely_0.1.1_linux_amd64_desktop.tar.gz"
+check_artifact_name "$VERSION" "openvibely_<version>_linux_arm64_desktop.tar.gz" \
+    "openvibely_0.1.1_linux_arm64_desktop.tar.gz"
 
 # SHA256SUMS (no version in the filename)
 SUMS_NAME="SHA256SUMS"
@@ -305,7 +311,7 @@ for required in OPENVIBELY_MACOS_SIGN_IDENTITY OPENVIBELY_MACOS_NOTARY_PROFILE O
         fail "official build does not require ${required}"
     fi
 done
-for required_call in 'sign-macos.sh' 'notarize-macos-archive.sh' 'xcrun stapler staple' 'notarize_macos_binary_archive' 'sign_windows_binary "$TMP_BIN/server_windows_amd64.exe"' 'sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe"' 'Official releases require a Windows desktop build' 'Official releases require a Linux desktop build' 'linux_amd64_desktop.tar.gz'; do
+for required_call in 'sign-macos.sh' 'notarize-macos-archive.sh' 'xcrun stapler staple' 'notarize_macos_binary_archive' 'sign_windows_binary "$TMP_BIN/server_windows_amd64.exe"' 'sign_windows_binary "$TMP_BIN/server_windows_arm64.exe"' 'sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe"' 'sign_windows_binary "$TMP_BIN/desktop_windows_arm64.exe"' 'build_desktop_binary "$TMP_BIN/desktop_windows_amd64.exe" windows amd64 0' 'build_desktop_binary "$TMP_BIN/desktop_windows_arm64.exe" windows arm64 0' 'build_linux_desktop amd64' 'build_linux_desktop arm64' 'package_linux_desktop_tar amd64' 'package_linux_desktop_tar arm64' 'Official releases require a Linux $goarch desktop build' 'linux_amd64_desktop.tar.gz' 'linux_arm64_desktop.tar.gz'; do
     if grep -Fq "$required_call" "$BUILD_SCRIPT"; then
         pass "release build contains signing step: ${required_call}"
     else
@@ -313,7 +319,7 @@ for required_call in 'sign-macos.sh' 'notarize-macos-archive.sh' 'xcrun stapler 
     fi
 done
 PUBLISH_SCRIPT="${SCRIPT_DIR}/release-publish.sh"
-for required_artifact in 'require_release_artifact "OpenVibely_${VERSION}_darwin_amd64.app.zip"' 'require_release_artifact "OpenVibely_${VERSION}_darwin_arm64.app.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_amd64_desktop-cli.zip"' 'require_release_artifact "openvibely_${VERSION}_linux_amd64_desktop.tar.gz"'; do
+for required_artifact in 'require_release_artifact "OpenVibely_${VERSION}_darwin_amd64.app.zip"' 'require_release_artifact "OpenVibely_${VERSION}_darwin_arm64.app.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_amd64_desktop-cli.zip"' 'require_release_artifact "openvibely_${VERSION}_windows_arm64_desktop-cli.zip"' 'require_release_artifact "openvibely_${VERSION}_linux_amd64_desktop.tar.gz"' 'require_release_artifact "openvibely_${VERSION}_linux_arm64_desktop.tar.gz"'; do
     if grep -Fq "$required_artifact" "$PUBLISH_SCRIPT"; then
         pass "release publish requires desktop artifact: ${required_artifact}"
     else

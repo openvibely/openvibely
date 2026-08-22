@@ -14,8 +14,11 @@
 #   openvibely_<version>_linux_amd64_server.tar.gz
 #   openvibely_<version>_linux_arm64_server.tar.gz
 #   openvibely_<version>_windows_amd64_server.zip
+#   openvibely_<version>_windows_arm64_server.zip
 #   openvibely_<version>_windows_amd64_desktop-cli.zip
+#   openvibely_<version>_windows_arm64_desktop-cli.zip
 #   openvibely_<version>_linux_amd64_desktop.tar.gz
+#   openvibely_<version>_linux_arm64_desktop.tar.gz
 #   SHA256SUMS
 #
 # Environment variables:
@@ -26,11 +29,16 @@
 #   OPENVIBELY_MACOS_NOTARY_PROFILE     notarytool keychain profile.
 #   OPENVIBELY_WINDOWS_SIGN_COMMAND     Executable invoked with each Windows binary path.
 #   OPENVIBELY_WINDOWS_VERIFY_COMMAND   Executable that fails unless that binary is Authenticode signed and timestamped.
+#   OPENVIBELY_WINDOWS_DESKTOP_CGO=1    Build Windows amd64 desktop with CGO/mingw-w64 instead of Go cross-compile.
+#   OPENVIBELY_WAILS3                  Optional wails3 executable path/command.
 #
 # Known limitations (matches v0.1.0):
-#   - Linux desktop requires native GTK/WebKit development dependencies or an
-#     explicit OPENVIBELY_LINUX_DESKTOP_BINARY produced by the Linux release job.
-#   - Windows desktop requires mingw-w64 or OPENVIBELY_WINDOWS_DESKTOP_BINARY.
+#   - Linux desktop requires native GTK/WebKit development dependencies,
+#     explicit prebuilt artifacts, or Wails Taskfile Docker images for both
+#     amd64 and arm64.
+#   - Windows desktop normally cross-compiles for amd64 and arm64 with
+#     CGO_ENABLED=0; set OPENVIBELY_WINDOWS_DESKTOP_BINARY to provide a
+#     prebuilt/signed amd64 candidate.
 #   - Docker image publishing is a separate step (release-publish.sh).
 
 set -euo pipefail
@@ -58,10 +66,36 @@ run() {
     fi
 }
 
+wails3_command() {
+    local local_wails3="${REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || true)}/.tools/wails3/bin/wails3"
+    if [[ -n "${OPENVIBELY_WAILS3:-}" ]]; then
+        printf '%s\n' "$OPENVIBELY_WAILS3"
+    elif command -v wails3 &>/dev/null; then
+        command -v wails3
+    elif [[ -x "$local_wails3" ]]; then
+        printf '%s\n' "$local_wails3"
+    else
+        return 1
+    fi
+}
+
+has_wails3() {
+    wails3_command >/dev/null 2>&1
+}
+
+run_wails3() {
+    local wails3
+    if wails3="$(wails3_command)"; then
+        run "$wails3" "$@"
+    else
+        fail "wails3 is required for desktop release builds. Install it with: go install github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3 2>/dev/null || echo latest)"
+    fi
+}
+
 load_release_env_defaults() {
     local env_file="$1"
-    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_azure_endpoint=0 had_azure_account=0 had_azure_profile=0 had_azure_sub=0 had_win_desktop=0 had_linux_desktop=0
-    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_azure_endpoint="" saved_azure_account="" saved_azure_profile="" saved_azure_sub="" saved_win_desktop="" saved_linux_desktop=""
+    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_azure_endpoint=0 had_azure_account=0 had_azure_profile=0 had_azure_sub=0 had_win_desktop=0 had_linux_desktop=0 had_linux_arm64_desktop=0
+    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_azure_endpoint="" saved_azure_account="" saved_azure_profile="" saved_azure_sub="" saved_win_desktop="" saved_linux_desktop="" saved_linux_arm64_desktop=""
 
     [[ ${OPENVIBELY_RELEASE_KEY_ID+x} ]] && { had_key=1; saved_key="$OPENVIBELY_RELEASE_KEY_ID"; }
     [[ ${OPENVIBELY_RELEASE_PUBLIC_KEY+x} ]] && { had_pub=1; saved_pub="$OPENVIBELY_RELEASE_PUBLIC_KEY"; }
@@ -75,6 +109,7 @@ load_release_env_defaults() {
     [[ ${OPENVIBELY_AZURE_SUBSCRIPTION_ID+x} ]] && { had_azure_sub=1; saved_azure_sub="$OPENVIBELY_AZURE_SUBSCRIPTION_ID"; }
     [[ ${OPENVIBELY_WINDOWS_DESKTOP_BINARY+x} ]] && { had_win_desktop=1; saved_win_desktop="$OPENVIBELY_WINDOWS_DESKTOP_BINARY"; }
     [[ ${OPENVIBELY_LINUX_DESKTOP_BINARY+x} ]] && { had_linux_desktop=1; saved_linux_desktop="$OPENVIBELY_LINUX_DESKTOP_BINARY"; }
+    [[ ${OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY+x} ]] && { had_linux_arm64_desktop=1; saved_linux_arm64_desktop="$OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY"; }
 
     # shellcheck source=/dev/null
     source "$env_file"
@@ -91,6 +126,7 @@ load_release_env_defaults() {
     [[ "$had_azure_sub" == "1" ]] && OPENVIBELY_AZURE_SUBSCRIPTION_ID="$saved_azure_sub"
     [[ "$had_win_desktop" == "1" ]] && OPENVIBELY_WINDOWS_DESKTOP_BINARY="$saved_win_desktop"
     [[ "$had_linux_desktop" == "1" ]] && OPENVIBELY_LINUX_DESKTOP_BINARY="$saved_linux_desktop"
+    [[ "$had_linux_arm64_desktop" == "1" ]] && OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY="$saved_linux_arm64_desktop"
     return 0
 }
 
@@ -127,7 +163,9 @@ HOST_OS="$(uname -s)"
 WINDOWS_SIGN_COMMAND="${OPENVIBELY_WINDOWS_SIGN_COMMAND:-}"
 WINDOWS_VERIFY_COMMAND="${OPENVIBELY_WINDOWS_VERIFY_COMMAND:-}"
 WINDOWS_DESKTOP_BINARY="${OPENVIBELY_WINDOWS_DESKTOP_BINARY:-}"
+WINDOWS_DESKTOP_CGO="${OPENVIBELY_WINDOWS_DESKTOP_CGO:-0}"
 LINUX_DESKTOP_BINARY="${OPENVIBELY_LINUX_DESKTOP_BINARY:-}"
+LINUX_ARM64_DESKTOP_BINARY="${OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY:-}"
 [[ -n "$WINDOWS_SIGN_COMMAND" ]] || fail "OPENVIBELY_WINDOWS_SIGN_COMMAND is required for official Windows release artifacts."
 [[ "${DRY_RUN:-0}" == "1" || -x "$WINDOWS_SIGN_COMMAND" ]] || fail "OPENVIBELY_WINDOWS_SIGN_COMMAND must name an executable signing hook."
 [[ -n "$WINDOWS_VERIFY_COMMAND" ]] || fail "OPENVIBELY_WINDOWS_VERIFY_COMMAND is required for official Windows release validation."
@@ -197,6 +235,80 @@ build_binary() {
     run "${cmd[@]}"
 }
 
+desktop_ldflags() {
+    local goos="$1"
+    local ldflags="-s -w -X github.com/openvibely/openvibely/internal/buildinfo.Version=${VERSION} -X github.com/openvibely/openvibely/internal/buildinfo.Commit=${BUILD_COMMIT} -X github.com/openvibely/openvibely/internal/buildinfo.BuildTime=${BUILD_TIME} -X github.com/openvibely/openvibely/internal/buildinfo.Artifact=desktop -X github.com/openvibely/openvibely/internal/buildinfo.ReleaseKeyID=${RELEASE_KEY_ID} -X github.com/openvibely/openvibely/internal/buildinfo.ReleasePublicKey=${RELEASE_PUBLIC_KEY}"
+    if [[ "$goos" == "windows" ]]; then
+        ldflags="${ldflags} -H windowsgui"
+    fi
+    printf '%s' "$ldflags"
+}
+
+build_desktop_binary() {
+    local output="$1" goos="$2" goarch="$3"
+    local cgo="${4:-}"
+    local cross_image="${5:-}"
+    local ldflags
+    ldflags="$(desktop_ldflags "$goos")"
+
+    log "Building desktop $goos/$goarch with wails3 → $output"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        if [[ -n "$cross_image" ]]; then
+            echo -e "${YELLOW}[DRY-RUN]${NC} OPENVIBELY_DESKTOP_LDFLAGS=\"$ldflags\" CROSS_IMAGE=\"$cross_image\" wails3 build GOOS=$goos GOARCH=$goarch OUTPUT=$output${cgo:+ CGO_ENABLED=$cgo}"
+        else
+            echo -e "${YELLOW}[DRY-RUN]${NC} OPENVIBELY_DESKTOP_LDFLAGS=\"$ldflags\" wails3 build GOOS=$goos GOARCH=$goarch OUTPUT=$output${cgo:+ CGO_ENABLED=$cgo}"
+        fi
+        return
+    fi
+
+    if [[ -n "$cross_image" && -n "$cgo" ]]; then
+        OPENVIBELY_DESKTOP_LDFLAGS="$ldflags" CROSS_IMAGE="$cross_image" run_wails3 build "GOOS=$goos" "GOARCH=$goarch" "OUTPUT=$output" "CGO_ENABLED=$cgo"
+    elif [[ -n "$cross_image" ]]; then
+        OPENVIBELY_DESKTOP_LDFLAGS="$ldflags" CROSS_IMAGE="$cross_image" run_wails3 build "GOOS=$goos" "GOARCH=$goarch" "OUTPUT=$output"
+    elif [[ -n "$cgo" ]]; then
+        OPENVIBELY_DESKTOP_LDFLAGS="$ldflags" run_wails3 build "GOOS=$goos" "GOARCH=$goarch" "OUTPUT=$output" "CGO_ENABLED=$cgo"
+    else
+        OPENVIBELY_DESKTOP_LDFLAGS="$ldflags" run_wails3 build "GOOS=$goos" "GOARCH=$goarch" "OUTPUT=$output"
+    fi
+}
+
+host_goarch() {
+    case "$(uname -m)" in
+        x86_64|amd64) printf 'amd64\n' ;;
+        arm64|aarch64) printf 'arm64\n' ;;
+        *) printf '%s\n' "$(uname -m)" ;;
+    esac
+}
+
+wails_cross_image_for_arch() {
+    local goarch="$1"
+    local upper_arch var_name
+    upper_arch="$(printf '%s' "$goarch" | tr '[:lower:]' '[:upper:]')"
+    var_name="OPENVIBELY_WAILS_CROSS_IMAGE_${upper_arch}"
+    if [[ -n "${!var_name:-}" ]]; then
+        printf '%s\n' "${!var_name}"
+    else
+        printf 'wails-cross-%s\n' "$goarch"
+    fi
+}
+
+ensure_wails_cross_image() {
+    local goarch="$1"
+    local image="$2"
+    local image_arch
+
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would ensure Wails Docker image $image for linux/$goarch"
+        return
+    fi
+    image_arch="$(docker image inspect "$image" --format '{{.Architecture}}' 2>/dev/null || true)"
+    if [[ "$image_arch" == "$goarch" ]]; then
+        return
+    fi
+    log "Preparing Wails Docker image $image for linux/$goarch..."
+    CROSS_IMAGE="$image" CROSS_PLATFORM="linux/${goarch}" run_wails3 task setup:docker
+}
+
 sign_windows_binary() {
     local binary="$1"
     log "Authenticode signing and timestamping $(basename "$binary")..."
@@ -259,6 +371,10 @@ build_binary "$TMP_BIN/server_linux_arm64" ./cmd/server linux arm64
 build_binary "$TMP_BIN/server_windows_amd64.exe" ./cmd/server windows amd64
 sign_windows_binary "$TMP_BIN/server_windows_amd64.exe"
 
+# windows/arm64 server
+build_binary "$TMP_BIN/server_windows_arm64.exe" ./cmd/server windows arm64
+sign_windows_binary "$TMP_BIN/server_windows_arm64.exe"
+
 ###############################################################################
 # 5. macOS desktop app bundles
 ###############################################################################
@@ -272,7 +388,7 @@ build_macos_app() {
     local bundle="${app_dir}/Contents"
 
     log "Building macOS desktop app ($goarch)..."
-    build_binary "$TMP_BIN/${bin_name}" ./cmd/desktop darwin "$goarch" 1
+    build_desktop_binary "$TMP_BIN/${bin_name}" darwin "$goarch" 1
 
     local zip_name="OpenVibely_${VERSION}_darwin_${goarch}.app.zip"
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
@@ -327,33 +443,62 @@ else
 fi
 
 ###############################################################################
-# 6. Windows desktop-cli (requires mingw-w64 cross-compiler)
+# 6. Windows desktop-cli
 ###############################################################################
 
-if command -v x86_64-w64-mingw32-gcc &>/dev/null; then
-    log "Building Windows desktop-cli (amd64 with mingw-w64)..."
-    build_binary "$TMP_BIN/desktop_windows_amd64.exe" ./cmd/desktop windows amd64 1 x86_64-w64-mingw32-gcc
-elif [[ -n "$WINDOWS_DESKTOP_BINARY" ]]; then
+if [[ -n "$WINDOWS_DESKTOP_BINARY" ]]; then
     [[ "${DRY_RUN:-0}" == "1" || -f "$WINDOWS_DESKTOP_BINARY" ]] || fail "OPENVIBELY_WINDOWS_DESKTOP_BINARY does not exist."
     run cp "$WINDOWS_DESKTOP_BINARY" "$TMP_BIN/desktop_windows_amd64.exe"
-elif [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo -e "${YELLOW}[DRY-RUN]${NC} Would require mingw-w64 or OPENVIBELY_WINDOWS_DESKTOP_BINARY"
+elif [[ "$WINDOWS_DESKTOP_CGO" == "1" ]]; then
+    build_desktop_binary "$TMP_BIN/desktop_windows_amd64.exe" windows amd64 1
 else
-    fail "Official releases require a Windows desktop build: install mingw-w64 or set OPENVIBELY_WINDOWS_DESKTOP_BINARY."
+    build_desktop_binary "$TMP_BIN/desktop_windows_amd64.exe" windows amd64 0
+fi
+build_desktop_binary "$TMP_BIN/desktop_windows_arm64.exe" windows arm64 0
+
+if [[ "${DRY_RUN:-0}" != "1" && ! -f "$TMP_BIN/desktop_windows_amd64.exe" ]]; then
+    fail "Official releases require a Windows amd64 desktop build."
+fi
+if [[ "${DRY_RUN:-0}" != "1" && ! -f "$TMP_BIN/desktop_windows_arm64.exe" ]]; then
+    fail "Official releases require a Windows arm64 desktop build."
+elif [[ "${DRY_RUN:-0}" == "1" ]]; then
+    echo -e "${YELLOW}[DRY-RUN]${NC} Would build Windows desktop-cli artifacts with Go cross-compilation"
 fi
 sign_windows_binary "$TMP_BIN/desktop_windows_amd64.exe"
+sign_windows_binary "$TMP_BIN/desktop_windows_arm64.exe"
 
-if [[ "$HOST_OS" == "Linux" ]]; then
-    log "Building Linux desktop (amd64)..."
-    build_binary "$TMP_BIN/desktop_linux_amd64" ./cmd/desktop linux amd64 1
-elif [[ -n "$LINUX_DESKTOP_BINARY" ]]; then
-    [[ "${DRY_RUN:-0}" == "1" || -f "$LINUX_DESKTOP_BINARY" ]] || fail "OPENVIBELY_LINUX_DESKTOP_BINARY does not exist."
-    run cp "$LINUX_DESKTOP_BINARY" "$TMP_BIN/desktop_linux_amd64"
-elif [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo -e "${YELLOW}[DRY-RUN]${NC} Would require a native Linux build or OPENVIBELY_LINUX_DESKTOP_BINARY"
-else
-    fail "Official releases require a Linux desktop build; run on Linux or set OPENVIBELY_LINUX_DESKTOP_BINARY."
-fi
+build_linux_desktop() {
+    local goarch="$1"
+    local output="$TMP_BIN/desktop_linux_${goarch}"
+    local prebuilt=""
+    local prebuilt_var=""
+    local cross_image
+
+    case "$goarch" in
+        amd64) prebuilt="$LINUX_DESKTOP_BINARY"; prebuilt_var="OPENVIBELY_LINUX_DESKTOP_BINARY" ;;
+        arm64) prebuilt="$LINUX_ARM64_DESKTOP_BINARY"; prebuilt_var="OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY" ;;
+    esac
+
+    if [[ "$HOST_OS" == "Linux" && "$(host_goarch)" == "$goarch" ]]; then
+        log "Building Linux desktop ($goarch natively)..."
+        build_desktop_binary "$output" linux "$goarch" 1
+    elif [[ -n "$prebuilt" ]]; then
+        [[ "${DRY_RUN:-0}" == "1" || -f "$prebuilt" ]] || fail "${prebuilt_var} does not exist."
+        run cp "$prebuilt" "$output"
+    elif command -v docker &>/dev/null && has_wails3; then
+        cross_image="$(wails_cross_image_for_arch "$goarch")"
+        ensure_wails_cross_image "$goarch" "$cross_image"
+        log "Building Linux desktop ($goarch with Wails Docker path)..."
+        build_desktop_binary "$output" linux "$goarch" 1 "$cross_image"
+    elif [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would require native Linux, Wails Docker support, or ${prebuilt_var}"
+    else
+        fail "Official releases require a Linux $goarch desktop build; run on matching Linux, install wails3+Docker, or set ${prebuilt_var}."
+    fi
+}
+
+build_linux_desktop amd64
+build_linux_desktop arm64
 
 ###############################################################################
 # 7. Package server tarballs and zips
@@ -417,27 +562,51 @@ package_macos_server_zip arm64
 package_server_tar linux  amd64
 package_server_tar linux  arm64
 package_server_zip windows amd64
+package_server_zip windows arm64
 
-win_desktop_artifact="openvibely_${VERSION}_windows_amd64_desktop-cli.zip"
-linux_desktop_artifact="openvibely_${VERSION}_linux_amd64_desktop.tar.gz"
-if [[ "${DRY_RUN:-0}" == "1" ]]; then
-    echo -e "${YELLOW}[DRY-RUN]${NC} Would package $win_desktop_artifact"
-    echo -e "${YELLOW}[DRY-RUN]${NC} Would package $linux_desktop_artifact"
-else
-    log "Packaging $win_desktop_artifact..."
-    local_pkg="${TMP_BIN}/pkg_win_desktop"
+package_windows_desktop_zip() {
+    local goarch="$1"
+    local artifact="openvibely_${VERSION}_windows_${goarch}_desktop-cli.zip"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would package $artifact"
+        return
+    fi
+
+    log "Packaging $artifact..."
+    local local_pkg="${TMP_BIN}/pkg_win_desktop_${goarch}"
     mkdir -p "$local_pkg"
-    cp "$TMP_BIN/desktop_windows_amd64.exe" "$local_pkg/openvibely-desktop.exe"
-    bash -c "cd '${local_pkg}' && zip '${DIST_DIR}/${win_desktop_artifact}' openvibely-desktop.exe"
-    log "Created: $win_desktop_artifact"
+    cp "$TMP_BIN/desktop_windows_${goarch}.exe" "$local_pkg/openvibely-desktop.exe"
+    bash -c "cd '${local_pkg}' && zip '${DIST_DIR}/${artifact}' openvibely-desktop.exe"
+    log "Created: $artifact"
+}
 
-    log "Packaging $linux_desktop_artifact..."
-    linux_pkg="${TMP_BIN}/pkg_linux_desktop"
+package_linux_desktop_tar() {
+    local goarch="$1"
+    local artifact="openvibely_${VERSION}_linux_${goarch}_desktop.tar.gz"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would package $artifact"
+        return
+    fi
+
+    log "Packaging $artifact..."
+    local linux_pkg="${TMP_BIN}/pkg_linux_desktop_${goarch}"
     mkdir -p "$linux_pkg"
-    cp "$TMP_BIN/desktop_linux_amd64" "$linux_pkg/openvibely-desktop"
+    cp "$TMP_BIN/desktop_linux_${goarch}" "$linux_pkg/openvibely-desktop"
     chmod +x "$linux_pkg/openvibely-desktop"
-    tar -czf "${DIST_DIR}/${linux_desktop_artifact}" -C "$linux_pkg" openvibely-desktop
-    log "Created: $linux_desktop_artifact"
+    tar -czf "${DIST_DIR}/${artifact}" -C "$linux_pkg" openvibely-desktop
+    log "Created: $artifact"
+}
+
+if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    package_windows_desktop_zip amd64
+    package_windows_desktop_zip arm64
+    package_linux_desktop_tar amd64
+    package_linux_desktop_tar arm64
+else
+    package_windows_desktop_zip amd64
+    package_windows_desktop_zip arm64
+    package_linux_desktop_tar amd64
+    package_linux_desktop_tar arm64
 fi
 
 ###############################################################################

@@ -47,6 +47,7 @@ OPENVIBELY_WINDOWS_SIGN_COMMAND="${REPO_ROOT}/.openvibely/skills/openvibely_rele
 OPENVIBELY_WINDOWS_VERIFY_COMMAND="${REPO_ROOT}/.openvibely/skills/openvibely_release_workflow/scripts/verify-windows.sh"
 
 OPENVIBELY_LINUX_DESKTOP_BINARY='<path-to-linux-amd64-openvibely-desktop>'
+OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY='<path-to-linux-arm64-openvibely-desktop>'
 EOF
     chmod 600 "$LOCAL_ENV"
     echo "created local env template: $LOCAL_ENV"
@@ -54,8 +55,8 @@ EOF
 
 load_release_env_defaults() {
     local env_file="$1"
-    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_azure_endpoint=0 had_azure_account=0 had_azure_profile=0 had_azure_sub=0 had_linux_desktop=0
-    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_azure_endpoint="" saved_azure_account="" saved_azure_profile="" saved_azure_sub="" saved_linux_desktop=""
+    local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_azure_endpoint=0 had_azure_account=0 had_azure_profile=0 had_azure_sub=0 had_linux_desktop=0 had_linux_arm64_desktop=0
+    local saved_key="" saved_pub="" saved_mac_id="" saved_notary="" saved_win_sign="" saved_win_verify="" saved_azure_endpoint="" saved_azure_account="" saved_azure_profile="" saved_azure_sub="" saved_linux_desktop="" saved_linux_arm64_desktop=""
 
     [[ ${OPENVIBELY_RELEASE_KEY_ID+x} ]] && { had_key=1; saved_key="$OPENVIBELY_RELEASE_KEY_ID"; }
     [[ ${OPENVIBELY_RELEASE_PUBLIC_KEY+x} ]] && { had_pub=1; saved_pub="$OPENVIBELY_RELEASE_PUBLIC_KEY"; }
@@ -68,6 +69,7 @@ load_release_env_defaults() {
     [[ ${OPENVIBELY_AZURE_SIGNING_PROFILE+x} ]] && { had_azure_profile=1; saved_azure_profile="$OPENVIBELY_AZURE_SIGNING_PROFILE"; }
     [[ ${OPENVIBELY_AZURE_SUBSCRIPTION_ID+x} ]] && { had_azure_sub=1; saved_azure_sub="$OPENVIBELY_AZURE_SUBSCRIPTION_ID"; }
     [[ ${OPENVIBELY_LINUX_DESKTOP_BINARY+x} ]] && { had_linux_desktop=1; saved_linux_desktop="$OPENVIBELY_LINUX_DESKTOP_BINARY"; }
+    [[ ${OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY+x} ]] && { had_linux_arm64_desktop=1; saved_linux_arm64_desktop="$OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY"; }
 
     # shellcheck source=/dev/null
     source "$env_file"
@@ -83,6 +85,7 @@ load_release_env_defaults() {
     [[ "$had_azure_profile" == "1" ]] && OPENVIBELY_AZURE_SIGNING_PROFILE="$saved_azure_profile"
     [[ "$had_azure_sub" == "1" ]] && OPENVIBELY_AZURE_SUBSCRIPTION_ID="$saved_azure_sub"
     [[ "$had_linux_desktop" == "1" ]] && OPENVIBELY_LINUX_DESKTOP_BINARY="$saved_linux_desktop"
+    [[ "$had_linux_arm64_desktop" == "1" ]] && OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY="$saved_linux_arm64_desktop"
     return 0
 }
 
@@ -199,6 +202,7 @@ fi
 export PATH="${REPO_ROOT}/.tools/osslsigncode/bin:${PATH}"
 export PATH="${REPO_ROOT}/.tools/jsign/bin:${PATH}"
 export PATH="${REPO_ROOT}/.tools/azure-cli/bin:${PATH}"
+export PATH="${REPO_ROOT}/.tools/wails3/bin:${PATH}"
 check_osslsigncode
 if [[ -n "${OPENVIBELY_JAVA_BIN:-}" && -x "$OPENVIBELY_JAVA_BIN" ]]; then
     echo "ok tool: java ($OPENVIBELY_JAVA_BIN)"
@@ -211,6 +215,7 @@ else
     missing=1
 fi
 check_cmd jsign
+check_cmd wails3
 if [[ -z "${AZURE_ACCESS_TOKEN:-}" ]]; then
     check_cmd az
 else

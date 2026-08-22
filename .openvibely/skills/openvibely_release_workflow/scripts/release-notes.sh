@@ -198,8 +198,8 @@ Persistent data (database, repos, uploads) is stored in the \`/data\` volume. Th
 
 ## Known Limitations
 
-- **Linux desktop**: Native Linux desktop app builds (GTK/WebKit) are not included in this release; the Linux artifacts are server-only binaries. To run the desktop UI on Linux, use the web interface at \`http://localhost:3001\` after starting the server binary.
-- **Windows desktop**: The Windows artifact is an executable zip, not an installer. Extract and run \`openvibely-desktop.exe\` directly.
+- **Linux desktop**: Linux desktop artifacts are executable tarballs, not installers. Pick the amd64 or arm64 tarball for your machine, then extract and run \`openvibely-desktop\` directly.
+- **Windows desktop**: The Windows desktop artifacts are executable zips, not installers. Pick the amd64 or arm64 zip for your machine, then extract and run \`openvibely-desktop.exe\` directly.
 - **Docker / VPS storage**: Mount a persistent volume at \`/data\` so your database, repos, and uploads survive container restarts. The Docker image uses \`/data\` as the data root.
 
 ---

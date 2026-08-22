@@ -32,6 +32,7 @@ source "${SCRIPT_DIR}/release-version.sh"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
 if [[ -n "$REPO_ROOT" ]]; then
     export PATH="${REPO_ROOT}/.tools/gh/bin:${PATH}"
+    export PATH="${REPO_ROOT}/.tools/wails3/bin:${PATH}"
 fi
 
 ###############################################################################
@@ -180,22 +181,42 @@ else
     warn "Build host: $HOST_OS — macOS desktop .app bundles require artifacts from a macOS release job."
 fi
 
-# Windows CGO cross-compiler check
-if command -v x86_64-w64-mingw32-gcc &>/dev/null; then
-    log "mingw-w64 cross-compiler present — Windows desktop-cli build supported."
-elif [[ -n "${OPENVIBELY_WINDOWS_DESKTOP_BINARY:-}" ]]; then
-    log "Windows desktop-cli prebuilt artifact configured."
+if command -v wails3 &>/dev/null || [[ -n "${OPENVIBELY_WAILS3:-}" ]]; then
+    log "wails3 CLI configured — desktop builds use the Wails Taskfile path."
 else
-    warn "mingw-w64 not found and OPENVIBELY_WINDOWS_DESKTOP_BINARY is unset. Official release-build will fail."
-    warn "Install on macOS with: brew install mingw-w64"
+    warn "wails3 CLI is missing. Official desktop builds will fail."
+    warn "Install with: go install github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3 2>/dev/null || echo latest)"
+fi
+
+# Windows desktop build check
+if [[ -n "${OPENVIBELY_WINDOWS_DESKTOP_BINARY:-}" ]]; then
+    log "Windows amd64 desktop-cli prebuilt artifact configured; Windows arm64 desktop-cli will be built with Go cross-compilation."
+elif [[ "${OPENVIBELY_WINDOWS_DESKTOP_CGO:-0}" == "1" ]]; then
+    if command -v x86_64-w64-mingw32-gcc &>/dev/null || { { command -v wails3 &>/dev/null || [[ -n "${OPENVIBELY_WAILS3:-}" ]]; } && command -v docker &>/dev/null; }; then
+        log "Windows amd64 desktop-cli CGO build supported through mingw-w64 or the Wails Docker path; Windows arm64 uses Go cross-compilation."
+    else
+        warn "OPENVIBELY_WINDOWS_DESKTOP_CGO=1 but neither mingw-w64 nor wails3+Docker is available. Official release-build will fail."
+    fi
+elif go env GOOS GOARCH >/dev/null 2>&1; then
+    log "Windows desktop-cli artifacts will be built for amd64 and arm64 with Go cross-compilation (CGO disabled)."
+else
+    warn "Unable to verify Go cross-compilation support. Official release-build may fail."
 fi
 
 if [[ "$HOST_OS" == "Linux" ]]; then
-    log "Native Linux host — Linux desktop build supported when GTK/WebKit development dependencies are installed."
+    log "Native Linux host — Linux desktop build supported for the host architecture when GTK/WebKit development dependencies are installed."
+fi
+if [[ -n "${OPENVIBELY_LINUX_DESKTOP_BINARY:-}" && -n "${OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY:-}" ]]; then
+    log "Linux desktop prebuilt artifacts configured for amd64 and arm64."
 elif [[ -n "${OPENVIBELY_LINUX_DESKTOP_BINARY:-}" ]]; then
-    log "Linux desktop prebuilt artifact configured."
+    log "Linux amd64 desktop prebuilt artifact configured; Linux arm64 still needs native Linux, Wails Docker, or OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY."
+elif [[ -n "${OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY:-}" ]]; then
+    log "Linux arm64 desktop prebuilt artifact configured; Linux amd64 still needs native Linux, Wails Docker, or OPENVIBELY_LINUX_DESKTOP_BINARY."
+elif { command -v wails3 &>/dev/null || [[ -n "${OPENVIBELY_WAILS3:-}" ]]; } && command -v docker &>/dev/null; then
+    log "wails3 and Docker present — Linux desktop can use Wails Docker images for amd64 and arm64."
 else
-    warn "Non-Linux host and OPENVIBELY_LINUX_DESKTOP_BINARY is unset. Official release-build will fail."
+    warn "Linux desktop prebuilt artifacts are unset and Wails Docker is unavailable. Official release-build will fail unless native Linux covers the target architecture."
+    warn "Produce Linux desktop binaries in Linux build jobs or Wails v3 Docker/Taskfile builds, then export OPENVIBELY_LINUX_DESKTOP_BINARY and OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY."
 fi
 
 # Docker check

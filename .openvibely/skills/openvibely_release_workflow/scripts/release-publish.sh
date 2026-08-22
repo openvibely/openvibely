@@ -102,7 +102,9 @@ require_release_artifact() {
 require_release_artifact "OpenVibely_${VERSION}_darwin_amd64.app.zip"
 require_release_artifact "OpenVibely_${VERSION}_darwin_arm64.app.zip"
 require_release_artifact "openvibely_${VERSION}_windows_amd64_desktop-cli.zip"
+require_release_artifact "openvibely_${VERSION}_windows_arm64_desktop-cli.zip"
 require_release_artifact "openvibely_${VERSION}_linux_amd64_desktop.tar.gz"
+require_release_artifact "openvibely_${VERSION}_linux_arm64_desktop.tar.gz"
 
 ###############################################################################
 # 2. GitHub CLI authentication
@@ -191,8 +193,11 @@ if [[ ${#ARTIFACTS[@]} -eq 0 && "${DRY_RUN:-0}" == "1" ]]; then
         "${DIST_DIR}/openvibely_${VERSION}_linux_amd64_server.tar.gz"
         "${DIST_DIR}/openvibely_${VERSION}_linux_arm64_server.tar.gz"
         "${DIST_DIR}/openvibely_${VERSION}_windows_amd64_server.zip"
+        "${DIST_DIR}/openvibely_${VERSION}_windows_arm64_server.zip"
         "${DIST_DIR}/openvibely_${VERSION}_windows_amd64_desktop-cli.zip"
+        "${DIST_DIR}/openvibely_${VERSION}_windows_arm64_desktop-cli.zip"
         "${DIST_DIR}/openvibely_${VERSION}_linux_amd64_desktop.tar.gz"
+        "${DIST_DIR}/openvibely_${VERSION}_linux_arm64_desktop.tar.gz"
     )
     if [[ "$(uname -s)" == "Darwin" ]]; then
         ARTIFACTS+=(

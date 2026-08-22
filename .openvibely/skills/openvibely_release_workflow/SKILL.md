@@ -62,10 +62,11 @@ Before a real non-dry-run release, confirm the exact commit that will receive th
 | `java` | Run `jsign` for Azure Artifact Signing | installed locally under `.tools/jre` by signing setup when missing |
 | `python3` | Bootstrap local Azure CLI when system `az` is unavailable | installed locally under `.tools/python` when Python 3.14+ is missing |
 | `az` | Fetch Azure Artifact Signing access token | installed locally under `.tools/azure-cli`, or replaced by `AZURE_ACCESS_TOKEN` |
-| `docker` *(optional)* | Build and push Docker image | https://docker.com |
-| `x86_64-w64-mingw32-gcc` *(optional)* | Cross-compile Windows desktop-cli | `brew install mingw-w64` |
+| `docker` *(optional)* | Build/push Docker image and host Wails Linux desktop cross-builds | https://docker.com |
+| `wails3` | Run desktop Taskfile builds and Wails Docker build paths | installed locally under `.tools/wails3` by signing setup when missing |
+| `x86_64-w64-mingw32-gcc` *(optional)* | CGO-enabled Windows desktop-cli fallback | `brew install mingw-w64` |
 
-**Platform builds:** macOS desktop `.app` bundles require a macOS host. Linux desktop binaries require a native Linux build job or `OPENVIBELY_LINUX_DESKTOP_BINARY`. Windows desktop binaries require `mingw-w64` or `OPENVIBELY_WINDOWS_DESKTOP_BINARY`. Official release builds fail if any required desktop artifact is unavailable.
+**Platform builds:** macOS desktop `.app` bundles require a macOS host. Linux desktop binaries for amd64 and arm64 require native Linux build jobs, Wails v3 Docker/Taskfile builds, or `OPENVIBELY_LINUX_DESKTOP_BINARY` plus `OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY`. Windows desktop binaries for amd64 and arm64 normally build through Wails with Go cross-compilation (`CGO_ENABLED=0`); `OPENVIBELY_WINDOWS_DESKTOP_BINARY` can supply a prebuilt amd64 artifact, and `OPENVIBELY_WINDOWS_DESKTOP_CGO=1` uses either `mingw-w64` or the Wails Docker path for a CGO-enabled Windows amd64 build. Official release builds fail if any required desktop artifact is unavailable.
 
 ### Missing tools — install before proceeding
 
@@ -75,10 +76,15 @@ Common macOS installs when local `.tools` bootstrapping is unavailable:
 
 ```bash
 brew install gh
+go install github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)
+wails3 task setup:docker
+# Optional, only if a CGO-enabled Windows desktop build is required:
 brew install mingw-w64
 ```
 
-After installing `gh`, run `gh auth status`; if unauthenticated, run `gh auth login` or ask the user to complete GitHub authentication. If the user has already requested the real release and later completes `gh` authentication or another credential step, treat the original release request as still active: verify auth and preflight, then continue the release pipeline. Do not stop with a status-only summary asking whether to proceed unless a new hard blocker remains or the user explicitly changed the request to dry-run/status mode. For platform-specific desktop builds, install the required compiler when practical or supply the corresponding signed/prebuilt artifact hook. Official releases cannot omit Windows or Linux desktop artifacts; the build stops if either cannot be produced.
+`ensure-release-tooling.sh` installs `wails3` locally and, when Docker is running, builds or refreshes `wails-cross-amd64` and `wails-cross-arm64` by default. Set `SKIP_WAILS_DOCKER_SETUP=1` to skip that heavier Docker image step, or `OPENVIBELY_WAILS_CROSS_ARCH=arm64` to prepare only one architecture.
+
+After installing `gh`, run `gh auth status`; if unauthenticated, run `gh auth login` or ask the user to complete GitHub authentication. If the user has already requested the real release and later completes `gh` authentication or another credential step, treat the original release request as still active: verify auth and preflight, then continue the release pipeline. Do not stop with a status-only summary asking whether to proceed unless a new hard blocker remains or the user explicitly changed the request to dry-run/status mode. For platform-specific desktop builds, install the required compiler when practical or supply the corresponding signed/prebuilt artifact hook. Official releases cannot omit Windows or Linux desktop artifacts; the build stops if either cannot be produced. Windows desktop normally uses Go's built-in cross-compilation; Linux desktop still needs a native Linux/WebKit build path, Wails v3 Docker/Taskfile build, or `OPENVIBELY_LINUX_DESKTOP_BINARY`.
 
 ---
 
@@ -158,7 +164,8 @@ OPENVIBELY_WINDOWS_VERIFY_COMMAND="$(pwd)/$SCRIPTS/verify-windows.sh"
 # the corresponding native release jobs. The build fails if either desktop
 # artifact cannot be produced.
 export OPENVIBELY_WINDOWS_DESKTOP_BINARY='/secure/path/to/openvibely-desktop.exe'
-export OPENVIBELY_LINUX_DESKTOP_BINARY='/secure/path/to/openvibely-desktop'
+export OPENVIBELY_LINUX_DESKTOP_BINARY='/secure/path/to/openvibely-desktop-amd64'
+export OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY='/secure/path/to/openvibely-desktop-arm64'
 bash $SCRIPTS/release-build.sh 0.1.1 ./dist/0.1.1
 
 # 2b. Verify archive contents, especially macOS .app zips
@@ -229,9 +236,12 @@ Use the preferred style from `references/release-note-style.md` when rewriting r
 | `openvibely_<version>_darwin_arm64_server.zip` | macOS server binary (Apple Silicon) |
 | `openvibely_<version>_linux_amd64_server.tar.gz` | Linux server binary (x86_64) |
 | `openvibely_<version>_linux_arm64_server.tar.gz` | Linux server binary (ARM64) |
-| `openvibely_<version>_windows_amd64_server.zip` | Windows server binary zip |
-| `openvibely_<version>_windows_amd64_desktop-cli.zip` | Signed Windows desktop binary zip |
-| `openvibely_<version>_linux_amd64_desktop.tar.gz` | Linux desktop binary tarball |
+| `openvibely_<version>_windows_amd64_server.zip` | Windows server binary zip (x86_64) |
+| `openvibely_<version>_windows_arm64_server.zip` | Windows server binary zip (ARM64) |
+| `openvibely_<version>_windows_amd64_desktop-cli.zip` | Signed Windows desktop binary zip (x86_64) |
+| `openvibely_<version>_windows_arm64_desktop-cli.zip` | Signed Windows desktop binary zip (ARM64) |
+| `openvibely_<version>_linux_amd64_desktop.tar.gz` | Linux desktop binary tarball (x86_64) |
+| `openvibely_<version>_linux_arm64_desktop.tar.gz` | Linux desktop binary tarball (ARM64) |
 | `SHA256SUMS` | SHA-256 checksums for all artifacts |
 
 **Casing rule:** Desktop macOS bundles use `OpenVibely_` (capitalized). All server/binary artifacts use `openvibely_` (lowercase).
@@ -373,8 +383,8 @@ Before publishing, verify the docs changes are included in the release branch/ta
 
 These are preserved from v0.1.0 and should appear in every release's notes unless resolved:
 
-1. **Linux desktop** — Built natively on Linux with GTK/WebKit dependencies or supplied through `OPENVIBELY_LINUX_DESKTOP_BINARY`; an official release fails if the artifact is unavailable.
-2. **Windows desktop-cli** — Artifact is a signed executable zip, not an installer. Build it with `mingw-w64` or supply it through `OPENVIBELY_WINDOWS_DESKTOP_BINARY`; an official release fails if the artifact is unavailable.
+1. **Linux desktop** — Artifacts are built for amd64 and arm64, either natively on Linux with GTK/WebKit dependencies, through Wails v3 Docker/Taskfile builds, or supplied through `OPENVIBELY_LINUX_DESKTOP_BINARY` and `OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY`; an official release fails if either artifact is unavailable.
+2. **Windows desktop-cli** — Artifacts are signed executable zips, not installers, for amd64 and arm64. They normally build through Wails with Go cross-compilation (`CGO_ENABLED=0`); use `OPENVIBELY_WINDOWS_DESKTOP_BINARY` to supply a prebuilt amd64 artifact, or `OPENVIBELY_WINDOWS_DESKTOP_CGO=1` plus `mingw-w64`/Wails Docker for a CGO-enabled Windows amd64 build. An official release fails if either artifact is unavailable.
 3. **Docker / VPS storage** — Mount `/data` as a persistent volume; do not rely on the container filesystem for database or repos.
 
 ---
@@ -446,8 +456,11 @@ dist/<version>/
 ├── openvibely_<version>_linux_amd64_server.tar.gz
 ├── openvibely_<version>_linux_arm64_server.tar.gz
 ├── openvibely_<version>_windows_amd64_server.zip
+├── openvibely_<version>_windows_arm64_server.zip
 ├── openvibely_<version>_windows_amd64_desktop-cli.zip
+├── openvibely_<version>_windows_arm64_desktop-cli.zip
 ├── openvibely_<version>_linux_amd64_desktop.tar.gz
+├── openvibely_<version>_linux_arm64_desktop.tar.gz
 ├── SHA256SUMS
 └── RELEASE_NOTES.md
 ```
@@ -482,5 +495,5 @@ Tests cover:
 
 - Tag: `v0.1.0` — commit `d654a06`
 - GitHub release title: `OpenVibely 0.1.0`
-- Assets published: darwin amd64/arm64 desktop `.app.zip`, darwin/linux amd64/arm64 server tarballs, windows amd64 server zip, windows amd64 desktop-cli zip, SHA256SUMS
+- Assets published: darwin amd64/arm64 desktop `.app.zip`, linux amd64/arm64 desktop tarballs, darwin/linux amd64/arm64 server archives, windows amd64/arm64 server zips, windows amd64/arm64 desktop-cli zips, SHA256SUMS
 - Docker image: `openvibely/openvibely:0.1.0`
