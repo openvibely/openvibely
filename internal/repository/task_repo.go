@@ -252,6 +252,49 @@ func (r *TaskRepo) GetByID(ctx context.Context, id string) (*models.Task, error)
 		 FROM tasks WHERE id = ?`, id)
 }
 
+// FilterNonChatTaskIDs returns the referenced task IDs that exist and are not
+// internal Chat tasks. The result is a set so callers can preserve their own
+// marker ordering, including duplicate markers, without hydrating full tasks.
+func (r *TaskRepo) FilterNonChatTaskIDs(ctx context.Context, ids []string) (map[string]bool, error) {
+	if len(ids) == 0 {
+		return map[string]bool{}, nil
+	}
+	placeholders := make([]string, 0, len(ids))
+	args := make([]any, 0, len(ids)+1)
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	if len(placeholders) == 0 {
+		return map[string]bool{}, nil
+	}
+	args = append(args, models.CategoryChat)
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id FROM tasks WHERE id IN (`+strings.Join(placeholders, ",")+`) AND category != ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("filtering non-chat task ids: %w", err)
+	}
+	defer rows.Close()
+
+	allowed := make(map[string]bool, len(placeholders))
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scanning non-chat task id: %w", err)
+		}
+		allowed[id] = true
+	}
+	return allowed, rows.Err()
+}
+
 func (r *TaskRepo) GetByProjectAndTitle(ctx context.Context, projectID, title string) (*models.Task, error) {
 	return r.getOne(ctx,
 		`SELECT `+taskSelectColumns+`

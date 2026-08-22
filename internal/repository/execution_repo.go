@@ -54,6 +54,9 @@ const taskExecutionMetricsSQL = `SELECT
 	(SELECT started_at FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1) AS latest_started_at,
 	COALESCE((SELECT duration_ms FROM executions WHERE task_id = ? AND duration_ms > 0 ORDER BY started_at DESC, rowid DESC LIMIT 1), 0) AS latest_duration_ms`
 
+const apiChatExecutionStatusSQL = `SELECT id, status, COALESCE(output, ''), COALESCE(error_message, ''), tokens_used, duration_ms
+	FROM executions WHERE id = ?`
+
 func scanExecutionRow(scanner interface {
 	Scan(dest ...interface{}) error
 }) (models.Execution, error) {
@@ -196,6 +199,22 @@ func (r *ExecutionRepo) GetByID(ctx context.Context, id string) (*models.Executi
 	}
 	if err != nil {
 		return nil, fmt.Errorf("getting execution: %w", err)
+	}
+	return &e, nil
+}
+
+// GetAPIChatStatusByID returns only the execution fields needed by
+// GET /api/chat/message/:id status polling. It intentionally omits prompt,
+// reasoning, diff, timestamps, and other execution-detail payloads.
+func (r *ExecutionRepo) GetAPIChatStatusByID(ctx context.Context, id string) (*models.Execution, error) {
+	var e models.Execution
+	err := r.db.QueryRowContext(ctx, apiChatExecutionStatusSQL, id).Scan(
+		&e.ID, &e.Status, &e.Output, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting api chat execution status: %w", err)
 	}
 	return &e, nil
 }
