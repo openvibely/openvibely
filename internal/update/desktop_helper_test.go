@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -116,5 +117,89 @@ func TestDesktopHelperResumesJournaledPublishedTargetAndValidates(t *testing.T) 
 	outcome, err := readBinaryHelperOutcome(staged)
 	if err != nil || outcome.State != binaryOutcomeSucceeded {
 		t.Fatalf("outcome=%#v err=%v", outcome, err)
+	}
+}
+
+func TestDesktopHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
+	cfg, err := ParseDesktopHelperArgs([]string{
+		"--parent-pid", "1234",
+		"--current", "/tmp/current",
+		"--staged", "/tmp/current.openvibely-new",
+		"--backup", "/tmp/current.openvibely-backup",
+		"--health-url", "http://127.0.0.1:3456/health",
+		"--expected-version", "0.6.0",
+		"--previous-version", "0.5.0",
+		"--outcome-id", "outcome-1",
+		"--recovery", "true",
+		"--running-version", "0.5.0",
+	})
+	if err != nil {
+		t.Fatalf("ParseDesktopHelperArgs: %v", err)
+	}
+	if cfg.ParentPID != 1234 || !cfg.Recovery || cfg.RunningVersion != "0.5.0" || cfg.HealthURL == "" {
+		t.Fatalf("parsed config = %#v", cfg)
+	}
+
+	for _, args := range [][]string{
+		{"--parent-pid"},
+		{"--parent-pid", "not-a-pid"},
+		{"--parent-pid", "1", "--recovery", "false"},
+		{"--parent-pid", "1", "--recovery", "true"},
+		{"--unknown", "value"},
+		{"--parent-pid", "1", "--parent-pid", "2"},
+	} {
+		if _, err := ParseDesktopHelperArgs(args); err == nil {
+			t.Fatalf("ParseDesktopHelperArgs(%v) unexpectedly succeeded", args)
+		}
+	}
+
+	var relaunch DesktopHelperConfig
+	metadata := `{"arguments":["OpenVibely","--flag"],"working_directory":"/tmp","executable_relative":"Contents/MacOS/OpenVibely"}`
+	if err := LoadDesktopHelperRelaunch(strings.NewReader(metadata), &relaunch); err != nil {
+		t.Fatalf("LoadDesktopHelperRelaunch: %v", err)
+	}
+	if len(relaunch.Arguments) != 2 || relaunch.Arguments[1] != "--flag" || relaunch.ExecutableRelative == "" {
+		t.Fatalf("relaunch config = %#v", relaunch)
+	}
+	for _, input := range []string{
+		`{"arguments":[],"working_directory":"/tmp"}`,
+		`{"arguments":["OpenVibely"],"working_directory":"relative"}`,
+		`{"arguments":["OpenVibely"],"working_directory":"/tmp","extra":true}`,
+		`not-json`,
+	} {
+		if err := LoadDesktopHelperRelaunch(strings.NewReader(input), &DesktopHelperConfig{}); err == nil {
+			t.Fatalf("LoadDesktopHelperRelaunch(%q) unexpectedly succeeded", input)
+		}
+	}
+	if err := LoadDesktopHelperRelaunch(nil, &DesktopHelperConfig{}); err == nil {
+		t.Fatal("nil relaunch reader unexpectedly succeeded")
+	}
+	if err := LoadDesktopHelperRelaunch(strings.NewReader(metadata), nil); err == nil {
+		t.Fatal("nil relaunch config unexpectedly succeeded")
+	}
+}
+
+func TestRunDesktopHelperEarlyValidationErrors(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "openvibely-desktop")
+	staged := current + ".openvibely-new"
+	backup := current + ".openvibely-backup"
+	if err := os.WriteFile(current, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staged, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backup, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, cfg := range []DesktopHelperConfig{
+		{ParentPID: 999999, Current: "relative", Staged: staged, Backup: backup, HealthURL: "http://127.0.0.1:1/health", ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "outcome"},
+		{ParentPID: os.Getpid(), Current: current, Staged: staged, Backup: backup, HealthURL: "http://127.0.0.1:1/health", ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "outcome"},
+		{ParentPID: 999999, Current: current, Staged: staged, Backup: backup, HealthURL: "", ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "outcome"},
+	} {
+		if err := RunDesktopHelper(context.Background(), cfg); err == nil {
+			t.Fatalf("RunDesktopHelper(%#v) unexpectedly succeeded", cfg)
+		}
 	}
 }

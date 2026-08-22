@@ -7876,3 +7876,68 @@ func TestExecuteListAgentsUsesRuntimeSummariesAndPreservesOutput(t *testing.T) {
 	}
 	require.Contains(t, h.executeListAgents(ctx), "No agents configured.")
 }
+
+func TestStartQueuedTaskThreadInputHandlesMissingTaskAndNoModel(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("missing task returns load error", func(t *testing.T) {
+		h, _, _ := setupTestHandler(t)
+		input := models.ThreadInput{ID: "queued-missing-task", TaskID: "missing-task", Content: "continue", Source: models.TaskOriginSlack}
+		err := h.startQueuedTaskThreadInput(ctx, input)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "task not found")
+	})
+
+	t.Run("unstartable queued input is cancelled when no model exists", func(t *testing.T) {
+		h, _, _ := setupTestHandler(t)
+		project := createProject(t, h, "Queued No Model Project")
+		task := createTask(t, h, project.ID, "Queued No Model Task", func(tk *models.Task) {
+			tk.Category = models.CategoryActive
+			tk.Status = models.StatusPending
+		})
+		queued := models.ThreadInput{ID: "queued-missing-model", Scope: models.ThreadInputScopeTask, TaskID: task.ID, ProjectID: project.ID, AgentConfigID: "missing-model", Content: "continue without model", Source: models.TaskOriginDiscord, DiscordChannelID: "C1", DiscordThreadID: "T1", DiscordMessageID: "M1", DiscordUserID: "U1"}
+
+		err := h.startQueuedTaskThreadInput(ctx, queued)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "input is no longer pending")
+	})
+}
+
+func TestChannelReplyAndQueuedAgentResolutionBranches(t *testing.T) {
+	h, _, repo := setupTestHandler(t)
+	ctx := context.Background()
+	project := createProject(t, h, "Queued Agent Resolution Project")
+	agent := createAgent(t, repo)
+	project.DefaultAgentConfigID = &agent.ID
+	require.NoError(t, h.projectRepo.Update(ctx, project))
+
+	task := createTask(t, h, project.ID, "Queued Agent Resolution Task", func(tk *models.Task) {
+		tk.AgentID = nil
+	})
+	resolved, unstartable, err := h.resolveTaskThreadExecutionAgent(ctx, task)
+	require.NoError(t, err)
+	require.False(t, unstartable)
+	require.NotNil(t, resolved)
+	require.Equal(t, agent.ID, resolved.ID)
+
+	input := models.ThreadInput{
+		Source:    models.TaskOriginEmail,
+		EmailFrom: "sender@example.com", EmailMessageID: "msg-1", EmailReferences: "<ref>", EmailSubject: "Subject", EmailSessionKey: "session-1",
+		TelegramChatID: 123, SlackTeamID: "T1", SlackChannelID: "C1", SlackThreadTS: "123.456", SlackUserID: "U1",
+		DiscordChannelID: "D1", DiscordThreadID: "DT1", DiscordMessageID: "DM1", DiscordUserID: "DU1",
+	}
+	reply := channelReplyFromThreadInput(input)
+	require.Equal(t, models.TaskOriginEmail, reply.Source)
+	require.Equal(t, "sender@example.com", reply.EmailFrom)
+	require.Equal(t, "msg-1", reply.EmailMessageID)
+	require.Equal(t, "session-1", reply.EmailSessionKey)
+	require.Equal(t, int64(123), reply.TelegramChatID)
+	require.Equal(t, "T1", reply.SlackTeamID)
+	require.Equal(t, "DU1", reply.DiscordUserID)
+
+	require.Equal(t, chatcontrol.SurfaceTelegram, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginTelegram}))
+	require.Equal(t, chatcontrol.SurfaceSlack, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginSlack}))
+	require.Equal(t, chatcontrol.SurfaceEmail, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginEmail}))
+	require.Equal(t, chatcontrol.SurfaceDiscord, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginDiscord}))
+	require.Equal(t, chatcontrol.SurfaceWeb, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginWeb}))
+}

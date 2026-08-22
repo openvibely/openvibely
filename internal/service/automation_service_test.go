@@ -916,3 +916,64 @@ func TestAutomationCompositeConstraintsAndProjectCascade(t *testing.T) {
 	require.NoError(t, db.QueryRow(`SELECT COUNT(*) FROM automations WHERE id = 'a'`).Scan(&count))
 	require.Zero(t, count)
 }
+
+func TestAutomationGraphServiceHistoryAndResourceWrappers(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := automationTestProject(t, repository.NewProjectRepo(db), "Automation graph wrappers")
+	task, schedule := automationTestTaskAndSchedule(t, repository.NewTaskRepo(db, nil), repository.NewScheduleRepo(db), project.ID, "Automation wrapper task")
+	automationRepo := repository.NewAutomationRepo(db)
+	registration := NewAutomationRegistrationService(automationRepo, NewAutomationAdapterRegistry())
+	definition, reused, err := registration.Register(ctx, AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: AutomationAdapterNativeSDLC, StableKey: "native-sdlc/wrappers",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "vision_suggestions", ResourceType: "task", ResourceID: task.ID},
+			{NodeKey: "vision_suggestions", ResourceType: "schedule", ResourceID: schedule.ID},
+		},
+	})
+	require.NoError(t, err)
+	require.False(t, reused)
+	require.NotEmpty(t, definition.Nodes)
+
+	graph := NewAutomationGraphService(automationRepo)
+	loaded, resources, err := graph.GetDefinition(ctx, project.ID, definition.Automation.ID)
+	require.NoError(t, err)
+	require.NotNil(t, loaded)
+	require.Len(t, resources, 2)
+
+	var nodeID string
+	for _, node := range loaded.Nodes {
+		if node.NodeKey == "vision_suggestions" {
+			nodeID = node.ID
+			break
+		}
+	}
+	require.NotEmpty(t, nodeID)
+	resourcePage, err := graph.ListNodeResources(ctx, project.ID, definition.Automation.ID, nodeID, 10, "")
+	require.NoError(t, err)
+	require.NotNil(t, resourcePage)
+	require.Empty(t, resourcePage.Items)
+
+	missingNodeResources, err := graph.ListNodeResources(ctx, project.ID, definition.Automation.ID, "missing-node", 10, "")
+	require.NoError(t, err)
+	require.Nil(t, missingNodeResources)
+	missingDefinitionResources, err := graph.ListNodeResources(ctx, project.ID, "missing-automation", nodeID, 10, "")
+	require.NoError(t, err)
+	require.Nil(t, missingDefinitionResources)
+
+	invocations, err := graph.ListInvocations(ctx, project.ID, definition.Automation.ID, 5, "")
+	require.NoError(t, err)
+	require.Empty(t, invocations.Items)
+	missingInvocations, err := graph.ListInvocations(ctx, project.ID, "missing-automation", 5, "")
+	require.NoError(t, err)
+	require.Empty(t, missingInvocations.Items)
+
+	workItems, err := graph.ListWorkItems(ctx, project.ID, definition.Automation.ID, "", 5, "")
+	require.NoError(t, err)
+	require.Empty(t, workItems.Items)
+	missingWorkItems, err := graph.ListWorkItems(ctx, project.ID, "missing-automation", "", 5, "")
+	require.NoError(t, err)
+	require.Empty(t, missingWorkItems.Items)
+	_, err = graph.ListWorkItems(ctx, project.ID, definition.Automation.ID, "invalid-status", 5, "")
+	require.Error(t, err)
+}
