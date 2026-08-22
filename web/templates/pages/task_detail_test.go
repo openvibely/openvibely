@@ -28,6 +28,31 @@ func TestTaskDetailContentIncludesAuthoritativeDynamicPageTitle(t *testing.T) {
 	}
 }
 
+func TestTaskDetailExecutionCopyRoutesThroughSharedClipboardHelper(t *testing.T) {
+	task := &models.Task{ID: "task-copy", ProjectID: "project-copy", Title: "Copy task"}
+	executions := []models.Execution{{ID: "exec-copy", TaskID: "task-copy", Status: models.ExecCompleted, Output: "model output", ErrorMessage: "model error"}}
+	var buf bytes.Buffer
+	if err := TaskDetailContent(task, nil, executions, nil, nil, nil, nil, "history", nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task detail content: %v", err)
+	}
+	html := buf.String()
+	for _, expected := range []string{
+		`function copyToClipboard(elementId, button)`,
+		`window.openVibelyCopyText(element.textContent, {`,
+		`successFeedback: {`,
+		`failureFeedback: {`,
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("task detail copy script missing shared-helper contract %q", expected)
+		}
+	}
+	for _, forbidden := range []string{`navigator.clipboard.writeText`, `document.execCommand('copy')`} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("task detail must not render local clipboard implementation %q", forbidden)
+		}
+	}
+}
+
 func TestTaskDetailBreadcrumbSupportsAutomationOrigin(t *testing.T) {
 	task := &models.Task{ID: "task-automation-origin", ProjectID: "project-origin", Title: "Automation task"}
 	var buf bytes.Buffer

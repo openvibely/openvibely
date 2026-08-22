@@ -42,6 +42,36 @@ func TestSettingsContent_WebhookCardsOmitEditOnlyPayloads(t *testing.T) {
 	}
 }
 
+func TestSettingsContent_WebhookCopyRoutesThroughSharedClipboardHelper(t *testing.T) {
+	out := renderSettingsContentForWebhookTest(t, []models.WebhookEndpoint{{
+		ID:              "wh-copy",
+		ProjectID:       "project-1",
+		Name:            "Copy Webhook",
+		Enabled:         true,
+		PathToken:       "token-copy",
+		DefaultPriority: 2,
+	}})
+
+	for _, expected := range []string{
+		`copyWebhookEndpointUrl('wh-copy', this)`,
+		`copyWebhookAbsoluteUrl('webhook_url_display', this)`,
+		`function writeToClipboardWithFeedback(text, button, successMessage, failureMessage)`,
+		`window.openVibelyCopyText(text, {`,
+		`successFeedback: { text: 'Copied' }`,
+		`Webhook URL copied`,
+		`Failed to copy webhook URL`,
+	} {
+		if !strings.Contains(out, expected) {
+			t.Fatalf("settings webhook copy script missing shared-helper contract %q", expected)
+		}
+	}
+	for _, forbidden := range []string{`navigator.clipboard.writeText`, `document.execCommand('copy')`} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("settings webhook copy must not render local clipboard implementation %q", forbidden)
+		}
+	}
+}
+
 func TestSettingsContent_WebhookEditBlocksSaveUntilDetailsHydrate(t *testing.T) {
 	out := renderSettingsContentForWebhookTest(t, []models.WebhookEndpoint{{
 		ID:              "wh-1",

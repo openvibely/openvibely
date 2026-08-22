@@ -762,62 +762,6 @@ templ diffViewerWithReviewContent(metas []DiffFileRenderMeta, taskID string, rev
 				});
 			}
 
-			function copyDiffFilePath(ev, button) {
-				if (ev) {
-					ev.preventDefault();
-					ev.stopPropagation();
-				}
-				var text = button && button.dataset ? button.dataset.copyPath : '';
-				if (!text) {
-					if (window.showToast) window.showToast('No file path to copy', 'failed');
-					return;
-				}
-
-				function setCopiedState() {
-					if (!button) return;
-					var originalHTML = button.innerHTML;
-					button.classList.add('btn-success');
-					button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
-					setTimeout(function() {
-						button.classList.remove('btn-success');
-						button.innerHTML = originalHTML;
-					}, 1200);
-				}
-
-				function onCopySuccess() {
-					setCopiedState();
-				}
-
-				function onCopyFailure() {
-					if (window.showToast) window.showToast('Failed to copy file path', 'failed');
-				}
-
-				function fallbackCopy() {
-					var textarea = document.createElement('textarea');
-					textarea.value = text;
-					textarea.setAttribute('readonly', '');
-					textarea.style.position = 'fixed';
-					textarea.style.opacity = '0';
-					document.body.appendChild(textarea);
-					textarea.select();
-					textarea.setSelectionRange(0, textarea.value.length);
-					try {
-						if (document.execCommand('copy')) onCopySuccess();
-						else onCopyFailure();
-					} catch (e) {
-						onCopyFailure();
-					} finally {
-						document.body.removeChild(textarea);
-					}
-				}
-
-				if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-					navigator.clipboard.writeText(text).then(onCopySuccess).catch(fallbackCopy);
-					return;
-				}
-				fallbackCopy();
-			}
-
 			function persistDiffViewPreference(mode) {
 				try {
 					fetch('/ui/preferences', {
@@ -2011,62 +1955,6 @@ templ diffViewerContent(metas []DiffFileRenderMeta, initialView string) {
 				['htmx:afterSwap', 'htmx:afterSettle'].forEach(function(eventName) {
 					document.body.addEventListener(eventName, window._restoreDiffFileState);
 				});
-			}
-
-			function copyDiffFilePath(ev, button) {
-				if (ev) {
-					ev.preventDefault();
-					ev.stopPropagation();
-				}
-				var text = button && button.dataset ? button.dataset.copyPath : '';
-				if (!text) {
-					if (window.showToast) window.showToast('No file path to copy', 'failed');
-					return;
-				}
-
-				function setCopiedState() {
-					if (!button) return;
-					var originalHTML = button.innerHTML;
-					button.classList.add('btn-success');
-					button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
-					setTimeout(function() {
-						button.classList.remove('btn-success');
-						button.innerHTML = originalHTML;
-					}, 1200);
-				}
-
-				function onCopySuccess() {
-					setCopiedState();
-				}
-
-				function onCopyFailure() {
-					if (window.showToast) window.showToast('Failed to copy file path', 'failed');
-				}
-
-				function fallbackCopy() {
-					var textarea = document.createElement('textarea');
-					textarea.value = text;
-					textarea.setAttribute('readonly', '');
-					textarea.style.position = 'fixed';
-					textarea.style.opacity = '0';
-					document.body.appendChild(textarea);
-					textarea.select();
-					textarea.setSelectionRange(0, textarea.value.length);
-					try {
-						if (document.execCommand('copy')) onCopySuccess();
-						else onCopyFailure();
-					} catch (e) {
-						onCopyFailure();
-					} finally {
-						document.body.removeChild(textarea);
-					}
-				}
-
-				if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-					navigator.clipboard.writeText(text).then(onCopySuccess).catch(fallbackCopy);
-					return;
-				}
-				fallbackCopy();
 			}
 
 			function persistDiffViewPreference(mode) {

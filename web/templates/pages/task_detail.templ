@@ -1625,20 +1625,19 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 
 			function copyToClipboard(elementId, button) {
 				var element = document.getElementById(elementId);
-				if (!element) return;
+				if (!element || !window.openVibelyCopyText) return;
 
-				var text = element.textContent;
-				navigator.clipboard.writeText(text).then(function() {
-					var originalHTML = button.innerHTML;
-					button.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
-					button.classList.add('btn-success');
-
-					setTimeout(function() {
-						button.innerHTML = originalHTML;
-						button.classList.remove('btn-success');
-					}, 2000);
-				}).catch(function(err) {
-					console.error('Failed to copy text: ', err);
+				window.openVibelyCopyText(element.textContent, {
+					button: button,
+					successFeedback: {
+						html: '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
+						addClass: 'btn-success'
+					},
+					failureFeedback: {
+						html: '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>',
+						title: 'Copy failed',
+						addClass: 'btn-error'
+					}
 				});
 			}
 		</script>

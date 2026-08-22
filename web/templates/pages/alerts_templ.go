@@ -238,7 +238,7 @@ func alertsContent(alerts []models.AlertSummary, currentProjectID string, unread
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</div></div><!-- Task Detail Dialog Container --><script>\n\t\tasync function refreshSystemUpdateCard() {\n\t\t\t\tvar card = document.getElementById('system-update-card');\n\t\t\t\tif (!card || !window.openVibelyNormalizeSystemUpdateSnapshot) return;\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch('/api/system/update', {headers: {'Accept': 'application/json'}});\n\t\t\t\t\tif (response.status === 204) {\n\t\t\t\t\t\tcard.classList.add('hidden');\n\t\t\t\t\t\tif (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(null);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!response.ok) return;\n\t\t\t\t\tvar data = await response.json();\n\t\t\t\t\tif (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(data);\n\t\t\t\t\tvar view = window.openVibelyNormalizeSystemUpdateSnapshot(data);\n\t\t\t\t\tif (view.hidden) { card.classList.add('hidden'); return; }\n\t\t\t\t\tcard.classList.remove('hidden');\n\t\t\t\t\tdocument.getElementById('system-update-summary').textContent = 'Current ' + view.currentVersion + (view.available ? ' · Available ' + view.available : ' · No update available') + ' · ' + view.distribution + ' · ' + view.channel;\n\t\t\t\t\tdocument.getElementById('system-update-state').textContent = view.state;\n\t\t\t\t\tdocument.getElementById('system-update-owner').textContent = view.ownerText;\n\t\t\t\t\tdocument.getElementById('system-update-work').textContent = view.workText;\n\t\t\t\t\tvar digest = document.getElementById('system-update-digest');\n\t\t\t\t\tdigest.textContent = view.imageRef ? 'Verified image: ' + view.imageRef : ''; digest.classList.toggle('hidden', !view.imageRef);\n\t\t\t\t\tvar notes = document.getElementById('system-update-notes');\n\t\t\t\t\tif (view.notesURL) { notes.href = view.notesURL; notes.classList.remove('hidden'); } else { notes.classList.add('hidden'); }\n\t\t\t\t\tvar error = document.getElementById('system-update-error'); error.textContent = view.errorText; error.classList.toggle('hidden', !view.errorText);\n\t\t\t\t\tvar accept = document.getElementById('system-update-accept');\n\t\t\t\t\taccept.textContent = view.acceptText;\n\t\t\t\t\taccept.classList.toggle('hidden', !view.actionable);\n\t\t\t\t\tdocument.getElementById('system-update-acceptance').classList.toggle('hidden', !view.showAcceptance);\n\t\t\t\t\tdocument.getElementById('system-update-cancel').classList.toggle('hidden', !view.showCancel);\n\t\t\t\t} catch (_) {}\n\t\t\t}\n\t\t\tasync function systemUpdateAction(action) {\n\t\t\t\tvar response = await fetch('/api/system/update/' + action, {method: 'POST', headers: {'Accept': 'application/json'}});\n\t\t\t\tif (action === 'cancel' && response.ok && window.openVibelyClearSystemUpdatePendingSuccess) window.openVibelyClearSystemUpdatePendingSuccess();\n\t\t\t\tawait refreshSystemUpdateCard();\n\t\t\t}\n\t\t\trefreshSystemUpdateCard();\n\t\t\tif (window.openVibelySystemUpdatePoll) clearInterval(window.openVibelySystemUpdatePoll);\n\t\t\twindow.openVibelySystemUpdatePoll = setInterval(refreshSystemUpdateCard, 1000);\n\t\t\twindow.addEventListener('pagehide', function() { clearInterval(window.openVibelySystemUpdatePoll); }, {once: true});\n\n\t\t\tfunction loadAlertDetail(details) {\n\t\t\t\tif (!details || !details.open) return;\n\t\t\t\tvar container = details.querySelector('[data-alert-detail-container]');\n\t\t\t\tif (!container || container.dataset.alertDetailState === 'loaded' || container.dataset.alertDetailState === 'loading') return;\n\t\t\t\tvar url = details.dataset.alertDetailUrl || '';\n\t\t\t\tif (!url) return;\n\t\t\t\tcontainer.dataset.alertDetailState = 'loading';\n\t\t\t\tfetch(url, {headers: {'Accept': 'text/html'}}).then(function(response) {\n\t\t\t\t\tif (!response.ok) throw new Error('detail request failed');\n\t\t\t\t\treturn response.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\tcontainer.innerHTML = html;\n\t\t\t\t\tcontainer.dataset.alertDetailState = 'loaded';\n\t\t\t\t}).catch(function() {\n\t\t\t\t\tcontainer.dataset.alertDetailState = '';\n\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm text-error\">Could not load detail. Close and reopen to retry.</p>';\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction copyAlertDetails(button) {\n\t\t\t\tif (!button) return;\n\t\t\t\tvar scope = button.closest('[data-alert-detail-loaded]') || button.closest('details') || button.parentElement;\n\t\t\t\tvar copyText = scope && scope.querySelector('[data-alert-copy-text]');\n\t\t\t\tvar text = copyText ? copyText.textContent : '';\n\t\t\t\tvar defaultLabel = button.dataset.defaultLabel || 'Copy body';\n\t\t\t\tvar feedback = button.querySelector('[data-alert-copy-feedback]');\n\t\t\t\tvar copyIcon = button.querySelector('[data-alert-copy-icon]');\n\t\t\t\tvar successIcon = button.querySelector('[data-alert-copy-success-icon]');\n\t\t\t\tvar errorIcon = button.querySelector('[data-alert-copy-error-icon]');\n\t\t\t\tvar setFeedback = function(label, failed) {\n\t\t\t\t\tif (feedback) feedback.textContent = label;\n\t\t\t\t\tif (copyIcon) copyIcon.classList.add('hidden');\n\t\t\t\t\tif (successIcon) successIcon.classList.toggle('hidden', failed);\n\t\t\t\t\tif (errorIcon) errorIcon.classList.toggle('hidden', !failed);\n\t\t\t\t\tbutton.title = label;\n\t\t\t\t\tbutton.classList.toggle('btn-error', failed);\n\t\t\t\t\tbutton.classList.toggle('btn-success', !failed);\n\t\t\t\t\twindow.setTimeout(function() {\n\t\t\t\t\t\tif (!button.isConnected) return;\n\t\t\t\t\t\tif (feedback) feedback.textContent = defaultLabel;\n\t\t\t\t\t\tif (copyIcon) copyIcon.classList.remove('hidden');\n\t\t\t\t\t\tif (successIcon) successIcon.classList.add('hidden');\n\t\t\t\t\t\tif (errorIcon) errorIcon.classList.add('hidden');\n\t\t\t\t\t\tbutton.title = defaultLabel;\n\t\t\t\t\t\tbutton.classList.remove('btn-error', 'btn-success');\n\t\t\t\t\t}, 2000);\n\t\t\t\t};\n\t\t\t\tif (!text || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {\n\t\t\t\t\tsetFeedback('Copy failed', true);\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\tnavigator.clipboard.writeText(text).then(function() {\n\t\t\t\t\tsetFeedback('Copied', false);\n\t\t\t\t}).catch(function() {\n\t\t\t\t\tsetFeedback('Copy failed', true);\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction openAlertTaskDialog(taskId) {\n\t\t\twindow.openVibelyNavigate(\n\t\t\t\t'/tasks/' + taskId + '?tab=history&from=alerts',\n\t\t\t\t'/tasks/' + taskId + '?from=alerts'\n\t\t\t);\n\t\t}\n\n\t\tfunction deleteAlerts(url, target) {\n\t\t\tif (!url) return false;\n\t\t\thtmx.ajax('DELETE', url, {\n\t\t\t\ttarget: target || '#alerts-content',\n\t\t\t\tselect: '#alerts-content',\n\t\t\t\tswap: 'outerHTML show:none'\n\t\t\t});\n\t\t\treturn false;\n\t\t}\n\n\t\tfunction deleteAlertsFromDataset(el) {\n\t\t\tif (!el || !el.dataset) return false;\n\t\t\tvar url = el.dataset.deleteUrl || '';\n\t\t\tvar row = el.closest('[data-alert-scroll-anchor]');\n\t\t\tif (row && window.openVibelyAlertsViewport) {\n\t\t\t\twindow.openVibelyAlertsViewport.pendingFocusID = row.dataset.alertId || '';\n\t\t\t}\n\t\t\treturn deleteAlerts(url, '#alerts-content');\n\t\t}\n\n\t\t(function installAlertsViewportPreservation() {\n\t\t\tvar state = window.openVibelyAlertsViewport || (window.openVibelyAlertsViewport = {});\n\t\t\tif (state.installed) return;\n\t\t\tstate.installed = true;\n\n\t\t\tfunction alertRows(root) {\n\t\t\t\treturn Array.prototype.slice.call(root.querySelectorAll('[data-alert-scroll-anchor]'));\n\t\t\t}\n\n\t\t\tfunction visibleAlertRows(rows) {\n\t\t\t\treturn rows.filter(function(row) {\n\t\t\t\t\treturn row.getClientRects().length > 0;\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction focusCandidates(rows, activeID) {\n\t\t\t\tvar ids = visibleAlertRows(rows).map(function(row) { return row.dataset.alertId || ''; });\n\t\t\t\tvar index = ids.indexOf(activeID);\n\t\t\t\tif (index < 0) return [];\n\t\t\t\tvar candidates = [activeID];\n\t\t\t\tfor (var distance = 1; distance < ids.length; distance++) {\n\t\t\t\t\tif (index + distance < ids.length) candidates.push(ids[index + distance]);\n\t\t\t\t\tif (index - distance >= 0) candidates.push(ids[index - distance]);\n\t\t\t\t}\n\t\t\t\treturn candidates;\n\t\t\t}\n\n\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tif (!target || target.id !== 'alerts-content' || !root) return;\n\n\t\t\t\tvar rows = alertRows(root);\n\t\t\t\tvar rootRect = root.getBoundingClientRect();\n\t\t\t\tvar viewportTop = Math.max(rootRect.top, 0);\n\t\t\t\tvar viewportBottom = Math.min(rootRect.bottom, window.innerHeight);\n\t\t\t\tvar renderedRows = visibleAlertRows(rows);\n\t\t\t\tvar viewportRows = renderedRows.filter(function(row) {\n\t\t\t\t\tvar rect = row.getBoundingClientRect();\n\t\t\t\t\treturn rect.bottom > viewportTop && rect.top < viewportBottom;\n\t\t\t\t});\n\t\t\t\tvar anchors = (viewportRows.length ? viewportRows : renderedRows).map(function(row) {\n\t\t\t\t\treturn {id: row.dataset.alertId || '', top: row.getBoundingClientRect().top};\n\t\t\t\t}).sort(function(a, b) {\n\t\t\t\t\treturn Math.abs(a.top - viewportTop) - Math.abs(b.top - viewportTop);\n\t\t\t\t});\n\t\t\t\tvar activeDelete = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-alert-delete]');\n\t\t\t\tvar activeRow = activeDelete && activeDelete.closest('[data-alert-scroll-anchor]');\n\t\t\t\tvar focusID = state.pendingFocusID || (activeRow && activeRow.dataset.alertId) || '';\n\n\t\t\t\tstate.swap = {\n\t\t\t\t\tanchors: anchors,\n\t\t\t\t\trootScrollTop: root.scrollTop,\n\t\t\t\t\twindowScrollY: window.scrollY,\n\t\t\t\t\tfocusIDs: focusCandidates(rows, focusID)\n\t\t\t\t};\n\t\t\t\tstate.pendingFocusID = '';\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tvar swappedTarget = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tvar saved = state.swap;\n\t\t\t\tif (!swappedTarget || swappedTarget.id !== 'alerts-content' || !root || !saved) return;\n\t\t\t\tstate.swap = null;\n\t\t\t\tswappedTarget.openVibelyAlertsViewportSwap = saved;\n\n\t\t\t\tif (typeof window.refreshCardSearches === 'function') {\n\t\t\t\t\twindow.refreshCardSearches(root);\n\t\t\t\t}\n\t\t\t\troot.scrollTop = saved.rootScrollTop;\n\t\t\t\tvar anchor = null;\n\t\t\t\tvar savedAnchor = null;\n\t\t\t\tfor (var i = 0; i < saved.anchors.length; i++) {\n\t\t\t\t\tanchor = root.querySelector('[data-alert-scroll-anchor=\"' + CSS.escape(saved.anchors[i].id) + '\"]');\n\t\t\t\t\tif (anchor) {\n\t\t\t\t\t\tsavedAnchor = saved.anchors[i];\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (anchor && savedAnchor) {\n\t\t\t\t\tvar delta = anchor.getBoundingClientRect().top - savedAnchor.top;\n\t\t\t\t\tif (root.scrollHeight > root.clientHeight) root.scrollTop += delta;\n\t\t\t\t\telse window.scrollBy(0, delta);\n\t\t\t\t} else if (Math.abs(window.scrollY - saved.windowScrollY) > 1) {\n\t\t\t\t\twindow.scrollTo(0, saved.windowScrollY);\n\t\t\t\t}\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:afterSettle', function(event) {\n\t\t\t\tvar settledTarget = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tvar saved = settledTarget && settledTarget.openVibelyAlertsViewportSwap;\n\t\t\t\tif (!settledTarget || settledTarget.id !== 'alerts-content' || !root || !saved) return;\n\t\t\t\tdelete settledTarget.openVibelyAlertsViewportSwap;\n\n\t\t\t\tvar focusTarget = null;\n\t\t\t\tfor (var j = 0; j < saved.focusIDs.length; j++) {\n\t\t\t\t\tfocusTarget = root.querySelector('[data-alert-scroll-anchor=\"' + CSS.escape(saved.focusIDs[j]) + '\"] [data-alert-delete]');\n\t\t\t\t\tif (focusTarget) break;\n\t\t\t\t}\n\t\t\t\tif (!focusTarget && saved.focusIDs.length) focusTarget = root.querySelector('[data-card-search]');\n\t\t\t\tif (focusTarget) focusTarget.focus({preventScroll: true});\n\t\t\t});\n\t\t})();\n\t</script>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</div></div><!-- Task Detail Dialog Container --><script>\n\t\tasync function refreshSystemUpdateCard() {\n\t\t\t\tvar card = document.getElementById('system-update-card');\n\t\t\t\tif (!card || !window.openVibelyNormalizeSystemUpdateSnapshot) return;\n\t\t\t\ttry {\n\t\t\t\t\tvar response = await fetch('/api/system/update', {headers: {'Accept': 'application/json'}});\n\t\t\t\t\tif (response.status === 204) {\n\t\t\t\t\t\tcard.classList.add('hidden');\n\t\t\t\t\t\tif (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(null);\n\t\t\t\t\t\treturn;\n\t\t\t\t\t}\n\t\t\t\t\tif (!response.ok) return;\n\t\t\t\t\tvar data = await response.json();\n\t\t\t\t\tif (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(data);\n\t\t\t\t\tvar view = window.openVibelyNormalizeSystemUpdateSnapshot(data);\n\t\t\t\t\tif (view.hidden) { card.classList.add('hidden'); return; }\n\t\t\t\t\tcard.classList.remove('hidden');\n\t\t\t\t\tdocument.getElementById('system-update-summary').textContent = 'Current ' + view.currentVersion + (view.available ? ' · Available ' + view.available : ' · No update available') + ' · ' + view.distribution + ' · ' + view.channel;\n\t\t\t\t\tdocument.getElementById('system-update-state').textContent = view.state;\n\t\t\t\t\tdocument.getElementById('system-update-owner').textContent = view.ownerText;\n\t\t\t\t\tdocument.getElementById('system-update-work').textContent = view.workText;\n\t\t\t\t\tvar digest = document.getElementById('system-update-digest');\n\t\t\t\t\tdigest.textContent = view.imageRef ? 'Verified image: ' + view.imageRef : ''; digest.classList.toggle('hidden', !view.imageRef);\n\t\t\t\t\tvar notes = document.getElementById('system-update-notes');\n\t\t\t\t\tif (view.notesURL) { notes.href = view.notesURL; notes.classList.remove('hidden'); } else { notes.classList.add('hidden'); }\n\t\t\t\t\tvar error = document.getElementById('system-update-error'); error.textContent = view.errorText; error.classList.toggle('hidden', !view.errorText);\n\t\t\t\t\tvar accept = document.getElementById('system-update-accept');\n\t\t\t\t\taccept.textContent = view.acceptText;\n\t\t\t\t\taccept.classList.toggle('hidden', !view.actionable);\n\t\t\t\t\tdocument.getElementById('system-update-acceptance').classList.toggle('hidden', !view.showAcceptance);\n\t\t\t\t\tdocument.getElementById('system-update-cancel').classList.toggle('hidden', !view.showCancel);\n\t\t\t\t} catch (_) {}\n\t\t\t}\n\t\t\tasync function systemUpdateAction(action) {\n\t\t\t\tvar response = await fetch('/api/system/update/' + action, {method: 'POST', headers: {'Accept': 'application/json'}});\n\t\t\t\tif (action === 'cancel' && response.ok && window.openVibelyClearSystemUpdatePendingSuccess) window.openVibelyClearSystemUpdatePendingSuccess();\n\t\t\t\tawait refreshSystemUpdateCard();\n\t\t\t}\n\t\t\trefreshSystemUpdateCard();\n\t\t\tif (window.openVibelySystemUpdatePoll) clearInterval(window.openVibelySystemUpdatePoll);\n\t\t\twindow.openVibelySystemUpdatePoll = setInterval(refreshSystemUpdateCard, 1000);\n\t\t\twindow.addEventListener('pagehide', function() { clearInterval(window.openVibelySystemUpdatePoll); }, {once: true});\n\n\t\t\tfunction loadAlertDetail(details) {\n\t\t\t\tif (!details || !details.open) return;\n\t\t\t\tvar container = details.querySelector('[data-alert-detail-container]');\n\t\t\t\tif (!container || container.dataset.alertDetailState === 'loaded' || container.dataset.alertDetailState === 'loading') return;\n\t\t\t\tvar url = details.dataset.alertDetailUrl || '';\n\t\t\t\tif (!url) return;\n\t\t\t\tcontainer.dataset.alertDetailState = 'loading';\n\t\t\t\tfetch(url, {headers: {'Accept': 'text/html'}}).then(function(response) {\n\t\t\t\t\tif (!response.ok) throw new Error('detail request failed');\n\t\t\t\t\treturn response.text();\n\t\t\t\t}).then(function(html) {\n\t\t\t\t\tcontainer.innerHTML = html;\n\t\t\t\t\tcontainer.dataset.alertDetailState = 'loaded';\n\t\t\t\t}).catch(function() {\n\t\t\t\t\tcontainer.dataset.alertDetailState = '';\n\t\t\t\t\tcontainer.innerHTML = '<p class=\"text-sm text-error\">Could not load detail. Close and reopen to retry.</p>';\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction copyAlertDetails(button) {\n\t\t\t\tif (!button) return;\n\t\t\t\tvar scope = button.closest('[data-alert-detail-loaded]') || button.closest('details') || button.parentElement;\n\t\t\t\tvar copyText = scope && scope.querySelector('[data-alert-copy-text]');\n\t\t\t\tvar text = copyText ? copyText.textContent : '';\n\t\t\t\tvar defaultLabel = button.dataset.defaultLabel || 'Copy body';\n\t\t\t\tvar feedback = button.querySelector('[data-alert-copy-feedback]');\n\t\t\t\tvar copyIcon = button.querySelector('[data-alert-copy-icon]');\n\t\t\t\tvar successIcon = button.querySelector('[data-alert-copy-success-icon]');\n\t\t\t\tvar errorIcon = button.querySelector('[data-alert-copy-error-icon]');\n\t\t\t\tvar setFeedback = function(label, failed) {\n\t\t\t\t\tif (feedback) feedback.textContent = label;\n\t\t\t\t\tif (copyIcon) copyIcon.classList.add('hidden');\n\t\t\t\t\tif (successIcon) successIcon.classList.toggle('hidden', failed);\n\t\t\t\t\tif (errorIcon) errorIcon.classList.toggle('hidden', !failed);\n\t\t\t\t\tbutton.title = label;\n\t\t\t\t\tbutton.classList.toggle('btn-error', failed);\n\t\t\t\t\tbutton.classList.toggle('btn-success', !failed);\n\t\t\t\t};\n\t\t\t\tvar restoreFeedback = function() {\n\t\t\t\t\tif (feedback) feedback.textContent = defaultLabel;\n\t\t\t\t\tif (copyIcon) copyIcon.classList.remove('hidden');\n\t\t\t\t\tif (successIcon) successIcon.classList.add('hidden');\n\t\t\t\t\tif (errorIcon) errorIcon.classList.add('hidden');\n\t\t\t\t\tbutton.title = defaultLabel;\n\t\t\t\t\tbutton.classList.remove('btn-error', 'btn-success');\n\t\t\t\t};\n\t\t\t\tif (!window.openVibelyCopyText) {\n\t\t\t\t\tsetFeedback('Copy failed', true);\n\t\t\t\t\treturn;\n\t\t\t\t}\n\t\t\t\twindow.openVibelyCopyText(text, {\n\t\t\t\t\tbutton: button,\n\t\t\t\t\tsuccessFeedback: { apply: function() { setFeedback('Copied', false); }, restore: restoreFeedback },\n\t\t\t\t\tfailureFeedback: { apply: function() { setFeedback('Copy failed', true); }, restore: restoreFeedback }\n\t\t\t\t});\n\t\t\t}\n\t\t\tfunction openAlertTaskDialog(taskId) {\n\t\t\twindow.openVibelyNavigate(\n\t\t\t\t'/tasks/' + taskId + '?tab=history&from=alerts',\n\t\t\t\t'/tasks/' + taskId + '?from=alerts'\n\t\t\t);\n\t\t}\n\n\t\tfunction deleteAlerts(url, target) {\n\t\t\tif (!url) return false;\n\t\t\thtmx.ajax('DELETE', url, {\n\t\t\t\ttarget: target || '#alerts-content',\n\t\t\t\tselect: '#alerts-content',\n\t\t\t\tswap: 'outerHTML show:none'\n\t\t\t});\n\t\t\treturn false;\n\t\t}\n\n\t\tfunction deleteAlertsFromDataset(el) {\n\t\t\tif (!el || !el.dataset) return false;\n\t\t\tvar url = el.dataset.deleteUrl || '';\n\t\t\tvar row = el.closest('[data-alert-scroll-anchor]');\n\t\t\tif (row && window.openVibelyAlertsViewport) {\n\t\t\t\twindow.openVibelyAlertsViewport.pendingFocusID = row.dataset.alertId || '';\n\t\t\t}\n\t\t\treturn deleteAlerts(url, '#alerts-content');\n\t\t}\n\n\t\t(function installAlertsViewportPreservation() {\n\t\t\tvar state = window.openVibelyAlertsViewport || (window.openVibelyAlertsViewport = {});\n\t\t\tif (state.installed) return;\n\t\t\tstate.installed = true;\n\n\t\t\tfunction alertRows(root) {\n\t\t\t\treturn Array.prototype.slice.call(root.querySelectorAll('[data-alert-scroll-anchor]'));\n\t\t\t}\n\n\t\t\tfunction visibleAlertRows(rows) {\n\t\t\t\treturn rows.filter(function(row) {\n\t\t\t\t\treturn row.getClientRects().length > 0;\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tfunction focusCandidates(rows, activeID) {\n\t\t\t\tvar ids = visibleAlertRows(rows).map(function(row) { return row.dataset.alertId || ''; });\n\t\t\t\tvar index = ids.indexOf(activeID);\n\t\t\t\tif (index < 0) return [];\n\t\t\t\tvar candidates = [activeID];\n\t\t\t\tfor (var distance = 1; distance < ids.length; distance++) {\n\t\t\t\t\tif (index + distance < ids.length) candidates.push(ids[index + distance]);\n\t\t\t\t\tif (index - distance >= 0) candidates.push(ids[index - distance]);\n\t\t\t\t}\n\t\t\t\treturn candidates;\n\t\t\t}\n\n\t\t\tdocument.body.addEventListener('htmx:beforeSwap', function(event) {\n\t\t\t\tvar target = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tif (!target || target.id !== 'alerts-content' || !root) return;\n\n\t\t\t\tvar rows = alertRows(root);\n\t\t\t\tvar rootRect = root.getBoundingClientRect();\n\t\t\t\tvar viewportTop = Math.max(rootRect.top, 0);\n\t\t\t\tvar viewportBottom = Math.min(rootRect.bottom, window.innerHeight);\n\t\t\t\tvar renderedRows = visibleAlertRows(rows);\n\t\t\t\tvar viewportRows = renderedRows.filter(function(row) {\n\t\t\t\t\tvar rect = row.getBoundingClientRect();\n\t\t\t\t\treturn rect.bottom > viewportTop && rect.top < viewportBottom;\n\t\t\t\t});\n\t\t\t\tvar anchors = (viewportRows.length ? viewportRows : renderedRows).map(function(row) {\n\t\t\t\t\treturn {id: row.dataset.alertId || '', top: row.getBoundingClientRect().top};\n\t\t\t\t}).sort(function(a, b) {\n\t\t\t\t\treturn Math.abs(a.top - viewportTop) - Math.abs(b.top - viewportTop);\n\t\t\t\t});\n\t\t\t\tvar activeDelete = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-alert-delete]');\n\t\t\t\tvar activeRow = activeDelete && activeDelete.closest('[data-alert-scroll-anchor]');\n\t\t\t\tvar focusID = state.pendingFocusID || (activeRow && activeRow.dataset.alertId) || '';\n\n\t\t\t\tstate.swap = {\n\t\t\t\t\tanchors: anchors,\n\t\t\t\t\trootScrollTop: root.scrollTop,\n\t\t\t\t\twindowScrollY: window.scrollY,\n\t\t\t\t\tfocusIDs: focusCandidates(rows, focusID)\n\t\t\t\t};\n\t\t\t\tstate.pendingFocusID = '';\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:afterSwap', function(event) {\n\t\t\t\tvar swappedTarget = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tvar saved = state.swap;\n\t\t\t\tif (!swappedTarget || swappedTarget.id !== 'alerts-content' || !root || !saved) return;\n\t\t\t\tstate.swap = null;\n\t\t\t\tswappedTarget.openVibelyAlertsViewportSwap = saved;\n\n\t\t\t\tif (typeof window.refreshCardSearches === 'function') {\n\t\t\t\t\twindow.refreshCardSearches(root);\n\t\t\t\t}\n\t\t\t\troot.scrollTop = saved.rootScrollTop;\n\t\t\t\tvar anchor = null;\n\t\t\t\tvar savedAnchor = null;\n\t\t\t\tfor (var i = 0; i < saved.anchors.length; i++) {\n\t\t\t\t\tanchor = root.querySelector('[data-alert-scroll-anchor=\"' + CSS.escape(saved.anchors[i].id) + '\"]');\n\t\t\t\t\tif (anchor) {\n\t\t\t\t\t\tsavedAnchor = saved.anchors[i];\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif (anchor && savedAnchor) {\n\t\t\t\t\tvar delta = anchor.getBoundingClientRect().top - savedAnchor.top;\n\t\t\t\t\tif (root.scrollHeight > root.clientHeight) root.scrollTop += delta;\n\t\t\t\t\telse window.scrollBy(0, delta);\n\t\t\t\t} else if (Math.abs(window.scrollY - saved.windowScrollY) > 1) {\n\t\t\t\t\twindow.scrollTo(0, saved.windowScrollY);\n\t\t\t\t}\n\t\t\t});\n\n\t\t\tdocument.body.addEventListener('htmx:afterSettle', function(event) {\n\t\t\t\tvar settledTarget = event.detail && event.detail.target;\n\t\t\t\tvar root = document.getElementById('alerts-container');\n\t\t\t\tvar saved = settledTarget && settledTarget.openVibelyAlertsViewportSwap;\n\t\t\t\tif (!settledTarget || settledTarget.id !== 'alerts-content' || !root || !saved) return;\n\t\t\t\tdelete settledTarget.openVibelyAlertsViewportSwap;\n\n\t\t\t\tvar focusTarget = null;\n\t\t\t\tfor (var j = 0; j < saved.focusIDs.length; j++) {\n\t\t\t\t\tfocusTarget = root.querySelector('[data-alert-scroll-anchor=\"' + CSS.escape(saved.focusIDs[j]) + '\"] [data-alert-delete]');\n\t\t\t\t\tif (focusTarget) break;\n\t\t\t\t}\n\t\t\t\tif (!focusTarget && saved.focusIDs.length) focusTarget = root.querySelector('[data-card-search]');\n\t\t\t\tif (focusTarget) focusTarget.focus({preventScroll: true});\n\t\t\t});\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -364,7 +364,7 @@ func alertDetailBody(alert models.Alert) templ.Component {
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Body)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 391, Col: 67}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 390, Col: 67}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 				if templ_7745c5c3_Err != nil {
@@ -401,7 +401,7 @@ func alertDetailBody(alert models.Alert) templ.Component {
 				var templ_7745c5c3_Var16 string
 				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(alertMetadataJSON(alert))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 394, Col: 172}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 393, Col: 172}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 				if templ_7745c5c3_Err != nil {
@@ -420,7 +420,7 @@ func alertDetailBody(alert models.Alert) templ.Component {
 				var templ_7745c5c3_Var17 string
 				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Body)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 397, Col: 76}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 396, Col: 76}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 				if templ_7745c5c3_Err != nil {
@@ -433,7 +433,7 @@ func alertDetailBody(alert models.Alert) templ.Component {
 				var templ_7745c5c3_Var18 string
 				templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.ResolveAttributeValue("Copy inspected " + alertDetailInspectLabel(alert) + " body")
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 404, Col: 78}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 403, Col: 78}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var18)
 				if templ_7745c5c3_Err != nil {
@@ -486,7 +486,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.ResolveAttributeValue("alert-" + alert.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 425, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 424, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var21)
 		if templ_7745c5c3_Err != nil {
@@ -499,7 +499,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var22 string
 		templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.ResolveAttributeValue(alert.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 426, Col: 26}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 425, Col: 26}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var22)
 		if templ_7745c5c3_Err != nil {
@@ -512,7 +512,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var23 string
 		templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.ResolveAttributeValue(alert.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 427, Col: 37}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 426, Col: 37}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var23)
 		if templ_7745c5c3_Err != nil {
@@ -538,7 +538,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var25 string
 		templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.ResolveAttributeValue(alertSearchText(alert))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 430, Col: 43}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 429, Col: 43}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var25)
 		if templ_7745c5c3_Err != nil {
@@ -556,7 +556,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 			var templ_7745c5c3_Var26 string
 			templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.ResolveAttributeValue(*alert.TaskID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 432, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 431, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var26)
 			if templ_7745c5c3_Err != nil {
@@ -616,7 +616,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var29 string
 		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 455, Col: 19}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 454, Col: 19}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 		if templ_7745c5c3_Err != nil {
@@ -629,7 +629,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var30 string
 		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.Type))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 459, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 458, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 		if templ_7745c5c3_Err != nil {
@@ -665,7 +665,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.DecisionState))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 461, Col: 362}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 460, Col: 362}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 			if templ_7745c5c3_Err != nil {
@@ -689,7 +689,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(string(alert.ProcessingState))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 466, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 465, Col: 81}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
@@ -712,7 +712,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Message)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 470, Col: 93}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 469, Col: 93}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
@@ -730,7 +730,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var36 string
 		templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s/details?project_id=%s", alert.ID, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 476, Col: 105}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 475, Col: 105}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var36)
 		if templ_7745c5c3_Err != nil {
@@ -743,7 +743,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var37 string
 		templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(alertSummaryInspectLabel(alert))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 478, Col: 99}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 477, Col: 99}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 		if templ_7745c5c3_Err != nil {
@@ -756,7 +756,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var38 string
 		templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Source)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 484, Col: 34}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 483, Col: 34}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 		if templ_7745c5c3_Err != nil {
@@ -769,7 +769,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var39 string
 		templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(alert.CreatedAt.Local().Format("Jan 2, 2006 3:04 PM"))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 486, Col: 67}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 485, Col: 67}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 		if templ_7745c5c3_Err != nil {
@@ -787,7 +787,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(alert.Claimant)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 488, Col: 68}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 487, Col: 68}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
@@ -810,7 +810,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(alert.ProcessingError)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 492, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 491, Col: 76}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
@@ -829,7 +829,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 			var templ_7745c5c3_Var42 string
 			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.ResolveAttributeValue(*alert.ImplementationTaskID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 495, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 494, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var42)
 			if templ_7745c5c3_Err != nil {
@@ -848,7 +848,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 			var templ_7745c5c3_Var43 string
 			templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s/approve?project_id=%s", alert.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 499, Col: 131}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 498, Col: 131}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var43)
 			if templ_7745c5c3_Err != nil {
@@ -861,7 +861,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 			var templ_7745c5c3_Var44 string
 			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s/reject?project_id=%s", alert.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 500, Col: 140}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 499, Col: 140}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var44)
 			if templ_7745c5c3_Err != nil {
@@ -884,7 +884,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s/read?project_id=%s", alert.ID, currentProjectID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 508, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 507, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var45)
 			if templ_7745c5c3_Err != nil {
@@ -902,7 +902,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var46 string
 		templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.ResolveAttributeValue("Delete alert " + alert.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 522, Col: 48}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 521, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var46)
 		if templ_7745c5c3_Err != nil {
@@ -915,7 +915,7 @@ func alertRow(alert models.AlertSummary, currentProjectID string) templ.Componen
 		var templ_7745c5c3_Var47 string
 		templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/alerts/%s?project_id=%s", alert.ID, currentProjectID))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 523, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 522, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var47)
 		if templ_7745c5c3_Err != nil {
@@ -958,7 +958,7 @@ func AlertBadge(count int) templ.Component {
 			var templ_7745c5c3_Var49 string
 			templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", count))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 538, Col: 94}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/alerts.templ`, Line: 537, Col: 94}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 			if templ_7745c5c3_Err != nil {

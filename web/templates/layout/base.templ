@@ -1756,10 +1756,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					background: hsl(var(--bc) / 0.15);
 					color: hsl(var(--bc) / 0.8);
 				}
-				.chat-markdown pre .code-copy-btn.copied {
-					opacity: 1;
-					color: hsl(var(--su, 158 64% 52%));
-				}
+					.chat-markdown pre .code-copy-btn.copied {
+						opacity: 1;
+						color: hsl(var(--su, 158 64% 52%));
+					}
+					.chat-markdown pre .code-copy-btn.copy-failed {
+						opacity: 1;
+						color: oklch(var(--er));
+					}
 				.chat-markdown blockquote {
 					margin: 0.5em 0;
 					padding: 0.25em 0.75em;
@@ -2447,34 +2451,144 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						return Promise.resolve(window.renderChatMarkdownLargeFallback(text));
 					}
 				};
-				// Add copy buttons to all <pre> blocks inside a container element
-				window.addCodeCopyButtons = function(container) {
-					if (!container) return;
-					var pres = container.querySelectorAll('pre');
-					pres.forEach(function(pre) {
-						if (pre.querySelector('.code-copy-btn')) return;
-						var btn = document.createElement('button');
-						btn.className = 'code-copy-btn';
-						btn.type = 'button';
-						btn.setAttribute('aria-label', 'Copy code');
-						btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copy</span>';
-						btn.addEventListener('click', function(e) {
-							e.preventDefault();
-							e.stopPropagation();
-							var code = pre.querySelector('code');
-							var text = (code || pre).textContent;
-							navigator.clipboard.writeText(text).then(function() {
-								btn.classList.add('copied');
-								btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg><span>Copied!</span>';
-								setTimeout(function() {
-									btn.classList.remove('copied');
-									btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copy</span>';
-								}, 2000);
-							});
+					var openVibelyCopyIconHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><span>Copy</span>';
+					var openVibelyCopiedIconHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg><span>Copied!</span>';
+					var openVibelyCopyFailedIconHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg><span>Copy failed</span>';
+
+					function openVibelyClassList(value) {
+						if (!value) return [];
+						return Array.isArray(value) ? value : String(value).split(/\s+/).filter(Boolean);
+					}
+
+					function openVibelyApplyCopyFeedback(button, feedback, fallbackDuration) {
+						if (!button || !feedback) return;
+						if (button._openVibelyCopyFeedbackTimer) clearTimeout(button._openVibelyCopyFeedbackTimer);
+						var original = {
+							html: button.innerHTML,
+							text: button.textContent,
+							title: button.title || ''
+						};
+						if (typeof feedback.apply === 'function') {
+							feedback.apply(button, original);
+						} else {
+							if (feedback.html !== undefined) button.innerHTML = feedback.html;
+							if (feedback.text !== undefined) button.textContent = feedback.text;
+							if (feedback.title !== undefined) button.title = feedback.title;
+							openVibelyClassList(feedback.addClass).forEach(function(className) { button.classList.add(className); });
+							openVibelyClassList(feedback.removeClass).forEach(function(className) { button.classList.remove(className); });
+						}
+						var duration = feedback.duration;
+						if (duration === undefined) duration = fallbackDuration;
+						if (duration === 0) return;
+						button._openVibelyCopyFeedbackTimer = setTimeout(function() {
+							if (!button.isConnected) return;
+							if (typeof feedback.restore === 'function') {
+								feedback.restore(button, original);
+							} else {
+								if (feedback.html !== undefined) button.innerHTML = original.html;
+								if (feedback.text !== undefined) button.textContent = original.text;
+								if (feedback.title !== undefined) button.title = original.title;
+								openVibelyClassList(feedback.addClass).forEach(function(className) { button.classList.remove(className); });
+								openVibelyClassList(feedback.removeClass).forEach(function(className) { button.classList.add(className); });
+							}
+						}, duration || 2000);
+					}
+
+					window.openVibelyCopyText = function(text, options) {
+						options = options || {};
+						var value = text == null ? '' : String(text);
+						var button = options.button || null;
+						var feedbackDuration = options.feedbackDuration === undefined ? 2000 : options.feedbackDuration;
+
+						function onSuccess() {
+							openVibelyApplyCopyFeedback(button, options.successFeedback, feedbackDuration);
+							if (typeof options.onSuccess === 'function') options.onSuccess();
+							return true;
+						}
+
+						function onFailure(error) {
+							openVibelyApplyCopyFeedback(button, options.failureFeedback, feedbackDuration);
+							if (typeof options.onFailure === 'function') options.onFailure(error);
+							return false;
+						}
+
+						function fallbackCopy(error) {
+							if (!document.body || typeof document.createElement !== 'function' || typeof document.execCommand !== 'function') {
+								return Promise.resolve(onFailure(error));
+							}
+							var textarea = document.createElement('textarea');
+							textarea.value = value;
+							textarea.setAttribute('readonly', '');
+							textarea.style.position = 'fixed';
+							textarea.style.top = '0';
+							textarea.style.left = '0';
+							textarea.style.width = '1px';
+							textarea.style.height = '1px';
+							textarea.style.opacity = '0';
+							textarea.style.pointerEvents = 'none';
+							document.body.appendChild(textarea);
+							textarea.select();
+							if (typeof textarea.setSelectionRange === 'function') textarea.setSelectionRange(0, textarea.value.length);
+							try {
+								return Promise.resolve(document.execCommand('copy') ? onSuccess() : onFailure(error));
+							} catch (fallbackError) {
+								return Promise.resolve(onFailure(fallbackError));
+							} finally {
+								if (textarea.parentNode) textarea.parentNode.removeChild(textarea);
+							}
+						}
+
+						if (!value) return Promise.resolve(onFailure(new Error('Nothing to copy')));
+						if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+							return navigator.clipboard.writeText(value).then(onSuccess).catch(fallbackCopy);
+						}
+						return fallbackCopy(new Error('Clipboard API unavailable'));
+					};
+
+					window.copyDiffFilePath = function(ev, button) {
+						if (ev) {
+							ev.preventDefault();
+							ev.stopPropagation();
+						}
+						var text = button && button.dataset ? button.dataset.copyPath : '';
+						window.openVibelyCopyText(text, {
+							button: button,
+							feedbackDuration: 1200,
+							successFeedback: {
+								html: '<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
+								addClass: 'btn-success'
+							},
+							onFailure: function() {
+								if (window.showToast) window.showToast(text ? 'Failed to copy file path' : 'No file path to copy', 'failed');
+							}
 						});
-						pre.appendChild(btn);
-					});
-				};
+					};
+
+					// Add copy buttons to all <pre> blocks inside a container element
+					window.addCodeCopyButtons = function(container) {
+						if (!container) return;
+						var pres = container.querySelectorAll('pre');
+						pres.forEach(function(pre) {
+							if (pre.querySelector('.code-copy-btn')) return;
+							var btn = document.createElement('button');
+							btn.className = 'code-copy-btn';
+							btn.type = 'button';
+							btn.setAttribute('aria-label', 'Copy code');
+							btn.innerHTML = openVibelyCopyIconHTML;
+							btn.addEventListener('click', function(e) {
+								e.preventDefault();
+								e.stopPropagation();
+								var code = pre.querySelector('code');
+								var text = (code || pre).textContent;
+								window.openVibelyCopyText(text, {
+									button: btn,
+									successFeedback: { html: openVibelyCopiedIconHTML, addClass: 'copied', removeClass: 'copy-failed' },
+									failureFeedback: { html: openVibelyCopyFailedIconHTML, addClass: 'copy-failed', removeClass: 'copied' }
+								});
+							});
+							pre.appendChild(btn);
+						});
+					};
 	// Theme toggle function
 					(function() {
 						var nativeThemeByMode = { light: 'openvibely-light', dark: 'openvibely-dark' };

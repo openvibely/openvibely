@@ -200,6 +200,29 @@ func TestAlertDetail_IncludesBodyAndMetadataForSelectedAlert(t *testing.T) {
 	}
 }
 
+func TestAlertsContent_CopyAlertDetailsRoutesThroughSharedClipboardHelper(t *testing.T) {
+	var buf bytes.Buffer
+	if err := AlertsContent(nil, "project-alerts", 0).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render alerts content: %v", err)
+	}
+	html := buf.String()
+	for _, expected := range []string{
+		`function copyAlertDetails(button)`,
+		`window.openVibelyCopyText(text, {`,
+		`successFeedback: { apply: function() { setFeedback('Copied', false); }, restore: restoreFeedback }`,
+		`failureFeedback: { apply: function() { setFeedback('Copy failed', true); }, restore: restoreFeedback }`,
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("alerts copy script missing shared-helper contract %q", expected)
+		}
+	}
+	for _, forbidden := range []string{`navigator.clipboard.writeText`, `document.execCommand('copy')`} {
+		if strings.Contains(html, forbidden) {
+			t.Fatalf("alerts copy must not render local clipboard implementation %q", forbidden)
+		}
+	}
+}
+
 func TestAlertDetail_EmptyAlertOmitsCopyControl(t *testing.T) {
 	alert := models.Alert{ID: "empty-body-1", Title: "No body", Message: "Summary only"}
 	var buf bytes.Buffer

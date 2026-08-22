@@ -1603,68 +1603,21 @@ templ settingsContent(view ChannelsSettingsView) {
 				}
 
 				function writeToClipboardWithFeedback(text, button, successMessage, failureMessage) {
-						if (!text) {
-							if (window.showToast) window.showToast(failureMessage || 'Nothing to copy', 'failed');
-							return;
-						}
-
-						function onCopySuccess() {
-							if (button) {
-								var original = button.textContent;
-								button.textContent = 'Copied';
-								setTimeout(function() { button.textContent = original; }, 1000);
-							}
-							if (window.showToast) window.showToast(successMessage || 'Copied to clipboard', 'completed');
-						}
-
-						function onCopyFailure() {
+						if (!window.openVibelyCopyText) {
 							if (window.showToast) window.showToast(failureMessage || 'Failed to copy to clipboard', 'failed');
-						}
-
-						if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-							navigator.clipboard.writeText(text).then(onCopySuccess).catch(function() {
-								var textarea = document.createElement('textarea');
-								textarea.value = text;
-								textarea.setAttribute('readonly', '');
-								textarea.style.position = 'fixed';
-								textarea.style.opacity = '0';
-								document.body.appendChild(textarea);
-								textarea.select();
-								textarea.setSelectionRange(0, textarea.value.length);
-								try {
-									if (document.execCommand('copy')) {
-										onCopySuccess();
-									} else {
-										onCopyFailure();
-									}
-								} catch (e) {
-									onCopyFailure();
-								} finally {
-									document.body.removeChild(textarea);
-								}
-							});
 							return;
 						}
-
-						var fallbackTextarea = document.createElement('textarea');
-						fallbackTextarea.value = text;
-						fallbackTextarea.setAttribute('readonly', '');
-						fallbackTextarea.style.position = 'fixed';
-						fallbackTextarea.style.opacity = '0';
-						document.body.appendChild(fallbackTextarea);
-						fallbackTextarea.select();
-						fallbackTextarea.setSelectionRange(0, fallbackTextarea.value.length);
-						try {
-							if (document.execCommand('copy')) {
-								onCopySuccess();
-							} else {
-								onCopyFailure();
+						window.openVibelyCopyText(text, {
+							button: button,
+							feedbackDuration: 1000,
+							successFeedback: { text: 'Copied' },
+							onSuccess: function() {
+								if (window.showToast) window.showToast(successMessage || 'Copied to clipboard', 'completed');
+							},
+							onFailure: function() {
+								if (window.showToast) window.showToast(failureMessage || 'Failed to copy to clipboard', 'failed');
 							}
-						} catch (e) {
-							onCopyFailure();
-						} finally {
-							document.body.removeChild(fallbackTextarea);
-						}
+						});
 					}
 
 				function copyWebhookEndpointUrl(webhookID, button) {

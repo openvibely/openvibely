@@ -191,24 +191,23 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 					button.title = label;
 					button.classList.toggle('btn-error', failed);
 					button.classList.toggle('btn-success', !failed);
-					window.setTimeout(function() {
-						if (!button.isConnected) return;
-						if (feedback) feedback.textContent = defaultLabel;
-						if (copyIcon) copyIcon.classList.remove('hidden');
-						if (successIcon) successIcon.classList.add('hidden');
-						if (errorIcon) errorIcon.classList.add('hidden');
-						button.title = defaultLabel;
-						button.classList.remove('btn-error', 'btn-success');
-					}, 2000);
 				};
-				if (!text || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+				var restoreFeedback = function() {
+					if (feedback) feedback.textContent = defaultLabel;
+					if (copyIcon) copyIcon.classList.remove('hidden');
+					if (successIcon) successIcon.classList.add('hidden');
+					if (errorIcon) errorIcon.classList.add('hidden');
+					button.title = defaultLabel;
+					button.classList.remove('btn-error', 'btn-success');
+				};
+				if (!window.openVibelyCopyText) {
 					setFeedback('Copy failed', true);
 					return;
 				}
-				navigator.clipboard.writeText(text).then(function() {
-					setFeedback('Copied', false);
-				}).catch(function() {
-					setFeedback('Copy failed', true);
+				window.openVibelyCopyText(text, {
+					button: button,
+					successFeedback: { apply: function() { setFeedback('Copied', false); }, restore: restoreFeedback },
+					failureFeedback: { apply: function() { setFeedback('Copy failed', true); }, restore: restoreFeedback }
 				});
 			}
 			function openAlertTaskDialog(taskId) {

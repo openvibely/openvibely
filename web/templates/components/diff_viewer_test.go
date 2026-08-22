@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -967,6 +968,33 @@ func assertDiffViewerHeaderStats(t *testing.T, diff, wantAdd, wantDel, wantLabel
 	return body
 }
 
+func TestTaskExecutionHistoryCopyButtonsUseTaskDetailWrapper(t *testing.T) {
+	task := &models.Task{ID: "task-copy", ProjectID: "project-copy", Title: "Copy task"}
+	executions := []models.Execution{{
+		ID:           "exec-copy",
+		TaskID:       "task-copy",
+		Status:       models.ExecCompleted,
+		Output:       "model output",
+		ErrorMessage: "model error",
+		StartedAt:    time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC),
+	}}
+	var buf bytes.Buffer
+	if err := TaskExecutionHistory(task, executions, false, 30).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render task execution history: %v", err)
+	}
+	body := buf.String()
+	for _, expected := range []string{
+		`copyToClipboard('exec-output-exec-copy', this)`,
+		`copyToClipboard('exec-error-exec-copy', this)`,
+		`id="exec-output-exec-copy"`,
+		`id="exec-error-exec-copy"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("task execution history missing copy control contract %q", expected)
+		}
+	}
+}
+
 func TestDiffViewer_FileHeaderRendersCopyPathButton(t *testing.T) {
 	longPath := "internal/very/deep/package/with/a/really/long/path/name/that/should/truncate/without/hiding/copy/button/example_handler.go"
 	diff := fmt.Sprintf(`diff --git a/%s b/%s
@@ -993,16 +1021,13 @@ func TestDiffViewer_FileHeaderRendersCopyPathButton(t *testing.T) {
 		t.Fatal("expected copy button to render in the filename group")
 	}
 	if !strings.Contains(body, `onclick="copyDiffFilePath(event, this)"`) {
-		t.Fatal("expected copy button to use the stop-propagating copy handler")
+		t.Fatal("expected copy button to use the shared stop-propagating copy handler")
 	}
-	if !strings.Contains(body, `function copyDiffFilePath(ev, button)`) || !strings.Contains(body, `ev.stopPropagation()`) {
-		t.Fatal("expected copy handler to prevent header collapse toggle")
+	if strings.Contains(body, `function copyDiffFilePath(ev, button)`) || strings.Contains(body, `document.execCommand('copy')`) {
+		t.Fatal("diff viewer must not render its own clipboard implementation")
 	}
 	if strings.Contains(body, `showToast('File path copied', 'completed')`) {
 		t.Fatal("expected no successful copy toast feedback")
-	}
-	if !strings.Contains(body, `showToast('Failed to copy file path', 'failed')`) {
-		t.Fatal("expected failed copy toast feedback")
 	}
 }
 

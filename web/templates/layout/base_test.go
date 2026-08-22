@@ -190,6 +190,119 @@ func TestBaseGlobalToastRendererPreservesDuplicateSuppressionAndLinks(t *testing
 	}
 }
 
+func TestBaseSharedClipboardHelperProvidesFallbackAndTemporaryFeedback(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Clipboard", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render base: %v", err)
+	}
+	html := buf.String()
+	for _, expected := range []string{
+		"window.openVibelyCopyText = function(text, options)",
+		"document.execCommand('copy')",
+		"textarea.parentNode.removeChild(textarea)",
+		"window.copyDiffFilePath = function(ev, button)",
+		"window.openVibelyCopyText(text, {",
+		"window.addCodeCopyButtons = function(container)",
+	} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("base layout missing shared clipboard contract %q", expected)
+		}
+	}
+
+	start := strings.Index(html, "var openVibelyCopyIconHTML =")
+	if start < 0 {
+		t.Fatal("could not find rendered shared clipboard script")
+	}
+	end := strings.Index(html[start:], "// Theme toggle function")
+	if end < 0 {
+		t.Fatal("could not extract rendered shared clipboard script")
+	}
+	scriptBody := html[start : start+end]
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the rendered clipboard helper script")
+	}
+	script := `
+	const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+	global.window = {};
+	global.navigator = {};
+	let execResult = true;
+	let selectedText = '';
+	const activeTextareas = [];
+	global.document = {
+	  body: {
+	    appendChild: function(el) { activeTextareas.push(el); el.parentNode = this; },
+	    removeChild: function(el) {
+	      const idx = activeTextareas.indexOf(el);
+	      if (idx >= 0) activeTextareas.splice(idx, 1);
+	      el.parentNode = null;
+	    }
+	  },
+	  createElement: function(tag) {
+	    if (tag !== 'textarea') throw new Error('unexpected element ' + tag);
+	    return {
+	      value: '',
+	      style: {},
+	      parentNode: null,
+	      setAttribute: function() {},
+	      select: function() { selectedText = this.value; },
+	      setSelectionRange: function(start, end) { this.selection = [start, end]; }
+	    };
+	  },
+	  execCommand: function(command) {
+	    if (command !== 'copy') throw new Error('unexpected command ' + command);
+	    return execResult;
+	  }
+	};
+	function makeClassList() {
+	  const values = new Set();
+	  return {
+	    add: function(name) { values.add(name); },
+	    remove: function(name) { values.delete(name); },
+	    contains: function(name) { return values.has(name); }
+	  };
+	}
+	` + scriptBody + `
+	(async function() {
+	  let succeeded = 0;
+	  const button = { innerHTML: '<span>Copy</span>', textContent: 'Copy', title: 'Copy', isConnected: true, classList: makeClassList() };
+	  const fallbackOK = await window.openVibelyCopyText('fallback text', {
+	    button: button,
+	    feedbackDuration: 1,
+	    successFeedback: { text: 'Copied', addClass: 'btn-success' },
+	    onSuccess: function() { succeeded++; }
+	  });
+	  if (!fallbackOK || succeeded !== 1) throw new Error('fallback copy did not report success');
+	  if (selectedText !== 'fallback text') throw new Error('fallback textarea did not carry copied text');
+	  if (activeTextareas.length !== 0) throw new Error('fallback textarea was not removed');
+	  if (button.textContent !== 'Copied' || !button.classList.contains('btn-success')) throw new Error('success feedback was not applied');
+	  await wait(5);
+	  if (button.textContent !== 'Copy' || button.classList.contains('btn-success')) throw new Error('success feedback was not restored');
+
+	  let clipboardAttempt = '';
+	  navigator.clipboard = { writeText: function(text) { clipboardAttempt = text; return Promise.reject(new Error('denied')); } };
+	  const rejectedThenFallbackOK = await window.openVibelyCopyText('retry text', { onSuccess: function() { succeeded++; } });
+	  if (!rejectedThenFallbackOK || clipboardAttempt !== 'retry text' || selectedText !== 'retry text') throw new Error('rejected Clipboard API did not use fallback');
+	  if (activeTextareas.length !== 0) throw new Error('fallback textarea leaked after rejected Clipboard API');
+
+	  execResult = false;
+	  let failed = 0;
+	  const failureButton = { innerHTML: '<span>Copy</span>', textContent: 'Copy', title: 'Copy', isConnected: true, classList: makeClassList() };
+	  const failedResult = await window.openVibelyCopyText('uncopyable', {
+	    button: failureButton,
+	    failureFeedback: { text: 'Copy failed', addClass: 'btn-error', duration: 0 },
+	    onFailure: function() { failed++; }
+	  });
+	  if (failedResult || failed !== 1) throw new Error('failed fallback did not report failure');
+	  if (failureButton.textContent !== 'Copy failed' || !failureButton.classList.contains('btn-error')) throw new Error('failure feedback was not applied');
+	  if (activeTextareas.length !== 0) throw new Error('fallback textarea leaked after failure');
+	})().catch(function(err) { console.error(err && err.stack || err); process.exit(1); });
+	`
+	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
+		t.Fatalf("rendered shared clipboard helper failed: %v\n%s", err, output)
+	}
+}
+
 func TestBasePurgesSensitiveHTMXHistoryBeforeHTMXLoads(t *testing.T) {
 	var buf bytes.Buffer
 	if err := Base("Test", nil, "").Render(context.Background(), &buf); err != nil {

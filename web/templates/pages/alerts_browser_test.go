@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
@@ -56,6 +57,20 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 		}
 		rendered.WriteString(`</div>`)
 	}
+	var base bytes.Buffer
+	if err := layout.Base("Alerts", nil, "").Render(context.Background(), &base); err != nil {
+		t.Fatalf("render base clipboard scripts: %v", err)
+	}
+	baseHTML := base.String()
+	clipboardStart := strings.Index(baseHTML, "var openVibelyCopyIconHTML =")
+	if clipboardStart < 0 {
+		t.Fatal("base layout clipboard helper script missing")
+	}
+	clipboardEnd := strings.Index(baseHTML[clipboardStart:], "// Theme toggle function")
+	if clipboardEnd < 0 {
+		t.Fatal("base layout clipboard helper script missing end marker")
+	}
+	sharedClipboardScript := "<script>" + baseHTML[clipboardStart:clipboardStart+clipboardEnd] + "</script>"
 
 	runner := `<style>
 		.hidden { display: none; }
@@ -83,20 +98,35 @@ func TestAlertsInspectCopyFeedbackInChrome(t *testing.T) {
 		    if (operational.textContent.trim() !== 'Copied') fail('success feedback was not shown');
 		    if (copied[0] !== 'Compiler diagnostics\nline 2') fail('operational alert copied more than its body: ' + copied[0]);
 		    await report('progress', 'success-feedback-ready');
-		    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function() { return Promise.reject(new Error('denied')); }}});
-		    notification.click();
-		    await wait(0);
-		    if (notification.textContent.trim() !== 'Copy failed') fail('failure feedback was not shown');
-		    await report('progress', 'failure-feedback-ready');
-		    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied.push(text); return Promise.resolve(); }}});
-		    notification.click();
-		    await wait(0);
-		    if (copied[1] !== 'Check the patch.') fail('notification copied more than its body: ' + copied[1]);
+			    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function() { return Promise.reject(new Error('denied')); }}});
+			    var fallbackCopied = [];
+			    Object.defineProperty(document, 'execCommand', {configurable:true, value:function(command) {
+			      if (command !== 'copy') fail('unexpected fallback command: ' + command);
+			      var textarea = document.querySelector('textarea');
+			      fallbackCopied.push(textarea ? textarea.value : '');
+			      return true;
+			    }});
+			    notification.click();
+			    await wait(0);
+			    if (notification.textContent.trim() !== 'Copied') fail('fallback success feedback was not shown');
+			    if (fallbackCopied[0] !== 'Check the patch.') fail('fallback copied more than its body: ' + fallbackCopied[0]);
+			    if (document.querySelector('textarea')) fail('fallback textarea was not removed');
+			    await report('progress', 'fallback-feedback-ready');
+			    Object.defineProperty(document, 'execCommand', {configurable:true, value:function(command) { return false; }});
+			    notification.click();
+			    await wait(0);
+			    if (notification.textContent.trim() !== 'Copy failed') fail('failure feedback was not shown');
+			    if (document.querySelector('textarea')) fail('failed fallback textarea was not removed');
+			    await report('progress', 'failure-feedback-ready');
+			    Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:function(text) { copied.push(text); return Promise.resolve(); }}});
+			    notification.click();
+			    await wait(0);
+			    if (copied[1] !== 'Check the patch.') fail('notification copied more than its body: ' + copied[1]);
 	    report('pass', '');
 	  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
 	});
 	</script>`
-	page := "<!doctype html><html><head>" + runner + "</head><body>" + rendered.String() + "</body></html>"
+	page := "<!doctype html><html><head>" + sharedClipboardScript + runner + "</head><body>" + rendered.String() + "</body></html>"
 
 	browserResult := make(chan string, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
