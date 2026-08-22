@@ -9,7 +9,7 @@
 // Chat RW (orchestrate mode):
 //   - tasks: create_task, create_swarm_task, edit_task, execute_tasks, send_to_task
 //   - schedules: schedule_task, delete_schedule, modify_schedule
-//   - alerts: create_alert, delete_alert, toggle_alert
+//   - alerts: create_alert, create_notification, decide_alert, delete_alert, toggle_alert
 //   - personality: set_personality, save_custom_personality
 //   - projects: create_project, update_project_settings, switch_project
 //   - agents: create_agent, update_agent
@@ -591,6 +591,16 @@ var registry = []ActionDef{
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string"},"type":{"type":"string","maxLength":100},"title":{"type":"string","maxLength":200},"message":{"type":"string","maxLength":2000},"body":{"type":"string","maxLength":20000},"severity":{"type":"string","enum":["info","warning","error"]},"source":{"type":"string","maxLength":100},"metadata":{"type":"object"}},"required":["type","title"],"additionalProperties":false}`),
+	},
+	{
+		Name:         "decide_alert",
+		Description:  "Approve, reject, or dismiss a pending actionable notification in the current project after explicit user review.",
+		Domain:       DomainAlerts,
+		Access:       AccessWrite,
+		Sensitivity:  SensitivityNormal,
+		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:     allSurfaces(),
+		Parameters:   json.RawMessage(`{"type":"object","properties":{"project_id":{"type":"string","description":"Optional same-project assertion. The action always uses the caller's current project."},"alert_id":{"type":"string"},"decision":{"type":"string","enum":["approved","rejected","dismissed"]}},"required":["alert_id","decision"],"additionalProperties":false}`),
 	},
 	{
 		Name:         "claim_alert",

@@ -175,6 +175,7 @@ func TestUpdateProjectSettingsCapabilityAndInheritedDefaultModel(t *testing.T) {
 	require.True(t, handled)
 	require.False(t, isErr, capabilities)
 	require.Contains(t, capabilities, "update_project_settings")
+	require.Contains(t, capabilities, "decide_alert")
 
 	planRT := h.buildChatActionToolRuntimeFromDefs(
 		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
@@ -188,6 +189,7 @@ func TestUpdateProjectSettingsCapabilityAndInheritedDefaultModel(t *testing.T) {
 	require.True(t, handled)
 	require.False(t, isErr, planCapabilities)
 	require.NotContains(t, planCapabilities, "update_project_settings")
+	require.NotContains(t, planCapabilities, "decide_alert")
 	blockedOut, handled, isErr, err := planRT.Executor(ctx, "update_project_settings", json.RawMessage(`{"max_workers":2}`))
 	require.NoError(t, err)
 	require.True(t, handled)

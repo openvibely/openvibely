@@ -86,10 +86,12 @@ func TestFilterTaskThreadRuntimeToolDefs_CreateNotificationDispatchUsesPersisted
 	defs := filterTaskThreadRuntimeToolDefs(chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true), nil, false)
 	advertised := toolDefNameSet(defs)
 	require.True(t, advertised["create_notification"], "task-thread runtime must advertise create_notification")
+	require.True(t, advertised["decide_alert"], "task-thread runtime must advertise decide_alert")
 	capabilities := capabilityNameSet(filterTaskThreadCapabilitySummaries(
 		chatcontrol.ListForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb), nil, false,
 	))
 	require.True(t, capabilities["create_notification"], "task-thread capabilities must include create_notification")
+	require.True(t, capabilities["decide_alert"], "task-thread capabilities must include decide_alert")
 
 	runtime := h.buildChatActionToolRuntimeFromDefs(streamingResponseParams{
 		TaskID:         task.ID,
@@ -117,6 +119,15 @@ func TestFilterTaskThreadRuntimeToolDefs_CreateNotificationDispatchUsesPersisted
 	require.Equal(t, models.AlertProcessingUnclaimed, stored.ProcessingState)
 	require.NotNil(t, stored.SourceTaskID)
 	require.Equal(t, task.ID, *stored.SourceTaskID)
+
+	decisionOutput, handled, isErr, err := runtime.Executor(ctx, "decide_alert", json.RawMessage(`{"alert_id":"`+result.Notification.ID+`","decision":"approved"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr)
+	require.Contains(t, decisionOutput, `"decision_state":"approved"`)
+	decided, err := h.alertSvc.GetByID(ctx, project.ID, result.Notification.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.AlertDecisionApproved, decided.DecisionState)
 }
 
 func TestFilterTaskThreadRuntimeToolDefs_HaveWebHandlers(t *testing.T) {
@@ -128,6 +139,7 @@ func TestFilterTaskThreadRuntimeToolDefs_HaveWebHandlers(t *testing.T) {
 		"create_task",
 		"schedule_task",
 		"modify_schedule",
+		"decide_alert",
 		"github_get_project_inbox",
 		"github_list_my_assigned_issues",
 		"github_list_assigned_issues",

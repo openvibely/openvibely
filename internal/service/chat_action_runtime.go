@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2936,6 +2937,54 @@ func BuildAlertRuntimeActionHandlers(opts AlertRuntimeOptions) map[string]chatco
 				return "", err
 			}
 			return resultJSON(map[string]any{"notification": a})
+		},
+		"decide_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
+			var req struct {
+				ProjectID string `json:"project_id"`
+				AlertID   string `json:"alert_id"`
+				Decision  string `json:"decision"`
+			}
+			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+				return "", err
+			}
+			if err := assertProject(req.ProjectID); err != nil {
+				return "", err
+			}
+			alertID := strings.TrimSpace(req.AlertID)
+			if alertID == "" {
+				return "", fmt.Errorf("alert_id is required")
+			}
+			var decision models.AlertDecisionState
+			switch strings.ToLower(strings.TrimSpace(req.Decision)) {
+			case string(models.AlertDecisionApproved):
+				decision = models.AlertDecisionApproved
+			case string(models.AlertDecisionRejected):
+				decision = models.AlertDecisionRejected
+			case string(models.AlertDecisionDismissed):
+				decision = models.AlertDecisionDismissed
+			default:
+				return "", fmt.Errorf("decision must be one of approved, rejected, or dismissed")
+			}
+			if err := requireService(); err != nil {
+				return "", err
+			}
+			current, err := opts.AlertSvc.GetByID(ctx, opts.ProjectID, alertID)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) || errors.Is(err, repository.ErrAlertNotFound) {
+					return "", fmt.Errorf("alert not found or not pending")
+				}
+				return "", err
+			}
+			if current.DecisionState != models.AlertDecisionPending {
+				return "", fmt.Errorf("alert decision is %s, not pending", current.DecisionState)
+			}
+			if err := opts.AlertSvc.SetDecision(ctx, opts.ProjectID, alertID, decision); err != nil {
+				if errors.Is(err, sql.ErrNoRows) || errors.Is(err, repository.ErrAlertNotFound) {
+					return "", fmt.Errorf("alert not found or not pending")
+				}
+				return "", err
+			}
+			return resultJSON(map[string]any{"alert_id": alertID, "decision_state": decision})
 		},
 		"claim_alert": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req struct {

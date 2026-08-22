@@ -291,6 +291,46 @@ func TestSaveCustomPersonalityRegisteredOrchestrateOnly(t *testing.T) {
 	mustContain(t, required, "mode", "name", "system_prompt")
 }
 
+func TestDecideAlertRegisteredOrchestrateOnly(t *testing.T) {
+	def := Get("decide_alert")
+	if def == nil {
+		t.Fatal("decide_alert missing from registry")
+	}
+	if def.Domain != DomainAlerts || def.Access != AccessWrite {
+		t.Fatalf("decide_alert domain/access = %s/%s, want alerts/write", def.Domain, def.Access)
+	}
+	if def.NeedsConfirmation {
+		t.Fatal("decide_alert should rely on explicit user-directed Orchestrate calls, not destructive confirmation")
+	}
+	for _, surface := range AllSurfaces {
+		if err := IsAllowed("decide_alert", models.ChatModeOrchestrate, surface); err != nil {
+			t.Fatalf("decide_alert should be allowed in orchestrate on %s: %v", surface, err)
+		}
+		mustContain(t, toolDefNames(ToolDefsForContext(models.ChatModeOrchestrate, surface, true)), "decide_alert")
+		if err := IsAllowed("decide_alert", models.ChatModePlan, surface); err == nil {
+			t.Fatalf("decide_alert should be denied in plan on %s", surface)
+		}
+		mustNotContain(t, toolDefNames(ToolDefsForContext(models.ChatModePlan, surface, true)), "decide_alert")
+	}
+	var schema struct {
+		Required   []string `json:"required"`
+		Properties map[string]struct {
+			Enum []string `json:"enum"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(def.Parameters, &schema); err != nil {
+		t.Fatalf("decode schema: %v", err)
+	}
+	required := map[string]bool{}
+	for _, name := range schema.Required {
+		required[name] = true
+	}
+	mustContain(t, required, "alert_id", "decision")
+	if !reflect.DeepEqual(schema.Properties["decision"].Enum, []string{"approved", "rejected", "dismissed"}) {
+		t.Fatalf("decide_alert decision enum = %v", schema.Properties["decision"].Enum)
+	}
+}
+
 func TestCreateProjectRegisteredOrchestrateOnly(t *testing.T) {
 	def := Get("create_project")
 	if def == nil {
@@ -371,6 +411,8 @@ func TestToolDefsForContext_OrchestrateWeb(t *testing.T) {
 	mustContain(t, names, "switch_project", "get_chat_mode", "set_chat_mode", "list_capabilities")
 	// Must have new read actions
 	mustContain(t, names, "get_alert", "get_model", "get_personality", "get_current_project", "memory_view", "view_system_update", "view_swarm")
+	// Must have alert decision actions in Orchestrate mode.
+	mustContain(t, names, "decide_alert")
 	// Must have GitHub mailbox actions on web/API surfaces.
 	mustContain(t, names, "github_create_issue", "github_get_issue", "github_get_project_inbox", "github_is_actor_authorized", "github_list_my_assigned_issues", "github_list_existing_automation_issues", "github_list_assigned_issues", "github_list_assigned_issues_with_prs", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks")
 	// Must have thread tools when requested
@@ -394,7 +436,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 	// Must NOT have write actions
 	mustNotContain(t, names, "create_task", "edit_task", "execute_tasks",
 		"set_personality", "save_custom_personality", "schedule_task", "delete_schedule", "modify_schedule",
-		"create_alert", "create_notification", "delete_alert", "toggle_alert", "create_project", "update_project_settings", "switch_project",
+		"create_alert", "create_notification", "decide_alert", "delete_alert", "toggle_alert", "create_project", "update_project_settings", "switch_project",
 		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
 		"save_automation", "run_automation_now", "pause_automation", "resume_automation")
 
@@ -723,7 +765,7 @@ func TestRegistry_CoversCoreActions(t *testing.T) {
 		"list_models", "list_agents", "create_agent", "update_agent",
 		"view_settings", "list_channels", "view_system_update", "project_info",
 		"list_projects", "create_project", "update_project_settings", "switch_project",
-		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "delete_alert", "toggle_alert",
+		"list_alerts", "list_existing_automation_notifications", "create_alert", "create_notification", "decide_alert", "delete_alert", "toggle_alert",
 		// new actions
 		"get_chat_mode", "set_chat_mode", "list_capabilities",
 		"get_alert", "get_model", "get_personality", "get_current_project",
