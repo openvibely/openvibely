@@ -77,7 +77,7 @@ log "Required tools present: go, git, zip, tar, sha(sum)"
 
 # GitHub CLI (needed for release creation — warn, not fail, for preflight)
 if ! command -v gh &>/dev/null; then
-    warn "GitHub CLI (gh) not found — release publishing will fail. Install: https://cli.github.com"
+    warn "GitHub CLI (gh) not found — release publishing will fail. Run check-release-signing.sh --setup to install local release tooling."
 else
     log "GitHub CLI present: $(gh --version | head -1)"
 fi

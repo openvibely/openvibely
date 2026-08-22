@@ -124,7 +124,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
         warn "GitHub CLI not found; continuing non-publishing dry run."
     fi
 else
-    command -v gh &>/dev/null || fail "GitHub CLI (gh) not found. Install: https://cli.github.com"
+    command -v gh &>/dev/null || fail "GitHub CLI (gh) not found. Run check-release-signing.sh --setup to install local release tooling."
     gh auth status &>/dev/null || fail "GitHub CLI not authenticated. Run: gh auth login"
     log "GitHub auth: OK"
 fi

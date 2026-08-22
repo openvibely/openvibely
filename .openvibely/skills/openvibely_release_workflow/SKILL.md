@@ -68,19 +68,17 @@ Before a real non-dry-run release, confirm the exact commit that will receive th
 
 ### Missing tools — install before proceeding
 
-If preflight or a dry run reports a required release tool as missing, install it during the task before continuing. Do not stop at "tool missing" unless installation fails, requires unavailable privileges, or requires user-owned credentials/auth that cannot be completed non-interactively.
+If preflight or a dry run reports a required release tool as missing, run the release tooling setup during the task before continuing. Do not stop at "tool missing" unless setup fails, requires unavailable privileges, or requires user-owned credentials/auth that cannot be completed non-interactively.
 
-Common macOS installs when local `.tools` bootstrapping is unavailable:
+Release tooling setup:
 
 ```bash
-brew install gh
-go install github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)
-wails3 task setup:docker
+bash .openvibely/skills/openvibely_release_workflow/scripts/check-release-signing.sh --setup
 ```
 
-`ensure-release-tooling.sh` installs `wails3` locally and, when Docker is running, builds or refreshes `wails-cross-amd64` and `wails-cross-arm64` by default. Set `SKIP_WAILS_DOCKER_SETUP=1` to skip that heavier Docker image step, or `OPENVIBELY_WAILS_CROSS_ARCH=arm64` to prepare only one architecture.
+`ensure-release-tooling.sh` installs local release tools under `.tools`, including `gh` and `wails3` when missing. When Docker is running, it also builds or refreshes `wails-cross-amd64` and `wails-cross-arm64` by default. Set `SKIP_WAILS_DOCKER_SETUP=1` to skip that heavier Wails Linux desktop image setup, or `OPENVIBELY_WAILS_CROSS_ARCH=arm64` to prepare only one architecture.
 
-After installing `gh`, run `gh auth status`; if unauthenticated, run `gh auth login` or ask the user to complete GitHub authentication. If the user has already requested the real release and later completes `gh` authentication or another credential step, treat the original release request as still active: verify auth and preflight, then continue the release pipeline. Do not stop with a status-only summary asking whether to proceed unless a new hard blocker remains or the user explicitly changed the request to dry-run/status mode. For platform-specific desktop builds, install the required Wails, Docker, or native platform dependencies when practical, or supply the corresponding signed/prebuilt artifact hook. Official releases cannot omit Windows or Linux desktop artifacts; the build stops if either cannot be produced. Windows desktop normally uses Go's built-in cross-compilation; Linux desktop still needs a native Linux/WebKit build path, Wails v3 Docker/Taskfile build, or `OPENVIBELY_LINUX_DESKTOP_BINARY`.
+After setup, run `gh auth status`; if unauthenticated, run `gh auth login` or ask the user to complete GitHub authentication. If the user has already requested the real release and later completes `gh` authentication or another credential step, treat the original release request as still active: verify auth and preflight, then continue the release pipeline. Do not stop with a status-only summary asking whether to proceed unless a new hard blocker remains or the user explicitly changed the request to dry-run/status mode. For platform-specific desktop builds, install the required Wails, Docker, or native platform dependencies when practical, or supply the corresponding signed/prebuilt artifact hook. Official releases cannot omit Windows or Linux desktop artifacts; the build stops if either cannot be produced. Windows desktop normally uses Go's built-in cross-compilation; Linux desktop still needs a native Linux/WebKit build path, Wails v3 Docker/Taskfile build, or `OPENVIBELY_LINUX_DESKTOP_BINARY`.
 
 ---
 
@@ -285,7 +283,7 @@ Only state that the raw Unix executable is excluded from release assets after ve
 
 `release-notes.sh` is deterministic: it collects raw commit data and renders the static template, but **does not synthesize release-specific highlights or the changelog**. Those steps require AI judgment and are explicitly delegated to the orchestrating agent.
 
-Never reuse static product marketing bullets as release `Highlights`. The product intro can describe what OpenVibely is; `Highlights` must describe the 2–4 biggest user-facing changes that are new in this exact release compared to the previous tag.
+Never reuse static product marketing bullets as release `Highlights`. The product intro can describe what OpenVibely is; `Highlights` must describe the 2–4 biggest user-facing changes, features, or workflow improvements that are new in this exact release compared to the previous tag. Do not spend Highlights on small bug fixes, narrow UI polish, dependency bumps, release tooling, tests, or internal reliability work unless the combined effect is a major user-visible improvement.
 
 ### What the script does
 
@@ -297,12 +295,14 @@ Never reuse static product marketing bullets as release `Highlights`. The produc
 After `release-notes.sh` runs, the agent must:
 
 1. **Read `dist/<version>/COMMITS.txt`** — full commit log since the previous release.
-2. **Synthesize release-specific highlights** — 2–4 bullets, only for the most notable changes that are new in this release. Do not list evergreen features that existed in the prior release. Describe each highlight by what it **does** for the user — the functional capability or workflow it enables — not by what UI elements or files were added. Avoid using feature-specific examples in this skill; they rot as the product evolves. Prefer generic guidance such as: describe the user outcome, not the implementation detail or surface-level label.
+2. **Synthesize release-specific highlights** — 2–4 bullets, only for the most notable changes that are new in this release. Each bullet should use the style `- **Capability or outcome** — User-facing explanation`. Do not list evergreen features that existed in the prior release. Describe each highlight by what it **does** for the user — the functional capability or workflow it enables — not by what UI elements or files were added. Avoid using feature-specific examples in this skill; they rot as the product evolves. Prefer generic guidance such as: describe the user outcome, not the implementation detail or surface-level label.
 3. **Synthesize a high-level, user-facing changelog** — not a dump of commit subjects. The agent should:
    - Identify what actually changed from a user's perspective.
-   - Group related commits into coherent bullet points (3–8 total, plain English).
+   - Group related commits into coherent bullet points (3–8 total, plain English), with each bullet following the style `- **Area or feature — outcome** — Details`.
+   - Focus the `What's Changed` section on substantial capabilities, workflow changes, and major reliability improvements. It can include more detail than Highlights, but it should still read like an upgrade summary, not a bug-fix ledger.
    - Leave out noise: internal refactors, memory updates, test changes, typo fixes, chore commits, CI/build/release-tooling changes, developer-only logging/observability flags, and anything else with no direct user impact.
    - Omit narrow bug fixes, reliability patches, and UI polish items unless they restore or materially improve a core user workflow that a release reader would choose to upgrade for.
+   - When several bug fixes or polish commits support the same larger feature, fold them into that feature's bullet instead of listing them separately.
    - Omit panel-detail changes, visual tweaks, and one-off light/dark-mode fixes from high-level notes; fold them into a broader feature entry only when they directly support a major release capability.
    - Apply the upgrade-decision test before adding a bullet: would a developer or operator deciding whether to upgrade care about this item at release-note level? If not, leave it out even if the commit is user-visible.
    - Combine multiple small commits about the same feature into one bullet.
@@ -312,6 +312,15 @@ After `release-notes.sh` runs, the agent must:
    - **Omit minor model version additions** (e.g. "Model X added to model selector") unless the model is a primary release feature. Adding a model to a dropdown is a maintenance change, not a release highlight. Omit it entirely or fold it into a generic "model updates" entry only if there are several such additions.
 4. **Replace both placeholder blocks** in `RELEASE_NOTES.md`: `AI_HIGHLIGHTS_PLACEHOLDER` and `AI_CHANGELOG_PLACEHOLDER`.
 5. Confirm the notes look correct before running `release-publish.sh`: no placeholder text, no duplicated commit-derived bullets, no old highlights from a previous release, no leaked secrets, and no claims about Docker/artifacts/features that the scripts did not actually build or verify.
+
+### Release note style
+
+Use this shape for synthesized sections:
+
+- `Highlights`: 2–4 bullets for the release's biggest user-facing themes. These are the headline reasons to care about the release.
+- `What's Changed`: 3–8 grouped bullets. Each bullet should have a bold lead label with an outcome, an em dash, and a concise explanation of the meaningful behavior change.
+
+Good release notes describe major features and meaningful workflows. They should not enumerate small bug fixes, implementation details, one-off visual tweaks, test commits, build script changes, or every individual commit. If the release has many small fixes in one area, summarize the user-visible effect as one broader reliability or workflow bullet only when it matters for upgrade decisions.
 
 ### Why this approach
 
