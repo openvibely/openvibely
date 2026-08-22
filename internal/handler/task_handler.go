@@ -2219,15 +2219,23 @@ func (h *Handler) TaskThreadPendingInputs(c echo.Context) error {
 	if taskID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "task id required")
 	}
+	ctx := c.Request().Context()
+	task, err := h.requireTaskInRequestProject(ctx, taskID, h.mutationProjectID(c))
+	if err != nil {
+		if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusBadRequest {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+		return err
+	}
 	pendingInputs := []models.ThreadInput{}
 	if h.threadInputRepo != nil {
-		if inputs, inputErr := h.threadInputRepo.ListPendingForTask(c.Request().Context(), taskID); inputErr == nil {
+		if inputs, inputErr := h.threadInputRepo.ListPendingForTask(ctx, task.ID); inputErr == nil {
 			pendingInputs = inputs
 		}
 	}
 	return render(c, http.StatusOK, components.ChatComposerQueuedInputRowsForTask(pendingInputs, func(input models.ThreadInput) string {
-		return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", taskID, input.ID)
-	}, taskID))
+		return fmt.Sprintf("/tasks/%s/thread/queued/%s/steer", task.ID, input.ID)
+	}, task.ID))
 }
 
 func (h *Handler) loadTaskExecutionHistoryWindow(ctx context.Context, taskID, beforeExecID string, limit int) ([]models.Execution, bool, error) {

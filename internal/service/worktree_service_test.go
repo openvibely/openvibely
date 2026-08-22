@@ -4215,9 +4215,38 @@ func TestGetWorktreeDiffFileWithUncommittedUsesPathScopedGitDiff(t *testing.T) {
 	}
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	start := time.Now()
+	beforeStart := time.Now()
+	fullDiff := GetWorktreeDiffWithUncommitted(repoDir, branchName, targetBranch, worktreePath)
+	fullStats := GetWorktreeFileStatsWithUncommitted(repoDir, branchName, targetBranch, worktreePath)
+	beforeElapsed := time.Since(beforeStart)
+	if !strings.Contains(fullDiff, "changed file 000") || !strings.Contains(fullDiff, "changed file 199") {
+		t.Fatalf("expected baseline full diff to include all changed files")
+	}
+	if len(fullStats) != 200 {
+		t.Fatalf("expected baseline full stats for 200 files, got %d", len(fullStats))
+	}
+	beforeLogBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read baseline git log: %v", err)
+	}
+	beforeCommands := strings.FieldsFunc(strings.TrimSpace(string(beforeLogBytes)), func(r rune) bool { return r == '\n' })
+	baselineFullPatchDiff := false
+	for _, command := range beforeCommands {
+		if strings.HasPrefix(command, "diff\t") && !strings.Contains(command, "--name-status") && !strings.Contains(command, "--\t") {
+			baselineFullPatchDiff = true
+			break
+		}
+	}
+	if !baselineFullPatchDiff {
+		t.Fatalf("expected baseline resolver shape to run a full patch diff, got:\n%s", beforeLogBytes)
+	}
+	if err := os.WriteFile(logPath, nil, 0644); err != nil {
+		t.Fatalf("reset git log: %v", err)
+	}
+
+	afterStart := time.Now()
 	diff, ok := GetWorktreeDiffFileWithUncommitted(repoDir, branchName, targetBranch, worktreePath, 123)
-	elapsed := time.Since(start)
+	afterElapsed := time.Since(afterStart)
 	if !ok {
 		t.Fatal("expected targeted diff")
 	}
@@ -4232,6 +4261,9 @@ func TestGetWorktreeDiffFileWithUncommittedUsesPathScopedGitDiff(t *testing.T) {
 	if len(commands) > 6 {
 		t.Fatalf("expected bounded git subprocess count, got %d commands:\n%s", len(commands), logBytes)
 	}
+	if len(beforeCommands) <= len(commands) {
+		t.Fatalf("expected targeted path to use fewer git subprocesses than baseline, before=%d after=%d\nbefore:\n%s\nafter:\n%s", len(beforeCommands), len(commands), beforeLogBytes, logBytes)
+	}
 	pathScopedPatchDiff := false
 	for _, command := range commands {
 		if strings.HasPrefix(command, "diff\t") && strings.Contains(command, "--\tbulk/file-123.txt") {
@@ -4244,7 +4276,7 @@ func TestGetWorktreeDiffFileWithUncommittedUsesPathScopedGitDiff(t *testing.T) {
 	if !pathScopedPatchDiff {
 		t.Fatalf("expected one path-scoped patch diff command, got:\n%s", logBytes)
 	}
-	t.Logf("targeted 200-file lazy diff used %d git subprocesses in %s", len(commands), elapsed)
+	t.Logf("200-file lazy diff baseline used %d git subprocesses in %s; targeted used %d git subprocesses in %s", len(beforeCommands), beforeElapsed, len(commands), afterElapsed)
 }
 
 func leftPad3(i int) string {
