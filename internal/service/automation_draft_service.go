@@ -104,6 +104,27 @@ func (s *AutomationDraftService) CreationTemplateCandidate(adapterKey string) (m
 	return s.TemplateCandidate(adapterKey)
 }
 
+func ApplyAutomationTemplateDefaultModel(candidate *models.AutomationDraftCandidate) {
+	if candidate == nil {
+		return
+	}
+	for i := range candidate.Nodes {
+		node := &candidate.Nodes[i]
+		if node.Type != models.AutomationNodeTrigger && node.Type != models.AutomationNodeAgentTask {
+			continue
+		}
+		if node.Config == nil {
+			node.Config = map[string]any{}
+		}
+		if existing, ok := node.Config["model_config_id"].(string); ok && strings.TrimSpace(existing) != "" {
+			continue
+		}
+		if _, hasPrompt := node.Config["prompt"]; hasPrompt || node.Role == "implementation" {
+			node.Config["model_config_id"] = automationDefaultModelConfigID
+		}
+	}
+}
+
 func (s *AutomationDraftService) TemplateCandidate(adapterKey string) (models.AutomationDraftCandidate, error) {
 	adapterKey = strings.TrimSpace(adapterKey)
 	if document, maintained := maintainedAutomationTemplateYAML(adapterKey); maintained {

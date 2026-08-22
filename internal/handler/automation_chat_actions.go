@@ -200,11 +200,12 @@ type automationLifecycleActionInput struct {
 func automationCardSummary(card models.AutomationCard) map[string]any {
 	paused := card.Automation.LifecycleState == models.AutomationPaused
 	summary := map[string]any{
-		"id":          card.Automation.ID,
-		"name":        card.Automation.Name,
-		"status":      string(card.Automation.LifecycleState),
-		"paused":      paused,
-		"adapter_key": card.Version.AdapterKey,
+		"id":                        card.Automation.ID,
+		"name":                      card.Automation.Name,
+		"status":                    string(card.Automation.LifecycleState),
+		"paused":                    paused,
+		"adapter_key":               card.Version.AdapterKey,
+		"template_update_available": card.TemplateUpdateAvailable,
 		"node_count": card.Counts.Running + card.Counts.Waiting +
 			card.Counts.Blocked + card.Counts.Failed + card.Counts.CompletedRecently,
 		"counts": map[string]int{
@@ -214,6 +215,12 @@ func automationCardSummary(card models.AutomationCard) map[string]any {
 			"failed":             card.Counts.Failed,
 			"completed_recently": card.Counts.CompletedRecently,
 		},
+	}
+	if card.Automation.TemplateRevision != nil {
+		summary["template_revision"] = *card.Automation.TemplateRevision
+	}
+	if current := service.CurrentAutomationTemplateRevision(card.Version.AdapterKey); current > 0 {
+		summary["current_template_revision"] = current
 	}
 	if card.NextRun != nil {
 		summary["next_run"] = card.NextRun.UTC().Format("2006-01-02T15:04:05Z")
@@ -279,6 +286,16 @@ func (h *Handler) executeGetAutomationTool(ctx context.Context, params streaming
 		}
 	}
 	return marshalAutomationActionResult(map[string]any{"error": fmt.Sprintf("automation %q not found in project %s", automationID, projectID), "found": false})
+}
+
+func (h *Handler) executeUpdateAutomationTemplateTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	return service.ExecuteAutomationTemplateUpdateRuntime(ctx, service.AutomationTemplateUpdateRuntimeOptions{
+		ProjectID:          params.ProjectID,
+		Input:              input,
+		AutomationGraphSvc: h.automationGraphSvc,
+		AutomationDraftSvc: h.automationDraftSvc,
+		AutomationCompiler: h.automationCompiler,
+	})
 }
 
 func (h *Handler) executeRunAutomationNowTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {

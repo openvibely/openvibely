@@ -94,6 +94,8 @@ type TelegramService struct {
 	llmSvc                     *LLMService
 	workerSvc                  *WorkerService
 	automationGraphSvc         *AutomationGraphService
+	automationDraftSvc         *AutomationDraftService
+	automationCompiler         *AutomationCompiler
 	chatBroadcaster            *events.ChatBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
 	queuedTurnPromoter         func(projectID string)
@@ -260,6 +262,11 @@ func (s *TelegramService) SetUpcomingService(svc *UpcomingService) {
 
 func (s *TelegramService) SetAutomationGraphService(svc *AutomationGraphService) {
 	s.automationGraphSvc = svc
+}
+
+func (s *TelegramService) SetAutomationTemplateUpdateServices(drafts *AutomationDraftService, compiler *AutomationCompiler) {
+	s.automationDraftSvc = drafts
+	s.automationCompiler = compiler
 }
 
 func (s *TelegramService) SetChannelMessageRouter(router *ChannelMessageRouter) {
@@ -1368,14 +1375,15 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 		ResultAdapter: telegramSendToTaskActionResult,
 	}))
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
-		ProjectID:             projectID,
-		CallerTaskID:          callerTaskID,
-		TaskRepo:              s.taskRepo,
-		ScheduleRepo:          s.scheduleRepo,
-		AutomationGraphSvc:    s.automationGraphSvc,
-		WorkerSvc:             s.workerSvc,
-		LLMConfigRepo:         s.llmConfigRepo,
-		AgentRepo:             s.agentRepo,
+		ProjectID:          projectID,
+		CallerTaskID:       callerTaskID,
+		TaskRepo:           s.taskRepo,
+		ScheduleRepo:       s.scheduleRepo,
+		AutomationGraphSvc: s.automationGraphSvc,
+		AutomationDraftSvc: s.automationDraftSvc,
+		AutomationCompiler: s.automationCompiler,
+		WorkerSvc:          s.workerSvc,
+		LLMConfigRepo:      s.llmConfigRepo, AgentRepo: s.agentRepo,
 		SettingsRepo:          s.settingsRepo,
 		CustomPersonalityRepo: s.customPersonalityRepo,
 		ProjectRepo:           s.projectRepo,
