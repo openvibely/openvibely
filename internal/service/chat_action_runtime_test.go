@@ -2640,3 +2640,72 @@ func TestChannelAlertResultHelpersPersistAndFormatAlerts(t *testing.T) {
 	require.Empty(t, errText)
 	require.Equal(t, models.AlertTaskFailed, alertType)
 }
+
+func TestChannelStatusAndAutomationSummaryHelpers(t *testing.T) {
+	targets := []models.ChannelTarget{
+		{Platform: " Slack ", TargetKind: "channel", Name: "alerts", Home: true},
+		{Platform: "slack", TargetKind: "", Name: "", Home: false},
+		{Platform: "", TargetKind: "custom", Name: "mystery", Home: false},
+	}
+	summary := channelSummarizeTargets(targets)
+	require.Equal(t, 3, summary.Total)
+	require.True(t, summary.Configured)
+	require.Equal(t, 2, summary.ByPlatform["slack"].Total)
+	require.Equal(t, 1, summary.ByPlatform["slack"].Home)
+	require.Equal(t, 1, summary.ByPlatform["slack"].Named)
+	require.Equal(t, 2, summary.ByPlatform["slack"].ByKind["channel"])
+	require.Equal(t, 1, summary.ByPlatform["unknown"].ByKind["custom"])
+
+	repoSummary := channelTargetStatusFromRepoSummary(repository.ChannelTargetProjectSummary{Total: 2, Configured: true, ByPlatform: map[string]repository.ChannelTargetPlatformSummary{"email": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"address": 2}}}})
+	require.Equal(t, 2, repoSummary.Total)
+	require.Equal(t, 2, repoSummary.ByPlatform["email"].ByKind["address"])
+	webhookSummary := channelSummarizeWebhooks([]models.WebhookEndpoint{{Enabled: true}, {Enabled: false}, {Enabled: true}})
+	require.Equal(t, 3, webhookSummary.Total)
+	require.Equal(t, 2, webhookSummary.Active)
+	require.Equal(t, 1, webhookSummary.Disabled)
+
+	require.Equal(t, "connected", channelConnectedStatus(true, true))
+	require.Equal(t, "configured_not_connected", channelConnectedStatus(true, false))
+	require.Equal(t, "not_configured", channelConnectedStatus(false, false))
+	require.Equal(t, "running", channelRunningStatus(true, true))
+	require.Equal(t, "configured_not_running", channelRunningStatus(true, false))
+	require.Equal(t, "not_configured", channelRunningStatus(false, false))
+	require.Equal(t, "connected", channelDiscordStatus(DiscordConnectionStatus{Configured: true, Connected: true, Running: true}))
+	require.Equal(t, "gateway_offline", channelDiscordStatus(DiscordConnectionStatus{Configured: true, Connected: false, Running: false}))
+	require.Equal(t, "configured_not_connected", channelDiscordStatus(DiscordConnectionStatus{Configured: true, Connected: false, Running: true}))
+	require.Equal(t, "not_configured", channelDiscordStatus(DiscordConnectionStatus{}))
+	longLine := strings.Repeat("word ", 80)
+	require.LessOrEqual(t, len(channelSafeSingleLine(longLine)), 240)
+	require.Equal(t, "spaced value", channelSafeSingleLine("  spaced\n\tvalue  "))
+
+	nextRun := time.Date(2026, 8, 22, 12, 30, 0, 0, time.FixedZone("offset", -5*3600))
+	lastRun := nextRun.Add(-time.Hour)
+	card := models.AutomationCard{
+		Automation: models.Automation{ID: "auto-1", Name: "Nightly", LifecycleState: models.AutomationPaused},
+		Version:    models.AutomationVersion{AdapterKey: "native"},
+		Counts:     models.AutomationNodeCounts{Running: 2, Waiting: 3, Blocked: 1, Failed: 4, CompletedRecently: 5},
+		NextRun:    &nextRun,
+		LastRun:    &lastRun,
+	}
+	cardSummary := channelAutomationCardSummary(card)
+	require.Equal(t, "auto-1", cardSummary["id"])
+	require.Equal(t, true, cardSummary["paused"])
+	require.Equal(t, "native", cardSummary["adapter_key"])
+	require.Equal(t, 15, cardSummary["node_count"])
+	require.Equal(t, "2026-08-22T17:30:00Z", cardSummary["next_run"])
+	require.Equal(t, "2026-08-22T16:30:00Z", cardSummary["last_run"])
+
+	jsonResult, err := marshalChannelAutomationResult(map[string]any{"automation": cardSummary})
+	require.NoError(t, err)
+	require.Contains(t, jsonResult, "auto-1")
+
+	listResult, err := channelListAutomationsResult(context.Background(), nil, "project-1", json.RawMessage(`{}`))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"automations":[]}`, listResult)
+	_, err = channelListAutomationsResult(context.Background(), nil, "project-1", json.RawMessage(`{"project_id":"other"}`))
+	require.ErrorContains(t, err, "outside the caller's authorized project context")
+	_, err = channelGetAutomationResult(context.Background(), nil, "project-1", json.RawMessage(`{"automation_id":"auto-1"}`))
+	require.ErrorContains(t, err, "automations unavailable")
+	_, err = channelGetAutomationResult(context.Background(), nil, "project-1", json.RawMessage(`{}`))
+	require.ErrorContains(t, err, "automation_id is required")
+}

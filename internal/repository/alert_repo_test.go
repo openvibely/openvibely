@@ -779,3 +779,29 @@ func TestAlertRepoListFilteredSummariesOmitFullDetailColumnsAndGetHydrates(t *te
 		t.Fatalf("detail metadata was not hydrated: %#v", detail.Metadata)
 	}
 }
+
+func TestAlertRepo_GetByIdempotencyKeyScopesToProject(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	alertRepo := NewAlertRepo(db)
+	projectA := createTestProject(t, projectRepo)
+	projectB := &models.Project{Name: "Other Alert Project"}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatal(err)
+	}
+	alert := &models.Alert{ProjectID: projectA.ID, Type: "task_needs_followup", Severity: "warning", Title: "Needs followup", Message: "message", IdempotencyKey: "dedupe-key"}
+	if err := alertRepo.Create(ctx, alert); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	loaded, err := alertRepo.GetByIdempotencyKey(ctx, projectA.ID, "dedupe-key")
+	if err != nil {
+		t.Fatalf("GetByIdempotencyKey: %v", err)
+	}
+	if loaded.ID != alert.ID || loaded.ProjectID != projectA.ID {
+		t.Fatalf("unexpected loaded alert: %#v", loaded)
+	}
+	if _, err := alertRepo.GetByIdempotencyKey(ctx, projectB.ID, "dedupe-key"); err == nil || !strings.Contains(err.Error(), "alert not found") {
+		t.Fatalf("expected project-scoped not found, got %v", err)
+	}
+}

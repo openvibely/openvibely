@@ -1159,3 +1159,43 @@ func promptsOf(execs []models.Execution) []string {
 	}
 	return out
 }
+
+func TestExecutionRepo_CancelActiveByTaskReturnsCount(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	taskRepo := NewTaskRepo(db, nil)
+	execRepo := NewExecutionRepo(db)
+	projectRepo := NewProjectRepo(db)
+	project := &models.Project{Name: "Cancel Active Count Project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Cancel active count", Prompt: "prompt", Status: models.StatusRunning, Category: models.CategoryActive}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []models.ExecutionStatus{models.ExecRunning, models.ExecQueued, models.ExecCompleted} {
+		exec := &models.Execution{TaskID: task.ID, Status: status, PromptSent: string(status)}
+		if err := execRepo.Create(ctx, exec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count, err := execRepo.CancelActiveByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("CancelActiveByTask: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 active executions cancelled, got %d", count)
+	}
+	history, err := execRepo.ListByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statuses := map[models.ExecutionStatus]int{}
+	for _, exec := range history {
+		statuses[exec.Status]++
+	}
+	if statuses[models.ExecCancelled] != 2 || statuses[models.ExecCompleted] != 1 {
+		t.Fatalf("unexpected execution statuses after cancel: %#v", statuses)
+	}
+}

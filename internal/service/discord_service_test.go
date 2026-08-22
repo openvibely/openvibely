@@ -1981,3 +1981,121 @@ func TestDiscordSettingsHelpersRoundTrip(t *testing.T) {
 		t.Fatalf("stored setting = %q err=%v", stored, err)
 	}
 }
+
+func TestDiscordServiceSendThreadAndChatResponsesUseInjectedSender(t *testing.T) {
+	ctx := context.Background()
+	svc, _, settingsRepo, projectRepo, taskRepo, _, discordTaskContextRepo := newDiscordServiceForTest(t)
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "true"); err != nil {
+		t.Fatal(err)
+	}
+	project := &models.Project{Name: "Discord response project"}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "Discord task", Prompt: "do work", Status: models.StatusPending, Category: models.CategoryActive, CreatedVia: models.TaskOriginDiscord}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Discord chat", Prompt: "chat", Status: models.StatusPending, Category: models.CategoryChat, CreatedVia: models.TaskOriginDiscord}
+	if err := taskRepo.Create(ctx, chatTask); err != nil {
+		t.Fatal(err)
+	}
+	if err := discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: task.ID, DiscordChannelID: "chan-task", DiscordThreadID: "thread-task", DiscordMessageID: "msg-task", DiscordUserID: "user-task"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := discordTaskContextRepo.Upsert(ctx, &models.DiscordTaskContext{TaskID: chatTask.ID, DiscordChannelID: "chan-chat", DiscordThreadID: "thread-chat", DiscordMessageID: "msg-chat", DiscordUserID: "user-chat"}); err != nil {
+		t.Fatal(err)
+	}
+
+	type sentMessage struct{ channelID, messageID, body string }
+	var sent []sentMessage
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		sent = append(sent, sentMessage{channelID: channelID, messageID: messageID, body: text})
+		return fmt.Sprintf("ack-%d", len(sent)), nil
+	}
+
+	svc.SendTaskCompletionToThread(ctx, "chan-direct", "thread-direct", "reply-direct", "Thread Task", "thread output", "", "user-direct")
+	svc.SendTaskCompletionNotification(ctx, *task, "task output", "")
+	svc.SendChatResponse(ctx, *chatTask, "chat output", "")
+	svc.SendChatResponse(ctx, *chatTask, "", "provider exploded")
+
+	if len(sent) != 4 {
+		t.Fatalf("expected 4 sent messages, got %d: %#v", len(sent), sent)
+	}
+	if sent[0].channelID != "chan-direct" || sent[0].messageID != "reply-direct" || !strings.Contains(sent[0].body, "Task completed: Thread Task") {
+		t.Fatalf("unexpected direct completion send: %#v", sent[0])
+	}
+	if sent[1].channelID != "chan-task" || sent[1].messageID != "msg-task" || !strings.Contains(sent[1].body, "Task completed: Discord task") {
+		t.Fatalf("unexpected task completion send: %#v", sent[1])
+	}
+	if sent[2].channelID != "chan-chat" || sent[2].messageID != "msg-chat" || !strings.Contains(sent[2].body, "chat output") {
+		t.Fatalf("unexpected chat output send: %#v", sent[2])
+	}
+	if sent[3].channelID != "chan-chat" || sent[3].messageID != "msg-chat" || !strings.Contains(sent[3].body, "Error: provider exploded") {
+		t.Fatalf("unexpected chat error send: %#v", sent[3])
+	}
+
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "false"); err != nil {
+		t.Fatal(err)
+	}
+	svc.SendTaskCompletionToThread(ctx, "chan-disabled", "thread-disabled", "reply-disabled", "Disabled", "ignored", "", "user-disabled")
+	if len(sent) != 4 {
+		t.Fatalf("send responses disabled should not send, got %#v", sent)
+	}
+}
+
+func TestDiscordServiceEditOrSendAndLifecycleHelpers(t *testing.T) {
+	ctx := context.Background()
+	svc, _, settingsRepo, _, _, _, _ := newDiscordServiceForTest(t)
+	if svc.IsRunning() {
+		t.Fatal("new Discord service should not be running")
+	}
+	if err := svc.ReloadFromSettings(ctx); err != nil {
+		t.Fatalf("ReloadFromSettings without token: %v", err)
+	}
+	if err := svc.TestConnection(ctx); err == nil || !strings.Contains(err.Error(), "bot token is not configured") {
+		t.Fatalf("expected missing token TestConnection error, got %v", err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingBotToken, "bot-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingBotUserID, "bot-user"); err != nil {
+		t.Fatal(err)
+	}
+	if err := settingsRepo.Set(ctx, DiscordSettingSendResponses, "false"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Disconnect(ctx); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+	for _, key := range []string{DiscordSettingBotToken, DiscordSettingBotUserID, DiscordSettingSendResponses} {
+		value, err := settingsRepo.Get(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value != "" {
+			t.Fatalf("expected %s to be cleared, got %q", key, value)
+		}
+	}
+
+	var sent []string
+	svc.sendMessageFunc = func(channelID, messageID, text string) (string, error) {
+		sent = append(sent, channelID+"|"+messageID+"|"+text)
+		return "ack", nil
+	}
+	if err := svc.editOrSendDiscordMessage("", "edit", "reply", "body"); err != nil {
+		t.Fatalf("blank channel should be ignored: %v", err)
+	}
+	if err := svc.editOrSendDiscordMessage("chan", "edit", "reply", "   "); err != nil {
+		t.Fatalf("blank body should be ignored: %v", err)
+	}
+	if len(sent) != 0 {
+		t.Fatalf("blank edit/send inputs should not send: %#v", sent)
+	}
+	if err := svc.editOrSendDiscordMessage("chan", "edit", "reply", "body"); err != nil {
+		t.Fatalf("editOrSendDiscordMessage: %v", err)
+	}
+	if len(sent) != 1 || sent[0] != "chan|reply|body" {
+		t.Fatalf("expected fallback send through injected sender, got %#v", sent)
+	}
+}

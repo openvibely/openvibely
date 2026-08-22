@@ -3715,3 +3715,121 @@ func TestSlackTextAndAttachmentHelpers(t *testing.T) {
 	require.Equal(t, "after", filtered[1].ID)
 	require.Equal(t, history, filterSlackChatHistory(history, "missing"))
 }
+
+func TestSlackServiceSendCompletionThreadAndLifecycleHelpers(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	settingsRepo := repository.NewSettingsRepo(db)
+	svc := NewSlackService(settingsRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	var posted []string
+	svc.postMessageFn = func(channelID, threadTS, text string) (string, error) {
+		posted = append(posted, channelID+"|"+threadTS+"|"+text)
+		return fmt.Sprintf("ts-%d", len(posted)), nil
+	}
+
+	svc.SendTaskCompletionToThread(ctx, "C1", "1710000000.100000", "Slack Task", "finished output", "", "U1")
+	svc.SendTaskCompletionToThread(ctx, "C2", "1710000000.200000", "Broken Task", "", "provider exploded", "U2")
+	if len(posted) != 2 {
+		t.Fatalf("expected two completion posts, got %#v", posted)
+	}
+	if !strings.Contains(posted[0], "✅ *Task completed:* Slack Task") || !strings.Contains(posted[0], "finished output") {
+		t.Fatalf("unexpected success completion post: %q", posted[0])
+	}
+	if !strings.Contains(posted[1], "❌ *Task failed:* Broken Task") || !strings.Contains(posted[1], "provider exploded") {
+		t.Fatalf("unexpected failure completion post: %q", posted[1])
+	}
+
+	if err := settingsRepo.Set(ctx, SlackSettingSendResponses, "false"); err != nil {
+		t.Fatal(err)
+	}
+	svc.SendTaskCompletionToThread(ctx, "C3", "1710000000.300000", "Disabled", "ignored", "", "U3")
+	if len(posted) != 2 {
+		t.Fatalf("send responses disabled should not post, got %#v", posted)
+	}
+	if err := settingsRepo.Set(ctx, SlackSettingSendResponses, "true"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.postSlackMessage("", "thread", "body"); err != nil {
+		t.Fatalf("blank channel should be ignored: %v", err)
+	}
+	if _, err := svc.postSlackMessage("C4", "thread", " "); err != nil {
+		t.Fatalf("blank body should be ignored: %v", err)
+	}
+	if _, err := svc.openSlackDirectMessage(""); err == nil || !strings.Contains(err.Error(), "user id is required") {
+		t.Fatalf("expected blank user open DM error, got %v", err)
+	}
+	if err := svc.TestConnection(ctx); err == nil || !strings.Contains(err.Error(), "bot token is not configured") {
+		t.Fatalf("expected missing token TestConnection error, got %v", err)
+	}
+	for _, kv := range map[string]string{
+		SlackSettingBotToken:         "xoxb-token",
+		SlackSettingBotTokenOverride: "override",
+		SlackSettingBotUserID:        "U-BOT",
+		SlackSettingTeamID:           "T1",
+		SlackSettingTeamName:         "Team",
+		SlackSettingConnectedAt:      time.Now().UTC().Format(time.RFC3339),
+		SlackSettingOAuthState:       "state",
+	} {
+		if err := settingsRepo.Set(ctx, kv, kv+"-value"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := svc.Disconnect(ctx); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+	for _, key := range []string{SlackSettingBotToken, SlackSettingBotTokenOverride, SlackSettingBotUserID, SlackSettingTeamID, SlackSettingTeamName, SlackSettingConnectedAt, SlackSettingOAuthState} {
+		value, err := settingsRepo.Get(ctx, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value != "" && key != SlackSettingBotTokenSource {
+			t.Fatalf("expected %s to be cleared, got %q", key, value)
+		}
+	}
+}
+
+func TestSlackServiceBoundedAttachmentCleanupHelpers(t *testing.T) {
+	root := t.TempDir()
+	svc := NewSlackService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	svc.uploadsDir = root
+
+	attachmentDir := filepath.Join(root, "source")
+	if err := os.MkdirAll(attachmentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(attachmentDir, "payload.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	svc.cleanupAttachmentSourcesFn = func(attachments []models.ChatAttachment) {
+		called = true
+		if len(attachments) != 1 || attachments[0].FilePath != filepath.Join(attachmentDir, "payload.txt") {
+			t.Fatalf("unexpected cleanup attachments: %#v", attachments)
+		}
+	}
+	svc.cleanupSlackAttachmentSourcesBounded(context.Background(), []models.ChatAttachment{{FilePath: filepath.Join(attachmentDir, "payload.txt")}})
+	if !called {
+		t.Fatal("expected cleanup function to be called")
+	}
+
+	sessionPath := filepath.Join(root, "chat", "pending", "session-1")
+	if err := os.MkdirAll(sessionPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc.cleanupSlackPendingSessionBounded(context.Background(), "session-1")
+	if _, err := os.Stat(sessionPath); !os.IsNotExist(err) {
+		t.Fatalf("expected pending session to be removed, got %v", err)
+	}
+
+	svc.savePendingAttachmentsFn = func(attachments []models.ChatAttachment) (string, error) {
+		if len(attachments) != 1 || attachments[0].FileName != "report.txt" {
+			t.Fatalf("unexpected saved attachments: %#v", attachments)
+		}
+		return "session-2", nil
+	}
+	sessionID, err := svc.saveChatAttachmentsToPendingSessionBounded(context.Background(), []models.ChatAttachment{{FileName: "report.txt"}})
+	if err != nil || sessionID != "session-2" {
+		t.Fatalf("save pending attachments = %q, %v", sessionID, err)
+	}
+}
