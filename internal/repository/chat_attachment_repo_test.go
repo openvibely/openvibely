@@ -87,6 +87,20 @@ func TestChatAttachmentRepo_ListByExecutionIDs_Empty(t *testing.T) {
 	}
 }
 
+func TestChatAttachmentRepo_CleanupOrphanedFiles_NoUploadsDir(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewChatAttachmentRepo(db)
+
+	uploadsDir := filepath.Join(t.TempDir(), "missing-uploads")
+	count, err := repo.CleanupOrphanedFiles(context.Background(), uploadsDir)
+	if err != nil {
+		t.Fatalf("CleanupOrphanedFiles() should not error on nonexistent dir: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 files deleted, got %d", count)
+	}
+}
+
 func TestChatAttachmentRepo_CleanupOrphanedFiles_RelativeRootPreservesTrackedFiles(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	chatAttachmentRepo := NewChatAttachmentRepo(db)
