@@ -196,17 +196,14 @@ func TestTaskDetailLifecycleTabRendersSelectedMemoryClientUI(t *testing.T) {
 	}
 }
 
-func TestHandler_GetLifecycleExecutionEvents_ReturnsTraceEvents(t *testing.T) {
+func TestHandler_GetLifecycleExecutionEvents_ReturnsTraceEventsForSameProject(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	agentRepo := repository.NewAgentRepo(db)
-	taskRepo := repository.NewTaskRepo(db, nil)
 	lifecycleRepo := repository.NewLifecycleRepo(db)
 	h.SetLifecycleRepo(lifecycleRepo)
 
-	task := &models.Task{ProjectID: "default", Title: "Trace Events", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
-	if err := taskRepo.Create(t.Context(), task); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
+	project := createProject(t, h, "trace-events-project")
+	task := createTask(t, h, project.ID, "Trace Events")
 	agent := &models.Agent{Name: "trace-agent", SystemPrompt: "x"}
 	if err := agentRepo.Create(t.Context(), agent); err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -219,7 +216,7 @@ func TestHandler_GetLifecycleExecutionEvents_ReturnsTraceEvents(t *testing.T) {
 		t.Fatalf("append event: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/lifecycle-executions/"+exec.ID+"/events", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/lifecycle-executions/"+exec.ID+"/events?project_id="+project.ID, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -232,6 +229,109 @@ func TestHandler_GetLifecycleExecutionEvents_ReturnsTraceEvents(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].EventType != "tool_call" || got[0].Payload["name"] != "skills_list" {
 		t.Fatalf("unexpected trace events: %+v", got)
+	}
+}
+
+func TestHandler_GetLifecycleExecutionEvents_RejectsForeignProject(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetLifecycleRepo(lifecycleRepo)
+
+	projectA := createProject(t, h, "trace-project-a")
+	projectB := createProject(t, h, "trace-project-b")
+	task := createTask(t, h, projectA.ID, "Project A Trace Events")
+	agent := &models.Agent{Name: "foreign-trace-agent", SystemPrompt: "x"}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	exec := &models.LifecycleExecution{TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete, Status: models.LifecycleExecCompleted}
+	if err := lifecycleRepo.CreateExecution(t.Context(), exec); err != nil {
+		t.Fatalf("create exec: %v", err)
+	}
+	if err := lifecycleRepo.AppendExecutionEvent(t.Context(), &models.LifecycleExecutionEvent{LifecycleExecutionID: exec.ID, EventType: "tool_result", PayloadJSON: `{"secret_payload":"project-a-only"}`}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/lifecycle-executions/"+exec.ID+"/events?project_id="+projectB.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code < 400 {
+		t.Fatalf("expected foreign project request to be rejected, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "project-a-only") || strings.Contains(rec.Body.String(), "secret_payload") {
+		t.Fatalf("foreign lifecycle event payload leaked: %s", rec.Body.String())
+	}
+}
+
+func TestHandler_GetLifecycleActivity_UnknownIDsReturnControlledNotFound(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetLifecycleRepo(lifecycleRepo)
+	project := createProject(t, h, "unknown-lifecycle-project")
+
+	for _, tc := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "task lifecycle list", path: "/api/tasks/missing-task/lifecycle-executions?project_id=" + project.ID, want: "task not found"},
+		{name: "execution events", path: "/api/lifecycle-executions/missing-exec/events?project_id=" + project.ID, want: "lifecycle execution not found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.want) {
+				t.Fatalf("expected controlled not found message %q, got %s", tc.want, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestHandler_GetTaskLifecycleExecutions_RejectsForeignProject(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+
+	projectA := createProject(t, h, "lifecycle-project-a")
+	projectB := createProject(t, h, "lifecycle-project-b")
+	task := createTask(t, h, projectA.ID, "Project A Lifecycle Task")
+	agent := &models.Agent{Name: "foreign-activity-agent", SystemPrompt: "x"}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	exec := &models.LifecycleExecution{
+		TaskID:         task.ID,
+		AgentID:        agent.ID,
+		When:           models.LifecycleRouteTask,
+		SkillKey:       "route_task",
+		OutputContract: models.OutputContractSelectedSkills,
+		Status:         models.LifecycleExecFailed,
+		Error:          "project-a-error",
+		OutputJSON:     `{"skills":["project_a_skill"],"memories":[{"file":"project_a_memory.md"}],"summary":"project-a-summary"}`,
+	}
+	if err := lifecycleRepo.CreateExecution(t.Context(), exec); err != nil {
+		t.Fatalf("create exec: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+task.ID+"/lifecycle-executions?project_id="+projectB.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code < 400 {
+		t.Fatalf("expected foreign project request to be rejected, got %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, forbidden := range []string{"project_a_skill", "project_a_memory.md", "project-a-summary", "project-a-error"} {
+		if strings.Contains(rec.Body.String(), forbidden) {
+			t.Fatalf("foreign lifecycle content %q leaked: %s", forbidden, rec.Body.String())
+		}
 	}
 }
 
@@ -327,7 +427,7 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 		t.Fatalf("create failed exec: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+task.ID+"/lifecycle-executions", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+task.ID+"/lifecycle-executions?project_id="+project.ID, nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 

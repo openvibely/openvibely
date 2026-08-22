@@ -386,6 +386,73 @@ func TestLifecycleRepo_ExecutionEvents(t *testing.T) {
 	}
 }
 
+func TestLifecycleRepo_ListExecutionEventsForProjectFiltersOwnership(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := NewProjectRepo(db)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	projectA := &models.Project{Name: "Lifecycle Repo Project A"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Lifecycle Repo Project B"}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	agent := createLifecycleTestAgent(t, agentRepo)
+	taskA := &models.Task{ProjectID: projectA.ID, Title: "Trace A", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, taskA); err != nil {
+		t.Fatalf("create task A: %v", err)
+	}
+	execA := &models.LifecycleExecution{TaskID: taskA.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete, Status: models.LifecycleExecRunning}
+	if err := repo.CreateExecution(ctx, execA); err != nil {
+		t.Fatalf("create exec A: %v", err)
+	}
+	if err := repo.AppendExecutionEvent(ctx, &models.LifecycleExecutionEvent{LifecycleExecutionID: execA.ID, EventType: "tool_result", PayloadJSON: `{"project":"a"}`}); err != nil {
+		t.Fatalf("append event A: %v", err)
+	}
+	taskB := &models.Task{ProjectID: projectB.ID, Title: "Trace B", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, taskB); err != nil {
+		t.Fatalf("create task B: %v", err)
+	}
+	execB := &models.LifecycleExecution{TaskID: taskB.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete, Status: models.LifecycleExecRunning}
+	if err := repo.CreateExecution(ctx, execB); err != nil {
+		t.Fatalf("create exec B: %v", err)
+	}
+
+	events, found, err := repo.ListExecutionEventsForProject(ctx, execA.ID, projectA.ID)
+	if err != nil {
+		t.Fatalf("list project A events: %v", err)
+	}
+	if !found || len(events) != 1 || events[0].PayloadJSON != `{"project":"a"}` {
+		t.Fatalf("expected Project A event, found=%v events=%+v", found, events)
+	}
+	foreignEvents, found, err := repo.ListExecutionEventsForProject(ctx, execA.ID, projectB.ID)
+	if err != nil {
+		t.Fatalf("list foreign events: %v", err)
+	}
+	if found || len(foreignEvents) != 0 {
+		t.Fatalf("expected no foreign events, found=%v events=%+v", found, foreignEvents)
+	}
+	emptyEvents, found, err := repo.ListExecutionEventsForProject(ctx, execB.ID, projectB.ID)
+	if err != nil {
+		t.Fatalf("list empty same-project events: %v", err)
+	}
+	if !found || len(emptyEvents) != 0 {
+		t.Fatalf("expected same-project execution with empty events, found=%v events=%+v", found, emptyEvents)
+	}
+	unknownEvents, found, err := repo.ListExecutionEventsForProject(ctx, "missing-exec", projectB.ID)
+	if err != nil {
+		t.Fatalf("list unknown events: %v", err)
+	}
+	if found || len(unknownEvents) != 0 {
+		t.Fatalf("expected unknown execution to look absent, found=%v events=%+v", found, unknownEvents)
+	}
+}
+
 // TestLifecycleRepo_ListExecutionsForTask_NewestFirst verifies that
 // ListExecutionsForTask returns executions in descending started_at order so
 // the newest lifecycle event is visible at the top of the UI without scrolling.

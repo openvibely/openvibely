@@ -784,6 +784,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/handler.ErrorResponse"
                         }
                     },
+                    "404": {
+                        "description": "Lifecycle execution not found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -1013,6 +1019,12 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Invalid task ID",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Task not found",
                         "schema": {
                             "$ref": "#/definitions/handler.ErrorResponse"
                         }
@@ -2620,6 +2632,8 @@ var SwaggerInfo = &swag.Spec{
 	Description:      "REST API for OpenVibely - AI-powered task scheduling and management\nThis API provides endpoints for managing projects, tasks, and chat interactions with AI agents.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
+	LeftDelim:        "{{",
+	RightDelim:       "}}",
 }
 
 func init() {

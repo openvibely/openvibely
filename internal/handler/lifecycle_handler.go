@@ -185,6 +185,7 @@ func (h *Handler) reconcileAgentLifecycleHooks(ctx context.Context, agentID stri
 // @Param id path string true "Task ID"
 // @Success 200 {array} viewmodels.LifecycleExecutionView
 // @Failure 400 {object} ErrorResponse "Invalid task ID"
+// @Failure 404 {object} ErrorResponse "Task not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/tasks/{id}/lifecycle-executions [get]
 func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
@@ -194,6 +195,18 @@ func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
 	taskID := strings.TrimSpace(c.Param("id"))
 	if taskID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "task id is required")
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	task, err := h.taskRepo.GetByID(c.Request().Context(), taskID)
+	if err != nil {
+		applog.Infof("[handler] GetTaskLifecycleExecutions task=%s lookup error: %v", taskID, err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if task == nil || task.ProjectID != projectID {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 	execs, err := h.lifecycleRepo.ListExecutionsForTask(c.Request().Context(), taskID)
 	if err != nil {
@@ -215,6 +228,7 @@ func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
 // @Param id path string true "Lifecycle execution ID"
 // @Success 200 {array} viewmodels.LifecycleExecutionEventView
 // @Failure 400 {object} ErrorResponse "Invalid execution ID"
+// @Failure 404 {object} ErrorResponse "Lifecycle execution not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/lifecycle-executions/{id}/events [get]
 func (h *Handler) GetLifecycleExecutionEvents(c echo.Context) error {
@@ -225,10 +239,17 @@ func (h *Handler) GetLifecycleExecutionEvents(c echo.Context) error {
 	if execID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "lifecycle execution id is required")
 	}
-	events, err := h.lifecycleRepo.ListExecutionEvents(c.Request().Context(), execID)
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	events, found, err := h.lifecycleRepo.ListExecutionEventsForProject(c.Request().Context(), execID, projectID)
 	if err != nil {
 		applog.Infof("[handler] GetLifecycleExecutionEvents exec=%s error: %v", execID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if !found {
+		return echo.NewHTTPError(http.StatusNotFound, "lifecycle execution not found")
 	}
 	views := make([]viewmodels.LifecycleExecutionEventView, 0, len(events))
 	for _, e := range events {

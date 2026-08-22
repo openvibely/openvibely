@@ -1444,6 +1444,10 @@ paths:
           description: Invalid execution ID
           schema:
             $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Lifecycle execution not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
         "500":
           description: Internal server error
           schema:
@@ -1597,6 +1601,10 @@ paths:
             type: array
         "400":
           description: Invalid task ID
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Task not found
           schema:
             $ref: '#/definitions/handler.ErrorResponse'
         "500":
