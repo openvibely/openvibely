@@ -2463,6 +2463,24 @@ func TestUpdateAgentRuntimeRejectsUnsafeTargetsAndInputsWithoutPartialSave(t *te
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "update_agent does not support")
 	}
+
+	updateHandler := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{ProjectID: project.ID, AgentRepo: agentRepo, LLMConfigRepo: llmConfigRepo, ProjectRepo: projectRepo})["update_agent"]
+	require.NotNil(t, updateHandler)
+	for _, raw := range []string{
+		`{"agent_id":"` + base.ID + `","scoped_files":[{"directory":"docs","permissions":["read"],"api_key":"secret"}]}`,
+		`{"agent_id":"` + base.ID + `","scoped_files":[{"directory":"docs","permissions":["read"],"plugins":["github@marketplace"]}]}`,
+		`{"agent_id":"` + base.ID + `","scoped_files":[{"directory":"docs","permissions":["read"],"skills":[{"content":"mutate"}]}]}`,
+		`{"agent_id":"` + base.ID + `","scoped_files":[{"directory":"docs","permissions":["read"],"lifecycle_hooks":[{"slot":"after_complete"}]}]}`,
+		`{"agent_id":"` + base.ID + `","scoped_files":[{"directory":"docs","permissions":["read"],"delete":true}]}`,
+	} {
+		_, err := updateHandler(ctx, json.RawMessage(raw))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "update_agent scoped_files[0] does not support")
+		stored, getErr := agentRepo.GetByID(ctx, base.ID)
+		require.NoError(t, getErr)
+		require.Equal(t, []string{"Read", "Bash"}, stored.Tools)
+		require.Empty(t, stored.ToolConfig.ScopedFiles)
+	}
 }
 
 func ptrString(v string) *string { return &v }
