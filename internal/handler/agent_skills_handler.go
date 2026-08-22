@@ -66,7 +66,10 @@ func (h *Handler) GetAgentSkills(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	projectRoot := h.currentProjectSkillRoot(c)
+	projectRoot, err := h.agentOwnedSkillProjectRoot(c, agent)
+	if err != nil {
+		return err
+	}
 	if err := h.migrateLegacyAgentSkills(c, agent, projectRoot); err != nil {
 		return err
 	}
@@ -88,7 +91,7 @@ func (h *Handler) GetAgentSkills(c echo.Context) error {
 		view := agentSkillView{
 			Handle: entry.Handle,
 			Name:   entry.Skill,
-			Scope:  h.scopeForAgentSkillPath(c, entry.AbsolutePath),
+			Scope:  h.scopeForAgentSkillPathWithProjectRoot(entry.AbsolutePath, projectRoot),
 			Source: string(entry.Source),
 			Path:   entry.AbsolutePath,
 		}
@@ -171,7 +174,11 @@ func (h *Handler) ArchiveAgentOwnedSkill(c echo.Context) error {
 	var req agentSkillArchiveRequest
 	_ = json.NewDecoder(c.Request().Body).Decode(&req)
 	scope := h.dialogSkillScope(c, agent, c.QueryParam("scope"))
-	root, err := h.rootForDialogScope(c, scope)
+	projectRoot, err := h.agentOwnedSkillProjectRoot(c, agent)
+	if err != nil {
+		return err
+	}
+	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -211,7 +218,11 @@ func (h *Handler) writeAgentOwnedSkillFromDialog(c echo.Context, agent *models.A
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "skill handle must be a slug and must not include an agent prefix")
 	}
 	scope := h.dialogSkillScope(c, agent, req.Scope)
-	root, err := h.rootForDialogScope(c, scope)
+	projectRoot, err := h.agentOwnedSkillProjectRoot(c, agent)
+	if err != nil {
+		return nil, err
+	}
+	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +244,7 @@ func (h *Handler) writeAgentOwnedSkillFromDialog(c echo.Context, agent *models.A
 	if err != nil {
 		return nil, err
 	}
-	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: h.currentProjectSkillRoot(c)}, agentlibrary.NewRepoApplier(h.agentRepo, h.lifecycleRepo))
+	importer := agentlibrary.NewImporter(agentlibrary.SkillRoots{Global: h.agentSkillRoot, Project: projectRoot}, agentlibrary.NewRepoApplier(h.agentRepo, h.lifecycleRepo))
 	res, err := importer.WriteAgentOwnedSkill(c.Request().Context(), scope, agentStableKey(agent), decl, body)
 	if err != nil {
 		return res, echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -355,7 +366,24 @@ func (h *Handler) projectSkillRootForAgent(c echo.Context, agent *models.Agent) 
 	return h.currentProjectSkillRoot(c)
 }
 
+func (h *Handler) agentOwnedSkillProjectRoot(c echo.Context, agent *models.Agent) (string, error) {
+	if agent != nil && agent.Scope == models.AgentScopeProject {
+		agentProjectID := strings.TrimSpace(agent.ProjectID)
+		if agentProjectID != "" {
+			if requestedProjectID := strings.TrimSpace(c.QueryParam("project_id")); requestedProjectID != "" && requestedProjectID != agentProjectID {
+				return "", echo.NewHTTPError(http.StatusNotFound, "agent not found")
+			}
+			return h.projectSkillRootForAgent(c, agent), nil
+		}
+	}
+	return h.currentProjectSkillRoot(c), nil
+}
+
 func (h *Handler) rootForDialogScope(c echo.Context, scope string) (string, error) {
+	return h.rootForDialogScopeWithProjectRoot(scope, h.currentProjectSkillRoot(c))
+}
+
+func (h *Handler) rootForDialogScopeWithProjectRoot(scope, projectRoot string) (string, error) {
 	switch scope {
 	case "global":
 		if h.agentSkillRoot == "" {
@@ -363,13 +391,11 @@ func (h *Handler) rootForDialogScope(c echo.Context, scope string) (string, erro
 		}
 		return h.agentSkillRoot, nil
 	case "project":
-		projectRoot := h.currentProjectSkillRoot(c)
 		if projectRoot == "" {
 			return "", echo.NewHTTPError(http.StatusServiceUnavailable, "project skill root not configured")
 		}
 		return projectRoot, nil
 	case "":
-		projectRoot := h.currentProjectSkillRoot(c)
 		if projectRoot != "" {
 			return projectRoot, nil
 		}
@@ -436,7 +462,7 @@ func (h *Handler) materializeAgentToDiskWithUsedKeys(c echo.Context, agent *mode
 	if scope == "project" && projectRoot == "" {
 		scope = "global"
 	}
-	root, err := h.rootForDialogScope(c, scope)
+	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -605,7 +631,7 @@ func (h *Handler) migrateLegacyAgentSkills(c echo.Context, agent *models.Agent, 
 	if scope == "project" && projectRoot == "" {
 		scope = "global"
 	}
-	root, err := h.rootForDialogScope(c, scope)
+	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -722,8 +748,12 @@ func agentStableKey(agent *models.Agent) string {
 }
 
 func (h *Handler) scopeForAgentSkillPath(c echo.Context, path string) string {
+	return h.scopeForAgentSkillPathWithProjectRoot(path, h.currentProjectSkillRoot(c))
+}
+
+func (h *Handler) scopeForAgentSkillPathWithProjectRoot(path, projectRoot string) string {
 	clean := filepath.Clean(path)
-	if projectRoot := h.currentProjectSkillRoot(c); projectRoot != "" {
+	if projectRoot != "" {
 		if rel, err := filepath.Rel(filepath.Clean(projectRoot), clean); err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
 			return "project"
 		}

@@ -291,3 +291,32 @@ func TestAgentRepo_GetByKeyIncludingArchivedSeesArchivedRows(t *testing.T) {
 		t.Fatalf("expected archived row, got %+v", archived)
 	}
 }
+
+func TestAgentRepoGetByIDsReturnsOnlyRequestedExistingAgents(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	first := &models.Agent{Name: "Batch One", SystemPrompt: "one", Model: "inherit", Tools: []string{"Read"}}
+	second := &models.Agent{Name: "Batch Two", SystemPrompt: "two", Model: "inherit", Tools: []string{"Grep"}}
+	if err := repo.Create(ctx, first); err != nil {
+		t.Fatalf("create first agent: %v", err)
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatalf("create second agent: %v", err)
+	}
+
+	empty, err := repo.GetByIDs(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty GetByIDs = %#v, %v", empty, err)
+	}
+	agents, err := repo.GetByIDs(ctx, []string{first.ID, "missing", second.ID, first.ID})
+	if err != nil {
+		t.Fatalf("GetByIDs: %v", err)
+	}
+	if len(agents) != 2 || agents[first.ID].Name != "Batch One" || agents[second.ID].Name != "Batch Two" {
+		t.Fatalf("agents = %#v", agents)
+	}
+	if _, ok := agents["missing"]; ok {
+		t.Fatalf("missing ID should not be present: %#v", agents)
+	}
+}
