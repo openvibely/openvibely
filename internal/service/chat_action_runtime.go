@@ -361,7 +361,7 @@ func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[st
 			}
 			agents := []models.LLMConfig{}
 			if opts.LLMConfigRepo != nil {
-				agents, _ = opts.LLMConfigRepo.List(ctx)
+				agents, _ = opts.LLMConfigRepo.ListTaskCreationSelectionOptions(ctx)
 			}
 			createdTasks := []models.Task(nil)
 			summary := ""

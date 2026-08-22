@@ -1541,14 +1541,21 @@ func assertChannelModelStatusStatementsCompact(t *testing.T, statements []string
 }
 
 func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallback(t *testing.T) {
-	db := testutil.NewTestDB(t)
+	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()
 	projectRepo := repository.NewProjectRepo(db)
 	llmConfigRepo := repository.NewLLMConfigRepo(db)
 	taskRepo := repository.NewTaskRepo(db, nil)
 	project := &models.Project{Name: "Channel Actions"}
 	require.NoError(t, projectRepo.Create(ctx, project))
-	agent := &models.LLMConfig{Name: "Default", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	largeProviderJSON := strings.Repeat("large-provider-json", 4096)
+	agent := &models.LLMConfig{
+		Name: "Default", Provider: models.ProviderTest, Model: "test", IsDefault: true,
+		APIKey: "secret-api-key", OAuthAccessToken: "secret-oauth-token", OAuthRefreshToken: "secret-refresh-token",
+		OAuthClientSecret: "secret-client-secret", BaseURL: "https://example.com/v1/", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largeProviderJSON, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largeProviderJSON + `"}`,
+	}
 	require.NoError(t, llmConfigRepo.Create(ctx, agent))
 	collector := newChannelActionSummaryCollector()
 	var callbackTaskIDs []string
@@ -1567,7 +1574,10 @@ func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallbac
 	payload, err := json.Marshal(TaskCreationRequest{Title: "Shared action task", Prompt: "Do shared work"})
 	require.NoError(t, err)
 
+	counter.Reset()
+	counter.SetEnabled(true)
 	summary, err := handlers["create_task"](ctx, payload)
+	counter.SetEnabled(false)
 	require.NoError(t, err)
 	require.Contains(t, summary, "Shared action task")
 	require.Contains(t, summary, "[TASK_ID:")
@@ -1577,7 +1587,36 @@ func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallbac
 	require.NotNil(t, created)
 	require.Equal(t, project.ID, created.ProjectID)
 	require.Equal(t, 2, created.Priority)
+	require.NotNil(t, created.AgentID)
+	require.Equal(t, agent.ID, *created.AgentID)
 	require.Contains(t, strings.Join(collector.createdLines, "\n"), callbackTaskIDs[0])
+	assertChannelCreateTaskUsesCompactModelSelection(t, counter.Statements())
+}
+
+func assertChannelCreateTaskUsesCompactModelSelection(t *testing.T, statements []string) {
+	t.Helper()
+	compactQueries := 0
+	for _, raw := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+		if !strings.Contains(stmt, " from agent_configs") {
+			continue
+		}
+		projection := strings.Split(stmt, " from agent_configs")[0]
+		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_id", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "transport", "preset_slug", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "max_workers", "worker_timeout"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("channel create_task model query selected forbidden column %q: %s", forbidden, raw)
+			}
+		}
+		if strings.Contains(projection, "select id, name, provider, model, reasoning_effort") {
+			t.Fatalf("channel create_task used full model list query: %s", raw)
+		}
+		if projection == "select id, name, provider, model, is_default, auto_start_tasks" && strings.Contains(stmt, "order by is_default desc, name asc") {
+			compactQueries++
+		}
+	}
+	if compactQueries != 1 {
+		t.Fatalf("compact task creation model query count = %d, want 1; statements: %#v", compactQueries, statements)
+	}
 }
 
 func TestBuildChannelTaskActionHandlersEditTaskUpdatesPrimaryAgentDefinition(t *testing.T) {

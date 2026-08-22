@@ -365,7 +365,7 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			if req.Priority == 0 {
 				req.Priority = 2
 			}
-			agents, err := h.llmConfigRepo.List(ctx)
+			agents, err := h.llmConfigRepo.ListTaskCreationSelectionOptions(ctx)
 			if err != nil {
 				agents = nil
 			}

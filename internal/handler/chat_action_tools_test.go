@@ -15,6 +15,7 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
+	"github.com/openvibely/openvibely/internal/testutil"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/stretchr/testify/require"
 )
@@ -948,6 +949,136 @@ func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
 				require.Equal(t, tt.wantStoredTitle, tasks[0].Title)
 			}
 		})
+	}
+}
+
+func TestCreateTaskRuntimeToolUsesCompactModelSelection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+	project := createProject(t, h, "Runtime Compact Create Task")
+	largeProviderJSON := strings.Repeat("large-provider-json", 4096)
+	agent := &models.LLMConfig{
+		Name: "Runtime Compact Default", Provider: models.ProviderTest, AuthMethod: models.AuthMethodAPIKey,
+		Model: "claude-sonnet-runtime-create", IsDefault: true, APIKey: "secret-api-key",
+		OAuthAccessToken: "secret-oauth-token", OAuthRefreshToken: "secret-refresh-token", OAuthClientSecret: "secret-client-secret",
+		BaseURL: "https://example.com/v1/", ExtraHeadersJSON: `{"X-Secret":"value"}`,
+		ExtraBodyJSON: largeProviderJSON, CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON: `{"access":"secret"}`, MixtureConfigJSON: `{"large":"` + largeProviderJSON + `"}`,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	handler := h.chatActionHandlers(
+		streamingResponseParams{ExecID: "runtime-compact-create-exec", ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)["create_task"]
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	out, err := handler(ctx, json.RawMessage(`{"title":"Compact created task","prompt":"Create this task"}`))
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	ids := extractTaskIDsFromOutput(out)
+	require.Len(t, ids, 1)
+	created, err := h.taskRepo.GetByID(ctx, ids[0])
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.NotNil(t, created.AgentID)
+	require.Equal(t, agent.ID, *created.AgentID)
+	assertCreateTaskRuntimeUsesCompactModelSelection(t, counter.Statements())
+}
+
+func TestCreateTaskRuntimeToolDefersAutoStartUntilChatAttachmentsActivate(t *testing.T) {
+	h, _, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	_, err := db.Exec(`DELETE FROM agent_configs`)
+	require.NoError(t, err)
+	project := createProject(t, h, "Runtime Attachment Deferral")
+	agent := &models.LLMConfig{Name: "Attachment Auto Start", Provider: models.ProviderTest, Model: "claude-sonnet-attachments", IsDefault: true, AutoStartTasks: true}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	chatTask := &models.Task{ProjectID: project.ID, Title: "Chat source", Prompt: "chat", Category: models.CategoryChat, Status: models.StatusRunning, Priority: 2}
+	require.NoError(t, h.taskRepo.Create(ctx, chatTask))
+	exec := &models.Execution{TaskID: chatTask.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "create task with attachment"}
+	require.NoError(t, h.execRepo.Create(ctx, exec))
+
+	sourceDir := t.TempDir()
+	sourceFile := filepath.Join(sourceDir, "evidence.txt")
+	require.NoError(t, os.WriteFile(sourceFile, []byte("attachment evidence"), 0644))
+	require.NoError(t, h.chatAttachmentRepo.Create(ctx, &models.ChatAttachment{
+		ExecutionID: exec.ID,
+		FileName:    "evidence.txt",
+		FilePath:    sourceFile,
+		MediaType:   "text/plain",
+		FileSize:    int64(len("attachment evidence")),
+	}))
+
+	handler := h.chatActionHandlers(
+		streamingResponseParams{ExecID: exec.ID, ProjectID: project.ID},
+		nil,
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)["create_task"]
+	out, err := handler(ctx, json.RawMessage(`{"title":"Attachment created task","prompt":"Create this task with the chat attachment"}`))
+	require.NoError(t, err)
+	ids := extractTaskIDsFromOutput(out)
+	require.Len(t, ids, 1)
+	require.Contains(t, out, `"Attachment created task" (active)`)
+	require.Contains(t, out, "Attachments copied to tasks: evidence.txt")
+
+	created, err := h.taskRepo.GetByID(ctx, ids[0])
+	require.NoError(t, err)
+	require.NotNil(t, created)
+	require.Equal(t, models.CategoryActive, created.Category)
+	attachments, err := h.attachmentRepo.ListByTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.Len(t, attachments, 1)
+
+	select {
+	case submitted := <-h.workerSvc.Submitted():
+		require.Equal(t, created.ID, submitted.ID)
+		require.Equal(t, models.CategoryActive, submitted.Category)
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("expected deferred active task to submit after attachment copy")
+	}
+}
+
+func TestDeferActiveTasksWithAttachmentsUsesCompactAutoStartRows(t *testing.T) {
+	h := &Handler{}
+	agents := []models.LLMConfig{{ID: "compact-auto", Name: "Compact Auto", Provider: models.ProviderTest, Model: "custom-model", AutoStartTasks: true}}
+	requests := []service.TaskCreationRequest{{Title: "Auto-start attachment task", Prompt: "Do work"}}
+
+	deferred := h.deferActiveTasksWithAttachments(requests, []models.ChatAttachment{{ID: "attachment"}}, agents)
+
+	require.Equal(t, map[int]bool{0: true}, deferred)
+	require.Equal(t, string(models.CategoryBacklog), requests[0].Category)
+}
+
+func assertCreateTaskRuntimeUsesCompactModelSelection(t *testing.T, statements []string) {
+	t.Helper()
+	compactQueries := 0
+	for _, raw := range statements {
+		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+		if !strings.Contains(stmt, " from agent_configs") {
+			continue
+		}
+		projection := strings.Split(stmt, " from agent_configs")[0]
+		for _, forbidden := range []string{"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_id", "oauth_client_secret", "oauth_authorize_url", "oauth_token_url", "oauth_scopes", "ollama_base_url", "base_url", "transport", "preset_slug", "models_url", "auth_header_name", "auth_header_value_prefix", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "max_workers", "worker_timeout"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("create_task model query selected forbidden column %q: %s", forbidden, raw)
+			}
+		}
+		if strings.Contains(projection, "select id, name, provider, model, reasoning_effort") {
+			t.Fatalf("create_task used full model list query: %s", raw)
+		}
+		if projection == "select id, name, provider, model, is_default, auto_start_tasks" && strings.Contains(stmt, "order by is_default desc, name asc") {
+			compactQueries++
+		}
+	}
+	if compactQueries != 1 {
+		t.Fatalf("compact task creation model query count = %d, want 1; statements: %#v", compactQueries, statements)
 	}
 }
 

@@ -3146,6 +3146,93 @@ func TestAutoStartTasks_DisabledInModel(t *testing.T) {
 	}
 }
 
+func TestTaskCreationSelectionPreservesBehaviorWithCompactRows(t *testing.T) {
+	tests := []struct {
+		name         string
+		req          TaskCreationRequest
+		agents       []models.LLMConfig
+		wantAgentID  string
+		wantCategory models.TaskCategory
+	}{
+		{
+			name:         "no models creates backlog without selected model",
+			req:          TaskCreationRequest{Title: "No models", Prompt: "Do work", Priority: 2},
+			wantCategory: models.CategoryBacklog,
+		},
+		{
+			name: "one model selects only model",
+			req:  TaskCreationRequest{Title: "One model", Prompt: "Do work", Priority: 2},
+			agents: []models.LLMConfig{{
+				ID: "only-model", Name: "Only Model", Provider: models.ProviderTest, Model: "custom-model",
+			}},
+			wantAgentID:  "only-model",
+			wantCategory: models.CategoryBacklog,
+		},
+		{
+			name: "multiple models default fallback ordering",
+			req:  TaskCreationRequest{Title: "Default fallback", Prompt: "rename", Priority: 2},
+			agents: []models.LLMConfig{
+				{ID: "alpha", Name: "Alpha", Provider: models.ProviderTest, Model: "claude-opus-alpha"},
+				{ID: "default", Name: "Default", Provider: models.ProviderTest, Model: "claude-opus-default", IsDefault: true},
+			},
+			wantAgentID:  "default",
+			wantCategory: models.CategoryBacklog,
+		},
+		{
+			name: "explicit agent id wins over auto selection",
+			req:  TaskCreationRequest{Title: "Explicit model", Prompt: "Implement a complex multi-file architecture refactor", AgentID: "explicit", Priority: 2},
+			agents: []models.LLMConfig{
+				{ID: "auto", Name: "Auto", Provider: models.ProviderTest, Model: "claude-opus-auto", AutoStartTasks: true},
+				{ID: "explicit", Name: "Explicit", Provider: models.ProviderTest, Model: "custom-explicit"},
+			},
+			wantAgentID:  "explicit",
+			wantCategory: models.CategoryBacklog,
+		},
+		{
+			name: "auto start enabled selected model makes default category active",
+			req:  TaskCreationRequest{Title: "Auto start", Prompt: "Do work", Priority: 2},
+			agents: []models.LLMConfig{{
+				ID: "auto-start", Name: "Auto Start", Provider: models.ProviderTest, Model: "custom-model", AutoStartTasks: true,
+			}},
+			wantAgentID:  "auto-start",
+			wantCategory: models.CategoryActive,
+		},
+		{
+			name: "auto start disabled selected model keeps default category backlog",
+			req:  TaskCreationRequest{Title: "No auto start", Prompt: "Do work", Priority: 2},
+			agents: []models.LLMConfig{{
+				ID: "manual", Name: "Manual", Provider: models.ProviderTest, Model: "custom-model", AutoStartTasks: false,
+			}},
+			wantAgentID:  "manual",
+			wantCategory: models.CategoryBacklog,
+		},
+		{
+			name: "explicit category overrides auto start",
+			req:  TaskCreationRequest{Title: "Explicit backlog", Prompt: "Do work", Category: string(models.CategoryBacklog), Priority: 2},
+			agents: []models.LLMConfig{{
+				ID: "auto-start", Name: "Auto Start", Provider: models.ProviderTest, Model: "custom-model", AutoStartTasks: true,
+			}},
+			wantAgentID:  "auto-start",
+			wantCategory: models.CategoryBacklog,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			selectedAgentID, _ := selectTaskCreationAgent(tt.req, tt.agents)
+			if selectedAgentID != tt.wantAgentID {
+				t.Fatalf("selected agent id=%q, want %q", selectedAgentID, tt.wantAgentID)
+			}
+			if got := resolveTaskCreationCategory(tt.req, selectedAgentID, tt.agents); got != tt.wantCategory {
+				t.Fatalf("category=%s, want %s", got, tt.wantCategory)
+			}
+			if got := EffectiveTaskCreationCategory(tt.req, tt.agents); got != tt.wantCategory {
+				t.Fatalf("effective category=%s, want %s", got, tt.wantCategory)
+			}
+		})
+	}
+}
+
 func TestTaskCreationDefaultModelSentinelSkipsAutoSelection(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
