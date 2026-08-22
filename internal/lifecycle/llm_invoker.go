@@ -10,6 +10,7 @@ import (
 
 	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/util"
 )
 
 // AgentCaller is the subset of the LLM service the LLM-backed HookInvoker
@@ -474,7 +475,7 @@ func extractJSONPayloadForContract(reply string, contract models.LifecycleOutput
 	if s == "" {
 		return s
 	}
-	candidates := jsonPayloadCandidates(s)
+	candidates := util.JSONPayloadCandidates(s)
 	for _, candidate := range candidates {
 		if ValidateOutput(contract, json.RawMessage(candidate)) == nil {
 			return candidate
@@ -484,88 +485,4 @@ func extractJSONPayloadForContract(reply string, contract models.LifecycleOutput
 		return candidates[0]
 	}
 	return s
-}
-
-func jsonPayloadCandidates(s string) []string {
-	var candidates []string
-	addCandidate := func(candidate string) {
-		candidate = normalizeJSONPayloadCandidate(candidate)
-		if candidate == "" {
-			return
-		}
-		for _, existing := range candidates {
-			if existing == candidate {
-				return
-			}
-		}
-		candidates = append(candidates, candidate)
-	}
-	if (s[0] == '{' || s[0] == '[') && json.Valid([]byte(s)) {
-		addCandidate(s)
-	}
-	if idx := strings.Index(s, "```json"); idx >= 0 {
-		rest := s[idx+len("```json"):]
-		if end := strings.Index(rest, "```"); end >= 0 {
-			addCandidate(strings.TrimSpace(rest[:end]))
-		}
-	}
-	if idx := strings.Index(s, "```"); idx >= 0 {
-		rest := s[idx+3:]
-		if end := strings.Index(rest, "```"); end >= 0 {
-			addCandidate(strings.TrimSpace(rest[:end]))
-		}
-	}
-	for _, candidate := range balancedJSONValues(s) {
-		addCandidate(candidate)
-	}
-	return candidates
-}
-
-func normalizeJSONPayloadCandidate(candidate string) string {
-	candidate = strings.TrimSpace(candidate)
-	if candidate == "" || json.Valid([]byte(candidate)) {
-		return candidate
-	}
-	if payload := firstBalancedJSONValue(candidate); payload != "" {
-		return payload
-	}
-	return candidate
-}
-
-func firstBalancedJSONValue(s string) string {
-	values := balancedJSONValues(s)
-	if len(values) == 0 {
-		return ""
-	}
-	return values[0]
-}
-
-func balancedJSONValues(s string) []string {
-	values := make([]string, 0, 2)
-	for offset := 0; offset < len(s); {
-		start := -1
-		for i := offset; i < len(s); i++ {
-			if s[i] == '{' || s[i] == '[' {
-				start = i
-				break
-			}
-		}
-		if start < 0 {
-			break
-		}
-
-		dec := json.NewDecoder(strings.NewReader(s[start:]))
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil || len(raw) == 0 {
-			offset = start + 1
-			continue
-		}
-		values = append(values, strings.TrimSpace(string(raw)))
-		next := start + int(dec.InputOffset())
-		if next <= start {
-			next = start + 1
-		}
-		offset = next
-	}
-	return values
 }

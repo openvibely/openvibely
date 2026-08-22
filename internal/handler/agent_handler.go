@@ -836,61 +836,6 @@ func buildGenerateAgentUserError(modelName string, err error) string {
 	return fmt.Sprintf("%s: %s", modelName, shortGenerationError(err))
 }
 
-func extractBalancedJSONObjectCandidates(input string) []string {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return nil
-	}
-
-	const maxObjects = 8
-	objects := make([]string, 0, maxObjects)
-	depth := 0
-	start := -1
-	inString := false
-	escaped := false
-
-	for i := 0; i < len(input); i++ {
-		ch := input[i]
-		if inString {
-			if escaped {
-				escaped = false
-				continue
-			}
-			if ch == '\\' {
-				escaped = true
-				continue
-			}
-			if ch == '"' {
-				inString = false
-			}
-			continue
-		}
-		switch ch {
-		case '"':
-			inString = true
-		case '{':
-			if depth == 0 {
-				start = i
-			}
-			depth++
-		case '}':
-			if depth == 0 {
-				continue
-			}
-			depth--
-			if depth == 0 && start >= 0 {
-				objects = append(objects, input[start:i+1])
-				start = -1
-				if len(objects) >= maxObjects {
-					return objects
-				}
-			}
-		}
-	}
-
-	return objects
-}
-
 func isGeneratedAgentPayloadShape(payload map[string]json.RawMessage) bool {
 	if len(payload) == 0 {
 		return false
@@ -959,30 +904,18 @@ func stripGenerateAgentToolWrappers(output string) string {
 }
 
 func parseGeneratedAgentOutput(output string) (generatedAgentResponse, error) {
-	cleaned := strings.TrimSpace(util.StripMarkdownFences(output))
-	cleaned = stripGenerateAgentToolWrappers(cleaned)
+	cleaned := stripGenerateAgentToolWrappers(output)
 	if cleaned == "" {
 		return generatedAgentResponse{}, fmt.Errorf("empty model output")
 	}
 
-	candidates := make([]string, 0, 16)
-	seen := map[string]struct{}{}
-	addCandidate := func(candidate string) {
-		candidate = strings.TrimSpace(candidate)
-		if candidate == "" {
-			return
+	candidates := util.JSONPayloadCandidates(cleaned)
+	if len(candidates) == 0 {
+		fallback := strings.TrimSpace(util.StripMarkdownFences(cleaned))
+		if fallback == "" {
+			fallback = cleaned
 		}
-		if _, ok := seen[candidate]; ok {
-			return
-		}
-		seen[candidate] = struct{}{}
-		candidates = append(candidates, candidate)
-	}
-
-	addCandidate(cleaned)
-	addCandidate(util.ExtractJSONObject(cleaned))
-	for _, candidate := range extractBalancedJSONObjectCandidates(cleaned) {
-		addCandidate(candidate)
+		candidates = append(candidates, fallback)
 	}
 
 	var lastErr error

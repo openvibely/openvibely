@@ -1,6 +1,9 @@
 package util
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestExtractJSONObject(t *testing.T) {
 	tests := []struct {
@@ -64,5 +67,23 @@ func TestExtractJSONArray(t *testing.T) {
 				t.Errorf("ExtractJSONArray(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestJSONPayloadCandidatesExtractsOrderedDeduplicatedLLMReplyPayloads(t *testing.T) {
+	input := "Intro prose.\n```json\n{\"fenced\":true}\n```\n" +
+		"More prose before an array [{\"array\":1}].\n" +
+		"{\"object\":1}{\"object\":2}\n" +
+		"```\n{\"fenced\":true}\n```\nDone."
+
+	got := JSONPayloadCandidates(input)
+	want := []string{
+		`{"fenced":true}`,
+		`[{"array":1}]`,
+		`{"object":1}`,
+		`{"object":2}`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("JSONPayloadCandidates() = %#v, want %#v", got, want)
 	}
 }
