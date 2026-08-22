@@ -235,6 +235,69 @@ func TestUpdateProjectSettingsCapabilityAndInheritedDefaultModel(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestSaveCustomPersonalityRuntimeToolCreatesListsAndSelects(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+	customRepo := repository.NewCustomPersonalityRepo(db)
+	h.SetCustomPersonalityRepo(customRepo)
+	project := createProject(t, h, "Chat Personality Project")
+
+	orchestrateRT := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true),
+		models.ChatModeOrchestrate,
+		chatcontrol.SurfaceWeb,
+	)
+	out, handled, isErr, err := orchestrateRT.Executor(ctx, "save_custom_personality", json.RawMessage(`{"mode":"create","name":"Terse Code Review","description":"Brief code review tone","system_prompt":"You are terse in code review while still naming concrete risks.","activate":true}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr, out)
+	var resp struct {
+		OK        bool   `json:"ok"`
+		Key       string `json:"key"`
+		Activated bool   `json:"activated"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	require.True(t, resp.OK)
+	require.Equal(t, "terse_code_review", resp.Key)
+	require.True(t, resp.Activated)
+
+	listed, handled, isErr, err := orchestrateRT.Executor(ctx, "list_personalities", nil)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr, listed)
+	require.Contains(t, listed, "Terse Code Review")
+	require.Contains(t, listed, "terse_code_review")
+
+	setOut, handled, isErr, err := orchestrateRT.Executor(ctx, "set_personality", json.RawMessage(`{"personality":"terse_code_review"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr, setOut)
+	require.Contains(t, setOut, "Personality changed")
+	current, err := h.settingsRepo.Get(ctx, "personality")
+	require.NoError(t, err)
+	require.Equal(t, "terse_code_review", current)
+
+	planRT := h.buildChatActionToolRuntimeFromDefs(
+		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
+		nil,
+		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, true),
+		models.ChatModePlan,
+		chatcontrol.SurfaceWeb,
+	)
+	capabilities, handled, isErr, err := planRT.Executor(ctx, "list_capabilities", nil)
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.False(t, isErr, capabilities)
+	require.NotContains(t, capabilities, "save_custom_personality")
+	blocked, handled, isErr, err := planRT.Executor(ctx, "save_custom_personality", json.RawMessage(`{"mode":"create","name":"Blocked","system_prompt":"This blocked prompt is long enough."}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Contains(t, blocked, "not available in plan mode")
+}
+
 func TestFormatCapabilitiesIncludesSelectedMemoryHandles(t *testing.T) {
 	out := formatCapabilities([]chatcontrol.ActionSummary{{Domain: "memory", Name: "memory_view", Description: "Load selected memory.", Access: "read"}}, []string{"usage_analytics.md"})
 	if !strings.Contains(out, "Selected memories for this turn") || !strings.Contains(out, "usage_analytics.md") {
