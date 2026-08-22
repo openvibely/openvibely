@@ -1386,6 +1386,77 @@ func (h *Handler) RunTask(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
 }
 
+type taskCancellationResult struct {
+	OK               bool                `json:"ok"`
+	Accepted         bool                `json:"accepted"`
+	TaskID           string              `json:"task_id"`
+	Title            string              `json:"title"`
+	PreviousStatus   models.TaskStatus   `json:"previous_status"`
+	PreviousCategory models.TaskCategory `json:"previous_category"`
+	FinalStatus      models.TaskStatus   `json:"final_status"`
+	FinalCategory    models.TaskCategory `json:"final_category"`
+	Message          string              `json:"message"`
+}
+
+func taskIsCancellableByUser(task *models.Task) bool {
+	if task == nil {
+		return false
+	}
+	return task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive) || (task.SwarmRole == models.SwarmRoleParent && task.Status == models.StatusBlocked && task.Category == models.CategoryActive)
+}
+
+func (h *Handler) cancelTaskWork(ctx context.Context, task *models.Task, composerStop bool, operation string) (*taskCancellationResult, error) {
+	if task == nil {
+		return nil, fmt.Errorf("task not found")
+	}
+	result := &taskCancellationResult{
+		OK:               true,
+		TaskID:           task.ID,
+		Title:            task.Title,
+		PreviousStatus:   task.Status,
+		PreviousCategory: task.Category,
+		FinalStatus:      task.Status,
+		FinalCategory:    task.Category,
+	}
+	if !taskIsCancellableByUser(task) {
+		result.Accepted = false
+		result.Message = fmt.Sprintf("Task is not currently cancellable (status=%s, category=%s).", task.Status, task.Category)
+		return result, nil
+	}
+
+	if h.workerSvc != nil {
+		h.workerSvc.MarkCancellationRequested(task.ID)
+	}
+	if !composerStop && h.threadInputRepo != nil {
+		if err := h.threadInputRepo.CancelPendingForTask(ctx, task.ID); err != nil {
+			applog.Infof("[handler] %s error cancelling pending thread inputs task=%s: %v", operation, task.ID, err)
+		}
+	}
+	if task.SwarmRole == models.SwarmRoleParent && h.swarmSvc != nil {
+		if err := h.swarmSvc.CancelSwarm(ctx, task.ID); err != nil {
+			applog.Infof("[handler] %s swarm cascade error: %v", operation, err)
+			return nil, err
+		}
+	} else if err := h.taskSvc.CancelTask(ctx, task.ID); err != nil {
+		applog.Infof("[handler] %s error: %v", operation, err)
+		return nil, err
+	} else if models.IsSwarmChildRole(task.SwarmRole) {
+		h.notifySwarmChildTerminal(ctx, task.ID)
+	}
+	h.cancelActiveExecutionsAndPublish(ctx, task.ID, operation)
+	updated, err := h.taskSvc.GetByID(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	if updated != nil {
+		result.FinalStatus = updated.Status
+		result.FinalCategory = updated.Category
+	}
+	result.Accepted = true
+	result.Message = "Cancellation requested."
+	return result, nil
+}
+
 func (h *Handler) CancelTask(c echo.Context) error {
 	taskID := c.Param("taskId")
 	applog.Infof("[handler] CancelTask task=%s", taskID)
@@ -1403,26 +1474,14 @@ func (h *Handler) CancelTask(c echo.Context) error {
 	projectID := task.ProjectID
 
 	composerStop := c.QueryParam("composer_stop") == "1"
-	if h.workerSvc != nil && (task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && task.Category == models.CategoryActive)) {
-		h.workerSvc.MarkCancellationRequested(taskID)
-	}
-	if !composerStop && h.threadInputRepo != nil {
-		if err := h.threadInputRepo.CancelPendingForTask(c.Request().Context(), taskID); err != nil {
-			applog.Infof("[handler] CancelTask error cancelling pending thread inputs task=%s: %v", taskID, err)
-		}
-	}
-	if task.SwarmRole == models.SwarmRoleParent && h.swarmSvc != nil {
-		if err := h.swarmSvc.CancelSwarm(c.Request().Context(), taskID); err != nil {
-			applog.Infof("[handler] CancelTask swarm cascade error: %v", err)
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-		}
-	} else if err := h.taskSvc.CancelTask(c.Request().Context(), taskID); err != nil {
-		applog.Infof("[handler] CancelTask error: %v", err)
+	result, err := h.cancelTaskWork(c.Request().Context(), task, composerStop, "CancelTask")
+	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	} else if models.IsSwarmChildRole(task.SwarmRole) {
-		h.notifySwarmChildTerminal(c.Request().Context(), taskID)
 	}
-	h.cancelActiveExecutionsAndPublish(c.Request().Context(), taskID, "CancelTask")
+	if result != nil && !result.Accepted {
+		applog.Infof("[handler] CancelTask not cancellable task=%s status=%s category=%s", taskID, task.Status, task.Category)
+		return echo.NewHTTPError(http.StatusBadRequest, result.Message)
+	}
 	applog.Infof("[handler] CancelTask cancelled task=%s", taskID)
 
 	// Return the full kanban board for HTMX requests

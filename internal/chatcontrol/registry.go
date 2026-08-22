@@ -7,7 +7,7 @@
 // # API-domain mapping policy
 //
 // Chat RW (orchestrate mode):
-//   - tasks: create_task, create_swarm_task, edit_task, execute_tasks, send_to_task
+//   - tasks: create_task, create_swarm_task, edit_task, execute_tasks, cancel_task, send_to_task
 //   - schedules: schedule_task, delete_schedule, modify_schedule
 //   - alerts: create_alert, create_notification, decide_alert, delete_alert, toggle_alert
 //   - personality: set_personality, save_custom_personality
@@ -147,6 +147,7 @@ const createProjectParams = `{"type":"object","properties":{"name":{"type":"stri
 const updateProjectSettingsParams = `{"type":"object","properties":{"project_id":{"type":"string","description":"Optional assertion matching the current project ID. The action updates only the current project."},"project_name":{"type":"string","description":"Optional assertion matching the current project name exactly, case-insensitive. The action updates only the current project."},"new_name":{"type":"string","description":"Optional new project display name. Must be nonblank after trimming."},"description":{"type":"string","description":"Optional replacement project description. Use an empty string to clear it."},"default_model":{"type":"string","description":"Optional project default model to set, by exact model config ID first or unambiguous exact model name."},"default_model_id":{"type":"string","description":"Optional project default model config ID to set. Use either default_model or default_model_id, not both."},"clear_default_model":{"type":"boolean","description":"Clear the project-specific default model so future tasks inherit the global default."},"max_workers":{"type":"integer","minimum":0,"maximum":10,"description":"Optional per-project worker limit. Use 0 to clear the project-specific limit."},"clear_max_workers":{"type":"boolean","description":"Clear the project-specific worker limit, equivalent to max_workers=0."}},"additionalProperties":false}`
 const createSwarmTaskParams = `{"type":"object","properties":{"title":{"type":"string"},"prompt":{"type":"string"},"goal":{"type":"string","description":"Optional completion condition for the swarm parent. If set, the Goal Agent may continue the parent task until this condition is satisfied."},"project_id":{"type":"string","description":"Optional project id; defaults to current project."},"category":{"type":"string","enum":["active","backlog"],"description":"Active starts the planner now; backlog defers planning until the swarm parent is run or moved to Active."},"priority":{"type":"integer","minimum":1,"maximum":4},"agent_id":{"type":"string","description":"Internal model config ID for the swarm parent/children. Do not use for Agent definitions from the Agents page."},"agent_definition_id":{"type":"string","description":"Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page, e.g. natural requests like 'Have <agent name>...' use agent: '<agent name>'."},"tag":{"type":"string","enum":["bug","feature"]},"max_workers":{"type":"integer","minimum":1,"maximum":8},"worker_isolation":{"type":"string","enum":["worktree","read_only","shared"]},"reviewer_enabled":{"type":"boolean","description":"Whether the swarm should create and run a reviewer stage. Defaults to true."},"merger_enabled":{"type":"boolean","description":"Whether the swarm should create and run a merger stage. Defaults to true."},"merge_target_branch":{"type":"string","description":"Optional merge target branch for swarm output."}},"required":["title","prompt"],"additionalProperties":false}`
 const viewSwarmParams = `{"type":"object","properties":{"task_id":{"type":"string","description":"Swarm parent or child task ID, or 'current' in a persisted task-thread follow-up."},"title":{"type":"string","description":"Exact swarm parent or child task title in the current project when task_id is not known."}},"additionalProperties":false}`
+const cancelTaskParams = `{"type":"object","properties":{"task_id":{"type":"string","description":"Task ID to cancel, or 'current' in a persisted task-thread follow-up."},"title":{"type":"string","description":"Exact current-project task title when task_id is not known."}},"additionalProperties":false}`
 
 // editTaskParams is the full JSON Schema for the edit_task tool.
 const editTaskParams = `{"type":"object","properties":{"id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"category":{"type":"string","enum":["active","backlog","scheduled"]},"priority":{"type":"integer","minimum":1,"maximum":4},"tag":{"type":"string"},"agent_id":{"type":"string","description":"Internal model config ID. Do not use for Agent definitions from the Agents page."},"agent_config_id":{"type":"string","description":"Alias for agent_id; selects the LLM model config only."},"agent_definition_id":{"type":"string","description":"Primary Agent definition ID when already known."},"agent":{"type":"string","description":"Exact name of an enabled selectable Agent definition from the Agents page. Use this when only the Agent name is known."},"clear_agent_definition":{"type":"boolean","description":"Clear the primary Agent assignment without clearing or changing the model config."},"chain":` + chainSchemaProperties + `,"attachments":{"type":"array","items":{"type":"string"}}},"required":["id"],"additionalProperties":false}`
@@ -215,6 +216,18 @@ var registry = []ActionDef{
 		Surfaces:           allSurfaces(),
 		IncludeThreadTools: false,
 		Parameters:         json.RawMessage(`{"type":"object","properties":{"task_id":{"type":"string"},"title":{"type":"string"},"tags":{"type":"array","items":{"type":"string"}},"min_priority":{"type":"integer","minimum":1,"maximum":4},"include_completed":{"type":"boolean"}},"additionalProperties":false}`),
+	},
+	{
+		Name:               "cancel_task",
+		Description:        "Cancel one running, queued, or active-pending current-project task. Accepts a task ID, exact title, or task_id='current' in a persisted task-thread follow-up. This stops active work, cancels pending follow-ups, pauses an active goal as stopped by the user, and delegates swarm-parent cancellation to the swarm cascade. It does not support bulk cancellation.",
+		Domain:             DomainTasks,
+		Access:             AccessWrite,
+		Sensitivity:        SensitivityDestructive,
+		NeedsConfirmation:  true,
+		AllowedModes:       []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:           allSurfaces(),
+		IncludeThreadTools: true,
+		Parameters:         json.RawMessage(cancelTaskParams),
 	},
 	{
 		Name:               "list_tasks",

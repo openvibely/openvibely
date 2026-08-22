@@ -1310,12 +1310,15 @@ func (s *TelegramService) telegramActionHandlersForTask(projectID, callerTaskID 
 	}
 	prepareTaskCreation, createPreparedTask := buildAutomationTaskCreationCallbacks(callerTaskID, projectID, llmSvcForAutomation)
 	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
-		ProjectID:           projectID,
-		TaskSvc:             s.taskSvc,
-		LLMConfigRepo:       s.llmConfigRepo,
-		Collector:           collector,
-		PrepareTaskCreation: prepareTaskCreation,
-		CreatePreparedTask:  createPreparedTask,
+		ProjectID:          projectID,
+		TaskSvc:            s.taskSvc,
+		TaskRepo:           s.taskRepo,
+		ExecRepo:           s.execRepo,
+		ThreadInputRepo:    s.threadInputRepo,
+		ExecutionStreamHub: s.executionStreamHub,
+		LLMConfigRepo:      s.llmConfigRepo,
+		Collector:          collector, PrepareTaskCreation: prepareTaskCreation,
+		CreatePreparedTask: createPreparedTask,
 		OnTasksCreated: func(ctx context.Context, _ []TaskCreationRequest, createdTasks []models.Task) error {
 			for _, t := range createdTasks {
 				if s.taskRepo != nil {

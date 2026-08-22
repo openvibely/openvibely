@@ -12,6 +12,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/buildinfo"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -177,6 +178,7 @@ func TestUpdateProjectSettingsCapabilityAndInheritedDefaultModel(t *testing.T) {
 	require.False(t, isErr, capabilities)
 	require.Contains(t, capabilities, "update_project_settings")
 	require.Contains(t, capabilities, "decide_alert")
+	require.Contains(t, capabilities, "cancel_task")
 
 	planRT := h.buildChatActionToolRuntimeFromDefs(
 		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
@@ -191,6 +193,12 @@ func TestUpdateProjectSettingsCapabilityAndInheritedDefaultModel(t *testing.T) {
 	require.False(t, isErr, planCapabilities)
 	require.NotContains(t, planCapabilities, "update_project_settings")
 	require.NotContains(t, planCapabilities, "decide_alert")
+	require.NotContains(t, planCapabilities, "cancel_task")
+	cancelOut, handled, isErr, err := planRT.Executor(ctx, "cancel_task", json.RawMessage(`{"task_id":"task-1"}`))
+	require.NoError(t, err)
+	require.True(t, handled)
+	require.True(t, isErr)
+	require.Contains(t, cancelOut, "not available in plan mode")
 	blockedOut, handled, isErr, err := planRT.Executor(ctx, "update_project_settings", json.RawMessage(`{"max_workers":2}`))
 	require.NoError(t, err)
 	require.True(t, handled)
@@ -877,6 +885,203 @@ func TestViewTaskThreadResolvesCurrentTaskID(t *testing.T) {
 			t.Fatalf("expected current task_id outside a follow-up to be rejected, out=%q err=%v", out, err)
 		}
 	})
+}
+
+type cancelTaskRuntimeToolResponse struct {
+	OK               bool                `json:"ok"`
+	Accepted         bool                `json:"accepted"`
+	TaskID           string              `json:"task_id"`
+	Title            string              `json:"title"`
+	PreviousStatus   models.TaskStatus   `json:"previous_status"`
+	PreviousCategory models.TaskCategory `json:"previous_category"`
+	FinalStatus      models.TaskStatus   `json:"final_status"`
+	FinalCategory    models.TaskCategory `json:"final_category"`
+	Message          string              `json:"message"`
+}
+
+func decodeCancelTaskRuntimeToolResponse(t *testing.T, out string) cancelTaskRuntimeToolResponse {
+	t.Helper()
+	var resp cancelTaskRuntimeToolResponse
+	require.NoError(t, json.Unmarshal([]byte(out), &resp))
+	return resp
+}
+
+func TestCancelTaskRuntimeToolCancelsRunningTaskByID(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := tc.CreateTask(project.ID).WithTitle("Runtime cancel by id").WithStatus(models.StatusRunning).WithCategory(models.CategoryActive).Build()
+	exec := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).Build()
+	hub := events.NewExecutionStreamHub()
+	tc.handler.SetExecutionStreamHub(hub)
+	sub, _, err := hub.Subscribe(exec.ID)
+	require.NoError(t, err)
+	handler := tc.handler.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["cancel_task"]
+
+	out, err := handler(ctx, json.RawMessage(`{"task_id":"`+task.ID+`"}`))
+	require.NoError(t, err)
+	resp := decodeCancelTaskRuntimeToolResponse(t, out)
+	require.True(t, resp.OK)
+	require.True(t, resp.Accepted)
+	require.Equal(t, task.ID, resp.TaskID)
+	require.Equal(t, models.StatusRunning, resp.PreviousStatus)
+	require.Equal(t, models.CategoryActive, resp.PreviousCategory)
+	require.Equal(t, models.StatusCancelled, resp.FinalStatus)
+	require.Equal(t, models.CategoryBacklog, resp.FinalCategory)
+
+	updatedTask, err := tc.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updatedTask.Status)
+	require.Equal(t, models.CategoryBacklog, updatedTask.Category)
+	updatedExec, err := tc.execRepo.GetByID(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.ExecCancelled, updatedExec.Status)
+	require.Equal(t, "cancelled", updatedExec.ErrorMessage)
+	select {
+	case event, ok := <-sub:
+		require.True(t, ok)
+		require.Equal(t, events.ExecutionStreamDone, event.Type)
+		require.Equal(t, "cancelled", event.Status)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for cancelled execution stream event")
+	}
+}
+
+func TestCancelTaskRuntimeToolCancelsQueuedTaskByExactTitleAndPendingInputs(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	agent := tc.CreateLLMConfig().Build()
+	task := tc.CreateTask(project.ID).WithTitle("Runtime cancel exact title").WithStatus(models.StatusQueued).WithCategory(models.CategoryActive).Build()
+	queuedInput := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: project.ID, TaskID: task.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued follow-up"}
+	require.NoError(t, tc.handler.threadInputRepo.CreateQueued(ctx, queuedInput))
+	handler := tc.handler.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["cancel_task"]
+
+	out, err := handler(ctx, json.RawMessage(`{"title":"Runtime cancel exact title"}`))
+	require.NoError(t, err)
+	resp := decodeCancelTaskRuntimeToolResponse(t, out)
+	require.True(t, resp.Accepted)
+	require.Equal(t, task.ID, resp.TaskID)
+	require.Equal(t, models.StatusCancelled, resp.FinalStatus)
+	require.Equal(t, models.CategoryBacklog, resp.FinalCategory)
+	storedInput, err := tc.handler.threadInputRepo.GetByID(ctx, queuedInput.ID)
+	require.NoError(t, err)
+	require.NotNil(t, storedInput)
+	require.Equal(t, models.ThreadInputCancelled, storedInput.InputStatus)
+
+	partialTask := tc.CreateTask(project.ID).WithTitle("Runtime cancel exact title extra").WithStatus(models.StatusQueued).WithCategory(models.CategoryActive).Build()
+	out, err = handler(ctx, json.RawMessage(`{"title":"Runtime cancel exact"}`))
+	require.ErrorContains(t, err, "no task found with exact title")
+	require.Empty(t, out)
+	unchanged, err := tc.taskRepo.GetByID(ctx, partialTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusQueued, unchanged.Status)
+}
+
+func TestCancelTaskRuntimeToolResolvesCurrentTaskID(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).WithTitle("Current cancellable task").WithStatus(models.StatusPending).WithCategory(models.CategoryActive).Build()
+	handler := tc.handler.chatActionHandlers(streamingResponseParams{ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["cancel_task"]
+
+	out, err := handler(ctx, json.RawMessage(`{"task_id":"current"}`))
+	require.NoError(t, err)
+	resp := decodeCancelTaskRuntimeToolResponse(t, out)
+	require.True(t, resp.Accepted)
+	require.Equal(t, task.ID, resp.TaskID)
+	updated, err := tc.taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updated.Status)
+
+	nonFollowup := tc.handler.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["cancel_task"]
+	out, err = nonFollowup(ctx, json.RawMessage(`{"task_id":"current"}`))
+	require.ErrorContains(t, err, "only valid in a persisted task thread")
+	require.Empty(t, out)
+}
+
+func TestCancelTaskRuntimeToolRejectsForeignProjectTargets(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().Build()
+	foreignProject := tc.CreateProject().Build()
+	foreignTask := tc.CreateTask(foreignProject.ID).WithTitle("Foreign runtime cancel").WithStatus(models.StatusRunning).WithCategory(models.CategoryActive).Build()
+	handler := tc.handler.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["cancel_task"]
+
+	out, err := handler(ctx, json.RawMessage(`{"task_id":"`+foreignTask.ID+`"}`))
+	require.ErrorContains(t, err, "belongs to a different project")
+	require.Empty(t, out)
+	out, err = handler(ctx, json.RawMessage(`{"title":"Foreign runtime cancel"}`))
+	require.ErrorContains(t, err, "no task found")
+	require.Empty(t, out)
+	unchanged, err := tc.taskRepo.GetByID(ctx, foreignTask.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusRunning, unchanged.Status)
+	require.Equal(t, models.CategoryActive, unchanged.Category)
+}
+
+func TestCancelTaskRuntimeToolDelegatesSwarmParentCancellation(t *testing.T) {
+	h, _, llmConfigRepo := setupTestHandler(t)
+	h.workerSvc = nil
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Runtime Swarm Cancel")
+	parent, err := h.swarmSvc.CreateSwarmTask(ctx, service.CreateSwarmTaskRequest{ProjectID: project.ID, Title: "Runtime swarm parent", Prompt: "Build it", Category: models.CategoryActive, Priority: 2, AgentID: &agent.ID, MaxWorkers: 1, WorkerIsolation: "worktree", ReviewerEnabled: true, MergerEnabled: true})
+	require.NoError(t, err)
+	planner, err := h.taskRepo.FindSwarmChildByRole(ctx, parent.ID, models.SwarmRolePlanner)
+	require.NoError(t, err)
+	require.NotNil(t, planner)
+	require.NoError(t, h.taskRepo.UpdateStatus(ctx, planner.ID, models.StatusRunning))
+	handler := h.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["cancel_task"]
+
+	out, err := handler(ctx, json.RawMessage(`{"task_id":"`+parent.ID+`"}`))
+	require.NoError(t, err)
+	resp := decodeCancelTaskRuntimeToolResponse(t, out)
+	require.True(t, resp.Accepted)
+	require.Equal(t, parent.ID, resp.TaskID)
+	updatedParent, err := h.taskRepo.GetByID(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updatedParent.Status)
+	updatedPlanner, err := h.taskRepo.GetByID(ctx, planner.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updatedPlanner.Status)
+}
+
+func TestCancelTaskRuntimeToolReturnsNotCancellableWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name     string
+		status   models.TaskStatus
+		category models.TaskCategory
+	}{
+		{name: "completed", status: models.StatusCompleted, category: models.CategoryCompleted},
+		{name: "failed", status: models.StatusFailed, category: models.CategoryBacklog},
+		{name: "already cancelled", status: models.StatusCancelled, category: models.CategoryBacklog},
+		{name: "backlog pending", status: models.StatusPending, category: models.CategoryBacklog},
+		{name: "scheduled pending", status: models.StatusPending, category: models.CategoryScheduled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc := NewTestContext(t)
+			ctx := context.Background()
+			project := tc.CreateProject().Build()
+			task := tc.CreateTask(project.ID).WithTitle("Not cancellable " + tt.name).WithStatus(tt.status).WithCategory(tt.category).Build()
+			handler := tc.handler.chatActionHandlers(streamingResponseParams{ProjectID: project.ID}, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceWeb)["cancel_task"]
+
+			out, err := handler(ctx, json.RawMessage(`{"task_id":"`+task.ID+`"}`))
+			require.NoError(t, err)
+			resp := decodeCancelTaskRuntimeToolResponse(t, out)
+			require.True(t, resp.OK)
+			require.False(t, resp.Accepted)
+			require.Equal(t, tt.status, resp.FinalStatus)
+			require.Equal(t, tt.category, resp.FinalCategory)
+			require.Contains(t, resp.Message, "not currently cancellable")
+			updated, err := tc.taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, tt.status, updated.Status)
+			require.Equal(t, tt.category, updated.Category)
+		})
+	}
 }
 
 func TestWebRuntimeToolsUseSharedInputDecoder(t *testing.T) {

@@ -424,6 +424,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 			}
 			return strings.TrimSpace(h.executeChatTaskExecutionRequests(ctx, params.ExecID, params.ProjectID, []service.TaskExecutionRequest{req})), nil
 		},
+		"cancel_task": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeCancelTaskTool(ctx, params, input)
+		},
 		"list_tasks": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return service.ExecuteListTasksTool(ctx, h.taskRepo, params.ProjectID, input)
 		},
@@ -1112,6 +1115,39 @@ type sendToTaskToolInput struct {
 	Message     string `json:"message"`
 	Origin      string `json:"origin"`
 	OriginAgent string `json:"origin_agent"`
+}
+
+type cancelTaskToolInput struct {
+	TaskID string `json:"task_id"`
+	Title  string `json:"title"`
+}
+
+func (h *Handler) executeCancelTaskTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	var req cancelTaskToolInput
+	if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
+		return "", err
+	}
+	taskIDInput := strings.TrimSpace(req.TaskID)
+	if taskIDInput == "" && strings.TrimSpace(req.Title) == "" && params.IsTaskFollowup && params.TaskID != "" {
+		taskIDInput = "current"
+	}
+	taskID, err := h.resolveTaskIDForTool(ctx, params, taskIDInput, req.Title)
+	if err != nil {
+		return "", err
+	}
+	task, err := h.resolveTaskReference(ctx, params.ProjectID, taskID, "")
+	if err != nil {
+		return "", err
+	}
+	if taskIDInput == "" && strings.TrimSpace(req.Title) != "" && !strings.EqualFold(strings.TrimSpace(task.Title), strings.TrimSpace(req.Title)) {
+		return "", fmt.Errorf("no task found with exact title %q", strings.TrimSpace(req.Title))
+	}
+	result, err := h.cancelTaskWork(ctx, task, false, "ChatCancelTask")
+	if err != nil {
+		return "", err
+	}
+	b, err := json.Marshal(result)
+	return string(b), err
 }
 
 func (h *Handler) executeViewSwarmTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
