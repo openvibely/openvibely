@@ -913,10 +913,13 @@ func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
 		input           json.RawMessage
 		wantError       string
 		wantStoredTitle string
+		wantPriority    int
 	}{
 		{name: "empty", input: nil, wantError: "create_task requires title and prompt"},
 		{name: "whitespace", input: json.RawMessage(" \n\t "), wantError: "create_task requires title and prompt"},
-		{name: "valid", input: json.RawMessage(`{"title":" Decoded task ","prompt":" Create this task ","category":"backlog"}`), wantStoredTitle: "Decoded task"},
+		{name: "missing title", input: json.RawMessage(`{"prompt":"Create this task"}`), wantError: "create_task requires title and prompt"},
+		{name: "missing prompt", input: json.RawMessage(`{"title":"Decoded task"}`), wantError: "create_task requires title and prompt"},
+		{name: "valid", input: json.RawMessage(`{"title":" Decoded task ","prompt":" Create this task ","category":"backlog"}`), wantStoredTitle: "Decoded task", wantPriority: 2},
 		{name: "malformed", input: json.RawMessage(`{"title":`), wantError: "invalid tool input JSON:"},
 	}
 
@@ -946,6 +949,7 @@ func TestCreateTaskRuntimeToolNormalizesAndDecodesInput(t *testing.T) {
 				require.NoError(t, listErr)
 				require.Len(t, tasks, 1)
 				require.Equal(t, tt.wantStoredTitle, tasks[0].Title)
+				require.Equal(t, tt.wantPriority, tasks[0].Priority)
 			}
 		})
 	}

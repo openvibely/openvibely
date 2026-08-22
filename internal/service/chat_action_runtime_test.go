@@ -1540,6 +1540,48 @@ func assertChannelModelStatusStatementsCompact(t *testing.T, statements []string
 	}
 }
 
+func TestBuildChannelTaskActionHandlersCreateTaskValidatesSharedInput(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	project := &models.Project{Name: "Channel Create Validation"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	handlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
+		ProjectID: project.ID,
+		TaskSvc:   NewTaskService(taskRepo, nil, nil),
+	})
+
+	for _, tt := range []struct {
+		name      string
+		input     json.RawMessage
+		wantError string
+	}{
+		{name: "blank", input: nil, wantError: "create_task requires title and prompt"},
+		{name: "whitespace", input: json.RawMessage(" \n\t "), wantError: "create_task requires title and prompt"},
+		{name: "missing title", input: json.RawMessage(`{"prompt":"Do channel work"}`), wantError: "create_task requires title and prompt"},
+		{name: "missing prompt", input: json.RawMessage(`{"title":"Channel task"}`), wantError: "create_task requires title and prompt"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := handlers["create_task"](ctx, tt.input)
+			require.ErrorContains(t, err, tt.wantError)
+			require.Empty(t, out)
+			tasks, listErr := taskRepo.ListByProject(ctx, project.ID, "")
+			require.NoError(t, listErr)
+			require.Empty(t, tasks)
+		})
+	}
+
+	out, err := handlers["create_task"](ctx, json.RawMessage(`{"title":" Channel success ","prompt":"Do channel work"}`))
+	require.NoError(t, err)
+	require.Contains(t, out, "Channel success")
+	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, "Channel success", tasks[0].Title)
+	require.Equal(t, 2, tasks[0].Priority)
+}
+
 func TestBuildChannelTaskActionHandlersCreateTaskUsesSharedLogicAndOriginCallback(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

@@ -341,50 +341,20 @@ func workerFromTaskService(taskSvc *TaskService) *WorkerService {
 func buildChannelTaskActionHandlers(opts channelTaskActionHandlerOptions) map[string]chatcontrol.RuntimeActionHandler {
 	return map[string]chatcontrol.RuntimeActionHandler{
 		"create_task": func(ctx context.Context, input json.RawMessage) (string, error) {
-			if opts.TaskSvc == nil {
-				return "", fmt.Errorf("create_task: task service unavailable")
-			}
-			var req TaskCreationRequest
-			if err := chatcontrol.DecodeRuntimeToolInput(input, &req); err != nil {
-				return "", err
-			}
-			if opts.PrepareTaskCreation != nil {
-				if err := opts.PrepareTaskCreation(ctx, &req); err != nil {
-					return "", err
-				}
-			}
-			if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Prompt) == "" {
-				return "", fmt.Errorf("create_task requires title and prompt")
-			}
-			if req.Priority == 0 {
-				req.Priority = 2
-			}
-			agents := []models.LLMConfig{}
-			if opts.LLMConfigRepo != nil {
-				agents, _ = opts.LLMConfigRepo.List(ctx)
-			}
-			createdTasks := []models.Task(nil)
-			summary := ""
-			creationHandled := false
-			if opts.CreatePreparedTask != nil {
-				var err error
-				createdTasks, summary, creationHandled, err = opts.CreatePreparedTask(ctx, req, agents)
-				if err != nil {
-					return "", err
-				}
-			}
-			if !creationHandled {
-				createdTasks, summary = ExecuteTaskCreationsWithReturn(ctx, []TaskCreationRequest{req}, opts.ProjectID, opts.TaskSvc, agents)
-			}
-			if !creationHandled && opts.OnTasksCreated != nil && len(createdTasks) > 0 {
-				if err := opts.OnTasksCreated(ctx, []TaskCreationRequest{req}, createdTasks); err != nil {
-					return "", err
-				}
-			}
-			if opts.Collector != nil {
-				opts.Collector.addCreated(summary)
-			}
-			return strings.TrimSpace(summary), nil
+			out, _, err := ExecuteCreateTaskRuntimeAction(ctx, input, RuntimeTaskCreationOptions{
+				ProjectID:           opts.ProjectID,
+				TaskSvc:             opts.TaskSvc,
+				LLMConfigRepo:       opts.LLMConfigRepo,
+				PrepareTaskCreation: opts.PrepareTaskCreation,
+				CreateTask:          opts.CreatePreparedTask,
+				OnTasksCreated:      opts.OnTasksCreated,
+				AddCreatedSummary: func(summary string) {
+					if opts.Collector != nil {
+						opts.Collector.addCreated(summary)
+					}
+				},
+			})
+			return out, err
 		},
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			var req SwarmTaskRuntimeInput
