@@ -913,7 +913,18 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 }
 
 func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models.ThreadInput, error) {
-	cancelled, err := scanThreadInput(r.db.QueryRowContext(ctx, `
+	return r.cancelPending(ctx, id, "")
+}
+
+func (r *ThreadInputRepo) CancelPendingForProject(ctx context.Context, id, projectID string) (*models.ThreadInput, error) {
+	if projectID == "" {
+		return r.CancelPending(ctx, id)
+	}
+	return r.cancelPending(ctx, id, projectID)
+}
+
+func (r *ThreadInputRepo) cancelPending(ctx context.Context, id, projectID string) (*models.ThreadInput, error) {
+	query := `
 		UPDATE thread_inputs
 		SET input_status = 'cancelled', updated_at = datetime('now')
 		WHERE id = ? AND input_status = 'pending'
@@ -922,8 +933,15 @@ func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models
 			    AND COALESCE(expected_turn_id, '') = ''
 			    AND COALESCE(run_execution_id, '') != ''
 			    AND EXISTS (SELECT 1 FROM executions WHERE id = thread_inputs.run_execution_id AND status = 'running')
-			  )
-		RETURNING `+threadInputSelectColumns, id))
+			  )`
+	args := []interface{}{id}
+	if projectID != "" {
+		query += ` AND project_id = ?`
+		args = append(args, projectID)
+	}
+	query += ` RETURNING ` + threadInputSelectColumns
+
+	cancelled, err := scanThreadInput(r.db.QueryRowContext(ctx, query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInputNotPending
 	}

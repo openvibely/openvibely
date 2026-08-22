@@ -1639,3 +1639,40 @@ func createThreadInputLLMConfig(t *testing.T, ctx context.Context, db *sql.DB) *
 	}
 	return agent
 }
+
+func TestThreadInputRepo_CancelPendingForProjectScopesTaskThreadInputs(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewThreadInputRepo(db)
+	owner := createThreadInputProject(t, ctx, db)
+	foreign := createThreadInputProject(t, ctx, db)
+	task := createThreadInputTask(t, ctx, db, owner.ID)
+	agent := createThreadInputLLMConfig(t, ctx, db)
+	execRepo := NewExecutionRepo(db)
+	active := &models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "active"}
+	if err := execRepo.Create(ctx, active); err != nil {
+		t.Fatalf("create active execution: %v", err)
+	}
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: owner.ID, TaskID: task.ID, RunExecutionID: active.ID, AgentConfigID: agent.ID, InputMode: models.ThreadInputModeQueued, Content: "queued"}
+	if err := repo.CreateQueued(ctx, input); err != nil {
+		t.Fatalf("CreateQueued: %v", err)
+	}
+
+	if _, err := repo.CancelPendingForProject(ctx, input.ID, foreign.ID); !errors.Is(err, ErrInputNotPending) {
+		t.Fatalf("expected foreign-project stale cancel, got %v", err)
+	}
+	stored, err := repo.GetByID(ctx, input.ID)
+	if err != nil {
+		t.Fatalf("GetByID after foreign cancel: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputPending {
+		t.Fatalf("foreign cancel should leave row pending, got %#v", stored)
+	}
+	cancelled, err := repo.CancelPendingForProject(ctx, input.ID, owner.ID)
+	if err != nil {
+		t.Fatalf("same-project CancelPendingForProject: %v", err)
+	}
+	if cancelled == nil || cancelled.ID != input.ID || cancelled.ProjectID != owner.ID || cancelled.TaskID != task.ID || cancelled.InputStatus != models.ThreadInputCancelled {
+		t.Fatalf("same-project cancel returned unexpected row: %#v", cancelled)
+	}
+}

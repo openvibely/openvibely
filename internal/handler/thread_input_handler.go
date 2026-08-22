@@ -20,7 +20,7 @@ func (h *Handler) CancelThreadInput(c echo.Context) error {
 	if h.threadInputRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
 	}
-	cancelled, err := h.threadInputRepo.CancelPending(c.Request().Context(), inputID)
+	cancelled, err := h.threadInputRepo.CancelPendingForProject(c.Request().Context(), inputID, h.mutationProjectID(c))
 	if err != nil {
 		if errors.Is(err, repository.ErrInputNotPending) {
 			// The row is already applied, already cancelled, or is a prepared/in-flight steering
@@ -140,16 +140,23 @@ func (h *Handler) TaskThreadQueuedInputSteer(c echo.Context) error {
 	if h.threadInputRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "thread input queue is unavailable")
 	}
-	input, err := h.threadInputRepo.GetByID(c.Request().Context(), inputID)
+	ctx := c.Request().Context()
+	task, err := h.requireTaskInRequestProject(ctx, taskID, h.mutationProjectID(c))
+	if err != nil {
+		if httpErr, ok := err.(*echo.HTTPError); ok && httpErr.Code == http.StatusBadRequest {
+			return echo.NewHTTPError(http.StatusNotFound, "task not found")
+		}
+		return err
+	}
+	input, err := h.threadInputRepo.GetByID(ctx, inputID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load queued input")
 	}
-	if input == nil || input.TaskID != taskID || input.InputStatus != models.ThreadInputPending || input.InputMode != models.ThreadInputModeQueued {
+	if input == nil || input.TaskID != task.ID || input.ProjectID != task.ProjectID || input.InputStatus != models.ThreadInputPending || input.InputMode != models.ThreadInputModeQueued {
 		return echo.NewHTTPError(http.StatusConflict, "queued input is no longer pending")
 	}
-	ctx := c.Request().Context()
 	steering, err := h.convertQueuedInputToSteering(ctx, input, func() (*models.Execution, error) {
-		return h.execRepo.FindActiveTaskExecution(ctx, taskID, "")
+		return h.execRepo.FindActiveTaskExecution(ctx, task.ID, "")
 	})
 	if err != nil {
 		return err

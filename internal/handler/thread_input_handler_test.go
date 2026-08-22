@@ -194,3 +194,195 @@ func TestPublishThreadInputCancelledEvent_NilInput(t *testing.T) {
 	// publishThreadInputCancelledEvent with nil input is a no-op; call it to exercise the nil guard.
 	tc.handler.publishThreadInputCancelledEvent(nil)
 }
+
+func createPendingTaskThreadInput(t *testing.T, tc *TestContext, projectID, taskID, agentID, runExecutionID string, mode models.ThreadInputMode, content, attachmentSessionID string) *models.ThreadInput {
+	t.Helper()
+	ctx := context.Background()
+	input := &models.ThreadInput{
+		Scope:               models.ThreadInputScopeTask,
+		ProjectID:           projectID,
+		TaskID:              taskID,
+		AgentConfigID:       agentID,
+		RunExecutionID:      runExecutionID,
+		InputMode:           mode,
+		InputStatus:         models.ThreadInputPending,
+		Content:             content,
+		AttachmentSessionID: attachmentSessionID,
+	}
+	if mode == models.ThreadInputModeSteering {
+		input.TurnID = runExecutionID
+		input.ExpectedTurnID = runExecutionID
+		if err := tc.handler.threadInputRepo.CreateSteeringForActiveExecution(ctx, input, runExecutionID); err != nil {
+			t.Fatalf("create steering input: %v", err)
+		}
+		return input
+	}
+	if err := tc.handler.threadInputRepo.CreateQueued(ctx, input); err != nil {
+		t.Fatalf("create queued input: %v", err)
+	}
+	return input
+}
+
+func TestTaskThreadPendingInputsRejectsForeignProjectTask(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	owner := tc.CreateProject().WithName("Pending owner").Build()
+	current := tc.CreateProject().WithName("Pending current").Build()
+	task := tc.CreateTask(owner.ID).WithStatus(models.StatusRunning).Build()
+	agent, _ := tc.llmConfigRepo.GetDefault(ctx)
+	if agent == nil {
+		t.Skip("no default agent configured")
+	}
+	active := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).WithPromptSent("active turn").Build()
+	queued := createPendingTaskThreadInput(t, tc, owner.ID, task.ID, agent.ID, active.ID, models.ThreadInputModeQueued, "deploy Project A secret fix", "foreign-queued-attachments")
+
+	rec := tc.HTMX().Get("/tasks/" + task.ID + "/thread/pending-inputs?project_id=" + current.ID).Execute()
+	tc.Assert(rec).StatusCode(http.StatusNotFound)
+	body := rec.Body.String()
+	if strings.Contains(body, queued.Content) || strings.Contains(body, queued.ID) || strings.Contains(body, task.ID) || strings.Contains(body, "foreign-queued-attachments") || strings.Contains(body, "/thread/queued/") || strings.Contains(body, "/thread-inputs/") {
+		t.Fatalf("foreign pending-input refresh leaked queued row details: %q", body)
+	}
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputPending || stored.InputMode != models.ThreadInputModeQueued {
+		t.Fatalf("foreign refresh should not mutate queued input, got %#v", stored)
+	}
+}
+
+func TestTaskThreadPendingInputsRendersSameProjectQueuedAndSteeringRows(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Pending same project").Build()
+	task := tc.CreateTask(project.ID).WithStatus(models.StatusRunning).Build()
+	agent, _ := tc.llmConfigRepo.GetDefault(ctx)
+	if agent == nil {
+		t.Skip("no default agent configured")
+	}
+	active := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).WithPromptSent("active turn").Build()
+	queued := createPendingTaskThreadInput(t, tc, project.ID, task.ID, agent.ID, active.ID, models.ThreadInputModeQueued, "same queued follow-up", "same-queued-attachments")
+	steering := createPendingTaskThreadInput(t, tc, project.ID, task.ID, agent.ID, active.ID, models.ThreadInputModeSteering, "same steering correction", "same-steering-attachments")
+
+	rec := tc.HTMX().Get("/tasks/" + task.ID + "/thread/pending-inputs?project_id=" + project.ID).Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	body := rec.Body.String()
+	for _, want := range []string{
+		queued.ID,
+		queued.Content,
+		steering.ID,
+		steering.Content,
+		"Queued follow-up",
+		"Steering pending",
+		"Attachments included",
+		"/tasks/" + task.ID + "/thread/queued/" + queued.ID + "/steer",
+		"/thread-inputs/" + queued.ID + "/cancel",
+		"/thread-inputs/" + steering.ID + "/cancel",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("same-project pending refresh missing %q in %q", want, body)
+		}
+	}
+}
+
+func TestCancelThreadInputRejectsForeignProjectInput(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	owner := tc.CreateProject().WithName("Cancel owner").Build()
+	current := tc.CreateProject().WithName("Cancel current").Build()
+	task := tc.CreateTask(owner.ID).WithStatus(models.StatusRunning).Build()
+	agent, _ := tc.llmConfigRepo.GetDefault(ctx)
+	if agent == nil {
+		t.Skip("no default agent configured")
+	}
+	active := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).WithPromptSent("active turn").Build()
+	queued := createPendingTaskThreadInput(t, tc, owner.ID, task.ID, agent.ID, active.ID, models.ThreadInputModeQueued, "foreign cancel content", "")
+
+	rec := tc.HTMX().Post("/thread-inputs/" + queued.ID + "/cancel?project_id=" + current.ID).Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputPending || stored.InputMode != models.ThreadInputModeQueued {
+		t.Fatalf("foreign cancel should leave input pending/queued, got %#v", stored)
+	}
+}
+
+func TestCancelThreadInputCancelsSameProjectInput(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Cancel same project").Build()
+	task := tc.CreateTask(project.ID).WithStatus(models.StatusRunning).Build()
+	agent, _ := tc.llmConfigRepo.GetDefault(ctx)
+	if agent == nil {
+		t.Skip("no default agent configured")
+	}
+	active := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).WithPromptSent("active turn").Build()
+	queued := createPendingTaskThreadInput(t, tc, project.ID, task.ID, agent.ID, active.ID, models.ThreadInputModeQueued, "same cancel content", "")
+
+	rec := tc.HTMX().Post("/thread-inputs/" + queued.ID + "/cancel?project_id=" + project.ID).Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputCancelled {
+		t.Fatalf("same-project cancel should cancel input, got %#v", stored)
+	}
+}
+
+func TestTaskThreadQueuedInputSteerRejectsForeignProjectTask(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	owner := tc.CreateProject().WithName("Steer owner").Build()
+	current := tc.CreateProject().WithName("Steer current").Build()
+	task := tc.CreateTask(owner.ID).WithStatus(models.StatusRunning).Build()
+	agent, _ := tc.llmConfigRepo.GetDefault(ctx)
+	if agent == nil {
+		t.Skip("no default agent configured")
+	}
+	active := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).WithPromptSent("active turn").Build()
+	queued := createPendingTaskThreadInput(t, tc, owner.ID, task.ID, agent.ID, active.ID, models.ThreadInputModeQueued, "foreign steer content", "foreign-steer-attachments")
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/thread/queued/" + queued.ID + "/steer?project_id=" + current.ID).Execute()
+	tc.Assert(rec).StatusCode(http.StatusNotFound)
+	body := rec.Body.String()
+	if strings.Contains(body, queued.Content) || strings.Contains(body, queued.ID) || strings.Contains(body, "foreign-steer-attachments") {
+		t.Fatalf("foreign steer leaked queued row details: %q", body)
+	}
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputPending || stored.InputMode != models.ThreadInputModeQueued {
+		t.Fatalf("foreign steer should leave input pending/queued, got %#v", stored)
+	}
+}
+
+func TestTaskThreadQueuedInputSteerConvertsSameProjectInput(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("Steer same project").Build()
+	task := tc.CreateTask(project.ID).WithStatus(models.StatusRunning).Build()
+	agent, _ := tc.llmConfigRepo.GetDefault(ctx)
+	if agent == nil {
+		t.Skip("no default agent configured")
+	}
+	active := tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecRunning).WithPromptSent("active turn").Build()
+	queued := createPendingTaskThreadInput(t, tc, project.ID, task.ID, agent.ID, active.ID, models.ThreadInputModeQueued, "same steer content", "same-steer-attachments")
+
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/thread/queued/" + queued.ID + "/steer?project_id=" + project.ID).Execute()
+	tc.Assert(rec).StatusCode(http.StatusOK)
+	body := rec.Body.String()
+	if !strings.Contains(body, "Steering pending") || !strings.Contains(body, queued.Content) || !strings.Contains(body, "Attachments included") {
+		t.Fatalf("same-project steer response missing converted row details: %q", body)
+	}
+	stored, err := tc.handler.threadInputRepo.GetByID(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if stored == nil || stored.InputStatus != models.ThreadInputPending || stored.InputMode != models.ThreadInputModeSteering || stored.ExpectedTurnID != active.ID || stored.RunExecutionID != active.ID {
+		t.Fatalf("same-project steer should convert input to pending steering, got %#v", stored)
+	}
+}
