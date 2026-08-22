@@ -207,10 +207,11 @@ func (r *ChatAttachmentRepo) DeleteByExecution(ctx context.Context, executionID 
 	return nil
 }
 
+const selectAllChatAttachmentFilePathsSQL = `SELECT file_path FROM chat_attachments`
+
 // GetAllFilePaths returns all file paths currently in the database
 func (r *ChatAttachmentRepo) GetAllFilePaths(ctx context.Context) ([]string, error) {
-	query := `SELECT file_path FROM chat_attachments ORDER BY file_path`
-	rows, err := r.db.QueryContext(ctx, query)
+	rows, err := r.db.QueryContext(ctx, selectAllChatAttachmentFilePathsSQL)
 	if err != nil {
 		return nil, fmt.Errorf("querying file paths: %w", err)
 	}
