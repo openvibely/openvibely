@@ -282,7 +282,7 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 
 	port := freeTCPPort(t)
 	t.Cleanup(func() { killPort(t, port) })
-	parentPID := exitedFixtureParentPID(t, installedExecutable)
+	parentPID := exitedCommandPID(t)
 	helperArgs := []string{
 		"desktop-update-helper",
 		"--parent-pid", strconv.Itoa(parentPID),
@@ -443,38 +443,6 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 	} else {
 		assertGoBuildInfoVersion(t, installedExecutable, "0.5.0")
 	}
-}
-
-func exitedFixtureParentPID(t *testing.T, executable string) int {
-	t.Helper()
-	port := freeTCPPort(t)
-	cmd := exec.Command(executable, "serve", "--listen", "127.0.0.1:"+port)
-	cmd.Env = append(os.Environ(), "OPENVIBELY_UPDATE_INTEGRATION_EXIT_AFTER_HEALTH=1")
-	cmd.Stdout = io.Discard
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start exited parent fixture: %v", err)
-	}
-	pid := cmd.Process.Pid
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get("http://127.0.0.1:" + port + "/health")
-		if err == nil {
-			_ = resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				if waitErr := cmd.Wait(); waitErr != nil {
-					t.Fatalf("wait exited parent fixture: %v\n%s", waitErr, stderr.String())
-				}
-				return pid
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	_ = cmd.Process.Kill()
-	_, _ = cmd.Process.Wait()
-	t.Fatalf("exited parent fixture did not start: %s", stderr.String())
-	return 0
 }
 
 func openCommandLogs(t *testing.T, dir, name string) (*os.File, *os.File, func() string) {
@@ -1062,11 +1030,29 @@ func killPort(t *testing.T, port string) {
 		}
 		return
 	}
-	out, err := exec.CommandContext(ctx, "lsof", "-ti", "tcp:"+port).Output()
+	out, err := exec.CommandContext(ctx, "lsof", "-tiTCP:"+port, "-sTCP:LISTEN").Output()
 	if err != nil {
 		return
 	}
-	for _, pid := range strings.Fields(string(out)) {
-		_ = exec.CommandContext(ctx, "kill", pid).Run()
+	pids := strings.Fields(string(out))
+	for _, pid := range pids {
+		_ = exec.CommandContext(ctx, "kill", "-TERM", pid).Run()
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		alive := false
+		for _, pid := range pids {
+			if exec.CommandContext(ctx, "kill", "-0", pid).Run() == nil {
+				alive = true
+				break
+			}
+		}
+		if !alive {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	for _, pid := range pids {
+		_ = exec.CommandContext(ctx, "kill", "-KILL", pid).Run()
 	}
 }

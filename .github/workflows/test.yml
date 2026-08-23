@@ -216,6 +216,7 @@ jobs:
             libwebkitgtk-6.0-dev \
             libglib2.0-dev \
             libsoup-3.0-dev \
+            lsof \
             xvfb
 
       - name: Start Linux virtual display
