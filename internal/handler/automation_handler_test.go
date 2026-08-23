@@ -2890,8 +2890,12 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 	case call := <-started:
 		require.Equal(t, "Continue the Automation implementation task.", call.Prompt)
 		promotedExecID = call.ExecID
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for queued Automation continuation to start")
+	case <-time.After(10 * time.Second):
+		promoted, getErr := tc.handler.threadInputRepo.GetByID(ctx, result.QueuedMessageID)
+		require.NoError(t, getErr)
+		execs, listErr := tc.execRepo.ListByTaskChronological(ctx, task.ID)
+		require.NoError(t, listErr)
+		t.Fatalf("timed out waiting for queued Automation continuation to start (input status=%s run_exec=%s mock_calls=%d task_execs=%d)", promoted.InputStatus, promoted.RunExecutionID, mock.CallCount(), len(execs))
 	}
 	counts, _, _, err = automationRepo.LiveNodeCounts(ctx, project.ID, definition.Automation.ID, definition.Version.ID, time.Now().UTC().Add(-time.Hour))
 	require.NoError(t, err)
@@ -2905,7 +2909,11 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 			return false
 		}
 		exec, getErr := tc.execRepo.GetByID(ctx, promotedExecID)
-		return getErr == nil && exec != nil && exec.Status == models.ExecCompleted
+		if getErr != nil || exec == nil || exec.Status != models.ExecCompleted {
+			return false
+		}
+		updatedTask, getErr := tc.taskRepo.GetByID(ctx, task.ID)
+		return getErr == nil && updatedTask != nil && updatedTask.Status == models.StatusCompleted
 	}, 2*time.Second, 10*time.Millisecond)
 }
 
