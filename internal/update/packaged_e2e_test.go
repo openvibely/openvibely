@@ -281,7 +281,10 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 	}
 
 	port := freeTCPPort(t)
-	t.Cleanup(func() { killPort(t, port) })
+	t.Cleanup(func() {
+		killExecutable(t, installedExecutable)
+		killPort(t, port)
+	})
 	parentPID := exitedCommandPID(t)
 	helperArgs := []string{
 		"desktop-update-helper",
@@ -389,7 +392,10 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 	}
 
 	port := freeTCPPort(t)
-	t.Cleanup(func() { killPort(t, port) })
+	t.Cleanup(func() {
+		killExecutable(t, installedExecutable)
+		killPort(t, port)
+	})
 	configFile := writeRealDesktopConfig(t, root, dataRoot, updateServer.URL, publicKeyFile)
 	helperPath := packagedUpdateHelperPath(staged.InstallPath)
 	if runPackagedUpdateHelperInPlace(runtime.GOOS, staged.InstallPath) {
@@ -1034,7 +1040,36 @@ func killPort(t *testing.T, port string) {
 	if err != nil {
 		return
 	}
-	pids := unixProcessTreePIDs(ctx, strings.Fields(string(out)))
+	terminateUnixProcessTrees(ctx, unixProcessTreePIDs(ctx, strings.Fields(string(out))))
+}
+
+func killExecutable(t *testing.T, executable string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ps", "-e", "-o", "pid=", "-o", "args=").Output()
+	if err != nil {
+		return
+	}
+	var roots []string
+	for _, line := range strings.Split(string(out), "\n") {
+		trimmed := strings.TrimSpace(line)
+		fields := strings.Fields(trimmed)
+		if len(fields) < 2 {
+			continue
+		}
+		commandLine := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+		if commandLine == executable || strings.HasPrefix(commandLine, executable+" ") {
+			roots = append(roots, fields[0])
+		}
+	}
+	terminateUnixProcessTrees(ctx, unixProcessTreePIDs(ctx, roots))
+}
+
+func terminateUnixProcessTrees(ctx context.Context, pids []string) {
 	for _, pid := range pids {
 		_ = exec.CommandContext(ctx, "kill", "-TERM", pid).Run()
 	}
