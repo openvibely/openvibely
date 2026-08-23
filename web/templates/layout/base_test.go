@@ -250,9 +250,11 @@ func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testin
 	}
 	script := `
 	const listeners = {};
+	let runtime = 'web';
 	global.window = { innerHeight: 320 };
 	global.document = {
 	  body: { name: 'body' },
+	  documentElement: { getAttribute: function() { return runtime; } },
 	  activeElement: null,
 	  addEventListener: function(name, handler) { listeners[name] = handler; }
 	};
@@ -281,6 +283,7 @@ func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testin
 	  const dropdown = {
 	    parentElement: boundary,
 	    dataset: {},
+	    getAttribute: function(name) { return this[name] || null; },
 	    classList: makeClassList(['dropdown', 'dropdown-end']),
 	    querySelector: function(selector) { return selector === '.dropdown-content' ? content : null; }
 	  };
@@ -303,9 +306,46 @@ func TestBaseDropdownToggleRepositionsMenusInsideVisibleScrollBoundary(t *testin
 	originalTop.dropdown.classList.add('dropdown-top');
 	handleDropdownToggle({ currentTarget: originalTop.label, stopPropagation: function() {} });
 	if (!originalTop.dropdown.classList.contains('dropdown-top')) throw new Error('original dropdown-top class should be preserved');
+
+	runtime = 'desktop';
+	const startupFocusedChat = makeDropdown(80, 104, 100);
+	document.activeElement = startupFocusedChat.label;
+	listeners['mousedown']({});
+	const startupActivation = {
+	  currentTarget: startupFocusedChat.label,
+	  defaultPrevented: false,
+	  stopPropagation: function() {},
+	  preventDefault: function() { this.defaultPrevented = true; }
+	};
+	startupFocusedChat.dropdown.getAttribute = function(name) {
+	  return name === 'data-chat-actions-open' ? null : null;
+	};
+	startupFocusedChat.label.closest = function(selector) { return selector === '[data-chat-actions-dropdown]' || selector === '.dropdown' ? startupFocusedChat.dropdown : null; };
+	handleDropdownToggle(startupActivation);
+	if (startupActivation.defaultPrevented) throw new Error('desktop startup focus was treated as an already-open Chat menu');
 	`
+
 	if output, err := exec.Command(node, "-e", script).CombinedOutput(); err != nil {
 		t.Fatalf("rendered dropdown positioning script failed: %v\n%s", err, output)
+	}
+}
+
+func TestBaseDesktopChatActionsRequireExplicitActivation(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Chat", []models.Project{}, "project-1").Render(WithDesktopMode(context.Background(), true), &buf); err != nil {
+		t.Fatalf("failed to render desktop Base: %v", err)
+	}
+	content := buf.String()
+	for _, required := range []string{
+		`data-openvibely-runtime="desktop"`,
+		`[data-openvibely-runtime="desktop"] #chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content`,
+		`visibility: hidden !important;`,
+		`opacity: 0 !important;`,
+		`pointer-events: none !important;`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("desktop Chat startup must keep the clear-actions menu closed; missing %q", required)
+		}
 	}
 }
 

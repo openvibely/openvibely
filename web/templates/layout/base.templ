@@ -606,6 +606,14 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						max-height: calc(100vh - 4rem);
 						overflow-y: auto;
 					}
+					/* Desktop WebViews can focus the first control during startup. The Chat actions menu
+					   must stay hidden until its trigger receives an explicit user activation. */
+					[data-openvibely-runtime="desktop"] #chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content {
+						visibility: hidden !important;
+						opacity: 0 !important;
+						pointer-events: none !important;
+					}
+
 				/* Chat bubble redesign - distinct card-style per message */
 				/* Scrollports and input gutter are shifted left 16px so bubble bodies
 				   align with other page card left-edges (kanban columns / models cards).
@@ -2723,9 +2731,12 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			function handleDropdownToggle(event) {
 				event.stopPropagation(); // Prevent event from bubbling to parent handlers
 				const label = event.currentTarget;
+				const dropdown = label && label.closest ? label.closest('[data-chat-actions-dropdown]') : null;
+				const desktopChatStartupFocus = dropdown && document.documentElement.getAttribute('data-openvibely-runtime') === 'desktop' && dropdown.getAttribute('data-chat-actions-open') !== 'true';
 
-				// Check if this dropdown was already open before the click
-				if (focusedBeforeClick === label) {
+				// Check if this dropdown was already open before the click. A desktop Chat
+				// trigger may only be focused by WebView startup, which is not an open action.
+				if (focusedBeforeClick === label && !desktopChatStartupFocus) {
 					// Dropdown was already open, close it
 					event.preventDefault();
 					label.blur();
@@ -2735,7 +2746,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				requestAnimationFrame(function() { positionDropdownForViewport(label); });
 			}
 
-				function handleTaskSelect(event) {
+			function handleTaskSelect(event) {
 					const clickedTaskID = event.currentTarget.getAttribute('data-task-id');
 					if (clickedTaskID && clickedTaskID === suppressedTaskClickID) {
 						event.preventDefault();

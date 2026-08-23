@@ -73,19 +73,21 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 				<h2 class="text-2xl font-bold">Chat</h2>
 				<p class="text-sm opacity-60 mt-1">Coordinate and orchestrate AI tasks across your project</p>
 			</div>
-			<div class="dropdown dropdown-end">
-				<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">
+			<div class="dropdown dropdown-end" data-chat-actions-dropdown>
+				<button type="button" class="btn btn-xs btn-ghost" title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="chat-actions-menu" onclick="toggleChatActionsDropdown(event)">
 					<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 						<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"></path>
 					</svg>
-				</label>
-				<ul tabindex="0" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">
+				</button>
+				<ul id="chat-actions-menu" tabindex="0" role="menu" class="dropdown-content menu p-2 shadow bg-base-100 rounded-box w-56 z-[100]">
 					<li>
 						<button
+							type="button"
 							hx-delete={ "/chat/history?project_id=" + currentProjectID }
 							hx-target="closest #chat-page-root"
 							hx-swap="outerHTML"
 							class="text-error"
+							role="menuitem"
 						>
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
@@ -171,6 +173,63 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 		@components.ChatStreamingResumeInitScript()
 		<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
 		<script>
+			(function() {
+				var documentElement = document.documentElement;
+				var isDesktopRuntime = function() {
+					return documentElement && documentElement.getAttribute('data-openvibely-runtime') === 'desktop';
+				};
+				var setChatActionsOpen = function(dropdown, open) {
+					if (!dropdown) return;
+					if (open) dropdown.setAttribute('data-chat-actions-open', 'true');
+					else dropdown.removeAttribute('data-chat-actions-open');
+					var trigger = dropdown.querySelector('[aria-controls="chat-actions-menu"]');
+					if (trigger) trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+				};
+				var resetChatActionsDropdown = function() {
+					setChatActionsOpen(document.querySelector('[data-chat-actions-dropdown]'), false);
+				};
+				window.toggleChatActionsDropdown = function(event) {
+					var trigger = event && event.currentTarget;
+					var dropdown = trigger && trigger.closest ? trigger.closest('[data-chat-actions-dropdown]') : null;
+					if (!dropdown) return;
+					if (typeof handleDropdownToggle === 'function') handleDropdownToggle(event);
+					setChatActionsOpen(dropdown, !event.defaultPrevented);
+				};
+
+				var dropdown = document.querySelector('[data-chat-actions-dropdown]');
+				if (dropdown) {
+					if (isDesktopRuntime()) {
+						// A Wails WebView may focus the first focusable control during startup.
+						// Keep that focus accessible without treating it as an open request.
+						setChatActionsOpen(dropdown, false);
+					}
+					dropdown.addEventListener('focusout', function(event) {
+						if (!event.relatedTarget || !dropdown.contains(event.relatedTarget)) setChatActionsOpen(dropdown, false);
+					});
+					if (isDesktopRuntime()) dropdown.addEventListener('keydown', function(event) {
+						if (event.key !== 'Escape') return;
+						event.preventDefault();
+						setChatActionsOpen(dropdown, false);
+						var trigger = dropdown.querySelector('[aria-controls="chat-actions-menu"]');
+						if (trigger) trigger.blur();
+					});
+				}
+
+				if (!window._chatActionsPointerCloseBound) {
+					window._chatActionsPointerCloseBound = true;
+					document.addEventListener('pointerdown', function(event) {
+						var currentDropdown = document.querySelector('[data-chat-actions-dropdown]');
+						if (currentDropdown && !currentDropdown.contains(event.target)) setChatActionsOpen(currentDropdown, false);
+					}, true);
+				}
+				if (!window._chatActionsHistoryRestoreBound) {
+					window._chatActionsHistoryRestoreBound = true;
+					document.body.addEventListener('htmx:historyRestore', function() {
+						setTimeout(resetChatActionsDropdown, 0);
+					});
+				}
+			})();
+
 					window.initializeChatTranscriptScroll = function() {
 						var chatRoot = document.getElementById('chat-page-root');
 						var chatMessages = document.getElementById('chat-messages');

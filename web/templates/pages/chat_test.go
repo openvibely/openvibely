@@ -379,7 +379,7 @@ func TestChatContent_LiveBubbleErrorClearsStreamingFlag(t *testing.T) {
 	}
 }
 
-func TestChatContent_KebabTriggerUsesLabelForDesktopWebviewCompatibility(t *testing.T) {
+func TestChatContent_ClearActionsUseExplicitAccessibleTrigger(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
@@ -389,11 +389,26 @@ func TestChatContent_KebabTriggerUsesLabelForDesktopWebviewCompatibility(t *test
 	}
 	content := buf.String()
 
-	if !strings.Contains(content, `<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">`) {
-		t.Fatal("expected chat kebab trigger to use <label> for stable dropdown focus behavior")
+	for _, required := range []string{
+		`data-chat-actions-dropdown`,
+		`<button type="button" class="btn btn-xs btn-ghost" title="More actions" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="chat-actions-menu" onclick="toggleChatActionsDropdown(event)">`,
+		`<ul id="chat-actions-menu" tabindex="0" role="menu"`,
+		`type="button"`,
+		`role="menuitem"`,
+		`hx-delete="/chat/history?project_id=project-1"`,
+		`window.toggleChatActionsDropdown = function(event)`,
+		`setChatActionsOpen(dropdown, false)`,
+		`event.key !== 'Escape'`,
+	} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("Chat clear-actions startup/accessibility contract is missing %q", required)
+		}
 	}
-	if strings.Contains(content, `<button tabindex="0" class="btn btn-xs btn-ghost" title="More actions" onclick="handleDropdownToggle(event)">`) {
-		t.Fatal("unexpected <button> dropdown trigger in chat header")
+	if strings.Contains(content, `<label tabindex="0" class="btn btn-xs btn-ghost" title="More actions"`) {
+		t.Fatal("Chat clear-actions trigger must not use a focus-opening label")
+	}
+	if strings.Contains(content, `autofocus`) {
+		t.Fatal("Chat startup must not introduce autofocus that changes the initial focus target")
 	}
 }
 
