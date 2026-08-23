@@ -86,6 +86,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 							hx-delete={ "/chat/history?project_id=" + currentProjectID }
 							hx-target="closest #chat-page-root"
 							hx-swap="outerHTML"
+							hx-confirm="Clear all chat history? This cannot be undone."
 							class="text-error"
 							role="menuitem"
 						>
@@ -174,10 +175,6 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 		<!-- Chat-specific: draft persistence, plan handling, and HTMX swap behavior -->
 		<script>
 			(function() {
-				var documentElement = document.documentElement;
-				var isDesktopRuntime = function() {
-					return documentElement && documentElement.getAttribute('data-openvibely-runtime') === 'desktop';
-				};
 				var setChatActionsOpen = function(dropdown, open) {
 					if (!dropdown) return;
 					if (open) dropdown.setAttribute('data-chat-actions-open', 'true');
@@ -185,33 +182,62 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					var trigger = dropdown.querySelector('[aria-controls="chat-actions-menu"]');
 					if (trigger) trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
 				};
+				var chatActionsTrigger = function(dropdown) {
+					return dropdown ? dropdown.querySelector('[aria-controls="chat-actions-menu"]') : null;
+				};
+				var restoreChatActionsFocus = function(dropdown) {
+					var trigger = chatActionsTrigger(dropdown);
+					if (!trigger || typeof trigger.focus !== 'function') return;
+					try {
+						trigger.focus({preventScroll: true});
+					} catch (_) {
+						trigger.focus();
+					}
+				};
+				var closeChatActions = function(dropdown, restoreFocus) {
+					setChatActionsOpen(dropdown, false);
+					if (restoreFocus) restoreChatActionsFocus(dropdown);
+				};
 				var resetChatActionsDropdown = function() {
-					setChatActionsOpen(document.querySelector('[data-chat-actions-dropdown]'), false);
+					closeChatActions(document.querySelector('[data-chat-actions-dropdown]'), false);
 				};
 				window.toggleChatActionsDropdown = function(event) {
-					var trigger = event && event.currentTarget;
+					if (!event) return;
+					event.stopPropagation();
+					var trigger = event.currentTarget;
 					var dropdown = trigger && trigger.closest ? trigger.closest('[data-chat-actions-dropdown]') : null;
 					if (!dropdown) return;
-					if (typeof handleDropdownToggle === 'function') handleDropdownToggle(event);
-					setChatActionsOpen(dropdown, !event.defaultPrevented);
+					var isOpen = dropdown.getAttribute('data-chat-actions-open') === 'true';
+					if (isOpen) {
+						event.preventDefault();
+						closeChatActions(dropdown, true);
+						return;
+					}
+					setChatActionsOpen(dropdown, true);
+					requestAnimationFrame(function() {
+						if (typeof positionDropdownForViewport === 'function') positionDropdownForViewport(trigger);
+					});
 				};
 
 				var dropdown = document.querySelector('[data-chat-actions-dropdown]');
 				if (dropdown) {
-					if (isDesktopRuntime()) {
-						// A Wails WebView may focus the first focusable control during startup.
-						// Keep that focus accessible without treating it as an open request.
-						setChatActionsOpen(dropdown, false);
-					}
-					dropdown.addEventListener('focusout', function(event) {
-						if (!event.relatedTarget || !dropdown.contains(event.relatedTarget)) setChatActionsOpen(dropdown, false);
+					// A Wails WebView may focus the first focusable control during startup.
+					// Explicit state keeps that focus accessible without opening the menu.
+					setChatActionsOpen(dropdown, false);
+					var trigger = chatActionsTrigger(dropdown);
+					if (trigger) trigger.addEventListener('keydown', function(event) {
+						if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Spacebar') return;
+						event.preventDefault();
+						window.toggleChatActionsDropdown(event);
 					});
-					if (isDesktopRuntime()) dropdown.addEventListener('keydown', function(event) {
+					dropdown.addEventListener('focusout', function(event) {
+						if (!event.relatedTarget || !dropdown.contains(event.relatedTarget)) closeChatActions(dropdown, false);
+					});
+					dropdown.addEventListener('keydown', function(event) {
 						if (event.key !== 'Escape') return;
 						event.preventDefault();
-						setChatActionsOpen(dropdown, false);
-						var trigger = dropdown.querySelector('[aria-controls="chat-actions-menu"]');
-						if (trigger) trigger.blur();
+						event.stopPropagation();
+						closeChatActions(dropdown, true);
 					});
 				}
 
@@ -219,7 +245,7 @@ templ ChatContent(agents []models.LLMConfig, chatHistory []models.Execution, cur
 					window._chatActionsPointerCloseBound = true;
 					document.addEventListener('pointerdown', function(event) {
 						var currentDropdown = document.querySelector('[data-chat-actions-dropdown]');
-						if (currentDropdown && !currentDropdown.contains(event.target)) setChatActionsOpen(currentDropdown, false);
+						if (currentDropdown && !currentDropdown.contains(event.target)) closeChatActions(currentDropdown, false);
 					}, true);
 				}
 				if (!window._chatActionsHistoryRestoreBound) {

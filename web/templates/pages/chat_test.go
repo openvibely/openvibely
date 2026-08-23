@@ -396,8 +396,11 @@ func TestChatContent_ClearActionsUseExplicitAccessibleTrigger(t *testing.T) {
 		`type="button"`,
 		`role="menuitem"`,
 		`hx-delete="/chat/history?project_id=project-1"`,
+		`hx-confirm="Clear all chat history? This cannot be undone."`,
 		`window.toggleChatActionsDropdown = function(event)`,
-		`setChatActionsOpen(dropdown, false)`,
+		`restoreChatActionsFocus = function(dropdown)`,
+		`trigger.focus({preventScroll: true})`,
+		`closeChatActions(dropdown, true)`,
 		`event.key !== 'Escape'`,
 	} {
 		if !strings.Contains(content, required) {
@@ -412,7 +415,7 @@ func TestChatContent_ClearActionsUseExplicitAccessibleTrigger(t *testing.T) {
 	}
 }
 
-func TestChatContent_ClearChatDoesNotRequireConfirmation(t *testing.T) {
+func TestChatContent_ClearChatPreservesConfirmationFlow(t *testing.T) {
 	agents := []models.LLMConfig{{ID: "agent-1", Name: "Agent One", Provider: models.ProviderAnthropic}}
 
 	var buf bytes.Buffer
@@ -425,8 +428,8 @@ func TestChatContent_ClearChatDoesNotRequireConfirmation(t *testing.T) {
 	if !strings.Contains(content, `hx-delete="/chat/history?project_id=project-1"`) {
 		t.Fatal("expected clear chat action to issue hx-delete request")
 	}
-	if strings.Contains(content, `hx-confirm="Clear all chat history? This cannot be undone."`) {
-		t.Fatal("clear chat action should not require confirmation in desktop app")
+	if !strings.Contains(content, `hx-confirm="Clear all chat history? This cannot be undone."`) {
+		t.Fatal("clear chat action must preserve its confirmation flow")
 	}
 }
 

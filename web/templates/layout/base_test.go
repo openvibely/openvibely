@@ -338,7 +338,7 @@ func TestBaseDesktopChatActionsRequireExplicitActivation(t *testing.T) {
 	content := buf.String()
 	for _, required := range []string{
 		`data-openvibely-runtime="desktop"`,
-		`[data-openvibely-runtime="desktop"] #chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content`,
+		`#chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content`,
 		`visibility: hidden !important;`,
 		`opacity: 0 !important;`,
 		`pointer-events: none !important;`,
