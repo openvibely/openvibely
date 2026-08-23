@@ -161,6 +161,9 @@ func (h *Handler) UpdateCustomPersonality(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to update custom personality")
 		}
 	} else {
+		if key == "" || !service.IsPresetPersonality(key) {
+			return echo.NewHTTPError(http.StatusNotFound, "Custom personality not found")
+		}
 		if err := h.customPersonalityRepo.Create(c.Request().Context(), p); err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save personality")
 		}
