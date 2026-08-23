@@ -837,15 +837,21 @@ definitions:
         type: string
       image_ref:
         type: string
+      install_layout:
+        type: string
       kind:
         type: string
       os:
+        type: string
+      purpose:
         type: string
       sha256:
         type: string
       size:
         type: integer
       url:
+        type: string
+      variant:
         type: string
     type: object
   update.VerifiedRelease:

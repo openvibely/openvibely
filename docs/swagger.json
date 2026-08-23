@@ -2480,10 +2480,16 @@
                 "image_ref": {
                     "type": "string"
                 },
+                "install_layout": {
+                    "type": "string"
+                },
                 "kind": {
                     "type": "string"
                 },
                 "os": {
+                    "type": "string"
+                },
+                "purpose": {
                     "type": "string"
                 },
                 "sha256": {
@@ -2493,6 +2499,9 @@
                     "type": "integer"
                 },
                 "url": {
+                    "type": "string"
+                },
+                "variant": {
                     "type": "string"
                 }
             }

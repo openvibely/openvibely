@@ -2482,10 +2482,16 @@ const docTemplate = `{
                 "image_ref": {
                     "type": "string"
                 },
+                "install_layout": {
+                    "type": "string"
+                },
                 "kind": {
                     "type": "string"
                 },
                 "os": {
+                    "type": "string"
+                },
+                "purpose": {
                     "type": "string"
                 },
                 "sha256": {
@@ -2495,6 +2501,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "url": {
+                    "type": "string"
+                },
+                "variant": {
                     "type": "string"
                 }
             }
@@ -2632,8 +2641,6 @@ var SwaggerInfo = &swag.Spec{
 	Description:      "REST API for OpenVibely - AI-powered task scheduling and management\nThis API provides endpoints for managing projects, tasks, and chat interactions with AI agents.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
-	LeftDelim:        "{{",
-	RightDelim:       "}}",
 }
 
 func init() {
