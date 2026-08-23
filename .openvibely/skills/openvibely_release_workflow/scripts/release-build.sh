@@ -22,9 +22,10 @@
 #   SHA256SUMS
 #
 # Environment variables:
-#   DRY_RUN=1          Print commands without executing build steps.
-#   SKIP_GENERATE=1    Skip templ generate + swagger (if already done).
-#   DIST_DIR=<path>                       Override distribution output directory.
+#   DRY_RUN=1                         Print commands without executing build steps.
+#   SKIP_GENERATE=1                   Skip templ generate + swagger (if already done).
+#   DIST_DIR=<path>                   Override distribution output directory.
+#   OPENVIBELY_RELEASE_WORK_DIR=<path> Override resumable release work directory.
 #   OPENVIBELY_MACOS_SIGN_IDENTITY      Developer ID Application identity.
 #   OPENVIBELY_MACOS_NOTARY_PROFILE     notarytool keychain profile.
 #   OPENVIBELY_WINDOWS_SIGN_COMMAND     Executable invoked with each Windows binary path.
@@ -190,6 +191,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
 else
     mkdir -p "$DIST_DIR"
 fi
+NOTARY_STATE_FILE="${DIST_DIR}/notarization-state.tsv"
 cd "$REPO_ROOT"
 
 ###############################################################################
@@ -324,7 +326,7 @@ sign_windows_binary() {
 }
 
 notarize_macos_binary_archive() {
-    local binary="$1" archive="$2"
+    local binary="$1" archive="$2" state_key="$3"
     log "Developer ID signing $(basename "$binary")..."
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}[DRY-RUN]${NC} $SCRIPT_DIR/sign-macos.sh $binary"
@@ -332,21 +334,78 @@ notarize_macos_binary_archive() {
         env OPENVIBELY_MACOS_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" "$SCRIPT_DIR/sign-macos.sh" "$binary"
     fi
     run ditto -c -k --keepParent "$binary" "$archive"
-    queue_macos_notarization "$archive" "$(basename "$archive")" "" ""
+    queue_macos_notarization "$state_key" "$archive" "$(basename "$archive")" "" ""
     # Keep notarize-macos-archive.sh as the standalone serial helper; release-build
     # queues macOS submissions so first-time notarization delays do not block later uploads.
 }
 
+MACOS_NOTARY_KEYS=()
 MACOS_NOTARY_IDS=()
 MACOS_NOTARY_NAMES=()
 MACOS_NOTARY_APP_DIRS=()
 MACOS_NOTARY_RELEASE_ZIPS=()
 
+notary_state_line() {
+    local key="$1"
+    [[ -f "$NOTARY_STATE_FILE" ]] || return 1
+    awk -F '\t' -v key="$key" '$1 == key { print; exit }' "$NOTARY_STATE_FILE"
+}
+
+notary_state_field() {
+    local line="$1" field="$2"
+    awk -F '\t' -v field="$field" '{ print $field }' <<< "$line"
+}
+
+record_macos_notarization() {
+    local key="$1" submission_id="$2" name="$3" archive="$4" app_dir="$5" release_zip="$6"
+    local tmp_state
+
+    mkdir -p "$(dirname "$NOTARY_STATE_FILE")"
+    tmp_state="${NOTARY_STATE_FILE}.tmp"
+    if [[ -f "$NOTARY_STATE_FILE" ]]; then
+        awk -F '\t' -v key="$key" '$1 != key' "$NOTARY_STATE_FILE" > "$tmp_state"
+    else
+        : > "$tmp_state"
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$key" "$submission_id" "$name" "$archive" "$app_dir" "$release_zip" "$BUILD_COMMIT" >> "$tmp_state"
+    mv "$tmp_state" "$NOTARY_STATE_FILE"
+}
+
+use_existing_macos_notarization() {
+    local key="$1"
+    local line submission_id name archive app_dir release_zip build_commit
+
+    line="$(notary_state_line "$key" || true)"
+    [[ -n "$line" ]] || return 1
+
+    submission_id="$(notary_state_field "$line" 2)"
+    name="$(notary_state_field "$line" 3)"
+    archive="$(notary_state_field "$line" 4)"
+    app_dir="$(notary_state_field "$line" 5)"
+    release_zip="$(notary_state_field "$line" 6)"
+    build_commit="$(notary_state_field "$line" 7)"
+    [[ -n "$submission_id" && -f "$archive" ]] || return 1
+    [[ -z "$app_dir" || -d "$app_dir" ]] || return 1
+    [[ -n "$build_commit" && "$build_commit" == "$BUILD_COMMIT" ]] || return 1
+
+    MACOS_NOTARY_KEYS+=("$key")
+    MACOS_NOTARY_IDS+=("$submission_id")
+    MACOS_NOTARY_NAMES+=("$name")
+    MACOS_NOTARY_APP_DIRS+=("$app_dir")
+    MACOS_NOTARY_RELEASE_ZIPS+=("$release_zip")
+    log "Resuming notarization for $name: $submission_id"
+    return 0
+}
+
 queue_macos_notarization() {
-    local archive="$1" name="$2" app_dir="${3:-}" release_zip="${4:-}"
+    local key="$1" archive="$2" name="$3" app_dir="${4:-}" release_zip="${5:-}"
 
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}[DRY-RUN]${NC} Would submit $name for notarization"
+        return
+    fi
+
+    if use_existing_macos_notarization "$key"; then
         return
     fi
 
@@ -357,10 +416,12 @@ queue_macos_notarization() {
     submission_id="$(awk '/^[[:space:]]*id:/ { print $2; exit }' <<< "$output")"
     [[ -n "$submission_id" ]] || fail "Could not parse notarization submission id for $name."
 
+    MACOS_NOTARY_KEYS+=("$key")
     MACOS_NOTARY_IDS+=("$submission_id")
     MACOS_NOTARY_NAMES+=("$name")
     MACOS_NOTARY_APP_DIRS+=("$app_dir")
     MACOS_NOTARY_RELEASE_ZIPS+=("$release_zip")
+    record_macos_notarization "$key" "$submission_id" "$name" "$archive" "$app_dir" "$release_zip"
     log "Queued notarization for $name: $submission_id"
 }
 
@@ -398,8 +459,8 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
     TMP_BIN="${TMPDIR:-/tmp}/openvibely-release-dry-run"
 else
     mkdir -p "${REPO_ROOT}/.release-tmp"
-    TMP_BIN="$(mktemp -d "${REPO_ROOT}/.release-tmp/build-${VERSION}.XXXXXX")"
-    trap 'rm -rf "$TMP_BIN"' EXIT
+    TMP_BIN="${OPENVIBELY_RELEASE_WORK_DIR:-${REPO_ROOT}/.release-tmp/build-${VERSION}}"
+    mkdir -p "$TMP_BIN"
 fi
 
 log "Building server binaries (all platforms)..."
@@ -435,11 +496,17 @@ build_macos_app() {
     local staging_dir="${TMP_BIN}/staging_${goarch}"
     local app_dir="${staging_dir}/${app_name}"
     local bundle="${app_dir}/Contents"
+    local zip_name="OpenVibely_${VERSION}_darwin_${goarch}.app.zip"
+    local notary_zip="${TMP_BIN}/OpenVibely_${goarch}_notary.zip"
+    local state_key="desktop-darwin-${goarch}"
 
     log "Building macOS desktop app ($goarch)..."
+    if [[ "${DRY_RUN:-0}" != "1" ]] && use_existing_macos_notarization "$state_key"; then
+        return
+    fi
+
     build_desktop_binary "$TMP_BIN/${bin_name}" darwin "$goarch" 1
 
-    local zip_name="OpenVibely_${VERSION}_darwin_${goarch}.app.zip"
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}[DRY-RUN]${NC} Would assemble ${app_name}/Contents/MacOS/OpenVibely"
         echo -e "${YELLOW}[DRY-RUN]${NC} Would sign and notarize ${app_name}, then staple and verify it"
@@ -470,9 +537,8 @@ PLIST
 
     log "Signing and notarizing ${app_name}..."
     env OPENVIBELY_MACOS_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" "$SCRIPT_DIR/sign-macos.sh" "$app_dir"
-    local notary_zip="${TMP_BIN}/OpenVibely_${goarch}_notary.zip"
     run ditto -c -k --keepParent "$app_dir" "$notary_zip"
-    queue_macos_notarization "$notary_zip" "OpenVibely ${goarch} desktop app" "$app_dir" "${DIST_DIR}/${zip_name}"
+    queue_macos_notarization "$state_key" "$notary_zip" "OpenVibely ${goarch} desktop app" "$app_dir" "${DIST_DIR}/${zip_name}"
 }
 
 if [[ "$HOST_OS" == "Darwin" ]]; then
@@ -553,8 +619,12 @@ package_macos_server_zip() {
     local goarch="$1"
     local src_bin="$TMP_BIN/server_darwin_${goarch}"
     local artifact="openvibely_${VERSION}_darwin_${goarch}_server.zip"
+    local state_key="server-darwin-${goarch}"
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}[DRY-RUN]${NC} Would Developer ID sign and notarize $artifact"
+        return
+    fi
+    if use_existing_macos_notarization "$state_key"; then
         return
     fi
     [[ "$HOST_OS" == "Darwin" ]] || fail "Official macOS server archives must be built, signed, and notarized on macOS."
@@ -562,8 +632,8 @@ package_macos_server_zip() {
     mkdir -p "$pkg_dir"
     cp "$src_bin" "$pkg_dir/openvibely"
     chmod +x "$pkg_dir/openvibely"
-    notarize_macos_binary_archive "$pkg_dir/openvibely" "${DIST_DIR}/${artifact}"
-    log "Created signed and notarized: $artifact"
+    notarize_macos_binary_archive "$pkg_dir/openvibely" "${DIST_DIR}/${artifact}" "$state_key"
+    log "Created signed archive and queued notarization: $artifact"
 }
 
 package_server_tar() {

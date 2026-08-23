@@ -162,6 +162,13 @@ export OPENVIBELY_LINUX_DESKTOP_BINARY='/secure/path/to/openvibely-desktop-amd64
 export OPENVIBELY_LINUX_ARM64_DESKTOP_BINARY='/secure/path/to/openvibely-desktop-arm64'
 bash $SCRIPTS/release-build.sh 0.1.1 ./dist/0.1.1
 
+# If macOS notarization is slow or interrupted, re-run the same command from
+# the same release commit. The build resumes existing Apple submissions from:
+#   ./dist/0.1.1/notarization-state.tsv
+# and keeps the matching local files in:
+#   ./.release-tmp/build-0.1.1/
+# Delete both only when intentionally forcing fresh macOS submissions.
+
 # 2b. Verify archive contents, especially macOS .app zips
 #     The top-level extracted desktop bundle must end exactly in .app.
 unzip -Z1 ./dist/0.1.1/OpenVibely_0.1.1_darwin_amd64.app.zip | head
@@ -253,6 +260,8 @@ bin/OpenVibely.app/
 Treat `bin/openvibely-desktop` as a staging/intermediate Unix executable, not the user-facing desktop app and not a release asset by itself. It exists so the bundle can copy it into `Contents/MacOS/OpenVibely`; the useful macOS artifact is the `.app` bundle, packaged as `.app.zip` for GitHub releases.
 
 The release script delegates OS signing to skill-local helpers: `sign-macos.sh`, `notarize-macos-archive.sh`, `sign-windows.sh`, and `verify-windows.sh`. macOS bundles are hardened-runtime signed with a secure timestamp, notarized, stapled, and Gatekeeper-assessed before packaging. Windows executables are Authenticode signed and timestamped with Azure Artifact Signing through `jsign` on macOS, then verified with `osslsigncode`.
+
+macOS notarization is resumable during real release builds. `release-build.sh` writes `dist/<version>/notarization-state.tsv` and keeps the local files Apple reviewed under `.release-tmp/build-<version>/` unless `OPENVIBELY_RELEASE_WORK_DIR` overrides that path. If the terminal wait is interrupted while Apple still says `In Progress`, re-run the exact same `release-build.sh` command from the same Git commit; do not delete the state file or work dir. The script should reuse the saved submission IDs, wait for acceptance, staple desktop `.app` bundles, package the final macOS desktop zips, and then generate `SHA256SUMS`. If the release commit changed, the script must submit fresh macOS notarizations.
 
 ### macOS app archive verification
 
@@ -412,7 +421,9 @@ docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile \
 | Failure point | Recovery action |
 |---------------|----------------|
 | Preflight fails | Fix the reported issue and re-run `release.sh` — no state was changed |
-| Build fails mid-way | Fix the error; re-run `release-build.sh` (dist dir is recreated each run) |
+| Build fails before macOS notarization upload | Fix the error and re-run `release-build.sh` |
+| Build is interrupted while macOS notarization is `In Progress` | Re-run the same `release-build.sh` command from the same Git commit; it resumes from `dist/<version>/notarization-state.tsv` and `.release-tmp/build-<version>/` |
+| Need fresh macOS notarization submissions | Delete `dist/<version>/notarization-state.tsv` and `.release-tmp/build-<version>/`, then re-run `release-build.sh` |
 | Notes generation fails | Re-run `release-notes.sh`; it overwrites `RELEASE_NOTES.md` |
 | GitHub release creation fails | If tag was pushed, delete it: `git tag -d v<ver> && git push <remote> :refs/tags/v<ver>`; delete the remote release if partially created via `gh release delete v<ver>`; then retry |
 | Partial asset upload | Use `gh release upload v<ver> <files>` to add missing assets to an existing release |
