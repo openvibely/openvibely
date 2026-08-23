@@ -46,6 +46,8 @@ func TestPackagedUpdateE2E(t *testing.T) {
 	case "desktop":
 		t.Run("desktop helper succeeds", testPackagedUpdateE2EDesktopHelperSucceeds)
 		t.Run("desktop helper rolls back", testPackagedUpdateE2EDesktopHelperRollsBack)
+		t.Run("desktop real app succeeds", testPackagedUpdateE2ERealDesktopSucceeds)
+		t.Run("desktop real app rolls back", testPackagedUpdateE2ERealDesktopRollsBack)
 	default:
 		t.Fatalf("unknown OPENVIBELY_UPDATE_E2E_DISTRIBUTION %q", os.Getenv("OPENVIBELY_UPDATE_E2E_DISTRIBUTION"))
 	}
@@ -198,6 +200,23 @@ func testPackagedUpdateE2EDesktopHelperRollsBack(t *testing.T) {
 	runDesktopHelperE2E(t, "0.6.0", "0.7.0", binaryOutcomeRolledBack)
 }
 
+func testPackagedUpdateE2ERealDesktopSucceeds(t *testing.T) {
+	requireRealDesktopUpdateE2E(t)
+	runRealDesktopUpdateE2E(t, "0.6.0", "0.6.0", binaryOutcomeSucceeded)
+}
+
+func testPackagedUpdateE2ERealDesktopRollsBack(t *testing.T) {
+	requireRealDesktopUpdateE2E(t)
+	runRealDesktopUpdateE2E(t, "0.6.0", "0.7.0", binaryOutcomeRolledBack)
+}
+
+func requireRealDesktopUpdateE2E(t *testing.T) {
+	t.Helper()
+	if os.Getenv("OPENVIBELY_UPDATE_E2E_REAL_DESKTOP") != "1" {
+		t.Skip("OPENVIBELY_UPDATE_E2E_REAL_DESKTOP=1 is required for real desktop app update E2E")
+	}
+}
+
 func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, wantOutcome string) {
 	t.Helper()
 	root := t.TempDir()
@@ -307,6 +326,122 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 		assertInstalledFixtureVersion(t, installedExecutable, replacementVersion)
 	} else {
 		assertInstalledFixtureVersion(t, installedExecutable, "0.5.0")
+	}
+}
+
+func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, wantOutcome string) {
+	t.Helper()
+	root := t.TempDir()
+	currentExe := filepath.Join(root, "current", executableName("openvibely-desktop-real"))
+	replacementExe := filepath.Join(root, "replacement", executableName("openvibely-desktop-real"))
+	buildDesktopCommand(t, currentExe, "0.5.0")
+	buildDesktopCommand(t, replacementExe, replacementVersion)
+
+	installPath, installedExecutable, executableRelative := installDesktopUnit(t, root, "OpenVibely.app", currentExe)
+	artifact, filetype, filename := packageDesktopArtifact(t, replacementExe)
+	publicKeyFile, privateKey := writeE2ETrustRoot(t, root)
+	updateServer := serveSignedRelease(t, artifact, filetype, filename, "app_bundle", expectedVersion, privateKey)
+	defer updateServer.Close()
+	updateKeys, err := DecodePublicKeys("", "", publicKeyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := NewClient(ClientConfig{
+		ServiceURL: updateServer.URL,
+		Channel:    "stable",
+		StatePath:  filepath.Join(root, "real-desktop-update-state.json"),
+		PublicKeys: updateKeys,
+	})
+	current := CurrentBuild{
+		Build:        buildinfo.Build{Version: "0.5.0", OS: runtime.GOOS, Arch: runtime.GOARCH},
+		Distribution: buildinfo.DistributionDesktop,
+	}
+	release, checked, err := client.CheckIfDue(context.Background(), current)
+	if err != nil {
+		t.Fatalf("real desktop update check: %v", err)
+	}
+	if !checked || release == nil {
+		t.Fatal("real desktop update check did not return a release")
+	}
+	dataRoot := filepath.Join(root, "real-desktop-data")
+	if err := os.MkdirAll(dataRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installer := &WailsInstaller{
+		Updater:            wailsupdater.New(noopUpdaterHost{}),
+		Provider:           &WailsProvider{Client: client, Current: current},
+		AppPath:            installPath,
+		ProtectedDataPaths: []string{dataRoot},
+	}
+	stagedValue, err := installer.Stage(context.Background(), *release)
+	if err != nil {
+		t.Fatalf("real desktop stage: %v", err)
+	}
+	staged, ok := stagedValue.(LocalStagedUpdate)
+	if !ok {
+		t.Fatalf("real desktop staged value = %T", stagedValue)
+	}
+	if err := retainDesktopInstallUnit(staged, []string{dataRoot}); err != nil {
+		t.Fatalf("retain real desktop install unit: %v", err)
+	}
+	if err := writeBinaryHelperOutcome(staged, binaryOutcomeAuthorized); err != nil {
+		t.Fatalf("write real desktop helper authorization: %v", err)
+	}
+
+	port := freeTCPPort(t)
+	t.Cleanup(func() { killPort(t, port) })
+	configFile := writeRealDesktopConfig(t, root, dataRoot, updateServer.URL, publicKeyFile)
+	helperPath := packagedUpdateHelperPath(staged.InstallPath)
+	if runPackagedUpdateHelperInPlace(runtime.GOOS, staged.InstallPath) {
+		helperPath = installedExecutable
+	} else if err := copyFile(installedExecutable, helperPath, 0o755); err != nil {
+		t.Fatalf("publish real desktop helper: %v", err)
+	}
+	parentPID := exitedCommandPID(t)
+	helperArgs := []string{
+		"desktop-update-helper",
+		"--parent-pid", strconv.Itoa(parentPID),
+		"--current", staged.InstallPath,
+		"--staged", staged.ArtifactPath,
+		"--backup", staged.BackupPath,
+		"--health-url", "http://127.0.0.1:" + port + "/api/system/health",
+		"--expected-version", staged.Version,
+		"--previous-version", staged.PreviousVersion,
+		"--outcome-id", staged.OutcomeID,
+	}
+	metadata, err := json.Marshal(binaryRelaunchMetadata{
+		Arguments:          []string{installedExecutable},
+		WorkingDirectory:   root,
+		ExecutableRelative: executableRelative,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(helperPath, helperArgs...)
+	cmd.Stdin = bytes.NewReader(metadata)
+	cmd.Env = append(os.Environ(),
+		"HOME="+filepath.Join(root, "home"),
+		"PORT="+port,
+		"OPENVIBELY_DESKTOP_CONFIG_FILE="+configFile,
+		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=5000",
+		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
+	)
+	output, helperErr := cmd.CombinedOutput()
+	if helperErr != nil && wantOutcome != binaryOutcomeRolledBack {
+		t.Fatalf("real desktop helper failed: %v\n%s", helperErr, output)
+	}
+	outcome, err := readBinaryHelperOutcome(staged)
+	if err != nil {
+		t.Fatalf("read real desktop helper outcome: %v\nhelper err: %v\n%s", err, helperErr, output)
+	}
+	if outcome.State != wantOutcome {
+		t.Fatalf("real desktop outcome = %q, want %q\nhelper err: %v\n%s", outcome.State, wantOutcome, helperErr, output)
+	}
+	if wantOutcome == binaryOutcomeSucceeded {
+		assertGoBuildInfoVersion(t, installedExecutable, replacementVersion)
+		assertNoDesktopHalfSwap(t, staged)
+	} else {
+		assertGoBuildInfoVersion(t, installedExecutable, "0.5.0")
 	}
 }
 
@@ -441,6 +576,65 @@ func buildGoCommand(t *testing.T, pkg, output string, values map[string]string) 
 	outputBytes, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("go %s failed: %v\n%s", strings.Join(args, " "), err, outputBytes)
+	}
+}
+
+func buildDesktopCommand(t *testing.T, output, version string) {
+	t.Helper()
+	buildGoCommand(t, "./cmd/desktop", output, map[string]string{
+		"github.com/openvibely/openvibely/internal/buildinfo.Version":  version,
+		"github.com/openvibely/openvibely/internal/buildinfo.Commit":   "e2e-desktop-" + version,
+		"github.com/openvibely/openvibely/internal/buildinfo.Artifact": "desktop",
+	})
+}
+
+func writeRealDesktopConfig(t *testing.T, root, dataRoot, updateURL, publicKeyFile string) string {
+	t.Helper()
+	configPath := filepath.Join(root, "desktop-config.env")
+	lines := []string{
+		"OPENVIBELY_APP_DATA_DIR=" + dataRoot,
+		"DATABASE_PATH=" + filepath.Join(dataRoot, "openvibely.db"),
+		"PROJECT_REPO_ROOT=" + filepath.Join(dataRoot, "repos"),
+		"OPENVIBELY_PLUGIN_ROOT=" + filepath.Join(dataRoot, "plugins"),
+		"OPENVIBELY_UPDATE_SERVICE_URL=" + updateURL,
+		"OPENVIBELY_UPDATE_PUBLIC_KEY_FILE=" + publicKeyFile,
+		"DISABLE_UPDATE_NOTIFICATIONS=false",
+		"OPENVIBELY_DISABLE_INSTALL_ID=1",
+		"AUTH_ENABLED=false",
+		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=5000",
+		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
+	}
+	if err := os.WriteFile(configPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write real desktop config: %v", err)
+	}
+	return configPath
+}
+
+func exitedCommandPID(t *testing.T) int {
+	t.Helper()
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", "exit", "0")
+	} else {
+		cmd = exec.Command("sh", "-c", "exit 0")
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start exited command: %v", err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait exited command: %v", err)
+	}
+	return pid
+}
+
+func assertNoDesktopHalfSwap(t *testing.T, staged LocalStagedUpdate) {
+	t.Helper()
+	if _, err := os.Stat(staged.InstallPath); err != nil {
+		t.Fatalf("desktop install path missing after update: %v", err)
+	}
+	if _, err := os.Stat(staged.ArtifactPath); !os.IsNotExist(err) {
+		t.Fatalf("desktop update left staged replacement %s: %v", staged.ArtifactPath, err)
 	}
 }
 

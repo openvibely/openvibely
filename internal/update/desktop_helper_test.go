@@ -223,7 +223,8 @@ func TestDesktopSuccessorCommandUsesLaunchServicesForMacAppBundles(t *testing.T)
 	}
 	got := string(data)
 	for _, want := range []string{
-		"args:[-n][" + filepath.Join(root, "OpenVibely.app") + "][--env][PORT=54420][--args][--flag][value]",
+		"args:[-n][" + filepath.Join(root, "OpenVibely.app") + "][--env][PORT=54420]",
+		"[--args][--flag][value]",
 		"PORT=",
 	} {
 		if !strings.Contains(got, want) {

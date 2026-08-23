@@ -205,6 +205,26 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libgtk-4-dev \
+            libwebkitgtk-6.0-dev \
+            libglib2.0-dev \
+            libsoup-3.0-dev \
+            xvfb
+
+      - name: Start Linux virtual display
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          Xvfb :99 -screen 0 1280x1024x24 >/tmp/openvibely-xvfb.log 2>&1 &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+
       - name: Run native packaged-update tests
         shell: bash
         run: go test ./internal/update -count=1 -timeout 120s -coverpkg=./internal/update -coverprofile=coverage.update-native.out
@@ -223,9 +243,10 @@ jobs:
         env:
           OPENVIBELY_UPDATE_E2E: "1"
           OPENVIBELY_UPDATE_E2E_DISTRIBUTION: desktop
+          OPENVIBELY_UPDATE_E2E_REAL_DESKTOP: "1"
           OPENVIBELY_UPDATE_E2E_EXPECTED_OS: ${{ runner.os }}
           OPENVIBELY_UPDATE_E2E_EXPECTED_ARCH: ${{ matrix.arch }}
-        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 180s -coverpkg=./internal/update -coverprofile=coverage.update-desktop.out
+        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 360s -coverpkg=./internal/update -coverprofile=coverage.update-desktop.out
 
       - name: Upload packaged-update coverage reports to Codecov
         uses: codecov/codecov-action@v5

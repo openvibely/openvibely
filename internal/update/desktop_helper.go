@@ -56,6 +56,9 @@ func desktopSuccessorCommand(cfg DesktopHelperConfig) func() (func(context.Conte
 		}
 		if runtime.GOOS == "darwin" && filepath.Ext(cfg.Current) == ".app" {
 			openArgs := []string{"-n", cfg.Current, "--env", portEnv}
+			for _, env := range inheritedDarwinDesktopRelaunchEnvironment() {
+				openArgs = append(openArgs, "--env", env)
+			}
 			if len(arguments) > 1 {
 				openArgs = append(openArgs, "--args")
 				openArgs = append(openArgs, arguments[1:]...)
@@ -79,6 +82,20 @@ func desktopSuccessorCommand(cfg DesktopHelperConfig) func() (func(context.Conte
 		}
 		return func(context.Context) error { return stopStartedProcess(cmd) }, nil
 	}
+}
+
+func inheritedDarwinDesktopRelaunchEnvironment() []string {
+	var inherited []string
+	for _, env := range os.Environ() {
+		key, _, ok := strings.Cut(env, "=")
+		if !ok {
+			continue
+		}
+		if key == "HOME" || strings.HasPrefix(key, "OPENVIBELY_") || key == "DATABASE_PATH" || key == "PROJECT_REPO_ROOT" || key == "DISABLE_UPDATE_NOTIFICATIONS" || key == "ENVIRONMENT" || key == "AUTH_ENABLED" {
+			inherited = append(inherited, env)
+		}
+	}
+	return inherited
 }
 
 func stopDarwinAppBundleProcess(executable string) error {
