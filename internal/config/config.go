@@ -322,7 +322,7 @@ func parseStrictBool(value string) (bool, bool) {
 }
 
 func packagedUpdateNotificationsDisabledByDefault(artifact string) bool {
-	return artifact == buildinfo.ArtifactBinary || artifact == buildinfo.ArtifactDesktop
+	return false
 }
 
 func resolveBoolDefault(value string, fallback bool) bool {

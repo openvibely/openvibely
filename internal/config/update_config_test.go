@@ -181,7 +181,7 @@ func TestValidateUpdateConfigurationAllowsPackagedBinaryWithoutServiceManager(t 
 	}
 }
 
-func TestPackagedUpdateNotificationsDefaultOffWhileChecksRemainEnabled(t *testing.T) {
+func TestPackagedUpdateNotificationsDefaultOnUnlessExplicitlyDisabled(t *testing.T) {
 	originalArtifact := buildinfo.Artifact
 	t.Cleanup(func() { buildinfo.Artifact = originalArtifact })
 
@@ -196,8 +196,8 @@ func TestPackagedUpdateNotificationsDefaultOffWhileChecksRemainEnabled(t *testin
 		wantNotificationsOff bool
 	}{
 		{name: "source metrics unchanged", mode: ModeServer, artifact: buildinfo.ArtifactSource, wantNotificationsOff: false},
-		{name: "standalone binary offers default off", mode: ModeServer, artifact: buildinfo.ArtifactBinary, wantNotificationsOff: true},
-		{name: "desktop offers default off", mode: ModeDesktop, artifact: buildinfo.ArtifactDesktop, wantNotificationsOff: true},
+		{name: "standalone binary offers default on", mode: ModeServer, artifact: buildinfo.ArtifactBinary, wantNotificationsOff: false},
+		{name: "desktop offers default on", mode: ModeDesktop, artifact: buildinfo.ArtifactDesktop, wantNotificationsOff: false},
 		{name: "container updates unchanged", mode: ModeServer, artifact: buildinfo.ArtifactContainer, wantNotificationsOff: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -210,9 +210,9 @@ func TestPackagedUpdateNotificationsDefaultOffWhileChecksRemainEnabled(t *testin
 	}
 
 	buildinfo.Artifact = buildinfo.ArtifactBinary
-	t.Setenv("DISABLE_UPDATE_NOTIFICATIONS", "false")
-	if cfg := LoadWithMode(ModeServer); cfg.DisableUpdateNotifications {
-		t.Fatal("explicit DISABLE_UPDATE_NOTIFICATIONS=false did not enable packaged update offers")
+	t.Setenv("DISABLE_UPDATE_NOTIFICATIONS", "true")
+	if cfg := LoadWithMode(ModeServer); !cfg.DisableUpdateNotifications {
+		t.Fatal("explicit DISABLE_UPDATE_NOTIFICATIONS=true did not disable packaged update offers")
 	}
 }
 
