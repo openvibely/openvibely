@@ -16,10 +16,13 @@ func TestAlertsContent_SystemUpdateShowsExactDockerDigestAndLiveProgress(t *test
 		t.Fatal(err)
 	}
 	html := buf.String()
-	for _, required := range []string{"system-update-digest", "view.imageRef", "setInterval(refreshSystemUpdateCard, 1000)", "window.openVibelyNormalizeSystemUpdateSnapshot(data)", "view.hidden", "view.showCancel", "window.openVibelyHandleSystemUpdateSnapshot(data)", "window.openVibelyHandleSystemUpdateSnapshot(null)"} {
+	for _, required := range []string{"system-update-digest", "view.imageRef", "window.openVibelyRenderSystemUpdateCard = renderSystemUpdateCard", "window.refreshGlobalSystemUpdateIndicators()", "window.openVibelyNormalizeSystemUpdateSnapshot(data)", "view.hidden", "view.showCancel", "window.openVibelyHandleSystemUpdateSnapshot(data)", "window.openVibelyHandleSystemUpdateSnapshot(null)"} {
 		if !strings.Contains(html, required) {
 			t.Fatalf("system update UI missing %q", required)
 		}
+	}
+	if strings.Contains(html, "setInterval(refreshSystemUpdateCard, 1000)") {
+		t.Fatal("Alerts page should use the shared system update poll instead of polling every second")
 	}
 	for _, duplicatedRule := range []string{"data.current_version === available", "localPackagedReady", "data.release.apply_supported", "data.distribution === 'hosted' ||"} {
 		if strings.Contains(html, duplicatedRule) {

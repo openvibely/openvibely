@@ -113,36 +113,45 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 	</div>
 	<!-- Task Detail Dialog Container -->
 	<script>
+		function renderSystemUpdateCard(data) {
+				var card = document.getElementById('system-update-card');
+				if (!card || !window.openVibelyNormalizeSystemUpdateSnapshot) return;
+				if (!data) {
+					card.classList.add('hidden');
+					return;
+				}
+				var view = window.openVibelyNormalizeSystemUpdateSnapshot(data);
+				if (view.hidden) { card.classList.add('hidden'); return; }
+				card.classList.remove('hidden');
+				document.getElementById('system-update-summary').textContent = 'Current ' + view.currentVersion + (view.available ? ' · Available ' + view.available : ' · No update available') + ' · ' + view.distribution + ' · ' + view.channel;
+				document.getElementById('system-update-state').textContent = view.state;
+				document.getElementById('system-update-owner').textContent = view.ownerText;
+				document.getElementById('system-update-work').textContent = view.workText;
+				var digest = document.getElementById('system-update-digest');
+				digest.textContent = view.imageRef ? 'Verified image: ' + view.imageRef : ''; digest.classList.toggle('hidden', !view.imageRef);
+				var notes = document.getElementById('system-update-notes');
+				if (view.notesURL) { notes.href = view.notesURL; notes.classList.remove('hidden'); } else { notes.classList.add('hidden'); }
+				var error = document.getElementById('system-update-error'); error.textContent = view.errorText; error.classList.toggle('hidden', !view.errorText);
+				var accept = document.getElementById('system-update-accept');
+				accept.textContent = view.acceptText;
+				accept.classList.toggle('hidden', !view.actionable);
+				document.getElementById('system-update-acceptance').classList.toggle('hidden', !view.showAcceptance);
+				document.getElementById('system-update-cancel').classList.toggle('hidden', !view.showCancel);
+			}
 		async function refreshSystemUpdateCard() {
 				var card = document.getElementById('system-update-card');
 				if (!card || !window.openVibelyNormalizeSystemUpdateSnapshot) return;
 				try {
 					var response = await fetch('/api/system/update', {headers: {'Accept': 'application/json'}});
 					if (response.status === 204) {
-						card.classList.add('hidden');
 						if (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(null);
+						else renderSystemUpdateCard(null);
 						return;
 					}
 					if (!response.ok) return;
 					var data = await response.json();
 					if (window.openVibelyHandleSystemUpdateSnapshot) window.openVibelyHandleSystemUpdateSnapshot(data);
-					var view = window.openVibelyNormalizeSystemUpdateSnapshot(data);
-					if (view.hidden) { card.classList.add('hidden'); return; }
-					card.classList.remove('hidden');
-					document.getElementById('system-update-summary').textContent = 'Current ' + view.currentVersion + (view.available ? ' · Available ' + view.available : ' · No update available') + ' · ' + view.distribution + ' · ' + view.channel;
-					document.getElementById('system-update-state').textContent = view.state;
-					document.getElementById('system-update-owner').textContent = view.ownerText;
-					document.getElementById('system-update-work').textContent = view.workText;
-					var digest = document.getElementById('system-update-digest');
-					digest.textContent = view.imageRef ? 'Verified image: ' + view.imageRef : ''; digest.classList.toggle('hidden', !view.imageRef);
-					var notes = document.getElementById('system-update-notes');
-					if (view.notesURL) { notes.href = view.notesURL; notes.classList.remove('hidden'); } else { notes.classList.add('hidden'); }
-					var error = document.getElementById('system-update-error'); error.textContent = view.errorText; error.classList.toggle('hidden', !view.errorText);
-					var accept = document.getElementById('system-update-accept');
-					accept.textContent = view.acceptText;
-					accept.classList.toggle('hidden', !view.actionable);
-					document.getElementById('system-update-acceptance').classList.toggle('hidden', !view.showAcceptance);
-					document.getElementById('system-update-cancel').classList.toggle('hidden', !view.showCancel);
+					else renderSystemUpdateCard(data);
 				} catch (_) {}
 			}
 			async function systemUpdateAction(action) {
@@ -150,10 +159,9 @@ templ alertsContent(alerts []models.AlertSummary, currentProjectID string, unrea
 				if (action === 'cancel' && response.ok && window.openVibelyClearSystemUpdatePendingSuccess) window.openVibelyClearSystemUpdatePendingSuccess();
 				await refreshSystemUpdateCard();
 			}
-			refreshSystemUpdateCard();
-			if (window.openVibelySystemUpdatePoll) clearInterval(window.openVibelySystemUpdatePoll);
-			window.openVibelySystemUpdatePoll = setInterval(refreshSystemUpdateCard, 1000);
-			window.addEventListener('pagehide', function() { clearInterval(window.openVibelySystemUpdatePoll); }, {once: true});
+			window.openVibelyRenderSystemUpdateCard = renderSystemUpdateCard;
+			if (typeof window.refreshGlobalSystemUpdateIndicators === 'function') window.refreshGlobalSystemUpdateIndicators();
+			else refreshSystemUpdateCard();
 
 			function loadAlertDetail(details) {
 				if (!details || !details.open) return;

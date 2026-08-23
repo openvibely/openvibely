@@ -3816,9 +3816,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						setSystemUpdateIndicators(false);
 						dismissSystemUpdateNotice('');
 						showSystemUpdateSucceededToast(null, consumeSystemUpdatePendingSuccess());
+						if (typeof window.openVibelyRenderSystemUpdateCard === 'function') window.openVibelyRenderSystemUpdateCard(null);
 						return;
 					}
 					setSystemUpdateIndicators(view.actionable);
+					if (typeof window.openVibelyRenderSystemUpdateCard === 'function') window.openVibelyRenderSystemUpdateCard(data);
 					if (view.actionable) showSystemUpdateNotice(data);
 					else {
 						dismissSystemUpdateNotice('');
