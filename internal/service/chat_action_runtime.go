@@ -149,6 +149,8 @@ type GitHubProjectCloneProvider interface {
 	CloneProjectRepo(ctx context.Context, projectID, repoURL string) (string, string, error)
 }
 
+const runtimeProjectMaxWorkers = 10
+
 type CreateGitHubProjectRuntimeInput struct {
 	Name                 string `json:"name"`
 	RepoURL              string `json:"repo_url"`
@@ -1844,7 +1846,7 @@ func applyProjectWorkerLimitUpdate(project *models.Project, req UpdateProjectSet
 		return false, false, ""
 	}
 	maxWorkers := *req.MaxWorkers
-	if maxWorkers < 0 || maxWorkers > 10 {
+	if maxWorkers < 0 || maxWorkers > runtimeProjectMaxWorkers {
 		return false, false, "max_workers must be 0 or between 1 and 10"
 	}
 	var next *int
@@ -1929,8 +1931,13 @@ func ExecuteCreateGitHubProjectRuntime(ctx context.Context, input json.RawMessag
 	if !isSupportedGitHubProjectURLInput(repoURL) {
 		return fail("repo_url must be a GitHub repository URL; local filesystem paths and bare local paths are not supported")
 	}
-	if req.MaxWorkers != nil && *req.MaxWorkers <= 0 {
-		return fail("max_workers must be a positive integer")
+	if req.MaxWorkers != nil {
+		if *req.MaxWorkers <= 0 {
+			return fail("max_workers must be a positive integer")
+		}
+		if *req.MaxWorkers > runtimeProjectMaxWorkers {
+			return fail(fmt.Sprintf("max_workers must be between 1 and %d", runtimeProjectMaxWorkers))
+		}
 	}
 
 	var defaultAgentConfigID *string
