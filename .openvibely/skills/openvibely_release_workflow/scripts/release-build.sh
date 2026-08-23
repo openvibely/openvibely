@@ -333,7 +333,14 @@ notarize_macos_binary_archive() {
     else
         env OPENVIBELY_MACOS_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" "$SCRIPT_DIR/sign-macos.sh" "$binary"
     fi
-    run ditto -c -k --keepParent "$binary" "$archive"
+    if [[ "${DRY_RUN:-0}" == "1" ]]; then
+        echo -e "${YELLOW}[DRY-RUN]${NC} zip -X $archive $(basename "$binary")"
+    else
+        (
+            cd "$(dirname "$binary")"
+            zip -X "$archive" "$(basename "$binary")" >/dev/null
+        )
+    fi
     queue_macos_notarization "$state_key" "$archive" "$(basename "$archive")" "" ""
     # Keep notarize-macos-archive.sh as the standalone serial helper; release-build
     # queues macOS submissions so first-time notarization delays do not block later uploads.

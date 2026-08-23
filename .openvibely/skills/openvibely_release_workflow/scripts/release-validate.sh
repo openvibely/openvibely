@@ -318,11 +318,11 @@ for required_call in 'sign-macos.sh' 'notarize-macos-archive.sh' 'xcrun stapler 
         fail "release build lacks signing step: ${required_call}"
     fi
 done
-for required_layout in 'zip '\''${DIST_DIR}/${artifact}'\'' openvibely-desktop.exe' 'tar -czf "${DIST_DIR}/${artifact}" -C "$linux_pkg" openvibely-desktop'; do
+for required_layout in 'zip -X "$archive" "$(basename "$binary")"' 'zip '\''${DIST_DIR}/${artifact}'\'' openvibely-desktop.exe' 'tar -czf "${DIST_DIR}/${artifact}" -C "$linux_pkg" openvibely-desktop'; do
     if grep -Fq "$required_layout" "$BUILD_SCRIPT"; then
-        pass "desktop package preserves flat executable artifact: ${required_layout}"
+        pass "release package preserves flat executable artifact: ${required_layout}"
     else
-        fail "desktop package does not preserve flat executable artifact: ${required_layout}"
+        fail "release package does not preserve flat executable artifact: ${required_layout}"
     fi
 done
 PUBLISH_SCRIPT="${SCRIPT_DIR}/release-publish.sh"
