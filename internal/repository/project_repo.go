@@ -71,7 +71,7 @@ func (r *ProjectRepo) GetByID(ctx context.Context, id string) (*models.Project, 
 	var p models.Project
 	err := r.db.QueryRowContext(ctx,
 		`SELECT id, name, description, repo_path, repo_url, is_default, default_agent_config_id, max_workers, created_at, updated_at
-		 FROM projects WHERE id = ?`, id).
+			 FROM projects WHERE id = ?`, id).
 		Scan(&p.ID, &p.Name, &p.Description, &p.RepoPath, &p.RepoURL, &p.IsDefault, &p.DefaultAgentConfigID, &p.MaxWorkers, &p.CreatedAt, &p.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -80,6 +80,22 @@ func (r *ProjectRepo) GetByID(ctx context.Context, id string) (*models.Project, 
 		return nil, fmt.Errorf("getting project: %w", err)
 	}
 	return &p, nil
+}
+
+// GetDefaultAgentConfigID returns only the project default model ID used by hot
+// task-thread render paths. Full project detail reads should continue using GetByID.
+func (r *ProjectRepo) GetDefaultAgentConfigID(ctx context.Context, id string) (*string, error) {
+	var defaultAgentConfigID *string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT default_agent_config_id FROM projects WHERE id = ?`, id).
+		Scan(&defaultAgentConfigID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting project default model id: %w", err)
+	}
+	return defaultAgentConfigID, nil
 }
 
 func (r *ProjectRepo) Create(ctx context.Context, p *models.Project) error {

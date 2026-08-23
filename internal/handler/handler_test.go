@@ -1133,6 +1133,145 @@ func TestHandler_GetTask_StatusIndicator(t *testing.T) {
 	}
 }
 
+func TestHandler_GetTaskThreadPollUsesCompactTaskMetadata(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Poll Projection Project")
+	task := createTask(t, h, project.ID, "Thread Poll Projection Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = &agent.ID
+		tk.Prompt = strings.Repeat("large-current-task-prompt", 8192)
+	})
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("large-chain-config", 8192), strings.Repeat("large-swarm-config", 8192), task.ID); err != nil {
+		t.Fatalf("seed large task configs: %v", err)
+	}
+	exec := createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "stable execution prompt"
+		ex.Output = "working"
+	})
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	rec := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=5&preserved_exec_ids="+exec.ID)
+	counter.SetEnabled(false)
+	assertCode(t, rec, http.StatusOK)
+	assertContains(t, rec, `data-task-status="running"`)
+	assertContains(t, rec, `data-task-category="active"`)
+	assertContains(t, rec, `data-task-agent="`+agent.ID+`"`)
+	assertNotContains(t, rec, "large-current-task-prompt")
+	assertNotContains(t, rec, "large-chain-config")
+	assertNotContains(t, rec, "large-swarm-config")
+
+	var compactTaskQuerySeen bool
+	for _, stmt := range counter.Statements() {
+		if !strings.Contains(stmt, "FROM tasks") || !strings.Contains(stmt, "WHERE id = ?") {
+			continue
+		}
+		if strings.Contains(stmt, "SELECT id, project_id, category, status, agent_id, agent_definition_id") {
+			compactTaskQuerySeen = true
+		}
+		for _, forbidden := range []string{"prompt", "chain_config", "swarm_config"} {
+			if strings.Contains(stmt, forbidden) {
+				t.Fatalf("poll task metadata query selected %s: %s", forbidden, stmt)
+			}
+		}
+	}
+	if !compactTaskQuerySeen {
+		t.Fatalf("poll did not execute compact task metadata query; statements: %#v", counter.Statements())
+	}
+}
+
+func TestHandler_GetTaskThreadPollIgnoresTaskPromptAndConfigChanges(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Thread Poll Stable Project")
+	task := createTask(t, h, project.ID, "Thread Poll Stable Task", func(tk *models.Task) {
+		tk.Status = models.StatusRunning
+		tk.Category = models.CategoryActive
+		tk.AgentID = &agent.ID
+		tk.Prompt = strings.Repeat("first prompt payload", 4096)
+	})
+	createExec(t, h, task.ID, agent.ID, func(ex *models.Execution) {
+		ex.Status = models.ExecRunning
+		ex.PromptSent = "stable execution prompt"
+		ex.Output = "working"
+	})
+
+	first := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=5")
+	assertCode(t, first, http.StatusOK)
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET prompt = ?, chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("second prompt payload", 4096), strings.Repeat("changed chain payload", 4096), strings.Repeat("changed swarm payload", 4096), task.ID); err != nil {
+		t.Fatalf("update ignored task payloads: %v", err)
+	}
+	second := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=5")
+	assertCode(t, second, http.StatusOK)
+	if first.Body.String() != second.Body.String() {
+		t.Fatalf("poll response changed after prompt/config-only update")
+	}
+}
+
+func TestHandler_GetTaskThreadPollPreservesComposerModelSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		configureTask    func(*models.Task, *models.LLMConfig, *models.LLMConfig, *models.LLMConfig)
+		configureProject bool
+		want             func(*models.LLMConfig, *models.LLMConfig, *models.LLMConfig) string
+	}{
+		{
+			name: "explicit_task_model",
+			configureTask: func(tk *models.Task, explicit, _, _ *models.LLMConfig) {
+				tk.AgentID = &explicit.ID
+			},
+			configureProject: true,
+			want:             func(explicit, _, _ *models.LLMConfig) string { return explicit.ID },
+		},
+		{
+			name:             "project_default_model",
+			configureProject: true,
+			want:             func(_, projectDefault, _ *models.LLMConfig) string { return projectDefault.ID },
+		},
+		{
+			name: "global_default_model",
+			want: func(_, _, globalDefault *models.LLMConfig) string { return globalDefault.ID },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, e, llmConfigRepo := setupTestHandler(t)
+			ctx := context.Background()
+			globalDefault := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Global Default"; a.IsDefault = true })
+			projectDefault := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Project Default"; a.IsDefault = false })
+			explicit := createAgent(t, llmConfigRepo, func(a *models.LLMConfig) { a.Name = "Explicit Model"; a.IsDefault = false })
+			project := createProject(t, h, "Thread Poll Model Selection "+tc.name)
+			if tc.configureProject {
+				project.DefaultAgentConfigID = &projectDefault.ID
+				if err := h.projectSvc.Update(ctx, project); err != nil {
+					t.Fatalf("set project default model: %v", err)
+				}
+			}
+			task := createTask(t, h, project.ID, "Thread Poll Model Selection Task "+tc.name, func(tk *models.Task) {
+				tk.Status = models.StatusRunning
+				tk.Category = models.CategoryActive
+				if tc.configureTask != nil {
+					tc.configureTask(tk, explicit, projectDefault, globalDefault)
+				}
+			})
+			createExec(t, h, task.ID, globalDefault.ID, func(ex *models.Execution) {
+				ex.Status = models.ExecRunning
+				ex.PromptSent = "hello"
+			})
+
+			rec := htmxGet(e, "/tasks/"+task.ID+"/thread?poll=1&limit=5")
+			assertCode(t, rec, http.StatusOK)
+			assertContains(t, rec, `data-task-agent="`+tc.want(explicit, projectDefault, globalDefault)+`"`)
+		})
+	}
+}
+
 func TestHandler_CreateModel(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 

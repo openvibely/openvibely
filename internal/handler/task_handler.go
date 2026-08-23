@@ -2187,8 +2187,20 @@ func (h *Handler) TaskThreadSteer(c echo.Context) error {
 // GetTaskThread returns the task thread view (for polling updates)
 func (h *Handler) GetTaskThread(c echo.Context) error {
 	taskID := c.Param("taskId")
+	ctx := c.Request().Context()
+	limit := parseThreadWindowLimit(c.QueryParam("limit"), taskThreadWindowLimitDefault, taskThreadWindowLimitMax)
+	beforeExecID := strings.TrimSpace(c.QueryParam("before"))
+	isPoll := c.QueryParam("poll") == "1"
 
-	task, err := h.taskSvc.GetByID(c.Request().Context(), taskID)
+	var (
+		task *models.Task
+		err  error
+	)
+	if isPoll && beforeExecID == "" {
+		task, err = h.taskSvc.GetThreadRenderMetadata(ctx, taskID)
+	} else {
+		task, err = h.taskSvc.GetByID(ctx, taskID)
+	}
 	if err != nil {
 		return err
 	}
@@ -2196,21 +2208,19 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
 
-	limit := parseThreadWindowLimit(c.QueryParam("limit"), taskThreadWindowLimitDefault, taskThreadWindowLimitMax)
-	beforeExecID := strings.TrimSpace(c.QueryParam("before"))
-	executions, hasEarlier, err := h.loadTaskThreadExecutionWindow(c.Request().Context(), taskID, beforeExecID, limit)
+	executions, hasEarlier, err := h.loadTaskThreadExecutionWindow(ctx, taskID, beforeExecID, limit)
 	if err != nil {
 		applog.Infof("[handler] GetTaskThread error loading executions: %v", err)
 		executions = []models.Execution{}
 		hasEarlier = false
 	}
-	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
 
-	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(c.Request().Context(), executions, "GetTaskThread")
+	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(ctx, executions, "GetTaskThread")
 
 	pendingInputs := []models.ThreadInput{}
 	if h.threadInputRepo != nil {
-		if inputs, inputErr := h.threadInputRepo.ListPendingForTask(c.Request().Context(), taskID); inputErr == nil {
+		if inputs, inputErr := h.threadInputRepo.ListPendingForTask(ctx, taskID); inputErr == nil {
 			pendingInputs = inputs
 		} else {
 			applog.Infof("[handler] GetTaskThread error loading pending inputs: %v", inputErr)
@@ -2219,7 +2229,7 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 
 	var agentDef *models.Agent
 	if task.AgentDefinitionID != nil && h.agentRepo != nil {
-		if ad, adErr := h.agentRepo.GetByID(c.Request().Context(), *task.AgentDefinitionID); adErr == nil && ad != nil {
+		if ad, adErr := h.agentRepo.GetByID(ctx, *task.AgentDefinitionID); adErr == nil && ad != nil {
 			agentDef = ad
 		}
 	}
@@ -2228,8 +2238,9 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 		return render(c, http.StatusOK, components.TaskThreadEarlierMessages(task, executions, chatAttachmentsByExec, hasEarlier, limit))
 	}
 
-	renderTask := h.taskThreadRenderTaskWithEffectiveAgent(c.Request().Context(), task)
-	if c.QueryParam("poll") == "1" {
+	renderTask := h.taskThreadRenderTaskWithEffectiveAgent(ctx, task, agents)
+	if isPoll {
+		renderTask = taskThreadPollRenderTaskWithExecutionPrompt(renderTask, executions, hasEarlier)
 		preservedExecIDs := make(map[string]bool)
 		for index, id := range strings.Split(c.QueryParam("preserved_exec_ids"), ",") {
 			if index >= taskThreadWindowLimitMax {
@@ -2245,23 +2256,26 @@ func (h *Handler) GetTaskThread(c echo.Context) error {
 	return render(c, http.StatusOK, components.TaskThreadView(renderTask, executions, agents, agentDef, chatAttachmentsByExec, pendingInputs, hasEarlier, limit))
 }
 
-func (h *Handler) taskThreadRenderTaskWithEffectiveAgent(ctx context.Context, task *models.Task) *models.Task {
-	if task == nil || task.AgentID != nil || h.llmConfigRepo == nil {
+func (h *Handler) taskThreadRenderTaskWithEffectiveAgent(ctx context.Context, task *models.Task, agents []models.LLMConfig) *models.Task {
+	if task == nil || task.AgentID != nil {
 		return task
 	}
 	resolvedID := ""
 	if h.projectRepo != nil && strings.TrimSpace(task.ProjectID) != "" {
-		project, err := h.projectRepo.GetByID(ctx, task.ProjectID)
-		if err == nil && project != nil && project.DefaultAgentConfigID != nil && strings.TrimSpace(*project.DefaultAgentConfigID) != "" {
-			candidateID := strings.TrimSpace(*project.DefaultAgentConfigID)
-			if agent, agentErr := h.llmConfigRepo.GetByID(ctx, candidateID); agentErr == nil && agent != nil {
+		defaultAgentConfigID, err := h.projectRepo.GetDefaultAgentConfigID(ctx, task.ProjectID)
+		if err == nil && defaultAgentConfigID != nil {
+			candidateID := strings.TrimSpace(*defaultAgentConfigID)
+			if taskThreadAgentIDInBadgeOptions(agents, candidateID) {
 				resolvedID = candidateID
 			}
 		}
 	}
 	if resolvedID == "" {
-		if agent, err := h.llmConfigRepo.GetDefault(ctx); err == nil && agent != nil {
-			resolvedID = agent.ID
+		for _, agent := range agents {
+			if agent.IsDefault && strings.TrimSpace(agent.ID) != "" {
+				resolvedID = agent.ID
+				break
+			}
 		}
 	}
 	if resolvedID == "" {
@@ -2270,6 +2284,33 @@ func (h *Handler) taskThreadRenderTaskWithEffectiveAgent(ctx context.Context, ta
 	renderTask := *task
 	renderTask.AgentID = &resolvedID
 	return &renderTask
+}
+
+func taskThreadAgentIDInBadgeOptions(agents []models.LLMConfig, id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	for _, agent := range agents {
+		if agent.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func taskThreadPollRenderTaskWithExecutionPrompt(task *models.Task, executions []models.Execution, hasEarlier bool) *models.Task {
+	if task == nil || task.Prompt != "" || hasEarlier {
+		return task
+	}
+	for _, exec := range executions {
+		if !exec.IsFollowup && exec.PromptSent != "" {
+			renderTask := *task
+			renderTask.Prompt = exec.PromptSent
+			return &renderTask
+		}
+	}
+	return task
 }
 
 // TaskThreadPendingInputs returns the current pending-inputs composer fragment for a task.

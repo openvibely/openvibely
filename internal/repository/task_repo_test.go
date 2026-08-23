@@ -21,6 +21,127 @@ func getDefaultProjectID(t *testing.T, db interface {
 	return "default"
 }
 
+func TestTaskRepo_GetThreadRenderMetadataUsesCompactProjection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Large Thread Metadata Task",
+		Category:  models.CategoryActive,
+		Priority:  3,
+		Prompt:    strings.Repeat("prompt-payload", 4096),
+		Status:    models.StatusRunning,
+	}
+	if err := repo.Create(ctx, task); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	largeChainConfig := strings.Repeat("chain-payload", 4096)
+	largeSwarmConfig := strings.Repeat("swarm-payload", 4096)
+	if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ?, swarm_config = ? WHERE id = ?`, largeChainConfig, largeSwarmConfig, task.ID); err != nil {
+		t.Fatalf("seed large task configs: %v", err)
+	}
+
+	got, err := repo.GetThreadRenderMetadata(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetThreadRenderMetadata: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected task metadata, got nil")
+	}
+	if got.ID != task.ID || got.ProjectID != task.ProjectID || got.Category != task.Category || got.Status != task.Status {
+		t.Fatalf("unexpected compact metadata: %+v", got)
+	}
+	if got.Title != "" || got.Priority != 0 || got.Prompt != "" || got.ChainConfig != "" || got.SwarmConfig != "" {
+		t.Fatalf("compact metadata carried omitted full-detail fields: title=%q priority=%d prompt=%d chain=%d swarm=%d",
+			got.Title, got.Priority, len(got.Prompt), len(got.ChainConfig), len(got.SwarmConfig))
+	}
+
+	full, err := repo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if len(full.Prompt) != len(task.Prompt) || full.ChainConfig != largeChainConfig || full.SwarmConfig != largeSwarmConfig {
+		t.Fatalf("full task hydration did not preserve payloads: prompt=%d chain=%d swarm=%d", len(full.Prompt), len(full.ChainConfig), len(full.SwarmConfig))
+	}
+}
+
+func TestTaskRepo_GetThreadRenderMetadataQueryPlanUsesTaskID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	rows, err := db.Query(`EXPLAIN QUERY PLAN SELECT `+taskThreadRenderMetadataColumns+` FROM tasks WHERE id = ?`, "task-id")
+	if err != nil {
+		t.Fatalf("EXPLAIN QUERY PLAN: %v", err)
+	}
+	defer rows.Close()
+	var details []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			t.Fatalf("scan query plan: %v", err)
+		}
+		details = append(details, detail)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate query plan: %v", err)
+	}
+	plan := strings.Join(details, "\n")
+	if !strings.Contains(plan, "SEARCH tasks") || !strings.Contains(plan, "id=?") {
+		t.Fatalf("thread metadata query plan = %s, want indexed tasks.id lookup", plan)
+	}
+}
+
+func BenchmarkTaskRepo_GetThreadRenderMetadataProjection(b *testing.B) {
+	for _, tc := range []struct {
+		name        string
+		run         func(context.Context, *TaskRepo, string) (*models.Task, error)
+		textBytesFn func(*models.Task) int64
+	}{
+		{
+			name: "legacy_full_task",
+			run: func(ctx context.Context, repo *TaskRepo, taskID string) (*models.Task, error) {
+				return repo.GetByID(ctx, taskID)
+			},
+			textBytesFn: func(task *models.Task) int64 {
+				return int64(len(task.Prompt) + len(task.ChainConfig) + len(task.SwarmConfig))
+			},
+		},
+		{
+			name: "compact_thread_metadata",
+			run: func(ctx context.Context, repo *TaskRepo, taskID string) (*models.Task, error) {
+				return repo.GetThreadRenderMetadata(ctx, taskID)
+			},
+			textBytesFn: func(*models.Task) int64 { return 0 },
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db := testutil.NewTestDB(b)
+			repo := NewTaskRepo(db, nil)
+			ctx := context.Background()
+			task := &models.Task{ProjectID: "default", Title: "Thread Metadata Benchmark", Category: models.CategoryActive, Priority: 2, Prompt: strings.Repeat("prompt", 128*1024), Status: models.StatusRunning}
+			if err := repo.Create(ctx, task); err != nil {
+				b.Fatalf("Create: %v", err)
+			}
+			if _, err := db.ExecContext(ctx, `UPDATE tasks SET chain_config = ?, swarm_config = ? WHERE id = ?`, strings.Repeat("chain", 128*1024), strings.Repeat("swarm", 128*1024), task.ID); err != nil {
+				b.Fatalf("seed large configs: %v", err)
+			}
+			warm, err := tc.run(ctx, repo, task.ID)
+			if err != nil {
+				b.Fatalf("warm projection: %v", err)
+			}
+			b.ReportMetric(float64(tc.textBytesFn(warm)), "task_payload_bytes_scanned/op")
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := tc.run(ctx, repo, task.ID); err != nil {
+					b.Fatalf("projection: %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestTaskRepo_CreateAndGetByID(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)

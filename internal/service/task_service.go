@@ -171,6 +171,10 @@ func (s *TaskService) GetByID(ctx context.Context, id string) (*models.Task, err
 	return s.repo.GetByID(ctx, id)
 }
 
+func (s *TaskService) GetThreadRenderMetadata(ctx context.Context, id string) (*models.Task, error) {
+	return s.repo.GetThreadRenderMetadata(ctx, id)
+}
+
 func (s *TaskService) Create(ctx context.Context, t *models.Task) error {
 	return s.CreateWithGoal(ctx, t, "")
 }

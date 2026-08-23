@@ -17,6 +17,8 @@ var ErrDuplicateTask = errors.New("task with this name already exists in this pr
 
 const taskSelectColumns = `id, project_id, title, category, priority, status, prompt, agent_id, agent_definition_id, tag, display_order, parent_task_id, chain_config, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
 
+const taskThreadRenderMetadataColumns = `id, project_id, category, status, agent_id, agent_definition_id`
+
 const worktreeCleanupTaskSelectColumns = `id, project_id, status, worktree_path, worktree_branch, merge_target_branch, merge_status`
 
 const swarmChildTaskSelectColumns = `id, project_id, title, category, priority, status, agent_id, agent_definition_id, tag, display_order, parent_task_id, swarm_role, swarm_status, swarm_config, swarm_sequence, worktree_path, worktree_branch, auto_merge, merge_target_branch, merge_status, base_branch, base_commit_sha, lineage_depth, created_via, telegram_chat_id, created_at, updated_at, completed_at`
@@ -249,7 +251,25 @@ func taskDisplayOrderDesc(a models.Task, b models.Task) bool {
 func (r *TaskRepo) GetByID(ctx context.Context, id string) (*models.Task, error) {
 	return r.getOne(ctx,
 		`SELECT `+taskSelectColumns+`
-		 FROM tasks WHERE id = ?`, id)
+			 FROM tasks WHERE id = ?`, id)
+}
+
+// GetThreadRenderMetadata returns the compact task fields needed by recurring
+// task-thread polling. The returned Task is intentionally incomplete and must
+// not be used for full detail/edit rendering or full-record persistence.
+func (r *TaskRepo) GetThreadRenderMetadata(ctx context.Context, id string) (*models.Task, error) {
+	var t models.Task
+	err := r.db.QueryRowContext(ctx,
+		`SELECT `+taskThreadRenderMetadataColumns+`
+			 FROM tasks WHERE id = ?`, id).
+		Scan(&t.ID, &t.ProjectID, &t.Category, &t.Status, &t.AgentID, &t.AgentDefinitionID)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting task thread render metadata: %w", err)
+	}
+	return &t, nil
 }
 
 // FilterNonChatTaskIDs returns the referenced task IDs that exist and are not
