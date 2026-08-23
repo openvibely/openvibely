@@ -48,6 +48,7 @@ bin/
 /server
 *.test
 .tools/
+.release-tmp/
 
 # Local environment overrides
 .env

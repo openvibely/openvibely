@@ -177,6 +177,9 @@ fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || fail "Not in a git repository.")"
 DIST_DIR="${2:-${DIST_DIR:-${REPO_ROOT}/dist/${VERSION}}}"
+if [[ "$DIST_DIR" != /* ]]; then
+    DIST_DIR="${REPO_ROOT}/${DIST_DIR#./}"
+fi
 
 log "Building OpenVibely v${VERSION}"
 log "Repo root:  $REPO_ROOT"
@@ -329,11 +332,62 @@ notarize_macos_binary_archive() {
         env OPENVIBELY_MACOS_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" "$SCRIPT_DIR/sign-macos.sh" "$binary"
     fi
     run ditto -c -k --keepParent "$binary" "$archive"
+    queue_macos_notarization "$archive" "$(basename "$archive")" "" ""
+    # Keep notarize-macos-archive.sh as the standalone serial helper; release-build
+    # queues macOS submissions so first-time notarization delays do not block later uploads.
+}
+
+MACOS_NOTARY_IDS=()
+MACOS_NOTARY_NAMES=()
+MACOS_NOTARY_APP_DIRS=()
+MACOS_NOTARY_RELEASE_ZIPS=()
+
+queue_macos_notarization() {
+    local archive="$1" name="$2" app_dir="${3:-}" release_zip="${4:-}"
+
     if [[ "${DRY_RUN:-0}" == "1" ]]; then
-        echo -e "${YELLOW}[DRY-RUN]${NC} $SCRIPT_DIR/notarize-macos-archive.sh $archive"
-    else
-        env OPENVIBELY_MACOS_NOTARY_PROFILE="$MACOS_NOTARY_PROFILE" "$SCRIPT_DIR/notarize-macos-archive.sh" "$archive"
+        echo -e "${YELLOW}[DRY-RUN]${NC} Would submit $name for notarization"
+        return
     fi
+
+    log "Submitting $name for notarization..."
+    local output submission_id
+    output="$(xcrun notarytool submit "$archive" --keychain-profile "$MACOS_NOTARY_PROFILE" 2>&1)"
+    printf '%s\n' "$output"
+    submission_id="$(awk '/^[[:space:]]*id:/ { print $2; exit }' <<< "$output")"
+    [[ -n "$submission_id" ]] || fail "Could not parse notarization submission id for $name."
+
+    MACOS_NOTARY_IDS+=("$submission_id")
+    MACOS_NOTARY_NAMES+=("$name")
+    MACOS_NOTARY_APP_DIRS+=("$app_dir")
+    MACOS_NOTARY_RELEASE_ZIPS+=("$release_zip")
+    log "Queued notarization for $name: $submission_id"
+}
+
+wait_for_macos_notarizations() {
+    local count="${#MACOS_NOTARY_IDS[@]}"
+    [[ "$count" -gt 0 ]] || return 0
+
+    log "Waiting for $count macOS notarization submission(s)..."
+    local i submission_id name app_dir release_zip
+    for ((i = 0; i < count; i++)); do
+        submission_id="${MACOS_NOTARY_IDS[$i]}"
+        name="${MACOS_NOTARY_NAMES[$i]}"
+        app_dir="${MACOS_NOTARY_APP_DIRS[$i]}"
+        release_zip="${MACOS_NOTARY_RELEASE_ZIPS[$i]}"
+
+        log "Waiting for notarization: $name ($submission_id)"
+        xcrun notarytool wait "$submission_id" --keychain-profile "$MACOS_NOTARY_PROFILE"
+
+        if [[ -n "$app_dir" ]]; then
+            run xcrun stapler staple "$app_dir"
+            run spctl --assess --type execute --verbose=2 "$app_dir"
+            [[ -n "$release_zip" ]] || fail "Missing release zip path for notarized app $name."
+            log "Packaging $(basename "$release_zip")..."
+            run ditto -c -k --keepParent "$app_dir" "$release_zip"
+            log "Created: $(basename "$release_zip")"
+        fi
+    done
 }
 
 ###############################################################################
@@ -343,7 +397,8 @@ notarize_macos_binary_archive() {
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
     TMP_BIN="${TMPDIR:-/tmp}/openvibely-release-dry-run"
 else
-    TMP_BIN="$(mktemp -d)"
+    mkdir -p "${REPO_ROOT}/.release-tmp"
+    TMP_BIN="$(mktemp -d "${REPO_ROOT}/.release-tmp/build-${VERSION}.XXXXXX")"
     trap 'rm -rf "$TMP_BIN"' EXIT
 fi
 
@@ -417,13 +472,7 @@ PLIST
     env OPENVIBELY_MACOS_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" "$SCRIPT_DIR/sign-macos.sh" "$app_dir"
     local notary_zip="${TMP_BIN}/OpenVibely_${goarch}_notary.zip"
     run ditto -c -k --keepParent "$app_dir" "$notary_zip"
-    env OPENVIBELY_MACOS_NOTARY_PROFILE="$MACOS_NOTARY_PROFILE" "$SCRIPT_DIR/notarize-macos-archive.sh" "$notary_zip"
-    run xcrun stapler staple "$app_dir"
-    run spctl --assess --type execute --verbose=2 "$app_dir"
-
-    log "Packaging $zip_name..."
-    run ditto -c -k --keepParent "$app_dir" "${DIST_DIR}/${zip_name}"
-    log "Created: $zip_name"
+    queue_macos_notarization "$notary_zip" "OpenVibely ${goarch} desktop app" "$app_dir" "${DIST_DIR}/${zip_name}"
 }
 
 if [[ "$HOST_OS" == "Darwin" ]]; then
@@ -481,7 +530,11 @@ build_linux_desktop() {
         cross_image="$(wails_cross_image_for_arch "$goarch")"
         ensure_wails_cross_image "$goarch" "$cross_image"
         log "Building Linux desktop ($goarch with Wails Docker path)..."
-        build_desktop_binary "$output" linux "$goarch" 1 "$cross_image"
+        local docker_output="$output"
+        if [[ "$docker_output" == "${REPO_ROOT}/"* ]]; then
+            docker_output="${docker_output#${REPO_ROOT}/}"
+        fi
+        build_desktop_binary "$docker_output" linux "$goarch" 1 "$cross_image"
     elif [[ "${DRY_RUN:-0}" == "1" ]]; then
         echo -e "${YELLOW}[DRY-RUN]${NC} Would require native Linux, Wails Docker support, or ${prebuilt_var}"
     else
@@ -600,6 +653,8 @@ else
     package_linux_desktop_tar amd64
     package_linux_desktop_tar arm64
 fi
+
+wait_for_macos_notarizations
 
 ###############################################################################
 # 8. SHA256SUMS
