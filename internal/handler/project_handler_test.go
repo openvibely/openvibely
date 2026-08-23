@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/testutil"
 )
 
 // ---- Home ----
@@ -478,6 +479,117 @@ func TestViewSchedule_HTMX(t *testing.T) {
 	rec := tc.HTMX().Get("/schedule?project_id=" + project.ID).Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestViewSchedule_UsesCompactModelProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	project := createProject(t, h, "Schedule Projection")
+	ctx := context.Background()
+
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+	largeBody := strings.Repeat("x", 1024*1024)
+	defaultModel := &models.LLMConfig{
+		Name:                 "Schedule Default",
+		Provider:             models.ProviderOpenAICompatible,
+		AuthMethod:           models.AuthMethodOAuth,
+		Model:                "schedule-default-model",
+		APIKey:               "secret-api-key",
+		OAuthAccessToken:     "secret-oauth-token",
+		OAuthRefreshToken:    "secret-refresh-token",
+		OAuthClientSecret:    "secret-client-secret",
+		BaseURL:              "https://example.com/v1/",
+		ExtraHeadersJSON:     `{"X-Secret":"value"}`,
+		ExtraBodyJSON:        largeBody,
+		CustomAuthConfigJSON: `{"signing_secret":"secret"}`,
+		CustomAuthStateJSON:  `{"access":"secret"}`,
+		MixtureConfigJSON:    `{"large":"` + largeBody + `"}`,
+		IsDefault:            true,
+	}
+	otherModel := &models.LLMConfig{
+		Name:          "Schedule Alpha",
+		Provider:      models.ProviderOpenAICompatible,
+		AuthMethod:    models.AuthMethodAPIKey,
+		Model:         "schedule-alpha-model",
+		APIKey:        "another-secret",
+		ExtraBodyJSON: largeBody,
+	}
+	if err := llmConfigRepo.Create(ctx, defaultModel); err != nil {
+		t.Fatalf("create default model: %v", err)
+	}
+	if err := llmConfigRepo.Create(ctx, otherModel); err != nil {
+		t.Fatalf("create other model: %v", err)
+	}
+
+	for _, test := range []struct {
+		name string
+		htmx bool
+	}{
+		{name: "full page"},
+		{name: "HTMX fragment", htmx: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			counter.Reset()
+			counter.SetEnabled(true)
+			req := httptest.NewRequest(http.MethodGet, "/schedule?project_id="+project.ID, nil)
+			if test.htmx {
+				req.Header.Set("HX-Request", "true")
+			}
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			counter.SetEnabled(false)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, expected := range []string{
+				`<option value="">Use Default Model</option>`,
+				`value="` + defaultModel.ID + `"`,
+				defaultModel.Name,
+				`(Default)`,
+				`value="` + otherModel.ID + `"`,
+				otherModel.Name,
+			} {
+				if !strings.Contains(body, expected) {
+					t.Fatalf("schedule response missing %q: %s", expected, body)
+				}
+			}
+			if strings.Index(body, `value="`+defaultModel.ID+`"`) > strings.Index(body, `value="`+otherModel.ID+`"`) {
+				t.Fatalf("model dropdown order changed: default must precede other model")
+			}
+			if strings.Contains(body, largeBody) || strings.Contains(body, "secret-api-key") || strings.Contains(body, "secret-oauth-token") {
+				t.Fatal("schedule response exposed full model configuration")
+			}
+
+			var modelQueries []string
+			for _, statement := range counter.Statements() {
+				normalized := strings.Join(strings.Fields(statement), " ")
+				if strings.Contains(normalized, "FROM agent_configs ORDER BY is_default DESC, name ASC") {
+					modelQueries = append(modelQueries, normalized)
+				}
+			}
+			if len(modelQueries) != 1 {
+				t.Fatalf("expected exactly one schedule model query, got %d in %q", len(modelQueries), counter.Statements())
+			}
+			projection := strings.ToLower(strings.Split(modelQueries[0], " from agent_configs ")[0])
+			if !strings.Contains(projection, "select id, name, model, is_default") {
+				t.Fatalf("schedule model query does not use compact badge projection: %s", modelQueries[0])
+			}
+			for _, forbidden := range []string{
+				"api_key", "oauth_access_token", "oauth_refresh_token", "oauth_client_secret",
+				"oauth_authorize_url", "oauth_token_url", "ollama_base_url", "base_url", "models_url",
+				"extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json",
+				"mixture_config_json", "created_at", "updated_at", "max_workers", "worker_timeout",
+			} {
+				if strings.Contains(projection, forbidden) {
+					t.Fatalf("schedule model query selected forbidden column %q: %s", forbidden, modelQueries[0])
+				}
+			}
+		})
 	}
 }
 
