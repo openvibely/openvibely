@@ -916,6 +916,9 @@ func (i *BinaryInstaller) Stage(ctx context.Context, release VerifiedRelease) (a
 	if err != nil {
 		return nil, err
 	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil && resolved != "" {
+		exe = resolved
+	}
 	path := exe + ".openvibely-new"
 	archivePath := exe + ".openvibely-package"
 	_ = os.Remove(path)

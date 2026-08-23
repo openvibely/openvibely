@@ -594,6 +594,61 @@ func TestBinaryInstallerStagePersistsExactOutcomeIdentity(t *testing.T) {
 	}
 }
 
+func TestBinaryInstallerStagesBesideResolvedExecutableSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on many Windows hosts")
+	}
+	now := time.Unix(1000, 0).UTC()
+	payload := []byte("new-binary")
+	format := "zip"
+	filename := "openvibely_server.zip"
+	artifact := zipBinaryFixture(t, "openvibely", payload)
+	if runtime.GOOS == "linux" {
+		format, filename = "tar.gz", "openvibely_server.tar.gz"
+		artifact = tarGzipBinaryFixture(t, "openvibely", payload)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(artifact)
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	appBin := filepath.Join(root, "app", "openvibely")
+	if err := os.MkdirAll(filepath.Dir(appBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(appBin, []byte("old-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	commandPath := filepath.Join(root, "bin", "openvibely")
+	if err := os.MkdirAll(filepath.Dir(commandPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(appBin, commandPath); err != nil {
+		t.Fatal(err)
+	}
+	resolvedAppBin, err := filepath.EvalSymlinks(appBin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(artifact)
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }})
+	installer := &BinaryInstaller{Client: client, Current: CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: runtime.GOOS}, Distribution: buildinfo.DistributionBinary}, Executable: commandPath}
+	value, err := installer.Stage(context.Background(), VerifiedRelease{
+		Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)},
+		Target:   Target{Kind: "binary", OS: runtime.GOOS, URL: server.URL, Filename: filename, Filetype: format, Size: int64(len(artifact)), SHA256: hex.EncodeToString(digest[:])},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged := value.(LocalStagedUpdate)
+	if staged.InstallPath != resolvedAppBin {
+		t.Fatalf("InstallPath = %q, want resolved executable %q", staged.InstallPath, resolvedAppBin)
+	}
+	if !strings.HasPrefix(staged.ArtifactPath, resolvedAppBin+".") {
+		t.Fatalf("ArtifactPath = %q, want staged beside resolved executable %q", staged.ArtifactPath, resolvedAppBin)
+	}
+}
+
 func TestBinaryInstallerStagesOfficialPackagedArtifacts(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
