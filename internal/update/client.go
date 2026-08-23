@@ -85,16 +85,19 @@ type ReleaseMetadata struct {
 	Targets               []Target  `json:"targets"`
 }
 type Target struct {
-	ID       string `json:"id"`
-	Kind     string `json:"kind"`
-	OS       string `json:"os"`
-	Arch     string `json:"arch"`
-	URL      string `json:"url,omitempty"`
-	Filename string `json:"filename,omitempty"`
-	Filetype string `json:"filetype,omitempty"`
-	Size     int64  `json:"size,omitempty"`
-	SHA256   string `json:"sha256,omitempty"`
-	ImageRef string `json:"image_ref,omitempty"`
+	ID            string `json:"id"`
+	Purpose       string `json:"purpose,omitempty"`
+	Variant       string `json:"variant,omitempty"`
+	Kind          string `json:"kind"`
+	OS            string `json:"os"`
+	Arch          string `json:"arch"`
+	URL           string `json:"url,omitempty"`
+	Filename      string `json:"filename,omitempty"`
+	Filetype      string `json:"filetype,omitempty"`
+	InstallLayout string `json:"install_layout,omitempty"`
+	Size          int64  `json:"size,omitempty"`
+	SHA256        string `json:"sha256,omitempty"`
+	ImageRef      string `json:"image_ref,omitempty"`
 }
 type VerifiedRelease struct {
 	Metadata       ReleaseMetadata `json:"metadata"`
@@ -389,6 +392,9 @@ func (c *Client) verifyRelease(response CheckResponse, current CurrentBuild, hig
 	}
 	if selected.OS != current.OS || selected.Arch != current.Arch && selected.Arch != "multi" {
 		return nil, errors.New("selected release target platform mismatch")
+	}
+	if selected.Purpose != "" || selected.Variant != "" || selected.InstallLayout != "" {
+		return nil, errors.New("selected release target is not an updater download target")
 	}
 	switch current.Distribution {
 	case buildinfo.DistributionDesktop:
