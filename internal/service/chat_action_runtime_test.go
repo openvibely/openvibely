@@ -2131,6 +2131,49 @@ func TestExecuteCreateGitHubProjectRuntimeCreatesGitHubBackedProject(t *testing.
 	require.Equal(t, 3, *created.MaxWorkers)
 }
 
+func TestExecuteCreateGitHubProjectRuntimeRejectsUnsupportedWorkerLimitsBeforeSideEffects(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := NewProjectService(projectRepo)
+	cloneCalls := 0
+	opts := CreateGitHubProjectRuntimeOptions{
+		ProjectSvc: projectSvc,
+		GitHubSvc: fakeProjectCloneProvider{cloneFn: func(ctx context.Context, projectID, repoURL string) (string, string, error) {
+			cloneCalls++
+			return "/repos/" + projectID, repoURL, nil
+		}},
+	}
+
+	for _, tc := range []struct {
+		name       string
+		maxWorkers int
+	}{
+		{name: "negative", maxWorkers: -1},
+		{name: "zero", maxWorkers: 0},
+		{name: "above maximum", maxWorkers: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			projectName := "Invalid Worker Limit " + tc.name
+			out, err := ExecuteCreateGitHubProjectRuntime(ctx, json.RawMessage(fmt.Sprintf(`{"name":%q,"repo_url":"https://github.com/acme/%s","max_workers":%d}`, projectName, tc.name, tc.maxWorkers)), opts)
+			require.NoError(t, err)
+
+			var resp createGitHubProjectRuntimeResponse
+			require.NoError(t, json.Unmarshal([]byte(out), &resp))
+			require.False(t, resp.OK)
+			require.Contains(t, resp.Error, "max_workers")
+
+			projects, err := projectRepo.List(ctx)
+			require.NoError(t, err)
+			for _, project := range projects {
+				require.NotEqual(t, projectName, project.Name)
+			}
+		})
+	}
+
+	require.Zero(t, cloneCalls, "invalid worker limits must be rejected before cloning")
+}
+
 func TestExecuteCreateGitHubProjectRuntimeRollsBackOnCloneFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
@@ -2381,6 +2424,7 @@ func TestExecuteUpdateProjectSettingsRuntimeRejectsInvalidInputsWithoutPartialUp
 		`{"default_model":"missing","max_workers":3}`,
 		`{"project_id":"different-project","max_workers":3}`,
 		`{"max_workers":-1}`,
+		`{"max_workers":11}`,
 		`{"repo_path":"/tmp/other","max_workers":3}`,
 		`{"clear_default_model":true,"default_model":"Safe Model"}`,
 	} {

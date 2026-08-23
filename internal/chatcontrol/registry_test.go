@@ -361,6 +361,16 @@ func TestCreateProjectRegisteredOrchestrateOnly(t *testing.T) {
 	if _, ok := schema.Properties["create_directory"]; ok {
 		t.Fatal("create_project schema must not expose create_directory")
 	}
+	var maxWorkersSchema struct {
+		Minimum int `json:"minimum"`
+		Maximum int `json:"maximum"`
+	}
+	if err := json.Unmarshal(schema.Properties["max_workers"], &maxWorkersSchema); err != nil {
+		t.Fatalf("decode create_project max_workers schema: %v", err)
+	}
+	if maxWorkersSchema.Minimum != 1 || maxWorkersSchema.Maximum != 10 {
+		t.Fatalf("create_project max_workers bounds = %d..%d, want 1..10", maxWorkersSchema.Minimum, maxWorkersSchema.Maximum)
+	}
 }
 
 func TestUpdateProjectSettingsRegisteredOrchestrateOnly(t *testing.T) {
