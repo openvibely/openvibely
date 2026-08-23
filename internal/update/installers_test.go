@@ -280,8 +280,35 @@ func TestPackagedDesktopHelperHandoffPassesExecutableRelativeMetadataForBundle(t
 	if metadata.ExecutableRelative != "Contents/MacOS/OpenVibely" {
 		t.Fatalf("executable_relative = %q", metadata.ExecutableRelative)
 	}
-	if data, err := os.ReadFile(packagedUpdateHelperPath(installed)); err != nil || string(data) != "signed-desktop-executable" {
+	if runtime.GOOS == "darwin" {
+		if helper.Path != executable {
+			t.Fatalf("macOS app helper path = %q, want signed bundle executable %q", helper.Path, executable)
+		}
+		if _, err := os.Stat(packagedUpdateHelperPath(installed)); !os.IsNotExist(err) {
+			t.Fatalf("macOS app helper should not be copied outside signed bundle: %v", err)
+		}
+	} else if data, err := os.ReadFile(packagedUpdateHelperPath(installed)); err != nil || string(data) != "signed-desktop-executable" {
 		t.Fatalf("helper copy = %q, err = %v", data, err)
+	}
+}
+
+func TestPackagedUpdateHelperRunsInPlaceForMacAppBundles(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		goos        string
+		installPath string
+		want        bool
+	}{
+		{name: "macOS app bundle", goos: "darwin", installPath: "/Applications/OpenVibely.app", want: true},
+		{name: "macOS standalone binary", goos: "darwin", installPath: "/usr/local/bin/openvibely", want: false},
+		{name: "Linux desktop executable", goos: "linux", installPath: "/home/me/.local/share/openvibely/bin/openvibely-desktop", want: false},
+		{name: "Windows desktop executable", goos: "windows", installPath: `C:\Users\me\AppData\Local\Programs\OpenVibely\openvibely-desktop.exe`, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := runPackagedUpdateHelperInPlace(test.goos, test.installPath); got != test.want {
+				t.Fatalf("runPackagedUpdateHelperInPlace() = %v, want %v", got, test.want)
+			}
+		})
 	}
 }
 

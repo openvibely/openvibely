@@ -297,6 +297,9 @@ func wrapPackagedHelperHandoffError(message string, err error) error {
 }
 
 func publishPackagedUpdateHelper(sourcePath, installPath string) (string, error) {
+	if runPackagedUpdateHelperInPlace(runtime.GOOS, installPath) {
+		return sourcePath, nil
+	}
 	helperPath := packagedUpdateHelperPath(installPath)
 	info, err := os.Stat(sourcePath)
 	if err != nil {
@@ -306,6 +309,10 @@ func publishPackagedUpdateHelper(sourcePath, installPath string) (string, error)
 		return "", err
 	}
 	return helperPath, nil
+}
+
+func runPackagedUpdateHelperInPlace(goos, installPath string) bool {
+	return goos == "darwin" && filepath.Ext(installPath) == ".app"
 }
 
 func currentExecutablePath() (string, error) {
