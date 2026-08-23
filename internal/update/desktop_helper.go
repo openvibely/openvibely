@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -40,6 +41,11 @@ func validateDesktopHelperPaths(staged LocalStagedUpdate) error {
 
 func desktopSuccessorCommand(cfg DesktopHelperConfig) func() (func(context.Context) error, error) {
 	return func() (func(context.Context) error, error) {
+		health, err := url.Parse(cfg.HealthURL)
+		if err != nil || health.Port() == "" {
+			return nil, errors.New("desktop health URL has no relaunch port")
+		}
+		portEnv := "PORT=" + health.Port()
 		executable := cfg.Current
 		if cfg.ExecutableRelative != "" {
 			executable = filepath.Join(cfg.Current, filepath.FromSlash(cfg.ExecutableRelative))
@@ -48,19 +54,61 @@ func desktopSuccessorCommand(cfg DesktopHelperConfig) func() (func(context.Conte
 		if len(arguments) == 0 {
 			arguments = []string{executable}
 		}
+		if runtime.GOOS == "darwin" && filepath.Ext(cfg.Current) == ".app" {
+			openArgs := []string{"-n", cfg.Current, "--env", portEnv}
+			if len(arguments) > 1 {
+				openArgs = append(openArgs, "--args")
+				openArgs = append(openArgs, arguments[1:]...)
+			}
+			cmd := exec.Command("open", openArgs...)
+			cmd.Dir = cfg.WorkingDirectory
+			if err := cmd.Start(); err != nil {
+				return nil, err
+			}
+			if err := cmd.Wait(); err != nil {
+				return nil, err
+			}
+			return func(context.Context) error { return stopDarwinAppBundleProcess(executable) }, nil
+		}
 		cmd := exec.Command(executable, arguments[1:]...)
 		cmd.Args[0] = arguments[0]
 		cmd.Dir = cfg.WorkingDirectory
-		health, err := url.Parse(cfg.HealthURL)
-		if err != nil || health.Port() == "" {
-			return nil, errors.New("desktop health URL has no relaunch port")
-		}
-		cmd.Env = append(os.Environ(), "PORT="+health.Port())
+		cmd.Env = append(os.Environ(), portEnv)
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
 		return func(context.Context) error { return stopStartedProcess(cmd) }, nil
 	}
+}
+
+func stopDarwinAppBundleProcess(executable string) error {
+	output, err := exec.Command("ps", "-axo", "pid=,args=").Output()
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		trimmed := strings.TrimSpace(line)
+		fields := strings.Fields(trimmed)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid == os.Getpid() {
+			continue
+		}
+		commandLine := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+		if commandLine != executable && !strings.HasPrefix(commandLine, executable+" ") {
+			continue
+		}
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			return err
+		}
+	}
+	return nil
 }
 
 func rollbackDesktopInstallUnit(staged LocalStagedUpdate) error {

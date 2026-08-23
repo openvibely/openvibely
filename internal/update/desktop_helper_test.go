@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -181,6 +182,53 @@ func TestDesktopHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 	}
 	if err := LoadDesktopHelperRelaunch(strings.NewReader(metadata), nil); err == nil {
 		t.Fatal("nil relaunch config unexpectedly succeeded")
+	}
+}
+
+func TestDesktopSuccessorCommandUsesLaunchServicesForMacAppBundles(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS LaunchServices relaunch behavior")
+	}
+	root := t.TempDir()
+	mockBin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(mockBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	capture := filepath.Join(root, "open.capture")
+	openPath := filepath.Join(mockBin, "open")
+	script := "#!/bin/sh\nprintf 'args:' > \"$OPEN_CAPTURE\"\nfor arg in \"$@\"; do printf '[%s]' \"$arg\" >> \"$OPEN_CAPTURE\"; done\nprintf '\\nPORT=%s\\n' \"${PORT:-}\" >> \"$OPEN_CAPTURE\"\n"
+	if err := os.WriteFile(openPath, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", mockBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("OPEN_CAPTURE", capture)
+
+	start := desktopSuccessorCommand(DesktopHelperConfig{
+		Current:            filepath.Join(root, "OpenVibely.app"),
+		HealthURL:          "http://127.0.0.1:54420/api/system/health",
+		Arguments:          []string{"OpenVibely", "--flag", "value"},
+		WorkingDirectory:   root,
+		ExecutableRelative: "Contents/MacOS/OpenVibely",
+	})
+	stop, err := start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stop == nil {
+		t.Fatal("macOS app bundle relaunch should expose a rollback stopper")
+	}
+	data, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"args:[-n][" + filepath.Join(root, "OpenVibely.app") + "][--env][PORT=54420][--args][--flag][value]",
+		"PORT=",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("open invocation = %q, missing %q", got, want)
+		}
 	}
 }
 
