@@ -37,7 +37,9 @@ func TestPackagedUpdateE2E(t *testing.T) {
 	if os.Getenv(updateE2EEnv) != "1" {
 		t.Skip(updateE2EEnv + "=1 is required for packaged update E2E tests")
 	}
-	switch strings.TrimSpace(os.Getenv("OPENVIBELY_UPDATE_E2E_DISTRIBUTION")) {
+	distribution := strings.TrimSpace(os.Getenv("OPENVIBELY_UPDATE_E2E_DISTRIBUTION"))
+	assertPackagedUpdateMatrixTarget(t, distribution)
+	switch distribution {
 	case "", "binary":
 		t.Run("binary real app succeeds", testPackagedUpdateE2EBinarySucceeds)
 		t.Run("binary real app rolls back", testPackagedUpdateE2EBinaryRollsBack)
@@ -49,18 +51,67 @@ func TestPackagedUpdateE2E(t *testing.T) {
 	}
 }
 
+func assertPackagedUpdateMatrixTarget(t *testing.T, distribution string) {
+	t.Helper()
+	expectedOS := strings.TrimSpace(os.Getenv("OPENVIBELY_UPDATE_E2E_EXPECTED_OS"))
+	expectedArch := strings.TrimSpace(os.Getenv("OPENVIBELY_UPDATE_E2E_EXPECTED_ARCH"))
+	if expectedOS == "" && expectedArch == "" {
+		return
+	}
+	normalizedOS := map[string]string{"Linux": "linux", "macOS": "darwin", "Windows": "windows"}[expectedOS]
+	if normalizedOS == "" {
+		t.Fatalf("unknown expected packaged-update OS %q", expectedOS)
+	}
+	if runtime.GOOS != normalizedOS {
+		t.Fatalf("packaged-update OS mismatch: runtime.GOOS=%s expected=%s", runtime.GOOS, normalizedOS)
+	}
+	if expectedArch != "" && runtime.GOARCH != expectedArch {
+		t.Fatalf("packaged-update arch mismatch: runtime.GOARCH=%s expected=%s", runtime.GOARCH, expectedArch)
+	}
+	if distribution != "binary" && distribution != "desktop" {
+		t.Fatalf("packaged-update distribution must be binary or desktop when matrix expectations are set, got %q", distribution)
+	}
+	t.Logf("packaged update matrix target: os=%s arch=%s distribution=%s", runtime.GOOS, runtime.GOARCH, distribution)
+}
+
 func testPackagedUpdateE2EBinarySucceeds(t *testing.T) {
-	runBinaryUpdateE2E(t, "0.6.0", "0.6.0", StateSucceeded)
+	t.Run("direct executable", func(t *testing.T) {
+		runBinaryUpdateE2E(t, "0.6.0", "0.6.0", StateSucceeded, binaryE2EDirectLayout)
+	})
+	t.Run("command symlink with unwritable command dir", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows production binary installs do not use Unix command symlinks")
+		}
+		runBinaryUpdateE2E(t, "0.6.0", "0.6.0", StateSucceeded, binaryE2ESymlinkLayout)
+	})
 }
 
 func testPackagedUpdateE2EBinaryRollsBack(t *testing.T) {
-	runBinaryUpdateE2E(t, "0.6.0", "0.7.0", StateRolledBack)
+	runBinaryUpdateE2E(t, "0.6.0", "0.7.0", StateRolledBack, binaryE2EDirectLayout)
 }
 
-func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantState string) {
+type binaryE2EInstallLayout string
+
+const (
+	binaryE2EDirectLayout  binaryE2EInstallLayout = "direct"
+	binaryE2ESymlinkLayout binaryE2EInstallLayout = "symlink"
+)
+
+func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantState string, layout binaryE2EInstallLayout) {
 	t.Helper()
 	root := t.TempDir()
 	current := filepath.Join(root, executableName("openvibely"))
+	launchPath := current
+	commandDir := ""
+	if layout == binaryE2ESymlinkLayout {
+		current = filepath.Join(root, "appbin", executableName("openvibely"))
+		commandDir = filepath.Join(root, "command")
+		launchPath = filepath.Join(commandDir, executableName("openvibely"))
+		if err := os.MkdirAll(commandDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(commandDir, 0o755) })
+	}
 	replacement := filepath.Join(root, "replacement", executableName("openvibely"))
 	buildGoCommand(t, "./cmd/server", current, map[string]string{
 		"github.com/openvibely/openvibely/internal/buildinfo.Version":  "0.5.0",
@@ -72,6 +123,14 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		"github.com/openvibely/openvibely/internal/buildinfo.Commit":   "e2e-replacement",
 		"github.com/openvibely/openvibely/internal/buildinfo.Artifact": "binary",
 	})
+	if layout == binaryE2ESymlinkLayout {
+		if err := os.Symlink(current, launchPath); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(commandDir, 0o555); err != nil {
+			t.Fatal(err)
+		}
+	}
 	archive, filetype, filename := packageBinaryArtifact(t, replacement)
 	publicKeyFile, privateKey := writeE2ETrustRoot(t, root)
 	updateServer := serveSignedBinaryRelease(t, archive, filetype, filename, releaseVersion, privateKey)
@@ -80,7 +139,7 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 	port := freeTCPPort(t)
 	appData := filepath.Join(root, "app-data")
 	stdoutLog, stderrLog, readLogs := openCommandLogs(t, root, "binary-current")
-	cmd := exec.Command(current)
+	cmd := exec.Command(launchPath)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(),
 		"PORT="+port,
@@ -126,6 +185,9 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		waitForHealthVersion(t, baseURL, "0.5.0")
 	}
 	waitForUpdateState(t, baseURL, wantState)
+	if layout == binaryE2ESymlinkLayout {
+		assertBinarySymlinkLayoutUpdated(t, commandDir, launchPath, current, releaseVersion, wantState)
+	}
 }
 
 func testPackagedUpdateE2EDesktopHelperSucceeds(t *testing.T) {
@@ -749,6 +811,44 @@ func assertInstalledFixtureVersion(t *testing.T, executable, version string) {
 	_ = cmd.Process.Kill()
 	_, _ = cmd.Process.Wait()
 	t.Fatalf("installed fixture did not report version %s: last=%s stderr=%s", version, last, stderr.String())
+}
+
+func assertBinarySymlinkLayoutUpdated(t *testing.T, commandDir, commandPath, targetPath, releaseVersion, wantState string) {
+	t.Helper()
+	if linkTarget, err := os.Readlink(commandPath); err != nil {
+		t.Fatalf("command path is not a symlink after update: %v", err)
+	} else if linkTarget != targetPath {
+		t.Fatalf("command symlink target = %q, want %q", linkTarget, targetPath)
+	}
+	for _, suffix := range []string{".openvibely-package", ".openvibely-new", ".openvibely-backup"} {
+		if _, err := os.Stat(commandPath + suffix); !os.IsNotExist(err) {
+			t.Fatalf("updater wrote staging artifact beside command symlink %s: %v", commandPath+suffix, err)
+		}
+	}
+	entries, err := os.ReadDir(commandDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".openvibely-") {
+			t.Fatalf("updater wrote staging artifact in command dir: %s", entry.Name())
+		}
+	}
+	if wantState == StateSucceeded {
+		assertGoBuildInfoVersion(t, targetPath, releaseVersion)
+	}
+}
+
+func assertGoBuildInfoVersion(t *testing.T, executable, version string) {
+	t.Helper()
+	cmd := exec.Command("go", "version", "-m", executable)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go version -m %s: %v\n%s", executable, err, output)
+	}
+	if !bytes.Contains(output, []byte("github.com/openvibely/openvibely/internal/buildinfo.Version="+version)) {
+		t.Fatalf("installed binary does not contain version %s\n%s", version, output)
+	}
 }
 
 func killPort(t *testing.T, port string) {
