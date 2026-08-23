@@ -327,6 +327,59 @@ func TestSidebar_CollapseToggleAccessibilityAndA11ySync(t *testing.T) {
 	}
 }
 
+func TestSidebar_CollapseToggleHandlersSharePersistenceHelper(t *testing.T) {
+	projects := []models.Project{{ID: "p1", Name: "Test"}}
+
+	var buf bytes.Buffer
+	if err := Sidebar(projects, "p1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("failed to render Sidebar: %v", err)
+	}
+
+	html := buf.String()
+	helperStart := strings.Index(html, "function toggleSidebarCollapsed()")
+	if helperStart == -1 {
+		t.Fatal("sidebar toggle script must define a shared toggleSidebarCollapsed helper")
+	}
+	helperEnd := strings.Index(html[helperStart:], "btn.addEventListener('click'")
+	if helperEnd == -1 {
+		t.Fatal("sidebar toggle helper should appear before the click handler")
+	}
+	helper := html[helperStart : helperStart+helperEnd]
+
+	for _, snippet := range []string{
+		"sidebar.classList.toggle('sidebar-collapsed');",
+		"var isCollapsed = sidebar.classList.contains('sidebar-collapsed');",
+		"localStorage.setItem('sidebar-collapsed', isCollapsed)",
+		"persistSidebarPreference(isCollapsed);",
+		"updateSidebarToggleA11y(isCollapsed);",
+	} {
+		if !strings.Contains(helper, snippet) {
+			t.Fatalf("shared sidebar toggle helper missing snippet: %s", snippet)
+		}
+		if strings.Count(html, snippet) != 1 {
+			t.Fatalf("sidebar toggle post-action snippet should appear only once, got %d for %s", strings.Count(html, snippet), snippet)
+		}
+	}
+
+	if strings.Count(html, "toggleSidebarCollapsed();") != 2 {
+		t.Fatalf("click and keyboard handlers should be the only callers of toggleSidebarCollapsed, got %d", strings.Count(html, "toggleSidebarCollapsed();"))
+	}
+	if !strings.Contains(html, "btn.addEventListener('click', function(e) {") || !strings.Contains(html, "e.preventDefault();\n\t\t\t\t\t\ttoggleSidebarCollapsed();") {
+		t.Fatal("click handler must prevent default and delegate to shared sidebar toggle helper")
+	}
+	for _, snippet := range []string{
+		"document.addEventListener('keydown', function(e) {",
+		"if ((e.ctrlKey || e.metaKey) && e.key === 'b') {",
+		"var tag = document.activeElement && document.activeElement.tagName;",
+		"if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;",
+		"e.preventDefault();\n\t\t\t\t\t\t\ttoggleSidebarCollapsed();",
+	} {
+		if !strings.Contains(html, snippet) {
+			t.Fatalf("keyboard sidebar toggle handler missing snippet: %s", snippet)
+		}
+	}
+}
+
 func TestSidebar_UserAreaAndThemeToggleCoexist(t *testing.T) {
 	projects := []models.Project{{ID: "p1", Name: "Test"}}
 
