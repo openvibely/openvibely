@@ -1015,7 +1015,7 @@ func assertGoBuildInfoVersion(t *testing.T, executable, version string) {
 
 func killPort(t *testing.T, port string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	if runtime.GOOS == "windows" {
 		out, err := exec.CommandContext(ctx, "netstat", "-ano", "-p", "tcp").Output()
@@ -1034,7 +1034,7 @@ func killPort(t *testing.T, port string) {
 	if err != nil {
 		return
 	}
-	pids := strings.Fields(string(out))
+	pids := unixProcessTreePIDs(ctx, strings.Fields(string(out)))
 	for _, pid := range pids {
 		_ = exec.CommandContext(ctx, "kill", "-TERM", pid).Run()
 	}
@@ -1055,4 +1055,35 @@ func killPort(t *testing.T, port string) {
 	for _, pid := range pids {
 		_ = exec.CommandContext(ctx, "kill", "-KILL", pid).Run()
 	}
+}
+
+func unixProcessTreePIDs(ctx context.Context, roots []string) []string {
+	out, err := exec.CommandContext(ctx, "ps", "-e", "-o", "pid=", "-o", "ppid=").Output()
+	if err != nil {
+		return roots
+	}
+	children := make(map[string][]string)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 {
+			children[fields[1]] = append(children[fields[1]], fields[0])
+		}
+	}
+	seen := make(map[string]bool)
+	ordered := make([]string, 0, len(roots))
+	var appendTree func(string)
+	appendTree = func(pid string) {
+		if seen[pid] {
+			return
+		}
+		seen[pid] = true
+		for _, child := range children[pid] {
+			appendTree(child)
+		}
+		ordered = append(ordered, pid)
+	}
+	for _, root := range roots {
+		appendTree(root)
+	}
+	return ordered
 }
