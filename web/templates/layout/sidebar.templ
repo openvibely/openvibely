@@ -399,13 +399,17 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						}
 						updateSidebarToggleA11y(collapsed);
 
+					function toggleSidebarCollapsed() {
+						sidebar.classList.toggle('sidebar-collapsed');
+						var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
+						try { localStorage.setItem('sidebar-collapsed', isCollapsed); } catch (_) {}
+						persistSidebarPreference(isCollapsed);
+						updateSidebarToggleA11y(isCollapsed);
+					}
+
 					btn.addEventListener('click', function(e) {
 						e.preventDefault();
-							sidebar.classList.toggle('sidebar-collapsed');
-							var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
-							try { localStorage.setItem('sidebar-collapsed', isCollapsed); } catch (_) {}
-							persistSidebarPreference(isCollapsed);
-							updateSidebarToggleA11y(isCollapsed);
+						toggleSidebarCollapsed();
 					});
 
 					// Keyboard shortcut: Ctrl+B or Cmd+B to toggle sidebar
@@ -415,11 +419,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							var tag = document.activeElement && document.activeElement.tagName;
 							if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 							e.preventDefault();
-							sidebar.classList.toggle('sidebar-collapsed');
-							var isCollapsed = sidebar.classList.contains('sidebar-collapsed');
-							try { localStorage.setItem('sidebar-collapsed', isCollapsed); } catch (_) {}
-							persistSidebarPreference(isCollapsed);
-							updateSidebarToggleA11y(isCollapsed);
+							toggleSidebarCollapsed();
 						}
 					});
 				})();

@@ -377,6 +377,51 @@ func TestHandler_UpdateCustomPersonality_JSONReturnsUpdatedObject(t *testing.T) 
 	assert.Equal(t, resp.SystemPrompt, got.SystemPrompt)
 }
 
+func TestHandler_UpdateCustomPersonality_RejectsMissingNonPresetKeyWithoutCreating(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		contentType string
+	}{
+		{name: "form", contentType: echo.MIMEApplicationForm},
+		{name: "json", contentType: echo.MIMEApplicationJSON},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, repo, _ := setupCustomPersonalityHandler(t)
+			ctx := context.Background()
+
+			var body string
+			if tt.contentType == echo.MIMEApplicationJSON {
+				body = customPersonalityJSONBody(t, map[string]string{
+					"name":          "Missing Custom",
+					"description":   "Should not be created",
+					"system_prompt": "This valid missing custom update must not create a row.",
+				})
+			} else {
+				form := url.Values{}
+				form.Set("name", "Missing Custom")
+				form.Set("description", "Should not be created")
+				form.Set("system_prompt", "This valid missing custom update must not create a row.")
+				body = form.Encode()
+			}
+
+			req := httptest.NewRequest(http.MethodPut, "/personality/custom/missing_custom", strings.NewReader(body))
+			req.Header.Set(echo.HeaderContentType, tt.contentType)
+			rec := httptest.NewRecorder()
+			c := e.NewContext(req, rec)
+			c.SetPath("/personality/custom/:key")
+			c.SetParamNames("key")
+			c.SetParamValues("missing_custom")
+
+			err := h.UpdateCustomPersonality(c)
+			assertCustomPersonalityHTTPError(t, err, http.StatusNotFound, "Custom personality not found")
+
+			got, err := repo.GetByKey(ctx, "missing_custom")
+			require.NoError(t, err)
+			assert.Nil(t, got)
+		})
+	}
+}
+
 func TestHandler_CustomPersonalitySaveValidationConsistentAcrossCreateAndUpdate(t *testing.T) {
 	for _, tt := range []struct {
 		name          string
