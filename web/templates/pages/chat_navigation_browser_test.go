@@ -520,6 +520,16 @@ window.addEventListener('DOMContentLoaded', function() {
   function key(target, value) {
     target.dispatchEvent(new KeyboardEvent('keydown', {key: value, bubbles: true, cancelable: true}));
   }
+  function mouseClick(target) {
+    if (!target) fail('mouse click target is missing');
+    target.focus();
+    var pointerInit = {bubbles: true, cancelable: true, view: window, button: 0, buttons: 1};
+    if (typeof PointerEvent === 'function') target.dispatchEvent(new PointerEvent('pointerdown', pointerInit));
+    target.dispatchEvent(new MouseEvent('mousedown', pointerInit));
+    target.dispatchEvent(new MouseEvent('mouseup', pointerInit));
+    if (typeof PointerEvent === 'function') target.dispatchEvent(new PointerEvent('pointerup', pointerInit));
+    target.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true, view: window, button: 0, buttons: 0}));
+  }
   function reportResult(status, message) {
     return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method: 'POST'}).catch(function() {});
   }
@@ -539,10 +549,10 @@ window.addEventListener('DOMContentLoaded', function() {
     assertClosed(reloadStage ? 'reload startup focus' : 'startup focus');
 
     if (!reloadStage) {
-      trigger().click();
+      mouseClick(trigger());
       await wait(30);
       assertOpen('mouse activation');
-      trigger().click();
+      mouseClick(trigger());
       await wait(30);
       assertClosed('mouse close');
       if (document.activeElement !== trigger()) fail('mouse close did not restore focus to the trigger');
@@ -569,7 +579,7 @@ window.addEventListener('DOMContentLoaded', function() {
         confirmationMessage = String(message);
         return false;
       };
-      trigger().click();
+      mouseClick(trigger());
       await wait(30);
       assertOpen('confirmation setup');
       clearItem().click();
@@ -581,7 +591,7 @@ window.addEventListener('DOMContentLoaded', function() {
       await wait(30);
       assertClosed('outside close after cancelled confirmation');
 
-      trigger().click();
+      mouseClick(trigger());
       await wait(30);
       assertOpen('navigation setup');
       await window.openVibelyNavigate('/other');
@@ -611,13 +621,8 @@ window.addEventListener('DOMContentLoaded', function() {
 
 	fixtureStyle := `<style>
 html, body, #main-content { height: 100%; margin: 0; }
-.dropdown-content { display: none; }
+.dropdown-content { display: none; visibility: hidden; opacity: 0; pointer-events: none; }
 .dropdown:focus-within > .dropdown-content { display: block; }
-#chat-page-root [data-chat-actions-dropdown][data-chat-actions-open="true"] > .dropdown-content {
-  visibility: visible !important;
-  opacity: 1 !important;
-  pointer-events: auto !important;
-}
 .hidden { display: none !important; }
 </style>`
 

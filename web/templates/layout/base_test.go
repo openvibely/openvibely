@@ -339,9 +339,13 @@ func TestBaseDesktopChatActionsRequireExplicitActivation(t *testing.T) {
 	for _, required := range []string{
 		`data-openvibely-runtime="desktop"`,
 		`#chat-page-root [data-chat-actions-dropdown]:not([data-chat-actions-open="true"]) > .dropdown-content`,
+		`#chat-page-root [data-chat-actions-dropdown][data-chat-actions-open="true"] > .dropdown-content`,
 		`visibility: hidden !important;`,
 		`opacity: 0 !important;`,
 		`pointer-events: none !important;`,
+		`visibility: visible !important;`,
+		`opacity: 1 !important;`,
+		`pointer-events: auto !important;`,
 	} {
 		if !strings.Contains(content, required) {
 			t.Fatalf("desktop Chat startup must keep the clear-actions menu closed; missing %q", required)

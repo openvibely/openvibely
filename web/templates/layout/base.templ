@@ -612,6 +612,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						opacity: 0 !important;
 						pointer-events: none !important;
 					}
+					#chat-page-root [data-chat-actions-dropdown][data-chat-actions-open="true"] > .dropdown-content {
+						visibility: visible !important;
+						opacity: 1 !important;
+						pointer-events: auto !important;
+					}
 
 				/* Chat bubble redesign - distinct card-style per message */
 				/* Scrollports and input gutter are shifted left 16px so bubble bodies
