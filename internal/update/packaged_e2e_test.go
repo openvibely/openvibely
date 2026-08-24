@@ -19,6 +19,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -219,6 +220,9 @@ func requireRealDesktopUpdateE2E(t *testing.T) {
 
 func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, wantOutcome string) {
 	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Skip("non-macOS desktop executable updates are covered by real desktop E2E")
+	}
 	root := t.TempDir()
 	currentExe := filepath.Join(root, "current", executableName("openvibely-e2e-fixture"))
 	replacementExe := filepath.Join(root, "replacement", executableName("openvibely-e2e-fixture"))
@@ -226,9 +230,9 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 	buildGoCommand(t, "./internal/update/testfixture", replacementExe, map[string]string{"main.version": replacementVersion})
 
 	installPath, installedExecutable, executableRelative := installDesktopUnit(t, root, "OpenVibely.app", currentExe)
-	artifact, filetype, filename := packageDesktopArtifact(t, replacementExe)
+	artifact, filetype, filename, kind := packageDesktopArtifact(t, replacementExe)
 	publicKeyFile, privateKey := writeE2ETrustRoot(t, root)
-	updateServer := serveSignedRelease(t, artifact, filetype, filename, "app_bundle", expectedVersion, privateKey)
+	updateServer := serveSignedRelease(t, artifact, filetype, filename, kind, expectedVersion, privateKey)
 	defer updateServer.Close()
 	updateKeys, err := DecodePublicKeys("", "", publicKeyFile)
 	if err != nil {
@@ -334,6 +338,10 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 
 func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, wantOutcome string) {
 	t.Helper()
+	if runtime.GOOS != "darwin" {
+		runDesktopExecutableUpdateE2E(t, expectedVersion, replacementVersion, wantOutcome)
+		return
+	}
 	root := t.TempDir()
 	currentExe := filepath.Join(root, "current", executableName("openvibely-desktop-real"))
 	replacementExe := filepath.Join(root, "replacement", executableName("openvibely-desktop-real"))
@@ -341,9 +349,9 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 	buildDesktopCommand(t, replacementExe, replacementVersion)
 
 	installPath, installedExecutable, executableRelative := installDesktopUnit(t, root, "OpenVibely.app", currentExe)
-	artifact, filetype, filename := packageDesktopArtifact(t, replacementExe)
+	artifact, filetype, filename, kind := packageDesktopArtifact(t, replacementExe)
 	publicKeyFile, privateKey := writeE2ETrustRoot(t, root)
-	updateServer := serveSignedRelease(t, artifact, filetype, filename, "app_bundle", expectedVersion, privateKey)
+	updateServer := serveSignedRelease(t, artifact, filetype, filename, kind, expectedVersion, privateKey)
 	defer updateServer.Close()
 	updateKeys, err := DecodePublicKeys("", "", publicKeyFile)
 	if err != nil {
@@ -449,6 +457,69 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 	} else {
 		assertGoBuildInfoVersion(t, installedExecutable, "0.5.0")
 	}
+}
+
+func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantOutcome string) {
+	t.Helper()
+	root := t.TempDir()
+	current := filepath.Join(root, executableName("openvibely-desktop"))
+	replacement := filepath.Join(root, "replacement", executableName("openvibely-desktop"))
+	buildDesktopCommand(t, current, "0.5.0")
+	buildDesktopCommand(t, replacement, replacementVersion)
+	archive, filetype, filename, kind := packageDesktopArtifact(t, replacement)
+	publicKeyFile, privateKey := writeE2ETrustRoot(t, root)
+	updateServer := serveSignedRelease(t, archive, filetype, filename, kind, releaseVersion, privateKey)
+	defer updateServer.Close()
+
+	port := freeTCPPort(t)
+	appData := filepath.Join(root, "desktop-data")
+	stdoutLog, stderrLog, readLogs := openCommandLogs(t, root, "desktop-current")
+	cmd := exec.Command(current)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(),
+		"PORT="+port,
+		"DATABASE_PATH="+filepath.Join(appData, "openvibely.db"),
+		"PROJECT_REPO_ROOT="+filepath.Join(root, "projects"),
+		"OPENVIBELY_APP_DATA_DIR="+appData,
+		"OPENVIBELY_PLUGIN_ROOT="+filepath.Join(appData, "plugins"),
+		"OPENVIBELY_UPDATE_SERVICE_URL="+updateServer.URL,
+		"OPENVIBELY_UPDATE_PUBLIC_KEY_FILE="+publicKeyFile,
+		"DISABLE_UPDATE_NOTIFICATIONS=false",
+		"OPENVIBELY_DISABLE_INSTALL_ID=1",
+		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=5000",
+		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
+	)
+	cmd.Stdout = stdoutLog
+	cmd.Stderr = stderrLog
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start current desktop app: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+		killPort(t, port)
+	})
+
+	baseURL := "http://127.0.0.1:" + port
+	waitForHealthVersion(t, baseURL, "0.5.0")
+	waitForStagedUpdate(t, baseURL)
+	resp, err := http.Post(baseURL+"/api/system/update/apply", "application/json", nil)
+	if err != nil {
+		t.Fatalf("accept desktop update: %v\n%s", err, readLogs())
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("accept desktop update HTTP %d\n%s", resp.StatusCode, readLogs())
+	}
+	if err := waitForCommandExit(cmd, time.Minute); err != nil {
+		t.Fatalf("current desktop app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describeBinaryHelperState(current), readLogs())
+	}
+	if wantOutcome == binaryOutcomeSucceeded {
+		waitForHealthVersion(t, baseURL, releaseVersion)
+	} else {
+		waitForHealthVersion(t, baseURL, "0.5.0")
+	}
+	waitForUpdateState(t, baseURL, wantOutcome)
 }
 
 func openCommandLogs(t *testing.T, dir, name string) (*os.File, *os.File, func() string) {
@@ -639,66 +710,230 @@ func executableName(base string) string {
 
 func packageBinaryArtifact(t *testing.T, executable string) ([]byte, string, string) {
 	t.Helper()
-	payload, err := os.ReadFile(executable)
-	if err != nil {
-		t.Fatal(err)
-	}
 	entry := executableName("openvibely")
 	switch runtime.GOOS {
 	case "linux":
-		var buf bytes.Buffer
-		gz := gzip.NewWriter(&buf)
-		tw := tar.NewWriter(gz)
-		if err := tw.WriteHeader(&tar.Header{Name: entry, Mode: 0o755, Size: int64(len(payload))}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tw.Write(payload); err != nil {
-			t.Fatal(err)
-		}
-		if err := tw.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if err := gz.Close(); err != nil {
-			t.Fatal(err)
-		}
-		return buf.Bytes(), "tar.gz", "openvibely.tar.gz"
+		return packageReleaseTarGZ(t, executable, entry), "tar.gz", "openvibely.tar.gz"
 	default:
-		var buf bytes.Buffer
-		zw := zip.NewWriter(&buf)
-		header := &zip.FileHeader{Name: entry, Method: zip.Deflate}
-		header.SetMode(0o755)
-		w, err := zw.CreateHeader(header)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.Write(payload); err != nil {
-			t.Fatal(err)
-		}
-		if err := zw.Close(); err != nil {
-			t.Fatal(err)
-		}
-		return buf.Bytes(), "zip", "openvibely.zip"
+		return packageReleaseZip(t, executable, entry), "zip", "openvibely.zip"
 	}
 }
 
-func packageDesktopArtifact(t *testing.T, executable string) ([]byte, string, string) {
+func packageDesktopArtifact(t *testing.T, executable string) ([]byte, string, string, string) {
 	t.Helper()
-	payload, err := os.ReadFile(executable)
+	switch runtime.GOOS {
+	case "darwin":
+		return packageReleaseMacAppZip(t, executable), "zip", "openvibely-desktop.zip", "app_bundle"
+	case "linux":
+		return packageReleaseTarGZ(t, executable, "openvibely-desktop"), "tar.gz", "openvibely-desktop.tar.gz", "executable"
+	default:
+		entry := executableName("openvibely-desktop")
+		return packageReleaseZip(t, executable, entry), "zip", "openvibely-desktop.zip", "executable"
+	}
+}
+
+func packageReleaseTarGZ(t *testing.T, executable, entry string) []byte {
+	t.Helper()
+	root := t.TempDir()
+	pkgDir := filepath.Join(root, "pkg")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payloadPath := filepath.Join(pkgDir, entry)
+	copyFile(executable, payloadPath, 0o755)
+	addPackagedUpdateXattr(t, payloadPath)
+	archivePath := filepath.Join(root, "artifact.tar.gz")
+	cmd := exec.Command("tar", "-czf", archivePath, "-C", pkgDir, entry)
+	cmd.Env = append(os.Environ(), "COPYFILE_DISABLE=1")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("release tar package failed: %v\n%s", err, output)
+	}
+	data, err := os.ReadFile(archivePath)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertCleanArchiveEntries(t, archivePath, []string{entry})
+	return data
+}
+
+func packageReleaseZip(t *testing.T, executable, entry string) []byte {
+	t.Helper()
+	root := t.TempDir()
+	pkgDir := filepath.Join(root, "pkg")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payloadPath := filepath.Join(pkgDir, entry)
+	copyFile(executable, payloadPath, 0o755)
+	addPackagedUpdateXattr(t, payloadPath)
+	archivePath := filepath.Join(root, "artifact.zip")
+	if zipPath, err := exec.LookPath("zip"); err == nil {
+		cmd := exec.Command(zipPath, "-X", archivePath, entry)
+		cmd.Dir = pkgDir
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("release zip package failed: %v\n%s", err, output)
+		}
+	} else {
+		writeGoZip(t, archivePath, map[string]string{entry: payloadPath})
+	}
+	data, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCleanArchiveEntries(t, archivePath, []string{entry})
+	return data
+}
+
+func packageReleaseMacAppZip(t *testing.T, executable string) []byte {
+	t.Helper()
+	root := t.TempDir()
+	appDir := filepath.Join(root, "OpenVibely.app")
+	executablePath := filepath.Join(appDir, "Contents", "MacOS", "OpenVibely")
+	infoPath := filepath.Join(appDir, "Contents", "Info.plist")
+	if err := os.MkdirAll(filepath.Dir(executablePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(infoPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyFile(executable, executablePath, 0o755)
+	if err := os.WriteFile(infoPath, []byte(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>OpenVibely</string></dict></plist>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	addPackagedUpdateXattr(t, executablePath)
+	addPackagedUpdateXattr(t, infoPath)
+	archivePath := filepath.Join(root, "OpenVibely.app.zip")
+	if runtime.GOOS == "darwin" {
+		cmd := exec.Command("ditto", "-c", "-k", "--norsrc", "--keepParent", appDir, archivePath)
+		cmd.Env = append(os.Environ(), "COPYFILE_DISABLE=1")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("release macOS app package failed: %v\n%s", err, output)
+		}
+	} else {
+		writeGoZip(t, archivePath, map[string]string{
+			"OpenVibely.app/Contents/Info.plist":       infoPath,
+			"OpenVibely.app/Contents/MacOS/OpenVibely": executablePath,
+		})
+	}
+	data, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertCleanArchiveEntries(t, archivePath, []string{
+		"OpenVibely.app/Contents/Info.plist",
+		"OpenVibely.app/Contents/MacOS/OpenVibely",
+	})
+	return data
+}
+
+func TestReleaseShapedPackagingProducesCleanArchives(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "openvibely-source")
+	desktop := filepath.Join(root, "openvibely-desktop-source")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(desktop, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = packageReleaseTarGZ(t, binary, "openvibely")
+	_ = packageReleaseTarGZ(t, desktop, "openvibely-desktop")
+	_ = packageReleaseZip(t, binary, executableName("openvibely"))
+	_ = packageReleaseZip(t, desktop, executableName("openvibely-desktop"))
+	_ = packageReleaseMacAppZip(t, desktop)
+}
+
+func writeGoZip(t *testing.T, archivePath string, entries map[string]string) {
+	t.Helper()
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	if runtime.GOOS == "darwin" {
-		writeZipEntry(t, zw, "OpenVibely.app/Contents/Info.plist", 0o644, []byte(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>OpenVibely</string></dict></plist>`))
-		writeZipEntry(t, zw, "OpenVibely.app/Contents/MacOS/OpenVibely", 0o755, payload)
-	} else {
-		writeZipEntry(t, zw, executableName("openvibely-desktop"), 0o755, payload)
+	for name, source := range entries {
+		payload, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeZipEntry(t, zw, name, 0o755, payload)
 	}
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	return buf.Bytes(), "zip", "openvibely-desktop.zip"
+	if err := os.WriteFile(archivePath, buf.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func addPackagedUpdateXattr(t *testing.T, file string) {
+	t.Helper()
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	cmd := exec.Command("xattr", "-w", "com.openvibely.update-test", "metadata", file)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("unable to add xattr to %s: %v\n%s", file, err, output)
+	}
+}
+
+func assertCleanArchiveEntries(t *testing.T, archivePath string, required []string) {
+	t.Helper()
+	entries := archiveEntries(t, archivePath)
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		clean := strings.TrimPrefix(path.Clean(filepath.ToSlash(entry)), "./")
+		base := path.Base(clean)
+		if base == ".DS_Store" || strings.HasPrefix(base, "._") || strings.HasPrefix(clean, "__MACOSX/") {
+			t.Fatalf("archive %s contains metadata entry %q; entries=%v", archivePath, entry, entries)
+		}
+		if !strings.HasSuffix(clean, "/") {
+			seen[clean] = true
+		}
+	}
+	for _, want := range required {
+		if !seen[want] {
+			t.Fatalf("archive %s missing %q; entries=%v", archivePath, want, entries)
+		}
+	}
+}
+
+func archiveEntries(t *testing.T, archivePath string) []string {
+	t.Helper()
+	if strings.HasSuffix(archivePath, ".tar.gz") {
+		file, err := os.Open(archivePath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		gz, err := gzip.NewReader(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer gz.Close()
+		reader := tar.NewReader(gz)
+		var entries []string
+		for {
+			header, err := reader.Next()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries = append(entries, header.Name)
+		}
+		return entries
+	}
+	zr, err := zip.OpenReader(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	entries := make([]string, 0, len(zr.File))
+	for _, file := range zr.File {
+		entries = append(entries, file.Name)
+	}
+	return entries
 }
 
 func writeZipEntry(t *testing.T, zw *zip.Writer, name string, mode os.FileMode, payload []byte) {
