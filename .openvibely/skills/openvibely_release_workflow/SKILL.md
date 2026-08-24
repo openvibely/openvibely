@@ -171,7 +171,11 @@ bash $SCRIPTS/release-build.sh 0.1.1 ./dist/0.1.1
 
 # 2b. Verify archive contents, especially macOS .app zips
 #     The top-level extracted desktop bundle must end exactly in .app.
+#     The zip must not contain AppleDouble/resource-fork metadata such as ._* or __MACOSX entries.
 unzip -Z1 ./dist/0.1.1/OpenVibely_0.1.1_darwin_amd64.app.zip | head
+if unzip -Z1 ./dist/0.1.1/OpenVibely_0.1.1_darwin_amd64.app.zip | grep -E '(^|/)\._|(^|/)__MACOSX(/|$)|(^|/)\.DS_Store$'; then
+  echo "invalid macOS app zip metadata"
+fi
 
 # 3. Collect commits + render notes template
 bash $SCRIPTS/release-notes.sh 0.1.1 v0.1.0 ./dist/0.1.1
@@ -269,6 +273,8 @@ Do not infer the contents of a desktop release zip from its filename or from the
 
 A valid macOS desktop release zip must extract to a top-level bundle directory whose name ends exactly in `.app` and contains an executable at `Contents/MacOS/OpenVibely`. A top-level directory like `OpenVibely.app_amd64/` or `OpenVibely.app_arm64/` is invalid because Finder will not recognize it as an application bundle; treat that as a release blocker and fix the packaging script before publishing.
 
+A valid macOS desktop release zip must also be free of AppleDouble/resource-fork metadata entries like `._*`, `__MACOSX/*`, and `.DS_Store`. These files can be added by macOS archive tooling and will break the sealed code signature after extraction, causing Gatekeeper to show “OpenVibely is damaged and can’t be opened.” Treat any such entry as a release blocker.
+
 This exact top-level directory-name requirement is macOS-specific. Linux and Windows server/desktop archives are flat binary artifacts; verify their binary names and executable bits where applicable, but do not apply `.app` bundle naming rules to non-macOS artifacts.
 
 Example checks after a real build:
@@ -276,6 +282,10 @@ Example checks after a real build:
 ```bash
 zip_path="dist/<version>/OpenVibely_<version>_darwin_amd64.app.zip"
 unzip -Z1 "$zip_path" | head -20
+if unzip -Z1 "$zip_path" | grep -E '(^|/)\._|(^|/)__MACOSX(/|$)|(^|/)\.DS_Store$'; then
+  echo "invalid macOS app zip metadata"
+  exit 1
+fi
 
 tmpdir="$(mktemp -d)"
 unzip -q "$zip_path" -d "$tmpdir"

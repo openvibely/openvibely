@@ -92,6 +92,36 @@ run_wails3() {
     fi
 }
 
+clean_macos_bundle_metadata() {
+    local app_dir="$1"
+    [[ -d "$app_dir" ]] || fail "macOS app bundle does not exist: $app_dir"
+    find "$app_dir" -name '._*' -delete
+    find "$app_dir" -name '.DS_Store' -delete
+    if command -v xattr >/dev/null 2>&1; then
+        xattr -cr "$app_dir" 2>/dev/null || true
+    fi
+}
+
+assert_clean_macos_app_zip() {
+    local archive="$1"
+    local metadata_entries
+    metadata_entries="$(unzip -Z1 "$archive" | grep -E '(^|/)\._|(^|/)__MACOSX(/|$)|(^|/)\.DS_Store$' || true)"
+    if [[ -n "$metadata_entries" ]]; then
+        err "macOS app zip contains metadata entries that break code signing:"
+        printf '%s\n' "$metadata_entries" >&2
+        fail "Rebuild $(basename "$archive") without AppleDouble/resource-fork metadata."
+    fi
+}
+
+package_macos_app_zip() {
+    local app_dir="$1"
+    local archive="$2"
+    rm -f "$archive"
+    clean_macos_bundle_metadata "$app_dir"
+    run env COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent "$app_dir" "$archive"
+    assert_clean_macos_app_zip "$archive"
+}
+
 load_release_env_defaults() {
     local env_file="$1"
     local had_key=0 had_pub=0 had_mac_id=0 had_notary=0 had_win_sign=0 had_win_verify=0 had_azure_endpoint=0 had_azure_account=0 had_azure_profile=0 had_azure_sub=0 had_win_desktop=0 had_linux_desktop=0 had_linux_arm64_desktop=0
@@ -452,7 +482,7 @@ wait_for_macos_notarizations() {
             run spctl --assess --type execute --verbose=2 "$app_dir"
             [[ -n "$release_zip" ]] || fail "Missing release zip path for notarized app $name."
             log "Packaging $(basename "$release_zip")..."
-            run ditto -c -k --keepParent "$app_dir" "$release_zip"
+            package_macos_app_zip "$app_dir" "$release_zip"
             log "Created: $(basename "$release_zip")"
         fi
     done
@@ -543,8 +573,9 @@ build_macos_app() {
 PLIST
 
     log "Signing and notarizing ${app_name}..."
+    clean_macos_bundle_metadata "$app_dir"
     env OPENVIBELY_MACOS_SIGN_IDENTITY="$MACOS_SIGN_IDENTITY" "$SCRIPT_DIR/sign-macos.sh" "$app_dir"
-    run ditto -c -k --keepParent "$app_dir" "$notary_zip"
+    package_macos_app_zip "$app_dir" "$notary_zip"
     queue_macos_notarization "$state_key" "$notary_zip" "OpenVibely ${goarch} desktop app" "$app_dir" "${DIST_DIR}/${zip_name}"
 }
 
