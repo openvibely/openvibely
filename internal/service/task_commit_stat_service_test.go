@@ -184,7 +184,7 @@ func TestTaskCommitStatUpsertDoesNotDoubleCountDuplicateCommit(t *testing.T) {
 	if err := taskRepo.Create(ctx, task); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
-	producedAt := time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)
+	producedAt := time.Now().UTC().Add(-time.Hour)
 	stat := &models.TaskCommitStat{
 		ProjectID: project.ID, TaskID: task.ID, CommitSHA: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ShortSHA: "aaaaaaa",
 		Subject: "Add duplicate-safe stats", Author: "OpenVibely Bot", ProducedAt: producedAt,
