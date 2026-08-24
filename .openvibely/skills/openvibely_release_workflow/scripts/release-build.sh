@@ -113,6 +113,17 @@ assert_clean_macos_app_zip() {
     fi
 }
 
+assert_clean_tar_archive() {
+    local archive="$1"
+    local metadata_entries
+    metadata_entries="$(env COPYFILE_DISABLE=1 tar -tzf "$archive" | grep -E '(^|/)\._|(^|/)__MACOSX(/|$)|(^|/)\.DS_Store$' || true)"
+    if [[ -n "$metadata_entries" ]]; then
+        err "tar archive contains metadata entries that break executable updates:"
+        printf '%s\n' "$metadata_entries" >&2
+        fail "Rebuild $(basename "$archive") without AppleDouble/resource-fork metadata."
+    fi
+}
+
 package_macos_app_zip() {
     local app_dir="$1"
     local archive="$2"
@@ -688,7 +699,8 @@ package_server_tar() {
     local pkg_dir="${TMP_BIN}/pkg_${goos}_${goarch}"
     mkdir -p "$pkg_dir"
     cp "$src_bin" "$pkg_dir/openvibely"
-    tar -czf "${DIST_DIR}/${artifact}" -C "$pkg_dir" openvibely
+    env COPYFILE_DISABLE=1 tar -czf "${DIST_DIR}/${artifact}" -C "$pkg_dir" openvibely
+    assert_clean_tar_archive "${DIST_DIR}/${artifact}"
     log "Created: $artifact"
 }
 
@@ -706,7 +718,7 @@ package_server_zip() {
     local pkg_dir="${TMP_BIN}/pkg_${goos}_${goarch}_server"
     mkdir -p "$pkg_dir"
     cp "$src_bin" "$pkg_dir/openvibely.exe"
-    bash -c "cd '${pkg_dir}' && zip '${DIST_DIR}/${artifact}' openvibely.exe"
+    bash -c "cd '${pkg_dir}' && zip -X '${DIST_DIR}/${artifact}' openvibely.exe"
     log "Created: $artifact"
 }
 
@@ -729,7 +741,7 @@ package_windows_desktop_zip() {
     local local_pkg="${TMP_BIN}/pkg_win_desktop_${goarch}"
     mkdir -p "$local_pkg"
     cp "$TMP_BIN/desktop_windows_${goarch}.exe" "$local_pkg/openvibely-desktop.exe"
-    bash -c "cd '${local_pkg}' && zip '${DIST_DIR}/${artifact}' openvibely-desktop.exe"
+    bash -c "cd '${local_pkg}' && zip -X '${DIST_DIR}/${artifact}' openvibely-desktop.exe"
     log "Created: $artifact"
 }
 
@@ -746,7 +758,8 @@ package_linux_desktop_tar() {
     mkdir -p "$linux_pkg"
     cp "$TMP_BIN/desktop_linux_${goarch}" "$linux_pkg/openvibely-desktop"
     chmod +x "$linux_pkg/openvibely-desktop"
-    tar -czf "${DIST_DIR}/${artifact}" -C "$linux_pkg" openvibely-desktop
+    env COPYFILE_DISABLE=1 tar -czf "${DIST_DIR}/${artifact}" -C "$linux_pkg" openvibely-desktop
+    assert_clean_tar_archive "${DIST_DIR}/${artifact}"
     log "Created: $artifact"
 }
 
