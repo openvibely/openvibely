@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/openvibely/openvibely/internal/applog"
 	"strings"
@@ -125,6 +126,26 @@ func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher
 				backend.Shutdown()
 			}
 		})
+	}
+
+	if os.Getenv("OPENVIBELY_UPDATE_E2E_HEADLESS_DESKTOP") == "1" && runtime.GOOS != "darwin" {
+		if backend.UpdateCoordinator == nil {
+			shutdown()
+			return fmt.Errorf("desktop update coordinator is unavailable")
+		}
+		workingDirectory, err := os.Getwd()
+		if err != nil {
+			shutdown()
+			return fmt.Errorf("resolve desktop working directory: %w", err)
+		}
+		backend.UpdateCoordinator.SetDesktopRelaunchContext(backend.BaseURL+"/api/system/health", os.Args, workingDirectory, shutdown)
+		if err := backend.UpdateCoordinator.BindWailsUpdater(nil); err != nil {
+			shutdown()
+			return fmt.Errorf("configure desktop updater: %w", err)
+		}
+		<-ctx.Done()
+		applog.Infof("[desktop] shutdown complete")
+		return nil
 	}
 
 	if err := launch(backend.BaseURL, shutdown, backend.UpdateCoordinator); err != nil {

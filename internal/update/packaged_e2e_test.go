@@ -198,6 +198,7 @@ func linuxDesktopTestEnvironment() []string {
 		return nil
 	}
 	return []string{
+		"OPENVIBELY_UPDATE_E2E_HEADLESS_DESKTOP=1",
 		"WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1",
 		"NO_AT_BRIDGE=1",
 		"GTK_A11Y=none",
