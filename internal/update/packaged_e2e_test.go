@@ -193,6 +193,17 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 	}
 }
 
+func linuxDesktopTestEnvironment() []string {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	return []string{
+		"WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1",
+		"NO_AT_BRIDGE=1",
+		"GTK_A11Y=none",
+	}
+}
+
 func testPackagedUpdateE2EDesktopHelperSucceeds(t *testing.T) {
 	runDesktopHelperE2E(t, "0.6.0", "0.6.0", binaryOutcomeSucceeded)
 }
@@ -489,6 +500,7 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=5000",
 		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
 	)
+	cmd.Env = append(cmd.Env, linuxDesktopTestEnvironment()...)
 	cmd.Stdout = stdoutLog
 	cmd.Stderr = stderrLog
 	if err := cmd.Start(); err != nil {
@@ -743,7 +755,8 @@ func packageReleaseTarGZ(t *testing.T, executable, entry string) []byte {
 	copyFile(executable, payloadPath, 0o755)
 	addPackagedUpdateXattr(t, payloadPath)
 	archivePath := filepath.Join(root, "artifact.tar.gz")
-	cmd := exec.Command("tar", "-czf", archivePath, "-C", pkgDir, entry)
+	cmd := exec.Command("tar", "-czf", "artifact.tar.gz", "-C", "pkg", entry)
+	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "COPYFILE_DISABLE=1")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
