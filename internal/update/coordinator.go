@@ -6,11 +6,14 @@ import (
 	"errors"
 	"net"
 	"os"
+	"runtime"
 	"sync"
 	"time"
 
 	wailsupdater "github.com/wailsapp/wails/v3/pkg/updater"
 )
+
+var runtimeGOOS = runtime.GOOS
 
 const (
 	StateIdle           = "idle"
@@ -272,20 +275,35 @@ func (c *Coordinator) clearAcceptanceLocked() {
 }
 
 func (c *Coordinator) BindWailsUpdater(updater *wailsupdater.Updater) error {
-	if updater == nil {
-		return errors.New("Wails updater is nil")
-	}
 	c.mu.Lock()
 	if c.current.Distribution != "desktop" {
 		c.mu.Unlock()
 		return errors.New("Wails updater is only valid for desktop builds")
 	}
-	provider := &WailsProvider{Client: c.client, Current: c.current, Release: c.release}
-	installer := &WailsInstaller{
-		Updater: updater, Provider: provider,
-		ProtectedDataPaths: append([]string(nil), c.protectedDataPaths...),
-		HealthURL:          c.desktopHealthURL, Arguments: append([]string(nil), c.desktopArguments...),
-		WorkingDirectory: c.desktopWorkingDirectory, Shutdown: c.desktopShutdown,
+	var installer Installer
+	if runtimeGOOS == "darwin" {
+		if updater == nil {
+			c.mu.Unlock()
+			return errors.New("Wails updater is nil")
+		}
+		provider := &WailsProvider{Client: c.client, Current: c.current, Release: c.release}
+		installer = &WailsInstaller{
+			Updater: updater, Provider: provider,
+			ProtectedDataPaths: append([]string(nil), c.protectedDataPaths...),
+			HealthURL:          c.desktopHealthURL, Arguments: append([]string(nil), c.desktopArguments...),
+			WorkingDirectory: c.desktopWorkingDirectory, Shutdown: c.desktopShutdown,
+		}
+	} else {
+		executable, err := os.Executable()
+		if err != nil {
+			c.mu.Unlock()
+			return err
+		}
+		installer = &BinaryInstaller{
+			Client: c.client, Current: c.current, Executable: executable,
+			HealthURL: c.desktopHealthURL, Arguments: append([]string(nil), c.desktopArguments...),
+			WorkingDirectory: c.desktopWorkingDirectory, Shutdown: c.desktopShutdown,
+		}
 	}
 	c.installer = installer
 	needsStage := c.state == StateAvailable && c.release != nil && c.staged == nil

@@ -31,6 +31,28 @@ func mockCheckServiceURL(t *testing.T) string {
 	return server.URL
 }
 
+func TestCoordinatorBindsExecutableInstallerForLinuxDesktop(t *testing.T) {
+	originalGOOS := runtimeGOOS
+	runtimeGOOS = "linux"
+	t.Cleanup(func() { runtimeGOOS = originalGOOS })
+
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json")})
+	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionDesktop}, "stable", NewDrainManager(nil, nil, 0, nil), nil, false, "", nil)
+	coordinator.SetDesktopRelaunchContext("http://127.0.0.1:3001/api/system/health", []string{"openvibely-desktop"}, t.TempDir(), func() {})
+	if err := coordinator.BindWailsUpdater(nil); err != nil {
+		t.Fatal(err)
+	}
+	coordinator.mu.RLock()
+	installer, ok := coordinator.installer.(*BinaryInstaller)
+	coordinator.mu.RUnlock()
+	if !ok {
+		t.Fatalf("installer = %T, want *BinaryInstaller", coordinator.installer)
+	}
+	if installer.Current.Distribution != buildinfo.DistributionDesktop || installer.Current.OS != "linux" || installer.HealthURL == "" {
+		t.Fatalf("installer config = %#v health=%q", installer.Current, installer.HealthURL)
+	}
+}
+
 func TestCoordinatorDesktopRestartRequiresJournaledHealthOutcome(t *testing.T) {
 	root := t.TempDir()
 	drainPath := filepath.Join(root, "drain.json")

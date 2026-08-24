@@ -752,6 +752,41 @@ func TestBinaryInstallerRejectsUnsafeOrAmbiguousPackages(t *testing.T) {
 	}
 }
 
+func TestBinaryInstallerIgnoresArchiveMetadataEntries(t *testing.T) {
+	payload := []byte("new-openvibely")
+	for name, tc := range map[string]struct {
+		format  string
+		archive []byte
+	}{
+		"zip apple metadata": {
+			format:  "zip",
+			archive: zipBinaryFixtures(t, map[string][]byte{"openvibely-desktop": payload, "._openvibely-desktop": []byte("metadata"), "__MACOSX/._openvibely-desktop": []byte("metadata")}),
+		},
+		"tar apple metadata": {
+			format: "tar.gz",
+			archive: tarGzipBinaryFixtures(t, []tarBinaryFixture{
+				{name: "._openvibely-desktop", payload: []byte("metadata")},
+				{name: "openvibely-desktop", payload: payload},
+				{name: "__MACOSX/._openvibely-desktop", payload: []byte("metadata")},
+			}),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			output := filepath.Join(t.TempDir(), "openvibely-new")
+			if err := extractPackagedBinary(bytes.NewReader(tc.archive), int64(len(tc.archive)), tc.format, output); err != nil {
+				t.Fatal(err)
+			}
+			got, err := os.ReadFile(output)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got, payload) {
+				t.Fatalf("payload = %q, want %q", got, payload)
+			}
+		})
+	}
+}
+
 func zipBinaryFixture(t *testing.T, name string, payload []byte) []byte {
 	return zipBinaryFixtures(t, map[string][]byte{name: payload})
 }
@@ -782,17 +817,36 @@ type tarBinaryFixture struct {
 	payload []byte
 }
 
+type tarFixture struct {
+	name     string
+	payload  []byte
+	mode     int64
+	typeflag byte
+}
+
 func tarGzipBinaryFixture(t *testing.T, name string, payload []byte) []byte {
 	return tarGzipBinaryFixtures(t, []tarBinaryFixture{{name: name, payload: payload}})
 }
 
 func tarGzipBinaryFixtures(t *testing.T, entries []tarBinaryFixture) []byte {
+	fixtures := make([]tarFixture, 0, len(entries))
+	for _, entry := range entries {
+		fixtures = append(fixtures, tarFixture{name: entry.name, payload: entry.payload, mode: 0o755, typeflag: tar.TypeReg})
+	}
+	return tarGzipFixtures(t, fixtures)
+}
+
+func tarGzipFixtures(t *testing.T, entries []tarFixture) []byte {
 	t.Helper()
 	var output bytes.Buffer
 	gzipWriter := gzip.NewWriter(&output)
 	tarWriter := tar.NewWriter(gzipWriter)
 	for _, entry := range entries {
-		if err := tarWriter.WriteHeader(&tar.Header{Name: entry.name, Mode: 0o755, Size: int64(len(entry.payload)), Typeflag: tar.TypeReg}); err != nil {
+		mode := entry.mode
+		if mode == 0 {
+			mode = 0o644
+		}
+		if err := tarWriter.WriteHeader(&tar.Header{Name: entry.name, Mode: mode, Size: int64(len(entry.payload)), Typeflag: entry.typeflag}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := tarWriter.Write(entry.payload); err != nil {

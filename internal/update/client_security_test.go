@@ -135,6 +135,24 @@ func TestVerifyReleaseRejectsEveryUntrustedMetadataClass(t *testing.T) {
 	})
 }
 
+func TestVerifyReleaseAcceptsLinuxDesktopExecutableTarget(t *testing.T) {
+	public, private, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	metadata := ReleaseMetadata{SchemaVersion: 1, Version: "0.6.0", Commit: "def", Channel: "stable", PublishedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour), ReleaseNotesURL: "https://openvibely.ai/releases/0.6.0", MinimumUpdaterVersion: "0.1.0", Targets: []Target{{ID: "download-desktop-linux-amd64", Kind: "executable", OS: "linux", Arch: "amd64", URL: "https://downloads.openvibely.ai/openvibely-desktop.tar.gz", Filename: "openvibely-desktop.tar.gz", Filetype: "tar.gz", Size: 3, SHA256: hex.EncodeToString(make([]byte, 32))}}}
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "state.json"), PublicKeys: map[string]ed25519.PublicKey{"release": public}, Now: func() time.Time { return now }})
+	current := CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionDesktop}
+	release, err := client.verifyRelease(signedCheckResponse(t, private, metadata), current, "", now)
+	if err != nil {
+		t.Fatalf("linux desktop executable release: %v", err)
+	}
+	if release.Target.Kind != "executable" {
+		t.Fatalf("target kind = %q, want executable", release.Target.Kind)
+	}
+}
+
 func TestVerifyReleaseDowngradesNewerUpdaterRequirementToManual(t *testing.T) {
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

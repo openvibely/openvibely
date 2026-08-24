@@ -398,8 +398,12 @@ func (c *Client) verifyRelease(response CheckResponse, current CurrentBuild, hig
 	}
 	switch current.Distribution {
 	case buildinfo.DistributionDesktop:
-		if selected.Kind != "app_bundle" {
-			return nil, errors.New("desktop release target must be an app bundle")
+		if current.OS == "darwin" {
+			if selected.Kind != "app_bundle" {
+				return nil, errors.New("macOS desktop release target must be an app bundle")
+			}
+		} else if selected.Kind != "executable" {
+			return nil, errors.New("desktop release target must be an executable")
 		}
 	case buildinfo.DistributionBinary:
 		if selected.Kind != "binary" && selected.Kind != "executable" {

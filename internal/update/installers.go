@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -1020,10 +1021,19 @@ func extractPackagedBinary(reader io.Reader, archiveSize int64, format, destinat
 		if openErr != nil {
 			return openErr
 		}
-		if len(zr.File) != 1 {
+		var entry *zip.File
+		for _, candidate := range zr.File {
+			if ignoredPackagedArchiveEntry(candidate.Name, candidate.FileInfo().IsDir(), 0) {
+				continue
+			}
+			if entry != nil {
+				return errors.New("binary zip package must contain exactly one executable")
+			}
+			entry = candidate
+		}
+		if entry == nil {
 			return errors.New("binary zip package must contain exactly one executable")
 		}
-		entry := zr.File[0]
 		if !validPackagedBinaryName(entry.Name) || !entry.Mode().IsRegular() || entry.UncompressedSize64 > maxPackagedBinarySize {
 			return errors.New("binary zip package contains an invalid executable entry")
 		}
@@ -1040,9 +1050,17 @@ func extractPackagedBinary(reader io.Reader, archiveSize int64, format, destinat
 		}
 		defer gz.Close()
 		tr := tar.NewReader(gz)
-		header, nextErr := tr.Next()
-		if nextErr != nil {
-			return nextErr
+		var header *tar.Header
+		for {
+			candidate, nextErr := tr.Next()
+			if nextErr != nil {
+				return nextErr
+			}
+			if ignoredPackagedArchiveEntry(candidate.Name, candidate.FileInfo().IsDir(), candidate.Typeflag) {
+				continue
+			}
+			header = candidate
+			break
 		}
 		if !validPackagedBinaryName(header.Name) || header.Typeflag != tar.TypeReg || header.Size < 0 || header.Size > maxPackagedBinarySize {
 			return errors.New("binary tar package contains an invalid executable entry")
@@ -1050,8 +1068,20 @@ func extractPackagedBinary(reader io.Reader, archiveSize int64, format, destinat
 		payload, mode, expectedSize = io.LimitReader(tr, header.Size), os.FileMode(header.Mode), header.Size
 		defer func() {
 			if err == nil {
-				if _, nextErr := tr.Next(); nextErr != io.EOF {
+				for {
+					next, nextErr := tr.Next()
+					if nextErr == io.EOF {
+						return
+					}
+					if nextErr != nil {
+						err = errors.New("binary tar package must contain exactly one executable")
+						return
+					}
+					if ignoredPackagedArchiveEntry(next.Name, next.FileInfo().IsDir(), next.Typeflag) {
+						continue
+					}
 					err = errors.New("binary tar package must contain exactly one executable")
+					return
 				}
 			}
 		}()
@@ -1083,8 +1113,21 @@ func extractPackagedBinary(reader io.Reader, archiveSize int64, format, destinat
 	return syncDirectory(filepath.Dir(destination))
 }
 
+func ignoredPackagedArchiveEntry(name string, isDir bool, tarType byte) bool {
+	clean := strings.TrimPrefix(filepath.ToSlash(name), "./")
+	if clean == "" || isDir {
+		return true
+	}
+	switch tarType {
+	case tar.TypeXHeader, tar.TypeXGlobalHeader:
+		return true
+	}
+	base := path.Base(clean)
+	return base == ".DS_Store" || strings.HasPrefix(base, "._") || strings.HasPrefix(clean, "__MACOSX/")
+}
+
 func validPackagedBinaryName(name string) bool {
-	return name == "openvibely" || name == "openvibely.exe"
+	return name == "openvibely" || name == "openvibely.exe" || name == "openvibely-desktop" || name == "openvibely-desktop.exe"
 }
 
 func (i *BinaryInstaller) Apply(ctx context.Context, value any) error {
