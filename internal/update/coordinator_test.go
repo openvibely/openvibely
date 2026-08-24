@@ -395,6 +395,80 @@ func TestCoordinatorCheckDoesNotOverwriteActiveTransition(t *testing.T) {
 	}
 }
 
+func TestCoordinatorStartupCheckDoesNotRacePackagedRecoveryOutcome(t *testing.T) {
+	requests := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case requests <- struct{}{}:
+		default:
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"schema_version":1,"update_available":false}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(ClientConfig{
+		ServiceURL: server.URL,
+		Channel:    "stable",
+		StatePath:  filepath.Join(t.TempDir(), "client.json"),
+		HTTPClient: server.Client(),
+		Random:     func(time.Duration) time.Duration { return 0 },
+	})
+	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionDesktop}, "stable", NewDrainManager(nil, nil, 0, nil), nil, false, "", nil)
+	coordinator.state = StateRestarting
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	coordinator.StartChecks(ctx)
+	coordinator.mu.Lock()
+	coordinator.state = StateRolledBack
+	coordinator.mu.Unlock()
+
+	select {
+	case <-requests:
+		t.Fatal("startup check raced packaged recovery and could overwrite its terminal outcome")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := coordinator.Snapshot().State; got != StateRolledBack {
+		t.Fatalf("recovery outcome = %q, want %q", got, StateRolledBack)
+	}
+}
+
+func TestCoordinatorStartupCheckStillRunsFromIdle(t *testing.T) {
+	requests := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests <- struct{}{}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"schema_version":1,"update_available":false}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(ClientConfig{
+		ServiceURL: server.URL,
+		Channel:    "stable",
+		StatePath:  filepath.Join(t.TempDir(), "client.json"),
+		HTTPClient: server.Client(),
+		Random:     func(time.Duration) time.Duration { return 0 },
+	})
+	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionDesktop}, "stable", NewDrainManager(nil, nil, 0, nil), nil, false, "", nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	coordinator.StartChecks(ctx)
+
+	select {
+	case <-requests:
+	case <-time.After(time.Second):
+		t.Fatal("idle coordinator did not perform its startup update check")
+	}
+	deadline := time.Now().Add(time.Second)
+	for coordinator.Snapshot().State == StateChecking && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := coordinator.Snapshot().State; got != StateIdle {
+		t.Fatalf("startup check state = %q, want %q", got, StateIdle)
+	}
+}
+
 func TestCoordinatorRejectsConcurrentApplyAndFailedRemoteCancelKeepsDrain(t *testing.T) {
 	now := time.Unix(1000, 0).UTC()
 	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json"), Now: func() time.Time { return now }})

@@ -1369,8 +1369,17 @@ func (c *Coordinator) StartRecovery(ctx context.Context) {
 
 func (c *Coordinator) StartChecks(ctx context.Context) {
 	c.checksOnce.Do(func() {
+		// Capture startup eligibility before launching the goroutine. Recovery can
+		// settle a restarting packaged update immediately after Start returns; an
+		// asynchronous initial Check must not race that settlement and erase the
+		// terminal outcome before callers can observe it.
+		c.mu.RLock()
+		initialCheck := !isTransitionState(c.state) && !c.accepted && c.state != StateSucceeded && c.state != StateRolledBack
+		c.mu.RUnlock()
 		go func() {
-			_ = c.Check(ctx)
+			if initialCheck {
+				_ = c.Check(ctx)
+			}
 			ticker := time.NewTicker(time.Minute)
 			defer ticker.Stop()
 			for {
