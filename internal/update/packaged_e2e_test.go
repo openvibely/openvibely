@@ -193,16 +193,21 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 	}
 }
 
-func linuxDesktopTestEnvironment() []string {
-	if runtime.GOOS != "linux" {
+func desktopTestEnvironment() []string {
+	if runtime.GOOS == "darwin" {
 		return nil
 	}
-	return []string{
+	env := []string{
 		"OPENVIBELY_UPDATE_E2E_HEADLESS_DESKTOP=1",
-		"WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1",
-		"NO_AT_BRIDGE=1",
-		"GTK_A11Y=none",
 	}
+	if runtime.GOOS == "linux" {
+		env = append(env,
+			"WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1",
+			"NO_AT_BRIDGE=1",
+			"GTK_A11Y=none",
+		)
+	}
+	return env
 }
 
 func testPackagedUpdateE2EDesktopHelperSucceeds(t *testing.T) {
@@ -501,7 +506,7 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=5000",
 		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
 	)
-	cmd.Env = append(cmd.Env, linuxDesktopTestEnvironment()...)
+	cmd.Env = append(cmd.Env, desktopTestEnvironment()...)
 	cmd.Stdout = stdoutLog
 	cmd.Stderr = stderrLog
 	if err := cmd.Start(); err != nil {
