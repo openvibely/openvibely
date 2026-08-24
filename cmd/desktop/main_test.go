@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/update"
@@ -78,6 +79,51 @@ func TestEnsureDesktopPluginRootUsesExternalApplicationData(t *testing.T) {
 	want := filepath.Join(appData, ".openvibely", "plugins")
 	if got := os.Getenv("OPENVIBELY_PLUGIN_ROOT"); got != want {
 		t.Fatalf("desktop plugin root = %q, want %q", got, want)
+	}
+}
+
+func TestDesktopCommandRoutesPackagedUpdateHelpers(t *testing.T) {
+	tests := []struct {
+		name          string
+		command       string
+		handled       bool
+		errorContains string
+	}{
+		{name: "desktop helper", command: "desktop-update-helper", handled: true, errorContains: "invalid desktop-update-helper arguments"},
+		{name: "binary helper", command: "update-helper", handled: true, errorContains: "unsupported update-helper argument"},
+		{name: "normal desktop launch", command: "serve", handled: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			handled, err := runDesktopHelperCommand(context.Background(), []string{"openvibely-desktop", test.command, "--unsupported", "value"}, strings.NewReader(""))
+			if handled != test.handled {
+				t.Fatalf("handled = %t, want %t", handled, test.handled)
+			}
+			if test.handled && err == nil {
+				t.Fatal("helper command unexpectedly accepted invalid arguments")
+			}
+			if test.errorContains != "" && !strings.Contains(err.Error(), test.errorContains) {
+				t.Fatalf("helper command error = %q, want it to contain %q", err, test.errorContains)
+			}
+			if !test.handled && err != nil {
+				t.Fatalf("normal desktop command returned error: %v", err)
+			}
+		})
+	}
+}
+
+func TestDesktopBinaryHelperIntegrationTimeouts(t *testing.T) {
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "2500")
+	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "7500")
+	var cfg update.BinaryHelperConfig
+	if err := applyUpdateIntegrationTimeouts(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WaitTimeout != 2500*time.Millisecond {
+		t.Fatalf("wait timeout = %s", cfg.WaitTimeout)
+	}
+	if cfg.ValidationTimeout != 7500*time.Millisecond {
+		t.Fatalf("validation timeout = %s", cfg.ValidationTimeout)
 	}
 }
 

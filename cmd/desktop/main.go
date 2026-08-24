@@ -6,15 +6,17 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
-
-	"github.com/openvibely/openvibely/internal/applog"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/server"
 	"github.com/openvibely/openvibely/internal/update"
@@ -32,14 +34,7 @@ type desktopLauncher func(baseURL string, onShutdown func(), coordinator *update
 
 func main() {
 	log.SetOutput(os.Stderr)
-	if len(os.Args) > 1 && os.Args[1] == "desktop-update-helper" {
-		cfg, err := update.ParseDesktopHelperArgs(os.Args[2:])
-		if err == nil {
-			err = update.LoadDesktopHelperRelaunch(os.Stdin, &cfg)
-		}
-		if err == nil {
-			err = update.RunDesktopHelper(context.Background(), cfg)
-		}
+	if handled, err := runDesktopHelperCommand(context.Background(), os.Args, os.Stdin); handled {
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -61,6 +56,62 @@ func main() {
 	if err := runDesktop(cfg, startDesktopBackend, launchNativeWindow); err != nil {
 		log.Fatalf("[desktop] failed: %v", err)
 	}
+}
+
+func runDesktopHelperCommand(ctx context.Context, args []string, stdin io.Reader) (bool, error) {
+	if len(args) < 2 {
+		return false, nil
+	}
+	switch args[1] {
+	case "desktop-update-helper":
+		cfg, err := update.ParseDesktopHelperArgs(args[2:])
+		if err == nil {
+			err = update.LoadDesktopHelperRelaunch(stdin, &cfg)
+		}
+		if err == nil {
+			err = update.RunDesktopHelper(ctx, cfg)
+		}
+		return true, err
+	case "update-helper":
+		cfg, err := update.ParseBinaryHelperArgs(args[2:])
+		if err == nil {
+			if cfg.RelaunchMetadataPath != "" {
+				err = update.LoadBinaryHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
+			} else {
+				err = update.LoadBinaryHelperRelaunch(stdin, &cfg)
+			}
+		}
+		if err == nil {
+			err = applyUpdateIntegrationTimeouts(&cfg)
+		}
+		if err == nil {
+			err = update.RunBinaryHelper(ctx, cfg)
+		}
+		return true, err
+	default:
+		return false, nil
+	}
+}
+
+func applyUpdateIntegrationTimeouts(cfg *update.BinaryHelperConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
+		milliseconds, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("parse update integration wait timeout: %w", err)
+		}
+		cfg.WaitTimeout = time.Duration(milliseconds) * time.Millisecond
+	}
+	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS"); value != "" {
+		milliseconds, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("parse update integration validation timeout: %w", err)
+		}
+		cfg.ValidationTimeout = time.Duration(milliseconds) * time.Millisecond
+	}
+	return nil
 }
 
 func ensureDesktopPluginRoot(cfg *config.Config) error {
