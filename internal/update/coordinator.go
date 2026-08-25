@@ -811,8 +811,17 @@ func (c *Coordinator) waitAndApply(ctx context.Context, release VerifiedRelease,
 				continue
 			}
 			restartValidation := false
+			var restartShutdown restartShutdownInstaller
 			if restartInstaller, ok := installer.(restartValidatingInstaller); ok {
 				restartValidation = restartInstaller.RequiresRestartValidation()
+			}
+			if restartValidation {
+				var ok bool
+				restartShutdown, ok = installer.(restartShutdownInstaller)
+				if !ok {
+					c.abortGeneration(generation, errors.New("restart-validating installer cannot request shutdown"))
+					return
+				}
 			}
 			if restartValidation {
 				if err := c.persistOperationState(generation, StateRestarting, ""); err != nil {
@@ -843,9 +852,7 @@ func (c *Coordinator) waitAndApply(ctx context.Context, release VerifiedRelease,
 				return
 			}
 			if restartValidation {
-				if restartInstaller, ok := installer.(restartShutdownInstaller); ok {
-					restartInstaller.ShutdownForRestart()
-				}
+				restartShutdown.ShutdownForRestart()
 				return
 			}
 			if !c.persistOperationStateWithRetry(ctx, generation, StateValidating, "") {

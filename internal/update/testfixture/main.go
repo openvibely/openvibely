@@ -74,6 +74,7 @@ func main() {
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
+		installer.ShutdownForRestart()
 	})
 	server.Handler = mux
 	stopping := make(chan os.Signal, 1)

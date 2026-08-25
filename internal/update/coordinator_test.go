@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -828,6 +829,10 @@ type restartingCountingInstaller struct {
 	shutdowns atomic.Int32
 }
 
+type restartWithoutShutdownInstaller struct{ countingInstaller }
+
+func (i *restartWithoutShutdownInstaller) RequiresRestartValidation() bool { return true }
+
 func (i *restartingCountingInstaller) RequiresRestartValidation() bool { return true }
 func (i *restartingCountingInstaller) ShutdownForRestart()             { i.shutdowns.Add(1) }
 func (i *restartingCountingInstaller) Validate(context.Context, ReleaseMetadata) error {
@@ -1220,6 +1225,28 @@ func TestCoordinatorRestartInstallerDefersValidationUntilNewProcess(t *testing.T
 	}
 	if drain.Status().State == DrainStateIdle {
 		t.Fatal("restart validation reopened admission before the new process validated its version")
+	}
+}
+
+func TestCoordinatorRejectsRestartInstallerWithoutShutdown(t *testing.T) {
+	now := time.Unix(1000, 0).UTC()
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(t.TempDir(), "client.json"), Now: func() time.Time { return now }})
+	drain := NewDrainManager(nil, nil, 0, func() time.Time { return now })
+	installer := &restartWithoutShutdownInstaller{}
+	coordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, installer, false, "", nil)
+	coordinator.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}}
+	coordinator.staged = "staged"
+	coordinator.state = StateAvailable
+
+	if err := coordinator.Apply(context.Background(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	waitForCoordinatorState(t, coordinator, StateFailed)
+	if installer.applies.Load() != 0 {
+		t.Fatalf("installer applies = %d, want 0", installer.applies.Load())
+	}
+	if snapshot := coordinator.Snapshot(); !strings.Contains(snapshot.Error, "cannot request shutdown") || snapshot.Drain.State != DrainStateIdle {
+		t.Fatalf("snapshot=%#v", snapshot)
 	}
 }
 

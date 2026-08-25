@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -508,6 +509,11 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 	})
 
 	baseURL := waitForDesktopBaseURLFromLogs(t, readLogs)
+	parsedBaseURL, err := url.Parse(baseURL)
+	if err != nil || parsedBaseURL.Port() == "" {
+		t.Fatalf("parse desktop backend URL %q: %v", baseURL, err)
+	}
+	t.Cleanup(func() { killPort(t, parsedBaseURL.Port()) })
 	waitForHealthVersion(t, baseURL, "0.5.0")
 	waitForStagedUpdate(t, baseURL)
 	resp, err := http.Post(baseURL+"/api/system/update/apply", "application/json", nil)
