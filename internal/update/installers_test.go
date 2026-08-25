@@ -248,7 +248,6 @@ func TestAppBundleUpdateHelperHandoffPassesExecutableRelativeMetadata(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	shutdown := false
 	var helper *exec.Cmd
 	if err := startPackagedUpdateHelperHandoff(context.Background(), packagedUpdateHelperHandoffConfig{
 		Staged:           staged,
@@ -263,12 +262,11 @@ func TestAppBundleUpdateHelperHandoffPassesExecutableRelativeMetadata(t *testing
 		MetadataTransport:  packagedHelperMetadataStdin,
 		StartHelper:        func(cmd *exec.Cmd) error { helper = cmd; return nil },
 		AwaitHelperHandoff: acknowledgePackagedUpdateHelperForTest,
-		Shutdown:           func() { shutdown = true },
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if helper == nil || !shutdown {
-		t.Fatalf("helper=%#v shutdown=%v", helper, shutdown)
+	if helper == nil {
+		t.Fatal("helper was not started")
 	}
 	if strings.Contains(strings.Join(helper.Args, "\x00"), "--relaunch-metadata") {
 		t.Fatalf("app-bundle update helper used metadata file argv: %q", helper.Args)
@@ -1382,8 +1380,12 @@ func TestBinaryInstallerRecoveryWaitsForDurableHelperReadiness(t *testing.T) {
 	if err := installer.RecoverPackagedUpdateRestart(context.Background(), bindBinaryRestartOrigin(staged, installer)); err != nil {
 		t.Fatal(err)
 	}
-	if !shutdown || command == nil {
+	if shutdown || command == nil {
 		t.Fatalf("shutdown=%v command=%#v", shutdown, command)
+	}
+	installer.ShutdownForRestart()
+	if !shutdown {
+		t.Fatal("shutdown was not requested after recovery returned")
 	}
 	joined := strings.Join(command.Args, " ")
 	for _, required := range []string{"--recovery true", "--running-version 0.5.0", "--outcome-id operation-1"} {

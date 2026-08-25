@@ -1232,6 +1232,14 @@ func (c *Coordinator) recoverDeadPackagedUpdateHelper(ctx context.Context, stage
 	}
 
 	startRecovery := func() bool {
+		recovery, ok := c.installer.(packagedUpdateRestartRecoveryInstaller)
+		if !ok {
+			return false
+		}
+		restartShutdown, ok := c.installer.(restartShutdownInstaller)
+		if !ok {
+			return false
+		}
 		if err := writePackagedUpdateHelperRecoveryClaimWithRetry(ctx, staged); err != nil {
 			return false
 		}
@@ -1239,11 +1247,11 @@ func (c *Coordinator) recoverDeadPackagedUpdateHelper(ctx context.Context, stage
 			return false
 		}
 		leaseHeld = false
-		recovery, ok := c.installer.(packagedUpdateRestartRecoveryInstaller)
-		if !ok {
+		if err := recovery.RecoverPackagedUpdateRestart(ctx, staged); err != nil {
 			return false
 		}
-		return recovery.RecoverPackagedUpdateRestart(ctx, staged) == nil
+		restartShutdown.ShutdownForRestart()
+		return true
 	}
 
 	if outcome.State == packagedUpdateOutcomeRollingBack {

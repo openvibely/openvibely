@@ -202,7 +202,6 @@ type packagedUpdateHelperHandoffConfig struct {
 	MetadataTransport  packagedUpdateHelperMetadataTransport
 	StartHelper        func(*exec.Cmd) error
 	AwaitHelperHandoff func(context.Context, LocalStagedUpdate) error
-	Shutdown           func()
 	Errors             packagedUpdateHelperHandoffErrors
 
 	OnSetupFailure   func(helperPath string)
@@ -289,9 +288,6 @@ func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHel
 			}
 			return wrapPackagedHelperHandoffError(cfg.Errors.ConfirmHandoff, err)
 		}
-	}
-	if cfg.Shutdown != nil {
-		cfg.Shutdown()
 	}
 	return nil
 }
@@ -448,11 +444,7 @@ func (i *WailsInstaller) RecoveryReady() bool {
 	return strings.TrimSpace(i.HealthURL) != "" && i.Shutdown != nil
 }
 func (i *WailsInstaller) RecoverPackagedUpdateRestart(ctx context.Context, staged LocalStagedUpdate) error {
-	if err := i.startAppBundleUpdateHelper(ctx, staged, true); err != nil {
-		return err
-	}
-	i.ShutdownForRestart()
-	return nil
+	return i.startAppBundleUpdateHelper(ctx, staged, true)
 }
 
 func currentApplicationBundle() (string, error) {
@@ -1209,7 +1201,6 @@ func (i *BinaryInstaller) RecoverPackagedUpdateRestart(ctx context.Context, stag
 		RelaunchMetadata:  packagedUpdateRelaunchMetadata{Arguments: append([]string(nil), i.Arguments...), WorkingDirectory: i.WorkingDirectory},
 		MetadataTransport: packagedHelperMetadataFile,
 		StartHelper:       i.StartHelper,
-		Shutdown:          i.Shutdown,
 		OnStartFailure: func(_, metadataPath string) {
 			_ = os.Remove(metadataPath)
 		},

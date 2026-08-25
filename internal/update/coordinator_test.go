@@ -135,11 +135,11 @@ func TestCoordinatorDesktopRestartRequiresJournaledHealthOutcome(t *testing.T) {
 	defer cancel()
 	restarted.StartRecovery(ctx)
 	deadline := time.Now().Add(time.Second)
-	for installer.recoveries.Load() == 0 && time.Now().Before(deadline) {
+	for (installer.recoveries.Load() == 0 || installer.shutdowns.Load() == 0) && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if installer.recoveries.Load() != 1 {
-		t.Fatalf("desktop health recovery handoffs=%d", installer.recoveries.Load())
+	if installer.recoveries.Load() != 1 || installer.shutdowns.Load() != 1 || installer.earlyShutdown.Load() {
+		t.Fatalf("desktop health recovery handoffs=%d shutdowns=%d early=%v", installer.recoveries.Load(), installer.shutdowns.Load(), installer.earlyShutdown.Load())
 	}
 	if snapshot := restarted.Snapshot(); snapshot.State != StateRestarting || snapshot.Drain.State == DrainStateIdle {
 		t.Fatalf("desktop drain released without journaled health success: %#v", snapshot)
@@ -250,11 +250,22 @@ func TestCoordinatorRestartRecoveryConfirmsVersionAndReopensDurableDrain(t *test
 
 type fakeBinaryRestartRecoveryInstaller struct {
 	countingInstaller
-	recoveries atomic.Int32
+	recoveries    atomic.Int32
+	shutdowns     atomic.Int32
+	recovering    atomic.Bool
+	earlyShutdown atomic.Bool
 }
 
 func (i *fakeBinaryRestartRecoveryInstaller) RequiresRestartValidation() bool { return true }
+func (i *fakeBinaryRestartRecoveryInstaller) ShutdownForRestart() {
+	if i.recovering.Load() {
+		i.earlyShutdown.Store(true)
+	}
+	i.shutdowns.Add(1)
+}
 func (i *fakeBinaryRestartRecoveryInstaller) RecoverPackagedUpdateRestart(context.Context, LocalStagedUpdate) error {
+	i.recovering.Store(true)
+	defer i.recovering.Store(false)
 	i.recoveries.Add(1)
 	return nil
 }
@@ -343,8 +354,8 @@ func TestCoordinatorDeadHelperRecoveryClaimsOwnershipBeforeLeaseTransfer(t *test
 	if err != nil || claim.State != packagedUpdateOutcomeRecovering {
 		t.Fatalf("recovery ownership claim = %#v, err = %v", claim, err)
 	}
-	if installer.recoveries.Load() != 1 || !drain.Owns(status.Generation) {
-		t.Fatalf("recoveries=%d owns=%v", installer.recoveries.Load(), drain.Owns(status.Generation))
+	if installer.recoveries.Load() != 1 || installer.shutdowns.Load() != 1 || !drain.Owns(status.Generation) {
+		t.Fatalf("recoveries=%d shutdowns=%d owns=%v", installer.recoveries.Load(), installer.shutdowns.Load(), drain.Owns(status.Generation))
 	}
 
 	started := false
