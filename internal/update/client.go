@@ -215,10 +215,10 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 	}
 	now := c.cfg.Now()
 	if !state.LastSuccessfulCheck.IsZero() && now.Sub(state.LastSuccessfulCheck) < 24*time.Hour {
-		return state.Cached, false, nil
+		return c.cachedReleaseForCurrent(state, current, now), false, nil
 	}
 	if now.Before(state.NextAttempt) {
-		return state.Cached, false, nil
+		return c.cachedReleaseForCurrent(state, current, now), false, nil
 	}
 
 	installIDPersistenceFailed := false
@@ -228,7 +228,7 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 	} else if state.InstallID == "" || state.InstallIDIssuedAt.Before(now.Add(-installIDRotationWindow)) {
 		installID, err := generateInstallID()
 		if err != nil {
-			return state.Cached, true, err
+			return c.cachedReleaseForCurrent(state, current, now), true, err
 		}
 		state.InstallID = installID
 		state.InstallIDIssuedAt = now
@@ -260,12 +260,12 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 	resp, err := c.cfg.HTTPClient.Do(req)
 	if err != nil {
 		c.recordFailure(&state, now)
-		return state.Cached, true, err
+		return c.cachedReleaseForCurrent(state, current, now), true, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		c.recordFailure(&state, now)
-		return state.Cached, true, fmt.Errorf("update check returned HTTP %d", resp.StatusCode)
+		return c.cachedReleaseForCurrent(state, current, now), true, fmt.Errorf("update check returned HTTP %d", resp.StatusCode)
 	}
 	var response CheckResponse
 	limited := io.LimitReader(resp.Body, (4<<20)+1)
@@ -273,22 +273,22 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 	if readErr != nil || len(data) > 4<<20 {
 		c.recordFailure(&state, now)
 		if readErr != nil {
-			return state.Cached, true, readErr
+			return c.cachedReleaseForCurrent(state, current, now), true, readErr
 		}
-		return state.Cached, true, errors.New("update response exceeds size limit")
+		return c.cachedReleaseForCurrent(state, current, now), true, errors.New("update response exceeds size limit")
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if err := dec.Decode(&response); err != nil {
 		c.recordFailure(&state, now)
-		return state.Cached, true, err
+		return c.cachedReleaseForCurrent(state, current, now), true, err
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		c.recordFailure(&state, now)
-		return state.Cached, true, errors.New("update response contains trailing JSON")
+		return c.cachedReleaseForCurrent(state, current, now), true, errors.New("update response contains trailing JSON")
 	}
 	if response.SchemaVersion != checkSchemaVersion {
 		c.recordFailure(&state, now)
-		return state.Cached, true, fmt.Errorf("unsupported update schema_version %d", response.SchemaVersion)
+		return c.cachedReleaseForCurrent(state, current, now), true, fmt.Errorf("unsupported update schema_version %d", response.SchemaVersion)
 	}
 	if current.Distribution == buildinfo.DistributionSource {
 		state.LastSuccessfulCheck, state.Failures, state.NextAttempt = now, 0, now.Add(24*time.Hour+c.cfg.Random(time.Hour))
@@ -304,7 +304,7 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 		verified, err = c.verifyRelease(response, current, state.HighestAcceptedVersion, now)
 		if err != nil {
 			c.recordFailure(&state, now)
-			return state.Cached, true, err
+			return c.cachedReleaseForCurrent(state, current, now), true, err
 		}
 		state.HighestAcceptedVersion, state.MetadataExpiresAt, state.Cached = verified.Metadata.Version, verified.Metadata.ExpiresAt, verified
 	} else {
@@ -316,6 +316,26 @@ func (c *Client) CheckIfDue(ctx context.Context, current CurrentBuild) (*Verifie
 		saveErr = nil
 	}
 	return verified, true, saveErr
+}
+
+func (c *Client) cachedReleaseForCurrent(state persistedClientState, current CurrentBuild, now time.Time) *VerifiedRelease {
+	if state.Cached == nil {
+		return nil
+	}
+	metadata := state.Cached.Metadata
+	if metadata.Channel != c.cfg.Channel {
+		return nil
+	}
+	if !metadata.ExpiresAt.After(now) {
+		return nil
+	}
+	if compareVersions(metadata.Version, current.Version) <= 0 {
+		return nil
+	}
+	if state.HighestAcceptedVersion != "" && compareVersions(metadata.Version, state.HighestAcceptedVersion) < 0 {
+		return nil
+	}
+	return state.Cached
 }
 
 func (c *Client) verifyRelease(response CheckResponse, current CurrentBuild, highest string, now time.Time) (*VerifiedRelease, error) {

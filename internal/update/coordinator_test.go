@@ -31,6 +31,34 @@ func mockCheckServiceURL(t *testing.T) string {
 	return server.URL
 }
 
+func TestCoordinatorDoesNotExposePersistedReleaseOlderThanCurrent(t *testing.T) {
+	root := t.TempDir()
+	now := time.Unix(1700000000, 0).UTC()
+	client := NewClient(ClientConfig{ServiceURL: mockCheckServiceURL(t), Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }})
+	old := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.4.103"}, Distribution: buildinfo.DistributionBinary}, "stable", NewDrainManager(nil, nil, 0, nil), nil, false, "", nil)
+	if err := old.SetPersistence(filepath.Join(root, "coordinator.json")); err != nil {
+		t.Fatal(err)
+	}
+	old.mu.Lock()
+	old.state = StateAvailable
+	old.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.4.103", Channel: "stable", ExpiresAt: now.Add(time.Hour)}}
+	old.staged = "staged"
+	if err := old.persistLocked(); err != nil {
+		old.mu.Unlock()
+		t.Fatal(err)
+	}
+	old.mu.Unlock()
+
+	updated := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.4.104"}, Distribution: buildinfo.DistributionBinary}, "stable", NewDrainManager(nil, nil, 0, nil), nil, false, "", nil)
+	if err := updated.SetPersistence(filepath.Join(root, "coordinator.json")); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := updated.Snapshot()
+	if snapshot.State != StateIdle || snapshot.Release != nil || snapshot.Staged {
+		t.Fatalf("snapshot exposed stale release: %#v", snapshot)
+	}
+}
+
 func TestCoordinatorBindsExecutableInstallerForLinuxDesktop(t *testing.T) {
 	originalGOOS := runtimeGOOS
 	runtimeGOOS = "linux"

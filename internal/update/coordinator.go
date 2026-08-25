@@ -343,7 +343,16 @@ func (c *Coordinator) Visible() bool {
 }
 func (c *Coordinator) Snapshot() CoordinatorSnapshot {
 	c.mu.RLock()
-	snapshot := CoordinatorSnapshot{State: c.state, CurrentVersion: c.current.Version, Distribution: c.current.Distribution, Channel: c.channel, Release: c.release, ConfigurationError: c.configError, Error: c.lastError, Manual: c.manual, Staged: c.staged != nil}
+	state, release, staged, lastError := c.state, c.release, c.staged != nil, c.lastError
+	if release != nil && !c.releaseIsNewerThanCurrent(release) {
+		release = nil
+		staged = false
+		if state == StateAvailable || state == StateFailed {
+			state = StateIdle
+			lastError = ""
+		}
+	}
+	snapshot := CoordinatorSnapshot{State: state, CurrentVersion: c.current.Version, Distribution: c.current.Distribution, Channel: c.channel, Release: release, ConfigurationError: c.configError, Error: lastError, Manual: c.manual, Staged: staged}
 	provider := c.managedStateProvider
 	c.mu.RUnlock()
 	if c.drain != nil {
@@ -403,6 +412,10 @@ func (c *Coordinator) Check(ctx context.Context) error {
 		c.staged = nil
 	} else if release != nil && c.release == nil {
 		c.release = release
+	} else if c.release != nil && !c.releaseIsNewerThanCurrent(c.release) {
+		c.release = nil
+		c.staged = nil
+		c.lastError = ""
 	}
 	if c.release != nil {
 		c.state = StateAvailable
@@ -419,6 +432,16 @@ func (c *Coordinator) Check(ctx context.Context) error {
 		return c.Stage(ctx)
 	}
 	return nil
+}
+
+func (c *Coordinator) releaseIsNewerThanCurrent(release *VerifiedRelease) bool {
+	if release == nil {
+		return false
+	}
+	if release.Metadata.Channel != "" && release.Metadata.Channel != c.channel {
+		return false
+	}
+	return compareVersions(release.Metadata.Version, c.current.Version) > 0
 }
 func (c *Coordinator) Stage(ctx context.Context) error {
 	c.mu.Lock()

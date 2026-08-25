@@ -74,6 +74,66 @@ func TestClientRejectsUnsupportedSchema(t *testing.T) {
 	}
 }
 
+func TestCheckIfDueHidesCachedReleaseThatIsNotNewerThanCurrent(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	client := NewClient(ClientConfig{
+		ServiceURL: "https://updates.example.test",
+		Channel:    "stable",
+		StatePath:  statePath,
+		Now:        func() time.Time { return now },
+		Random:     func(time.Duration) time.Duration { return 0 },
+	})
+	if err := client.saveState(persistedClientState{
+		LastSuccessfulCheck: now.Add(-time.Hour),
+		Cached:              &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.4.103", Channel: "stable", ExpiresAt: now.Add(time.Hour)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	current := CurrentBuild{Build: buildinfo.Build{Version: "0.4.104", Commit: "abc", OS: "darwin", Arch: "arm64"}, Distribution: buildinfo.DistributionBinary}
+	release, checked, err := client.CheckIfDue(context.Background(), current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked {
+		t.Fatal("recent successful check should still throttle")
+	}
+	if release != nil {
+		t.Fatalf("stale cached release was exposed: %#v", release.Metadata)
+	}
+}
+
+func TestCheckIfDueHidesStaleCachedReleaseDuringRetryBackoff(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	client := NewClient(ClientConfig{
+		ServiceURL: "https://updates.example.test",
+		Channel:    "stable",
+		StatePath:  statePath,
+		Now:        func() time.Time { return now },
+		Random:     func(time.Duration) time.Duration { return 0 },
+	})
+	if err := client.saveState(persistedClientState{
+		NextAttempt: now.Add(time.Hour),
+		Cached:      &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.4.103", Channel: "stable", ExpiresAt: now.Add(time.Hour)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	current := CurrentBuild{Build: buildinfo.Build{Version: "0.4.104", Commit: "abc", OS: "linux", Arch: "amd64"}, Distribution: buildinfo.DistributionBinary}
+	release, checked, err := client.CheckIfDue(context.Background(), current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checked {
+		t.Fatal("retry backoff should skip network check")
+	}
+	if release != nil {
+		t.Fatalf("stale cached release was exposed during backoff: %#v", release.Metadata)
+	}
+}
+
 func TestCheckIfDueRetriesAfterReleaseVerificationFailureWithoutSuccessThrottle(t *testing.T) {
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
