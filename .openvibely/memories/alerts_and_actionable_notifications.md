@@ -2,9 +2,9 @@
 name: alerts_and_actionable_notifications
 type: project
 created: 2026-07-15
-updated: 2026-08-22
-source: after_complete_update
-source_id: 670ee91a928cec23138531be2cb9bc8d:2c6aaa44b5ac537d
+updated: 2026-08-23
+source: consolidation
+source_id: memory_consolidation_2026_08_23
 confidence: high
 title: Alerts and Actionable Notifications
 ---
@@ -30,6 +30,7 @@ Runtime tool contracts:
 - The structured runtime surface covers filtered/paginated listing, detail, atomic claim, implementation-task creation/linkage, explicit linkage, completion/failure, and claim release/retry.
 - Claims are lease-based and atomic. Explicit `lease_seconds` is validated as `1..86400`; omitted uses repository default.
 - `create_alert_implementation_task` requires a non-empty title/prompt and a notification currently claimed by the persisted caller task. It transactionally returns an already-linked task or creates a same-project Backlog/Pending system-agent task, links it, marks processing `implementation_task_linked`, and clears claim expiry. It does not start the task, mark processing complete, merge, release, or deploy.
+- Open duplication issue `#835`: Native alert implementation-task creation manually repeats core task-row creation/display-order/goal behavior that belongs in the shared transaction-capable `TaskRepo` creation path.
 - Maintained Native inbox execution lists approved notifications without a `read` filter, atomically creates/links one Backlog implementation task, executes the exact returned Task ID, and marks processing complete only after execution starts.
 - Because linkage removes rows from the unlinked result set, maintained and custom prompts must collect every stable paginated page before any claim/linkage/processing mutation; advancing offsets after mutation can skip eligible notifications.
 - Task-thread runtimes, including scheduled inbox runs, expose project-scoped `execute_tasks` required by Native inbox flow.
@@ -38,7 +39,7 @@ Runtime tool contracts:
 - If Native creation, linkage, or execution fails, the inbox records failed processing rather than reporting completion; claim release remains valid only before any task is linked.
 - Open gap `#352`: `complete_alert_processing` can mark an approved notification completed from a merely claimed state without requiring a linked implementation task.
 - Open gap `#612`: Automation-bound non-Native-Inbox tasks can list project-wide notification summaries because zero Native Inbox bindings are treated as unscoped project list; fix should fail closed or return no rows.
-- Resolved `#783`: Chat/runtime `decide_alert` records explicit user-directed approved/rejected/dismissed decisions for pending actionable notifications in Orchestrate mode without changing the browser Alerts approve/reject path. Missing, unknown, foreign-project, invalid-decision, and already-decided inputs fail without leaking cross-project details; approved notifications remain claimable by Native inbox flow while rejected/dismissed notifications are not claimable. PR `#814` passed a 2026-08-22 fresh strict read-only audit and its GitHub PR file blob SHAs matched audited local `HEAD` for all nine changed files.
+- Chat/runtime `decide_alert` records explicit user-directed approved/rejected/dismissed decisions for pending actionable notifications in Orchestrate mode without changing the browser Alerts approve/reject path. Missing, unknown, foreign-project, invalid-decision, and already-decided inputs fail without leaking cross-project details; approved notifications remain claimable by Native inbox flow while rejected/dismissed notifications are not claimable.
 - Slack, Telegram, Discord, and Email first-turn channel runtimes are constructed only after the channel Chat task is persisted, so channel lifecycle handlers receive trusted caller identity.
 - Alert lifecycle mutations publish project-scoped alert invalidation events.
 - Alert approval/claim/release/linkage/task creation/processing/idempotent creation/Automation rebind mutations use shared immediate-transaction scaffolding while mutation-specific SQL/validation/projections stay local.
@@ -55,7 +56,7 @@ Alerts UI contracts:
 - Newly inserted alerts/notifications are never auto-focused. Only deletion transfers focus, using `preventScroll`, to the next/previous visible delete control.
 - `#system-update-card` is independently API-authoritative and uses `hx-preserve` so Alerts swaps retain update-card state. Its poll forwards snapshots to the shared update snapshot handler.
 - Browser Alerts mutation response tails should share one private refresh helper for approve/reject/dismiss, mark-read, mark-all-read, delete-one/delete-last, and delete-all while preserving mutation-specific behavior.
-- Alerts page currently fetches only the newest 100 project alerts while search is client-side and decision-state filters/pagination are absent. Older pending approvals can become unreachable behind newer operational alerts; product direction is server-side filtering/pagination.
+- Open suggestion `#825`: Alerts page currently fetches only the newest 100 project alerts while search is client-side and decision-state filters/pagination are absent. Older pending approvals can become unreachable behind newer operational alerts; product direction is server-side filtering/pagination.
 - Notification bodies should start with a short nontechnical `## Summary` section followed by technical evidence and implementation detail.
 - Alerts UI should make pending approval summaries scanable without requiring expansion; detail expansion remains useful for full evidence/metadata/copy.
 - Runtime alert listing should use compact alert summaries excluding `body` and `metadata_json`, preserving filters/project isolation/Automation inbox scoping/ordering/pagination and `get_alert` detail hydration.

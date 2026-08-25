@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-22
-source: after_complete_update
-source_id: d1f202496617b9f0009cff4609029ac7:e139f6dccabdb5fd
+updated: 2026-08-23
+source: consolidation
+source_id: memory_consolidation_2026_08_23
 confidence: high
 title: Provider Architecture
 ---
@@ -23,9 +23,9 @@ Normalized provider direction:
 Provider and model selection:
 - Provider/model selection is based on selected `models.LLMConfig`, especially `Provider`, `Model`, and `AuthMethod`; model string alone does not choose the provider.
 - Normal task runs and task-thread execution starts select model config in this order: current `Task.AgentID`, project `DefaultAgentConfigID`, global default `agent_configs.is_default = 1`. Stored per-run/queued model IDs are history/accounting evidence, not immutable rerun assignment.
-- Interactive Chat model selection: explicit `agent_id` uses that model config, empty/`auto` triggers complexity/vision-based model selection, and browser Chat `agent_id=default` resolves after selected-project loading so it prefers `projects.default_agent_config_id` before global default. Queued browser Chat inputs preserve that same project-aware effective default model ID. Resolved in PR `#812` for issue `#767`; a 2026-08-22 fresh strict read-only audit found no material issues and confirmed live PR file blobs matched audited local files.
+- Interactive Chat model selection: explicit `agent_id` uses that model config; empty/`auto` triggers complexity/vision-based selection; browser `agent_id=default` resolves after selected-project loading, preferring `projects.default_agent_config_id` before global default. Queued browser Chat inputs preserve the same project-aware effective model ID.
 - API Chat immediate and queued execution paths should use compact model-selection/context rows before auto-selection or prompt-context rendering, then hydrate only the selected full `LLMConfig` at provider execution.
-- Resolved `#791`: runtime `create_task` model selection in browser Chat and shared channel/Automation paths uses compact task-creation selection rows containing only `ID`, `Name`, `Provider`, `Model`, `IsDefault`, and `AutoStartTasks`; full configs should be hydrated only when provider execution needs them. A 2026-08-22 fresh strict audit found no material issues for PR `#804`.
+- Runtime `create_task` model selection in browser Chat and shared channel/Automation paths uses compact task-creation selection rows containing only `ID`, `Name`, `Provider`, `Model`, `IsDefault`, and `AutoStartTasks`; full configs should be hydrated only when provider execution needs them.
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not provider/model.
 - The actual per-run model identity is stored but not shown in task-thread execution history; issue `#128` tracks exposing it.
 - Model Settings normalize names and runnable model slugs. Trimmed blank names or model slugs are rejected for concrete providers; case-insensitive duplicate trimmed names are rejected. Mixture remains a virtual provider and validates/defaults its virtual identifier separately.
@@ -35,7 +35,7 @@ OpenAI and Anthropic facts:
 - OpenAI supports Responses API and Completions API. OpenAI Responses `SendAgentic` does Codex-style client-side history compaction for API key and OAuth flows.
 - First-party OpenAI GPT-5.6 Sol/Terra/Luna are supported. `gpt-5.6-sol` is the default for unknown nonblank first-party OpenAI model selections, while blank submitted model values remain invalid for runnable configs. These models use Codex Responses Lite request shape for API-key and ChatGPT OAuth configs.
 - OpenAI GPT-5.6 Fast mode is an opt-in performance-tier gap tracked as `#295`; OpenVibely currently lacks persisted service-tier setting/request plumbing.
-- `gpt-5.3-codex` predates the current model-audit window and is a candidate for a future bounded support audit.
+- `gpt-5.3-codex` remains a candidate for a future bounded support audit.
 - Issues `#602` and `#609` track GPT-5.6 Cyber/Daybreak Red and Daybreak Blue alias support gaps.
 - Responses Lite WebSocket state is conversation-scoped and credential/account-aware, not globally shared by model config. It serializes turns per conversation, supports compatible incremental turns with `previous_response_id`, reconnects stale sockets once, and falls back to HTTP after unrecoverable transport failure.
 - Anthropic uses `ProviderAnthropic`; OAuth/API-key requests use `pkg/anthropicclient`. Anthropic/OpenAI token refresh is reactive, not background-scheduled.
@@ -51,7 +51,7 @@ OpenAI-compatible and Ollama facts:
 - Preset catalog includes named providers such as OpenRouter, NVIDIA NIM, Local vLLM, LM Studio, SGLang, LiteLLM, DeepInfra, Fireworks, Groq, Mistral, Cerebras, Together, Hugging Face Router, DeepSeek, Moonshot, DashScope variants, Alibaba Coding Plan, Z.AI/GLM, NovitaAI, Venice, Qianfan, Kilo Code, Arcee AI, StepFun variants, Tencent TokenHub variants, Xiaomi MiMo, Inferrs, ds4 Local, GMI Cloud, Chutes, plus Custom OpenAI-Compatible.
 - Local/self-hosted OpenAI-compatible presets include Local vLLM, LM Studio, SGLang, LiteLLM, Inferrs Local, and ds4 Local. Ollama remains separate.
 - Excluded/unverified candidates such as xAI, GitHub Copilot, native Bedrock/Gemini, and MiniMax should not be surfaced as generic presets or auto-normalized without a new explicit decision.
-- Ollama uses `/api/chat`, defaults to `http://localhost:11434`, and currently cannot use runtime tools during task execution; issue `#264` tracks tool support for Ollama-backed agents.
+- Ollama uses `/api/chat`, defaults to `http://localhost:11434`, and accepts exact/arbitrary custom model names rather than requiring per-catalog registrations; new Ollama library entries are usually not per-model integration gaps. It currently cannot use runtime tools during task execution; issue `#264` tracks tool support for Ollama-backed agents.
 - The Models UI already renders non-secret endpoint/base URL details for OpenAI-compatible and non-default Ollama configs, but Chat model readouts currently omit them; issue `#808` tracks prompt-safe endpoint visibility in Chat without exposing credentials or advanced header/body blobs.
 
 Mixture of Models facts:
@@ -70,6 +70,7 @@ OAuth account facts:
 - Editing a model config should update the existing row in place and preserve per-row OAuth token/reauth state unless auth/provider changes require clearing provider-specific credentials.
 - Durable direction is a provider-account token table with model configs referencing shared provider-account credentials; Anthropic needs a reliable account identity source before this can be keyed.
 - Provider 401 recovery reloads the model config from DB and may refresh/persist rotated tokens; it does not reread OAuth token material from disk, keychain, or environment.
+- Built-in OpenAI/Anthropic OAuth callbacks persist tokens only when the target still matches the initiating provider, `auth_method='oauth'`, and `oauth_config_revision`; deleted or stale-edited targets fail without reporting success or writing credentials. Zero-row token updates are failures; custom OpenAI-compatible revision guards remain intact.
 - Chat model discovery currently omits the connected/expired/not-connected OAuth status shown on model cards; issue `#695` tracks compact status exposure.
 
 Provider-native and runtime tools:
@@ -77,9 +78,9 @@ Provider-native and runtime tools:
 - Runtime tools are request-scoped, provider-generic, and carried through the LLM service/provider adapter path. Tool definitions carry read/write access classification.
 - Shared runtime executor behavior includes a request-scoped guard for consecutive identical exhausted-empty `list_tasks` calls: after a `total=0`, `has_more=false`, empty-task response for canonicalized parameters, the next identical call is answered as `duplicate_noop=true` with guidance instead of re-querying. Different parameters, non-`list_tasks` calls, handler errors, or nonempty/pageable results clear the guard so intervening mutations can be observed.
 - Runtime-tool-capable providers currently include OpenAI API/OAuth, Anthropic API/OAuth, and OpenAI-compatible API-key Chat Completions. Unsupported providers/transports receive no unusable native tool definitions and no legacy marker fallback.
-- Resolved `#687`: provider-local built-in file/shell tool execution for OpenAI and Anthropic is centralized in `pkg/agenttools`; `pkg/openai_client` and `pkg/anthropic_client` retain provider-specific schema definitions and thin `ExecuteTool` wrappers.
+- Provider-local built-in file/shell tool execution for OpenAI and Anthropic is centralized in `pkg/agenttools`; `pkg/openai_client` and `pkg/anthropic_client` retain provider-specific schema definitions and thin `ExecuteTool` wrappers.
 - Runtime-tool prompt guidance names are extracted through shared `RuntimeTools.DefinitionNames()` in `internal/llm/contracts`; OpenAI, Anthropic, and OpenAI-compatible adapters should use this provider-neutral helper rather than adapter-local name-list conversions.
-- Resolved `#771`: runtime-tool allow/deny policy for OpenAI, Anthropic, and OpenAI-compatible adapters is centralized in `internal/llm/contracts`. The shared helper owns plan mode, orchestration chat, task follow-ups, runtime access defaults, runtime filters, and `SkipDefaultTools`; provider adapters should keep only provider-specific naming/schema wrappers, Anthropic `skill_list`/`skills_list` canonicalization, Anthropic web-fetch read-only allowances, OpenAI/OpenAI-compatible web-search read-only behavior, and OpenAI local built-in grants. A 2026-08-21 strict audit found no material issues; PR `#781` live issue-scoped file blobs matched the audited local content.
+- Runtime-tool allow/deny policy for OpenAI, Anthropic, and OpenAI-compatible adapters is centralized in `internal/llm/contracts`. Shared policy owns plan mode, orchestration chat, task follow-ups, runtime defaults/filters, and `SkipDefaultTools`; adapters retain only provider naming/schema and provider-specific read-only/local grants.
 - Provider-local bash timeout policy is explicit configuration on the shared `pkg/agenttools` executor: OpenAI passes its timeout policy through the wrapper, while Anthropic defaults to 10 minutes only when no positive timeout is provided and preserves any positive explicit timeout.
 - Memory tool exposure is a request/tool-profile decision, not a global provider-adapter default.
 - Anthropic has a provider-side name-combination collision for `skill_view`, `skills_list`, and `skill_manage`; the adapter aliases canonical internal `skills_list` to wire name `skill_list` and translates back locally.

@@ -2,7 +2,7 @@
 name: openvibely_update_system
 type: project
 created: 2026-08-02
-updated: 2026-08-20
+updated: 2026-08-24
 source: after_complete_update
 source_id: f5f7b3e9c9d1bd2c112428bcd8a3a4c7:aac5090c975d9f33
 confidence: high
@@ -27,6 +27,8 @@ Distribution contracts:
 - Standalone binary updates copy the signed running executable and launch that copy as the updater helper. The helper waits for the original process to exit, atomically replaces the executable, and relaunches with original arguments and working directory. Do not put secrets in command-line arguments or durable update state.
 - Official standalone artifacts are ZIP archives on macOS/Windows and TAR.GZ archives on Linux; staging accepts exactly one root-level regular `openvibely` or `openvibely.exe` member after catalog/archive verification.
 - Wails desktop updates retain the Wails adapter for signed staging but use an OpenVibely-owned detached helper for replacement, relaunch, health validation, rollback, and crash recovery.
+- Standalone binary updates and Windows/Linux desktop updates use the `executable-update-helper` path. macOS desktop `.app` updates use the separate `app-bundle-update-helper` path. Both helpers use the shared packaged-update journal, authorization, lease, and recovery protocol; only their installation-unit replacement mechanics differ.
+- Helper handoff claim and coordinator cancellation must be one atomic-winner transition under the shared transition lease. The helper writes `pending` to the private prepared journal before atomically renaming it to the active journal, so the coordinator cannot observe or remove a partially published handoff.
 - Native desktop install units are a complete `.app` directory on macOS and the signed desktop executable on Windows/Linux. The helper journals replacement phases, uses native atomic publication, validates independently through `/api/system/health`, stops failed successors before restoring predecessors, and reconciles interrupted phases after restart.
 - Stage/apply/recovery must protect app data, database, project root, desktop config, plugin root, and custom trust files against updater-owned live, backup, staging, temporary, failed-install, Wails `.bak`, helper, journal, atomic `.tmp`, and lease paths, including symlink-resolved placement.
 - Git source retains daily metric-only no-op behavior. Hosted and Docker replacement remains externally controlled.
@@ -53,3 +55,4 @@ Release artifact trust:
 - `Client.CheckIfDue` should record a fresh successful-check timestamp only after packaged signed release verification succeeds. Verification failures should persist retry backoff without refreshing `LastSuccessfulCheck`; source metric-only checks still persist the 24-hour success throttle after schema validation.
 - Release tooling must expose signing-credential configuration hooks and fail official release validation when required signing has not occurred. Credentials must never be generated or invented.
 - Required validation includes macOS, Windows, and Linux builds/tests; successful replacement; health/version validation; rollback; invalid signatures; interrupted replacement; source/Hosted/Docker behavior; and release-script validation. The `packaged-update` CI job runs native update tests plus binary and desktop packaged E2E checks across OS/arch rows, with Windows ARM experimental.
+- Windows/Linux desktop packaged E2E starts the real desktop executable with the test-only `OPENVIBELY_UPDATE_E2E_HEADLESS_DESKTOP=1` switch. This skips Wails/WebView creation but still runs the real backend, coordinator, detached executable helper, process replacement, relaunch, and health/version validation. It is test harness behavior, not a production desktop or server mode; macOS app-bundle coverage continues through its separate helper path.

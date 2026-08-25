@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-08-20
+updated: 2026-08-23
 source: consolidation
-source_id: memory_consolidation_2026_08_20
+source_id: memory_consolidation_2026_08_23
 confidence: high
 title: Usage Analytics
 ---
@@ -37,11 +37,10 @@ Provider normalization facts:
 Analytics surface facts:
 - `/analytics` includes local task/execution/productivity analytics, LLM usage/account-limit views, and Skill Curator analytics.
 - Project memory recall effectiveness and follow-through are not currently inspectable alongside skill analytics; proposed in issue `#85`.
-- Known Insights dashboard gap `#272`: accepting an Insight only flips status to accepted but never creates/links a follow-up task, despite service-layer task-linking primitives.
+- Open suggestion `#841`: Analytics task-result queries (`GetMostFrequentTasks`, `GetFailedTaskPatterns`, and the average-time query) already return task IDs, but the dashboard renders only titles, counts, and chart labels without links; add project-scoped read-only drill-down links to the matching task details. This is distinct from `#380`, which concerns navigation and context on an execution-detail page.
 - Failed-task-pattern analytics and Insights should share task-level latest-error query/projection semantics while preserving API JSON fields, project scoping, limits, and minimum-failure behavior.
 - `/api/analytics/usage` backs model usage; `/api/analytics/skills` backs Skill Curator Analytics.
-- Resolved `#703`: read-only `view_usage_analytics` Chat/runtime action exposes current-project model usage, token totals, cost availability, top model/provider breakdowns, recent buckets, and sanitized stored account-limit summaries already available on `/analytics` and `/api/analytics/usage`. It is available in Plan and Orchestrate modes, uses locally stored analytics only through `BuildLocalAnalyticsUsage`, does not refresh external provider account usage, and omits credentials, raw provider payloads, raw account IDs, config IDs, raw events, and provider response IDs.
-- Resolved `#733`: local-only `view_usage_analytics` runtime uses a compact usage path instead of full dashboard aggregation. `BuildLocalAnalyticsUsage` avoids `LLMConfigRepo.List`, uses a compact model-account projection that excludes credential and large provider-config columns, and skips unused dashboard-only aggregates; the full web `/api/analytics/usage` dashboard path and provider refresh behavior remain unchanged.
+- Read-only `view_usage_analytics` Chat/runtime action exposes current-project model usage, token totals, cost availability, top model/provider breakdowns, recent buckets, and sanitized stored account-limit summaries in Plan and Orchestrate modes. It uses locally stored analytics only through `BuildLocalAnalyticsUsage`, a compact model-account projection that excludes credentials and large provider-config columns, skips unused dashboard aggregates, does not refresh external provider usage, and omits raw payloads, account IDs, config IDs, events, and provider response IDs; the full web `/api/analytics/usage` path remains unchanged.
 - The Analytics page sends selected/current project ID to every local analytics endpoint and ties the visible project label to that ID.
 - Local Analytics sections are project-scoped when labeled with the selected project: model usage filters `llm_usage_events.project_id`; Skill Curator analytics filters `skill_analytics_events.project_id`; task/execution/productivity analytics and failed-task patterns filter through `tasks.project_id`.
 - Provider account-limit cards are account-wide OAuth snapshots, not project-scoped data, and are visually labeled separately from local usage.

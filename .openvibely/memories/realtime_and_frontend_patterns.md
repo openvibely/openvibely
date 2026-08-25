@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-22
-source: after_complete_update
-source_id: ede97ed591a75fcf255c6818c1ea4e90:146ad778168e7538
+updated: 2026-08-23
+source: consolidation
+source_id: memory_consolidation_2026_08_23
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -16,6 +16,7 @@ Realtime and diff contracts:
 - `window._tabVisibility` owns broad realtime visibility behavior and pauses polling while hidden.
 - Per-execution `/events/chat/:exec_id` streams are token-style output path. SQLite is durable transcript/reconnect source; hot deltas flow through injected `events.ExecutionStreamHub`, not SQLite polling.
 - `ExecutionStreamHub` is keyed by exact execution ID, supports multiple subscribers, enforces subscriber limits, drops slow-subscriber deltas nonblockingly, closes on terminal events, and must be dependency-injected.
+- `internal/events` currently has three typed broadcasters (`Broadcaster`, `ChatBroadcaster`, and `FileChangeBroadcaster`) that independently duplicate the mutex-protected subscriber registry, capacity checks, idempotent unsubscribe/close, nonblocking publish, and count lifecycle. Their meaningful differences are event type and buffer capacity (`10`, `10`, and `50`); open issue `#839` proposes a private generic core with typed wrappers that preserve the public constructors and behavior.
 - `llmstream.Writer.Write` publishes live deltas with cumulative UTF-8 byte offsets after releasing its mutex. It must not publish seeded existing output or `WriteText` content, and must not synchronously flush SQLite on the hot token path.
 - Periodic/final stream persistence must serialize snapshot plus SQLite update so older periodic snapshots cannot overwrite newer final flushes.
 - Per-execution SSE clamps optional untrusted UTF-8 byte offsets, subscribes before DB catch-up, skips duplicate/partial overlaps, and uses targeted DB catch-up for dropped deltas or terminal fallback.
@@ -41,7 +42,7 @@ Chat and task-thread rendering:
 - Terminal reconciliation uses persisted authoritative execution status/output regardless of whether shared completion or per-execution terminal arrives first.
 - Known gap `#226`: hard refresh after cancellation does not show same explicit terminal marker as completed/failed threads.
 - Long Chat and Task Thread histories remain complete in DB but are UI-windowed with scroll-top pagination; initial/older windows default to 30 and cap at 100. Browser-memory protection removes old execution DOM nodes, not hides them.
-- Resolved `#706`: completed/error assistant bubbles no longer emit repeated per-bubble inline render scripts. Terminal assistant output renders as compact `data-raw-content` markup hydrated by the shared scanner/queue once per page or HTMX fragment, preserving Markdown/code hydration, task-link conversion, copy buttons, failed/cancelled partial output, pagination insertion, task-thread morph swaps, streaming/running resume behavior, and `hx-preserve`.
+- Completed/error assistant bubbles render compact `data-raw-content` markup and hydrate through the shared scanner/queue once per page or HTMX fragment instead of emitting repeated per-bubble inline scripts. The path preserves Markdown/code hydration, task-link conversion, copy buttons, failed/cancelled partial output, pagination insertion, morph swaps, streaming/running resume, and `hx-preserve`.
 - Active streaming uses smart autoscroll: pinned viewers follow growth, upward user movement is read intent.
 - Tool result output remains full-fidelity; canonical tool-result markers are not display-truncated and render in responsive scroll containers.
 
@@ -55,6 +56,7 @@ Shared composer and steering UI:
 - Modifier-click can steer through guarded endpoints when active turn ID is resolvable. Steering responses target pending-input containers, not transcript.
 - Accepted steering, queue, and idle sends clear submitted textarea after acceptance and submitted attachment session only if visible session still matches.
 - Drafts and pending attachment sessions survive failed/non-accepted sends, stale/unavailable steering, OOB swaps, visibility changes, and live reconnects. Detailed semantics live in `chat_thread_system.md`.
+- Desktop Chat clear-actions uses a semantic button with `aria-expanded` and explicit `data-chat-actions-open` state rather than a focusable DaisyUI label. CSS must explicitly enforce hidden and open states because WebKit/DaisyUI defaults can make a marker-only open state appear inert. Focus-out, outside pointer activity, history restoration, and fresh fragment initialization reset the state; Escape restores focus to the live trigger, and Clear Chat preserves `hx-confirm="Clear all chat history? This cannot be undone."`. Native WebKit coverage is required for desktop-specific focus and visibility regressions.
 - Known race `#48`: overlapping composer action-only refreshes lack stale-response guards and can regress Send to Stop.
 
 Transcript safety and navigation:
@@ -71,9 +73,10 @@ Transcript safety and navigation:
 - Forced task-thread refreshes must close per-exec EventSources before replacement, but revision no-op checks run before cleanup.
 - Older-history pagination captures scroll intent revision and cancels stale restoration if newer send/scroll changes intent.
 - Known frontend duplication gaps include task-thread scroll-state helpers, terminal UI/composer reconciliation, live queued-row construction, task-thread post-swap hydration, schedule repeat-interval controllers, Task Templates dashboard refresh, and execution status badge rendering.
-- Resolved `#776` in PR `#816`: browser clipboard writes route through the shared base-layout `window.openVibelyCopyText` helper, which owns Clipboard API use, hidden-textarea fallback, fallback cleanup, and timed feedback restoration. Task output/error copy, diff path copy, alert detail copy, code block copy, and webhook URL copy should keep surface-specific wrappers/labels/icons/toasts while delegating generic copy/fallback behavior to the shared helper; diff file path copy should stay centralized rather than reintroduced separately for review and non-review renders. A strict 2026-08-22 audit found no material issues and confirmed PR `#816` was open/non-draft, issue-scoped to the 16 expected template/generated/test files, and blob-matched the audited local `HEAD` despite a different remote branch SHA.
-- Resolved `#766` in PR `#801`: Kanban backlog priority bulk-execution actions loop over priorities `4, 3, 2, 1`, gate with `countEligibleBacklogByPriority`, preserve `/tasks/backlog/execute?project_id=<project>&priority=<priority>` routes, and derive confirm/visible labels from `PriorityLabel` so task-card badges and bulk-action labels share the canonical mapping. A strict 2026-08-21 audit found no material issues, and the PR/source branch tree matched the audited local tree despite different commit metadata.
-- Resolved `#756` in PR `#775`: Agent, Model, Skill, Schedule, Task Detail schedule, and Project destructive-delete confirmations render through shared `web/templates/pages/destructive_confirm_dialog.templ` while keeping entity-specific delete behavior local, including model default reassignment, skills viewport preservation, schedule target/swap selection, project modal closing, and agent container/toast refresh. A strict 2026-08-21 audit found no material issues, and the PR tree matched the audited workspace despite a different commit SHA.
+- Sidebar collapse toggling, including click and Ctrl/Cmd+B, delegates to one helper that owns class state, localStorage mirroring, `/ui/preferences` persistence, and accessibility/body markers; early server-rendered restore remains separate.
+- Browser clipboard writes delegate to the shared base-layout `window.openVibelyCopyText` helper for Clipboard API use, hidden-textarea fallback, cleanup, and feedback restoration. Surface wrappers retain their labels/icons/toasts.
+- Kanban backlog priority bulk execution uses canonical priority ordering/labels and only renders eligible priority actions.
+- Destructive delete confirmations share one dialog component across projects, tasks, models, agents, skills, schedules, channels, and related settings while entity-specific behavior remains local.
 - Task detail HTMX refresh assembly and task-board mutation/sort HTMX refresh assembly should stay centralized through private helpers while preserving route-specific behavior.
 
 Responsive and shared UI contracts:
@@ -90,7 +93,7 @@ Responsive and shared UI contracts:
 - Known board/card gaps: task cards lack worktree/merge state (`#227`) and linked PR URL/status (`#374`).
 - Active kanban pending dropzones render only real active pending/queued/blocked work; terminal failed/cancelled rows must not appear as queued work.
 - Tasks page date sorting defaults newest-first for Backlog and Completed. Task Detail edit-form saves are metadata-only.
-- Resolved `#731`: task tag badge labels/classes are centralized through exported task-card component helpers such as `components.TagLabel` and `components.TagBadgeClass`; Pulse `/upcoming` reuses the same mapping instead of rendering raw tag strings or a page-local badge switch.
+- Task tag badge labels/classes are centralized through exported task-card component helpers such as `components.TagLabel` and `components.TagBadgeClass`; Pulse `/upcoming` reuses the same mapping instead of rendering raw tag strings or a page-local badge switch.
 - Responsive card pages must keep roots/grids/cards/badges shrink-safe. Long badge values truncate within rows.
 - Workers settings tables are intentionally non-shrinking within viewport-bound `#main-content`, with horizontal overflow contained inside the wrapper.
 - Schedule UI should distinguish disabled schedules; dynamic loop wakeups remain visually distinct.
@@ -103,13 +106,13 @@ Responsive and shared UI contracts:
 - `/models` uses `LLMConfig`/`agent_configs`; `/agents` is plugin-first and has no `color` field.
 - `Managed Memory` in UI/tool profiles is scoped memory-file capability, not broad repo read/write access.
 - Shared toasts account for native dialog top-layer behavior, reserve right inset, use accessible close buttons, and avoid mobile overflow. Automation-start toasts dedupe by neutral `toast_key` and can click through to Automation Live/detail.
-- Resolved `#715`: HTMX toast rendering uses the global `openvibelyToast` event contract through the shared helper path. Worktree success paths should use the canonical helper while preserving unrelated HTMX trigger keys such as `refreshChanges`; task-detail pages must not reintroduce page-local `showToast` DOM rendering, deduplication, status/icon, or auto-dismiss logic.
+- HTMX toast rendering uses the global `openvibelyToast` event contract through the shared helper path. Worktree success paths should use the canonical helper while preserving unrelated HTMX trigger keys such as `refreshChanges`; task-detail pages must not reintroduce page-local `showToast` DOM rendering, deduplication, status/icon, or auto-dismiss logic.
 - For global indicators driven by page-local polling, expose shared layout handler and feed fetched snapshots instead of divergent state paths.
 - Destructive deletes for projects, tasks, models, agents, skills, schedules, and channel integrations use shared DaisyUI `<dialog>` confirmation; avoid browser `confirm()` or immediate `hx-confirm` delete wiring.
 
 Models, Channels, cards, and Automation YAML:
 - Models initial render uses compact card projections excluding secrets/tokens/client secrets/request JSON/custom auth/full mixture JSON. Edit fetches one authorized full record with request-generation and returned-ID guards.
-- Personality settings initial render uses compact card projections and bounded prompt previews; Edit lazy-loads full detail with stale-response guards. Resolved issue `#686` in PR `#710`: browser saves now reject stale, deleted, or fabricated personality keys before mutating settings, while base/default, built-in, existing custom, and runtime/channel `set_personality` paths stay consistent.
+- Personality settings initial render uses compact card projections and bounded prompt previews; Edit lazy-loads full detail with stale-response guards. Browser saves reject stale, deleted, or fabricated personality keys before mutating settings, and the custom update path rejects missing non-preset keys while allowing intentional built-in overrides; base/default, built-in, existing custom, and runtime/channel `set_personality` paths remain consistent.
 - Lazy edit modals for compact cards must not allow Save before detail hydration succeeds. Reused secret modals reset unsaved edits and revealed secrets before reopening.
 - Project-scoped settings pages preserve active project through `project_id`; Models paths derive URLs from live selector before fallback.
 - Card search pages use shared `data-card-search`; fragment replacement paths call `window.refreshCardSearches` after swapping card containers.

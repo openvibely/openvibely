@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-08-22
+updated: 2026-08-23
 source: after_complete_update
-source_id: d1f202496617b9f0009cff4609029ac7:c9949ec07042d14d
+source_id: fd37f46bb8f14052236f06e2550dd109:aea55982691cffec
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -77,6 +77,6 @@ Release-note and release-boundary preferences:
 - Release-build invariants include preserving `OpenVibely.app` as the zip root, making dry runs fully non-writing, avoiding managed worktree cleanup paths for real builds, and using script-default or absolute dist paths.
 - `.openvibely/skills/openvibely_release_workflow/scripts/release.sh` is tracked without executable bit; invoke release rehearsals through `bash` until mode is corrected.
 
-Current durable rotation state:
-- Redundancy Finder should avoid rechecking recently inspected bounded components unless explicitly asked: task-goal runtime actions, alert refresh tails, Automation save validation, Worktree Changes diff-state resolution, task-board refresh, dashboard page shell, execution-stream terminal mapping, attachment orphan cleanup, Agent dialog payload parsing, schedule mutations, project repository-source handling, model/provider form normalization, channel test/authorization flows, Task Templates, Personality cards, Insights/Analytics failed-task rendering, execution status badges, HTMX toast contracts, task tag badges, destructive delete confirmations, Kanban backlog priority bulk actions, browser clipboard-copy helpers, ordinary Chat `create_task` runtime handling, and LLM structured JSON reply parsing across Generate Agent/lifecycle hooks/Insights (`#798`).
-- Bug Finder should choose a new bounded component unless explicitly asked to revisit browser Task Detail primary-Agent edit validation (`#725`, resolved) or task attachment upload/delete project ownership (`#757`, resolved after a fresh 2026-08-21 strict audit).
+Current durable rotation guidance:
+- Redundancy Finder should choose a new bounded component rather than immediately rechecking recently inspected areas unless explicitly asked to revisit them.
+- Bug Finder should likewise choose a new bounded component; revisit a known issue only when requested or when its state materially changes.

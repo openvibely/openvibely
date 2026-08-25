@@ -2,9 +2,9 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-08-22
+updated: 2026-08-23
 source: consolidation
-source_id: memory_consolidation_2026_08_22
+source_id: memory_consolidation_2026_08_23
 confidence: high
 title: Worktree and Lineage
 ---
@@ -73,7 +73,6 @@ Merge, metadata, and publication direction:
 - For task PR publication, durable evidence is recorded `task_pull_requests.published_head_sha` from successful publish matched against live GitHub PR `head.sha`. Compare PR diffs against the live target branch ref from GitHub, not assumed local `origin/main`.
 - Repeated 2026 PR handoff incidents showed stale/polluted remote PR heads despite clean local task candidates. Durable response is to verify local candidate scope, live source/PR heads, live PR file list, target branch, validation evidence, and issue closure before claiming publication is current.
 - Automation authorization failures are explicit publication blockers and must not be bypassed by ordinary agents. Manual publication repair is exceptional: preserve stale remote heads in clearly named backup refs, verify issue-scoped diffs and live refs, use guarded `--force-with-lease`, then reconcile/reopen the PR and run a fresh audit.
-- Current retained publication state: PR `#719` for issue `#699` still needs authorized branch replacement/update and fresh audit; PRs `#721` and `#746` need fresh separate audit-only review if they are still relevant. Topic-specific PR states should live with their owning topic memory rather than accumulating here.
 
 Diagnostics:
 - A local merge error saying the worktree is not on the expected task branch indicates branch/metadata drift. Diagnose the assigned worktree path with status/ref evidence and identify which lineage branch owns the diff.
