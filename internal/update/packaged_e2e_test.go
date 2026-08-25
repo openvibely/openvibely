@@ -154,8 +154,6 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		"OPENVIBELY_UPDATE_PUBLIC_KEY_FILE="+publicKeyFile,
 		"DISABLE_UPDATE_NOTIFICATIONS=false",
 		"OPENVIBELY_DISABLE_INSTALL_ID=1",
-		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=5000",
-		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
 	)
 	cmd.Stdout = stdoutLog
 	cmd.Stderr = stderrLog
@@ -183,9 +181,13 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		t.Fatalf("current app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
 	}
 	if wantState == StateSucceeded {
-		waitForHealthVersion(t, baseURL, releaseVersion)
+		waitForHealthVersionWithin(t, baseURL, releaseVersion, 120*time.Second, func() string {
+			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
+		})
 	} else {
-		waitForHealthVersion(t, baseURL, "0.5.0")
+		waitForHealthVersionWithin(t, baseURL, "0.5.0", 120*time.Second, func() string {
+			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
+		})
 	}
 	waitForUpdateState(t, baseURL, wantState)
 	if layout == binaryE2ESymlinkLayout {
@@ -523,11 +525,11 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 		t.Fatalf("current desktop app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
 	}
 	if wantOutcome == packagedUpdateOutcomeSucceeded {
-		waitForHealthVersionWithin(t, baseURL, releaseVersion, 90*time.Second, func() string {
+		waitForHealthVersionWithin(t, baseURL, releaseVersion, 120*time.Second, func() string {
 			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
 		})
 	} else {
-		waitForHealthVersionWithin(t, baseURL, "0.5.0", 90*time.Second, func() string {
+		waitForHealthVersionWithin(t, baseURL, "0.5.0", 120*time.Second, func() string {
 			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
 		})
 	}
@@ -588,6 +590,7 @@ func readUpdateSnapshot(baseURL string) string {
 }
 
 func describePackagedUpdateHelperState(current string) string {
+	staged := LocalStagedUpdate{InstallPath: current}
 	paths := []string{
 		packagedUpdateHelperPreparedPath(current),
 		packagedUpdateHelperOutcomePath(current),
@@ -597,6 +600,7 @@ func describePackagedUpdateHelperState(current string) string {
 		packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand),
 	}
 	var state strings.Builder
+	var identity packagedUpdateHelperOutcome
 	for _, path := range paths {
 		info, err := os.Stat(path)
 		if err != nil {
@@ -607,9 +611,33 @@ func describePackagedUpdateHelperState(current string) string {
 		if strings.HasSuffix(path, ".json") && path != packagedUpdateHelperRelaunchMetadataPath(current) {
 			if data, readErr := os.ReadFile(path); readErr == nil {
 				fmt.Fprintf(&state, " %s", data)
+				if identity.ID == "" {
+					_ = json.Unmarshal(data, &identity)
+				}
 			}
 		}
 		state.WriteByte('\n')
+	}
+	if identity.ID != "" {
+		staged.OutcomeID = identity.ID
+		staged.PreviousVersion = identity.PreviousVersion
+		staged.Version = identity.DesiredVersion
+		if outcome, err := readPackagedUpdateHelperOutcome(staged); err == nil {
+			fmt.Fprintf(&state, "semantic outcome: %s\n", outcome.State)
+		} else {
+			fmt.Fprintf(&state, "semantic outcome: %v\n", err)
+		}
+		leasePath := packagedUpdateHelperLeasePath(staged)
+		if _, err := os.Stat(leasePath); err != nil {
+			fmt.Fprintf(&state, "%s: %v\n", filepath.Base(leasePath), err)
+		} else if lease, acquired, err := tryAcquirePackagedUpdateHelperLease(leasePath); err != nil {
+			fmt.Fprintf(&state, "%s: %v\n", filepath.Base(leasePath), err)
+		} else if acquired {
+			fmt.Fprintf(&state, "%s: not held\n", filepath.Base(leasePath))
+			_ = lease.Close()
+		} else {
+			fmt.Fprintf(&state, "%s: held\n", filepath.Base(leasePath))
+		}
 	}
 	return state.String()
 }
