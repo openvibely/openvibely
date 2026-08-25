@@ -74,8 +74,9 @@ Merge, metadata, and publication direction:
 - Repeated 2026 PR handoff incidents showed stale/polluted remote PR heads despite clean local task candidates. Durable response is to verify local candidate scope, live source/PR heads, live PR file list, target branch, validation evidence, and issue closure before claiming publication is current.
 - Automation authorization failures are explicit publication blockers and must not be bypassed by ordinary agents. Manual publication repair is exceptional: preserve stale remote heads in clearly named backup refs, verify issue-scoped diffs and live refs, use guarded `--force-with-lease`, then reconcile/reopen the PR and run a fresh audit.
 
-Diagnostics:
-- A local merge error saying the worktree is not on the expected task branch indicates branch/metadata drift. Diagnose the assigned worktree path with status/ref evidence and identify which lineage branch owns the diff.
-- Multi-turn follow-ups can surface a newer empty follow-up worktree while implementation commits remain on an earlier follow-up branch. Missing merge options or apparently lost changes may be lineage/metadata drift; use branches, worktree registrations, and persisted metadata as evidence.
-- If the browser does not show expected merge actions while server-rendered Task Changes HTML does, suspect stale HTMX/page state or dropdown visibility before lineage/ancestry.
-- Worktree status `exit status 128` can be transient. A genuinely missing assigned directory absent from `git worktree list` is a metadata recovery case, not permission to edit main checkout.
+Diagnostics and recurring lessons:
+- Branch/ref/worktree registrations plus persisted task metadata are the evidence for lineage drift. A missing assigned directory is a recovery case, never permission to edit the main checkout.
+- A local merge error reporting an unexpected task branch indicates branch/metadata drift; identify which registered lineage owns the diff before acting.
+- A newer empty follow-up worktree can coexist with implementation commits on an earlier follow-up branch. Missing merge options or apparently lost changes may be lineage/metadata drift, not lost code.
+- If server-rendered Task Changes HTML contains merge actions but the browser does not, suspect stale HTMX/page state or dropdown visibility before ancestry.
+- Worktree status `exit status 128` may be transient; a genuinely missing assigned directory absent from `git worktree list` requires metadata recovery.

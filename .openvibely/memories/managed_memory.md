@@ -11,6 +11,8 @@ title: Managed Memory
 
 OpenVibely managed memory is model-backed, tool-driven, project-scoped, and stored under the selected project's repo-local `.openvibely/memories/` directory. The directory stays flat: `MEMORIES.md` is the compact routing index and focused top-level topic files hold durable context. The old `user/`, `feedback/`, `project/`, and `runs/` subdirectory model is obsolete.
 
+Topic boundaries are intentional: architecture/storage, providers, chat/task threads, lifecycle/skills, worktrees, integrations, alerts, Automation Graphs, realtime/frontend, theming, analytics, testing, product direction, and coding-agent discipline each retain a separate routing handle. Repeated contracts belong in the most specific topic, with broader topics keeping only the cross-cutting invariant or ownership pointer.
+
 Durable storage boundaries:
 - Managed memory requires a selected project with a valid local `repo_path` for file operations.
 - `MemoryService` owns path resolution, file storage, context building, extraction, consolidation, and DB metadata.
