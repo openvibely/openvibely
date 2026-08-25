@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"runtime"
@@ -1285,6 +1286,10 @@ func (c *Coordinator) recoverDeadPackagedUpdateHelper(ctx context.Context, stage
 	if currentVersion != staged.PreviousVersion {
 		switch outcome.State {
 		case packagedUpdateOutcomeTargetPublished, packagedUpdateOutcomeValidating:
+			if err := validatePackagedUpdateRollbackBackup(staged); err != nil {
+				c.completeGenerationWithRetry(ctx, generation, StateFailed, "packaged update recovery cannot roll back: "+err.Error())
+				return true
+			}
 			return startRecovery()
 		default:
 			return false
@@ -1305,6 +1310,28 @@ func (c *Coordinator) recoverDeadPackagedUpdateHelper(ctx context.Context, stage
 		return false
 	}
 	return startRecovery()
+}
+
+func validatePackagedUpdateRollbackBackup(staged LocalStagedUpdate) error {
+	currentInfo, err := os.Lstat(staged.InstallPath)
+	if err != nil {
+		return fmt.Errorf("inspect current install unit: %w", err)
+	}
+	backupInfo, err := os.Lstat(staged.BackupPath)
+	if err != nil {
+		return fmt.Errorf("inspect rollback backup: %w", err)
+	}
+	switch {
+	case currentInfo.IsDir() && backupInfo.IsDir():
+		return nil
+	case currentInfo.Mode().IsRegular() && backupInfo.Mode().IsRegular():
+		if runtimeGOOS != "windows" && backupInfo.Mode().Perm()&0o111 == 0 {
+			return errors.New("rollback backup is not executable")
+		}
+		return nil
+	default:
+		return errors.New("rollback backup does not match the current install unit type")
+	}
 }
 
 func (c *Coordinator) reconcilePackagedUpdateRestartOutcome(ctx context.Context, staged LocalStagedUpdate, generation string) {

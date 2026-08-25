@@ -463,6 +463,87 @@ func TestCoordinatorRecoversPublishedTargetWithUnexpectedVersion(t *testing.T) {
 	}
 }
 
+func TestCoordinatorDoesNotStopUnexpectedVersionWithoutRollbackBackup(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "openvibely")
+	staged := LocalStagedUpdate{
+		ArtifactPath:    current + ".openvibely-new",
+		InstallPath:     current,
+		BackupPath:      current + ".openvibely-backup",
+		Version:         "0.6.0",
+		PreviousVersion: "0.5.0",
+		OutcomeID:       "operation-1",
+	}
+	if err := os.WriteFile(current, []byte("unexpected-target"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeTargetPublished); err != nil {
+		t.Fatal(err)
+	}
+
+	drain := NewDrainManager(nil, nil, 0, nil)
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("own drain: status=%#v err=%v", status, err)
+	}
+	installer := &fakeBinaryRestartRecoveryInstaller{}
+	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.7.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, installer, false, "", nil)
+	coordinator.state, coordinator.operationGeneration, coordinator.staged = StateRestarting, status.Generation, staged
+
+	if !coordinator.recoverDeadPackagedUpdateHelper(context.Background(), staged, status.Generation, packagedUpdateHelperOutcome{State: packagedUpdateOutcomeTargetPublished}, "0.7.0") {
+		t.Fatal("missing rollback backup was not handled")
+	}
+	if installer.recoveries.Load() != 0 || installer.shutdowns.Load() != 0 {
+		t.Fatalf("recoveries=%d shutdowns=%d", installer.recoveries.Load(), installer.shutdowns.Load())
+	}
+	snapshot := coordinator.Snapshot()
+	if snapshot.State != StateFailed || !strings.Contains(snapshot.Error, "rollback backup") || snapshot.Drain.State != DrainStateIdle {
+		t.Fatalf("snapshot=%#v", snapshot)
+	}
+	if _, err := os.Stat(packagedUpdateHelperRecoveryClaimPath(staged.InstallPath)); !os.IsNotExist(err) {
+		t.Fatalf("recovery ownership was claimed without a backup: %v", err)
+	}
+}
+
+func TestValidatePackagedUpdateRollbackBackupInstallUnitTypes(t *testing.T) {
+	tests := []struct {
+		name       string
+		currentDir bool
+		backupDir  bool
+		backupMode os.FileMode
+		wantError  bool
+	}{
+		{name: "executable", backupMode: 0o755},
+		{name: "app bundle", currentDir: true, backupDir: true},
+		{name: "mismatched type", currentDir: true, backupMode: 0o755, wantError: true},
+		{name: "non executable backup", backupMode: 0o644, wantError: runtimeGOOS != "windows"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			staged := LocalStagedUpdate{InstallPath: filepath.Join(root, "current"), BackupPath: filepath.Join(root, "backup")}
+			if test.currentDir {
+				if err := os.Mkdir(staged.InstallPath, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(staged.InstallPath, []byte("current"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if test.backupDir {
+				if err := os.Mkdir(staged.BackupPath, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(staged.BackupPath, []byte("backup"), test.backupMode); err != nil {
+				t.Fatal(err)
+			}
+			err := validatePackagedUpdateRollbackBackup(staged)
+			if (err != nil) != test.wantError {
+				t.Fatalf("validate error = %v, wantError=%v", err, test.wantError)
+			}
+		})
+	}
+}
+
 func TestCoordinatorDoesNotRecoverLiveAuthorizedPackagedUpdateHelper(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
