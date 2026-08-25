@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-func desktopHelperFixture(t *testing.T) LocalStagedUpdate {
+func appBundleUpdateHelperFixture(t *testing.T) LocalStagedUpdate {
 	t.Helper()
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely-desktop")
@@ -24,20 +24,20 @@ func desktopHelperFixture(t *testing.T) LocalStagedUpdate {
 			t.Fatal(err)
 		}
 	}
-	if err := writeBinaryHelperPhase(staged, binaryOutcomeAuthorized); err != nil {
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeAuthorized); err != nil {
 		t.Fatal(err)
 	}
 	return staged
 }
 
-func TestDesktopHelperValidatesHealthAndRollsBackFailedSuccessor(t *testing.T) {
-	staged := desktopHelperFixture(t)
+func TestAppBundleUpdateHelperValidatesHealthAndRollsBackFailedSuccessor(t *testing.T) {
+	staged := appBundleUpdateHelperFixture(t)
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"ready":true,"version":"wrong"}`))
 	}))
 	defer health.Close()
 	var starts, stops atomic.Int32
-	err := RunDesktopHelper(context.Background(), DesktopHelperConfig{
+	err := RunAppBundleUpdateHelper(context.Background(), AppBundleUpdateHelperConfig{
 		ParentPID: 99999999, Current: staged.InstallPath, Staged: staged.ArtifactPath, Backup: staged.BackupPath,
 		HealthURL: health.URL, ExpectedVersion: staged.Version, PreviousVersion: staged.PreviousVersion, OutcomeID: staged.OutcomeID,
 		WaitTimeout: 100 * time.Millisecond, ValidationTimeout: 30 * time.Millisecond,
@@ -47,7 +47,7 @@ func TestDesktopHelperValidatesHealthAndRollsBackFailedSuccessor(t *testing.T) {
 		},
 	})
 	if err == nil {
-		t.Fatal("desktop helper accepted the wrong health version")
+		t.Fatal("app-bundle update helper accepted the wrong health version")
 	}
 	if starts.Load() != 2 || stops.Load() != 1 {
 		t.Fatalf("starts=%d stops=%d, want rollback relaunch after one failed-successor stop", starts.Load(), stops.Load())
@@ -55,25 +55,25 @@ func TestDesktopHelperValidatesHealthAndRollsBackFailedSuccessor(t *testing.T) {
 	if data, readErr := os.ReadFile(staged.InstallPath); readErr != nil || string(data) != "old" {
 		t.Fatalf("rolled-back desktop = %q, err=%v", data, readErr)
 	}
-	outcome, readErr := readBinaryHelperOutcome(staged)
-	if readErr != nil || outcome.State != binaryOutcomeRolledBack {
+	outcome, readErr := readPackagedUpdateHelperOutcome(staged)
+	if readErr != nil || outcome.State != packagedUpdateOutcomeRolledBack {
 		t.Fatalf("outcome=%#v err=%v", outcome, readErr)
 	}
 }
 
-func TestDesktopHelperRecoveryDoesNotRepeatAmbiguousCompletedExchange(t *testing.T) {
-	staged := desktopHelperFixture(t)
+func TestAppBundleUpdateHelperRecoveryDoesNotRepeatAmbiguousCompletedExchange(t *testing.T) {
+	staged := appBundleUpdateHelperFixture(t)
 	if err := atomicExchangeInstallUnits(staged.InstallPath, staged.ArtifactPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeBinaryHelperPhase(staged, binaryOutcomeParentExited); err != nil {
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeParentExited); err != nil {
 		t.Fatal(err)
 	}
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"ready":true,"version":"0.6.0"}`))
 	}))
 	defer health.Close()
-	if err := RunDesktopHelper(context.Background(), DesktopHelperConfig{
+	if err := RunAppBundleUpdateHelper(context.Background(), AppBundleUpdateHelperConfig{
 		ParentPID: 99999999, Current: staged.InstallPath, Staged: staged.ArtifactPath, Backup: staged.BackupPath,
 		HealthURL: health.URL, ExpectedVersion: staged.Version, PreviousVersion: staged.PreviousVersion, OutcomeID: staged.OutcomeID,
 		Recovery: true, RunningVersion: staged.Version, WaitTimeout: 100 * time.Millisecond, ValidationTimeout: time.Second,
@@ -86,12 +86,12 @@ func TestDesktopHelperRecoveryDoesNotRepeatAmbiguousCompletedExchange(t *testing
 	}
 }
 
-func TestDesktopHelperResumesJournaledPublishedTargetAndValidates(t *testing.T) {
-	staged := desktopHelperFixture(t)
+func TestAppBundleUpdateHelperResumesJournaledPublishedTargetAndValidates(t *testing.T) {
+	staged := appBundleUpdateHelperFixture(t)
 	if err := atomicExchangeInstallUnits(staged.InstallPath, staged.ArtifactPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeBinaryHelperPhase(staged, binaryOutcomeTargetPublished); err != nil {
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeTargetPublished); err != nil {
 		t.Fatal(err)
 	}
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -99,7 +99,7 @@ func TestDesktopHelperResumesJournaledPublishedTargetAndValidates(t *testing.T) 
 	}))
 	defer health.Close()
 	var starts atomic.Int32
-	if err := RunDesktopHelper(context.Background(), DesktopHelperConfig{
+	if err := RunAppBundleUpdateHelper(context.Background(), AppBundleUpdateHelperConfig{
 		ParentPID: 99999999, Current: staged.InstallPath, Staged: staged.ArtifactPath, Backup: staged.BackupPath,
 		HealthURL: health.URL, ExpectedVersion: staged.Version, PreviousVersion: staged.PreviousVersion, OutcomeID: staged.OutcomeID,
 		WaitTimeout: 100 * time.Millisecond, ValidationTimeout: time.Second,
@@ -116,14 +116,14 @@ func TestDesktopHelperResumesJournaledPublishedTargetAndValidates(t *testing.T) 
 	if data, err := os.ReadFile(staged.InstallPath); err != nil || string(data) != "new" {
 		t.Fatalf("published desktop=%q err=%v", data, err)
 	}
-	outcome, err := readBinaryHelperOutcome(staged)
-	if err != nil || outcome.State != binaryOutcomeSucceeded {
+	outcome, err := readPackagedUpdateHelperOutcome(staged)
+	if err != nil || outcome.State != packagedUpdateOutcomeSucceeded {
 		t.Fatalf("outcome=%#v err=%v", outcome, err)
 	}
 }
 
-func TestDesktopHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
-	cfg, err := ParseDesktopHelperArgs([]string{
+func TestAppBundleUpdateHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
+	cfg, err := ParseAppBundleUpdateHelperArgs([]string{
 		"--parent-pid", "1234",
 		"--current", "/tmp/current",
 		"--staged", "/tmp/current.openvibely-new",
@@ -136,7 +136,7 @@ func TestDesktopHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 		"--running-version", "0.5.0",
 	})
 	if err != nil {
-		t.Fatalf("ParseDesktopHelperArgs: %v", err)
+		t.Fatalf("ParseAppBundleUpdateHelperArgs: %v", err)
 	}
 	if cfg.ParentPID != 1234 || !cfg.Recovery || cfg.RunningVersion != "0.5.0" || cfg.HealthURL == "" {
 		t.Fatalf("parsed config = %#v", cfg)
@@ -150,19 +150,19 @@ func TestDesktopHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 		{"--unknown", "value"},
 		{"--parent-pid", "1", "--parent-pid", "2"},
 	} {
-		if _, err := ParseDesktopHelperArgs(args); err == nil {
-			t.Fatalf("ParseDesktopHelperArgs(%v) unexpectedly succeeded", args)
+		if _, err := ParseAppBundleUpdateHelperArgs(args); err == nil {
+			t.Fatalf("ParseAppBundleUpdateHelperArgs(%v) unexpectedly succeeded", args)
 		}
 	}
 
-	var relaunch DesktopHelperConfig
-	metadataBytes, err := json.Marshal(binaryRelaunchMetadata{Arguments: []string{"OpenVibely", "--flag"}, WorkingDirectory: t.TempDir(), ExecutableRelative: "Contents/MacOS/OpenVibely"})
+	var relaunch AppBundleUpdateHelperConfig
+	metadataBytes, err := json.Marshal(packagedUpdateRelaunchMetadata{Arguments: []string{"OpenVibely", "--flag"}, WorkingDirectory: t.TempDir(), ExecutableRelative: "Contents/MacOS/OpenVibely"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	metadata := string(metadataBytes)
-	if err := LoadDesktopHelperRelaunch(strings.NewReader(metadata), &relaunch); err != nil {
-		t.Fatalf("LoadDesktopHelperRelaunch: %v", err)
+	if err := LoadAppBundleUpdateHelperRelaunch(strings.NewReader(metadata), &relaunch); err != nil {
+		t.Fatalf("LoadAppBundleUpdateHelperRelaunch: %v", err)
 	}
 	if len(relaunch.Arguments) != 2 || relaunch.Arguments[1] != "--flag" || relaunch.ExecutableRelative == "" {
 		t.Fatalf("relaunch config = %#v", relaunch)
@@ -173,14 +173,14 @@ func TestDesktopHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 		`{"arguments":["OpenVibely"],"working_directory":"/tmp","extra":true}`,
 		`not-json`,
 	} {
-		if err := LoadDesktopHelperRelaunch(strings.NewReader(input), &DesktopHelperConfig{}); err == nil {
-			t.Fatalf("LoadDesktopHelperRelaunch(%q) unexpectedly succeeded", input)
+		if err := LoadAppBundleUpdateHelperRelaunch(strings.NewReader(input), &AppBundleUpdateHelperConfig{}); err == nil {
+			t.Fatalf("LoadAppBundleUpdateHelperRelaunch(%q) unexpectedly succeeded", input)
 		}
 	}
-	if err := LoadDesktopHelperRelaunch(nil, &DesktopHelperConfig{}); err == nil {
+	if err := LoadAppBundleUpdateHelperRelaunch(nil, &AppBundleUpdateHelperConfig{}); err == nil {
 		t.Fatal("nil relaunch reader unexpectedly succeeded")
 	}
-	if err := LoadDesktopHelperRelaunch(strings.NewReader(metadata), nil); err == nil {
+	if err := LoadAppBundleUpdateHelperRelaunch(strings.NewReader(metadata), nil); err == nil {
 		t.Fatal("nil relaunch config unexpectedly succeeded")
 	}
 }
@@ -203,7 +203,7 @@ func TestDesktopSuccessorCommandUsesLaunchServicesForMacAppBundles(t *testing.T)
 	t.Setenv("PATH", mockBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("OPEN_CAPTURE", capture)
 
-	start := desktopSuccessorCommand(DesktopHelperConfig{
+	start := appBundleSuccessorCommand(AppBundleUpdateHelperConfig{
 		Current:            filepath.Join(root, "OpenVibely.app"),
 		HealthURL:          "http://127.0.0.1:54420/api/system/health",
 		Arguments:          []string{"OpenVibely", "--flag", "value"},
@@ -233,7 +233,7 @@ func TestDesktopSuccessorCommandUsesLaunchServicesForMacAppBundles(t *testing.T)
 	}
 }
 
-func TestRunDesktopHelperEarlyValidationErrors(t *testing.T) {
+func TestRunAppBundleUpdateHelperEarlyValidationErrors(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely-desktop")
 	staged := current + ".openvibely-new"
@@ -247,13 +247,13 @@ func TestRunDesktopHelperEarlyValidationErrors(t *testing.T) {
 	if err := os.WriteFile(backup, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, cfg := range []DesktopHelperConfig{
+	for _, cfg := range []AppBundleUpdateHelperConfig{
 		{ParentPID: 999999, Current: "relative", Staged: staged, Backup: backup, HealthURL: "http://127.0.0.1:1/health", ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "outcome"},
 		{ParentPID: os.Getpid(), Current: current, Staged: staged, Backup: backup, HealthURL: "http://127.0.0.1:1/health", ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "outcome"},
 		{ParentPID: 999999, Current: current, Staged: staged, Backup: backup, HealthURL: "", ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "outcome"},
 	} {
-		if err := RunDesktopHelper(context.Background(), cfg); err == nil {
-			t.Fatalf("RunDesktopHelper(%#v) unexpectedly succeeded", cfg)
+		if err := RunAppBundleUpdateHelper(context.Background(), cfg); err == nil {
+			t.Fatalf("RunAppBundleUpdateHelper(%#v) unexpectedly succeeded", cfg)
 		}
 	}
 }

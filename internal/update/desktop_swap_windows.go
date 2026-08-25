@@ -4,7 +4,7 @@ package update
 
 import "os"
 
-// Windows cannot atomically exchange non-empty directories. The desktop helper
+// Windows cannot atomically exchange non-empty directories. The app-bundle update helper
 // already keeps a rollback backup, so directory install units use a best-effort
 // remove-and-publish swap after the old process exits.
 func atomicExchangeInstallUnits(first, second string) error {

@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-type BinaryHelperConfig struct {
+type ExecutableUpdateHelperConfig struct {
 	ParentPID                      int
 	Current, Staged, Backup        string
 	HealthURL, ExpectedVersion     string
@@ -32,69 +32,73 @@ type BinaryHelperConfig struct {
 }
 
 const (
-	binaryOutcomePrepared        = "prepared"
-	binaryOutcomePending         = "pending"
-	binaryOutcomeAuthorized      = "authorized"
-	binaryOutcomeParentExited    = "parent_exited"
-	binaryOutcomeBackupPublished = "backup_published"
-	binaryOutcomeTargetPublished = "target_published"
-	binaryOutcomeValidating      = "validating"
-	binaryOutcomeRollingBack     = "rolling_back"
-	binaryOutcomeRecovering      = "recovering"
-	binaryOutcomeCancelled       = "cancelled"
-	binaryOutcomeSucceeded       = "succeeded"
-	binaryOutcomeRolledBack      = "rolled_back"
+	packagedUpdateOutcomePrepared        = "prepared"
+	packagedUpdateOutcomePending         = "pending"
+	packagedUpdateOutcomeAuthorized      = "authorized"
+	packagedUpdateOutcomeParentExited    = "parent_exited"
+	packagedUpdateOutcomeBackupPublished = "backup_published"
+	packagedUpdateOutcomeTargetPublished = "target_published"
+	packagedUpdateOutcomeValidating      = "validating"
+	packagedUpdateOutcomeRollingBack     = "rolling_back"
+	packagedUpdateOutcomeRecovering      = "recovering"
+	packagedUpdateOutcomeCancelled       = "cancelled"
+	packagedUpdateOutcomeSucceeded       = "succeeded"
+	packagedUpdateOutcomeRolledBack      = "rolled_back"
 )
 
-type binaryHelperOutcome struct {
+type packagedUpdateHelperOutcome struct {
 	ID              string `json:"id"`
 	State           string `json:"state"`
 	PreviousVersion string `json:"previous_version"`
 	DesiredVersion  string `json:"desired_version"`
 }
 
-func binaryHelperOutcomePath(current string) string { return current + ".openvibely-outcome.json" }
-func binaryHelperPreparedPath(current string) string {
+func packagedUpdateHelperOutcomePath(current string) string {
+	return current + ".openvibely-outcome.json"
+}
+func packagedUpdateHelperPreparedPath(current string) string {
 	return current + ".openvibely-outcome.prepared.json"
 }
-func binaryHelperAuthorizedPath(current string) string {
+func packagedUpdateHelperAuthorizedPath(current string) string {
 	return current + ".openvibely-outcome.authorized.json"
 }
-func binaryHelperCancelledPath(current string) string {
+func packagedUpdateHelperCancelledPath(current string) string {
 	return current + ".openvibely-outcome.cancelled.json"
 }
-func binaryHelperRecoveryReadyPath(current string) string {
+func packagedUpdateHelperRecoveryReadyPath(current string) string {
 	return current + ".openvibely-recovery-ready.json"
 }
-func binaryHelperRecoveryClaimPath(current string) string {
+func packagedUpdateHelperRecoveryClaimPath(current string) string {
 	return current + ".openvibely-recovery-claim.json"
 }
-func binaryHelperRelaunchMetadataPath(current string) string {
+func packagedUpdateHelperRelaunchMetadataPath(current string) string {
 	return current + ".openvibely-relaunch.json"
 }
-func binaryHelperTransitionLeasePath(staged LocalStagedUpdate) string {
+func packagedUpdateHelperTransitionLeasePath(staged LocalStagedUpdate) string {
 	digest := sha256.Sum256([]byte(staged.OutcomeID))
 	return staged.InstallPath + ".openvibely-handoff-" + hex.EncodeToString(digest[:8]) + ".lock"
 }
-func binaryHelperLeasePath(staged LocalStagedUpdate) string {
+func packagedUpdateHelperLeasePath(staged LocalStagedUpdate) string {
 	digest := sha256.Sum256([]byte(staged.OutcomeID))
+	// Keep the persisted lease filename stable across releases so a successor
+	// cannot mistake an older, still-running helper for a dead handoff.
 	return staged.InstallPath + ".openvibely-helper-" + hex.EncodeToString(digest[:8]) + ".lock"
 }
 
-func writeBinaryHelperPhase(staged LocalStagedUpdate, state string) error {
-	data, err := marshalBinaryHelperOutcome(staged, state)
+func writePackagedUpdateHelperPhase(staged LocalStagedUpdate, state string) error {
+	data, err := marshalPackagedUpdateHelperOutcome(staged, state)
 	if err != nil {
 		return err
 	}
-	return atomicWriteState(binaryHelperAuthorizedPath(staged.InstallPath), data)
+	return atomicWriteState(packagedUpdateHelperAuthorizedPath(staged.InstallPath), data)
 }
 
-func writeBinaryHelperPhaseWithRetry(ctx context.Context, staged LocalStagedUpdate, state string) error {
+func writePackagedUpdateHelperPhaseWithRetry(ctx context.Context, staged LocalStagedUpdate, state string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	for {
-		if err := writeBinaryHelperPhase(staged, state); err == nil {
+		if err := writePackagedUpdateHelperPhase(staged, state); err == nil {
 			return nil
 		} else {
 			timer := time.NewTimer(250 * time.Millisecond)
@@ -108,85 +112,85 @@ func writeBinaryHelperPhaseWithRetry(ctx context.Context, staged LocalStagedUpda
 	}
 }
 
-func marshalBinaryHelperOutcome(staged LocalStagedUpdate, state string) ([]byte, error) {
+func marshalPackagedUpdateHelperOutcome(staged LocalStagedUpdate, state string) ([]byte, error) {
 	if staged.OutcomeID == "" || staged.PreviousVersion == "" || staged.Version == "" {
-		return nil, errors.New("binary helper outcome identity is incomplete")
+		return nil, errors.New("packaged update helper outcome identity is incomplete")
 	}
-	return json.Marshal(binaryHelperOutcome{ID: staged.OutcomeID, State: state, PreviousVersion: staged.PreviousVersion, DesiredVersion: staged.Version})
+	return json.Marshal(packagedUpdateHelperOutcome{ID: staged.OutcomeID, State: state, PreviousVersion: staged.PreviousVersion, DesiredVersion: staged.Version})
 }
 
-func writeBinaryHelperOutcome(staged LocalStagedUpdate, state string) error {
-	data, err := marshalBinaryHelperOutcome(staged, state)
+func writePackagedUpdateHelperOutcome(staged LocalStagedUpdate, state string) error {
+	data, err := marshalPackagedUpdateHelperOutcome(staged, state)
 	if err != nil {
 		return err
 	}
-	path := binaryHelperOutcomePath(staged.InstallPath)
-	if state == binaryOutcomePrepared {
-		path = binaryHelperPreparedPath(staged.InstallPath)
+	path := packagedUpdateHelperOutcomePath(staged.InstallPath)
+	if state == packagedUpdateOutcomePrepared {
+		path = packagedUpdateHelperPreparedPath(staged.InstallPath)
 	}
 	return atomicWriteState(path, data)
 }
 
-func claimBinaryHelperHandoff(ctx context.Context, staged LocalStagedUpdate) error {
-	if err := os.Rename(binaryHelperPreparedPath(staged.InstallPath), binaryHelperOutcomePath(staged.InstallPath)); err != nil {
-		return fmt.Errorf("claim binary helper handoff: %w", err)
+func claimPackagedUpdateHelperHandoff(ctx context.Context, staged LocalStagedUpdate) error {
+	if err := os.Rename(packagedUpdateHelperPreparedPath(staged.InstallPath), packagedUpdateHelperOutcomePath(staged.InstallPath)); err != nil {
+		return fmt.Errorf("claim packaged update helper handoff: %w", err)
 	}
-	return writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomePending)
+	return writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomePending)
 }
 
-func authorizeBinaryHelperHandoff(staged LocalStagedUpdate) error {
-	lease, err := acquireBinaryHelperTransitionLease(staged)
+func authorizePackagedUpdateHelperHandoff(staged LocalStagedUpdate) error {
+	lease, err := acquirePackagedUpdateHelperTransitionLease(staged)
 	if err != nil {
-		return fmt.Errorf("authorize binary helper handoff: %w", err)
+		return fmt.Errorf("authorize packaged update helper handoff: %w", err)
 	}
 	defer lease.Close()
-	if err := renameBinaryHelperState(binaryHelperOutcomePath(staged.InstallPath), binaryHelperAuthorizedPath(staged.InstallPath)); err != nil {
+	if err := renamePackagedUpdateHelperState(packagedUpdateHelperOutcomePath(staged.InstallPath), packagedUpdateHelperAuthorizedPath(staged.InstallPath)); err != nil {
 		if os.IsNotExist(err) {
-			outcome, readErr := readBinaryHelperOutcome(staged)
-			if readErr == nil && outcome.State == binaryOutcomeAuthorized {
+			outcome, readErr := readPackagedUpdateHelperOutcome(staged)
+			if readErr == nil && outcome.State == packagedUpdateOutcomeAuthorized {
 				return nil
 			}
-			if readErr == nil && outcome.State == binaryOutcomeCancelled {
-				return errors.New("binary helper handoff was cancelled")
+			if readErr == nil && outcome.State == packagedUpdateOutcomeCancelled {
+				return errors.New("packaged update helper handoff was cancelled")
 			}
 		}
-		return fmt.Errorf("authorize binary helper handoff: %w", err)
+		return fmt.Errorf("authorize packaged update helper handoff: %w", err)
 	}
 	return nil
 }
 
-func cancelBinaryHelperHandoff(staged LocalStagedUpdate) (bool, error) {
-	lease, err := acquireBinaryHelperTransitionLease(staged)
+func cancelPackagedUpdateHelperHandoff(staged LocalStagedUpdate) (bool, error) {
+	lease, err := acquirePackagedUpdateHelperTransitionLease(staged)
 	if err != nil {
-		return false, fmt.Errorf("cancel binary helper handoff: %w", err)
+		return false, fmt.Errorf("cancel packaged update helper handoff: %w", err)
 	}
 	defer lease.Close()
-	if err := renameBinaryHelperState(binaryHelperOutcomePath(staged.InstallPath), binaryHelperCancelledPath(staged.InstallPath)); err == nil {
+	if err := renamePackagedUpdateHelperState(packagedUpdateHelperOutcomePath(staged.InstallPath), packagedUpdateHelperCancelledPath(staged.InstallPath)); err == nil {
 		return true, nil
 	} else if !os.IsNotExist(err) {
-		return false, fmt.Errorf("cancel binary helper handoff: %w", err)
+		return false, fmt.Errorf("cancel packaged update helper handoff: %w", err)
 	}
-	outcome, err := readBinaryHelperOutcome(staged)
+	outcome, err := readPackagedUpdateHelperOutcome(staged)
 	if err != nil {
 		return false, err
 	}
 	switch outcome.State {
-	case binaryOutcomeAuthorized:
+	case packagedUpdateOutcomeAuthorized:
 		return false, nil
-	case binaryOutcomeCancelled:
+	case packagedUpdateOutcomeCancelled:
 		return true, nil
 	default:
-		return false, fmt.Errorf("binary helper handoff has invalid terminal race state %q", outcome.State)
+		return false, fmt.Errorf("packaged update helper handoff has invalid terminal race state %q", outcome.State)
 	}
 }
 
-func acquireBinaryHelperTransitionLease(staged LocalStagedUpdate) (*binaryHelperLease, error) {
+func acquirePackagedUpdateHelperTransitionLease(staged LocalStagedUpdate) (*packagedUpdateHelperLease, error) {
 	// Serializing the two terminal renames is required on Windows, where
 	// concurrent MoveFileEx calls can otherwise both appear to claim the same
 	// pending path.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		lease, acquired, err := tryAcquireBinaryHelperLease(binaryHelperTransitionLeasePath(staged))
+		lease, acquired, err := tryAcquirePackagedUpdateHelperLease(packagedUpdateHelperTransitionLeasePath(staged))
 		if err != nil {
 			return nil, err
 		}
@@ -194,13 +198,13 @@ func acquireBinaryHelperTransitionLease(staged LocalStagedUpdate) (*binaryHelper
 			return lease, nil
 		}
 		if time.Now().After(deadline) {
-			return nil, errors.New("timed out acquiring binary helper handoff lease")
+			return nil, errors.New("timed out acquiring packaged update helper handoff lease")
 		}
 		time.Sleep(time.Millisecond)
 	}
 }
 
-func renameBinaryHelperState(source, destination string) error {
+func renamePackagedUpdateHelperState(source, destination string) error {
 	deadline := time.Now().Add(time.Second)
 	for {
 		err := os.Rename(source, destination)
@@ -211,60 +215,60 @@ func renameBinaryHelperState(source, destination string) error {
 	}
 }
 
-func cancelAuthorizedBinaryHelperHandoff(staged LocalStagedUpdate) error {
+func cancelAuthorizedPackagedUpdateHelperHandoff(staged LocalStagedUpdate) error {
 	for {
-		if err := os.Rename(binaryHelperAuthorizedPath(staged.InstallPath), binaryHelperCancelledPath(staged.InstallPath)); err == nil {
+		if err := os.Rename(packagedUpdateHelperAuthorizedPath(staged.InstallPath), packagedUpdateHelperCancelledPath(staged.InstallPath)); err == nil {
 			return nil
 		} else if !os.IsNotExist(err) {
 			time.Sleep(250 * time.Millisecond)
 			continue
 		}
-		outcome, err := readBinaryHelperOutcome(staged)
-		if err == nil && outcome.State == binaryOutcomeCancelled {
+		outcome, err := readPackagedUpdateHelperOutcome(staged)
+		if err == nil && outcome.State == packagedUpdateOutcomeCancelled {
 			return nil
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
 }
 
-func recoverAuthorizedParentExitFailure(cfg BinaryHelperConfig, staged LocalStagedUpdate, cause error) error {
+func recoverAuthorizedParentExitFailure(cfg ExecutableUpdateHelperConfig, staged LocalStagedUpdate, cause error) error {
 	result := cause
 	if err := ensureBootableBinary(cfg.Current, cfg.Backup); err != nil {
-		return errors.Join(result, fmt.Errorf("binary recovery has no bootable executable: %w", err))
+		return errors.Join(result, fmt.Errorf("executable update recovery has no bootable executable: %w", err))
 	}
-	if err := cancelAuthorizedBinaryHelperHandoff(staged); err != nil {
-		return errors.Join(result, fmt.Errorf("cancel binary helper after parent-exit failure: %w", err))
+	if err := cancelAuthorizedPackagedUpdateHelperHandoff(staged); err != nil {
+		return errors.Join(result, fmt.Errorf("cancel packaged update helper after parent-exit failure: %w", err))
 	}
 	start := cfg.StartCommand
 	if start == nil {
 		start = packagedRestartCommand(cfg)
 	}
 	if _, err := start("exec", cfg.Current); err != nil {
-		result = errors.Join(result, fmt.Errorf("binary recovery restart failed: %w", err))
+		result = errors.Join(result, fmt.Errorf("executable update recovery restart failed: %w", err))
 	}
 	return result
 }
 
-func waitForBinaryHelperAuthorization(ctx context.Context, staged LocalStagedUpdate, timeout time.Duration) error {
+func waitForPackagedUpdateHelperAuthorization(ctx context.Context, staged LocalStagedUpdate, timeout time.Duration) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	for {
-		outcome, err := readBinaryHelperOutcome(staged)
+		outcome, err := readPackagedUpdateHelperOutcome(staged)
 		if err == nil {
 			switch outcome.State {
-			case binaryOutcomeAuthorized:
+			case packagedUpdateOutcomeAuthorized:
 				return nil
-			case binaryOutcomePending:
-			case binaryOutcomeCancelled:
-				return errors.New("binary helper handoff was cancelled")
+			case packagedUpdateOutcomePending:
+			case packagedUpdateOutcomeCancelled:
+				return errors.New("packaged update helper handoff was cancelled")
 			default:
-				return fmt.Errorf("binary helper authorization has invalid state %q", outcome.State)
+				return fmt.Errorf("packaged update helper authorization has invalid state %q", outcome.State)
 			}
 		} else if os.IsNotExist(err) {
-			return errors.New("binary helper handoff was revoked")
+			return errors.New("packaged update helper handoff was revoked")
 		} else {
 			return err
 		}
@@ -272,25 +276,25 @@ func waitForBinaryHelperAuthorization(ctx context.Context, staged LocalStagedUpd
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			cancelled, cancelErr := cancelBinaryHelperHandoff(staged)
+			cancelled, cancelErr := cancelPackagedUpdateHelperHandoff(staged)
 			if cancelErr != nil {
-				return errors.Join(fmt.Errorf("wait for binary helper authorization: %w", ctx.Err()), cancelErr)
+				return errors.Join(fmt.Errorf("wait for packaged update helper authorization: %w", ctx.Err()), cancelErr)
 			}
 			if !cancelled {
 				return nil
 			}
-			return fmt.Errorf("wait for binary helper authorization: %w", ctx.Err())
+			return fmt.Errorf("wait for packaged update helper authorization: %w", ctx.Err())
 		case <-timer.C:
 		}
 	}
 }
 
-func writeBinaryHelperOutcomeWithRetry(ctx context.Context, staged LocalStagedUpdate, state string) error {
+func writePackagedUpdateHelperOutcomeWithRetry(ctx context.Context, staged LocalStagedUpdate, state string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	for {
-		err := writeBinaryHelperOutcome(staged, state)
+		err := writePackagedUpdateHelperOutcome(staged, state)
 		if err == nil {
 			return nil
 		}
@@ -304,20 +308,20 @@ func writeBinaryHelperOutcomeWithRetry(ctx context.Context, staged LocalStagedUp
 	}
 }
 
-func writeBinaryHelperRecoveryClaim(staged LocalStagedUpdate) error {
-	data, err := marshalBinaryHelperOutcome(staged, binaryOutcomeRecovering)
+func writePackagedUpdateHelperRecoveryClaim(staged LocalStagedUpdate) error {
+	data, err := marshalPackagedUpdateHelperOutcome(staged, packagedUpdateOutcomeRecovering)
 	if err != nil {
 		return err
 	}
-	return atomicWriteState(binaryHelperRecoveryClaimPath(staged.InstallPath), data)
+	return atomicWriteState(packagedUpdateHelperRecoveryClaimPath(staged.InstallPath), data)
 }
 
-func writeBinaryHelperRecoveryClaimWithRetry(ctx context.Context, staged LocalStagedUpdate) error {
+func writePackagedUpdateHelperRecoveryClaimWithRetry(ctx context.Context, staged LocalStagedUpdate) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	for {
-		if err := writeBinaryHelperRecoveryClaim(staged); err == nil {
+		if err := writePackagedUpdateHelperRecoveryClaim(staged); err == nil {
 			return nil
 		} else {
 			timer := time.NewTimer(250 * time.Millisecond)
@@ -331,20 +335,20 @@ func writeBinaryHelperRecoveryClaimWithRetry(ctx context.Context, staged LocalSt
 	}
 }
 
-func readBinaryHelperRecoveryClaim(staged LocalStagedUpdate) (binaryHelperOutcome, error) {
-	return readBinaryHelperOutcomeAt(staged, binaryHelperRecoveryClaimPath(staged.InstallPath))
+func readPackagedUpdateHelperRecoveryClaim(staged LocalStagedUpdate) (packagedUpdateHelperOutcome, error) {
+	return readPackagedUpdateHelperOutcomeAt(staged, packagedUpdateHelperRecoveryClaimPath(staged.InstallPath))
 }
 
-func removeBinaryHelperOutcome(staged LocalStagedUpdate) error {
+func removePackagedUpdateHelperOutcome(staged LocalStagedUpdate) error {
 	var result error
 	for _, path := range []string{
-		binaryHelperOutcomePath(staged.InstallPath),
-		binaryHelperPreparedPath(staged.InstallPath),
-		binaryHelperAuthorizedPath(staged.InstallPath),
-		binaryHelperCancelledPath(staged.InstallPath),
-		binaryHelperRecoveryClaimPath(staged.InstallPath),
-		binaryHelperRecoveryReadyPath(staged.InstallPath),
-		binaryHelperTransitionLeasePath(staged),
+		packagedUpdateHelperOutcomePath(staged.InstallPath),
+		packagedUpdateHelperPreparedPath(staged.InstallPath),
+		packagedUpdateHelperAuthorizedPath(staged.InstallPath),
+		packagedUpdateHelperCancelledPath(staged.InstallPath),
+		packagedUpdateHelperRecoveryClaimPath(staged.InstallPath),
+		packagedUpdateHelperRecoveryReadyPath(staged.InstallPath),
+		packagedUpdateHelperTransitionLeasePath(staged),
 	} {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			result = errors.Join(result, err)
@@ -353,24 +357,24 @@ func removeBinaryHelperOutcome(staged LocalStagedUpdate) error {
 	return result
 }
 
-func readBinaryHelperOutcome(staged LocalStagedUpdate) (binaryHelperOutcome, error) {
-	outcome, err := readBinaryHelperOutcomeAt(staged, binaryHelperOutcomePath(staged.InstallPath))
+func readPackagedUpdateHelperOutcome(staged LocalStagedUpdate) (packagedUpdateHelperOutcome, error) {
+	outcome, err := readPackagedUpdateHelperOutcomeAt(staged, packagedUpdateHelperOutcomePath(staged.InstallPath))
 	if err == nil || !os.IsNotExist(err) {
 		return outcome, err
 	}
-	outcome, err = readBinaryHelperOutcomeAt(staged, binaryHelperAuthorizedPath(staged.InstallPath))
+	outcome, err = readPackagedUpdateHelperOutcomeAt(staged, packagedUpdateHelperAuthorizedPath(staged.InstallPath))
 	if err == nil {
-		if outcome.State == binaryOutcomePending {
-			outcome.State = binaryOutcomeAuthorized
+		if outcome.State == packagedUpdateOutcomePending {
+			outcome.State = packagedUpdateOutcomeAuthorized
 		}
 		return outcome, nil
 	}
 	if !os.IsNotExist(err) {
 		return outcome, err
 	}
-	outcome, err = readBinaryHelperOutcomeAt(staged, binaryHelperCancelledPath(staged.InstallPath))
+	outcome, err = readPackagedUpdateHelperOutcomeAt(staged, packagedUpdateHelperCancelledPath(staged.InstallPath))
 	if err == nil {
-		outcome.State = binaryOutcomeCancelled
+		outcome.State = packagedUpdateOutcomeCancelled
 		return outcome, nil
 	}
 	if !os.IsNotExist(err) {
@@ -379,24 +383,24 @@ func readBinaryHelperOutcome(staged LocalStagedUpdate) (binaryHelperOutcome, err
 	// Authorization may have atomically claimed the active pending identity
 	// after the first authorized-path read. Recheck it before reporting that no
 	// durable winner exists.
-	outcome, authorizedErr := readBinaryHelperOutcomeAt(staged, binaryHelperAuthorizedPath(staged.InstallPath))
+	outcome, authorizedErr := readPackagedUpdateHelperOutcomeAt(staged, packagedUpdateHelperAuthorizedPath(staged.InstallPath))
 	if authorizedErr == nil {
-		if outcome.State == binaryOutcomePending {
-			outcome.State = binaryOutcomeAuthorized
+		if outcome.State == packagedUpdateOutcomePending {
+			outcome.State = packagedUpdateOutcomeAuthorized
 		}
 		return outcome, nil
 	}
 	return outcome, authorizedErr
 }
 
-func readBinaryHelperPrepared(staged LocalStagedUpdate) (binaryHelperOutcome, error) {
-	return readBinaryHelperOutcomeAt(staged, binaryHelperPreparedPath(staged.InstallPath))
+func readPackagedUpdateHelperPrepared(staged LocalStagedUpdate) (packagedUpdateHelperOutcome, error) {
+	return readPackagedUpdateHelperOutcomeAt(staged, packagedUpdateHelperPreparedPath(staged.InstallPath))
 }
 
-func readBinaryHelperOutcomeAt(staged LocalStagedUpdate, path string) (binaryHelperOutcome, error) {
-	var outcome binaryHelperOutcome
+func readPackagedUpdateHelperOutcomeAt(staged LocalStagedUpdate, path string) (packagedUpdateHelperOutcome, error) {
+	var outcome packagedUpdateHelperOutcome
 	if staged.OutcomeID == "" || staged.PreviousVersion == "" || staged.Version == "" {
-		return outcome, errors.New("binary helper outcome identity is incomplete")
+		return outcome, errors.New("packaged update helper outcome identity is incomplete")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -406,20 +410,20 @@ func readBinaryHelperOutcomeAt(staged LocalStagedUpdate, path string) (binaryHel
 		return outcome, err
 	}
 	if outcome.ID != staged.OutcomeID || outcome.PreviousVersion != staged.PreviousVersion || outcome.DesiredVersion != staged.Version {
-		return binaryHelperOutcome{}, errors.New("binary helper outcome identity does not match the staged update")
+		return packagedUpdateHelperOutcome{}, errors.New("packaged update helper outcome identity does not match the staged update")
 	}
 	switch outcome.State {
-	case binaryOutcomePrepared, binaryOutcomePending, binaryOutcomeAuthorized,
-		binaryOutcomeParentExited, binaryOutcomeBackupPublished, binaryOutcomeTargetPublished,
-		binaryOutcomeValidating, binaryOutcomeRollingBack, binaryOutcomeRecovering,
-		binaryOutcomeCancelled, binaryOutcomeSucceeded, binaryOutcomeRolledBack:
+	case packagedUpdateOutcomePrepared, packagedUpdateOutcomePending, packagedUpdateOutcomeAuthorized,
+		packagedUpdateOutcomeParentExited, packagedUpdateOutcomeBackupPublished, packagedUpdateOutcomeTargetPublished,
+		packagedUpdateOutcomeValidating, packagedUpdateOutcomeRollingBack, packagedUpdateOutcomeRecovering,
+		packagedUpdateOutcomeCancelled, packagedUpdateOutcomeSucceeded, packagedUpdateOutcomeRolledBack:
 		return outcome, nil
 	default:
-		return binaryHelperOutcome{}, errors.New("binary helper outcome state is invalid")
+		return packagedUpdateHelperOutcome{}, errors.New("packaged update helper outcome state is invalid")
 	}
 }
 
-func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error) {
+func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperConfig) (runErr error) {
 	staged := LocalStagedUpdate{ArtifactPath: cfg.Staged, InstallPath: cfg.Current, BackupPath: cfg.Backup, Version: cfg.ExpectedVersion, PreviousVersion: cfg.PreviousVersion, OutcomeID: cfg.OutcomeID}
 	if err := validateBinaryPaths(staged); err != nil {
 		return err
@@ -432,7 +436,7 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 	}
 	outcomeEnabled := cfg.OutcomeID != "" || cfg.PreviousVersion != ""
 	if outcomeEnabled && (cfg.OutcomeID == "" || cfg.PreviousVersion == "") {
-		return errors.New("binary helper outcome identity is incomplete")
+		return errors.New("packaged update helper outcome identity is incomplete")
 	}
 	if cfg.WaitTimeout <= 0 {
 		cfg.WaitTimeout = 30 * time.Second
@@ -440,20 +444,20 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 	if cfg.ValidationTimeout <= 0 {
 		cfg.ValidationTimeout = 60 * time.Second
 	}
-	phase := binaryOutcomeAuthorized
-	var lease *binaryHelperLease
+	phase := packagedUpdateOutcomeAuthorized
+	var lease *packagedUpdateHelperLease
 	if outcomeEnabled {
 		var acquired bool
 		var err error
-		lease, acquired, err = tryAcquireBinaryHelperLease(binaryHelperLeasePath(staged))
+		lease, acquired, err = tryAcquirePackagedUpdateHelperLease(packagedUpdateHelperLeasePath(staged))
 		if err != nil {
-			return fmt.Errorf("acquire binary helper lease: %w", err)
+			return fmt.Errorf("acquire packaged update helper lease: %w", err)
 		}
 		if !acquired {
-			return errors.New("binary helper lease is already owned")
+			return errors.New("packaged update helper lease is already owned")
 		}
 		defer lease.Close()
-		_, recoveryClaimErr := readBinaryHelperRecoveryClaim(staged)
+		_, recoveryClaimErr := readPackagedUpdateHelperRecoveryClaim(staged)
 		switch {
 		case recoveryClaimErr == nil && !cfg.Recovery:
 			// Startup recovery durably claimed this exact operation while proving
@@ -462,60 +466,60 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 			return nil
 		case recoveryClaimErr == nil:
 		case os.IsNotExist(recoveryClaimErr) && cfg.Recovery:
-			return errors.New("binary recovery helper ownership claim is missing")
+			return errors.New("executable update recovery helper ownership claim is missing")
 		case os.IsNotExist(recoveryClaimErr):
 		default:
-			return fmt.Errorf("read binary recovery ownership claim: %w", recoveryClaimErr)
+			return fmt.Errorf("read executable update recovery ownership claim: %w", recoveryClaimErr)
 		}
 		if cfg.Recovery {
-			return runBinaryRecoveryHelper(ctx, cfg, staged)
+			return runExecutableUpdateRecoveryHelper(ctx, cfg, staged)
 		}
 
-		if _, err := readBinaryHelperPrepared(staged); err == nil {
-			if err := claimBinaryHelperHandoff(ctx, staged); err != nil {
+		if _, err := readPackagedUpdateHelperPrepared(staged); err == nil {
+			if err := claimPackagedUpdateHelperHandoff(ctx, staged); err != nil {
 				return err
 			}
-			if err := waitForBinaryHelperAuthorization(ctx, staged, cfg.WaitTimeout); err != nil {
+			if err := waitForPackagedUpdateHelperAuthorization(ctx, staged, cfg.WaitTimeout); err != nil {
 				return err
 			}
 		} else if !os.IsNotExist(err) {
 			return err
 		}
-		outcome, err := readBinaryHelperOutcome(staged)
+		outcome, err := readPackagedUpdateHelperOutcome(staged)
 		if err != nil {
 			return err
 		}
-		if outcome.State == binaryOutcomePending {
-			if err := waitForBinaryHelperAuthorization(ctx, staged, cfg.WaitTimeout); err != nil {
+		if outcome.State == packagedUpdateOutcomePending {
+			if err := waitForPackagedUpdateHelperAuthorization(ctx, staged, cfg.WaitTimeout); err != nil {
 				return err
 			}
-			outcome, err = readBinaryHelperOutcome(staged)
+			outcome, err = readPackagedUpdateHelperOutcome(staged)
 			if err != nil {
 				return err
 			}
 		}
 		switch outcome.State {
-		case binaryOutcomeCancelled, binaryOutcomeSucceeded, binaryOutcomeRolledBack:
+		case packagedUpdateOutcomeCancelled, packagedUpdateOutcomeSucceeded, packagedUpdateOutcomeRolledBack:
 			return nil
-		case binaryOutcomeAuthorized, binaryOutcomeParentExited, binaryOutcomeBackupPublished,
-			binaryOutcomeTargetPublished, binaryOutcomeValidating, binaryOutcomeRollingBack:
+		case packagedUpdateOutcomeAuthorized, packagedUpdateOutcomeParentExited, packagedUpdateOutcomeBackupPublished,
+			packagedUpdateOutcomeTargetPublished, packagedUpdateOutcomeValidating, packagedUpdateOutcomeRollingBack:
 			phase = outcome.State
 		default:
-			return fmt.Errorf("binary helper cannot resume phase %q", outcome.State)
+			return fmt.Errorf("packaged update helper cannot resume phase %q", outcome.State)
 		}
 	}
 
-	if !outcomeEnabled || phase == binaryOutcomeAuthorized {
+	if !outcomeEnabled || phase == packagedUpdateOutcomeAuthorized {
 		if err := waitForProcessExit(ctx, cfg.ParentPID, cfg.WaitTimeout); err != nil {
 			if outcomeEnabled {
 				return recoverAuthorizedParentExitFailure(cfg, staged, err)
 			}
 			return err
 		}
-		phase = binaryOutcomeParentExited
+		phase = packagedUpdateOutcomeParentExited
 		if outcomeEnabled {
-			if err := writeBinaryHelperPhaseWithRetry(ctx, staged, phase); err != nil {
-				return fmt.Errorf("persist binary helper parent-exit phase: %w", err)
+			if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, phase); err != nil {
+				return fmt.Errorf("persist packaged update helper parent-exit phase: %w", err)
 			}
 		}
 	}
@@ -525,21 +529,21 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 		start = packagedRestartCommand(cfg)
 	}
 	recoveryComplete := false
-	replacementPublished := phase == binaryOutcomeTargetPublished || phase == binaryOutcomeValidating
+	replacementPublished := phase == packagedUpdateOutcomeTargetPublished || phase == packagedUpdateOutcomeValidating
 	defer func() {
 		if runErr == nil || recoveryComplete {
 			return
 		}
 		if err := ensureBootableBinary(cfg.Current, cfg.Backup); err != nil {
-			runErr = errors.Join(runErr, fmt.Errorf("binary recovery has no bootable executable: %w", err))
+			runErr = errors.Join(runErr, fmt.Errorf("executable update recovery has no bootable executable: %w", err))
 			return
 		}
 		if _, err := start("exec", cfg.Current); err != nil {
-			runErr = errors.Join(runErr, fmt.Errorf("binary recovery restart failed: %w", err))
+			runErr = errors.Join(runErr, fmt.Errorf("executable update recovery restart failed: %w", err))
 			return
 		}
 		if outcomeEnabled && !replacementPublished {
-			if err := writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeRolledBack); err != nil {
+			if err := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeRolledBack); err != nil {
 				runErr = errors.Join(runErr, fmt.Errorf("persist binary rollback outcome: %w", err))
 				return
 			}
@@ -547,7 +551,7 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 		recoveryComplete = true
 	}()
 
-	if phase == binaryOutcomeRollingBack {
+	if phase == packagedUpdateOutcomeRollingBack {
 		if _, err := os.Stat(cfg.Backup); err == nil {
 			if err := atomicReplace(cfg.Backup, cfg.Current); err != nil {
 				return fmt.Errorf("resume binary rollback: %w", err)
@@ -562,7 +566,7 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 			return fmt.Errorf("resume binary rollback restart: %w", err)
 		}
 		if outcomeEnabled {
-			if err := writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeRolledBack); err != nil {
+			if err := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeRolledBack); err != nil {
 				return err
 			}
 		}
@@ -570,7 +574,7 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 		return errors.New("resumed binary rollback completed")
 	}
 
-	if phase == binaryOutcomeParentExited {
+	if phase == packagedUpdateOutcomeParentExited {
 		if err := recoverInterruptedBinarySwap(cfg.Current, cfg.Backup); err != nil {
 			return err
 		}
@@ -591,14 +595,14 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 		if err := publishBinaryBackup(cfg.Current, cfg.Backup, info.Mode().Perm()); err != nil {
 			return err
 		}
-		phase = binaryOutcomeBackupPublished
+		phase = packagedUpdateOutcomeBackupPublished
 		if outcomeEnabled {
-			if err := writeBinaryHelperPhaseWithRetry(ctx, staged, phase); err != nil {
+			if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, phase); err != nil {
 				return fmt.Errorf("persist binary backup phase: %w", err)
 			}
 		}
 	}
-	if phase == binaryOutcomeBackupPublished {
+	if phase == packagedUpdateOutcomeBackupPublished {
 		if _, err := os.Stat(cfg.Staged); err == nil {
 			if err := publishStagedBinary(cfg.Current, cfg.Staged); err != nil {
 				return err
@@ -606,18 +610,18 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 		} else if !os.IsNotExist(err) {
 			return err
 		}
-		phase = binaryOutcomeTargetPublished
+		phase = packagedUpdateOutcomeTargetPublished
 		replacementPublished = true
 		if outcomeEnabled {
-			if err := writeBinaryHelperPhaseWithRetry(ctx, staged, phase); err != nil {
+			if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, phase); err != nil {
 				return fmt.Errorf("persist binary target phase: %w", err)
 			}
 		}
 	}
-	if phase == binaryOutcomeTargetPublished {
-		phase = binaryOutcomeValidating
+	if phase == packagedUpdateOutcomeTargetPublished {
+		phase = packagedUpdateOutcomeValidating
 		if outcomeEnabled {
-			if err := writeBinaryHelperPhaseWithRetry(ctx, staged, phase); err != nil {
+			if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, phase); err != nil {
 				return fmt.Errorf("persist binary validation phase: %w", err)
 			}
 		}
@@ -632,7 +636,7 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 	}
 	if restartErr == nil {
 		if outcomeEnabled {
-			if err := writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeSucceeded); err != nil {
+			if err := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeSucceeded); err != nil {
 				return fmt.Errorf("persist binary success outcome: %w", err)
 			}
 		}
@@ -651,7 +655,7 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 		}
 	}
 	if outcomeEnabled {
-		if phaseErr := writeBinaryHelperPhaseWithRetry(ctx, staged, binaryOutcomeRollingBack); phaseErr != nil {
+		if phaseErr := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, packagedUpdateOutcomeRollingBack); phaseErr != nil {
 			return fmt.Errorf("validation failed: %v; persist binary rollback phase: %w", err, phaseErr)
 		}
 	}
@@ -666,7 +670,7 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 		return fmt.Errorf("validation failed: %v; rollback restart failed: %w", err, restartErr)
 	}
 	if outcomeEnabled {
-		if outcomeErr := writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeRolledBack); outcomeErr != nil {
+		if outcomeErr := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeRolledBack); outcomeErr != nil {
 			return fmt.Errorf("validation failed: %v; persist binary rollback outcome: %w", err, outcomeErr)
 		}
 	}
@@ -674,25 +678,25 @@ func RunBinaryHelper(ctx context.Context, cfg BinaryHelperConfig) (runErr error)
 	return fmt.Errorf("new binary validation failed and prior binary was restored: %w", err)
 }
 
-func runBinaryRecoveryHelper(ctx context.Context, cfg BinaryHelperConfig, staged LocalStagedUpdate) error {
-	outcome, err := readBinaryHelperOutcome(staged)
+func runExecutableUpdateRecoveryHelper(ctx context.Context, cfg ExecutableUpdateHelperConfig, staged LocalStagedUpdate) error {
+	outcome, err := readPackagedUpdateHelperOutcome(staged)
 	if err != nil {
-		return fmt.Errorf("read binary recovery phase: %w", err)
+		return fmt.Errorf("read executable update recovery phase: %w", err)
 	}
 	switch outcome.State {
-	case binaryOutcomeCancelled, binaryOutcomeSucceeded, binaryOutcomeRolledBack:
+	case packagedUpdateOutcomeCancelled, packagedUpdateOutcomeSucceeded, packagedUpdateOutcomeRolledBack:
 		return nil
-	case binaryOutcomeAuthorized, binaryOutcomeParentExited, binaryOutcomeBackupPublished,
-		binaryOutcomeTargetPublished, binaryOutcomeValidating, binaryOutcomeRollingBack:
+	case packagedUpdateOutcomeAuthorized, packagedUpdateOutcomeParentExited, packagedUpdateOutcomeBackupPublished,
+		packagedUpdateOutcomeTargetPublished, packagedUpdateOutcomeValidating, packagedUpdateOutcomeRollingBack:
 	default:
-		return fmt.Errorf("binary recovery has invalid phase %q", outcome.State)
+		return fmt.Errorf("executable update recovery has invalid phase %q", outcome.State)
 	}
-	ready, err := marshalBinaryHelperOutcome(staged, binaryOutcomeRecovering)
+	ready, err := marshalPackagedUpdateHelperOutcome(staged, packagedUpdateOutcomeRecovering)
 	if err != nil {
 		return err
 	}
-	if err := atomicWriteState(binaryHelperRecoveryReadyPath(staged.InstallPath), ready); err != nil {
-		return fmt.Errorf("publish binary recovery readiness: %w", err)
+	if err := atomicWriteState(packagedUpdateHelperRecoveryReadyPath(staged.InstallPath), ready); err != nil {
+		return fmt.Errorf("publish executable update recovery readiness: %w", err)
 	}
 	if err := waitForProcessExit(ctx, cfg.ParentPID, cfg.WaitTimeout); err != nil {
 		return err
@@ -701,7 +705,7 @@ func runBinaryRecoveryHelper(ctx context.Context, cfg BinaryHelperConfig, staged
 	if start == nil {
 		start = packagedRestartCommand(cfg)
 	}
-	if outcome.State == binaryOutcomeRollingBack {
+	if outcome.State == packagedUpdateOutcomeRollingBack {
 		if _, err := os.Stat(cfg.Backup); err == nil {
 			if err := atomicReplace(cfg.Backup, cfg.Current); err != nil {
 				return err
@@ -715,7 +719,7 @@ func runBinaryRecoveryHelper(ctx context.Context, cfg BinaryHelperConfig, staged
 		if _, err := start("exec", cfg.Current); err != nil {
 			return err
 		}
-		return writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeRolledBack)
+		return writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeRolledBack)
 	}
 	if cfg.RunningVersion == staged.PreviousVersion {
 		if _, err := os.Stat(staged.ArtifactPath); err == nil {
@@ -725,15 +729,15 @@ func runBinaryRecoveryHelper(ctx context.Context, cfg BinaryHelperConfig, staged
 			if _, err := start("exec", cfg.Current); err != nil {
 				return err
 			}
-			return writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeCancelled)
+			return writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeCancelled)
 		} else if !os.IsNotExist(err) {
 			return err
 		}
 	}
-	return recoverPublishedBinaryTarget(ctx, cfg, staged, start)
+	return recoverPublishedExecutableTarget(ctx, cfg, staged, start)
 }
 
-func recoverPublishedBinaryTarget(ctx context.Context, cfg BinaryHelperConfig, staged LocalStagedUpdate, start func(string, string) (func(context.Context) error, error)) error {
+func recoverPublishedExecutableTarget(ctx context.Context, cfg ExecutableUpdateHelperConfig, staged LocalStagedUpdate, start func(string, string) (func(context.Context) error, error)) error {
 	stopSuccessor, restartErr := start("exec", cfg.Current)
 	if restartErr == nil {
 		validationCtx, cancel := context.WithTimeout(ctx, cfg.ValidationTimeout)
@@ -741,7 +745,7 @@ func recoverPublishedBinaryTarget(ctx context.Context, cfg BinaryHelperConfig, s
 		cancel()
 	}
 	if restartErr == nil {
-		return writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeSucceeded)
+		return writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeSucceeded)
 	}
 	if stopSuccessor != nil {
 		stopCtx, cancel := context.WithTimeout(context.Background(), cfg.WaitTimeout)
@@ -751,7 +755,7 @@ func recoverPublishedBinaryTarget(ctx context.Context, cfg BinaryHelperConfig, s
 			return errors.Join(restartErr, fmt.Errorf("stopping failed recovery successor: %w", stopErr))
 		}
 	}
-	if err := writeBinaryHelperPhaseWithRetry(ctx, staged, binaryOutcomeRollingBack); err != nil {
+	if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, packagedUpdateOutcomeRollingBack); err != nil {
 		return errors.Join(restartErr, err)
 	}
 	if err := atomicReplace(cfg.Backup, cfg.Current); err != nil {
@@ -763,7 +767,7 @@ func recoverPublishedBinaryTarget(ctx context.Context, cfg BinaryHelperConfig, s
 	if _, err := start("exec", cfg.Current); err != nil {
 		return errors.Join(restartErr, err)
 	}
-	if err := writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeRolledBack); err != nil {
+	if err := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeRolledBack); err != nil {
 		return errors.Join(restartErr, err)
 	}
 	return fmt.Errorf("recovered binary target failed validation and predecessor was restored: %w", restartErr)
@@ -871,7 +875,7 @@ func publishBinaryBackup(current, backup string, mode os.FileMode) (err error) {
 
 var waitForProcessExit = waitForProcessExitPlatform
 
-func packagedRestartCommand(cfg BinaryHelperConfig) func(string, string) (func(context.Context) error, error) {
+func packagedRestartCommand(cfg ExecutableUpdateHelperConfig) func(string, string) (func(context.Context) error, error) {
 	return func(_, _ string) (func(context.Context) error, error) {
 		arguments := cfg.Arguments
 		if len(arguments) == 0 {
@@ -956,44 +960,44 @@ func waitForExpectedHealth(ctx context.Context, endpoint, expected string, clien
 	}
 }
 
-type binaryRelaunchMetadata struct {
+type packagedUpdateRelaunchMetadata struct {
 	Arguments          []string `json:"arguments"`
 	WorkingDirectory   string   `json:"working_directory"`
 	ExecutableRelative string   `json:"executable_relative,omitempty"`
 }
 
-func LoadBinaryHelperRelaunch(reader io.Reader, cfg *BinaryHelperConfig) error {
+func LoadExecutableUpdateHelperRelaunch(reader io.Reader, cfg *ExecutableUpdateHelperConfig) error {
 	if reader == nil || cfg == nil {
-		return errors.New("binary helper relaunch metadata is unavailable")
+		return errors.New("executable update helper relaunch metadata is unavailable")
 	}
-	var metadata binaryRelaunchMetadata
+	var metadata packagedUpdateRelaunchMetadata
 	decoder := json.NewDecoder(io.LimitReader(reader, 1024*1024))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&metadata); err != nil {
-		return fmt.Errorf("decode binary helper relaunch metadata: %w", err)
+		return fmt.Errorf("decode executable update helper relaunch metadata: %w", err)
 	}
 	if len(metadata.Arguments) == 0 || metadata.WorkingDirectory == "" || !filepath.IsAbs(metadata.WorkingDirectory) {
-		return errors.New("binary helper relaunch metadata is incomplete")
+		return errors.New("executable update helper relaunch metadata is incomplete")
 	}
 	cfg.Arguments = append([]string(nil), metadata.Arguments...)
 	cfg.WorkingDirectory = metadata.WorkingDirectory
 	return nil
 }
 
-func LoadBinaryHelperRelaunchFile(path string, cfg *BinaryHelperConfig) error {
+func LoadExecutableUpdateHelperRelaunchFile(path string, cfg *ExecutableUpdateHelperConfig) error {
 	if path == "" || cfg == nil {
-		return errors.New("binary helper relaunch metadata path is unavailable")
+		return errors.New("executable update helper relaunch metadata path is unavailable")
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("open binary helper relaunch metadata: %w", err)
+		return fmt.Errorf("open executable update helper relaunch metadata: %w", err)
 	}
 	defer os.Remove(path)
 	defer file.Close()
-	return LoadBinaryHelperRelaunch(file, cfg)
+	return LoadExecutableUpdateHelperRelaunch(file, cfg)
 }
 
-func ParseBinaryHelperArgs(args []string) (BinaryHelperConfig, error) {
+func ParseExecutableUpdateHelperArgs(args []string) (ExecutableUpdateHelperConfig, error) {
 	allowed := map[string]bool{
 		"--parent-pid": true, "--current": true, "--staged": true, "--backup": true,
 		"--health-url": true, "--expected-version": true, "--previous-version": true,
@@ -1003,38 +1007,38 @@ func ParseBinaryHelperArgs(args []string) (BinaryHelperConfig, error) {
 	values := map[string]string{}
 	for len(args) > 0 {
 		if len(args) < 2 || len(args[0]) < 3 || args[0][:2] != "--" {
-			return BinaryHelperConfig{}, errors.New("invalid update-helper arguments")
+			return ExecutableUpdateHelperConfig{}, errors.New("invalid executable-update-helper arguments")
 		}
 		if !allowed[args[0]] {
-			return BinaryHelperConfig{}, fmt.Errorf("unsupported update-helper argument %s", args[0])
+			return ExecutableUpdateHelperConfig{}, fmt.Errorf("unsupported executable-update-helper argument %s", args[0])
 		}
 		if _, exists := values[args[0]]; exists {
-			return BinaryHelperConfig{}, errors.New("duplicate update-helper argument")
+			return ExecutableUpdateHelperConfig{}, errors.New("duplicate executable-update-helper argument")
 		}
 		values[args[0]] = args[1]
 		args = args[2:]
 	}
 	pid, err := strconv.Atoi(values["--parent-pid"])
 	if err != nil {
-		return BinaryHelperConfig{}, errors.New("invalid parent PID")
+		return ExecutableUpdateHelperConfig{}, errors.New("invalid parent PID")
 	}
-	cfg := BinaryHelperConfig{ParentPID: pid, Current: values["--current"], Staged: values["--staged"], Backup: values["--backup"], HealthURL: values["--health-url"], ExpectedVersion: values["--expected-version"], PreviousVersion: values["--previous-version"], OutcomeID: values["--outcome-id"], RunningVersion: values["--running-version"], RelaunchMetadataPath: values["--relaunch-metadata"], Recovery: values["--recovery"] == "true"}
+	cfg := ExecutableUpdateHelperConfig{ParentPID: pid, Current: values["--current"], Staged: values["--staged"], Backup: values["--backup"], HealthURL: values["--health-url"], ExpectedVersion: values["--expected-version"], PreviousVersion: values["--previous-version"], OutcomeID: values["--outcome-id"], RunningVersion: values["--running-version"], RelaunchMetadataPath: values["--relaunch-metadata"], Recovery: values["--recovery"] == "true"}
 	if values["--recovery"] != "" && values["--recovery"] != "true" {
-		return BinaryHelperConfig{}, errors.New("invalid recovery mode")
+		return ExecutableUpdateHelperConfig{}, errors.New("invalid recovery mode")
 	}
 	if cfg.Recovery && cfg.RunningVersion == "" {
-		return BinaryHelperConfig{}, errors.New("binary recovery running version is required")
+		return ExecutableUpdateHelperConfig{}, errors.New("executable update recovery running version is required")
 	}
 	if cfg.PreviousVersion == "" || cfg.OutcomeID == "" {
-		return BinaryHelperConfig{}, errors.New("binary helper outcome identity is required")
+		return ExecutableUpdateHelperConfig{}, errors.New("executable update helper outcome identity is required")
 	}
 	for _, path := range []string{cfg.Current, cfg.Staged, cfg.Backup} {
 		if !filepath.IsAbs(path) {
-			return BinaryHelperConfig{}, errors.New("update-helper paths must be absolute")
+			return ExecutableUpdateHelperConfig{}, errors.New("executable-update-helper paths must be absolute")
 		}
 	}
 	if cfg.RelaunchMetadataPath != "" && !filepath.IsAbs(cfg.RelaunchMetadataPath) {
-		return BinaryHelperConfig{}, errors.New("update-helper relaunch metadata path must be absolute")
+		return ExecutableUpdateHelperConfig{}, errors.New("executable-update-helper relaunch metadata path must be absolute")
 	}
 	return cfg, nil
 }

@@ -89,13 +89,13 @@ func TestDesktopCommandRoutesPackagedUpdateHelpers(t *testing.T) {
 		handled       bool
 		errorContains string
 	}{
-		{name: "desktop helper", command: "desktop-update-helper", handled: true, errorContains: "invalid desktop-update-helper arguments"},
-		{name: "binary helper", command: "update-helper", handled: true, errorContains: "unsupported update-helper argument"},
+		{name: "app-bundle update helper", command: update.AppBundleUpdateHelperCommand, handled: true, errorContains: "invalid app-bundle-update-helper arguments"},
+		{name: "executable update helper", command: update.ExecutableUpdateHelperCommand, handled: true, errorContains: "unsupported executable-update-helper argument"},
 		{name: "normal desktop launch", command: "serve", handled: false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			handled, err := runDesktopHelperCommand(context.Background(), []string{"openvibely-desktop", test.command, "--unsupported", "value"}, strings.NewReader(""))
+			handled, err := runPackagedUpdateHelperCommand(context.Background(), []string{"openvibely-desktop", test.command, "--unsupported", "value"}, strings.NewReader(""))
 			if handled != test.handled {
 				t.Fatalf("handled = %t, want %t", handled, test.handled)
 			}
@@ -112,10 +112,10 @@ func TestDesktopCommandRoutesPackagedUpdateHelpers(t *testing.T) {
 	}
 }
 
-func TestDesktopBinaryHelperIntegrationTimeouts(t *testing.T) {
+func TestDesktopPackagedUpdateHelperIntegrationTimeouts(t *testing.T) {
 	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "2500")
 	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "7500")
-	var cfg update.BinaryHelperConfig
+	var cfg update.ExecutableUpdateHelperConfig
 	if err := applyUpdateIntegrationTimeouts(&cfg); err != nil {
 		t.Fatal(err)
 	}

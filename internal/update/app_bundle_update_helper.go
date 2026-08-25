@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-type DesktopHelperConfig struct {
+type AppBundleUpdateHelperConfig struct {
 	ParentPID                      int
 	Current, Staged, Backup        string
 	HealthURL, ExpectedVersion     string
@@ -32,14 +32,14 @@ type DesktopHelperConfig struct {
 	HealthClient                   *http.Client
 }
 
-func validateDesktopHelperPaths(staged LocalStagedUpdate) error {
+func validateAppBundleUpdateHelperPaths(staged LocalStagedUpdate) error {
 	if !filepath.IsAbs(staged.InstallPath) || staged.ArtifactPath != staged.InstallPath+".openvibely-new" || staged.BackupPath != staged.InstallPath+".openvibely-backup" {
-		return errors.New("desktop helper paths must use validated absolute sibling names")
+		return errors.New("app-bundle update helper paths must use validated absolute sibling names")
 	}
 	return nil
 }
 
-func desktopSuccessorCommand(cfg DesktopHelperConfig) func() (func(context.Context) error, error) {
+func appBundleSuccessorCommand(cfg AppBundleUpdateHelperConfig) func() (func(context.Context) error, error) {
 	return func() (func(context.Context) error, error) {
 		health, err := url.Parse(cfg.HealthURL)
 		if err != nil || health.Port() == "" {
@@ -128,7 +128,7 @@ func stopDarwinAppBundleProcess(executable string) error {
 	return nil
 }
 
-func rollbackDesktopInstallUnit(staged LocalStagedUpdate) error {
+func rollbackAppBundleInstallUnit(staged LocalStagedUpdate) error {
 	if runtime.GOOS != "windows" {
 		return atomicExchangeInstallUnits(staged.InstallPath, staged.ArtifactPath)
 	}
@@ -139,13 +139,13 @@ func rollbackDesktopInstallUnit(staged LocalStagedUpdate) error {
 	return atomicExchangeInstallUnits(staged.InstallPath, staged.ArtifactPath)
 }
 
-func RunDesktopHelper(ctx context.Context, cfg DesktopHelperConfig) error {
+func RunAppBundleUpdateHelper(ctx context.Context, cfg AppBundleUpdateHelperConfig) error {
 	staged := LocalStagedUpdate{ArtifactPath: cfg.Staged, InstallPath: cfg.Current, BackupPath: cfg.Backup, Version: cfg.ExpectedVersion, PreviousVersion: cfg.PreviousVersion, OutcomeID: cfg.OutcomeID}
-	if err := validateDesktopHelperPaths(staged); err != nil {
+	if err := validateAppBundleUpdateHelperPaths(staged); err != nil {
 		return err
 	}
 	if cfg.ParentPID <= 1 || cfg.ParentPID == os.Getpid() || cfg.HealthURL == "" || cfg.ExpectedVersion == "" || cfg.PreviousVersion == "" || cfg.OutcomeID == "" {
-		return errors.New("desktop helper configuration is incomplete")
+		return errors.New("app-bundle update helper configuration is incomplete")
 	}
 	if cfg.WaitTimeout <= 0 {
 		cfg.WaitTimeout = 30 * time.Second
@@ -153,67 +153,67 @@ func RunDesktopHelper(ctx context.Context, cfg DesktopHelperConfig) error {
 	if cfg.ValidationTimeout <= 0 {
 		cfg.ValidationTimeout = 60 * time.Second
 	}
-	lease, acquired, err := tryAcquireBinaryHelperLease(binaryHelperLeasePath(staged))
+	lease, acquired, err := tryAcquirePackagedUpdateHelperLease(packagedUpdateHelperLeasePath(staged))
 	if err != nil {
 		return err
 	}
 	if !acquired {
-		return errors.New("desktop helper lease is already owned")
+		return errors.New("app-bundle update helper lease is already owned")
 	}
 	defer lease.Close()
 
-	if _, err := readBinaryHelperPrepared(staged); err == nil {
-		if err := claimBinaryHelperHandoff(ctx, staged); err != nil {
+	if _, err := readPackagedUpdateHelperPrepared(staged); err == nil {
+		if err := claimPackagedUpdateHelperHandoff(ctx, staged); err != nil {
 			return err
 		}
-		if err := waitForBinaryHelperAuthorization(ctx, staged, cfg.WaitTimeout); err != nil {
+		if err := waitForPackagedUpdateHelperAuthorization(ctx, staged, cfg.WaitTimeout); err != nil {
 			return err
 		}
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	outcome, err := readBinaryHelperOutcome(staged)
+	outcome, err := readPackagedUpdateHelperOutcome(staged)
 	if err != nil {
 		return err
 	}
 	if cfg.Recovery {
-		ready, err := marshalBinaryHelperOutcome(staged, binaryOutcomeRecovering)
+		ready, err := marshalPackagedUpdateHelperOutcome(staged, packagedUpdateOutcomeRecovering)
 		if err != nil {
 			return err
 		}
-		if err := atomicWriteState(binaryHelperRecoveryReadyPath(staged.InstallPath), ready); err != nil {
+		if err := atomicWriteState(packagedUpdateHelperRecoveryReadyPath(staged.InstallPath), ready); err != nil {
 			return err
 		}
 	}
 	switch outcome.State {
-	case binaryOutcomeCancelled, binaryOutcomeSucceeded, binaryOutcomeRolledBack:
+	case packagedUpdateOutcomeCancelled, packagedUpdateOutcomeSucceeded, packagedUpdateOutcomeRolledBack:
 		return nil
-	case binaryOutcomeAuthorized:
+	case packagedUpdateOutcomeAuthorized:
 		if err := waitForProcessExit(ctx, cfg.ParentPID, cfg.WaitTimeout); err != nil {
-			if cancelErr := cancelAuthorizedBinaryHelperHandoff(staged); cancelErr != nil {
+			if cancelErr := cancelAuthorizedPackagedUpdateHelperHandoff(staged); cancelErr != nil {
 				return errors.Join(err, cancelErr)
 			}
 			start := cfg.StartCommand
 			if start == nil {
-				start = desktopSuccessorCommand(cfg)
+				start = appBundleSuccessorCommand(cfg)
 			}
 			if _, startErr := start(); startErr != nil {
 				return errors.Join(err, startErr)
 			}
 			return err
 		}
-		if err := writeBinaryHelperPhaseWithRetry(ctx, staged, binaryOutcomeParentExited); err != nil {
+		if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, packagedUpdateOutcomeParentExited); err != nil {
 			return err
 		}
-		outcome.State = binaryOutcomeParentExited
+		outcome.State = packagedUpdateOutcomeParentExited
 	}
 
-	if outcome.State == binaryOutcomeParentExited {
+	if outcome.State == packagedUpdateOutcomeParentExited {
 		if cfg.Recovery && cfg.RunningVersion == staged.Version {
-			if err := writeBinaryHelperPhaseWithRetry(ctx, staged, binaryOutcomeTargetPublished); err != nil {
+			if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, packagedUpdateOutcomeTargetPublished); err != nil {
 				return err
 			}
-			outcome.State = binaryOutcomeTargetPublished
+			outcome.State = packagedUpdateOutcomeTargetPublished
 		} else {
 			if err := atomicExchangeInstallUnits(staged.InstallPath, staged.ArtifactPath); err != nil {
 				return err
@@ -221,40 +221,40 @@ func RunDesktopHelper(ctx context.Context, cfg DesktopHelperConfig) error {
 			if err := syncDirectory(filepath.Dir(staged.InstallPath)); err != nil {
 				return err
 			}
-			if err := writeBinaryHelperPhaseWithRetry(ctx, staged, binaryOutcomeTargetPublished); err != nil {
+			if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, packagedUpdateOutcomeTargetPublished); err != nil {
 				return err
 			}
-			outcome.State = binaryOutcomeTargetPublished
+			outcome.State = packagedUpdateOutcomeTargetPublished
 		}
 	}
-	if outcome.State == binaryOutcomeTargetPublished {
-		if err := writeBinaryHelperPhaseWithRetry(ctx, staged, binaryOutcomeValidating); err != nil {
+	if outcome.State == packagedUpdateOutcomeTargetPublished {
+		if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, packagedUpdateOutcomeValidating); err != nil {
 			return err
 		}
-		outcome.State = binaryOutcomeValidating
+		outcome.State = packagedUpdateOutcomeValidating
 	}
-	if outcome.State == binaryOutcomeRollingBack {
+	if outcome.State == packagedUpdateOutcomeRollingBack {
 		if !(cfg.Recovery && cfg.RunningVersion == staged.PreviousVersion) {
-			if err := rollbackDesktopInstallUnit(staged); err != nil {
+			if err := rollbackAppBundleInstallUnit(staged); err != nil {
 				return err
 			}
 		}
 		start := cfg.StartCommand
 		if start == nil {
-			start = desktopSuccessorCommand(cfg)
+			start = appBundleSuccessorCommand(cfg)
 		}
 		if _, err := start(); err != nil {
 			return err
 		}
-		return writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeRolledBack)
+		return writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeRolledBack)
 	}
-	if outcome.State != binaryOutcomeValidating {
-		return fmt.Errorf("desktop helper cannot resume phase %q", outcome.State)
+	if outcome.State != packagedUpdateOutcomeValidating {
+		return fmt.Errorf("app-bundle update helper cannot resume phase %q", outcome.State)
 	}
 
 	start := cfg.StartCommand
 	if start == nil {
-		start = desktopSuccessorCommand(cfg)
+		start = appBundleSuccessorCommand(cfg)
 	}
 	stop, startErr := start()
 	if startErr == nil {
@@ -263,7 +263,7 @@ func RunDesktopHelper(ctx context.Context, cfg DesktopHelperConfig) error {
 		cancel()
 	}
 	if startErr == nil {
-		if err := writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeSucceeded); err != nil {
+		if err := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeSucceeded); err != nil {
 			return err
 		}
 		_ = os.RemoveAll(staged.ArtifactPath)
@@ -274,36 +274,36 @@ func RunDesktopHelper(ctx context.Context, cfg DesktopHelperConfig) error {
 		stopErr := stop(stopCtx)
 		cancel()
 		if stopErr != nil {
-			return errors.Join(startErr, fmt.Errorf("stop failed desktop successor: %w", stopErr))
+			return errors.Join(startErr, fmt.Errorf("stop failed app-bundle successor: %w", stopErr))
 		}
 	}
-	if err := writeBinaryHelperPhaseWithRetry(ctx, staged, binaryOutcomeRollingBack); err != nil {
+	if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, packagedUpdateOutcomeRollingBack); err != nil {
 		return errors.Join(startErr, err)
 	}
-	if err := rollbackDesktopInstallUnit(staged); err != nil {
+	if err := rollbackAppBundleInstallUnit(staged); err != nil {
 		return errors.Join(startErr, err)
 	}
 	if _, err := start(); err != nil {
-		return errors.Join(startErr, fmt.Errorf("restart rolled-back desktop: %w", err))
+		return errors.Join(startErr, fmt.Errorf("restart rolled-back app bundle: %w", err))
 	}
-	if err := writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeRolledBack); err != nil {
+	if err := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeRolledBack); err != nil {
 		return errors.Join(startErr, err)
 	}
-	return fmt.Errorf("desktop validation failed and predecessor was restored: %w", startErr)
+	return fmt.Errorf("app-bundle validation failed and predecessor was restored: %w", startErr)
 }
 
-func LoadDesktopHelperRelaunch(reader io.Reader, cfg *DesktopHelperConfig) error {
+func LoadAppBundleUpdateHelperRelaunch(reader io.Reader, cfg *AppBundleUpdateHelperConfig) error {
 	if reader == nil || cfg == nil {
-		return errors.New("desktop helper relaunch metadata is unavailable")
+		return errors.New("app-bundle update helper relaunch metadata is unavailable")
 	}
-	var metadata binaryRelaunchMetadata
+	var metadata packagedUpdateRelaunchMetadata
 	decoder := json.NewDecoder(io.LimitReader(reader, 1024*1024))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&metadata); err != nil {
 		return err
 	}
 	if len(metadata.Arguments) == 0 || !filepath.IsAbs(metadata.WorkingDirectory) {
-		return errors.New("desktop helper relaunch metadata is incomplete")
+		return errors.New("app-bundle update helper relaunch metadata is incomplete")
 	}
 	cfg.Arguments = append([]string(nil), metadata.Arguments...)
 	cfg.WorkingDirectory = metadata.WorkingDirectory
@@ -311,24 +311,24 @@ func LoadDesktopHelperRelaunch(reader io.Reader, cfg *DesktopHelperConfig) error
 	return nil
 }
 
-func ParseDesktopHelperArgs(args []string) (DesktopHelperConfig, error) {
+func ParseAppBundleUpdateHelperArgs(args []string) (AppBundleUpdateHelperConfig, error) {
 	allowed := map[string]bool{"--parent-pid": true, "--current": true, "--staged": true, "--backup": true, "--health-url": true, "--expected-version": true, "--previous-version": true, "--outcome-id": true, "--recovery": true, "--running-version": true}
 	values := map[string]string{}
 	for len(args) > 0 {
 		if len(args) < 2 || !allowed[args[0]] || values[args[0]] != "" {
-			return DesktopHelperConfig{}, errors.New("invalid desktop-update-helper arguments")
+			return AppBundleUpdateHelperConfig{}, errors.New("invalid app-bundle-update-helper arguments")
 		}
 		values[args[0]], args = args[1], args[2:]
 	}
 	pid, err := strconv.Atoi(values["--parent-pid"])
 	if err != nil {
-		return DesktopHelperConfig{}, errors.New("invalid parent PID")
+		return AppBundleUpdateHelperConfig{}, errors.New("invalid parent PID")
 	}
 	if values["--recovery"] != "" && values["--recovery"] != "true" {
-		return DesktopHelperConfig{}, errors.New("invalid desktop helper recovery mode")
+		return AppBundleUpdateHelperConfig{}, errors.New("invalid app-bundle update helper recovery mode")
 	}
 	if values["--recovery"] == "true" && values["--running-version"] == "" {
-		return DesktopHelperConfig{}, errors.New("desktop helper recovery running version is required")
+		return AppBundleUpdateHelperConfig{}, errors.New("app-bundle update helper recovery running version is required")
 	}
-	return DesktopHelperConfig{ParentPID: pid, Current: values["--current"], Staged: values["--staged"], Backup: values["--backup"], HealthURL: values["--health-url"], ExpectedVersion: values["--expected-version"], PreviousVersion: values["--previous-version"], OutcomeID: values["--outcome-id"], Recovery: values["--recovery"] == "true", RunningVersion: values["--running-version"]}, nil
+	return AppBundleUpdateHelperConfig{ParentPID: pid, Current: values["--current"], Staged: values["--staged"], Backup: values["--backup"], HealthURL: values["--health-url"], ExpectedVersion: values["--expected-version"], PreviousVersion: values["--previous-version"], OutcomeID: values["--outcome-id"], Recovery: values["--recovery"] == "true", RunningVersion: values["--running-version"]}, nil
 }

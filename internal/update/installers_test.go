@@ -230,7 +230,7 @@ func TestWailsBundleOperationsRejectApplicationDataInsideBundle(t *testing.T) {
 	}
 }
 
-func TestPackagedDesktopHelperHandoffPassesExecutableRelativeMetadataForBundle(t *testing.T) {
+func TestAppBundleUpdateHelperHandoffPassesExecutableRelativeMetadata(t *testing.T) {
 	root := t.TempDir()
 	installed := filepath.Join(root, "OpenVibely.app")
 	executable := filepath.Join(installed, "Contents", "MacOS", "OpenVibely")
@@ -253,16 +253,16 @@ func TestPackagedDesktopHelperHandoffPassesExecutableRelativeMetadataForBundle(t
 	if err := startPackagedUpdateHelperHandoff(context.Background(), packagedUpdateHelperHandoffConfig{
 		Staged:           staged,
 		HelperSourcePath: executable,
-		CommandName:      "desktop-update-helper",
+		CommandName:      AppBundleUpdateHelperCommand,
 		HealthURL:        "http://127.0.0.1/health",
-		RelaunchMetadata: binaryRelaunchMetadata{
+		RelaunchMetadata: packagedUpdateRelaunchMetadata{
 			Arguments:          []string{executable, "--from-user"},
 			WorkingDirectory:   root,
 			ExecutableRelative: filepath.ToSlash(relative),
 		},
 		MetadataTransport:  packagedHelperMetadataStdin,
 		StartHelper:        func(cmd *exec.Cmd) error { helper = cmd; return nil },
-		AwaitHelperHandoff: acknowledgeBinaryHelperForTest,
+		AwaitHelperHandoff: acknowledgePackagedUpdateHelperForTest,
 		Shutdown:           func() { shutdown = true },
 	}); err != nil {
 		t.Fatal(err)
@@ -271,9 +271,9 @@ func TestPackagedDesktopHelperHandoffPassesExecutableRelativeMetadataForBundle(t
 		t.Fatalf("helper=%#v shutdown=%v", helper, shutdown)
 	}
 	if strings.Contains(strings.Join(helper.Args, "\x00"), "--relaunch-metadata") {
-		t.Fatalf("desktop helper used metadata file argv: %q", helper.Args)
+		t.Fatalf("app-bundle update helper used metadata file argv: %q", helper.Args)
 	}
-	var metadata binaryRelaunchMetadata
+	var metadata packagedUpdateRelaunchMetadata
 	if err := json.NewDecoder(helper.Stdin).Decode(&metadata); err != nil {
 		t.Fatal(err)
 	}
@@ -284,10 +284,10 @@ func TestPackagedDesktopHelperHandoffPassesExecutableRelativeMetadataForBundle(t
 		if helper.Path != executable {
 			t.Fatalf("macOS app helper path = %q, want signed bundle executable %q", helper.Path, executable)
 		}
-		if _, err := os.Stat(packagedUpdateHelperPath(installed)); !os.IsNotExist(err) {
+		if _, err := os.Stat(packagedUpdateHelperPath(installed, AppBundleUpdateHelperCommand)); !os.IsNotExist(err) {
 			t.Fatalf("macOS app helper should not be copied outside signed bundle: %v", err)
 		}
-	} else if data, err := os.ReadFile(packagedUpdateHelperPath(installed)); err != nil || string(data) != "signed-desktop-executable" {
+	} else if data, err := os.ReadFile(packagedUpdateHelperPath(installed, AppBundleUpdateHelperCommand)); err != nil || string(data) != "signed-desktop-executable" {
 		t.Fatalf("helper copy = %q, err = %v", data, err)
 	}
 }
@@ -331,20 +331,20 @@ func TestWailsInstallerApplyUsesJournaledHealthValidatingHelper(t *testing.T) {
 		ProtectedDataPaths: []string{filepath.Join(root, "data")}, HealthURL: "http://127.0.0.1/health",
 		Arguments: []string{installed, "--user-argument"}, WorkingDirectory: root,
 		StartHelper:        func(cmd *exec.Cmd) error { helper = cmd; return nil },
-		awaitHelperHandoff: acknowledgeBinaryHelperForTest,
+		awaitHelperHandoff: acknowledgePackagedUpdateHelperForTest,
 		Shutdown:           func() { shutdown = true },
 	}
 	if err := installer.Apply(context.Background(), staged); err != nil {
 		t.Fatal(err)
 	}
-	if helper == nil || helper.Args[1] != "desktop-update-helper" || !shutdown {
+	if helper == nil || helper.Args[1] != AppBundleUpdateHelperCommand || !shutdown {
 		t.Fatalf("helper=%#v shutdown=%v", helper, shutdown)
 	}
 	if strings.Contains(strings.Join(helper.Args, "\x00"), "--user-argument") {
 		t.Fatal("desktop relaunch arguments leaked into helper argv")
 	}
-	outcome, err := readBinaryHelperOutcome(staged)
-	if err != nil || outcome.State != binaryOutcomeAuthorized {
+	outcome, err := readPackagedUpdateHelperOutcome(staged)
+	if err != nil || outcome.State != packagedUpdateOutcomeAuthorized {
 		t.Fatalf("outcome=%#v err=%v", outcome, err)
 	}
 }
@@ -462,7 +462,7 @@ func TestWailsInstallUnitRejectsEveryUpdaterOwnedDeletionBoundary(t *testing.T) 
 		Version:      "0.6.0",
 		OutcomeID:    "desktop-operation-1",
 	}
-	helperPath := packagedUpdateHelperPath(staged.InstallPath)
+	helperPath := packagedUpdateHelperPath(staged.InstallPath, AppBundleUpdateHelperCommand)
 	for _, boundary := range []string{
 		staged.ArtifactPath,
 		staged.BackupPath + ".partial",
@@ -471,15 +471,15 @@ func TestWailsInstallUnitRejectsEveryUpdaterOwnedDeletionBoundary(t *testing.T) 
 		staged.InstallPath + ".bak",
 		helperPath,
 		helperPath + ".partial",
-		binaryHelperOutcomePath(staged.InstallPath),
-		binaryHelperOutcomePath(staged.InstallPath) + ".tmp",
-		binaryHelperPreparedPath(staged.InstallPath),
-		binaryHelperAuthorizedPath(staged.InstallPath),
-		binaryHelperCancelledPath(staged.InstallPath),
-		binaryHelperRecoveryReadyPath(staged.InstallPath),
-		binaryHelperRecoveryClaimPath(staged.InstallPath),
-		binaryHelperTransitionLeasePath(staged),
-		binaryHelperLeasePath(staged),
+		packagedUpdateHelperOutcomePath(staged.InstallPath),
+		packagedUpdateHelperOutcomePath(staged.InstallPath) + ".tmp",
+		packagedUpdateHelperPreparedPath(staged.InstallPath),
+		packagedUpdateHelperAuthorizedPath(staged.InstallPath),
+		packagedUpdateHelperCancelledPath(staged.InstallPath),
+		packagedUpdateHelperRecoveryReadyPath(staged.InstallPath),
+		packagedUpdateHelperRecoveryClaimPath(staged.InstallPath),
+		packagedUpdateHelperTransitionLeasePath(staged),
+		packagedUpdateHelperLeasePath(staged),
 	} {
 		t.Run(filepath.Base(boundary), func(t *testing.T) {
 			protected := filepath.Join(boundary, "user-data")
@@ -558,21 +558,21 @@ func TestExtractApplicationBundleRejectsTraversalAndMultipleRoots(t *testing.T) 
 	}
 }
 
-func acknowledgeBinaryHelperForTest(_ context.Context, staged LocalStagedUpdate) error {
-	if err := claimBinaryHelperHandoff(context.Background(), staged); err != nil {
+func acknowledgePackagedUpdateHelperForTest(_ context.Context, staged LocalStagedUpdate) error {
+	if err := claimPackagedUpdateHelperHandoff(context.Background(), staged); err != nil {
 		return err
 	}
-	return authorizeBinaryHelperHandoff(staged)
+	return authorizePackagedUpdateHelperHandoff(staged)
 }
 
-func authorizeBinaryHelperForTest(t *testing.T, staged LocalStagedUpdate) {
+func authorizePackagedUpdateHelperForTest(t *testing.T, staged LocalStagedUpdate) {
 	t.Helper()
 	go func() {
 		deadline := time.Now().Add(time.Second)
 		for time.Now().Before(deadline) {
-			outcome, err := readBinaryHelperOutcome(staged)
-			if err == nil && outcome.State == binaryOutcomePending {
-				_ = authorizeBinaryHelperHandoff(staged)
+			outcome, err := readPackagedUpdateHelperOutcome(staged)
+			if err == nil && outcome.State == packagedUpdateOutcomePending {
+				_ = authorizePackagedUpdateHelperHandoff(staged)
 				return
 			}
 			time.Sleep(time.Millisecond)
@@ -878,14 +878,14 @@ func TestBinaryInstallerPassesRelaunchContextOutsideCommandLineAndDurableState(t
 			if strings.Contains(strings.Join(cmd.Args, "\x00"), secret) {
 				t.Fatal("original arguments leaked into helper command line")
 			}
-			cfg, err := ParseBinaryHelperArgs(cmd.Args[2:])
+			cfg, err := ParseExecutableUpdateHelperArgs(cmd.Args[2:])
 			if err != nil {
 				return err
 			}
 			if cfg.RelaunchMetadataPath == "" {
 				t.Fatal("helper command omitted relaunch metadata path")
 			}
-			if err := LoadBinaryHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg); err != nil {
+			if err := LoadExecutableUpdateHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg); err != nil {
 				return err
 			}
 			if strings.Join(cfg.Arguments, "\x00") != strings.Join([]string{current, "--credential", secret}, "\x00") || cfg.WorkingDirectory != root {
@@ -893,13 +893,13 @@ func TestBinaryInstallerPassesRelaunchContextOutsideCommandLineAndDurableState(t
 			}
 			return nil
 		},
-		awaitHelperHandoff: acknowledgeBinaryHelperForTest,
+		awaitHelperHandoff: acknowledgePackagedUpdateHelperForTest,
 		Shutdown:           func() {},
 	}
 	if err := installer.Apply(context.Background(), staged); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{binaryHelperAuthorizedPath(current), binaryHelperOutcomePath(current), binaryHelperPreparedPath(current)} {
+	for _, path := range []string{packagedUpdateHelperAuthorizedPath(current), packagedUpdateHelperOutcomePath(current), packagedUpdateHelperPreparedPath(current)} {
 		data, err := os.ReadFile(path)
 		if err != nil && !os.IsNotExist(err) {
 			t.Fatal(err)
@@ -908,7 +908,7 @@ func TestBinaryInstallerPassesRelaunchContextOutsideCommandLineAndDurableState(t
 			t.Fatalf("relaunch context leaked into durable state %s", path)
 		}
 	}
-	if helper, err := os.ReadFile(packagedUpdateHelperPath(current)); err != nil || string(helper) != "signed-original" {
+	if helper, err := os.ReadFile(packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand)); err != nil || string(helper) != "signed-original" {
 		t.Fatalf("helper copy = %q, err = %v", helper, err)
 	}
 }
@@ -916,11 +916,11 @@ func TestBinaryInstallerPassesRelaunchContextOutsideCommandLineAndDurableState(t
 func TestBinaryInstallerRecoveryRequiresInitializedHealthURL(t *testing.T) {
 	installer := &BinaryInstaller{}
 	if installer.RecoveryReady() {
-		t.Fatal("binary recovery became ready before health URL initialization")
+		t.Fatal("executable update recovery became ready before health URL initialization")
 	}
 	installer.HealthURL = "http://127.0.0.1:1234/api/system/health"
 	if !installer.RecoveryReady() {
-		t.Fatal("binary recovery remained blocked after health URL initialization")
+		t.Fatal("executable update recovery remained blocked after health URL initialization")
 	}
 }
 
@@ -939,13 +939,13 @@ func TestBinaryInstallerApplyWrapsHelperHandoffPhaseErrors(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantMessage: "prepare binary update helper",
+			wantMessage: "prepare executable update helper",
 		},
 		{
 			name: "clear prior handoff",
 			setup: func(t *testing.T, staged LocalStagedUpdate) {
 				t.Helper()
-				blocked := binaryHelperOutcomePath(staged.InstallPath)
+				blocked := packagedUpdateHelperOutcomePath(staged.InstallPath)
 				if err := os.Mkdir(blocked, 0o755); err != nil {
 					t.Fatal(err)
 				}
@@ -953,7 +953,7 @@ func TestBinaryInstallerApplyWrapsHelperHandoffPhaseErrors(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantMessage: "clear prior binary helper handoff",
+			wantMessage: "clear prior executable update helper handoff",
 		},
 		{
 			name: "persist preparation",
@@ -961,13 +961,13 @@ func TestBinaryInstallerApplyWrapsHelperHandoffPhaseErrors(t *testing.T) {
 				staged.OutcomeID = ""
 				return staged
 			},
-			wantMessage: "persist binary helper preparation",
+			wantMessage: "persist executable update helper preparation",
 		},
 		{
 			name: "persist metadata",
 			setup: func(t *testing.T, staged LocalStagedUpdate) {
 				t.Helper()
-				blocked := binaryHelperRelaunchMetadataPath(staged.InstallPath)
+				blocked := packagedUpdateHelperRelaunchMetadataPath(staged.InstallPath)
 				if err := os.Mkdir(blocked, 0o755); err != nil {
 					t.Fatal(err)
 				}
@@ -975,7 +975,7 @@ func TestBinaryInstallerApplyWrapsHelperHandoffPhaseErrors(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantMessage: "persist binary helper relaunch metadata",
+			wantMessage: "persist executable update helper relaunch metadata",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -994,7 +994,7 @@ func TestBinaryInstallerApplyWrapsHelperHandoffPhaseErrors(t *testing.T) {
 			installer := &BinaryInstaller{
 				HealthURL:          "http://127.0.0.1/health",
 				StartHelper:        func(*exec.Cmd) error { return nil },
-				awaitHelperHandoff: acknowledgeBinaryHelperForTest,
+				awaitHelperHandoff: acknowledgePackagedUpdateHelperForTest,
 				Shutdown:           func() { t.Fatal("shutdown requested after failed helper handoff") },
 			}
 			err := installer.Apply(context.Background(), bindBinaryRestartOrigin(staged, installer))
@@ -1019,15 +1019,15 @@ func TestBinaryInstallerRequiresAndRequestsShutdownAfterHelperStarts(t *testing.
 	var helper *exec.Cmd
 	installer := &BinaryInstaller{HealthURL: "http://127.0.0.1/health", StartHelper: func(cmd *exec.Cmd) error {
 		started, helper = true, cmd
-		prepared, err := readBinaryHelperPrepared(staged)
-		if err != nil || prepared.State != binaryOutcomePrepared {
+		prepared, err := readPackagedUpdateHelperPrepared(staged)
+		if err != nil || prepared.State != packagedUpdateOutcomePrepared {
 			t.Fatalf("pre-launch helper outcome = %#v, err = %v", prepared, err)
 		}
-		if _, err := os.Stat(binaryHelperOutcomePath(current)); !os.IsNotExist(err) {
+		if _, err := os.Stat(packagedUpdateHelperOutcomePath(current)); !os.IsNotExist(err) {
 			t.Fatalf("active outcome existed before helper claim: %v", err)
 		}
 		return nil
-	}, awaitHelperHandoff: acknowledgeBinaryHelperForTest}
+	}, awaitHelperHandoff: acknowledgePackagedUpdateHelperForTest}
 	if err := installer.Apply(context.Background(), bindBinaryRestartOrigin(staged, installer)); err == nil {
 		t.Fatal("binary apply accepted missing shutdown handoff")
 	}
@@ -1038,7 +1038,7 @@ func TestBinaryInstallerRequiresAndRequestsShutdownAfterHelperStarts(t *testing.
 	if !started || !shutdown {
 		t.Fatalf("started=%v shutdown=%v", started, shutdown)
 	}
-	helperPath := packagedUpdateHelperPath(current)
+	helperPath := packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand)
 	if data, err := os.ReadFile(helperPath); err != nil || string(data) != "old" {
 		t.Fatalf("helper copy = %q, err = %v", data, err)
 	}
@@ -1048,8 +1048,8 @@ func TestBinaryInstallerRequiresAndRequestsShutdownAfterHelperStarts(t *testing.
 			t.Fatalf("detached helper args %q lack %q", helper.Args, required)
 		}
 	}
-	outcome, err := readBinaryHelperOutcome(staged)
-	if err != nil || outcome.State != binaryOutcomeAuthorized {
+	outcome, err := readPackagedUpdateHelperOutcome(staged)
+	if err != nil || outcome.State != packagedUpdateOutcomeAuthorized {
 		t.Fatalf("helper outcome = %#v, err = %v", outcome, err)
 	}
 }
@@ -1065,7 +1065,7 @@ func TestBinaryInstallerClaimedPreparedDoesNotAuthorizeShutdown(t *testing.T) {
 	installer := &BinaryInstaller{
 		HealthURL: "http://127.0.0.1/health",
 		StartHelper: func(_ *exec.Cmd) error {
-			return os.Rename(binaryHelperPreparedPath(current), binaryHelperOutcomePath(current))
+			return os.Rename(packagedUpdateHelperPreparedPath(current), packagedUpdateHelperOutcomePath(current))
 		},
 		Shutdown: func() { shutdown = true },
 	}
@@ -1075,14 +1075,14 @@ func TestBinaryInstallerClaimedPreparedDoesNotAuthorizeShutdown(t *testing.T) {
 	if err == nil {
 		t.Fatal("claimed prepared outcome authorized parent shutdown")
 	}
-	if !strings.Contains(err.Error(), "confirm binary helper handoff") {
-		t.Fatalf("binary handoff failure lacked apply context: %v", err)
+	if !strings.Contains(err.Error(), "confirm executable update helper handoff") {
+		t.Fatalf("executable update helper handoff failure lacked apply context: %v", err)
 	}
 	if shutdown {
 		t.Fatal("parent shutdown was requested before durable pending publication")
 	}
-	outcome, err := readBinaryHelperOutcome(staged)
-	if err != nil || outcome.State != binaryOutcomePrepared {
+	outcome, err := readPackagedUpdateHelperOutcome(staged)
+	if err != nil || outcome.State != packagedUpdateOutcomePrepared {
 		t.Fatalf("claimed outcome = %#v, err = %v", outcome, err)
 	}
 }
@@ -1101,7 +1101,7 @@ func TestBinaryInstallerTimeoutDoesNotAuthorizeLatePendingHelper(t *testing.T) {
 		StartHelper: func(_ *exec.Cmd) error {
 			go func() {
 				time.Sleep(75 * time.Millisecond)
-				lateAck <- claimBinaryHelperHandoff(context.Background(), staged)
+				lateAck <- claimPackagedUpdateHelperHandoff(context.Background(), staged)
 			}()
 			return nil
 		},
@@ -1115,8 +1115,8 @@ func TestBinaryInstallerTimeoutDoesNotAuthorizeLatePendingHelper(t *testing.T) {
 	if err := <-lateAck; err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := readBinaryHelperOutcome(staged)
-	if err != nil || outcome.State != binaryOutcomePending {
+	outcome, err := readPackagedUpdateHelperOutcome(staged)
+	if err != nil || outcome.State != packagedUpdateOutcomePending {
 		t.Fatalf("late helper outcome = %#v, err = %v", outcome, err)
 	}
 	if shutdown {
@@ -1124,14 +1124,14 @@ func TestBinaryInstallerTimeoutDoesNotAuthorizeLatePendingHelper(t *testing.T) {
 	}
 }
 
-func TestBinaryHelperLiveParentProcess(t *testing.T) {
+func TestPackagedUpdateHelperLiveParentProcess(t *testing.T) {
 	if os.Getenv("OPENVIBELY_TEST_LIVE_PARENT") != "1" {
 		return
 	}
 	time.Sleep(time.Minute)
 }
 
-func TestBinaryHelperAuthorizedParentExitFailurePublishesCancellation(t *testing.T) {
+func TestPackagedUpdateHelperAuthorizedParentExitFailurePublishesCancellation(t *testing.T) {
 	originalWaitForProcessExit := waitForProcessExit
 	t.Cleanup(func() { waitForProcessExit = originalWaitForProcessExit })
 
@@ -1155,10 +1155,10 @@ func TestBinaryHelperAuthorizedParentExitFailurePublishesCancellation(t *testing
 				t.Fatal(err)
 			}
 			staged := LocalStagedUpdate{ArtifactPath: stagedPath, InstallPath: current, BackupPath: backup, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"}
-			if err := writeBinaryHelperOutcome(staged, binaryOutcomePending); err != nil {
+			if err := writePackagedUpdateHelperOutcome(staged, packagedUpdateOutcomePending); err != nil {
 				t.Fatal(err)
 			}
-			if err := authorizeBinaryHelperHandoff(staged); err != nil {
+			if err := authorizePackagedUpdateHelperHandoff(staged); err != nil {
 				t.Fatal(err)
 			}
 
@@ -1180,12 +1180,12 @@ func TestBinaryHelperAuthorizedParentExitFailurePublishesCancellation(t *testing
 			}
 
 			starts := 0
-			err := RunBinaryHelper(ctx, BinaryHelperConfig{
+			err := RunExecutableUpdateHelper(ctx, ExecutableUpdateHelperConfig{
 				ParentPID: 99999999, Current: current, Staged: stagedPath, Backup: backup, HealthURL: "http://127.0.0.1/health",
 				ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1", WaitTimeout: 50 * time.Millisecond,
 				StartCommand: func(string, string) (func(context.Context) error, error) {
-					outcome, readErr := readBinaryHelperOutcome(staged)
-					if readErr != nil || outcome.State != binaryOutcomeCancelled {
+					outcome, readErr := readPackagedUpdateHelperOutcome(staged)
+					if readErr != nil || outcome.State != packagedUpdateOutcomeCancelled {
 						t.Fatalf("restart before durable cancellation: outcome=%#v err=%v", outcome, readErr)
 					}
 					starts++
@@ -1201,15 +1201,15 @@ func TestBinaryHelperAuthorizedParentExitFailurePublishesCancellation(t *testing
 			if data, readErr := os.ReadFile(current); readErr != nil || string(data) != "old" {
 				t.Fatalf("current binary = %q, err = %v", data, readErr)
 			}
-			outcome, readErr := readBinaryHelperOutcome(staged)
-			if readErr != nil || outcome.State != binaryOutcomeCancelled {
+			outcome, readErr := readPackagedUpdateHelperOutcome(staged)
+			if readErr != nil || outcome.State != packagedUpdateOutcomeCancelled {
 				t.Fatalf("helper outcome = %#v, err = %v", outcome, readErr)
 			}
 		})
 	}
 }
 
-func TestBinaryHelperCannotActWithoutInstallerAuthorization(t *testing.T) {
+func TestPackagedUpdateHelperCannotActWithoutInstallerAuthorization(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
 	stagedPath := current + ".openvibely-new"
@@ -1221,11 +1221,11 @@ func TestBinaryHelperCannotActWithoutInstallerAuthorization(t *testing.T) {
 		t.Fatal(err)
 	}
 	staged := LocalStagedUpdate{ArtifactPath: stagedPath, InstallPath: current, BackupPath: backup, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"}
-	if err := writeBinaryHelperOutcome(staged, binaryOutcomePrepared); err != nil {
+	if err := writePackagedUpdateHelperOutcome(staged, packagedUpdateOutcomePrepared); err != nil {
 		t.Fatal(err)
 	}
 	started := false
-	err := RunBinaryHelper(context.Background(), BinaryHelperConfig{
+	err := RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{
 		ParentPID:         99999999,
 		Current:           current,
 		Staged:            stagedPath,
@@ -1250,21 +1250,21 @@ func TestBinaryHelperCannotActWithoutInstallerAuthorization(t *testing.T) {
 	if data, readErr := os.ReadFile(current); readErr != nil || string(data) != "old" {
 		t.Fatalf("current binary = %q, err = %v", data, readErr)
 	}
-	outcome, outcomeErr := readBinaryHelperOutcome(staged)
+	outcome, outcomeErr := readPackagedUpdateHelperOutcome(staged)
 	if outcomeErr != nil || outcome.State != "cancelled" {
 		t.Fatalf("unauthorized helper outcome = %#v, err = %v", outcome, outcomeErr)
 	}
 }
 
-func TestBinaryHelperAuthorizationAndCancellationHaveOneAtomicWinner(t *testing.T) {
+func TestPackagedUpdateHelperAuthorizationAndCancellationHaveOneAtomicWinner(t *testing.T) {
 	for iteration := 0; iteration < 50; iteration++ {
 		root := t.TempDir()
 		current := filepath.Join(root, "openvibely")
 		staged := LocalStagedUpdate{InstallPath: current, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-" + strconv.Itoa(iteration)}
-		if err := writeBinaryHelperOutcome(staged, binaryOutcomePrepared); err != nil {
+		if err := writePackagedUpdateHelperOutcome(staged, packagedUpdateOutcomePrepared); err != nil {
 			t.Fatal(err)
 		}
-		if err := claimBinaryHelperHandoff(context.Background(), staged); err != nil {
+		if err := claimPackagedUpdateHelperHandoff(context.Background(), staged); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1273,11 +1273,11 @@ func TestBinaryHelperAuthorizationAndCancellationHaveOneAtomicWinner(t *testing.
 		cancelled := make(chan bool, 1)
 		go func() {
 			<-start
-			authorized <- authorizeBinaryHelperHandoff(staged) == nil
+			authorized <- authorizePackagedUpdateHelperHandoff(staged) == nil
 		}()
 		go func() {
 			<-start
-			won, err := cancelBinaryHelperHandoff(staged)
+			won, err := cancelPackagedUpdateHelperHandoff(staged)
 			cancelled <- err == nil && won
 		}()
 		close(start)
@@ -1285,14 +1285,14 @@ func TestBinaryHelperAuthorizationAndCancellationHaveOneAtomicWinner(t *testing.
 		if authorizedWon == cancelledWon {
 			t.Fatalf("iteration %d: authorized=%v cancelled=%v", iteration, authorizedWon, cancelledWon)
 		}
-		outcome, err := readBinaryHelperOutcome(staged)
+		outcome, err := readPackagedUpdateHelperOutcome(staged)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if authorizedWon && outcome.State != binaryOutcomeAuthorized {
+		if authorizedWon && outcome.State != packagedUpdateOutcomeAuthorized {
 			t.Fatalf("iteration %d: authorized winner left %q", iteration, outcome.State)
 		}
-		if cancelledWon && outcome.State != binaryOutcomeCancelled {
+		if cancelledWon && outcome.State != packagedUpdateOutcomeCancelled {
 			t.Fatalf("iteration %d: cancellation winner left %q", iteration, outcome.State)
 		}
 	}
@@ -1305,11 +1305,11 @@ func TestBinaryInstallerRecoveryWaitsForDurableHelperReadiness(t *testing.T) {
 	if err := os.WriteFile(current, []byte("published-target"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	phase, err := marshalBinaryHelperOutcome(staged, binaryOutcomeTargetPublished)
+	phase, err := marshalPackagedUpdateHelperOutcome(staged, packagedUpdateOutcomeTargetPublished)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := atomicWriteState(binaryHelperAuthorizedPath(current), phase); err != nil {
+	if err := atomicWriteState(packagedUpdateHelperAuthorizedPath(current), phase); err != nil {
 		t.Fatal(err)
 	}
 	shutdown := false
@@ -1322,15 +1322,15 @@ func TestBinaryInstallerRecoveryWaitsForDurableHelperReadiness(t *testing.T) {
 			if shutdown {
 				t.Fatal("shutdown preceded recovery helper readiness")
 			}
-			ready, err := marshalBinaryHelperOutcome(staged, binaryOutcomeRecovering)
+			ready, err := marshalPackagedUpdateHelperOutcome(staged, packagedUpdateOutcomeRecovering)
 			if err != nil {
 				return err
 			}
-			return atomicWriteState(binaryHelperRecoveryReadyPath(current), ready)
+			return atomicWriteState(packagedUpdateHelperRecoveryReadyPath(current), ready)
 		},
 		Shutdown: func() { shutdown = true },
 	}
-	if err := installer.RecoverBinaryRestart(context.Background(), bindBinaryRestartOrigin(staged, installer)); err != nil {
+	if err := installer.RecoverPackagedUpdateRestart(context.Background(), bindBinaryRestartOrigin(staged, installer)); err != nil {
 		t.Fatal(err)
 	}
 	if !shutdown || command == nil {
@@ -1342,13 +1342,13 @@ func TestBinaryInstallerRecoveryWaitsForDurableHelperReadiness(t *testing.T) {
 			t.Fatalf("recovery command %q lacks %q", command.Args, required)
 		}
 	}
-	helperPath := packagedUpdateHelperPath(current)
+	helperPath := packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand)
 	if data, err := os.ReadFile(helperPath); err != nil || string(data) != "published-target" {
 		t.Fatalf("recovery helper image=%q err=%v", data, err)
 	}
 }
 
-func TestBinaryHelperResumesDurablePostAuthorizationPhases(t *testing.T) {
+func TestPackagedUpdateHelperResumesDurablePostAuthorizationPhases(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		phase       string
@@ -1358,9 +1358,9 @@ func TestBinaryHelperResumesDurablePostAuthorizationPhases(t *testing.T) {
 		wantOutcome string
 		wantCurrent string
 	}{
-		{name: "backup published", phase: binaryOutcomeBackupPublished, current: "old", staged: true, health: "0.6.0", wantOutcome: binaryOutcomeSucceeded, wantCurrent: "new"},
-		{name: "target published", phase: binaryOutcomeTargetPublished, current: "new", health: "0.6.0", wantOutcome: binaryOutcomeSucceeded, wantCurrent: "new"},
-		{name: "rollback started", phase: binaryOutcomeRollingBack, current: "new", health: "0.5.0", wantOutcome: binaryOutcomeRolledBack, wantCurrent: "old"},
+		{name: "backup published", phase: packagedUpdateOutcomeBackupPublished, current: "old", staged: true, health: "0.6.0", wantOutcome: packagedUpdateOutcomeSucceeded, wantCurrent: "new"},
+		{name: "target published", phase: packagedUpdateOutcomeTargetPublished, current: "new", health: "0.6.0", wantOutcome: packagedUpdateOutcomeSucceeded, wantCurrent: "new"},
+		{name: "rollback started", phase: packagedUpdateOutcomeRollingBack, current: "new", health: "0.5.0", wantOutcome: packagedUpdateOutcomeRolledBack, wantCurrent: "old"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -1379,18 +1379,18 @@ func TestBinaryHelperResumesDurablePostAuthorizationPhases(t *testing.T) {
 				t.Fatal(err)
 			}
 			staged := LocalStagedUpdate{ArtifactPath: stagedPath, InstallPath: current, BackupPath: backup, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"}
-			phase, err := marshalBinaryHelperOutcome(staged, tc.phase)
+			phase, err := marshalPackagedUpdateHelperOutcome(staged, tc.phase)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := atomicWriteState(binaryHelperAuthorizedPath(current), phase); err != nil {
+			if err := atomicWriteState(packagedUpdateHelperAuthorizedPath(current), phase); err != nil {
 				t.Fatal(err)
 			}
 			health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = fmt.Fprintf(w, `{"ready":true,"version":%q}`, tc.health)
 			}))
 			defer health.Close()
-			err = RunBinaryHelper(context.Background(), BinaryHelperConfig{
+			err = RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{
 				ParentPID: 99999999, Current: current, Staged: stagedPath, Backup: backup, HealthURL: health.URL,
 				ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1",
 				WaitTimeout: 50 * time.Millisecond, ValidationTimeout: 25 * time.Millisecond,
@@ -1398,14 +1398,14 @@ func TestBinaryHelperResumesDurablePostAuthorizationPhases(t *testing.T) {
 					return func(context.Context) error { return nil }, nil
 				},
 			})
-			if tc.wantOutcome == binaryOutcomeRolledBack {
+			if tc.wantOutcome == packagedUpdateOutcomeRolledBack {
 				if err == nil {
 					t.Fatal("resumed rollback returned success")
 				}
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			outcome, readErr := readBinaryHelperOutcome(staged)
+			outcome, readErr := readPackagedUpdateHelperOutcome(staged)
 			if readErr != nil || outcome.State != tc.wantOutcome {
 				t.Fatalf("outcome=%#v err=%v", outcome, readErr)
 			}
@@ -1417,7 +1417,7 @@ func TestBinaryHelperResumesDurablePostAuthorizationPhases(t *testing.T) {
 	}
 }
 
-func TestBinaryRecoveryHelperSettlesPostAuthorizationCrashResidue(t *testing.T) {
+func TestExecutableUpdateRecoveryHelperSettlesPostAuthorizationCrashResidue(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
 		phase        string
@@ -1429,9 +1429,9 @@ func TestBinaryRecoveryHelperSettlesPostAuthorizationCrashResidue(t *testing.T) 
 		wantStarts   int
 		wantStops    int
 	}{
-		{name: "before target publication", phase: binaryOutcomeBackupPublished, running: "0.5.0", stagedExists: true, health: "0.5.0", wantOutcome: binaryOutcomeCancelled, wantCurrent: "old", wantStarts: 1},
-		{name: "published target validates", phase: binaryOutcomeTargetPublished, running: "0.5.0", health: "0.6.0", wantOutcome: binaryOutcomeSucceeded, wantCurrent: "new", wantStarts: 1},
-		{name: "published target rolls back", phase: binaryOutcomeValidating, running: "0.5.0", health: "wrong", wantOutcome: binaryOutcomeRolledBack, wantCurrent: "old", wantStarts: 2, wantStops: 1},
+		{name: "before target publication", phase: packagedUpdateOutcomeBackupPublished, running: "0.5.0", stagedExists: true, health: "0.5.0", wantOutcome: packagedUpdateOutcomeCancelled, wantCurrent: "old", wantStarts: 1},
+		{name: "published target validates", phase: packagedUpdateOutcomeTargetPublished, running: "0.5.0", health: "0.6.0", wantOutcome: packagedUpdateOutcomeSucceeded, wantCurrent: "new", wantStarts: 1},
+		{name: "published target rolls back", phase: packagedUpdateOutcomeValidating, running: "0.5.0", health: "wrong", wantOutcome: packagedUpdateOutcomeRolledBack, wantCurrent: "old", wantStarts: 2, wantStops: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -1452,11 +1452,11 @@ func TestBinaryRecoveryHelperSettlesPostAuthorizationCrashResidue(t *testing.T) 
 				t.Fatal(err)
 			}
 			staged := LocalStagedUpdate{ArtifactPath: stagedPath, InstallPath: current, BackupPath: backup, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"}
-			phase, err := marshalBinaryHelperOutcome(staged, tc.phase)
+			phase, err := marshalPackagedUpdateHelperOutcome(staged, tc.phase)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := atomicWriteState(binaryHelperAuthorizedPath(current), phase); err != nil {
+			if err := atomicWriteState(packagedUpdateHelperAuthorizedPath(current), phase); err != nil {
 				t.Fatal(err)
 			}
 			health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -1464,10 +1464,10 @@ func TestBinaryRecoveryHelperSettlesPostAuthorizationCrashResidue(t *testing.T) 
 			}))
 			defer health.Close()
 			starts, stops := 0, 0
-			if err := writeBinaryHelperRecoveryClaim(staged); err != nil {
+			if err := writePackagedUpdateHelperRecoveryClaim(staged); err != nil {
 				t.Fatal(err)
 			}
-			err = RunBinaryHelper(context.Background(), BinaryHelperConfig{
+			err = RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{
 				ParentPID: 99999999, Current: current, Staged: stagedPath, Backup: backup, HealthURL: health.URL,
 				ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1",
 				RunningVersion: tc.running, Recovery: true, WaitTimeout: 50 * time.Millisecond, ValidationTimeout: 25 * time.Millisecond,
@@ -1476,12 +1476,12 @@ func TestBinaryRecoveryHelperSettlesPostAuthorizationCrashResidue(t *testing.T) 
 					return func(context.Context) error { stops++; return nil }, nil
 				},
 			})
-			if tc.wantOutcome == binaryOutcomeRolledBack {
+			if tc.wantOutcome == packagedUpdateOutcomeRolledBack {
 				if err == nil {
 					t.Fatal("rollback recovery returned success")
 				}
 				beforeRestart := starts
-				if retryErr := RunBinaryHelper(context.Background(), BinaryHelperConfig{
+				if retryErr := RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{
 					ParentPID: 99999999, Current: current, Staged: stagedPath, Backup: backup, HealthURL: health.URL,
 					ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1",
 					RunningVersion: tc.running, Recovery: true, WaitTimeout: 50 * time.Millisecond, ValidationTimeout: 25 * time.Millisecond,
@@ -1495,7 +1495,7 @@ func TestBinaryRecoveryHelperSettlesPostAuthorizationCrashResidue(t *testing.T) 
 			} else if err != nil {
 				t.Fatal(err)
 			}
-			outcome, readErr := readBinaryHelperOutcome(staged)
+			outcome, readErr := readPackagedUpdateHelperOutcome(staged)
 			if readErr != nil || outcome.State != tc.wantOutcome {
 				t.Fatalf("outcome=%#v err=%v", outcome, readErr)
 			}
@@ -1510,7 +1510,7 @@ func TestBinaryRecoveryHelperSettlesPostAuthorizationCrashResidue(t *testing.T) 
 	}
 }
 
-func TestBinaryHelperExecRestartsPriorBinaryAfterPreInstallFailure(t *testing.T) {
+func TestPackagedUpdateHelperExecRestartsPriorBinaryAfterPreInstallFailure(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
 	if err := os.WriteFile(current, []byte("old"), 0o755); err != nil {
@@ -1518,11 +1518,11 @@ func TestBinaryHelperExecRestartsPriorBinaryAfterPreInstallFailure(t *testing.T)
 	}
 	starts := 0
 	handoff := LocalStagedUpdate{InstallPath: current, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"}
-	if err := writeBinaryHelperOutcome(handoff, binaryOutcomePrepared); err != nil {
+	if err := writePackagedUpdateHelperOutcome(handoff, packagedUpdateOutcomePrepared); err != nil {
 		t.Fatal(err)
 	}
-	authorizeBinaryHelperForTest(t, handoff)
-	err := RunBinaryHelper(context.Background(), BinaryHelperConfig{
+	authorizePackagedUpdateHelperForTest(t, handoff)
+	err := RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{
 		ParentPID: 99999999, Current: current, Staged: current + ".openvibely-new", Backup: current + ".openvibely-backup", HealthURL: "http://127.0.0.1/health",
 		ExpectedVersion: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1", WaitTimeout: time.Second,
 		StartCommand: func(mode, target string) (func(context.Context) error, error) {
@@ -1542,8 +1542,8 @@ func TestBinaryHelperExecRestartsPriorBinaryAfterPreInstallFailure(t *testing.T)
 	if data, readErr := os.ReadFile(current); readErr != nil || string(data) != "old" {
 		t.Fatalf("current = %q, err = %v", data, readErr)
 	}
-	outcome, readErr := readBinaryHelperOutcome(LocalStagedUpdate{InstallPath: current, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"})
-	if readErr != nil || outcome.State != binaryOutcomeRolledBack {
+	outcome, readErr := readPackagedUpdateHelperOutcome(LocalStagedUpdate{InstallPath: current, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"})
+	if readErr != nil || outcome.State != packagedUpdateOutcomeRolledBack {
 		t.Fatalf("helper outcome = %#v, err = %v", outcome, readErr)
 	}
 }
@@ -1563,14 +1563,14 @@ func TestBinaryInstallerHelperLaunchFailurePreservesCurrent(t *testing.T) {
 			helperPath = cmd.Path
 			return errors.New("start failed")
 		},
-		awaitHelperHandoff: acknowledgeBinaryHelperForTest,
+		awaitHelperHandoff: acknowledgePackagedUpdateHelperForTest,
 		Shutdown:           func() { shutdown = true },
 	}
 	err := installer.Apply(context.Background(), bindBinaryRestartOrigin(staged, installer))
 	if err == nil {
 		t.Fatal("helper launch failure succeeded")
 	}
-	if !strings.Contains(err.Error(), "start binary update helper") {
+	if !strings.Contains(err.Error(), "start executable update helper") {
 		t.Fatalf("helper launch failure lacked apply context: %v", err)
 	}
 	if shutdown {
@@ -1581,11 +1581,11 @@ func TestBinaryInstallerHelperLaunchFailurePreservesCurrent(t *testing.T) {
 	}
 	for _, path := range []string{
 		helperPath,
-		binaryHelperRelaunchMetadataPath(current),
-		binaryHelperOutcomePath(current),
-		binaryHelperPreparedPath(current),
-		binaryHelperAuthorizedPath(current),
-		binaryHelperCancelledPath(current),
+		packagedUpdateHelperRelaunchMetadataPath(current),
+		packagedUpdateHelperOutcomePath(current),
+		packagedUpdateHelperPreparedPath(current),
+		packagedUpdateHelperAuthorizedPath(current),
+		packagedUpdateHelperCancelledPath(current),
 	} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("helper-start failure retained %s: %v", path, err)
@@ -1593,7 +1593,7 @@ func TestBinaryInstallerHelperLaunchFailurePreservesCurrent(t *testing.T) {
 	}
 }
 
-func TestBinaryHelperRecoversInterruptedSwapBeforePublishingStagedBinary(t *testing.T) {
+func TestPackagedUpdateHelperRecoversInterruptedSwapBeforePublishingStagedBinary(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
 	staged := current + ".openvibely-new"
@@ -1610,8 +1610,8 @@ func TestBinaryHelperRecoversInterruptedSwapBeforePublishingStagedBinary(t *test
 	}))
 	defer health.Close()
 
-	cfg := BinaryHelperConfig{ParentPID: 99999999, Current: current, Staged: staged, Backup: backup, HealthURL: health.URL, ExpectedVersion: "0.6.0", WaitTimeout: time.Second, ValidationTimeout: time.Second, StartCommand: func(string, string) (func(context.Context) error, error) { return nil, nil }}
-	if err := RunBinaryHelper(context.Background(), cfg); err != nil {
+	cfg := ExecutableUpdateHelperConfig{ParentPID: 99999999, Current: current, Staged: staged, Backup: backup, HealthURL: health.URL, ExpectedVersion: "0.6.0", WaitTimeout: time.Second, ValidationTimeout: time.Second, StartCommand: func(string, string) (func(context.Context) error, error) { return nil, nil }}
+	if err := RunExecutableUpdateHelper(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
 	if data, err := os.ReadFile(current); err != nil || string(data) != "new" {
@@ -1642,7 +1642,7 @@ func TestInstallStagedBinaryKeepsCurrentExecutableWhenPublicationFails(t *testin
 	}
 }
 
-func TestBinaryHelperAtomicReplacementPreservesPermissionsAndValidatesVersion(t *testing.T) {
+func TestPackagedUpdateHelperAtomicReplacementPreservesPermissionsAndValidatesVersion(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
 	staged := current + ".openvibely-new"
@@ -1663,8 +1663,8 @@ func TestBinaryHelperAtomicReplacementPreservesPermissionsAndValidatesVersion(t 
 		_, _ = w.Write([]byte(`{"ready":true,"version":"0.6.0"}`))
 	}))
 	defer health.Close()
-	cfg := BinaryHelperConfig{ParentPID: 99999999, Current: current, Staged: staged, Backup: backup, HealthURL: health.URL, ExpectedVersion: "0.6.0", WaitTimeout: time.Second, ValidationTimeout: time.Second, StartCommand: func(string, string) (func(context.Context) error, error) { return nil, nil }}
-	if err := RunBinaryHelper(context.Background(), cfg); err != nil {
+	cfg := ExecutableUpdateHelperConfig{ParentPID: 99999999, Current: current, Staged: staged, Backup: backup, HealthURL: health.URL, ExpectedVersion: "0.6.0", WaitTimeout: time.Second, ValidationTimeout: time.Second, StartCommand: func(string, string) (func(context.Context) error, error) { return nil, nil }}
+	if err := RunExecutableUpdateHelper(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(current)
@@ -1691,7 +1691,7 @@ func TestBinaryHelperAtomicReplacementPreservesPermissionsAndValidatesVersion(t 
 	}
 }
 
-func TestBinaryHelperStopsFailedSuccessorBeforeRollback(t *testing.T) {
+func TestPackagedUpdateHelperStopsFailedSuccessorBeforeRollback(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is Unix-specific; Windows uses the same successor lifecycle contract")
 	}
@@ -1714,7 +1714,7 @@ func TestBinaryHelperStopsFailedSuccessorBeforeRollback(t *testing.T) {
 	defer health.Close()
 
 	starts := 0
-	err := RunBinaryHelper(context.Background(), BinaryHelperConfig{
+	err := RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{
 		ParentPID: 99999999, Current: current, Staged: staged, Backup: backup, HealthURL: health.URL,
 		ExpectedVersion: "0.6.0", WaitTimeout: time.Second, ValidationTimeout: 100 * time.Millisecond,
 		StartCommand: func(_ string, target string) (func(context.Context) error, error) {
@@ -1764,7 +1764,7 @@ func TestBinaryHelperStopsFailedSuccessorBeforeRollback(t *testing.T) {
 	}
 }
 
-func TestBinaryHelperDoesNotRollbackUntilSuccessorExitIsConfirmed(t *testing.T) {
+func TestPackagedUpdateHelperDoesNotRollbackUntilSuccessorExitIsConfirmed(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
 	staged := current + ".openvibely-new"
@@ -1780,7 +1780,7 @@ func TestBinaryHelperDoesNotRollbackUntilSuccessorExitIsConfirmed(t *testing.T) 
 	}))
 	defer health.Close()
 
-	err := RunBinaryHelper(context.Background(), BinaryHelperConfig{
+	err := RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{
 		ParentPID: 99999999, Current: current, Staged: staged, Backup: backup, HealthURL: health.URL,
 		ExpectedVersion: "0.6.0", WaitTimeout: time.Second, ValidationTimeout: 20 * time.Millisecond,
 		StartCommand: func(string, string) (func(context.Context) error, error) {
@@ -1798,7 +1798,7 @@ func TestBinaryHelperDoesNotRollbackUntilSuccessorExitIsConfirmed(t *testing.T) 
 	}
 }
 
-func TestBinaryHelperRollsBackAfterDefinitiveSuccessorStartFailure(t *testing.T) {
+func TestPackagedUpdateHelperRollsBackAfterDefinitiveSuccessorStartFailure(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
 	staged := current + ".openvibely-new"
@@ -1810,7 +1810,7 @@ func TestBinaryHelperRollsBackAfterDefinitiveSuccessorStartFailure(t *testing.T)
 		t.Fatal(err)
 	}
 	starts := 0
-	err := RunBinaryHelper(context.Background(), BinaryHelperConfig{
+	err := RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{
 		ParentPID: 99999999, Current: current, Staged: staged, Backup: backup, HealthURL: "http://127.0.0.1/health",
 		ExpectedVersion: "0.6.0", WaitTimeout: time.Second, ValidationTimeout: time.Second,
 		StartCommand: func(string, string) (func(context.Context) error, error) {
@@ -1832,7 +1832,7 @@ func TestBinaryHelperRollsBackAfterDefinitiveSuccessorStartFailure(t *testing.T)
 	}
 }
 
-func TestBinaryHelperRollsBackWhenReportedVersionDoesNotMatch(t *testing.T) {
+func TestPackagedUpdateHelperRollsBackWhenReportedVersionDoesNotMatch(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
 	staged := current + ".openvibely-new"
@@ -1844,7 +1844,7 @@ func TestBinaryHelperRollsBackWhenReportedVersionDoesNotMatch(t *testing.T) {
 	}))
 	defer health.Close()
 	starts := 0
-	err := RunBinaryHelper(context.Background(), BinaryHelperConfig{ParentPID: 99999999, Current: current, Staged: staged, Backup: backup, HealthURL: health.URL, ExpectedVersion: "0.6.0", WaitTimeout: time.Second, ValidationTimeout: 20 * time.Millisecond, StartCommand: func(string, string) (func(context.Context) error, error) {
+	err := RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{ParentPID: 99999999, Current: current, Staged: staged, Backup: backup, HealthURL: health.URL, ExpectedVersion: "0.6.0", WaitTimeout: time.Second, ValidationTimeout: 20 * time.Millisecond, StartCommand: func(string, string) (func(context.Context) error, error) {
 		starts++
 		return func(context.Context) error { return nil }, nil
 	}})

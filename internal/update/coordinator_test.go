@@ -72,7 +72,7 @@ func TestCoordinatorDesktopRestartRequiresJournaledHealthOutcome(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := writeBinaryHelperPhase(staged, binaryOutcomeValidating); err != nil {
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeValidating); err != nil {
 		t.Fatal(err)
 	}
 	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json")})
@@ -194,7 +194,7 @@ func TestCoordinatorRestartRecoveryConfirmsVersionAndReopensDurableDrain(t *test
 		t.Fatal(err)
 	}
 	old.mu.Unlock()
-	if err := writeBinaryHelperOutcome(old.staged.(LocalStagedUpdate), binaryOutcomeSucceeded); err != nil {
+	if err := writePackagedUpdateHelperOutcome(old.staged.(LocalStagedUpdate), packagedUpdateOutcomeSucceeded); err != nil {
 		t.Fatal(err)
 	}
 
@@ -225,7 +225,7 @@ type fakeBinaryRestartRecoveryInstaller struct {
 }
 
 func (i *fakeBinaryRestartRecoveryInstaller) RequiresRestartValidation() bool { return true }
-func (i *fakeBinaryRestartRecoveryInstaller) RecoverBinaryRestart(context.Context, LocalStagedUpdate) error {
+func (i *fakeBinaryRestartRecoveryInstaller) RecoverPackagedUpdateRestart(context.Context, LocalStagedUpdate) error {
 	i.recoveries.Add(1)
 	return nil
 }
@@ -240,7 +240,7 @@ func TestCoordinatorDeadHelperRecoveryExcludesHelperRestart(t *testing.T) {
 	if err := os.WriteFile(staged.ArtifactPath, []byte("new"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeBinaryHelperPhase(staged, binaryOutcomeAuthorized); err != nil {
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeAuthorized); err != nil {
 		t.Fatal(err)
 	}
 
@@ -252,8 +252,8 @@ func TestCoordinatorDeadHelperRecoveryExcludesHelperRestart(t *testing.T) {
 	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, &fakeBinaryRestartRecoveryInstaller{}, false, "", nil)
 	coordinator.state, coordinator.operationGeneration, coordinator.staged = StateRestarting, status.Generation, staged
 	var helperRestartAcquired bool
-	coordinator.binaryRecoveryLeaseHook = func() {
-		lease, acquired, err := tryAcquireBinaryHelperLease(binaryHelperLeasePath(staged))
+	coordinator.packagedUpdateRecoveryLeaseHook = func() {
+		lease, acquired, err := tryAcquirePackagedUpdateHelperLease(packagedUpdateHelperLeasePath(staged))
 		if err != nil {
 			t.Fatalf("helper restart lease: %v", err)
 		}
@@ -263,7 +263,7 @@ func TestCoordinatorDeadHelperRecoveryExcludesHelperRestart(t *testing.T) {
 		}
 	}
 
-	if !coordinator.recoverDeadBinaryHelper(context.Background(), staged, status.Generation, binaryHelperOutcome{State: binaryOutcomeAuthorized}, "0.5.0") {
+	if !coordinator.recoverDeadPackagedUpdateHelper(context.Background(), staged, status.Generation, packagedUpdateHelperOutcome{State: packagedUpdateOutcomeAuthorized}, "0.5.0") {
 		t.Fatal("dead helper recovery did not settle")
 	}
 	if helperRestartAcquired {
@@ -284,7 +284,7 @@ func TestCoordinatorDeadHelperRecoveryClaimsOwnershipBeforeLeaseTransfer(t *test
 	if err := os.WriteFile(staged.BackupPath, []byte("old"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeBinaryHelperPhase(staged, binaryOutcomeTargetPublished); err != nil {
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeTargetPublished); err != nil {
 		t.Fatal(err)
 	}
 
@@ -296,8 +296,8 @@ func TestCoordinatorDeadHelperRecoveryClaimsOwnershipBeforeLeaseTransfer(t *test
 	installer := &fakeBinaryRestartRecoveryInstaller{}
 	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, installer, false, "", nil)
 	coordinator.state, coordinator.operationGeneration, coordinator.staged = StateRestarting, status.Generation, staged
-	coordinator.binaryRecoveryLeaseHook = func() {
-		lease, acquired, err := tryAcquireBinaryHelperLease(binaryHelperLeasePath(staged))
+	coordinator.packagedUpdateRecoveryLeaseHook = func() {
+		lease, acquired, err := tryAcquirePackagedUpdateHelperLease(packagedUpdateHelperLeasePath(staged))
 		if err != nil {
 			t.Fatalf("helper restart lease: %v", err)
 		}
@@ -307,11 +307,11 @@ func TestCoordinatorDeadHelperRecoveryClaimsOwnershipBeforeLeaseTransfer(t *test
 		}
 	}
 
-	if !coordinator.recoverDeadBinaryHelper(context.Background(), staged, status.Generation, binaryHelperOutcome{State: binaryOutcomeTargetPublished}, "0.5.0") {
+	if !coordinator.recoverDeadPackagedUpdateHelper(context.Background(), staged, status.Generation, packagedUpdateHelperOutcome{State: packagedUpdateOutcomeTargetPublished}, "0.5.0") {
 		t.Fatal("dead helper recovery handoff did not start")
 	}
-	claim, err := readBinaryHelperRecoveryClaim(staged)
-	if err != nil || claim.State != binaryOutcomeRecovering {
+	claim, err := readPackagedUpdateHelperRecoveryClaim(staged)
+	if err != nil || claim.State != packagedUpdateOutcomeRecovering {
 		t.Fatalf("recovery ownership claim = %#v, err = %v", claim, err)
 	}
 	if installer.recoveries.Load() != 1 || !drain.Owns(status.Generation) {
@@ -319,7 +319,7 @@ func TestCoordinatorDeadHelperRecoveryClaimsOwnershipBeforeLeaseTransfer(t *test
 	}
 
 	started := false
-	if err := RunBinaryHelper(context.Background(), BinaryHelperConfig{
+	if err := RunExecutableUpdateHelper(context.Background(), ExecutableUpdateHelperConfig{
 		ParentPID: 99999999, Current: current, Staged: staged.ArtifactPath, Backup: staged.BackupPath,
 		HealthURL: "http://127.0.0.1/health", ExpectedVersion: staged.Version, PreviousVersion: staged.PreviousVersion, OutcomeID: staged.OutcomeID,
 		WaitTimeout: time.Millisecond, ValidationTimeout: time.Millisecond,
@@ -335,7 +335,7 @@ func TestCoordinatorDeadHelperRecoveryClaimsOwnershipBeforeLeaseTransfer(t *test
 	}
 }
 
-func TestCoordinatorDoesNotRecoverLiveAuthorizedBinaryHelper(t *testing.T) {
+func TestCoordinatorDoesNotRecoverLiveAuthorizedPackagedUpdateHelper(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
 	staged := LocalStagedUpdate{ArtifactPath: current + ".openvibely-new", InstallPath: current, BackupPath: current + ".openvibely-backup", Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"}
@@ -345,14 +345,14 @@ func TestCoordinatorDoesNotRecoverLiveAuthorizedBinaryHelper(t *testing.T) {
 	if err := os.WriteFile(staged.ArtifactPath, []byte("new"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data, err := marshalBinaryHelperOutcome(staged, binaryOutcomeAuthorized)
+	data, err := marshalPackagedUpdateHelperOutcome(staged, packagedUpdateOutcomeAuthorized)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := atomicWriteState(binaryHelperAuthorizedPath(current), data); err != nil {
+	if err := atomicWriteState(packagedUpdateHelperAuthorizedPath(current), data); err != nil {
 		t.Fatal(err)
 	}
-	lease, acquired, err := tryAcquireBinaryHelperLease(binaryHelperLeasePath(staged))
+	lease, acquired, err := tryAcquirePackagedUpdateHelperLease(packagedUpdateHelperLeasePath(staged))
 	if err != nil || !acquired {
 		t.Fatalf("acquire live helper lease: acquired=%v err=%v", acquired, err)
 	}
@@ -567,7 +567,7 @@ func TestCoordinatorBinaryAutoRestartDoesNotTreatPendingHelperAsRollback(t *test
 		t.Fatalf("pending helper outcome settled during active replacement: %#v", snapshot)
 	}
 	staged := LocalStagedUpdate{InstallPath: current, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1"}
-	cancelled, err := cancelBinaryHelperHandoff(staged)
+	cancelled, err := cancelPackagedUpdateHelperHandoff(staged)
 	if err != nil || !cancelled {
 		t.Fatalf("cancel pending helper handoff: cancelled=%v err=%v", cancelled, err)
 	}
@@ -615,7 +615,7 @@ func TestCoordinatorBinaryPreparedHandoffCrashReleasesExactGeneration(t *testing
 	if err := os.WriteFile(coordinatorPath, coordinatorState, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(binaryHelperPreparedPath(current), []byte(`{"id":"operation-1","state":"prepared","previous_version":"0.5.0","desired_version":"0.6.0"}`), 0o600); err != nil {
+	if err := os.WriteFile(packagedUpdateHelperPreparedPath(current), []byte(`{"id":"operation-1","state":"prepared","previous_version":"0.5.0","desired_version":"0.6.0"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -651,7 +651,7 @@ func TestCoordinatorBinaryPreparedClaimRaceKeepsExactGenerationOwned(t *testing.
 		PreviousVersion: "0.5.0",
 		OutcomeID:       "operation-1",
 	}
-	if err := writeBinaryHelperOutcome(staged, binaryOutcomePrepared); err != nil {
+	if err := writePackagedUpdateHelperOutcome(staged, packagedUpdateOutcomePrepared); err != nil {
 		t.Fatal(err)
 	}
 
@@ -669,9 +669,9 @@ func TestCoordinatorBinaryPreparedClaimRaceKeepsExactGenerationOwned(t *testing.
 	coordinator.staged = staged
 	coordinator.recoveryRetryInterval = time.Hour
 	var claimed atomic.Bool
-	coordinator.binaryOutcomeReadHook = func() {
+	coordinator.packagedUpdateOutcomeReadHook = func() {
 		if claimed.CompareAndSwap(false, true) {
-			if err := os.Rename(binaryHelperPreparedPath(current), binaryHelperOutcomePath(current)); err != nil {
+			if err := os.Rename(packagedUpdateHelperPreparedPath(current), packagedUpdateHelperOutcomePath(current)); err != nil {
 				t.Errorf("claim prepared outcome: %v", err)
 			}
 		}
@@ -696,7 +696,7 @@ func TestCoordinatorBinaryPreparedClaimRaceKeepsExactGenerationOwned(t *testing.
 	cancel()
 	deadline = time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
-		lease, acquired, err := tryAcquireBinaryHelperLease(binaryHelperLeasePath(staged))
+		lease, acquired, err := tryAcquirePackagedUpdateHelperLease(packagedUpdateHelperLeasePath(staged))
 		if err != nil {
 			t.Fatalf("wait for recovery lease release: %v", err)
 		}
@@ -765,7 +765,7 @@ func TestCoordinatorBinaryRollbackStartupReopensDurableDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	old.mu.Unlock()
-	if err := writeBinaryHelperOutcome(old.staged.(LocalStagedUpdate), binaryOutcomeRolledBack); err != nil {
+	if err := writePackagedUpdateHelperOutcome(old.staged.(LocalStagedUpdate), packagedUpdateOutcomeRolledBack); err != nil {
 		t.Fatal(err)
 	}
 

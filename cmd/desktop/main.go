@@ -34,7 +34,7 @@ type desktopLauncher func(baseURL string, onShutdown func(), coordinator *update
 
 func main() {
 	log.SetOutput(os.Stderr)
-	if handled, err := runDesktopHelperCommand(context.Background(), os.Args, os.Stdin); handled {
+	if handled, err := runPackagedUpdateHelperCommand(context.Background(), os.Args, os.Stdin); handled {
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -58,34 +58,34 @@ func main() {
 	}
 }
 
-func runDesktopHelperCommand(ctx context.Context, args []string, stdin io.Reader) (bool, error) {
+func runPackagedUpdateHelperCommand(ctx context.Context, args []string, stdin io.Reader) (bool, error) {
 	if len(args) < 2 {
 		return false, nil
 	}
 	switch args[1] {
-	case "desktop-update-helper":
-		cfg, err := update.ParseDesktopHelperArgs(args[2:])
+	case update.AppBundleUpdateHelperCommand:
+		cfg, err := update.ParseAppBundleUpdateHelperArgs(args[2:])
 		if err == nil {
-			err = update.LoadDesktopHelperRelaunch(stdin, &cfg)
+			err = update.LoadAppBundleUpdateHelperRelaunch(stdin, &cfg)
 		}
 		if err == nil {
-			err = update.RunDesktopHelper(ctx, cfg)
+			err = update.RunAppBundleUpdateHelper(ctx, cfg)
 		}
 		return true, err
-	case "update-helper":
-		cfg, err := update.ParseBinaryHelperArgs(args[2:])
+	case update.ExecutableUpdateHelperCommand:
+		cfg, err := update.ParseExecutableUpdateHelperArgs(args[2:])
 		if err == nil {
 			if cfg.RelaunchMetadataPath != "" {
-				err = update.LoadBinaryHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
+				err = update.LoadExecutableUpdateHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
 			} else {
-				err = update.LoadBinaryHelperRelaunch(stdin, &cfg)
+				err = update.LoadExecutableUpdateHelperRelaunch(stdin, &cfg)
 			}
 		}
 		if err == nil {
 			err = applyUpdateIntegrationTimeouts(&cfg)
 		}
 		if err == nil {
-			err = update.RunBinaryHelper(ctx, cfg)
+			err = update.RunExecutableUpdateHelper(ctx, cfg)
 		}
 		return true, err
 	default:
@@ -93,7 +93,7 @@ func runDesktopHelperCommand(ctx context.Context, args []string, stdin io.Reader
 	}
 }
 
-func applyUpdateIntegrationTimeouts(cfg *update.BinaryHelperConfig) error {
+func applyUpdateIntegrationTimeouts(cfg *update.ExecutableUpdateHelperConfig) error {
 	if cfg == nil {
 		return nil
 	}

@@ -46,18 +46,18 @@ import (
 // @tag.description Worker capacity and utilization API endpoints
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "update-helper" {
-		cfg, err := update.ParseBinaryHelperArgs(os.Args[2:])
+	if len(os.Args) > 1 && os.Args[1] == update.ExecutableUpdateHelperCommand {
+		cfg, err := update.ParseExecutableUpdateHelperArgs(os.Args[2:])
 		if err == nil {
 			if cfg.RelaunchMetadataPath != "" {
-				err = update.LoadBinaryHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
+				err = update.LoadExecutableUpdateHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
 			} else {
-				err = update.LoadBinaryHelperRelaunch(os.Stdin, &cfg)
+				err = update.LoadExecutableUpdateHelperRelaunch(os.Stdin, &cfg)
 			}
 		}
 		applyUpdateIntegrationTimeouts(&cfg)
 		if err == nil {
-			err = update.RunBinaryHelper(context.Background(), cfg)
+			err = update.RunExecutableUpdateHelper(context.Background(), cfg)
 		}
 		if err != nil {
 			log.Fatal(err)
@@ -93,7 +93,7 @@ func main() {
 	inst.Shutdown()
 }
 
-func applyUpdateIntegrationTimeouts(cfg *update.BinaryHelperConfig) {
+func applyUpdateIntegrationTimeouts(cfg *update.ExecutableUpdateHelperConfig) {
 	if cfg == nil {
 		return
 	}

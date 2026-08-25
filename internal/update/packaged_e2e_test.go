@@ -45,8 +45,8 @@ func TestPackagedUpdateE2E(t *testing.T) {
 		t.Run("binary real app succeeds", testPackagedUpdateE2EBinarySucceeds)
 		t.Run("binary real app rolls back", testPackagedUpdateE2EBinaryRollsBack)
 	case "desktop":
-		t.Run("desktop helper succeeds", testPackagedUpdateE2EDesktopHelperSucceeds)
-		t.Run("desktop helper rolls back", testPackagedUpdateE2EDesktopHelperRollsBack)
+		t.Run("app-bundle update helper succeeds", testPackagedUpdateE2EAppBundleUpdateHelperSucceeds)
+		t.Run("app-bundle update helper rolls back", testPackagedUpdateE2EAppBundleUpdateHelperRollsBack)
 		t.Run("desktop real app succeeds", testPackagedUpdateE2ERealDesktopSucceeds)
 		t.Run("desktop real app rolls back", testPackagedUpdateE2ERealDesktopRollsBack)
 	default:
@@ -180,7 +180,7 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 		t.Fatalf("accept update HTTP %d\n%s", resp.StatusCode, readLogs())
 	}
 	if err := waitForCommandExit(cmd, time.Minute); err != nil {
-		t.Fatalf("current app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describeBinaryHelperState(current), readLogs())
+		t.Fatalf("current app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
 	}
 	if wantState == StateSucceeded {
 		waitForHealthVersion(t, baseURL, releaseVersion)
@@ -210,22 +210,22 @@ func desktopTestEnvironment() []string {
 	return env
 }
 
-func testPackagedUpdateE2EDesktopHelperSucceeds(t *testing.T) {
-	runDesktopHelperE2E(t, "0.6.0", "0.6.0", binaryOutcomeSucceeded)
+func testPackagedUpdateE2EAppBundleUpdateHelperSucceeds(t *testing.T) {
+	runAppBundleUpdateHelperE2E(t, "0.6.0", "0.6.0", packagedUpdateOutcomeSucceeded)
 }
 
-func testPackagedUpdateE2EDesktopHelperRollsBack(t *testing.T) {
-	runDesktopHelperE2E(t, "0.6.0", "0.7.0", binaryOutcomeRolledBack)
+func testPackagedUpdateE2EAppBundleUpdateHelperRollsBack(t *testing.T) {
+	runAppBundleUpdateHelperE2E(t, "0.6.0", "0.7.0", packagedUpdateOutcomeRolledBack)
 }
 
 func testPackagedUpdateE2ERealDesktopSucceeds(t *testing.T) {
 	requireRealDesktopUpdateE2E(t)
-	runRealDesktopUpdateE2E(t, "0.6.0", "0.6.0", binaryOutcomeSucceeded)
+	runRealDesktopUpdateE2E(t, "0.6.0", "0.6.0", packagedUpdateOutcomeSucceeded)
 }
 
 func testPackagedUpdateE2ERealDesktopRollsBack(t *testing.T) {
 	requireRealDesktopUpdateE2E(t)
-	runRealDesktopUpdateE2E(t, "0.6.0", "0.7.0", binaryOutcomeRolledBack)
+	runRealDesktopUpdateE2E(t, "0.6.0", "0.7.0", packagedUpdateOutcomeRolledBack)
 }
 
 func requireRealDesktopUpdateE2E(t *testing.T) {
@@ -235,7 +235,7 @@ func requireRealDesktopUpdateE2E(t *testing.T) {
 	}
 }
 
-func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, wantOutcome string) {
+func runAppBundleUpdateHelperE2E(t *testing.T, expectedVersion, replacementVersion, wantOutcome string) {
 	t.Helper()
 	if runtime.GOOS != "darwin" {
 		t.Skip("non-macOS desktop executable updates are covered by real desktop E2E")
@@ -293,12 +293,12 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 	if err := retainDesktopInstallUnit(staged, []string{dataRoot}); err != nil {
 		t.Fatalf("retain desktop install unit: %v", err)
 	}
-	if err := writeBinaryHelperOutcome(staged, binaryOutcomeAuthorized); err != nil {
+	if err := writePackagedUpdateHelperOutcome(staged, packagedUpdateOutcomeAuthorized); err != nil {
 		t.Fatalf("write helper authorization: %v", err)
 	}
-	helperPath := packagedUpdateHelperPath(staged.InstallPath)
+	helperPath := packagedUpdateHelperPath(staged.InstallPath, AppBundleUpdateHelperCommand)
 	if err := copyFile(installedExecutable, helperPath, 0o755); err != nil {
-		t.Fatalf("publish desktop helper fixture: %v", err)
+		t.Fatalf("publish app-bundle update helper fixture: %v", err)
 	}
 
 	port := freeTCPPort(t)
@@ -308,7 +308,7 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 	})
 	parentPID := exitedCommandPID(t)
 	helperArgs := []string{
-		"desktop-update-helper",
+		AppBundleUpdateHelperCommand,
 		"--parent-pid", strconv.Itoa(parentPID),
 		"--current", staged.InstallPath,
 		"--staged", staged.ArtifactPath,
@@ -318,7 +318,7 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 		"--previous-version", staged.PreviousVersion,
 		"--outcome-id", staged.OutcomeID,
 	}
-	metadata, err := json.Marshal(binaryRelaunchMetadata{
+	metadata, err := json.Marshal(packagedUpdateRelaunchMetadata{
 		Arguments:          []string{installedExecutable, "serve", "--listen", "127.0.0.1:" + port},
 		WorkingDirectory:   root,
 		ExecutableRelative: executableRelative,
@@ -332,21 +332,21 @@ func runDesktopHelperE2E(t *testing.T, expectedVersion, replacementVersion, want
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=2000",
 		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
 	)
-	if wantOutcome == binaryOutcomeSucceeded {
+	if wantOutcome == packagedUpdateOutcomeSucceeded {
 		cmd.Env = append(cmd.Env, "OPENVIBELY_UPDATE_INTEGRATION_EXIT_AFTER_HEALTH=1")
 	}
 	output, helperErr := cmd.CombinedOutput()
-	if helperErr != nil && wantOutcome != binaryOutcomeRolledBack {
-		t.Fatalf("desktop helper failed: %v\n%s", helperErr, output)
+	if helperErr != nil && wantOutcome != packagedUpdateOutcomeRolledBack {
+		t.Fatalf("app-bundle update helper failed: %v\n%s", helperErr, output)
 	}
-	outcome, err := readBinaryHelperOutcome(staged)
+	outcome, err := readPackagedUpdateHelperOutcome(staged)
 	if err != nil {
-		t.Fatalf("read desktop helper outcome: %v\nhelper err: %v\n%s", err, helperErr, output)
+		t.Fatalf("read app-bundle update helper outcome: %v\nhelper err: %v\n%s", err, helperErr, output)
 	}
 	if outcome.State != wantOutcome {
 		t.Fatalf("desktop outcome = %q, want %q\nhelper err: %v\n%s", outcome.State, wantOutcome, helperErr, output)
 	}
-	if wantOutcome == binaryOutcomeSucceeded {
+	if wantOutcome == packagedUpdateOutcomeSucceeded {
 		assertInstalledFixtureVersion(t, installedExecutable, replacementVersion)
 	} else {
 		assertInstalledFixtureVersion(t, installedExecutable, "0.5.0")
@@ -412,8 +412,8 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 	if err := retainDesktopInstallUnit(staged, []string{dataRoot}); err != nil {
 		t.Fatalf("retain real desktop install unit: %v", err)
 	}
-	if err := writeBinaryHelperOutcome(staged, binaryOutcomeAuthorized); err != nil {
-		t.Fatalf("write real desktop helper authorization: %v", err)
+	if err := writePackagedUpdateHelperOutcome(staged, packagedUpdateOutcomeAuthorized); err != nil {
+		t.Fatalf("write real app-bundle update helper authorization: %v", err)
 	}
 
 	port := freeTCPPort(t)
@@ -422,15 +422,15 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 		killPort(t, port)
 	})
 	configFile := writeRealDesktopConfig(t, root, dataRoot, updateServer.URL, publicKeyFile)
-	helperPath := packagedUpdateHelperPath(staged.InstallPath)
+	helperPath := packagedUpdateHelperPath(staged.InstallPath, AppBundleUpdateHelperCommand)
 	if runPackagedUpdateHelperInPlace(runtime.GOOS, staged.InstallPath) {
 		helperPath = installedExecutable
 	} else if err := copyFile(installedExecutable, helperPath, 0o755); err != nil {
-		t.Fatalf("publish real desktop helper: %v", err)
+		t.Fatalf("publish real app-bundle update helper: %v", err)
 	}
 	parentPID := exitedCommandPID(t)
 	helperArgs := []string{
-		"desktop-update-helper",
+		AppBundleUpdateHelperCommand,
 		"--parent-pid", strconv.Itoa(parentPID),
 		"--current", staged.InstallPath,
 		"--staged", staged.ArtifactPath,
@@ -440,7 +440,7 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 		"--previous-version", staged.PreviousVersion,
 		"--outcome-id", staged.OutcomeID,
 	}
-	metadata, err := json.Marshal(binaryRelaunchMetadata{
+	metadata, err := json.Marshal(packagedUpdateRelaunchMetadata{
 		Arguments:          []string{installedExecutable},
 		WorkingDirectory:   root,
 		ExecutableRelative: executableRelative,
@@ -458,17 +458,17 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
 	)
 	output, helperErr := cmd.CombinedOutput()
-	if helperErr != nil && wantOutcome != binaryOutcomeRolledBack {
-		t.Fatalf("real desktop helper failed: %v\n%s", helperErr, output)
+	if helperErr != nil && wantOutcome != packagedUpdateOutcomeRolledBack {
+		t.Fatalf("real app-bundle update helper failed: %v\n%s", helperErr, output)
 	}
-	outcome, err := readBinaryHelperOutcome(staged)
+	outcome, err := readPackagedUpdateHelperOutcome(staged)
 	if err != nil {
-		t.Fatalf("read real desktop helper outcome: %v\nhelper err: %v\n%s", err, helperErr, output)
+		t.Fatalf("read real app-bundle update helper outcome: %v\nhelper err: %v\n%s", err, helperErr, output)
 	}
 	if outcome.State != wantOutcome {
 		t.Fatalf("real desktop outcome = %q, want %q\nhelper err: %v\n%s", outcome.State, wantOutcome, helperErr, output)
 	}
-	if wantOutcome == binaryOutcomeSucceeded {
+	if wantOutcome == packagedUpdateOutcomeSucceeded {
 		assertGoBuildInfoVersion(t, installedExecutable, replacementVersion)
 		assertNoDesktopHalfSwap(t, staged)
 	} else {
@@ -530,9 +530,9 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 		t.Fatalf("accept desktop update HTTP %d\n%s", resp.StatusCode, readLogs())
 	}
 	if err := waitForCommandExit(cmd, time.Minute); err != nil {
-		t.Fatalf("current desktop app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describeBinaryHelperState(current), readLogs())
+		t.Fatalf("current desktop app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
 	}
-	if wantOutcome == binaryOutcomeSucceeded {
+	if wantOutcome == packagedUpdateOutcomeSucceeded {
 		waitForHealthVersion(t, baseURL, releaseVersion)
 	} else {
 		waitForHealthVersion(t, baseURL, "0.5.0")
@@ -593,14 +593,14 @@ func readUpdateSnapshot(baseURL string) string {
 	return fmt.Sprintf("HTTP %d: %s", resp.StatusCode, body)
 }
 
-func describeBinaryHelperState(current string) string {
+func describePackagedUpdateHelperState(current string) string {
 	paths := []string{
-		binaryHelperPreparedPath(current),
-		binaryHelperOutcomePath(current),
-		binaryHelperAuthorizedPath(current),
-		binaryHelperCancelledPath(current),
-		binaryHelperRelaunchMetadataPath(current),
-		packagedUpdateHelperPath(current),
+		packagedUpdateHelperPreparedPath(current),
+		packagedUpdateHelperOutcomePath(current),
+		packagedUpdateHelperAuthorizedPath(current),
+		packagedUpdateHelperCancelledPath(current),
+		packagedUpdateHelperRelaunchMetadataPath(current),
+		packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand),
 	}
 	var state strings.Builder
 	for _, path := range paths {
@@ -610,7 +610,7 @@ func describeBinaryHelperState(current string) string {
 			continue
 		}
 		fmt.Fprintf(&state, "%s: %d bytes", filepath.Base(path), info.Size())
-		if strings.HasSuffix(path, ".json") && path != binaryHelperRelaunchMetadataPath(current) {
+		if strings.HasSuffix(path, ".json") && path != packagedUpdateHelperRelaunchMetadataPath(current) {
 			if data, readErr := os.ReadFile(path); readErr == nil {
 				fmt.Fprintf(&state, " %s", data)
 			}

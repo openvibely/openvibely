@@ -18,12 +18,12 @@ import (
 var version = "dev"
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "update-helper" {
-		runUpdateHelper()
+	if len(os.Args) > 1 && os.Args[1] == update.ExecutableUpdateHelperCommand {
+		runExecutableUpdateHelper()
 		return
 	}
-	if len(os.Args) > 1 && os.Args[1] == "desktop-update-helper" {
-		runDesktopUpdateHelper()
+	if len(os.Args) > 1 && os.Args[1] == update.AppBundleUpdateHelperCommand {
+		runAppBundleUpdateHelper()
 		return
 	}
 	if len(os.Args) != 4 || os.Args[1] != "serve" || os.Args[2] != "--listen" {
@@ -102,13 +102,13 @@ func exitAfterHealthChecks() *int {
 	return &count
 }
 
-func runUpdateHelper() {
-	cfg, err := update.ParseBinaryHelperArgs(os.Args[2:])
+func runExecutableUpdateHelper() {
+	cfg, err := update.ParseExecutableUpdateHelperArgs(os.Args[2:])
 	if err == nil {
 		if cfg.RelaunchMetadataPath != "" {
-			err = update.LoadBinaryHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
+			err = update.LoadExecutableUpdateHelperRelaunchFile(cfg.RelaunchMetadataPath, &cfg)
 		} else {
-			err = update.LoadBinaryHelperRelaunch(os.Stdin, &cfg)
+			err = update.LoadExecutableUpdateHelperRelaunch(os.Stdin, &cfg)
 		}
 	}
 	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
@@ -126,17 +126,17 @@ func runUpdateHelper() {
 		cfg.ValidationTimeout = time.Duration(milliseconds) * time.Millisecond
 	}
 	if err == nil {
-		err = update.RunBinaryHelper(context.Background(), cfg)
+		err = update.RunExecutableUpdateHelper(context.Background(), cfg)
 	}
 	if err != nil {
 		fatal(err)
 	}
 }
 
-func runDesktopUpdateHelper() {
-	cfg, err := update.ParseDesktopHelperArgs(os.Args[2:])
+func runAppBundleUpdateHelper() {
+	cfg, err := update.ParseAppBundleUpdateHelperArgs(os.Args[2:])
 	if err == nil {
-		err = update.LoadDesktopHelperRelaunch(os.Stdin, &cfg)
+		err = update.LoadAppBundleUpdateHelperRelaunch(os.Stdin, &cfg)
 	}
 	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
 		milliseconds, parseErr := strconv.Atoi(value)
@@ -153,7 +153,7 @@ func runDesktopUpdateHelper() {
 		cfg.ValidationTimeout = time.Duration(milliseconds) * time.Millisecond
 	}
 	if err == nil {
-		err = update.RunDesktopHelper(context.Background(), cfg)
+		err = update.RunAppBundleUpdateHelper(context.Background(), cfg)
 	}
 	if err != nil {
 		fatal(err)

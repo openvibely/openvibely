@@ -45,8 +45,8 @@ type resumableInstaller interface {
 	Resume(context.Context) error
 }
 
-type binaryRestartRecoveryInstaller interface {
-	RecoverBinaryRestart(context.Context, LocalStagedUpdate) error
+type packagedUpdateRestartRecoveryInstaller interface {
+	RecoverPackagedUpdateRestart(context.Context, LocalStagedUpdate) error
 }
 
 type recoveryReadyInstaller interface {
@@ -81,38 +81,38 @@ type CoordinatorSnapshot struct {
 	Staged             bool             `json:"staged"`
 }
 type Coordinator struct {
-	mu                         sync.RWMutex
-	client                     *Client
-	current                    CurrentBuild
-	channel                    string
-	drain                      *DrainManager
-	installer                  Installer
-	protectedDataPaths         []string
-	desktopHealthURL           string
-	desktopArguments           []string
-	desktopWorkingDirectory    string
-	desktopShutdown            func()
-	manual                     bool
-	state                      string
-	release                    *VerifiedRelease
-	staged                     any
-	configError, lastError     string
-	wakeDispatch               func()
-	persistence                string
-	stateWriter                func(string, []byte) error
-	operationGeneration        string
-	cleanupGeneration          string
-	accepted                   bool
-	acceptanceLease            time.Duration
-	acceptanceSupervisor       bool
-	managedStateProvider       func() ManagedUpdateState
-	recoveryCtx                context.Context
-	recoveryRetryInterval      time.Duration
-	binaryOutcomeReadHook      func()
-	binaryRecoveryLeaseHook    func()
-	recoveryOnce               sync.Once
-	checksOnce                 sync.Once
-	updateNotificationsEnabled bool
+	mu                              sync.RWMutex
+	client                          *Client
+	current                         CurrentBuild
+	channel                         string
+	drain                           *DrainManager
+	installer                       Installer
+	protectedDataPaths              []string
+	desktopHealthURL                string
+	desktopArguments                []string
+	desktopWorkingDirectory         string
+	desktopShutdown                 func()
+	manual                          bool
+	state                           string
+	release                         *VerifiedRelease
+	staged                          any
+	configError, lastError          string
+	wakeDispatch                    func()
+	persistence                     string
+	stateWriter                     func(string, []byte) error
+	operationGeneration             string
+	cleanupGeneration               string
+	accepted                        bool
+	acceptanceLease                 time.Duration
+	acceptanceSupervisor            bool
+	managedStateProvider            func() ManagedUpdateState
+	recoveryCtx                     context.Context
+	recoveryRetryInterval           time.Duration
+	packagedUpdateOutcomeReadHook   func()
+	packagedUpdateRecoveryLeaseHook func()
+	recoveryOnce                    sync.Once
+	checksOnce                      sync.Once
+	updateNotificationsEnabled      bool
 }
 
 func NewCoordinator(client *Client, current CurrentBuild, channel string, drain *DrainManager, installer Installer, manual bool, configError string, wakeDispatch func()) *Coordinator {
@@ -1173,14 +1173,14 @@ func (c *Coordinator) resumeInstallerUntilSettled(ctx context.Context, resumable
 	}
 }
 
-func (c *Coordinator) recoverDeadBinaryHelper(ctx context.Context, staged LocalStagedUpdate, generation string, outcome binaryHelperOutcome, currentVersion string) bool {
+func (c *Coordinator) recoverDeadPackagedUpdateHelper(ctx context.Context, staged LocalStagedUpdate, generation string, outcome packagedUpdateHelperOutcome, currentVersion string) bool {
 	switch outcome.State {
-	case binaryOutcomePrepared, binaryOutcomePending, binaryOutcomeAuthorized, binaryOutcomeParentExited,
-		binaryOutcomeBackupPublished, binaryOutcomeTargetPublished, binaryOutcomeValidating, binaryOutcomeRollingBack:
+	case packagedUpdateOutcomePrepared, packagedUpdateOutcomePending, packagedUpdateOutcomeAuthorized, packagedUpdateOutcomeParentExited,
+		packagedUpdateOutcomeBackupPublished, packagedUpdateOutcomeTargetPublished, packagedUpdateOutcomeValidating, packagedUpdateOutcomeRollingBack:
 	default:
 		return false
 	}
-	lease, acquired, err := tryAcquireBinaryHelperLease(binaryHelperLeasePath(staged))
+	lease, acquired, err := tryAcquirePackagedUpdateHelperLease(packagedUpdateHelperLeasePath(staged))
 	if err != nil || !acquired {
 		return false
 	}
@@ -1190,26 +1190,26 @@ func (c *Coordinator) recoverDeadBinaryHelper(ctx context.Context, staged LocalS
 			_ = lease.Close()
 		}
 	}()
-	if c.binaryRecoveryLeaseHook != nil {
-		c.binaryRecoveryLeaseHook()
+	if c.packagedUpdateRecoveryLeaseHook != nil {
+		c.packagedUpdateRecoveryLeaseHook()
 	}
 
 	startRecovery := func() bool {
-		if err := writeBinaryHelperRecoveryClaimWithRetry(ctx, staged); err != nil {
+		if err := writePackagedUpdateHelperRecoveryClaimWithRetry(ctx, staged); err != nil {
 			return false
 		}
 		if err := lease.Close(); err != nil {
 			return false
 		}
 		leaseHeld = false
-		recovery, ok := c.installer.(binaryRestartRecoveryInstaller)
+		recovery, ok := c.installer.(packagedUpdateRestartRecoveryInstaller)
 		if !ok {
 			return false
 		}
-		return recovery.RecoverBinaryRestart(ctx, staged) == nil
+		return recovery.RecoverPackagedUpdateRestart(ctx, staged) == nil
 	}
 
-	if outcome.State == binaryOutcomeRollingBack {
+	if outcome.State == packagedUpdateOutcomeRollingBack {
 		if c.current.Distribution == "desktop" {
 			return startRecovery()
 		}
@@ -1218,10 +1218,10 @@ func (c *Coordinator) recoverDeadBinaryHelper(ctx context.Context, staged LocalS
 				if err := ensureBootableBinary(staged.InstallPath, staged.BackupPath); err != nil {
 					return false
 				}
-				if err := writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeRolledBack); err != nil {
+				if err := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeRolledBack); err != nil {
 					return false
 				}
-				c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "binary update helper died after restoring the predecessor")
+				c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "packaged update helper died after restoring the predecessor")
 				return true
 			}
 		}
@@ -1231,7 +1231,7 @@ func (c *Coordinator) recoverDeadBinaryHelper(ctx context.Context, staged LocalS
 		if c.current.Distribution == "desktop" {
 			return startRecovery()
 		}
-		if err := writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeSucceeded); err != nil {
+		if err := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeSucceeded); err != nil {
 			return false
 		}
 		c.completeGenerationWithRetry(ctx, generation, StateSucceeded, "")
@@ -1246,10 +1246,10 @@ func (c *Coordinator) recoverDeadBinaryHelper(ctx context.Context, staged LocalS
 				return false
 			}
 		}
-		if err := writeBinaryHelperOutcomeWithRetry(ctx, staged, binaryOutcomeCancelled); err != nil {
+		if err := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeCancelled); err != nil {
 			return false
 		}
-		c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "binary update helper died before target publication")
+		c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "packaged update helper died before target publication")
 		return true
 	} else if !os.IsNotExist(err) {
 		return false
@@ -1257,7 +1257,7 @@ func (c *Coordinator) recoverDeadBinaryHelper(ctx context.Context, staged LocalS
 	return startRecovery()
 }
 
-func (c *Coordinator) reconcileBinaryRestartOutcome(ctx context.Context, staged LocalStagedUpdate, generation string) {
+func (c *Coordinator) reconcilePackagedUpdateRestartOutcome(ctx context.Context, staged LocalStagedUpdate, generation string) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1269,33 +1269,33 @@ func (c *Coordinator) reconcileBinaryRestartOutcome(ctx context.Context, staged 
 		if !active {
 			return
 		}
-		outcome, err := readBinaryHelperOutcome(staged)
+		outcome, err := readPackagedUpdateHelperOutcome(staged)
 		if err == nil {
 			switch {
-			case outcome.State == binaryOutcomeSucceeded && currentVersion == staged.Version:
+			case outcome.State == packagedUpdateOutcomeSucceeded && currentVersion == staged.Version:
 				c.completeGenerationWithRetry(ctx, generation, StateSucceeded, "")
 				return
-			case outcome.State == binaryOutcomeRolledBack && currentVersion == staged.PreviousVersion:
+			case outcome.State == packagedUpdateOutcomeRolledBack && currentVersion == staged.PreviousVersion:
 				c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "binary update rolled back to the prior version")
 				return
-			case outcome.State == binaryOutcomeCancelled && currentVersion == staged.PreviousVersion:
-				c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "binary update helper exited before authorization")
+			case outcome.State == packagedUpdateOutcomeCancelled && currentVersion == staged.PreviousVersion:
+				c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "packaged update helper exited before authorization")
 				return
 			}
-			if c.recoverDeadBinaryHelper(ctx, staged, generation, outcome, currentVersion) {
+			if c.recoverDeadPackagedUpdateHelper(ctx, staged, generation, outcome, currentVersion) {
 				return
 			}
 		} else if os.IsNotExist(err) && staged.OutcomeID != "" && staged.PreviousVersion != "" && currentVersion == staged.PreviousVersion {
-			if c.binaryOutcomeReadHook != nil {
-				c.binaryOutcomeReadHook()
+			if c.packagedUpdateOutcomeReadHook != nil {
+				c.packagedUpdateOutcomeReadHook()
 			}
-			prepared, preparedErr := readBinaryHelperPrepared(staged)
+			prepared, preparedErr := readPackagedUpdateHelperPrepared(staged)
 			switch {
-			case preparedErr == nil && prepared.State == binaryOutcomePrepared:
+			case preparedErr == nil && prepared.State == packagedUpdateOutcomePrepared:
 				// Removing the prepared identity races atomically with the helper's
 				// rename claim. Only the winner may classify the handoff.
-				if removeErr := os.Remove(binaryHelperPreparedPath(staged.InstallPath)); removeErr == nil {
-					c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "binary update helper handoff was not confirmed")
+				if removeErr := os.Remove(packagedUpdateHelperPreparedPath(staged.InstallPath)); removeErr == nil {
+					c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "packaged update helper handoff was not confirmed")
 					return
 				} else if !os.IsNotExist(removeErr) {
 					break
@@ -1304,11 +1304,11 @@ func (c *Coordinator) reconcileBinaryRestartOutcome(ctx context.Context, staged 
 				// The helper may have claimed the prepared identity after the
 				// first active-path read. Recheck active after observing prepared
 				// absent so a concurrent rename cannot look like no handoff.
-				if _, activeErr := readBinaryHelperOutcome(staged); activeErr == nil || !os.IsNotExist(activeErr) {
+				if _, activeErr := readPackagedUpdateHelperOutcome(staged); activeErr == nil || !os.IsNotExist(activeErr) {
 					break
 				}
 				// No active or prepared evidence proves the external handoff never began.
-				c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "binary update helper handoff did not start")
+				c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "packaged update helper handoff did not start")
 				return
 			}
 		}
@@ -1353,7 +1353,7 @@ func (c *Coordinator) StartRecovery(ctx context.Context) {
 	}
 	c.recoveryOnce.Do(func() {
 		if packagedRestart && generation != "" {
-			go c.reconcileBinaryRestartOutcome(recoveryCtx, stagedLocal, generation)
+			go c.reconcilePackagedUpdateRestartOutcome(recoveryCtx, stagedLocal, generation)
 		} else if state == StateRollingBack && dockerAgent && generation != "" {
 			// Docker-agent rollback is unsupported. A crash after the rolling_back
 			// transition must only finish exact-generation cleanup; replaying either

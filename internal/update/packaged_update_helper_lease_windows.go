@@ -9,11 +9,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-type binaryHelperLease struct {
+type packagedUpdateHelperLease struct {
 	file *os.File
 }
 
-func tryAcquireBinaryHelperLease(path string) (*binaryHelperLease, bool, error) {
+func tryAcquirePackagedUpdateHelperLease(path string) (*packagedUpdateHelperLease, bool, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, false, err
@@ -27,10 +27,10 @@ func tryAcquireBinaryHelperLease(path string) (*binaryHelperLease, bool, error) 
 		}
 		return nil, false, err
 	}
-	return &binaryHelperLease{file: file}, true, nil
+	return &packagedUpdateHelperLease{file: file}, true, nil
 }
 
-func (l *binaryHelperLease) Close() error {
+func (l *packagedUpdateHelperLease) Close() error {
 	if l == nil || l.file == nil {
 		return nil
 	}

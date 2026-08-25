@@ -32,8 +32,13 @@ type LocalStagedUpdate struct {
 	OutcomeID       string `json:"outcome_id,omitempty"`
 }
 
-func packagedUpdateHelperPath(installPath string) string {
-	path := installPath + ".openvibely-helper"
+const (
+	ExecutableUpdateHelperCommand = "executable-update-helper"
+	AppBundleUpdateHelperCommand  = "app-bundle-update-helper"
+)
+
+func packagedUpdateHelperPath(installPath, commandName string) string {
+	path := installPath + ".openvibely-" + commandName
 	if runtime.GOOS == "windows" {
 		path += ".exe"
 	}
@@ -146,9 +151,9 @@ func (i *WailsInstaller) Stage(ctx context.Context, release VerifiedRelease) (an
 	return staged, nil
 }
 
-func (i *WailsInstaller) startDesktopHelper(ctx context.Context, staged LocalStagedUpdate, recovery bool) error {
+func (i *WailsInstaller) startAppBundleUpdateHelper(ctx context.Context, staged LocalStagedUpdate, recovery bool) error {
 	if i.Shutdown == nil || i.HealthURL == "" {
-		return errors.New("desktop update helper handoff is unavailable")
+		return errors.New("app-bundle update helper handoff is unavailable")
 	}
 	if err := validateDesktopDataBoundaries(staged, i.ProtectedDataPaths); err != nil {
 		return err
@@ -168,11 +173,11 @@ func (i *WailsInstaller) startDesktopHelper(ctx context.Context, staged LocalSta
 	return startPackagedUpdateHelperHandoff(ctx, packagedUpdateHelperHandoffConfig{
 		Staged:             staged,
 		HelperSourcePath:   executable,
-		CommandName:        "desktop-update-helper",
+		CommandName:        AppBundleUpdateHelperCommand,
 		HealthURL:          i.HealthURL,
 		Recovery:           recovery,
 		RunningVersion:     runningVersion,
-		RelaunchMetadata:   binaryRelaunchMetadata{Arguments: append([]string(nil), i.Arguments...), WorkingDirectory: i.WorkingDirectory, ExecutableRelative: filepath.ToSlash(relative)},
+		RelaunchMetadata:   packagedUpdateRelaunchMetadata{Arguments: append([]string(nil), i.Arguments...), WorkingDirectory: i.WorkingDirectory, ExecutableRelative: filepath.ToSlash(relative)},
 		MetadataTransport:  packagedHelperMetadataStdin,
 		StartHelper:        i.StartHelper,
 		AwaitHelperHandoff: i.awaitHelperHandoff,
@@ -194,7 +199,7 @@ type packagedUpdateHelperHandoffConfig struct {
 	HealthURL          string
 	Recovery           bool
 	RunningVersion     string
-	RelaunchMetadata   binaryRelaunchMetadata
+	RelaunchMetadata   packagedUpdateRelaunchMetadata
 	MetadataTransport  packagedUpdateHelperMetadataTransport
 	StartHelper        func(*exec.Cmd) error
 	AwaitHelperHandoff func(context.Context, LocalStagedUpdate) error
@@ -219,20 +224,20 @@ type packagedUpdateHelperHandoffErrors struct {
 
 func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHelperHandoffConfig) error {
 	staged := cfg.Staged
-	helperPath, err := publishPackagedUpdateHelper(cfg.HelperSourcePath, staged.InstallPath)
+	helperPath, err := publishPackagedUpdateHelper(cfg.HelperSourcePath, staged.InstallPath, cfg.CommandName)
 	if err != nil {
 		return wrapPackagedHelperHandoffError(cfg.Errors.PrepareHelper, err)
 	}
 	if cfg.Recovery {
-		_ = os.Remove(binaryHelperRecoveryReadyPath(staged.InstallPath))
+		_ = os.Remove(packagedUpdateHelperRecoveryReadyPath(staged.InstallPath))
 	} else {
-		if err := removeBinaryHelperOutcome(staged); err != nil {
+		if err := removePackagedUpdateHelperOutcome(staged); err != nil {
 			if cfg.OnSetupFailure != nil {
 				cfg.OnSetupFailure(helperPath)
 			}
 			return wrapPackagedHelperHandoffError(cfg.Errors.ClearPriorHandoff, err)
 		}
-		if err := writeBinaryHelperOutcome(staged, binaryOutcomePrepared); err != nil {
+		if err := writePackagedUpdateHelperOutcome(staged, packagedUpdateOutcomePrepared); err != nil {
 			if cfg.OnSetupFailure != nil {
 				cfg.OnSetupFailure(helperPath)
 			}
@@ -251,7 +256,7 @@ func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHel
 	switch cfg.MetadataTransport {
 	case packagedHelperMetadataStdin:
 	case packagedHelperMetadataFile:
-		metadataPath = binaryHelperRelaunchMetadataPath(staged.InstallPath)
+		metadataPath = packagedUpdateHelperRelaunchMetadataPath(staged.InstallPath)
 		if err := atomicWriteState(metadataPath, metadata); err != nil {
 			return wrapPackagedHelperHandoffError(cfg.Errors.PersistMetadata, err)
 		}
@@ -277,7 +282,7 @@ func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHel
 	} else {
 		await := cfg.AwaitHelperHandoff
 		if await == nil {
-			await = waitForBinaryHelperHandoff
+			await = waitForPackagedUpdateHelperHandoff
 		}
 		if err := await(ctx, staged); err != nil {
 			if cfg.OnHandoffFailure != nil {
@@ -297,11 +302,11 @@ func wrapPackagedHelperHandoffError(message string, err error) error {
 	return fmt.Errorf("%s: %w", message, err)
 }
 
-func publishPackagedUpdateHelper(sourcePath, installPath string) (string, error) {
+func publishPackagedUpdateHelper(sourcePath, installPath, commandName string) (string, error) {
 	if runPackagedUpdateHelperInPlace(runtime.GOOS, installPath) {
 		return sourcePath, nil
 	}
-	helperPath := packagedUpdateHelperPath(installPath)
+	helperPath := packagedUpdateHelperPath(installPath, commandName)
 	info, err := os.Stat(sourcePath)
 	if err != nil {
 		return "", err
@@ -343,8 +348,8 @@ func waitForPackagedUpdateHelperRecoveryReadiness(ctx context.Context, staged Lo
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	for {
-		outcome, err := readBinaryHelperOutcomeAt(staged, binaryHelperRecoveryReadyPath(staged.InstallPath))
-		if err == nil && outcome.State == binaryOutcomeRecovering {
+		outcome, err := readPackagedUpdateHelperOutcomeAt(staged, packagedUpdateHelperRecoveryReadyPath(staged.InstallPath))
+		if err == nil && outcome.State == packagedUpdateOutcomeRecovering {
 			return nil
 		}
 		if err != nil && !os.IsNotExist(err) {
@@ -405,7 +410,7 @@ func (i *WailsInstaller) Apply(ctx context.Context, value any) error {
 	if err := retainDesktopInstallUnit(staged, i.ProtectedDataPaths); err != nil {
 		return err
 	}
-	return i.startDesktopHelper(ctx, staged, false)
+	return i.startAppBundleUpdateHelper(ctx, staged, false)
 }
 func (i *WailsInstaller) Validate(_ context.Context, release ReleaseMetadata) error {
 	if release.Version == "" {
@@ -436,8 +441,8 @@ func (i *WailsInstaller) RequiresRestartValidation() bool { return true }
 func (i *WailsInstaller) RecoveryReady() bool {
 	return strings.TrimSpace(i.HealthURL) != "" && i.Shutdown != nil
 }
-func (i *WailsInstaller) RecoverBinaryRestart(ctx context.Context, staged LocalStagedUpdate) error {
-	return i.startDesktopHelper(ctx, staged, true)
+func (i *WailsInstaller) RecoverPackagedUpdateRestart(ctx context.Context, staged LocalStagedUpdate) error {
+	return i.startAppBundleUpdateHelper(ctx, staged, true)
 }
 
 func currentApplicationBundle() (string, error) {
@@ -479,7 +484,7 @@ func validateDesktopDataBoundaries(staged LocalStagedUpdate, protectedPaths []st
 	if len(protectedPaths) == 0 {
 		return errors.New("desktop protected data paths are required")
 	}
-	helperPath := packagedUpdateHelperPath(staged.InstallPath)
+	helperPath := packagedUpdateHelperPath(staged.InstallPath, AppBundleUpdateHelperCommand)
 	boundaries := []string{
 		staged.InstallPath,
 		staged.BackupPath,
@@ -492,14 +497,14 @@ func validateDesktopDataBoundaries(staged LocalStagedUpdate, protectedPaths []st
 	}
 	if staged.OutcomeID != "" {
 		for _, statePath := range []string{
-			binaryHelperOutcomePath(staged.InstallPath),
-			binaryHelperPreparedPath(staged.InstallPath),
-			binaryHelperAuthorizedPath(staged.InstallPath),
-			binaryHelperCancelledPath(staged.InstallPath),
-			binaryHelperRecoveryReadyPath(staged.InstallPath),
-			binaryHelperRecoveryClaimPath(staged.InstallPath),
-			binaryHelperTransitionLeasePath(staged),
-			binaryHelperLeasePath(staged),
+			packagedUpdateHelperOutcomePath(staged.InstallPath),
+			packagedUpdateHelperPreparedPath(staged.InstallPath),
+			packagedUpdateHelperAuthorizedPath(staged.InstallPath),
+			packagedUpdateHelperCancelledPath(staged.InstallPath),
+			packagedUpdateHelperRecoveryReadyPath(staged.InstallPath),
+			packagedUpdateHelperRecoveryClaimPath(staged.InstallPath),
+			packagedUpdateHelperTransitionLeasePath(staged),
+			packagedUpdateHelperLeasePath(staged),
 		} {
 			boundaries = append(boundaries, statePath, statePath+".tmp")
 		}
@@ -1144,21 +1149,21 @@ func (i *BinaryInstaller) Apply(ctx context.Context, value any) error {
 	err := startPackagedUpdateHelperHandoff(ctx, packagedUpdateHelperHandoffConfig{
 		Staged:             staged,
 		HelperSourcePath:   staged.InstallPath,
-		CommandName:        "update-helper",
+		CommandName:        ExecutableUpdateHelperCommand,
 		HealthURL:          i.HealthURL,
-		RelaunchMetadata:   binaryRelaunchMetadata{Arguments: append([]string(nil), i.Arguments...), WorkingDirectory: i.WorkingDirectory},
+		RelaunchMetadata:   packagedUpdateRelaunchMetadata{Arguments: append([]string(nil), i.Arguments...), WorkingDirectory: i.WorkingDirectory},
 		MetadataTransport:  packagedHelperMetadataFile,
 		StartHelper:        i.StartHelper,
 		AwaitHelperHandoff: i.awaitHelperHandoff,
 		Shutdown:           i.Shutdown,
 		Errors: packagedUpdateHelperHandoffErrors{
-			PrepareHelper:      "prepare binary update helper",
-			ClearPriorHandoff:  "clear prior binary helper handoff",
-			PersistPreparation: "persist binary helper preparation",
-			EncodeMetadata:     "encode binary helper relaunch metadata",
-			PersistMetadata:    "persist binary helper relaunch metadata",
-			StartHelper:        "start binary update helper",
-			ConfirmHandoff:     "confirm binary helper handoff",
+			PrepareHelper:      "prepare executable update helper",
+			ClearPriorHandoff:  "clear prior executable update helper handoff",
+			PersistPreparation: "persist executable update helper preparation",
+			EncodeMetadata:     "encode executable update helper relaunch metadata",
+			PersistMetadata:    "persist executable update helper relaunch metadata",
+			StartHelper:        "start executable update helper",
+			ConfirmHandoff:     "confirm executable update helper handoff",
 		},
 		OnSetupFailure: func(helperPath string) {
 			_ = os.Remove(helperPath)
@@ -1166,7 +1171,7 @@ func (i *BinaryInstaller) Apply(ctx context.Context, value any) error {
 		OnStartFailure: func(helperPath, metadataPath string) {
 			_ = os.Remove(helperPath)
 			_ = os.Remove(metadataPath)
-			_ = removeBinaryHelperOutcome(staged)
+			_ = removePackagedUpdateHelperOutcome(staged)
 		},
 		OnHandoffFailure: func(metadataPath string) {
 			_ = os.Remove(metadataPath)
@@ -1178,9 +1183,9 @@ func (i *BinaryInstaller) Apply(ctx context.Context, value any) error {
 	return nil
 }
 
-func (i *BinaryInstaller) RecoverBinaryRestart(ctx context.Context, staged LocalStagedUpdate) error {
+func (i *BinaryInstaller) RecoverPackagedUpdateRestart(ctx context.Context, staged LocalStagedUpdate) error {
 	if i.Shutdown == nil {
-		return errors.New("binary recovery shutdown handoff is unavailable")
+		return errors.New("executable update recovery shutdown handoff is unavailable")
 	}
 	if err := validateBinaryPaths(staged); err != nil {
 		return err
@@ -1188,11 +1193,11 @@ func (i *BinaryInstaller) RecoverBinaryRestart(ctx context.Context, staged Local
 	err := startPackagedUpdateHelperHandoff(ctx, packagedUpdateHelperHandoffConfig{
 		Staged:            staged,
 		HelperSourcePath:  staged.InstallPath,
-		CommandName:       "update-helper",
+		CommandName:       ExecutableUpdateHelperCommand,
 		HealthURL:         i.HealthURL,
 		Recovery:          true,
 		RunningVersion:    i.Current.Version,
-		RelaunchMetadata:  binaryRelaunchMetadata{Arguments: append([]string(nil), i.Arguments...), WorkingDirectory: i.WorkingDirectory},
+		RelaunchMetadata:  packagedUpdateRelaunchMetadata{Arguments: append([]string(nil), i.Arguments...), WorkingDirectory: i.WorkingDirectory},
 		MetadataTransport: packagedHelperMetadataFile,
 		StartHelper:       i.StartHelper,
 		Shutdown:          i.Shutdown,
@@ -1201,33 +1206,33 @@ func (i *BinaryInstaller) RecoverBinaryRestart(ctx context.Context, staged Local
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("binary recovery helper handoff: %w", err)
+		return fmt.Errorf("executable update recovery helper handoff: %w", err)
 	}
 	return nil
 }
 
-func waitForBinaryHelperHandoff(ctx context.Context, staged LocalStagedUpdate) error {
+func waitForPackagedUpdateHelperHandoff(ctx context.Context, staged LocalStagedUpdate) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	for {
-		outcome, err := readBinaryHelperOutcome(staged)
-		if err == nil && outcome.State == binaryOutcomePending {
+		outcome, err := readPackagedUpdateHelperOutcome(staged)
+		if err == nil && outcome.State == packagedUpdateOutcomePending {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if err := authorizeBinaryHelperHandoff(staged); err != nil {
+			if err := authorizePackagedUpdateHelperHandoff(staged); err != nil {
 				return err
 			}
 			return nil
 		}
-		if err == nil && outcome.State == binaryOutcomeAuthorized {
+		if err == nil && outcome.State == packagedUpdateOutcomeAuthorized {
 			return nil
 		}
-		if err == nil && outcome.State == binaryOutcomeCancelled {
-			return errors.New("binary helper handoff was cancelled")
+		if err == nil && outcome.State == packagedUpdateOutcomeCancelled {
+			return errors.New("packaged update helper handoff was cancelled")
 		}
 		if err != nil && !os.IsNotExist(err) {
 			return err

@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
-func TestBinaryHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
+func TestExecutableUpdateHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
 	staged := filepath.Join(root, "openvibely-new")
 	backup := filepath.Join(root, "openvibely-backup")
 	metadataPath := filepath.Join(root, "relaunch.json")
-	cfg, err := ParseBinaryHelperArgs([]string{
+	cfg, err := ParseExecutableUpdateHelperArgs([]string{
 		"--parent-pid", "1234",
 		"--current", current,
 		"--staged", staged,
@@ -28,7 +28,7 @@ func TestBinaryHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 		"--relaunch-metadata", metadataPath,
 	})
 	if err != nil {
-		t.Fatalf("ParseBinaryHelperArgs: %v", err)
+		t.Fatalf("ParseExecutableUpdateHelperArgs: %v", err)
 	}
 	if cfg.ParentPID != 1234 || !cfg.Recovery || cfg.RunningVersion != "0.5.0" || cfg.RelaunchMetadataPath != metadataPath {
 		t.Fatalf("parsed cfg = %#v", cfg)
@@ -46,19 +46,19 @@ func TestBinaryHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 		{"--parent-pid", "1", "--current", current, "--staged", staged, "--backup", backup, "--previous-version", "0.5.0", "--outcome-id", "outcome", "--relaunch-metadata", "relative.json"},
 		{"--parent-pid", "1", "--current", current, "--staged", staged, "--backup", backup, "--previous-version", "0.5.0"},
 	} {
-		if _, err := ParseBinaryHelperArgs(args); err == nil {
-			t.Fatalf("ParseBinaryHelperArgs(%v) unexpectedly succeeded", args)
+		if _, err := ParseExecutableUpdateHelperArgs(args); err == nil {
+			t.Fatalf("ParseExecutableUpdateHelperArgs(%v) unexpectedly succeeded", args)
 		}
 	}
 
-	var relaunch BinaryHelperConfig
-	metadataBytes, err := json.Marshal(binaryRelaunchMetadata{Arguments: []string{"openvibely", "serve"}, WorkingDirectory: root})
+	var relaunch ExecutableUpdateHelperConfig
+	metadataBytes, err := json.Marshal(packagedUpdateRelaunchMetadata{Arguments: []string{"openvibely", "serve"}, WorkingDirectory: root})
 	if err != nil {
 		t.Fatal(err)
 	}
 	metadata := string(metadataBytes)
-	if err := LoadBinaryHelperRelaunch(strings.NewReader(metadata), &relaunch); err != nil {
-		t.Fatalf("LoadBinaryHelperRelaunch: %v", err)
+	if err := LoadExecutableUpdateHelperRelaunch(strings.NewReader(metadata), &relaunch); err != nil {
+		t.Fatalf("LoadExecutableUpdateHelperRelaunch: %v", err)
 	}
 	if len(relaunch.Arguments) != 2 || relaunch.Arguments[1] != "serve" || relaunch.WorkingDirectory != root {
 		t.Fatalf("relaunch = %#v", relaunch)
@@ -67,9 +67,9 @@ func TestBinaryHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 	if err := os.WriteFile(metadataPath, []byte(metadata), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	var fromFile BinaryHelperConfig
-	if err := LoadBinaryHelperRelaunchFile(metadataPath, &fromFile); err != nil {
-		t.Fatalf("LoadBinaryHelperRelaunchFile: %v", err)
+	var fromFile ExecutableUpdateHelperConfig
+	if err := LoadExecutableUpdateHelperRelaunchFile(metadataPath, &fromFile); err != nil {
+		t.Fatalf("LoadExecutableUpdateHelperRelaunchFile: %v", err)
 	}
 	if _, err := os.Stat(metadataPath); !os.IsNotExist(err) {
 		t.Fatalf("metadata file was not removed after load: %v", err)
@@ -84,20 +84,20 @@ func TestBinaryHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
 		`{"arguments":["openvibely"],"working_directory":"/tmp","extra":true}`,
 		`not-json`,
 	} {
-		if err := LoadBinaryHelperRelaunch(strings.NewReader(input), &BinaryHelperConfig{}); err == nil {
-			t.Fatalf("LoadBinaryHelperRelaunch(%q) unexpectedly succeeded", input)
+		if err := LoadExecutableUpdateHelperRelaunch(strings.NewReader(input), &ExecutableUpdateHelperConfig{}); err == nil {
+			t.Fatalf("LoadExecutableUpdateHelperRelaunch(%q) unexpectedly succeeded", input)
 		}
 	}
-	if err := LoadBinaryHelperRelaunch(nil, &BinaryHelperConfig{}); err == nil {
+	if err := LoadExecutableUpdateHelperRelaunch(nil, &ExecutableUpdateHelperConfig{}); err == nil {
 		t.Fatal("nil relaunch reader unexpectedly succeeded")
 	}
-	if err := LoadBinaryHelperRelaunch(strings.NewReader(metadata), nil); err == nil {
+	if err := LoadExecutableUpdateHelperRelaunch(strings.NewReader(metadata), nil); err == nil {
 		t.Fatal("nil relaunch config unexpectedly succeeded")
 	}
-	if err := LoadBinaryHelperRelaunchFile("", &BinaryHelperConfig{}); err == nil {
+	if err := LoadExecutableUpdateHelperRelaunchFile("", &ExecutableUpdateHelperConfig{}); err == nil {
 		t.Fatal("empty relaunch metadata path unexpectedly succeeded")
 	}
-	if err := LoadBinaryHelperRelaunchFile(filepath.Join(root, "missing.json"), &BinaryHelperConfig{}); err == nil {
+	if err := LoadExecutableUpdateHelperRelaunchFile(filepath.Join(root, "missing.json"), &ExecutableUpdateHelperConfig{}); err == nil {
 		t.Fatal("missing relaunch metadata file unexpectedly succeeded")
 	}
 }
