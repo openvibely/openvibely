@@ -71,7 +71,9 @@ func appBundleSuccessorCommand(cfg AppBundleUpdateHelperConfig) func() (func(con
 			if err := cmd.Wait(); err != nil {
 				return nil, err
 			}
-			return func(context.Context) error { return stopDarwinAppBundleProcess(executable) }, nil
+			return func(ctx context.Context) error {
+				return stopDarwinAppBundleProcess(ctx, executable, cfg.HealthURL, cfg.HealthClient)
+			}, nil
 		}
 		cmd := exec.Command(executable, arguments[1:]...)
 		cmd.Args[0] = arguments[0]
@@ -98,11 +100,16 @@ func inheritedDarwinDesktopRelaunchEnvironment() []string {
 	return inherited
 }
 
-func stopDarwinAppBundleProcess(executable string) error {
-	output, err := exec.Command("ps", "-axo", "pid=,args=").Output()
+func stopDarwinAppBundleProcess(ctx context.Context, executable, healthURL string, healthClient *http.Client) error {
+	executablePaths := []string{executable}
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil && resolved != executable {
+		executablePaths = append(executablePaths, resolved)
+	}
+	output, err := exec.Command("ps", "-ww", "-axo", "pid=,comm=").Output()
 	if err != nil {
 		return err
 	}
+	var stoppedPIDs []int
 	for _, line := range strings.Split(string(output), "\n") {
 		trimmed := strings.TrimSpace(line)
 		fields := strings.Fields(trimmed)
@@ -113,8 +120,20 @@ func stopDarwinAppBundleProcess(executable string) error {
 		if err != nil || pid == os.Getpid() {
 			continue
 		}
-		commandLine := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
-		if commandLine != executable && !strings.HasPrefix(commandLine, executable+" ") {
+		processExecutable := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+		matches := false
+		for _, candidate := range executablePaths {
+			if processExecutable == candidate {
+				matches = true
+				break
+			}
+		}
+		if !matches {
+			if resolved, resolveErr := filepath.EvalSymlinks(processExecutable); resolveErr == nil {
+				matches = resolved == executablePaths[len(executablePaths)-1]
+			}
+		}
+		if !matches {
 			continue
 		}
 		process, err := os.FindProcess(pid)
@@ -124,8 +143,49 @@ func stopDarwinAppBundleProcess(executable string) error {
 		if err := process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			return err
 		}
+		stoppedPIDs = append(stoppedPIDs, pid)
 	}
-	return nil
+	for _, pid := range stoppedPIDs {
+		if err := waitForProcessExit(ctx, pid, 30*time.Second); err != nil {
+			return fmt.Errorf("wait for failed desktop successor %d: %w", pid, err)
+		}
+	}
+	return waitForHealthEndpointExit(ctx, healthURL, healthClient)
+}
+
+func waitForHealthEndpointExit(ctx context.Context, healthURL string, healthClient *http.Client) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if healthClient == nil {
+		healthClient = http.DefaultClient
+	}
+	for {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+		if err != nil {
+			return err
+		}
+		response, err := healthClient.Do(request)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if errors.Is(err, context.DeadlineExceeded) {
+				continue
+			}
+			return nil
+		}
+		if response.Body != nil {
+			_ = response.Body.Close()
+		}
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func rollbackAppBundleInstallUnit(staged LocalStagedUpdate) error {

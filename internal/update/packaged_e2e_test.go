@@ -12,7 +12,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -100,11 +99,11 @@ func testPackagedUpdateE2EBinaryRollsBack(t *testing.T) {
 }
 
 func testPackagedUpdateE2EBinaryRecoverySucceeds(t *testing.T) {
-	runExecutableRecoveryProcessE2E(t, buildinfo.DistributionBinary, "0.6.0", packagedUpdateOutcomeTargetPublished, packagedUpdateOutcomeSucceeded)
+	runExecutableRecoveryProcessE2E(t, buildinfo.DistributionBinary, "0.6.0", packagedUpdateOutcomeSucceeded)
 }
 
 func testPackagedUpdateE2EBinaryRecoveryRollsBack(t *testing.T) {
-	runExecutableRecoveryProcessE2E(t, buildinfo.DistributionBinary, "0.7.0", packagedUpdateOutcomeRollingBack, packagedUpdateOutcomeRolledBack)
+	runExecutableRecoveryProcessE2E(t, buildinfo.DistributionBinary, "0.7.0", packagedUpdateOutcomeRolledBack)
 }
 
 type binaryE2EInstallLayout string
@@ -209,7 +208,7 @@ func runBinaryUpdateE2E(t *testing.T, releaseVersion, replacementVersion, wantSt
 	}
 }
 
-func runExecutableRecoveryProcessE2E(t *testing.T, distribution, runningVersion, phase, wantOutcome string) {
+func runExecutableRecoveryProcessE2E(t *testing.T, distribution, runningVersion, wantOutcome string) {
 	t.Helper()
 	root := t.TempDir()
 	baseName := "openvibely"
@@ -239,29 +238,23 @@ func runExecutableRecoveryProcessE2E(t *testing.T, distribution, runningVersion,
 		BackupPath:      current + ".openvibely-backup",
 		Version:         "0.6.0",
 		PreviousVersion: "0.5.0",
-		OutcomeID:       "e2e-recovery-" + distribution + "-" + phase,
+		OutcomeID:       "e2e-recovery-" + distribution + "-" + wantOutcome,
 	}
 	if err := copyFile(predecessor, staged.BackupPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := writePackagedUpdateHelperPhase(staged, phase); err != nil {
-		t.Fatal(err)
-	}
-	if err := writePackagedUpdateHelperRecoveryClaim(staged); err != nil {
-		t.Fatal(err)
-	}
-	helperPath := packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand)
-	if err := copyFile(current, helperPath, 0o755); err != nil {
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeTargetPublished); err != nil {
 		t.Fatal(err)
 	}
 
 	appData := filepath.Join(root, "app-data")
-	processEnv := append(envWithout("PORT"),
+	preparePackagedRecoveryPersistence(t, appData, staged, distribution, runningVersion)
+	processEnv := append(envWithout("PORT", "OPENVIBELY_UPDATE_E2E_HEADLESS_DESKTOP"),
 		"DATABASE_PATH="+filepath.Join(appData, "openvibely.db"),
 		"PROJECT_REPO_ROOT="+filepath.Join(root, "projects"),
 		"OPENVIBELY_APP_DATA_DIR="+appData,
 		"OPENVIBELY_PLUGIN_ROOT="+filepath.Join(appData, "plugins"),
-		"DISABLE_UPDATE_NOTIFICATIONS=true",
+		"DISABLE_UPDATE_NOTIFICATIONS=false",
 		"OPENVIBELY_DISABLE_INSTALL_ID=1",
 		"AUTH_ENABLED=false",
 		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=10000",
@@ -273,9 +266,7 @@ func runExecutableRecoveryProcessE2E(t *testing.T, distribution, runningVersion,
 	parent := exec.Command(current)
 	parent.Dir = root
 	parent.Env = processEnv
-	if distribution == buildinfo.DistributionDesktop {
-		parent.Env = append(parent.Env, desktopTestEnvironment()...)
-	} else {
+	if distribution != buildinfo.DistributionDesktop {
 		port = freeTCPPort(t)
 		baseURL = "http://127.0.0.1:" + port
 		parent.Env = append(parent.Env, "PORT="+port)
@@ -295,36 +286,18 @@ func runExecutableRecoveryProcessE2E(t *testing.T, distribution, runningVersion,
 	}
 	t.Cleanup(func() {
 		_ = parent.Process.Kill()
+		_, _ = parent.Process.Wait()
 		killPort(t, port)
 	})
-	waitForHealthVersion(t, baseURL, runningVersion, readParentLogs)
-
-	metadataPath := packagedUpdateHelperRelaunchMetadataPath(current)
-	metadata, err := json.Marshal(packagedUpdateRelaunchMetadata{Arguments: []string{current}, WorkingDirectory: root})
-	if err != nil {
-		t.Fatal(err)
+	if distribution == buildinfo.DistributionBinary && wantOutcome == packagedUpdateOutcomeSucceeded {
+		waitForHealthVersion(t, baseURL, runningVersion, readParentLogs)
+		waitForUpdateState(t, baseURL, StateSucceeded)
+		assertPackagedRecoveryOutcome(t, staged, wantOutcome)
+		assertGoBuildInfoVersion(t, current, runningVersion)
+		return
 	}
-	if err := atomicWriteState(metadataPath, metadata); err != nil {
-		t.Fatal(err)
-	}
-	helperArgs := executableRecoveryHelperArgs(staged, parent.Process.Pid, baseURL+"/api/system/health", runningVersion, metadataPath)
-	helperStdout, helperStderr, readHelperLogs := openCommandLogs(t, root, "recovery-helper")
-	helper := exec.Command(helperPath, helperArgs...)
-	helper.Dir = root
-	helper.Env = processEnv
-	helper.Stdout = helperStdout
-	helper.Stderr = helperStderr
-	if err := helper.Start(); err != nil {
-		t.Fatalf("start real recovery helper: %v", err)
-	}
-	t.Cleanup(func() { _ = helper.Process.Kill() })
-	waitForRecoveryHelperReadinessE2E(t, staged, readHelperLogs)
-	if err := parent.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		t.Fatalf("stop recovery parent: %v", err)
-	}
-	_ = parent.Wait()
-	if err := waitForCommandExit(helper, 90*time.Second); err != nil {
-		t.Fatalf("real recovery helper exit: %v\nhelper state:\n%s\n%s", err, describePackagedUpdateHelperState(current), readHelperLogs())
+	if err := waitForCommandExit(parent, 90*time.Second); err != nil {
+		t.Fatalf("recovery parent did not complete production handoff: %v\nhelper state:\n%s\n%s", err, describePackagedUpdateHelperState(current), readParentLogs())
 	}
 
 	wantVersion := runningVersion
@@ -332,36 +305,43 @@ func runExecutableRecoveryProcessE2E(t *testing.T, distribution, runningVersion,
 		wantVersion = staged.PreviousVersion
 	}
 	waitForHealthVersionWithin(t, baseURL, wantVersion, 90*time.Second, func() string {
-		return fmt.Sprintf("\nhelper state:\n%s\nhelper logs:\n%s\nparent logs:\n%s", describePackagedUpdateHelperState(current), readHelperLogs(), readParentLogs())
+		return fmt.Sprintf("\nhelper state:\n%s\nparent logs:\n%s", describePackagedUpdateHelperState(current), readParentLogs())
 	})
+	wantState := StateSucceeded
+	if wantOutcome == packagedUpdateOutcomeRolledBack {
+		wantState = StateRolledBack
+	}
+	waitForUpdateState(t, baseURL, wantState)
 	assertPackagedRecoveryOutcome(t, staged, wantOutcome)
 	assertGoBuildInfoVersion(t, current, wantVersion)
 }
 
-func executableRecoveryHelperArgs(staged LocalStagedUpdate, parentPID int, healthURL, runningVersion, metadataPath string) []string {
-	return []string{
-		ExecutableUpdateHelperCommand,
-		"--parent-pid", strconv.Itoa(parentPID),
-		"--current", staged.InstallPath,
-		"--staged", staged.ArtifactPath,
-		"--backup", staged.BackupPath,
-		"--health-url", healthURL,
-		"--expected-version", staged.Version,
-		"--previous-version", staged.PreviousVersion,
-		"--outcome-id", staged.OutcomeID,
-		"--recovery", "true",
-		"--running-version", runningVersion,
-		"--relaunch-metadata", metadataPath,
-	}
-}
-
-func waitForRecoveryHelperReadinessE2E(t *testing.T, staged LocalStagedUpdate, diagnostics func() string) {
+func preparePackagedRecoveryPersistence(t *testing.T, appData string, staged LocalStagedUpdate, distribution, currentVersion string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := waitForPackagedUpdateHelperRecoveryReadiness(ctx, staged); err != nil {
-		t.Fatalf("wait for real recovery helper readiness: %v\nhelper state:\n%s\n%s", err, describePackagedUpdateHelperState(staged.InstallPath), diagnostics())
+	if err := os.MkdirAll(appData, 0o755); err != nil {
+		t.Fatal(err)
 	}
+	drain := NewDrainManager(nil, nil, 0, nil)
+	if err := drain.SetPersistence(filepath.Join(appData, "update-drain.json")); err != nil {
+		t.Fatal(err)
+	}
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("prepare recovery drain: status=%#v err=%v", status, err)
+	}
+	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: currentVersion}, Distribution: distribution}, "stable", drain, nil, false, "", nil)
+	if err := coordinator.SetPersistence(filepath.Join(appData, "update-coordinator.json")); err != nil {
+		t.Fatal(err)
+	}
+	coordinator.mu.Lock()
+	coordinator.state = StateRestarting
+	coordinator.staged = staged
+	coordinator.operationGeneration = status.Generation
+	if err := coordinator.persistLocked(); err != nil {
+		coordinator.mu.Unlock()
+		t.Fatal(err)
+	}
+	coordinator.mu.Unlock()
 }
 
 func assertPackagedRecoveryOutcome(t *testing.T, staged LocalStagedUpdate, want string) {
@@ -404,12 +384,12 @@ func testPackagedUpdateE2ERealDesktopRollsBack(t *testing.T) {
 
 func testPackagedUpdateE2EDesktopRecoverySucceeds(t *testing.T) {
 	requireRealDesktopUpdateE2E(t)
-	runDesktopRecoveryProcessE2E(t, "0.6.0", packagedUpdateOutcomeTargetPublished, packagedUpdateOutcomeSucceeded)
+	runDesktopRecoveryProcessE2E(t, "0.6.0", packagedUpdateOutcomeSucceeded)
 }
 
 func testPackagedUpdateE2EDesktopRecoveryRollsBack(t *testing.T) {
 	requireRealDesktopUpdateE2E(t)
-	runDesktopRecoveryProcessE2E(t, "0.7.0", packagedUpdateOutcomeRollingBack, packagedUpdateOutcomeRolledBack)
+	runDesktopRecoveryProcessE2E(t, "0.7.0", packagedUpdateOutcomeRolledBack)
 }
 
 func requireRealDesktopUpdateE2E(t *testing.T) {
@@ -660,10 +640,10 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 	}
 }
 
-func runDesktopRecoveryProcessE2E(t *testing.T, runningVersion, phase, wantOutcome string) {
+func runDesktopRecoveryProcessE2E(t *testing.T, runningVersion, wantOutcome string) {
 	t.Helper()
 	if runtime.GOOS != "darwin" {
-		runExecutableRecoveryProcessE2E(t, buildinfo.DistributionDesktop, runningVersion, phase, wantOutcome)
+		runExecutableRecoveryProcessE2E(t, buildinfo.DistributionDesktop, runningVersion, wantOutcome)
 		return
 	}
 
@@ -672,7 +652,7 @@ func runDesktopRecoveryProcessE2E(t *testing.T, runningVersion, phase, wantOutco
 	replacement := filepath.Join(root, "build", "replacement", "OpenVibely")
 	buildDesktopCommand(t, predecessor, "0.5.0")
 	buildDesktopCommand(t, replacement, runningVersion)
-	installPath, installedExecutable, executableRelative := installDesktopUnit(t, root, "OpenVibely.app", replacement)
+	installPath, installedExecutable, _ := installDesktopUnit(t, root, "OpenVibely.app", replacement)
 	stagedPath, _, _ := installDesktopUnit(t, root, "OpenVibely.app.openvibely-new", predecessor)
 	backupPath, _, _ := installDesktopUnit(t, root, "OpenVibely.app.openvibely-backup", predecessor)
 	staged := LocalStagedUpdate{
@@ -681,18 +661,16 @@ func runDesktopRecoveryProcessE2E(t *testing.T, runningVersion, phase, wantOutco
 		BackupPath:      backupPath,
 		Version:         "0.6.0",
 		PreviousVersion: "0.5.0",
-		OutcomeID:       "e2e-recovery-desktop-" + phase,
+		OutcomeID:       "e2e-recovery-desktop-" + wantOutcome,
 	}
-	if err := writePackagedUpdateHelperPhase(staged, phase); err != nil {
-		t.Fatal(err)
-	}
-	if err := writePackagedUpdateHelperRecoveryClaim(staged); err != nil {
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeTargetPublished); err != nil {
 		t.Fatal(err)
 	}
 
 	port := freeTCPPort(t)
 	baseURL := "http://127.0.0.1:" + port
 	dataRoot := filepath.Join(root, "desktop-data")
+	preparePackagedRecoveryPersistence(t, dataRoot, staged, buildinfo.DistributionDesktop, runningVersion)
 	publicKeyFile, _ := writeE2ETrustRoot(t, root)
 	configFile := writeRealDesktopConfig(t, root, dataRoot, "http://127.0.0.1:1", publicKeyFile)
 	processEnv := append(envWithout("PORT"),
@@ -714,47 +692,10 @@ func runDesktopRecoveryProcessE2E(t *testing.T, runningVersion, phase, wantOutco
 		killExecutable(t, installedExecutable)
 		killPort(t, port)
 	})
-	waitForHealthVersion(t, baseURL, runningVersion, readParentLogs)
-
-	helperArgs := []string{
-		AppBundleUpdateHelperCommand,
-		"--parent-pid", strconv.Itoa(parent.Process.Pid),
-		"--current", staged.InstallPath,
-		"--staged", staged.ArtifactPath,
-		"--backup", staged.BackupPath,
-		"--health-url", baseURL + "/api/system/health",
-		"--expected-version", staged.Version,
-		"--previous-version", staged.PreviousVersion,
-		"--outcome-id", staged.OutcomeID,
-		"--recovery", "true",
-		"--running-version", runningVersion,
-	}
-	metadata, err := json.Marshal(packagedUpdateRelaunchMetadata{
-		Arguments:          []string{installedExecutable},
-		WorkingDirectory:   root,
-		ExecutableRelative: executableRelative,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	helperStdout, helperStderr, readHelperLogs := openCommandLogs(t, root, "recovery-helper")
-	helper := exec.Command(installedExecutable, helperArgs...)
-	helper.Dir = root
-	helper.Env = processEnv
-	helper.Stdin = bytes.NewReader(metadata)
-	helper.Stdout = helperStdout
-	helper.Stderr = helperStderr
-	if err := helper.Start(); err != nil {
-		t.Fatalf("start real app-bundle recovery helper: %v", err)
-	}
-	t.Cleanup(func() { _ = helper.Process.Kill() })
-	waitForRecoveryHelperReadinessE2E(t, staged, readHelperLogs)
-	if err := parent.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
-		t.Fatalf("stop app-bundle recovery parent: %v", err)
-	}
-	_ = parent.Wait()
-	if err := waitForCommandExit(helper, 90*time.Second); err != nil {
-		t.Fatalf("real app-bundle recovery helper exit: %v\nhelper state:\n%s\n%s", err, describePackagedUpdateHelperState(installPath), readHelperLogs())
+	if err := waitForCommandExit(parent, 90*time.Second); err != nil {
+		coordinatorState, _ := os.ReadFile(filepath.Join(dataRoot, "update-coordinator.json"))
+		drainState, _ := os.ReadFile(filepath.Join(dataRoot, "update-drain.json"))
+		t.Fatalf("app-bundle recovery parent did not complete production handoff: %v\nupdate snapshot: %s\ncoordinator state: %s\ndrain state: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), coordinatorState, drainState, describePackagedUpdateHelperState(installPath), readParentLogs())
 	}
 
 	wantVersion := runningVersion
@@ -762,8 +703,13 @@ func runDesktopRecoveryProcessE2E(t *testing.T, runningVersion, phase, wantOutco
 		wantVersion = staged.PreviousVersion
 	}
 	waitForHealthVersionWithin(t, baseURL, wantVersion, 90*time.Second, func() string {
-		return fmt.Sprintf("\nhelper state:\n%s\nhelper logs:\n%s\nparent logs:\n%s", describePackagedUpdateHelperState(installPath), readHelperLogs(), readParentLogs())
+		return fmt.Sprintf("\nhelper state:\n%s\nparent logs:\n%s", describePackagedUpdateHelperState(installPath), readParentLogs())
 	})
+	wantState := StateSucceeded
+	if wantOutcome == packagedUpdateOutcomeRolledBack {
+		wantState = StateRolledBack
+	}
+	waitForUpdateState(t, baseURL, wantState)
 	assertPackagedRecoveryOutcome(t, staged, wantOutcome)
 	assertGoBuildInfoVersion(t, installedExecutable, wantVersion)
 }
@@ -935,6 +881,8 @@ func describePackagedUpdateHelperState(current string) string {
 		packagedUpdateHelperOutcomePath(current),
 		packagedUpdateHelperAuthorizedPath(current),
 		packagedUpdateHelperCancelledPath(current),
+		packagedUpdateHelperRecoveryClaimPath(current),
+		packagedUpdateHelperRecoveryReadyPath(current),
 		packagedUpdateHelperRelaunchMetadataPath(current),
 		packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand),
 	}

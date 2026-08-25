@@ -290,6 +290,30 @@ func TestAppBundleUpdateHelperHandoffPassesExecutableRelativeMetadata(t *testing
 	}
 }
 
+func TestDesktopExecutableRelativeResolvesParentSymlinks(t *testing.T) {
+	root := t.TempDir()
+	realRoot := filepath.Join(root, "real")
+	installPath := filepath.Join(realRoot, "OpenVibely.app")
+	executable := filepath.Join(installPath, "Contents", "MacOS", "OpenVibely")
+	if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, []byte("desktop"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(root, "alias")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	relative, err := desktopExecutableRelative(filepath.Join(aliasRoot, "OpenVibely.app"), executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relative != filepath.Join("Contents", "MacOS", "OpenVibely") {
+		t.Fatalf("relative executable = %q", relative)
+	}
+}
+
 func TestPackagedUpdateHelperRunsInPlaceForMacAppBundles(t *testing.T) {
 	for _, test := range []struct {
 		name        string

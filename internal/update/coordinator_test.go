@@ -146,6 +146,51 @@ func TestCoordinatorDesktopRestartRequiresJournaledHealthOutcome(t *testing.T) {
 	}
 }
 
+func TestCoordinatorDesktopRecoveryStartsAfterInstallerBinding(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "openvibely-desktop")
+	staged := LocalStagedUpdate{
+		ArtifactPath:    current + ".openvibely-new",
+		InstallPath:     current,
+		BackupPath:      current + ".openvibely-backup",
+		Version:         "0.6.0",
+		PreviousVersion: "0.5.0",
+		OutcomeID:       "desktop-operation-1",
+	}
+	for path, contents := range map[string]string{staged.InstallPath: "new", staged.ArtifactPath: "old", staged.BackupPath: "old"} {
+		if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeTargetPublished); err != nil {
+		t.Fatal(err)
+	}
+	drain := NewDrainManager(nil, nil, 0, nil)
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("own drain: status=%#v err=%v", status, err)
+	}
+	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.6.0"}, Distribution: buildinfo.DistributionDesktop}, "stable", drain, nil, false, "", nil)
+	coordinator.state, coordinator.operationGeneration, coordinator.staged = StateRestarting, status.Generation, staged
+	coordinator.recoveryRetryInterval = time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	coordinator.StartRecovery(ctx)
+
+	installer := &fakeBinaryRestartRecoveryInstaller{}
+	coordinator.mu.Lock()
+	coordinator.installer = installer
+	coordinator.mu.Unlock()
+	coordinator.StartRecovery(nil)
+	deadline := time.Now().Add(time.Second)
+	for installer.recoveries.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if installer.recoveries.Load() != 1 || installer.shutdowns.Load() != 1 {
+		t.Fatalf("recoveries=%d shutdowns=%d", installer.recoveries.Load(), installer.shutdowns.Load())
+	}
+}
+
 func TestCoordinatorHiddenPackagedOfferStillChecksMetricsWithoutStaging(t *testing.T) {
 	var checks atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -257,6 +302,7 @@ type fakeBinaryRestartRecoveryInstaller struct {
 }
 
 func (i *fakeBinaryRestartRecoveryInstaller) RequiresRestartValidation() bool { return true }
+func (i *fakeBinaryRestartRecoveryInstaller) RecoveryReady() bool             { return true }
 func (i *fakeBinaryRestartRecoveryInstaller) ShutdownForRestart() {
 	if i.recovering.Load() {
 		i.earlyShutdown.Store(true)
@@ -372,6 +418,48 @@ func TestCoordinatorDeadHelperRecoveryClaimsOwnershipBeforeLeaseTransfer(t *test
 	}
 	if started {
 		t.Fatal("duplicate original helper acted after recovery ownership transfer")
+	}
+}
+
+func TestCoordinatorRecoversPublishedTargetWithUnexpectedVersion(t *testing.T) {
+	root := t.TempDir()
+	current := filepath.Join(root, "openvibely")
+	staged := LocalStagedUpdate{
+		ArtifactPath:    current + ".openvibely-new",
+		InstallPath:     current,
+		BackupPath:      current + ".openvibely-backup",
+		Version:         "0.6.0",
+		PreviousVersion: "0.5.0",
+		OutcomeID:       "operation-1",
+	}
+	if err := os.WriteFile(current, []byte("unexpected-target"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staged.BackupPath, []byte("predecessor"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeTargetPublished); err != nil {
+		t.Fatal(err)
+	}
+
+	drain := NewDrainManager(nil, nil, 0, nil)
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("own drain: status=%#v err=%v", status, err)
+	}
+	installer := &fakeBinaryRestartRecoveryInstaller{}
+	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.7.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, installer, false, "", nil)
+	coordinator.state, coordinator.operationGeneration, coordinator.staged = StateRestarting, status.Generation, staged
+
+	if !coordinator.recoverDeadPackagedUpdateHelper(context.Background(), staged, status.Generation, packagedUpdateHelperOutcome{State: packagedUpdateOutcomeTargetPublished}, "0.7.0") {
+		t.Fatal("unexpected published target did not start recovery")
+	}
+	if installer.recoveries.Load() != 1 || installer.shutdowns.Load() != 1 {
+		t.Fatalf("recoveries=%d shutdowns=%d", installer.recoveries.Load(), installer.shutdowns.Load())
+	}
+	claim, err := readPackagedUpdateHelperRecoveryClaim(staged)
+	if err != nil || claim.State != packagedUpdateOutcomeRecovering {
+		t.Fatalf("recovery ownership claim = %#v, err = %v", claim, err)
 	}
 }
 

@@ -331,7 +331,15 @@ func desktopExecutableRelative(installPath, executable string) (string, error) {
 	if err != nil || !installInfo.IsDir() {
 		return "", nil
 	}
-	relative, err := filepath.Rel(installPath, executable)
+	resolvedInstallPath, err := filepath.EvalSymlinks(installPath)
+	if err != nil {
+		return "", err
+	}
+	resolvedExecutable, err := filepath.EvalSymlinks(executable)
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(resolvedInstallPath, resolvedExecutable)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return "", errors.New("desktop executable is outside the application install unit")
 	}

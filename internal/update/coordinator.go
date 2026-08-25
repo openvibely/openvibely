@@ -1283,7 +1283,12 @@ func (c *Coordinator) recoverDeadPackagedUpdateHelper(ctx context.Context, stage
 		return true
 	}
 	if currentVersion != staged.PreviousVersion {
-		return false
+		switch outcome.State {
+		case packagedUpdateOutcomeTargetPublished, packagedUpdateOutcomeValidating:
+			return startRecovery()
+		default:
+			return false
+		}
 	}
 	if _, err := os.Stat(staged.ArtifactPath); err == nil {
 		if c.current.Distribution != "desktop" {
@@ -1387,6 +1392,12 @@ func (c *Coordinator) StartRecovery(ctx context.Context) {
 	needsInstaller := state == StateApplying || state == StateValidating || (state == StateWaitingForIdle && !manual) || (resumeAcceptance && !manual)
 	if needsInstaller && installer == nil {
 		return
+	}
+	if packagedRestart && c.current.Distribution == "desktop" {
+		ready, ok := installer.(recoveryReadyInstaller)
+		if !ok || !ready.RecoveryReady() {
+			return
+		}
 	}
 	if needsInstaller || packagedRestart {
 		if ready, ok := installer.(recoveryReadyInstaller); ok && !ready.RecoveryReady() {

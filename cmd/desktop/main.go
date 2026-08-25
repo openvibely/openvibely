@@ -21,6 +21,7 @@ import (
 	"github.com/openvibely/openvibely/internal/server"
 	"github.com/openvibely/openvibely/internal/update"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 type desktopBackend struct {
@@ -237,10 +238,17 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 	if err != nil {
 		return fmt.Errorf("resolve desktop working directory: %w", err)
 	}
-	coordinator.SetDesktopRelaunchContext(baseURL+"/api/system/health", os.Args, workingDirectory, app.Quit)
-	if err := coordinator.BindWailsUpdater(app.Updater); err != nil {
-		return fmt.Errorf("configure Wails updater: %w", err)
-	}
+	var updaterErr error
+	var updaterErrMu sync.Mutex
+	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		coordinator.SetDesktopRelaunchContext(baseURL+"/api/system/health", os.Args, workingDirectory, app.Quit)
+		if err := coordinator.BindWailsUpdater(app.Updater); err != nil {
+			updaterErrMu.Lock()
+			updaterErr = err
+			updaterErrMu.Unlock()
+			app.Quit()
+		}
+	})
 
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "main",
@@ -252,5 +260,13 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		MinHeight: 680,
 	})
 
-	return app.Run()
+	if err := app.Run(); err != nil {
+		return err
+	}
+	updaterErrMu.Lock()
+	defer updaterErrMu.Unlock()
+	if updaterErr != nil {
+		return fmt.Errorf("configure Wails updater: %w", updaterErr)
+	}
+	return nil
 }

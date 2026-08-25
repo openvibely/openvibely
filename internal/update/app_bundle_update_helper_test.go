@@ -3,9 +3,11 @@ package update
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -242,6 +244,77 @@ func TestDesktopSuccessorCommandUsesLaunchServicesForMacAppBundles(t *testing.T)
 		if !strings.Contains(got, want) {
 			t.Fatalf("open invocation = %q, missing %q", got, want)
 		}
+	}
+}
+
+func TestStopDarwinAppBundleProcessResolvesExecutableAliases(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS process discovery behavior")
+	}
+	root := t.TempDir()
+	realExecutable := filepath.Join(root, "real", "OpenVibely")
+	buildGoCommand(t, "./internal/update/testfixture", realExecutable, nil)
+	aliasRoot := filepath.Join(root, "alias")
+	if err := os.Symlink(filepath.Dir(realExecutable), aliasRoot); err != nil {
+		t.Fatal(err)
+	}
+	port := freeTCPPort(t)
+	cmd := exec.Command(realExecutable, "serve", "--listen", "127.0.0.1:"+port)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+		}
+	})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := http.Get("http://127.0.0.1:" + port + "/health")
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fixture did not start")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := stopDarwinAppBundleProcess(context.Background(), filepath.Join(aliasRoot, "OpenVibely"), "http://127.0.0.1:"+port+"/health", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStopDarwinAppBundleProcessAllowsExitedSuccessor(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS process discovery behavior")
+	}
+	port := freeTCPPort(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := stopDarwinAppBundleProcess(ctx, filepath.Join(t.TempDir(), "missing", "OpenVibely"), "http://127.0.0.1:"+port+"/health", nil); err != nil {
+		t.Fatalf("already-exited successor blocked rollback: %v", err)
+	}
+}
+
+func TestStopDarwinAppBundleProcessRejectsUnmatchedLiveSuccessor(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS process discovery behavior")
+	}
+	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer health.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := stopDarwinAppBundleProcess(ctx, filepath.Join(t.TempDir(), "missing", "OpenVibely"), health.URL, nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("live unmatched successor error = %v", err)
 	}
 }
 
