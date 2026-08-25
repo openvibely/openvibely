@@ -312,13 +312,14 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 	}
 	completeCancelledBeforeModel := func() {
+		cleanupWaitCancellation()
 		cleanupRuntimeCancellation()
 		h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
 		h.finalizeStreamingTurn(params, "")
 	}
 	alreadyCancelledBeforeModel := func() bool {
 		if params.TaskID != "" {
-			if task, err := h.taskRepo.GetByID(ctx, params.TaskID); err == nil && task != nil && task.Status == models.StatusCancelled {
+			if task, err := h.taskRepo.GetByID(preRuntimeCtx(), params.TaskID); err == nil && task != nil && task.Status == models.StatusCancelled {
 				applog.Infof("[handler] processStreamingResponse exec=%s task=%s observed cancelled task before model preparation", params.ExecID, params.TaskID)
 				return true
 			} else if err != nil {
@@ -326,7 +327,7 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 			}
 		}
 		if params.ExecID != "" {
-			if exec, err := h.execRepo.GetByID(ctx, params.ExecID); err == nil && exec != nil && exec.Status == models.ExecCancelled {
+			if exec, err := h.execRepo.GetByID(preRuntimeCtx(), params.ExecID); err == nil && exec != nil && exec.Status == models.ExecCancelled {
 				applog.Infof("[handler] processStreamingResponse exec=%s task=%s observed cancelled execution before model preparation", params.ExecID, params.TaskID)
 				return true
 			} else if err != nil {
@@ -372,6 +373,10 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		}
 		defer h.workerSvc.ReleaseModelSlot(agentConfigID)
 		applog.Infof("[handler] processStreamingResponse exec=%s acquired project + model slots for %s", params.ExecID, agentConfigID)
+		if alreadyCancelledBeforeModel() {
+			completeCancelledBeforeModel()
+			return
+		}
 		if err := h.execRepo.MarkRunning(preRuntimeCtx(), params.ExecID); err != nil {
 			applog.Infof("[handler] processStreamingResponse exec=%s failed to mark execution running: %v", params.ExecID, err)
 			h.completeWithFailure(ctx, params.ExecID, params.TaskID, err.Error(), 0, params.ChannelReply)
