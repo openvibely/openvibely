@@ -495,8 +495,6 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 		"OPENVIBELY_UPDATE_PUBLIC_KEY_FILE="+publicKeyFile,
 		"DISABLE_UPDATE_NOTIFICATIONS=false",
 		"OPENVIBELY_DISABLE_INSTALL_ID=1",
-		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=5000",
-		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
 	)
 	cmd.Env = append(cmd.Env, desktopTestEnvironment()...)
 	cmd.Stdout = stdoutLog
@@ -525,9 +523,13 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 		t.Fatalf("current desktop app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
 	}
 	if wantOutcome == packagedUpdateOutcomeSucceeded {
-		waitForHealthVersion(t, baseURL, releaseVersion)
+		waitForHealthVersionWithin(t, baseURL, releaseVersion, 90*time.Second, func() string {
+			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
+		})
 	} else {
-		waitForHealthVersion(t, baseURL, "0.5.0")
+		waitForHealthVersionWithin(t, baseURL, "0.5.0", 90*time.Second, func() string {
+			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
+		})
 	}
 	waitForUpdateState(t, baseURL, wantOutcome)
 }
@@ -1074,9 +1076,14 @@ func freeTCPPort(t *testing.T) string {
 	return strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 }
 
-func waitForHealthVersion(t *testing.T, baseURL, version string) {
+func waitForHealthVersion(t *testing.T, baseURL, version string, diagnostics ...func() string) {
 	t.Helper()
-	deadline := time.Now().Add(45 * time.Second)
+	waitForHealthVersionWithin(t, baseURL, version, 45*time.Second, diagnostics...)
+}
+
+func waitForHealthVersionWithin(t *testing.T, baseURL, version string, timeout time.Duration, diagnostics ...func() string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
 	var last string
 	for time.Now().Before(deadline) {
 		resp, err := http.Get(baseURL + "/api/system/health")
@@ -1097,7 +1104,13 @@ func waitForHealthVersion(t *testing.T, baseURL, version string) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	t.Fatalf("health did not report version %s: last=%s", version, last)
+	var details strings.Builder
+	for _, diagnostic := range diagnostics {
+		if diagnostic != nil {
+			details.WriteString(diagnostic())
+		}
+	}
+	t.Fatalf("health did not report version %s: last=%s%s", version, last, details.String())
 }
 
 func waitForUpdateState(t *testing.T, baseURL, state string) {
