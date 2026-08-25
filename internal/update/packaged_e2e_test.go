@@ -197,17 +197,9 @@ func desktopTestEnvironment() []string {
 	if runtime.GOOS == "darwin" {
 		return nil
 	}
-	env := []string{
+	return []string{
 		"OPENVIBELY_UPDATE_E2E_HEADLESS_DESKTOP=1",
 	}
-	if runtime.GOOS == "linux" {
-		env = append(env,
-			"WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1",
-			"NO_AT_BRIDGE=1",
-			"GTK_A11Y=none",
-		)
-	}
-	return env
 }
 
 func testPackagedUpdateE2EAppBundleUpdateHelperSucceeds(t *testing.T) {
