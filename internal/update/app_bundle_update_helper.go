@@ -176,6 +176,7 @@ func RunAppBundleUpdateHelper(ctx context.Context, cfg AppBundleUpdateHelperConf
 	if err != nil {
 		return err
 	}
+	parentExited := false
 	if cfg.Recovery {
 		ready, err := marshalPackagedUpdateHelperOutcome(staged, packagedUpdateOutcomeRecovering)
 		if err != nil {
@@ -184,23 +185,29 @@ func RunAppBundleUpdateHelper(ctx context.Context, cfg AppBundleUpdateHelperConf
 		if err := atomicWriteState(packagedUpdateHelperRecoveryReadyPath(staged.InstallPath), ready); err != nil {
 			return err
 		}
+		if err := waitForProcessExit(ctx, cfg.ParentPID, cfg.WaitTimeout); err != nil {
+			return err
+		}
+		parentExited = true
 	}
 	switch outcome.State {
 	case packagedUpdateOutcomeCancelled, packagedUpdateOutcomeSucceeded, packagedUpdateOutcomeRolledBack:
 		return nil
 	case packagedUpdateOutcomeAuthorized:
-		if err := waitForProcessExit(ctx, cfg.ParentPID, cfg.WaitTimeout); err != nil {
-			if cancelErr := cancelAuthorizedPackagedUpdateHelperHandoff(staged); cancelErr != nil {
-				return errors.Join(err, cancelErr)
+		if !parentExited {
+			if err := waitForProcessExit(ctx, cfg.ParentPID, cfg.WaitTimeout); err != nil {
+				if cancelErr := cancelAuthorizedPackagedUpdateHelperHandoff(staged); cancelErr != nil {
+					return errors.Join(err, cancelErr)
+				}
+				start := cfg.StartCommand
+				if start == nil {
+					start = appBundleSuccessorCommand(cfg)
+				}
+				if _, startErr := start(); startErr != nil {
+					return errors.Join(err, startErr)
+				}
+				return err
 			}
-			start := cfg.StartCommand
-			if start == nil {
-				start = appBundleSuccessorCommand(cfg)
-			}
-			if _, startErr := start(); startErr != nil {
-				return errors.Join(err, startErr)
-			}
-			return err
 		}
 		if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, packagedUpdateOutcomeParentExited); err != nil {
 			return err

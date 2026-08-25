@@ -73,11 +73,23 @@ func TestAppBundleUpdateHelperRecoveryDoesNotRepeatAmbiguousCompletedExchange(t 
 		_, _ = w.Write([]byte(`{"ready":true,"version":"0.6.0"}`))
 	}))
 	defer health.Close()
+	originalWaitForProcessExit := waitForProcessExit
+	t.Cleanup(func() { waitForProcessExit = originalWaitForProcessExit })
+	var parentExitObserved atomic.Bool
+	waitForProcessExit = func(context.Context, int, time.Duration) error {
+		parentExitObserved.Store(true)
+		return nil
+	}
 	if err := RunAppBundleUpdateHelper(context.Background(), AppBundleUpdateHelperConfig{
 		ParentPID: 99999999, Current: staged.InstallPath, Staged: staged.ArtifactPath, Backup: staged.BackupPath,
 		HealthURL: health.URL, ExpectedVersion: staged.Version, PreviousVersion: staged.PreviousVersion, OutcomeID: staged.OutcomeID,
 		Recovery: true, RunningVersion: staged.Version, WaitTimeout: 100 * time.Millisecond, ValidationTimeout: time.Second,
-		StartCommand: func() (func(context.Context) error, error) { return func(context.Context) error { return nil }, nil },
+		StartCommand: func() (func(context.Context) error, error) {
+			if !parentExitObserved.Load() {
+				t.Fatal("recovery relaunched the app bundle before its parent exited")
+			}
+			return func(context.Context) error { return nil }, nil
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
