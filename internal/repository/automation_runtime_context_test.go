@@ -369,18 +369,19 @@ func TestAutomationRepoDispatchRetryAndAbandonQueued(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim retry schedule: %v", err)
 	}
-	leased, err := repo.LeaseNextDispatch(ctx, "retry-owner", now, time.Minute)
+	leaseNow := time.Now().UTC().Add(time.Second)
+	leased, err := repo.LeaseNextDispatch(ctx, "retry-owner", leaseNow, time.Minute)
 	if err != nil || leased == nil {
 		t.Fatalf("lease retry dispatch = %#v, %v", leased, err)
 	}
-	if err := repo.FailDispatch(ctx, leased.ID, "retry-owner", "temporary", 3, now); err != nil {
+	if err := repo.FailDispatch(ctx, leased.ID, "retry-owner", "temporary", 3, leaseNow); err != nil {
 		t.Fatalf("FailDispatch retry: %v", err)
 	}
-	leasedAgain, err := repo.LeaseNextDispatch(ctx, "retry-owner", now.Add(3*time.Second), time.Minute)
+	leasedAgain, err := repo.LeaseNextDispatch(ctx, "retry-owner", leaseNow.Add(3*time.Second), time.Minute)
 	if err != nil || leasedAgain == nil || leasedAgain.ID != retryDispatch.ID || leasedAgain.Attempts != 2 {
 		t.Fatalf("lease retry again = %#v, %v", leasedAgain, err)
 	}
-	if err := repo.FailDispatch(ctx, leasedAgain.ID, "retry-owner", "permanent", 2, now.Add(3*time.Second)); err != nil {
+	if err := repo.FailDispatch(ctx, leasedAgain.ID, "retry-owner", "permanent", 2, leaseNow.Add(3*time.Second)); err != nil {
 		t.Fatalf("FailDispatch terminal: %v", err)
 	}
 
@@ -390,7 +391,7 @@ func TestAutomationRepoDispatchRetryAndAbandonQueued(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim abandoned schedule: %v", err)
 	}
-	abandonLease, err := repo.LeaseNextDispatch(ctx, "abandon-owner", now, time.Minute)
+	abandonLease, err := repo.LeaseNextDispatch(ctx, "abandon-owner", time.Now().UTC().Add(time.Second), time.Minute)
 	if err != nil || abandonLease == nil || abandonLease.ID != abandonDispatch.ID {
 		t.Fatalf("lease abandoned dispatch = %#v, %v", abandonLease, err)
 	}

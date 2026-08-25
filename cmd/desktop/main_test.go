@@ -115,15 +115,25 @@ func TestDesktopCommandRoutesPackagedUpdateHelpers(t *testing.T) {
 func TestDesktopPackagedUpdateHelperIntegrationTimeouts(t *testing.T) {
 	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS", "2500")
 	t.Setenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS", "7500")
-	var cfg update.ExecutableUpdateHelperConfig
-	if err := applyUpdateIntegrationTimeouts(&cfg); err != nil {
+	var executableCfg update.ExecutableUpdateHelperConfig
+	if err := applyUpdateIntegrationTimeouts(&executableCfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.WaitTimeout != 2500*time.Millisecond {
-		t.Fatalf("wait timeout = %s", cfg.WaitTimeout)
+	if executableCfg.WaitTimeout != 2500*time.Millisecond {
+		t.Fatalf("executable wait timeout = %s", executableCfg.WaitTimeout)
 	}
-	if cfg.ValidationTimeout != 7500*time.Millisecond {
-		t.Fatalf("validation timeout = %s", cfg.ValidationTimeout)
+	if executableCfg.ValidationTimeout != 7500*time.Millisecond {
+		t.Fatalf("executable validation timeout = %s", executableCfg.ValidationTimeout)
+	}
+	var appBundleCfg update.AppBundleUpdateHelperConfig
+	if err := applyAppBundleUpdateIntegrationTimeouts(&appBundleCfg); err != nil {
+		t.Fatal(err)
+	}
+	if appBundleCfg.WaitTimeout != 2500*time.Millisecond {
+		t.Fatalf("app-bundle wait timeout = %s", appBundleCfg.WaitTimeout)
+	}
+	if appBundleCfg.ValidationTimeout != 7500*time.Millisecond {
+		t.Fatalf("app-bundle validation timeout = %s", appBundleCfg.ValidationTimeout)
 	}
 }
 
@@ -207,6 +217,52 @@ func TestRunDesktopStartFailure(t *testing.T) {
 	}
 	if launched {
 		t.Fatalf("expected launcher not to run when backend fails")
+	}
+}
+
+func TestRunDesktopIgnoresNativeWindowErrorAfterUpdaterShutdown(t *testing.T) {
+	cfg := &config.Config{Mode: config.ModeDesktop}
+	launchErr := errors.New("webview stopped during initialization")
+	shutdownCalled := false
+
+	err := runDesktop(
+		cfg,
+		func(context.Context, *config.Config) (*desktopBackend, error) {
+			return &desktopBackend{
+				BaseURL: "http://127.0.0.1:43210",
+				Shutdown: func() {
+					shutdownCalled = true
+				},
+			}, nil
+		},
+		func(_ string, onShutdown func(), _ *update.Coordinator) error {
+			onShutdown()
+			return launchErr
+		},
+	)
+	if err != nil {
+		t.Fatalf("runDesktop returned an error after updater shutdown: %v", err)
+	}
+	if !shutdownCalled {
+		t.Fatal("expected backend shutdown to be called")
+	}
+}
+
+func TestRunDesktopReturnsNativeWindowErrorWithoutShutdown(t *testing.T) {
+	cfg := &config.Config{Mode: config.ModeDesktop}
+	launchErr := errors.New("webview failed")
+
+	err := runDesktop(
+		cfg,
+		func(context.Context, *config.Config) (*desktopBackend, error) {
+			return &desktopBackend{BaseURL: "http://127.0.0.1:43210"}, nil
+		},
+		func(string, func(), *update.Coordinator) error {
+			return launchErr
+		},
+	)
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("runDesktop error = %v, want native window error", err)
 	}
 }
 

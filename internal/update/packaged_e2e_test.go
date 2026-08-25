@@ -677,6 +677,8 @@ func runDesktopRecoveryProcessE2E(t *testing.T, runningVersion, wantOutcome stri
 		"HOME="+filepath.Join(root, "home"),
 		"PORT="+port,
 		"OPENVIBELY_DESKTOP_CONFIG_FILE="+configFile,
+		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=10000",
+		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=15000",
 	)
 	parentStdout, parentStderr, readParentLogs := openCommandLogs(t, root, "recovery-parent")
 	parent := exec.Command(installedExecutable)

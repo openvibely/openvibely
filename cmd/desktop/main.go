@@ -70,6 +70,9 @@ func runPackagedUpdateHelperCommand(ctx context.Context, args []string, stdin io
 			err = update.LoadAppBundleUpdateHelperRelaunch(stdin, &cfg)
 		}
 		if err == nil {
+			err = applyAppBundleUpdateIntegrationTimeouts(&cfg)
+		}
+		if err == nil {
 			err = update.RunAppBundleUpdateHelper(ctx, cfg)
 		}
 		return true, err
@@ -98,19 +101,30 @@ func applyUpdateIntegrationTimeouts(cfg *update.ExecutableUpdateHelperConfig) er
 	if cfg == nil {
 		return nil
 	}
+	return applyUpdateIntegrationTimeoutValues(&cfg.WaitTimeout, &cfg.ValidationTimeout)
+}
+
+func applyAppBundleUpdateIntegrationTimeouts(cfg *update.AppBundleUpdateHelperConfig) error {
+	if cfg == nil {
+		return nil
+	}
+	return applyUpdateIntegrationTimeoutValues(&cfg.WaitTimeout, &cfg.ValidationTimeout)
+}
+
+func applyUpdateIntegrationTimeoutValues(waitTimeout, validationTimeout *time.Duration) error {
 	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS"); value != "" {
 		milliseconds, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("parse update integration wait timeout: %w", err)
 		}
-		cfg.WaitTimeout = time.Duration(milliseconds) * time.Millisecond
+		*waitTimeout = time.Duration(milliseconds) * time.Millisecond
 	}
 	if value := os.Getenv("OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS"); value != "" {
 		milliseconds, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("parse update integration validation timeout: %w", err)
 		}
-		cfg.ValidationTimeout = time.Duration(milliseconds) * time.Millisecond
+		*validationTimeout = time.Duration(milliseconds) * time.Millisecond
 	}
 	return nil
 }
@@ -201,6 +215,10 @@ func runDesktop(cfg *config.Config, start desktopStarter, launch desktopLauncher
 	}
 
 	if err := launch(backend.BaseURL, shutdown, backend.UpdateCoordinator); err != nil {
+		if ctx.Err() != nil {
+			applog.Infof("[desktop] native window stopped during shutdown: %v", err)
+			return nil
+		}
 		shutdown()
 		return fmt.Errorf("failed to launch native desktop window: %w", err)
 	}

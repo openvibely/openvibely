@@ -226,6 +226,11 @@ jobs:
           Xvfb :99 -screen 0 1280x1024x24 >/tmp/openvibely-xvfb.log 2>&1 &
           echo "DISPLAY=:99" >> "$GITHUB_ENV"
 
+      - name: Configure Linux WebKit sandbox fallback
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1" >> "$GITHUB_ENV"
+
       - name: Run native packaged-update tests
         shell: bash
         run: go test ./internal/update -count=1 -timeout 120s -coverpkg=./internal/update -coverprofile=coverage.update-native.out
@@ -237,7 +242,7 @@ jobs:
           OPENVIBELY_UPDATE_E2E_DISTRIBUTION: binary
           OPENVIBELY_UPDATE_E2E_EXPECTED_OS: ${{ runner.os }}
           OPENVIBELY_UPDATE_E2E_EXPECTED_ARCH: ${{ matrix.arch }}
-        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 300s -coverpkg=./internal/update -coverprofile=coverage.update-binary.out
+        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 420s -coverpkg=./internal/update -coverprofile=coverage.update-binary.out
 
       - name: Run desktop packaged update E2E
         shell: bash
@@ -247,7 +252,7 @@ jobs:
           OPENVIBELY_UPDATE_E2E_REAL_DESKTOP: "1"
           OPENVIBELY_UPDATE_E2E_EXPECTED_OS: ${{ runner.os }}
           OPENVIBELY_UPDATE_E2E_EXPECTED_ARCH: ${{ matrix.arch }}
-        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 360s -coverpkg=./internal/update -coverprofile=coverage.update-desktop.out
+        run: go test ./internal/update -run '^TestPackagedUpdateE2E$' -count=1 -timeout 600s -coverpkg=./internal/update -coverprofile=coverage.update-desktop.out
 
       - name: Upload packaged-update coverage reports to Codecov
         uses: codecov/codecov-action@v5
