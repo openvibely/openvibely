@@ -1298,6 +1298,47 @@ func TestPackagedUpdateHelperAuthorizationAndCancellationHaveOneAtomicWinner(t *
 	}
 }
 
+func TestPackagedUpdateHelperClaimAndPreparedCancellationHaveOneAtomicWinner(t *testing.T) {
+	for iteration := 0; iteration < 50; iteration++ {
+		root := t.TempDir()
+		current := filepath.Join(root, "openvibely")
+		staged := LocalStagedUpdate{InstallPath: current, Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-" + strconv.Itoa(iteration)}
+		if err := writePackagedUpdateHelperOutcome(staged, packagedUpdateOutcomePrepared); err != nil {
+			t.Fatal(err)
+		}
+
+		start := make(chan struct{})
+		claimed := make(chan bool, 1)
+		cancelled := make(chan bool, 1)
+		go func() {
+			<-start
+			claimed <- claimPackagedUpdateHelperHandoff(context.Background(), staged) == nil
+		}()
+		go func() {
+			<-start
+			won, err := cancelPreparedPackagedUpdateHelperHandoff(staged)
+			cancelled <- err == nil && won
+		}()
+		close(start)
+		claimedWon, cancelledWon := <-claimed, <-cancelled
+		if claimedWon == cancelledWon {
+			t.Fatalf("iteration %d: claimed=%v cancelled=%v", iteration, claimedWon, cancelledWon)
+		}
+		if claimedWon {
+			outcome, err := readPackagedUpdateHelperOutcome(staged)
+			if err != nil || outcome.State != packagedUpdateOutcomePending {
+				t.Fatalf("iteration %d: outcome=%#v err=%v", iteration, outcome, err)
+			}
+			data, err := os.ReadFile(packagedUpdateHelperOutcomePath(current))
+			if err != nil || !bytes.Contains(data, []byte(`"state":"pending"`)) {
+				t.Fatalf("iteration %d: active claim=%s err=%v", iteration, data, err)
+			}
+		} else if _, err := os.Stat(packagedUpdateHelperPreparedPath(current)); !os.IsNotExist(err) {
+			t.Fatalf("iteration %d: cancelled prepared claim remains: %v", iteration, err)
+		}
+	}
+}
+
 func TestBinaryInstallerRecoveryWaitsForDurableHelperReadiness(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")

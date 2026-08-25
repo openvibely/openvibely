@@ -581,62 +581,66 @@ func TestCoordinatorBinaryAutoRestartDoesNotTreatPendingHelperAsRollback(t *test
 }
 
 func TestCoordinatorBinaryPreparedHandoffCrashReleasesExactGeneration(t *testing.T) {
-	now := time.Unix(1000, 0).UTC()
-	root := t.TempDir()
-	drainPath := filepath.Join(root, "drain.json")
-	coordinatorPath := filepath.Join(root, "coordinator.json")
-	current := filepath.Join(root, "openvibely")
+	for _, preparedState := range []string{packagedUpdateOutcomePrepared, packagedUpdateOutcomePending} {
+		t.Run(preparedState, func(t *testing.T) {
+			now := time.Unix(1000, 0).UTC()
+			root := t.TempDir()
+			drainPath := filepath.Join(root, "drain.json")
+			coordinatorPath := filepath.Join(root, "coordinator.json")
+			current := filepath.Join(root, "openvibely")
 
-	drain := NewDrainManager(nil, nil, 0, func() time.Time { return now })
-	if err := drain.SetPersistence(drainPath); err != nil {
-		t.Fatal(err)
-	}
-	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !drain.TakeOwnership(status.Generation) {
-		t.Fatal("take drain ownership")
-	}
-	coordinatorState, err := json.Marshal(map[string]any{
-		"state": "restarting",
-		"release": map[string]any{"metadata": map[string]any{
-			"version": "0.6.0", "channel": "stable", "expires_at": "2099-01-01T00:00:00Z",
-		}},
-		"staged_local": LocalStagedUpdate{
-			ArtifactPath: current + ".openvibely-new", InstallPath: current, BackupPath: current + ".openvibely-backup",
-			Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1",
-		},
-		"operation_generation": status.Generation,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(coordinatorPath, coordinatorState, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(packagedUpdateHelperPreparedPath(current), []byte(`{"id":"operation-1","state":"prepared","previous_version":"0.5.0","desired_version":"0.6.0"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+			drain := NewDrainManager(nil, nil, 0, func() time.Time { return now })
+			if err := drain.SetPersistence(drainPath); err != nil {
+				t.Fatal(err)
+			}
+			status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !drain.TakeOwnership(status.Generation) {
+				t.Fatal("take drain ownership")
+			}
+			coordinatorState, err := json.Marshal(map[string]any{
+				"state": "restarting",
+				"release": map[string]any{"metadata": map[string]any{
+					"version": "0.6.0", "channel": "stable", "expires_at": "2099-01-01T00:00:00Z",
+				}},
+				"staged_local": LocalStagedUpdate{
+					ArtifactPath: current + ".openvibely-new", InstallPath: current, BackupPath: current + ".openvibely-backup",
+					Version: "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1",
+				},
+				"operation_generation": status.Generation,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(coordinatorPath, coordinatorState, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(packagedUpdateHelperPreparedPath(current), []byte(`{"id":"operation-1","state":"`+preparedState+`","previous_version":"0.5.0","desired_version":"0.6.0"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
 
-	restoredDrain := NewDrainManager(nil, nil, 0, func() time.Time { return now })
-	if err := restoredDrain.SetPersistence(drainPath); err != nil {
-		t.Fatal(err)
-	}
-	restarted := NewCoordinator(NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }}), CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", restoredDrain, nil, false, "", nil)
-	if err := restarted.SetPersistence(coordinatorPath); err != nil {
-		t.Fatal(err)
-	}
-	restarted.recoveryRetryInterval = time.Millisecond
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	restarted.StartRecovery(ctx)
-	deadline := time.Now().Add(time.Second)
-	for restarted.Snapshot().State == StateRestarting && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if snapshot := restarted.Snapshot(); snapshot.State != StateRolledBack || snapshot.Drain.State != DrainStateIdle || restoredDrain.Owns(status.Generation) {
-		t.Fatalf("prepared handoff crash was not cleaned up: snapshot=%#v owns=%v", snapshot, restoredDrain.Owns(status.Generation))
+			restoredDrain := NewDrainManager(nil, nil, 0, func() time.Time { return now })
+			if err := restoredDrain.SetPersistence(drainPath); err != nil {
+				t.Fatal(err)
+			}
+			restarted := NewCoordinator(NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }}), CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", restoredDrain, nil, false, "", nil)
+			if err := restarted.SetPersistence(coordinatorPath); err != nil {
+				t.Fatal(err)
+			}
+			restarted.recoveryRetryInterval = time.Millisecond
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			restarted.StartRecovery(ctx)
+			deadline := time.Now().Add(time.Second)
+			for restarted.Snapshot().State == StateRestarting && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+			if snapshot := restarted.Snapshot(); snapshot.State != StateRolledBack || snapshot.Drain.State != DrainStateIdle || restoredDrain.Owns(status.Generation) {
+				t.Fatalf("prepared handoff crash was not cleaned up: snapshot=%#v owns=%v", snapshot, restoredDrain.Owns(status.Generation))
+			}
+		})
 	}
 }
 

@@ -1291,13 +1291,14 @@ func (c *Coordinator) reconcilePackagedUpdateRestartOutcome(ctx context.Context,
 			}
 			prepared, preparedErr := readPackagedUpdateHelperPrepared(staged)
 			switch {
-			case preparedErr == nil && prepared.State == packagedUpdateOutcomePrepared:
-				// Removing the prepared identity races atomically with the helper's
-				// rename claim. Only the winner may classify the handoff.
-				if removeErr := os.Remove(packagedUpdateHelperPreparedPath(staged.InstallPath)); removeErr == nil {
+			case preparedErr == nil && (prepared.State == packagedUpdateOutcomePrepared || prepared.State == packagedUpdateOutcomePending):
+				// The transition lease serializes recovery cleanup with the helper's
+				// pending-state publication and rename claim. Only the winner may
+				// classify the handoff.
+				if removed, removeErr := cancelPreparedPackagedUpdateHelperHandoff(staged); removeErr == nil && removed {
 					c.completeGenerationWithRetry(ctx, generation, StateRolledBack, "packaged update helper handoff was not confirmed")
 					return
-				} else if !os.IsNotExist(removeErr) {
+				} else if removeErr != nil {
 					break
 				}
 			case os.IsNotExist(preparedErr):

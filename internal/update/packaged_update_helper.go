@@ -132,10 +132,54 @@ func writePackagedUpdateHelperOutcome(staged LocalStagedUpdate, state string) er
 }
 
 func claimPackagedUpdateHelperHandoff(ctx context.Context, staged LocalStagedUpdate) error {
-	if err := os.Rename(packagedUpdateHelperPreparedPath(staged.InstallPath), packagedUpdateHelperOutcomePath(staged.InstallPath)); err != nil {
+	lease, err := acquirePackagedUpdateHelperTransitionLease(staged)
+	if err != nil {
 		return fmt.Errorf("claim packaged update helper handoff: %w", err)
 	}
-	return writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomePending)
+	defer lease.Close()
+	prepared, err := readPackagedUpdateHelperPrepared(staged)
+	if err != nil {
+		return fmt.Errorf("claim packaged update helper handoff: %w", err)
+	}
+	if prepared.State != packagedUpdateOutcomePrepared && prepared.State != packagedUpdateOutcomePending {
+		return fmt.Errorf("claim packaged update helper handoff: invalid prepared state %q", prepared.State)
+	}
+	data, err := marshalPackagedUpdateHelperOutcome(staged, packagedUpdateOutcomePending)
+	if err != nil {
+		return fmt.Errorf("claim packaged update helper handoff: %w", err)
+	}
+	if err := writePackagedUpdateHelperStateWithRetry(ctx, packagedUpdateHelperPreparedPath(staged.InstallPath), data); err != nil {
+		return fmt.Errorf("claim packaged update helper handoff: %w", err)
+	}
+	if err := renamePackagedUpdateHelperState(packagedUpdateHelperPreparedPath(staged.InstallPath), packagedUpdateHelperOutcomePath(staged.InstallPath)); err != nil {
+		return fmt.Errorf("claim packaged update helper handoff: %w", err)
+	}
+	return nil
+}
+
+func cancelPreparedPackagedUpdateHelperHandoff(staged LocalStagedUpdate) (bool, error) {
+	lease, err := acquirePackagedUpdateHelperTransitionLease(staged)
+	if err != nil {
+		return false, fmt.Errorf("cancel prepared packaged update helper handoff: %w", err)
+	}
+	defer lease.Close()
+	prepared, err := readPackagedUpdateHelperPrepared(staged)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if prepared.State != packagedUpdateOutcomePrepared && prepared.State != packagedUpdateOutcomePending {
+		return false, fmt.Errorf("prepared packaged update helper handoff has invalid state %q", prepared.State)
+	}
+	if err := os.Remove(packagedUpdateHelperPreparedPath(staged.InstallPath)); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 func authorizePackagedUpdateHelperHandoff(staged LocalStagedUpdate) error {
@@ -290,11 +334,19 @@ func waitForPackagedUpdateHelperAuthorization(ctx context.Context, staged LocalS
 }
 
 func writePackagedUpdateHelperOutcomeWithRetry(ctx context.Context, staged LocalStagedUpdate, state string) error {
+	data, err := marshalPackagedUpdateHelperOutcome(staged, state)
+	if err != nil {
+		return err
+	}
+	return writePackagedUpdateHelperStateWithRetry(ctx, packagedUpdateHelperOutcomePath(staged.InstallPath), data)
+}
+
+func writePackagedUpdateHelperStateWithRetry(ctx context.Context, path string, data []byte) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	for {
-		err := writePackagedUpdateHelperOutcome(staged, state)
+		err := atomicWriteState(path, data)
 		if err == nil {
 			return nil
 		}
