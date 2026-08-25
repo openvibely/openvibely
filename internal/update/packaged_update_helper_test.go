@@ -1,11 +1,13 @@
 package update
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExecutableUpdateHelperArgumentAndRelaunchParsingContracts(t *testing.T) {
@@ -99,5 +101,51 @@ func TestExecutableUpdateHelperArgumentAndRelaunchParsingContracts(t *testing.T)
 	}
 	if err := LoadExecutableUpdateHelperRelaunchFile(filepath.Join(root, "missing.json"), &ExecutableUpdateHelperConfig{}); err == nil {
 		t.Fatal("missing relaunch metadata file unexpectedly succeeded")
+	}
+}
+
+func TestPackagedRestartCommandPreservesHealthPortForRelaunch(t *testing.T) {
+	if _, ok := os.LookupEnv("OPENVIBELY_TEST_HELPER_PRINT_PORT"); ok {
+		if len(os.Args) > 3 {
+			_ = os.WriteFile(os.Args[3], []byte(os.Getenv("PORT")), 0o600)
+		}
+		time.Sleep(30 * time.Second)
+		return
+	}
+
+	root := t.TempDir()
+	portFile := filepath.Join(root, "port.txt")
+	t.Setenv("OPENVIBELY_TEST_HELPER_PRINT_PORT", "1")
+	cfg := ExecutableUpdateHelperConfig{
+		Current:          os.Args[0],
+		HealthURL:        "http://127.0.0.1:45678/api/system/health",
+		Arguments:        []string{"openvibely-desktop", "-test.run=TestPackagedRestartCommandPreservesHealthPortForRelaunch", "--", portFile},
+		WorkingDirectory: root,
+	}
+	stop, err := packagedRestartCommand(cfg)("exec", cfg.Current)
+	if err != nil {
+		t.Fatalf("start restart command: %v", err)
+	}
+	t.Cleanup(func() {
+		if stop != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_ = stop(ctx)
+		}
+	})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		data, err := os.ReadFile(portFile)
+		if err == nil {
+			if string(data) != "45678" {
+				t.Fatalf("PORT = %q, want 45678", data)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("child did not write port file: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -936,6 +937,9 @@ func packagedRestartCommand(cfg ExecutableUpdateHelperConfig) func(string, strin
 		cmd := exec.Command(cfg.Current, arguments[1:]...)
 		cmd.Args[0] = arguments[0]
 		cmd.Dir = cfg.WorkingDirectory
+		if health, err := url.Parse(cfg.HealthURL); err == nil && health.Port() != "" {
+			cmd.Env = append(os.Environ(), "PORT="+health.Port())
+		}
 		if err := cmd.Start(); err != nil {
 			return nil, err
 		}
