@@ -825,9 +825,11 @@ func TestCoordinatorBinaryRollbackStartupReopensDurableDrain(t *testing.T) {
 type restartingCountingInstaller struct {
 	countingInstaller
 	validates atomic.Int32
+	shutdowns atomic.Int32
 }
 
 func (i *restartingCountingInstaller) RequiresRestartValidation() bool { return true }
+func (i *restartingCountingInstaller) ShutdownForRestart()             { i.shutdowns.Add(1) }
 func (i *restartingCountingInstaller) Validate(context.Context, ReleaseMetadata) error {
 	i.validates.Add(1)
 	return nil
@@ -1213,8 +1215,8 @@ func TestCoordinatorRestartInstallerDefersValidationUntilNewProcess(t *testing.T
 	if snapshot := coordinator.Snapshot(); snapshot.State != StateRestarting {
 		t.Fatalf("state = %s", snapshot.State)
 	}
-	if installer.applies.Load() != 1 || installer.validates.Load() != 0 {
-		t.Fatalf("apply=%d validate=%d", installer.applies.Load(), installer.validates.Load())
+	if installer.applies.Load() != 1 || installer.validates.Load() != 0 || installer.shutdowns.Load() != 1 {
+		t.Fatalf("apply=%d validate=%d shutdown=%d", installer.applies.Load(), installer.validates.Load(), installer.shutdowns.Load())
 	}
 	if drain.Status().State == DrainStateIdle {
 		t.Fatal("restart validation reopened admission before the new process validated its version")

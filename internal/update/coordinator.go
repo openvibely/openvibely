@@ -41,6 +41,10 @@ type restartValidatingInstaller interface {
 	RequiresRestartValidation() bool
 }
 
+type restartShutdownInstaller interface {
+	ShutdownForRestart()
+}
+
 type resumableInstaller interface {
 	Resume(context.Context) error
 }
@@ -839,6 +843,9 @@ func (c *Coordinator) waitAndApply(ctx context.Context, release VerifiedRelease,
 				return
 			}
 			if restartValidation {
+				if restartInstaller, ok := installer.(restartShutdownInstaller); ok {
+					restartInstaller.ShutdownForRestart()
+				}
 				return
 			}
 			if !c.persistOperationStateWithRetry(ctx, generation, StateValidating, "") {

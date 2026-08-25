@@ -482,13 +482,11 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 	updateServer := serveSignedRelease(t, archive, filetype, filename, kind, releaseVersion, privateKey)
 	defer updateServer.Close()
 
-	port := freeTCPPort(t)
 	appData := filepath.Join(root, "desktop-data")
 	stdoutLog, stderrLog, readLogs := openCommandLogs(t, root, "desktop-current")
 	cmd := exec.Command(current)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(),
-		"PORT="+port,
+	cmd.Env = append(envWithout("PORT"),
 		"DATABASE_PATH="+filepath.Join(appData, "openvibely.db"),
 		"PROJECT_REPO_ROOT="+filepath.Join(root, "projects"),
 		"OPENVIBELY_APP_DATA_DIR="+appData,
@@ -507,10 +505,9 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 	t.Cleanup(func() {
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
-		killPort(t, port)
 	})
 
-	baseURL := "http://127.0.0.1:" + port
+	baseURL := waitForDesktopBaseURLFromLogs(t, readLogs)
 	waitForHealthVersion(t, baseURL, "0.5.0")
 	waitForStagedUpdate(t, baseURL)
 	resp, err := http.Post(baseURL+"/api/system/update/apply", "application/json", nil)
@@ -534,6 +531,45 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 		})
 	}
 	waitForUpdateState(t, baseURL, wantOutcome)
+}
+
+func envWithout(keys ...string) []string {
+	blocked := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		blocked[key] = true
+	}
+	env := os.Environ()
+	filtered := env[:0]
+	for _, entry := range env {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && blocked[key] {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return append([]string(nil), filtered...)
+}
+
+func waitForDesktopBaseURLFromLogs(t *testing.T, readLogs func() string) string {
+	t.Helper()
+	const marker = "[desktop] backend listening at "
+	deadline := time.Now().Add(45 * time.Second)
+	var logs string
+	for time.Now().Before(deadline) {
+		logs = readLogs()
+		if index := strings.Index(logs, marker); index >= 0 {
+			value := strings.TrimSpace(logs[index+len(marker):])
+			if lineEnd := strings.IndexAny(value, "\r\n"); lineEnd >= 0 {
+				value = strings.TrimSpace(value[:lineEnd])
+			}
+			if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
+				return value
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("desktop backend URL was not logged\n%s", logs)
+	return ""
 }
 
 func openCommandLogs(t *testing.T, dir, name string) (*os.File, *os.File, func() string) {

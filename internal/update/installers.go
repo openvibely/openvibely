@@ -181,7 +181,6 @@ func (i *WailsInstaller) startAppBundleUpdateHelper(ctx context.Context, staged 
 		MetadataTransport:  packagedHelperMetadataStdin,
 		StartHelper:        i.StartHelper,
 		AwaitHelperHandoff: i.awaitHelperHandoff,
-		Shutdown:           i.Shutdown,
 	})
 }
 
@@ -291,7 +290,9 @@ func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHel
 			return wrapPackagedHelperHandoffError(cfg.Errors.ConfirmHandoff, err)
 		}
 	}
-	cfg.Shutdown()
+	if cfg.Shutdown != nil {
+		cfg.Shutdown()
+	}
 	return nil
 }
 
@@ -438,11 +439,20 @@ func (i *WailsInstaller) Rollback(_ context.Context, value any) error {
 	return relaunch(staged.InstallPath)
 }
 func (i *WailsInstaller) RequiresRestartValidation() bool { return true }
+func (i *WailsInstaller) ShutdownForRestart() {
+	if i.Shutdown != nil {
+		i.Shutdown()
+	}
+}
 func (i *WailsInstaller) RecoveryReady() bool {
 	return strings.TrimSpace(i.HealthURL) != "" && i.Shutdown != nil
 }
 func (i *WailsInstaller) RecoverPackagedUpdateRestart(ctx context.Context, staged LocalStagedUpdate) error {
-	return i.startAppBundleUpdateHelper(ctx, staged, true)
+	if err := i.startAppBundleUpdateHelper(ctx, staged, true); err != nil {
+		return err
+	}
+	i.ShutdownForRestart()
+	return nil
 }
 
 func currentApplicationBundle() (string, error) {
@@ -1155,7 +1165,6 @@ func (i *BinaryInstaller) Apply(ctx context.Context, value any) error {
 		MetadataTransport:  packagedHelperMetadataFile,
 		StartHelper:        i.StartHelper,
 		AwaitHelperHandoff: i.awaitHelperHandoff,
-		Shutdown:           i.Shutdown,
 		Errors: packagedUpdateHelperHandoffErrors{
 			PrepareHelper:      "prepare executable update helper",
 			ClearPriorHandoff:  "clear prior executable update helper handoff",
@@ -1265,7 +1274,12 @@ func (i *BinaryInstaller) Rollback(_ context.Context, value any) error {
 }
 
 func (i *BinaryInstaller) RequiresRestartValidation() bool { return true }
-func (i *BinaryInstaller) RecoveryReady() bool             { return strings.TrimSpace(i.HealthURL) != "" }
+func (i *BinaryInstaller) ShutdownForRestart() {
+	if i.Shutdown != nil {
+		i.Shutdown()
+	}
+}
+func (i *BinaryInstaller) RecoveryReady() bool { return strings.TrimSpace(i.HealthURL) != "" }
 
 func validateBinaryPaths(s LocalStagedUpdate) error {
 	if !filepath.IsAbs(s.InstallPath) || !filepath.IsAbs(s.ArtifactPath) || !filepath.IsAbs(s.BackupPath) {

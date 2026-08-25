@@ -337,8 +337,12 @@ func TestWailsInstallerApplyUsesJournaledHealthValidatingHelper(t *testing.T) {
 	if err := installer.Apply(context.Background(), staged); err != nil {
 		t.Fatal(err)
 	}
-	if helper == nil || helper.Args[1] != AppBundleUpdateHelperCommand || !shutdown {
+	if helper == nil || helper.Args[1] != AppBundleUpdateHelperCommand || shutdown {
 		t.Fatalf("helper=%#v shutdown=%v", helper, shutdown)
+	}
+	installer.ShutdownForRestart()
+	if !shutdown {
+		t.Fatal("shutdown was not requested after apply returned")
 	}
 	if strings.Contains(strings.Join(helper.Args, "\x00"), "--user-argument") {
 		t.Fatal("desktop relaunch arguments leaked into helper argv")
@@ -1008,7 +1012,7 @@ func TestBinaryInstallerApplyWrapsHelperHandoffPhaseErrors(t *testing.T) {
 	}
 }
 
-func TestBinaryInstallerRequiresAndRequestsShutdownAfterHelperStarts(t *testing.T) {
+func TestBinaryInstallerDefersShutdownUntilApplyReturns(t *testing.T) {
 	root := t.TempDir()
 	current := filepath.Join(root, "openvibely")
 	if err := os.WriteFile(current, []byte("old"), 0o755); err != nil {
@@ -1035,8 +1039,12 @@ func TestBinaryInstallerRequiresAndRequestsShutdownAfterHelperStarts(t *testing.
 	if err := installer.Apply(context.Background(), bindBinaryRestartOrigin(staged, installer)); err != nil {
 		t.Fatal(err)
 	}
-	if !started || !shutdown {
+	if !started || shutdown {
 		t.Fatalf("started=%v shutdown=%v", started, shutdown)
+	}
+	installer.ShutdownForRestart()
+	if !shutdown {
+		t.Fatal("shutdown was not requested after apply returned")
 	}
 	helperPath := packagedUpdateHelperPath(current, ExecutableUpdateHelperCommand)
 	if data, err := os.ReadFile(helperPath); err != nil || string(data) != "old" {
