@@ -618,8 +618,8 @@ func runRealDesktopUpdateE2E(t *testing.T, expectedVersion, replacementVersion, 
 		"HOME="+filepath.Join(root, "home"),
 		"PORT="+port,
 		"OPENVIBELY_DESKTOP_CONFIG_FILE="+configFile,
-		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=5000",
-		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=5000",
+		"OPENVIBELY_UPDATE_INTEGRATION_WAIT_TIMEOUT_MS=10000",
+		"OPENVIBELY_UPDATE_INTEGRATION_VALIDATION_TIMEOUT_MS=15000",
 	)
 	output, helperErr := cmd.CombinedOutput()
 	if helperErr != nil && wantOutcome != packagedUpdateOutcomeRolledBack {

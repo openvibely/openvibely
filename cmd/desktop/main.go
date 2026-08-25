@@ -258,17 +258,19 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 	}
 	var updaterErr error
 	var updaterErrMu sync.Mutex
-	app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
-		coordinator.SetDesktopRelaunchContext(baseURL+"/api/system/health", os.Args, workingDirectory, app.Quit)
-		if err := coordinator.BindWailsUpdater(app.Updater); err != nil {
-			updaterErrMu.Lock()
-			updaterErr = err
-			updaterErrMu.Unlock()
-			app.Quit()
-		}
-	})
-
-	app.Window.NewWithOptions(application.WebviewWindowOptions{
+	var bindUpdaterOnce sync.Once
+	bindUpdater := func() {
+		bindUpdaterOnce.Do(func() {
+			coordinator.SetDesktopRelaunchContext(baseURL+"/api/system/health", os.Args, workingDirectory, app.Quit)
+			if err := coordinator.BindWailsUpdater(app.Updater); err != nil {
+				updaterErrMu.Lock()
+				updaterErr = err
+				updaterErrMu.Unlock()
+				app.Quit()
+			}
+		})
+	}
+	window := app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "main",
 		Title:     "OpenVibely",
 		URL:       baseURL,
@@ -277,6 +279,7 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		MinWidth:  1024,
 		MinHeight: 680,
 	})
+	registerDesktopUpdaterBinding(runtime.GOOS, app.Event.OnApplicationEvent, window.OnWindowEvent, application.InvokeAsync, bindUpdater)
 
 	if err := app.Run(); err != nil {
 		return err
@@ -287,4 +290,22 @@ func launchNativeWindow(baseURL string, onShutdown func(), coordinator *update.C
 		return fmt.Errorf("configure Wails updater: %w", updaterErr)
 	}
 	return nil
+}
+
+func registerDesktopUpdaterBinding(
+	goos string,
+	onApplicationEvent func(events.ApplicationEventType, func(*application.ApplicationEvent)) func(),
+	onWindowEvent func(events.WindowEventType, func(*application.WindowEvent)) func(),
+	invokeAfterNativeEvent func(func()),
+	bind func(),
+) {
+	if goos == "windows" {
+		onWindowEvent(events.Windows.WebViewNavigationCompleted, func(*application.WindowEvent) {
+			invokeAfterNativeEvent(bind)
+		})
+		return
+	}
+	onApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
+		bind()
+	})
 }

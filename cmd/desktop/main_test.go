@@ -13,6 +13,8 @@ import (
 
 	"github.com/openvibely/openvibely/internal/config"
 	"github.com/openvibely/openvibely/internal/update"
+	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // TestEnsureDesktopPATHMakesGoLocatable reproduces the "bash: go: command not
@@ -150,6 +152,62 @@ func TestDesktopWindowUsesEphemeralPortWebViewWithPersistentStorage(t *testing.T
 		if strings.Contains(source, disallowed) {
 			t.Fatalf("desktop launcher appears to override persistent WebView storage with %s", disallowed)
 		}
+	}
+}
+
+func TestRegisterDesktopUpdaterBinding(t *testing.T) {
+	tests := []struct {
+		name            string
+		goos            string
+		wantApplication events.ApplicationEventType
+		wantWindow      events.WindowEventType
+	}{
+		{name: "Windows waits for native WebView navigation", goos: "windows", wantWindow: events.Windows.WebViewNavigationCompleted},
+		{name: "Linux binds during application startup", goos: "linux", wantApplication: events.Common.ApplicationStarted},
+		{name: "macOS binds during application startup", goos: "darwin", wantApplication: events.Common.ApplicationStarted},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var gotApplication events.ApplicationEventType
+			var gotWindow events.WindowEventType
+			var applicationCallback func(*application.ApplicationEvent)
+			var windowCallback func(*application.WindowEvent)
+			var deferredBind func()
+			binds := 0
+			registerDesktopUpdaterBinding(
+				test.goos,
+				func(event events.ApplicationEventType, callback func(*application.ApplicationEvent)) func() {
+					gotApplication, applicationCallback = event, callback
+					return func() {}
+				},
+				func(event events.WindowEventType, callback func(*application.WindowEvent)) func() {
+					gotWindow, windowCallback = event, callback
+					return func() {}
+				},
+				func(callback func()) { deferredBind = callback },
+				func() { binds++ },
+			)
+			if gotApplication != test.wantApplication || gotWindow != test.wantWindow {
+				t.Fatalf("registered application event %d and window event %d, want %d and %d", gotApplication, gotWindow, test.wantApplication, test.wantWindow)
+			}
+			if applicationCallback != nil {
+				applicationCallback(nil)
+			}
+			if windowCallback != nil {
+				windowCallback(nil)
+			}
+			if test.goos == "windows" {
+				if binds != 0 || deferredBind == nil {
+					t.Fatalf("Windows bind ran before native callback deferral: binds=%d deferred=%v", binds, deferredBind != nil)
+				}
+				deferredBind()
+			} else if deferredBind != nil {
+				t.Fatal("non-Windows updater binding unexpectedly used native callback deferral")
+			}
+			if binds != 1 {
+				t.Fatalf("updater bind callback count = %d, want 1", binds)
+			}
+		})
 	}
 }
 
