@@ -302,7 +302,7 @@ func TestPackagedUpdateHelperRunsInPlaceForMacAppBundles(t *testing.T) {
 		{name: "macOS app bundle", goos: "darwin", installPath: "/Applications/OpenVibely.app", want: true},
 		{name: "macOS standalone binary", goos: "darwin", installPath: "/usr/local/bin/openvibely", want: false},
 		{name: "Linux desktop executable", goos: "linux", installPath: "/home/me/.local/share/openvibely/bin/openvibely-desktop", want: false},
-		{name: "Windows desktop executable", goos: "windows", installPath: `C:\Users\me\AppData\Local\Programs\OpenVibely\openvibely-desktop.exe`, want: false},
+		{name: "Windows desktop executable", goos: "windows", installPath: `C:\Users\me\AppData\Local\Programs\OpenVibely Desktop\openvibely-desktop.exe`, want: false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if got := runPackagedUpdateHelperInPlace(test.goos, test.installPath); got != test.want {
