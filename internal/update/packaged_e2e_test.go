@@ -325,13 +325,13 @@ func preparePackagedRecoveryPersistence(t *testing.T, appData string, staged Loc
 	if err := drain.SetPersistence(filepath.Join(appData, "update-drain.json")); err != nil {
 		t.Fatal(err)
 	}
-	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
-	if err != nil || !drain.TakeOwnership(status.Generation) {
-		t.Fatalf("prepare recovery drain: status=%#v err=%v", status, err)
-	}
 	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: currentVersion}, Distribution: distribution}, "stable", drain, nil, false, "", nil)
 	if err := coordinator.SetPersistence(filepath.Join(appData, "update-coordinator.json")); err != nil {
 		t.Fatal(err)
+	}
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("prepare recovery drain: status=%#v err=%v", status, err)
 	}
 	coordinator.mu.Lock()
 	coordinator.state = StateRestarting

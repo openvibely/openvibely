@@ -2840,6 +2840,20 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 	active := models.Execution{TaskID: task.ID, AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "Finishing the prior implementation run"}
 	require.NoError(t, tc.execRepo.Create(ctx, &active))
 
+	started := make(chan testutil.MockLLMCall, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseFollowup := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseFollowup)
+	mock := testutil.NewMockLLMCaller()
+	mock.Response = "continued"
+	mock.TextOnly = "continued"
+	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
+		started <- call
+		<-release
+	}
+	tc.handler.llmSvc.SetLLMCaller(mock)
+
 	goalContext := lifecycle.WithHookAgent(context.Background(), lifecycle.HookAgent{AgentID: "goal-agent", SystemKind: models.AgentSystemKindGoal})
 	output, err := tc.handler.executeSendToTaskTool(goalContext, streamingResponseParams{
 		ProjectID: project.ID, TaskID: task.ID, IsTaskFollowup: true,
@@ -2865,20 +2879,6 @@ func TestGoalAgentAutomationImplementationContinuationProjectsRunningNode(t *tes
 	require.NoError(t, err)
 	require.Equal(t, 1, portfolioCounts[definition.Automation.ID].Running)
 	require.Zero(t, portfolioCounts[definition.Automation.ID].CompletedRecently)
-
-	started := make(chan testutil.MockLLMCall, 1)
-	release := make(chan struct{})
-	var releaseOnce sync.Once
-	releaseFollowup := func() { releaseOnce.Do(func() { close(release) }) }
-	t.Cleanup(releaseFollowup)
-	mock := testutil.NewMockLLMCaller()
-	mock.Response = "continued"
-	mock.TextOnly = "continued"
-	mock.OnCall = func(_ context.Context, call testutil.MockLLMCall) {
-		started <- call
-		<-release
-	}
-	tc.handler.llmSvc.SetLLMCaller(mock)
 
 	require.NoError(t, tc.execRepo.Complete(ctx, active.ID, models.ExecCompleted, "", "", 0, 0))
 	// Completing an execution directly bypasses the normal LLM-service completion
