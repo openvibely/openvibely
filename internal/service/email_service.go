@@ -524,6 +524,7 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 		return
 	}
 	mailboxIdentity := emailMailboxIdentity(cfg)
+	acknowledgementIDs := make([]uint32, 0, len(messages))
 	for _, fetched := range messages {
 		messageKey, ok := emailInboundMessageKey(fetched.Message, mailbox.UidValidity, fetched.UID)
 		if !ok {
@@ -537,9 +538,7 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 				continue
 			}
 			if received {
-				if err := storeSeen(client, []uint32{fetched.ID}); err != nil {
-					applog.Infof("[email] mark previously handed-off message %d seen failed: %v", fetched.ID, err)
-				}
+				acknowledgementIDs = append(acknowledgementIDs, fetched.ID)
 				continue
 			}
 		}
@@ -557,8 +556,11 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 				applog.Infof("[email] record receipt for message %d failed: %v", fetched.ID, err)
 			}
 		}
-		if err := storeSeen(client, []uint32{fetched.ID}); err != nil {
-			applog.Infof("[email] mark message %d seen failed: %v", fetched.ID, err)
+		acknowledgementIDs = append(acknowledgementIDs, fetched.ID)
+	}
+	if len(acknowledgementIDs) > 0 {
+		if err := storeSeen(client, acknowledgementIDs); err != nil {
+			applog.Infof("[email] mark %d handled messages seen failed: %v", len(acknowledgementIDs), err)
 		}
 	}
 }

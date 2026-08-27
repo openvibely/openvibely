@@ -147,9 +147,39 @@ func TestEmailPollOnceDoesNotDeduplicateDistinctIdenticalMessagesWithoutMessageI
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
 }
 
+func TestEmailPollOnceBatchesReceiptRecoveryWithNewHandoff(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+	receipts := repository.NewEmailInboundReceiptRepo(db)
+	mailboxIdentity := emailMailboxIdentity(cfg)
+	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
+	client := newFakeEmailIMAPClient(
+		testIMAPMessage(1, "already handed off", "alice@example.com"),
+		testIMAPMessage(2, "new handoff", "alice@example.com"),
+	)
+	processed := 0
+	svc := &EmailService{emailInboundReceiptStore: receipts}
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processed++
+		return true
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(ctx, cfg)
+
+	assert.Equal(t, 1, processed, "receipt recovery must skip durable work for the first message")
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, 1, client.storeCalls)
+	assert.Equal(t, [][]uint32{{1, 2}}, client.storeBatches())
+}
+
 func TestEmailPollOnceDoesNotRepeatDurableHandoffAfterStoreFailure(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	client := newFakeEmailIMAPClient(testIMAPMessage(1, "durable", "alice@example.com"))
+	client := newFakeEmailIMAPClient(
+		testIMAPMessage(1, "durable-one", "alice@example.com"),
+		testIMAPMessage(2, "durable-two", "alice@example.com"),
+	)
 	client.storeFailures = 1
 	receipts := repository.NewEmailInboundReceiptRepo(db)
 	processed := 0
@@ -166,11 +196,13 @@ func TestEmailPollOnceDoesNotRepeatDurableHandoffAfterStoreFailure(t *testing.T)
 
 	newService().pollOnce(context.Background(), cfg)
 	require.Empty(t, client.seenIDs())
-	require.Equal(t, 1, processed)
+	require.Equal(t, 2, processed)
+	assert.Equal(t, [][]uint32{{1, 2}}, client.storeBatches())
 
 	newService().pollOnce(context.Background(), cfg)
-	assert.Equal(t, []uint32{1}, client.seenIDs())
-	assert.Equal(t, 1, processed)
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, 2, processed)
+	assert.Equal(t, [][]uint32{{1, 2}, {1, 2}}, client.storeBatches())
 }
 
 func TestEmailPollOnceSkipsPostSuccessRecordAfterFirstTurnWithHandoff(t *testing.T) {
@@ -267,6 +299,7 @@ func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
 
 	svc.pollOnce(ctx, cfg)
 	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1}}, client.storeBatches())
 	tasks, err := taskRepo.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
@@ -277,6 +310,7 @@ func TestEmailPollOnceMixedBatchRetriesRealTaskCreationFailure(t *testing.T) {
 	client.messages[2] = testIMAPMessageWithBody(2, "retry", "alice@example.com", "transient task failure")
 	svc.pollOnce(ctx, cfg)
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1}, {2}}, client.storeBatches())
 	tasks, err = taskRepo.ListByProject(ctx, project.ID, "")
 	require.NoError(t, err)
 	assert.Len(t, tasks, 2)
@@ -342,9 +376,28 @@ func TestEmailPollOnceMixedBatchRetriesRealQueueWriteFailure(t *testing.T) {
 	client.messages[2] = testIMAPReplyWithBody(2, "Queue thread", "alice@example.com", rootMessageID, "transient queue failure")
 	svc.pollOnce(ctx, cfg)
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1}, {2}}, client.storeBatches())
 	inputs, err = threadInputRepo.ListPendingForChat(ctx, project.ID)
 	require.NoError(t, err)
 	require.Len(t, inputs, 2)
+}
+
+func TestEmailPollOnceBatchesAcknowledgements(t *testing.T) {
+	client := newFakeEmailIMAPClient(
+		testIMAPMessage(1, "first", "alice@example.com"),
+		testIMAPMessage(2, "second", "alice@example.com"),
+	)
+	svc := &EmailService{}
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		return true
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
+
+	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, 1, client.storeCalls)
+	assert.Equal(t, [][]uint32{{1, 2}}, client.storeBatches())
 }
 
 func TestEmailPollOnceAcknowledgesOnlySuccessfulMessagesAndRetriesFailures(t *testing.T) {
@@ -362,11 +415,50 @@ func TestEmailPollOnceAcknowledgesOnlySuccessfulMessagesAndRetriesFailures(t *te
 
 	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
 	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1}}, client.storeBatches())
 	assert.Equal(t, map[string]int{"success": 1, "retry": 1}, attempts)
 
 	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
+	assert.Equal(t, [][]uint32{{1}, {2}}, client.storeBatches())
 	assert.Equal(t, map[string]int{"success": 1, "retry": 2}, attempts)
+}
+
+func BenchmarkEmailAcknowledgements(b *testing.B) {
+	for _, messageCount := range []int{10, 100, 1000} {
+		for _, batched := range []bool{false, true} {
+			name := "PerMessage"
+			if batched {
+				name = "Batched"
+			}
+			b.Run(fmt.Sprintf("%s/%d", name, messageCount), func(b *testing.B) {
+				client := newFakeEmailIMAPClient()
+				client.storeDelay = 100 * time.Microsecond
+				ids := make([]uint32, messageCount)
+				for i := range ids {
+					ids[i] = uint32(i + 1)
+				}
+
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					if batched {
+						if err := storeSeen(client, ids); err != nil {
+							b.Fatal(err)
+						}
+						continue
+					}
+					for _, id := range ids {
+						if err := storeSeen(client, []uint32{id}); err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+				b.StopTimer()
+				b.ReportMetric(float64(client.storeCalls)/float64(b.N), "store_calls/op")
+			})
+		}
+	}
 }
 
 func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
@@ -383,6 +475,7 @@ func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
 	svc.pollOnce(context.Background(), EmailRuntimeConfig{})
 
 	assert.Empty(t, client.seenIDs())
+	assert.Zero(t, client.storeCalls)
 	assert.Zero(t, processed)
 	assert.Equal(t, 2, client.fetchCount)
 }
@@ -391,7 +484,10 @@ type fakeEmailIMAPClient struct {
 	messages      map[uint32]*imap.Message
 	seen          map[uint32]bool
 	fetchCount    int
+	storeCalls    int
+	storedIDs     [][]uint32
 	storeFailures int
+	storeDelay    time.Duration
 	uidValidity   uint32
 }
 
@@ -468,18 +564,36 @@ func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, _ []imap.FetchItem, ch 
 	return nil
 }
 func (c *fakeEmailIMAPClient) Store(seqset *imap.SeqSet, _ imap.StoreItem, _ interface{}, _ chan *imap.Message) error {
+	c.storeCalls++
+	var storedIDs []uint32
+	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
+		if seqset.Contains(id) {
+			storedIDs = append(storedIDs, id)
+		}
+	}
+	if len(storedIDs) > 0 {
+		c.storedIDs = append(c.storedIDs, storedIDs)
+	}
+	if c.storeDelay > 0 {
+		time.Sleep(c.storeDelay)
+	}
 	if c.storeFailures > 0 {
 		c.storeFailures--
 		return fmt.Errorf("transient store failure")
 	}
-	for id := range c.messages {
-		if seqset.Contains(id) {
-			c.seen[id] = true
-		}
+	for _, id := range storedIDs {
+		c.seen[id] = true
 	}
 	return nil
 }
 func (c *fakeEmailIMAPClient) Logout() error { return nil }
+func (c *fakeEmailIMAPClient) storeBatches() [][]uint32 {
+	batches := make([][]uint32, len(c.storedIDs))
+	for i, ids := range c.storedIDs {
+		batches[i] = append([]uint32(nil), ids...)
+	}
+	return batches
+}
 func (c *fakeEmailIMAPClient) seenIDs() []uint32 {
 	var ids []uint32
 	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
