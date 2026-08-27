@@ -151,9 +151,8 @@ func (c *Coordinator) SetPersistence(path string) error {
 	c.persistence = path
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
+		data = []byte(`{"state":"idle"}`)
+	} else if err != nil {
 		return err
 	}
 	var persisted struct {
@@ -176,6 +175,33 @@ func (c *Coordinator) SetPersistence(path string) error {
 	}
 	if persisted.StagedRelease != nil {
 		c.staged = *persisted.StagedRelease
+	}
+	if staged, ok := c.staged.(LocalStagedUpdate); ok {
+		cancelled, err := packagedUpdateReinstallRequested(staged)
+		if err != nil {
+			return fmt.Errorf("read manual reinstall cancellation: %w", err)
+		}
+		if cancelled {
+			running, err := packagedUpdateHelperRunning(staged)
+			if err != nil {
+				return fmt.Errorf("inspect update helper during manual reinstall: %w", err)
+			}
+			if running {
+				return errors.New("manual reinstall cancellation is waiting for the update helper to stop")
+			}
+			if c.drain != nil && c.drain.Status().State != DrainStateIdle && !c.drain.CancelDrain() {
+				return errors.New("clear update drain after manual reinstall")
+			}
+			c.state, c.release, c.staged, c.lastError, c.operationGeneration = StateIdle, nil, nil, "", ""
+			c.clearAcceptanceLocked()
+			if err := c.persistLocked(); err != nil {
+				return err
+			}
+			if err := os.Remove(packagedUpdateReinstallCancellationPath(staged.InstallPath)); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove manual reinstall cancellation: %w", err)
+			}
+			return nil
+		}
 	}
 	if c.accepted {
 		if c.release == nil || c.acceptanceLease <= 0 {
@@ -241,7 +267,44 @@ func (c *Coordinator) SetPersistence(path string) error {
 			return err
 		}
 	}
+	managedActive := c.managedStateProvider != nil && c.managedStateProvider().Active
+	if c.drain != nil && !managedActive && !isTransitionState(c.state) && !c.accepted {
+		status := c.drain.Status()
+		if status.State != DrainStateIdle {
+			running := false
+			if staged, ok := c.staged.(LocalStagedUpdate); ok {
+				var err error
+				running, err = packagedUpdateHelperRunning(staged)
+				if err != nil {
+					return fmt.Errorf("inspect helper for orphaned update drain: %w", err)
+				}
+			}
+			if !running {
+				if !c.drain.CancelDrain() {
+					return errors.New("clear orphaned update drain")
+				}
+				c.operationGeneration = ""
+				if err := c.persistLocked(); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	return nil
+}
+
+func packagedUpdateHelperRunning(staged LocalStagedUpdate) (bool, error) {
+	if staged.OutcomeID == "" || staged.InstallPath == "" {
+		return false, nil
+	}
+	lease, acquired, err := tryAcquirePackagedUpdateHelperLease(packagedUpdateHelperLeasePath(staged))
+	if err != nil {
+		return false, err
+	}
+	if !acquired {
+		return true, nil
+	}
+	return false, lease.Close()
 }
 func (c *Coordinator) persistLocked() error {
 	if c.persistence == "" {

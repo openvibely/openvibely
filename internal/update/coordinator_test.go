@@ -90,6 +90,11 @@ func TestCoordinatorDesktopRestartRequiresJournaledHealthOutcome(t *testing.T) {
 	if err := drain.SetPersistence(drainPath); err != nil {
 		t.Fatal(err)
 	}
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json")})
+	old := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.6.0"}, Distribution: buildinfo.DistributionDesktop}, "stable", drain, nil, false, "", nil)
+	if err := old.SetPersistence(coordinatorPath); err != nil {
+		t.Fatal(err)
+	}
 	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
 	if err != nil || !drain.TakeOwnership(status.Generation) {
 		t.Fatalf("own drain: status=%#v err=%v", status, err)
@@ -102,11 +107,6 @@ func TestCoordinatorDesktopRestartRequiresJournaledHealthOutcome(t *testing.T) {
 		}
 	}
 	if err := writePackagedUpdateHelperPhase(staged, packagedUpdateOutcomeValidating); err != nil {
-		t.Fatal(err)
-	}
-	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json")})
-	old := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.6.0"}, Distribution: buildinfo.DistributionDesktop}, "stable", drain, nil, false, "", nil)
-	if err := old.SetPersistence(coordinatorPath); err != nil {
 		t.Fatal(err)
 	}
 	old.mu.Lock()
@@ -251,12 +251,12 @@ func TestCoordinatorRestartRecoveryConfirmsVersionAndReopensDurableDrain(t *test
 	if err := drain.SetPersistence(drainPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := drain.BeginDrain(DrainRequest{Lease: time.Hour}); err != nil {
-		t.Fatal(err)
-	}
 	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }})
 	old := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, nil, false, "", nil)
 	if err := old.SetPersistence(coordinatorPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := drain.BeginDrain(DrainRequest{Lease: time.Hour}); err != nil {
 		t.Fatal(err)
 	}
 	old.mu.Lock()
@@ -961,12 +961,12 @@ func TestCoordinatorBinaryRollbackStartupReopensDurableDrain(t *testing.T) {
 	if err := drain.SetPersistence(drainPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := drain.BeginDrain(DrainRequest{Lease: time.Hour}); err != nil {
-		t.Fatal(err)
-	}
 	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }})
 	old := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, nil, false, "", nil)
 	if err := old.SetPersistence(coordinatorPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := drain.BeginDrain(DrainRequest{Lease: time.Hour}); err != nil {
 		t.Fatal(err)
 	}
 	old.mu.Lock()
@@ -1478,17 +1478,17 @@ func TestCoordinatorResumesPersistedInstallerRequestAfterRestart(t *testing.T) {
 	if err := drain.SetPersistence(drainPath); err != nil {
 		t.Fatal(err)
 	}
+	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }})
+	old := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionDocker}, "stable", drain, nil, false, "", nil)
+	if err := old.SetPersistence(coordinatorPath); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := drain.BeginDrain(DrainRequest{Lease: time.Hour}); err != nil {
 		t.Fatal(err)
 	}
 	generation := drain.Status().Generation
 	if !drain.TakeOwnership(generation) {
 		t.Fatal("take drain ownership")
-	}
-	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: func() time.Time { return now }})
-	old := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionDocker}, "stable", drain, nil, false, "", nil)
-	if err := old.SetPersistence(coordinatorPath); err != nil {
-		t.Fatal(err)
 	}
 	old.mu.Lock()
 	old.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now.Add(time.Hour)}}
@@ -1899,16 +1899,16 @@ func TestCoordinatorRestartAutonomouslyExpiresOrphanDrainAfterWaitingTransitionC
 	if err := oldDrain.SetPersistence(drainPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := oldDrain.BeginDrain(DrainRequest{Lease: time.Second}); err != nil {
-		t.Fatal(err)
-	}
 	client := NewClient(ClientConfig{Channel: "stable", StatePath: filepath.Join(root, "client.json"), Now: now})
 	oldCoordinator := NewCoordinator(client, CurrentBuild{Build: buildinfo.Build{Version: "0.5.0"}, Distribution: buildinfo.DistributionBinary}, "stable", oldDrain, nil, false, "", nil)
 	if err := oldCoordinator.SetPersistence(coordinatorPath); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := oldDrain.BeginDrain(DrainRequest{Lease: time.Second}); err != nil {
+		t.Fatal(err)
+	}
 	oldCoordinator.mu.Lock()
-	oldCoordinator.state = StateAvailable
+	oldCoordinator.state = StateWaitingForIdle
 	oldCoordinator.release = &VerifiedRelease{Metadata: ReleaseMetadata{Version: "0.6.0", Channel: "stable", ExpiresAt: now().Add(time.Hour)}}
 	if err := oldCoordinator.persistLocked(); err != nil {
 		oldCoordinator.mu.Unlock()
@@ -2662,5 +2662,205 @@ func TestCoordinatorManualReadyPersistenceFailureStillExpiresAutonomously(t *tes
 	}
 	if snapshot := coordinator.Snapshot(); snapshot.State != StateIdle || snapshot.Drain.State != DrainStateIdle {
 		t.Fatalf("manual coordinator cleanup did not settle: %#v", snapshot)
+	}
+}
+
+func TestCoordinatorClearsOrphanedPersistedDrain(t *testing.T) {
+	root := t.TempDir()
+	drain := NewDrainManager(nil, nil, 0, nil)
+	if err := drain.SetPersistence(filepath.Join(root, "update-drain.json")); err != nil {
+		t.Fatal(err)
+	}
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("own drain: status=%#v err=%v", status, err)
+	}
+	coordinatorPath := filepath.Join(root, "update-coordinator.json")
+	if err := os.WriteFile(coordinatorPath, []byte(`{"state":"idle"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.6.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, nil, false, "", nil)
+	if err := coordinator.SetPersistence(coordinatorPath); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := coordinator.Snapshot(); snapshot.State != StateIdle || snapshot.Drain.State != DrainStateIdle {
+		t.Fatalf("orphaned drain was not cleared: %#v", snapshot)
+	}
+}
+
+func TestCoordinatorClearsOrphanedDrainWithoutCoordinatorState(t *testing.T) {
+	root := t.TempDir()
+	drain := NewDrainManager(nil, nil, 0, nil)
+	if err := drain.SetPersistence(filepath.Join(root, "update-drain.json")); err != nil {
+		t.Fatal(err)
+	}
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("own drain: status=%#v err=%v", status, err)
+	}
+	coordinatorPath := filepath.Join(root, "update-coordinator.json")
+	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.6.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, nil, false, "", nil)
+	if err := coordinator.SetPersistence(coordinatorPath); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := coordinator.Snapshot(); snapshot.State != StateIdle || snapshot.Drain.State != DrainStateIdle {
+		t.Fatalf("orphaned drain was not cleared without coordinator state: %#v", snapshot)
+	}
+	if _, err := os.Stat(coordinatorPath); err != nil {
+		t.Fatalf("normalized coordinator state was not persisted: %v", err)
+	}
+}
+
+func TestCoordinatorReportsOrphanedDrainCancellationFailure(t *testing.T) {
+	root := t.TempDir()
+	drain := NewDrainManager(nil, nil, 0, nil)
+	if err := drain.SetPersistence(filepath.Join(root, "update-drain.json")); err != nil {
+		t.Fatal(err)
+	}
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("own drain: status=%#v err=%v", status, err)
+	}
+	drain.stateWriter = func(string, []byte) error { return errors.New("disk full") }
+	coordinatorPath := filepath.Join(root, "update-coordinator.json")
+	if err := os.WriteFile(coordinatorPath, []byte(`{"state":"idle"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.6.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, nil, false, "", nil)
+	if err := coordinator.SetPersistence(coordinatorPath); err == nil || !strings.Contains(err.Error(), "clear orphaned update drain") {
+		t.Fatalf("expected orphaned drain cancellation failure, got %v", err)
+	}
+	if got := drain.Status(); got.State == DrainStateIdle || got.Generation != status.Generation {
+		t.Fatalf("failed cancellation did not restore the active drain: %#v", got)
+	}
+}
+
+func TestCoordinatorPreservesHostedManagedDrain(t *testing.T) {
+	root := t.TempDir()
+	drain := NewDrainManager(nil, nil, 0, nil)
+	if err := drain.SetPersistence(filepath.Join(root, "update-drain.json")); err != nil {
+		t.Fatal(err)
+	}
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("own hosted drain: status=%#v err=%v", status, err)
+	}
+	coordinatorPath := filepath.Join(root, "update-coordinator.json")
+	if err := os.WriteFile(coordinatorPath, []byte(`{"state":"idle"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.6.0"}, Distribution: buildinfo.DistributionHosted}, "stable", drain, nil, false, "", nil)
+	coordinator.SetManagedStateProvider(func() ManagedUpdateState {
+		return ManagedUpdateState{Active: true, State: StateWaitingForIdle, DesiredVersion: "0.7.0"}
+	})
+	if err := coordinator.SetPersistence(coordinatorPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := drain.Status(); got.State == DrainStateIdle || got.Generation != status.Generation {
+		t.Fatalf("hosted drain was cleared: %#v", got)
+	}
+}
+
+func TestCoordinatorManualReinstallCancelsPersistedPackagedUpdate(t *testing.T) {
+	root := t.TempDir()
+	drain := NewDrainManager(nil, nil, 0, nil)
+	if err := drain.SetPersistence(filepath.Join(root, "update-drain.json")); err != nil {
+		t.Fatal(err)
+	}
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("own drain: status=%#v err=%v", status, err)
+	}
+	staged := LocalStagedUpdate{
+		ArtifactPath: filepath.Join(root, "openvibely.openvibely-new"),
+		InstallPath:  filepath.Join(root, "openvibely"),
+		BackupPath:   filepath.Join(root, "openvibely.openvibely-backup"),
+		Version:      "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1",
+	}
+	persisted := struct {
+		State               string             `json:"state"`
+		Release             *VerifiedRelease   `json:"release"`
+		StagedLocal         *LocalStagedUpdate `json:"staged_local"`
+		OperationGeneration string             `json:"operation_generation"`
+	}{
+		State:       StateRestarting,
+		Release:     &VerifiedRelease{Metadata: ReleaseMetadata{Version: staged.Version, Channel: "stable", ExpiresAt: time.Now().Add(time.Hour)}},
+		StagedLocal: &staged, OperationGeneration: status.Generation,
+	}
+	data, err := json.Marshal(persisted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinatorPath := filepath.Join(root, "update-coordinator.json")
+	if err := os.WriteFile(coordinatorPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packagedUpdateReinstallCancellationPath(staged.InstallPath), []byte(staged.OutcomeID+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.7.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, nil, false, "", nil)
+	if err := coordinator.SetPersistence(coordinatorPath); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot := coordinator.Snapshot(); snapshot.State != StateIdle || snapshot.Release != nil || snapshot.Staged || snapshot.Drain.State != DrainStateIdle {
+		t.Fatalf("manual reinstall state was not cleared: %#v", snapshot)
+	}
+	if _, err := os.Stat(packagedUpdateReinstallCancellationPath(staged.InstallPath)); !os.IsNotExist(err) {
+		t.Fatalf("manual reinstall marker remains: %v", err)
+	}
+}
+
+func TestCoordinatorManualReinstallWaitsForPackagedUpdateHelper(t *testing.T) {
+	root := t.TempDir()
+	drain := NewDrainManager(nil, nil, 0, nil)
+	if err := drain.SetPersistence(filepath.Join(root, "update-drain.json")); err != nil {
+		t.Fatal(err)
+	}
+	status, err := drain.BeginDrain(DrainRequest{Lease: time.Hour})
+	if err != nil || !drain.TakeOwnership(status.Generation) {
+		t.Fatalf("own drain: status=%#v err=%v", status, err)
+	}
+	staged := LocalStagedUpdate{
+		ArtifactPath: filepath.Join(root, "openvibely.openvibely-new"),
+		InstallPath:  filepath.Join(root, "openvibely"),
+		BackupPath:   filepath.Join(root, "openvibely.openvibely-backup"),
+		Version:      "0.6.0", PreviousVersion: "0.5.0", OutcomeID: "operation-1",
+	}
+	lease, acquired, err := tryAcquirePackagedUpdateHelperLease(packagedUpdateHelperLeasePath(staged))
+	if err != nil || !acquired {
+		t.Fatalf("acquire helper lease: acquired=%v err=%v", acquired, err)
+	}
+	defer lease.Close()
+	persisted := struct {
+		State               string             `json:"state"`
+		Release             *VerifiedRelease   `json:"release"`
+		StagedLocal         *LocalStagedUpdate `json:"staged_local"`
+		OperationGeneration string             `json:"operation_generation"`
+	}{
+		State:       StateRestarting,
+		Release:     &VerifiedRelease{Metadata: ReleaseMetadata{Version: staged.Version, Channel: "stable", ExpiresAt: time.Now().Add(time.Hour)}},
+		StagedLocal: &staged, OperationGeneration: status.Generation,
+	}
+	data, err := json.Marshal(persisted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinatorPath := filepath.Join(root, "update-coordinator.json")
+	if err := os.WriteFile(coordinatorPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	markerPath := packagedUpdateReinstallCancellationPath(staged.InstallPath)
+	if err := os.WriteFile(markerPath, []byte(staged.OutcomeID+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	coordinator := NewCoordinator(nil, CurrentBuild{Build: buildinfo.Build{Version: "0.7.0"}, Distribution: buildinfo.DistributionBinary}, "stable", drain, nil, false, "", nil)
+	if err := coordinator.SetPersistence(coordinatorPath); err == nil || !strings.Contains(err.Error(), "waiting for the update helper to stop") {
+		t.Fatalf("expected live helper rejection, got %v", err)
+	}
+	if _, err := os.Stat(markerPath); err != nil {
+		t.Fatalf("reinstall marker was removed while helper was alive: %v", err)
+	}
+	if got := drain.Status(); got.State == DrainStateIdle {
+		t.Fatalf("drain was cleared while helper was alive: %#v", got)
 	}
 }

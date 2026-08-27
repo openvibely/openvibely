@@ -1,6 +1,7 @@
 package update
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -75,6 +76,9 @@ func packagedUpdateHelperRecoveryClaimPath(current string) string {
 func packagedUpdateHelperRelaunchMetadataPath(current string) string {
 	return current + ".openvibely-relaunch.json"
 }
+func packagedUpdateReinstallCancellationPath(current string) string {
+	return current + ".openvibely-reinstall-cancel"
+}
 func packagedUpdateHelperTransitionLeasePath(staged LocalStagedUpdate) string {
 	digest := sha256.Sum256([]byte(staged.OutcomeID))
 	return staged.InstallPath + ".openvibely-handoff-" + hex.EncodeToString(digest[:8]) + ".lock"
@@ -84,6 +88,20 @@ func packagedUpdateHelperLeasePath(staged LocalStagedUpdate) string {
 	// Keep the persisted lease filename stable across releases so a successor
 	// cannot mistake an older, still-running helper for a dead handoff.
 	return staged.InstallPath + ".openvibely-helper-" + hex.EncodeToString(digest[:8]) + ".lock"
+}
+
+func packagedUpdateReinstallRequested(staged LocalStagedUpdate) (bool, error) {
+	if staged.OutcomeID == "" || staged.InstallPath == "" {
+		return false, nil
+	}
+	data, err := os.ReadFile(packagedUpdateReinstallCancellationPath(staged.InstallPath))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return string(bytes.TrimSpace(data)) == staged.OutcomeID, nil
 }
 
 func writePackagedUpdateHelperPhase(staged LocalStagedUpdate, state string) error {
