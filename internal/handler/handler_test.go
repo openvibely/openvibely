@@ -1348,6 +1348,181 @@ func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
 	}
 }
 
+func BenchmarkHandler_GetTaskDetailStatus_AgentProjectionVsFullHydration(b *testing.B) {
+	db, counter := testutil.NewStatementCountingTestDB(b)
+	h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+	ctx := context.Background()
+	agentRepo := repository.NewAgentRepo(db)
+	h.SetAgentRepo(agentRepo)
+	if _, err := db.ExecContext(ctx, `DELETE FROM agents WHERE id IS NOT NULL`); err != nil {
+		b.Fatalf("clear Agent definitions: %v", err)
+	}
+
+	var targetAgent *models.Agent
+	for i := 0; i < 1000; i++ {
+		agent := createRichTaskDetailBenchmarkAgent(b, agentRepo, fmt.Sprintf("Agent %04d", i))
+		if i == 999 {
+			targetAgent = agent
+		}
+	}
+	if targetAgent == nil {
+		b.Fatal("target Agent definition was not created")
+	}
+
+	model := createAgentTB(b, llmConfigRepo)
+	project := createProjectTB(b, h, "Agent Projection Benchmark Project")
+	task := createTaskTB(b, h, project.ID, "Agent Projection Benchmark Task", func(tk *models.Task) {
+		tk.Status = models.StatusCompleted
+		tk.AgentID = &model.ID
+		tk.AgentDefinitionID = &targetAgent.ID
+	})
+
+	for _, tc := range []struct {
+		name string
+		run  func(context.Context) (int, error)
+	}{
+		{
+			name: "full_hydration",
+			run: func(ctx context.Context) (int, error) {
+				loadedTask, err := h.taskSvc.GetByID(ctx, task.ID)
+				if err != nil {
+					return 0, err
+				}
+				metrics, err := h.execRepo.GetTaskExecutionMetrics(ctx, task.ID)
+				if err != nil {
+					return 0, err
+				}
+				agents, err := h.llmConfigRepo.ListBadgeOptions(ctx)
+				if err != nil {
+					return 0, err
+				}
+				agentDefs, err := agentRepo.List(ctx)
+				if err != nil {
+					return 0, err
+				}
+				if len(agentDefs) != 1000 {
+					return 0, fmt.Errorf("full Agent list length = %d, want 1000", len(agentDefs))
+				}
+				agentName := ""
+				for _, agentDef := range agentDefs {
+					if loadedTask.AgentDefinitionID != nil && agentDef.ID == *loadedTask.AgentDefinitionID {
+						agentName = agentDef.Name
+						break
+					}
+				}
+				var out bytes.Buffer
+				if err := pages.TaskDetailMetrics(loadedTask, metrics, agents, agentName).Render(ctx, &out); err != nil {
+					return 0, err
+				}
+				return out.Len(), nil
+			},
+		},
+		{
+			name: "task_detail_status",
+			run: func(_ context.Context) (int, error) {
+				rec := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+				if rec.Code != http.StatusOK {
+					return 0, fmt.Errorf("detail-status request status=%d", rec.Code)
+				}
+				return rec.Body.Len(), nil
+			},
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			var totalResponseBytes int64
+			var totalLightweightWait time.Duration
+			for i := 0; i < b.N; i++ {
+				queryStarted := make(chan struct{})
+				var once sync.Once
+				counter.SetObserver(func(_ context.Context, query string) {
+					if strings.Contains(strings.ToLower(query), "from agents") {
+						once.Do(func() { close(queryStarted) })
+					}
+				})
+
+				type lookupResult struct {
+					responseBytes int
+					err           error
+				}
+				resultCh := make(chan lookupResult, 1)
+				go func() {
+					responseBytes, err := tc.run(context.Background())
+					resultCh <- lookupResult{responseBytes: responseBytes, err: err}
+				}()
+				var result lookupResult
+				lookupComplete := false
+				select {
+				case <-queryStarted:
+				case result = <-resultCh:
+					lookupComplete = true
+				case <-time.After(2 * time.Second):
+					b.Fatalf("Agent lookup query did not start")
+				}
+
+				lightweightStart := time.Now()
+				var projectID string
+				if err := db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID); err != nil {
+					b.Fatalf("lightweight project lookup: %v", err)
+				}
+				totalLightweightWait += time.Since(lightweightStart)
+
+				if !lookupComplete {
+					result = <-resultCh
+				}
+				counter.SetObserver(nil)
+				if result.err != nil {
+					b.Fatal(result.err)
+				}
+				if result.responseBytes <= 0 {
+					b.Fatal("Agent status response body was empty")
+				}
+				totalResponseBytes += int64(result.responseBytes)
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(totalResponseBytes)/float64(b.N), "response_bytes/op")
+			b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
+		})
+	}
+}
+
+func createRichTaskDetailBenchmarkAgent(tb testing.TB, repo *repository.AgentRepo, name string) *models.Agent {
+	tb.Helper()
+	agent := &models.Agent{
+		Name:         name,
+		Description:  "production-shaped picker agent",
+		SystemPrompt: strings.Repeat("large webhook picker prompt with instructions and examples. ", 320),
+		Model:        "inherit",
+		Tools:        []string{"Read", "Write", "Edit", "Bash", models.AgentToolScopedFiles},
+		ToolConfig: models.AgentToolConfig{ScopedFiles: []models.ScopedFilesConfig{{
+			Directory:   "src",
+			Permissions: []string{"read", "write"},
+		}}},
+		Plugins: []string{"github@marketplace", "playwright@claude-plugins-official"},
+		MCPServers: []models.MCPServerConfig{{
+			Name:    "playwright",
+			Command: []string{"npx", "-y", "@playwright/mcp"},
+			Env:     map[string]string{"TOKEN": strings.Repeat("x", 256)},
+		}},
+		Skills: []models.SkillConfig{{
+			Name:        "triage",
+			Description: "large skill config",
+			Tools:       "Read, Grep, Bash",
+			Content:     strings.Repeat("skill body ", 256),
+		}},
+		PermissionDefaults:  models.AgentPermissionDefaults{ReadAgents: true, ReadSkills: true, ReadRepositoryFiles: true, UseShellOrTools: true},
+		ModelDefaults:       models.AgentModelDefaults{Model: "gpt-5", Temperature: 0.3, MaxTokens: 8192},
+		SourceRefs:          []string{"agents/picker/SKILLS.md", strings.Repeat("ref", 128)},
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := repo.Create(context.Background(), agent); err != nil {
+		tb.Fatalf("create benchmark Agent %q: %v", name, err)
+	}
+	return agent
+}
+
 func taskExecutionMetricsFromExecutionsForBenchmark(executions []models.Execution) models.TaskExecutionMetrics {
 	var metrics models.TaskExecutionMetrics
 	if len(executions) > 0 {

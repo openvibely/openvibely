@@ -238,7 +238,6 @@ func BenchmarkAgentTaskDetailLabelProjectionVsFullHydration(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
-			var totalResponseBytes int64
 			var totalLightweightWait time.Duration
 			for i := 0; i < b.N; i++ {
 				queryStarted := make(chan struct{})
@@ -282,10 +281,8 @@ func BenchmarkAgentTaskDetailLabelProjectionVsFullHydration(b *testing.B) {
 				if result.err != nil {
 					b.Fatal(result.err)
 				}
-				totalResponseBytes += int64(len("Agent: ") + len(result.name))
 			}
 			b.StopTimer()
-			b.ReportMetric(float64(totalResponseBytes)/float64(b.N), "response_bytes/op")
 			b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
 		})
 	}
