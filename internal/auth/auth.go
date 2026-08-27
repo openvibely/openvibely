@@ -202,7 +202,7 @@ func DecodeNext(encoded string) (string, error) {
 
 func sanitizeNext(next string) string {
 	next = strings.TrimSpace(next)
-	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") {
+	if next == "" || !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.Contains(next, "\\") || strings.Contains(strings.ToLower(next), "%5c") {
 		return "/"
 	}
 	return next

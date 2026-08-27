@@ -212,13 +212,30 @@ func TestDecodeNextRejectsInvalid(t *testing.T) {
 }
 
 func TestSanitizeNext(t *testing.T) {
-	if got := sanitizeNext("https://evil.com"); got != "/" {
-		t.Fatalf("expected sanitized '/', got %q", got)
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "absolute URL", input: "https://evil.com", want: "/"},
+		{name: "protocol-relative URL", input: "//evil", want: "/"},
+		{name: "leading backslash", input: "\\attacker.example", want: "/"},
+		{name: "double leading backslashes", input: "\\\\attacker.example", want: "/"},
+		{name: "backslash authority form", input: "/\\attacker.example", want: "/"},
+		{name: "double backslash authority form", input: "/\\\\attacker.example", want: "/"},
+		{name: "mixed slash authority form", input: "/\\/attacker.example", want: "/"},
+		{name: "encoded backslash authority form", input: "/%5Cattacker.example", want: "/"},
+		{name: "encoded double backslash authority form", input: "/%5c%5cattacker.example", want: "/"},
+		{name: "encoded mixed slash authority form", input: "/%5c/attacker.example", want: "/"},
+		{name: "backslash in path", input: "/safe\\path", want: "/"},
+		{name: "safe internal path", input: "/safe", want: "/safe"},
 	}
-	if got := sanitizeNext("//evil"); got != "/" {
-		t.Fatalf("expected sanitized '/', got %q", got)
-	}
-	if got := sanitizeNext("/safe"); got != "/safe" {
-		t.Fatalf("expected '/safe', got %q", got)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeNext(tt.input); got != tt.want {
+				t.Fatalf("sanitizeNext(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
