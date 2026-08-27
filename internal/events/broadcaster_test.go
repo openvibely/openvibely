@@ -152,6 +152,22 @@ func TestBroadcaster_UnsubscribeFreeSlot(t *testing.T) {
 	b.Unsubscribe(sub1)
 }
 
+func TestBroadcaster_NonBlockingPublish(t *testing.T) {
+	b := NewBroadcaster()
+	sub, err := b.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer b.Unsubscribe(sub)
+
+	for i := 0; i < 15; i++ {
+		b.Publish(TaskEvent{TaskID: "task1", Status: "running"})
+	}
+	if got := len(sub); got != 10 {
+		t.Fatalf("buffered events = %d, want 10 after dropping full-buffer events", got)
+	}
+}
+
 func TestBroadcaster_ConcurrentSubscribeUnsubscribePublish(t *testing.T) {
 	b := NewBroadcaster()
 	var wg sync.WaitGroup

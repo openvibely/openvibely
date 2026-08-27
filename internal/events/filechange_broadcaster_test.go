@@ -3,6 +3,7 @@ package events
 import (
 	"encoding/json"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -125,6 +126,77 @@ func TestFileChangeBroadcasterSubscriberCount(t *testing.T) {
 	b.Unsubscribe(sub)
 	if got := b.SubscriberCount(); got != 0 {
 		t.Fatalf("SubscriberCount after unsubscribe = %d, want 0", got)
+	}
+}
+
+func TestFileChangeBroadcaster_NonBlockingPublish(t *testing.T) {
+	b := NewFileChangeBroadcaster()
+	sub, err := b.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer b.Unsubscribe(sub)
+
+	for i := 0; i < 55; i++ {
+		b.Publish(FileChangeEvent{Type: DiffSnapshot, TaskID: "task", ExecID: "exec"})
+	}
+	if got := cap(sub); got != 50 {
+		t.Fatalf("subscriber capacity = %d, want 50", got)
+	}
+	if got := len(sub); got != 50 {
+		t.Fatalf("buffered events = %d, want 50 after dropping full-buffer events", got)
+	}
+}
+
+func TestFileChangeBroadcaster_UnsubscribeIdempotent(t *testing.T) {
+	b := NewFileChangeBroadcaster()
+	sub, err := b.Subscribe()
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+
+	b.Unsubscribe(sub)
+	b.Unsubscribe(sub)
+	if got := b.SubscriberCount(); got != 0 {
+		t.Fatalf("SubscriberCount after double unsubscribe = %d, want 0", got)
+	}
+}
+
+func TestFileChangeBroadcaster_ConcurrentSubscribeUnsubscribePublish(t *testing.T) {
+	b := NewFileChangeBroadcaster()
+	var wg sync.WaitGroup
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				b.Publish(FileChangeEvent{Type: DiffSnapshot, TaskID: "task", ExecID: "exec"})
+			}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 100; j++ {
+				sub, err := b.Subscribe()
+				if err != nil {
+					continue
+				}
+				select {
+				case <-sub:
+				default:
+				}
+				b.Unsubscribe(sub)
+				b.Unsubscribe(sub)
+			}
+		}()
+	}
+
+	wg.Wait()
+	if got := b.SubscriberCount(); got != 0 {
+		t.Fatalf("SubscriberCount after concurrent lifecycle = %d, want 0", got)
 	}
 }
 
