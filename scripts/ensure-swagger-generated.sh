@@ -195,6 +195,9 @@ tracked_inputs_are_clean() {
 
 can_seed_stamp() {
     outputs_are_complete || return 1
+    # Compare against HEAD before current input discovery so staged deletions
+    # cannot disappear from the manifest and preserve stale documentation.
+    has_relevant_worktree_changes && return 1
     tracked_inputs_are_clean || return 1
     return 0
 }

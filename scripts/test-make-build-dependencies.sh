@@ -154,6 +154,35 @@ run_make_dry() {
     "$MAKE" -C "$ROOT" -n "$target"
 }
 
+run_staged_schema_deletion_probe() {
+    probe_repo="$TEST_DIR/staged-schema-deletion-repo"
+    git clone --quiet --no-hardlinks "$ROOT" "$probe_repo"
+    cp "$ROOT/Makefile" "$probe_repo/Makefile"
+    cp "$ROOT/scripts/ensure-generated-fresh.sh" "$probe_repo/scripts/ensure-generated-fresh.sh"
+    cp "$ROOT/scripts/ensure-swagger-generated.sh" "$probe_repo/scripts/ensure-swagger-generated.sh"
+    cp "$ROOT/scripts/ensure-templ-generated.sh" "$probe_repo/scripts/ensure-templ-generated.sh"
+    git -C "$probe_repo" rm --quiet internal/update/client.go
+    test ! -e "$probe_repo/internal/update/client.go"
+
+    reset_log
+    if PATH="$WRAPPER_DIR:$ORIGINAL_PATH" \
+        OPENVIBELY_BUILD_TEST_GO="$REAL_GO" \
+        OPENVIBELY_BUILD_TEST_LOG="$GO_LOG" \
+        "$MAKE" -C "$probe_repo" build > "$LAST_LOG" 2>&1; then
+        printf '%s\n' 'staged schema deletion unexpectedly produced a successful build' >&2
+        exit 1
+    fi
+    expect_counts 0 1 0
+    test ! -f "$probe_repo/bin/.swagger-inputs" || {
+        printf '%s\n' 'failed Swagger regeneration wrote a freshness stamp' >&2
+        exit 1
+    }
+    git -C "$probe_repo" diff --cached --name-status -- internal/update/client.go | grep -E -q '^D[[:space:]]+internal/update/client.go$' || {
+        printf '%s\n' 'staged schema deletion probe was not staged as a deletion' >&2
+        exit 1
+    }
+}
+
 count_log() {
     value=$1
     awk -v value="$value" '$0 == value { count++ } END { print count + 0 }' "$GO_LOG"
@@ -209,6 +238,11 @@ expect_counts 0 0 1
 assert_file_exists "$TEMPL_STAMP"
 assert_file_exists "$SWAGGER_STAMP"
 snapshot_state "$BASELINE_STATE" 0
+
+# A staged deletion of a non-annotated schema source disappears from the current
+# index-derived input list. With unknown freshness state, the real build graph
+# must attempt Swagger regeneration instead of seeding a stamp over stale docs.
+run_staged_schema_deletion_probe
 
 # An unavailable stamp must still regenerate when a relevant source is dirty.
 restore_baseline
