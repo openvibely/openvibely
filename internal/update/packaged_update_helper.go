@@ -473,7 +473,7 @@ func readPackagedUpdateHelperOutcomeAt(staged LocalStagedUpdate, path string) (p
 	if staged.OutcomeID == "" || staged.PreviousVersion == "" || staged.Version == "" {
 		return outcome, errors.New("packaged update helper outcome identity is incomplete")
 	}
-	data, err := os.ReadFile(path)
+	data, err := readPackagedUpdateHelperStateFile(path)
 	if err != nil {
 		return outcome, err
 	}
@@ -491,6 +491,21 @@ func readPackagedUpdateHelperOutcomeAt(staged LocalStagedUpdate, path string) (p
 		return outcome, nil
 	default:
 		return packagedUpdateHelperOutcome{}, errors.New("packaged update helper outcome state is invalid")
+	}
+}
+
+func readPackagedUpdateHelperStateFile(path string) ([]byte, error) {
+	return readPackagedUpdateHelperStateFileWithRetry(path, os.ReadFile, 10*time.Millisecond, time.Second)
+}
+
+func readPackagedUpdateHelperStateFileWithRetry(path string, read func(string) ([]byte, error), retryDelay, retryWindow time.Duration) ([]byte, error) {
+	deadline := time.Now().Add(retryWindow)
+	for {
+		data, err := read(path)
+		if err == nil || os.IsNotExist(err) || !time.Now().Before(deadline) {
+			return data, err
+		}
+		time.Sleep(retryDelay)
 	}
 }
 
