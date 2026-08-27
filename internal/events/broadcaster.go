@@ -3,7 +3,6 @@ package events
 import (
 	"encoding/json"
 	"errors"
-	"sync"
 )
 
 // MaxSubscribers is the maximum number of concurrent SSE subscribers.
@@ -75,87 +74,35 @@ type TaskEvent struct {
 // Subscriber is a channel that receives task events
 type Subscriber chan TaskEvent
 
-// subGuard protects a subscriber channel from concurrent send/close races.
-type subGuard struct {
-	mu     sync.Mutex
-	closed bool
-}
-
 // Broadcaster manages event subscribers and publishes events to them
 type Broadcaster struct {
-	mu          sync.RWMutex
-	subscribers map[Subscriber]*subGuard
+	core broadcaster[TaskEvent, Subscriber]
 }
 
 // NewBroadcaster creates a new event broadcaster
 func NewBroadcaster() *Broadcaster {
-	return &Broadcaster{
-		subscribers: make(map[Subscriber]*subGuard),
-	}
+	return &Broadcaster{core: newBroadcaster[TaskEvent, Subscriber](10)}
 }
 
 // Subscribe adds a new subscriber and returns a channel for receiving events.
 // Returns ErrMaxSubscribers if the subscriber limit has been reached.
 func (b *Broadcaster) Subscribe() (Subscriber, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if len(b.subscribers) >= MaxSubscribers {
-		return nil, ErrMaxSubscribers
-	}
-
-	sub := make(Subscriber, 10) // buffered to prevent blocking
-	b.subscribers[sub] = &subGuard{}
-	return sub, nil
+	return b.core.Subscribe()
 }
 
-// Unsubscribe removes a subscriber and closes its channel
+// Unsubscribe removes a subscriber and closes its channel.
 func (b *Broadcaster) Unsubscribe(sub Subscriber) {
-	b.mu.Lock()
-	guard, exists := b.subscribers[sub]
-	if exists {
-		delete(b.subscribers, sub)
-	}
-	b.mu.Unlock()
-
-	if exists {
-		guard.mu.Lock()
-		guard.closed = true
-		close(sub)
-		guard.mu.Unlock()
-	}
+	b.core.Unsubscribe(sub)
 }
 
-// Publish sends an event to all subscribers
+// Publish sends an event to all subscribers.
 func (b *Broadcaster) Publish(event TaskEvent) {
-	b.mu.RLock()
-	type entry struct {
-		ch    Subscriber
-		guard *subGuard
-	}
-	subs := make([]entry, 0, len(b.subscribers))
-	for sub, guard := range b.subscribers {
-		subs = append(subs, entry{sub, guard})
-	}
-	b.mu.RUnlock()
-
-	for _, e := range subs {
-		e.guard.mu.Lock()
-		if !e.guard.closed {
-			select {
-			case e.ch <- event:
-			default:
-			}
-		}
-		e.guard.mu.Unlock()
-	}
+	b.core.Publish(event)
 }
 
-// SubscriberCount returns the current number of subscribers
+// SubscriberCount returns the current number of subscribers.
 func (b *Broadcaster) SubscriberCount() int {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return len(b.subscribers)
+	return b.core.SubscriberCount()
 }
 
 // ToSSE converts a TaskEvent to SSE format
