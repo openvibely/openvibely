@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/agentlibrary"
 	"github.com/openvibely/openvibely/internal/agentplugins"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -3021,6 +3022,187 @@ func TestHandler_ListAgents_MaterializesLegacyDBAgentsToDisk(t *testing.T) {
 	}
 	if !containsAll(string(convertedSkill), "key: draft_skill", "Use the repo conventions.") {
 		t.Fatalf("converted legacy skill mismatch:\n%s", convertedSkill)
+	}
+}
+
+func TestHandler_ListAgents_ProjectScopedAgentMaterializesInOwningProject(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	globalRoot := t.TempDir()
+	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	maintenanceSvc.SetAgentsRootPath(globalRoot)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(globalRoot)
+	h.SetAgentLibraryMaintenanceService(maintenanceSvc)
+
+	projectA := &models.Project{Name: "Project A", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Project B", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	agent := &models.Agent{
+		Name:                "Project B Reviewer",
+		Key:                 "project_b_reviewer",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           projectB.ID,
+		Model:               "inherit",
+		Tools:               []string{},
+		SelectableAsPrimary: true,
+		Enabled:             true,
+		Skills: []models.SkillConfig{{
+			Name:        "Review migrations",
+			Description: "Legacy migration checks",
+			Content:     "Check migration downgrade safety.",
+		}},
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create project B agent: %v", err)
+	}
+
+	listAgents := func(projectID string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/agents?project_id="+url.QueryEscape(projectID), nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /agents project=%s status=%d body=%s", projectID, rec.Code, rec.Body.String())
+		}
+	}
+
+	projectARoot := filepath.Join(projectA.RepoPath, ".openvibely")
+	projectBRoot := filepath.Join(projectB.RepoPath, ".openvibely")
+	projectBAgentRoot := filepath.Join(projectBRoot, "agents", agent.Key)
+	listAgents(projectA.ID)
+
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "SKILLS.md"))
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "skills", "review_migrations", "SKILL.md"))
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", "AGENTS.md"))
+
+	projectBDeclaration := mustReadFileForTest(t, filepath.Join(projectBAgentRoot, "SKILLS.md"))
+	if !containsAll(projectBDeclaration, "key: "+agent.Key, "scope: project", "project_id: "+projectB.ID) {
+		t.Fatalf("project B declaration was not materialized in the owning root:\n%s", projectBDeclaration)
+	}
+	projectBLegacySkill := mustReadFileForTest(t, filepath.Join(projectBAgentRoot, "skills", "review_migrations", "SKILL.md"))
+	if !containsAll(projectBLegacySkill, "Review migrations", "Check migration downgrade safety.") {
+		t.Fatalf("legacy skill was not migrated in the owning root:\n%s", projectBLegacySkill)
+	}
+
+	listAgents(projectB.ID)
+	listAgents(projectA.ID)
+	assertFileContentForTest(t, filepath.Join(projectBAgentRoot, "SKILLS.md"), projectBDeclaration)
+	assertFileContentForTest(t, filepath.Join(projectBAgentRoot, "skills", "review_migrations", "SKILL.md"), projectBLegacySkill)
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "SKILLS.md"))
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "skills", "review_migrations", "SKILL.md"))
+	assertNoFileForTest(t, filepath.Join(projectARoot, "agents", "AGENTS.md"))
+}
+
+func TestHandler_ListAgents_IgnoresProjectDeclarationFromWrongRoot(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	globalRoot := t.TempDir()
+	maintenanceSvc := service.NewAgentLibraryMaintenanceService(taskRepo, scheduleRepo, agentRepo)
+	maintenanceSvc.SetLifecycleRepo(lifecycleRepo)
+	maintenanceSvc.SetAgentsRootPath(globalRoot)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+	h.SetAgentSkillRoot(globalRoot)
+	h.SetAgentLibraryMaintenanceService(maintenanceSvc)
+
+	projectA := &models.Project{Name: "Project A", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Project B", RepoPath: t.TempDir()}
+	if err := h.projectSvc.Create(t.Context(), projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	writeDeclaration := func(root, name string) {
+		t.Helper()
+		enabled := true
+		imp := agentlibrary.NewImporter(agentlibrary.SkillRoots{Project: root}, nil)
+		decl := &agentlibrary.SkillDeclaration{
+			Kind:    "openvibely.agent_skill",
+			Version: 1,
+			Agent: agentlibrary.AgentDeclaration{
+				Key:                 "wrong_root_reviewer",
+				Name:                name,
+				Scope:               "project",
+				ProjectID:           projectB.ID,
+				Enabled:             &enabled,
+				SelectableAsPrimary: true,
+			},
+		}
+		if _, err := imp.WriteAgentRootDeclaration(t.Context(), decl, "# "+name+"\n"); err != nil {
+			t.Fatalf("write declaration %s: %v", root, err)
+		}
+	}
+
+	agent := &models.Agent{
+		Name:                "Database Project B Reviewer",
+		Key:                 "wrong_root_reviewer",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           projectB.ID,
+		Model:               "inherit",
+		Tools:               []string{},
+		SelectableAsPrimary: true,
+		Enabled:             true,
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create project B agent: %v", err)
+	}
+
+	projectARoot := filepath.Join(projectA.RepoPath, ".openvibely")
+	projectBRoot := filepath.Join(projectB.RepoPath, ".openvibely")
+	writeDeclaration(projectBRoot, "Project B Declaration")
+	projectBDeclaration := mustReadFileForTest(t, filepath.Join(projectBRoot, "agents", agent.Key, "SKILLS.md"))
+	writeDeclaration(projectARoot, "Wrong Project A Copy")
+	wrongRootDeclaration := mustReadFileForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "SKILLS.md"))
+
+	req := httptest.NewRequest(http.MethodGet, "/agents?project_id="+url.QueryEscape(projectA.ID), nil)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /agents status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	stored, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload project B agent: %v", err)
+	}
+	if stored == nil || stored.Name != agent.Name || stored.ProjectID != projectB.ID {
+		t.Fatalf("wrong-root declaration changed the owning agent: got=%#v want name=%q project_id=%q", stored, agent.Name, projectB.ID)
+	}
+	assertFileContentForTest(t, filepath.Join(projectBRoot, "agents", agent.Key, "SKILLS.md"), projectBDeclaration)
+	assertFileContentForTest(t, filepath.Join(projectARoot, "agents", agent.Key, "SKILLS.md"), wrongRootDeclaration)
+
+	req = httptest.NewRequest(http.MethodGet, "/agents?project_id="+url.QueryEscape(projectA.ID), nil)
+	req.Header.Set("HX-Request", "true")
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("repeated GET /agents status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	storedAgain, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("reload project B agent after repeated refresh: %v", err)
+	}
+	if storedAgain == nil || storedAgain.Name != agent.Name || storedAgain.ProjectID != projectB.ID {
+		t.Fatalf("cached wrong-root declaration changed the owning agent: got=%#v want name=%q project_id=%q", storedAgain, agent.Name, projectB.ID)
 	}
 }
 
