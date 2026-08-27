@@ -752,7 +752,7 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</span></div></div><!-- Week Timeline View --><div id=\"schedule-timeline-container\" class=\"bg-base-100 rounded-lg shadow-lg overflow-x-auto flex-1 min-h-0 overflow-y-auto opacity-0\" style=\"border: 1px solid var(--ov-schedule-grid-border);\"><div class=\"min-w-[800px]\"><!-- Day Headers --><div class=\"grid bg-base-200 sticky top-0 z-20\" style=\"grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);\"><div class=\"p-2 text-center font-semibold text-xs\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\"></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</span></div></div><!-- Week Timeline View --><div id=\"schedule-timeline-container\" class=\"bg-base-100 rounded-lg shadow-lg overflow-x-auto flex flex-1 flex-col min-h-0 overflow-y-auto opacity-0\" style=\"border: 1px solid var(--ov-schedule-grid-border);\"><div class=\"min-w-[800px] flex flex-1 flex-col\"><!-- Day Headers --><div class=\"grid bg-base-200 sticky top-0 z-20\" style=\"grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);\"><div class=\"p-2 text-center font-semibold text-xs\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\"></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -830,12 +830,12 @@ func scheduleContent(currentProject *models.Project, weekData WeekData, weekOffs
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</div><!-- Timeline Grid --><div class=\"relative\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "</div><!-- Timeline Grid --><div class=\"relative flex flex-1 flex-col\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for _, slot := range getTimeSlots() {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<div class=\"grid schedule-grid-row last:border-b-0\" style=\"grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);\"><!-- Time Label --><div class=\"py-1 px-2 text-[10px] font-medium text-right bg-base-200 schedule-time-label\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<div class=\"grid flex-1 schedule-grid-row last:border-b-0\" style=\"grid-template-columns: 60px repeat(7, 1fr); border-bottom: 1px solid var(--ov-schedule-grid-border);\"><!-- Time Label --><div class=\"py-1 px-2 text-[10px] font-medium text-right bg-base-200 schedule-time-label\" style=\"border-right: 1px solid var(--ov-schedule-grid-border);\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
