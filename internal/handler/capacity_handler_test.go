@@ -331,10 +331,19 @@ func TestHandler_GetModelCapacities(t *testing.T) {
 
 	h.workerSvc.SetLLMConfigRepo(llmConfigRepo)
 
-	// Acquire worker slot for agent1
+	// Acquire worker slots for agent1 and bring agent2 to capacity.
 	ok := h.workerSvc.TryAcquireModelSlot(agent1.ID)
 	require.True(t, ok)
-	defer h.workerSvc.ReleaseModelSlot(agent1.ID)
+	for i := 0; i < agent2.MaxWorkers; i++ {
+		ok = h.workerSvc.TryAcquireModelSlot(agent2.ID)
+		require.True(t, ok)
+	}
+	defer func() {
+		h.workerSvc.ReleaseModelSlot(agent1.ID)
+		for i := 0; i < agent2.MaxWorkers; i++ {
+			h.workerSvc.ReleaseModelSlot(agent2.ID)
+		}
+	}()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/capacity/models", nil)
 	rec := httptest.NewRecorder()
@@ -366,6 +375,14 @@ func TestHandler_GetModelCapacities(t *testing.T) {
 	assert.True(t, a1Resp.HasCapacity)
 	assert.Equal(t, 2, a1Resp.AvailableSlots)
 
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/capacity/models/"+agent1.ID, nil)
+	detailRec := httptest.NewRecorder()
+	e.ServeHTTP(detailRec, detailReq)
+	require.Equal(t, http.StatusOK, detailRec.Code)
+	var detailResp ModelCapacityResponse
+	require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detailResp))
+	assert.Equal(t, *a1Resp, detailResp)
+
 	// Find agent2 in response
 	var a2Resp *ModelCapacityResponse
 	for i := range resp {
@@ -378,10 +395,17 @@ func TestHandler_GetModelCapacities(t *testing.T) {
 
 	assert.Equal(t, "Claude", a2Resp.Name)
 	assert.Equal(t, "claude-3-opus", a2Resp.Model)
-	assert.Equal(t, 0, a2Resp.Running)
+	assert.Equal(t, 2, a2Resp.Running)
 	assert.Equal(t, 2, a2Resp.MaxWorkers)
-	assert.True(t, a2Resp.HasCapacity)
-	assert.Equal(t, 2, a2Resp.AvailableSlots)
+	assert.False(t, a2Resp.HasCapacity)
+	assert.Equal(t, 0, a2Resp.AvailableSlots)
+
+	detailReq = httptest.NewRequest(http.MethodGet, "/api/capacity/models/"+agent2.ID, nil)
+	detailRec = httptest.NewRecorder()
+	e.ServeHTTP(detailRec, detailReq)
+	require.Equal(t, http.StatusOK, detailRec.Code)
+	require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detailResp))
+	assert.Equal(t, *a2Resp, detailResp)
 }
 
 func TestHandler_GetModelCapacitiesUsesCompactWorkerProjection(t *testing.T) {
@@ -587,4 +611,73 @@ func TestHandler_GetModelCapacity_NoLimit(t *testing.T) {
 	assert.Equal(t, 0, resp.MaxWorkers)
 	assert.True(t, resp.HasCapacity) // No limit = always has capacity
 	assert.Equal(t, 0, resp.AvailableSlots)
+}
+
+func TestHandler_GetModelCapacity_OverCapacityClampsAvailableSlots(t *testing.T) {
+	h, e, llmConfigRepo, db := setupTestHandlerWithDB(t)
+	ctx := context.Background()
+
+	agent := &models.LLMConfig{
+		Name:       "Over-capacity Model",
+		Model:      "test-model",
+		Provider:   "anthropic",
+		MaxWorkers: 3,
+	}
+	require.NoError(t, llmConfigRepo.Create(ctx, agent))
+	h.workerSvc.SetLLMConfigRepo(llmConfigRepo)
+
+	for i := 0; i < agent.MaxWorkers; i++ {
+		require.True(t, h.workerSvc.TryAcquireModelSlot(agent.ID))
+	}
+	defer func() {
+		for i := 0; i < agent.MaxWorkers; i++ {
+			h.workerSvc.ReleaseModelSlot(agent.ID)
+		}
+	}()
+
+	_, err := db.ExecContext(ctx, `UPDATE agent_configs SET max_workers = ? WHERE id = ?`, 2, agent.ID)
+	require.NoError(t, err)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/capacity/models", nil)
+	listRec := httptest.NewRecorder()
+	e.ServeHTTP(listRec, listReq)
+	require.Equal(t, http.StatusOK, listRec.Code)
+	var listResp []ModelCapacityResponse
+	require.NoError(t, json.Unmarshal(listRec.Body.Bytes(), &listResp))
+	require.Len(t, listResp, 1)
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/capacity/models/"+agent.ID, nil)
+	detailRec := httptest.NewRecorder()
+	e.ServeHTTP(detailRec, detailReq)
+	require.Equal(t, http.StatusOK, detailRec.Code)
+	var detailResp ModelCapacityResponse
+	require.NoError(t, json.Unmarshal(detailRec.Body.Bytes(), &detailResp))
+
+	assert.Equal(t, listResp[0], detailResp)
+	assert.Equal(t, 3, detailResp.Running)
+	assert.Equal(t, 2, detailResp.MaxWorkers)
+	assert.False(t, detailResp.HasCapacity)
+	assert.Equal(t, 0, detailResp.AvailableSlots)
+}
+
+func TestHandler_GetModelCapacities_RepositoryError(t *testing.T) {
+	_, e, _, db := setupTestHandlerWithDB(t)
+	require.NoError(t, db.Close())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/capacity/models", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
+func TestHandler_GetModelCapacity_RepositoryError(t *testing.T) {
+	_, e, _, db := setupTestHandlerWithDB(t)
+	require.NoError(t, db.Close())
+
+	req := httptest.NewRequest(http.MethodGet, "/api/capacity/models/model-id", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 }
