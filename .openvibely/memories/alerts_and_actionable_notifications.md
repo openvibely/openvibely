@@ -50,6 +50,7 @@ Alerts UI contracts:
 - `#system-update-card` is independently API-authoritative and uses `hx-preserve` so Alerts swaps retain update-card state. Its poll forwards snapshots to the shared update snapshot handler.
 - Browser Alerts mutation response tails should share one private refresh helper for approve/reject/dismiss, mark-read, mark-all-read, delete-one/delete-last, and delete-all while preserving mutation-specific behavior.
 - Open suggestion `#825`: Alerts page currently fetches only the newest 100 project alerts while search is client-side and decision-state filters/pagination are absent. Older pending approvals can become unreachable behind newer operational alerts; product direction is server-side filtering/pagination.
+- Open suggestion `#847`: Alerts rows currently do not expose decision and claim timing even though `AlertSummary` carries `DecidedAt`, `ClaimedAt`, and `ClaimExpiresAt`; approved or expired claims therefore lack visible audit timing and lease-status context. The issue proposes bounded timing/lease visibility in the Alerts queue.
 - Notification bodies should start with a short nontechnical `## Summary` section followed by technical evidence and implementation detail.
 - Alerts UI should make pending approval summaries scanable without requiring expansion; detail expansion remains useful for full evidence/metadata/copy.
 - Runtime alert listing should use compact alert summaries excluding `body` and `metadata_json`, preserving filters/project isolation/Automation inbox scoping/ordering/pagination and `get_alert` detail hydration.

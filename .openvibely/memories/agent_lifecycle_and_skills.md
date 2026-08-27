@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-08-22
-source: consolidation
-source_id: memory_consolidation_2026_08_22
+updated: 2026-08-24
+source: after_complete_update
+source_id: ce58dc08ee6cf3e3ca6d281fba596f35:8da8297f2204b6c5
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -34,6 +34,7 @@ Agent and skill catalog facts:
 - Skill import normalization guarantees YAML frontmatter with at least `name`, `description`, `kind: skill`, and `enabled: true`, supporting raw Markdown bodies, common package forms, and existing declarations without clobbering valid fields.
 - Browser-dialog request-to-declaration conversion for standalone and agent-owned skill saves is centralized before importer persistence. Standalone saves reject agent-root/`agent.key` declarations; agent-owned saves validate `agent.key` scope.
 - Open duplication gap `#806`: agent plugin MCP server resolution is duplicated between `ResolveRuntimeBundle` and `pluginServersForIDs`, covering selected-plugin parsing, auto-install/load, deduplication, and sorting for runtime bundles and persistent MCP process reconciliation.
+- Open bug `#846`: the browser plugin-install path accepts an agent ID and persists plugin IDs without applying the protected system-agent read-only/`GeneratedStatus` guard, so a user can mutate a protected agent's plugin configuration through installation even though normal agent editing blocks it.
 - `skill_import` is a skill-library write capability alongside `skill_manage`; grant it to write-authorized skill/curation agents rather than ordinary task turns.
 - The standalone `git_worktree_discipline` skill is intentionally compact at routing time; detailed recovery and prompt-orientation references live in support files.
 

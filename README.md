@@ -6,7 +6,7 @@
 
 The only recursive self-improvement command center for software teams.
 
-OpenVibely turns one Chat into the control plane for your entire AI development workflow. Describe a goal once, then let it fan out into parallel task sessions, live agent execution, reviewable diffs, scheduled follow-ups, and durable project learning.
+OpenVibely turns one Chat into the control plane for your entire AI development workflow. Describe a goal once, then coordinate parallel task sessions, reusable Automation Graphs, scheduled work, live agent execution, and reviewable changes from one place.
 
 Agents do the work. You stay in command. Inspect any thread, review any diff, steer any task, and keep the whole plan moving from the original conversation.
 
@@ -47,15 +47,43 @@ Useful starting points:
 | Operations footprint | Self-host a single Go binary with SQLite by default, plus optional Docker/VPS and desktop modes. |
 | Visibility and control | Use live status, execution logs, thread history, changed files, review comments, alerts, and insights to keep AI work auditable. |
 
-## Quick Start (Recommended)
+## Install OpenVibely (Recommended)
 
-### Prerequisite
+The hosted installers detect your operating system and amd64 or arm64 architecture automatically.
 
-- Go `1.26.6+`
+### macOS And Linux
 
-### Fresh Clone
+Desktop app:
 
-For most users, setup is this fast:
+```bash
+curl -fsSL https://openvibely.ai/install.sh | bash -s -- --variant desktop
+```
+
+Server:
+
+```bash
+curl -fsSL https://openvibely.ai/install.sh | bash -s -- --variant binary
+```
+
+### Windows PowerShell
+
+Desktop app:
+
+```powershell
+& ([scriptblock]::Create((irm https://openvibely.ai/install.ps1))) -Variant desktop
+```
+
+Server:
+
+```powershell
+& ([scriptblock]::Create((irm https://openvibely.ai/install.ps1))) -Variant binary
+```
+
+See the <a href="https://docs.openvibely.ai/installation" target="_blank" rel="noopener noreferrer">Installation guide</a> for install locations, version pinning, replacement behavior, and every supported platform.
+
+## Run From Source
+
+Requires Go `1.26.6+`:
 
 ```bash
 git clone https://github.com/openvibely/openvibely.git
@@ -65,7 +93,7 @@ cd openvibely
 
 Open `http://localhost:3001`.
 
-## Optional Developer Workflow
+### Optional Developer Workflow
 
 Live reload while editing Go, templ, HTML, CSS, or JS files:
 

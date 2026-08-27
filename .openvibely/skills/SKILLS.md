@@ -298,3 +298,7 @@ always_use:
 ## openvibely_browser_clipboard_workflow
 
 [OpenVibely Browser Clipboard Workflow](openvibely_browser_clipboard_workflow/SKILL.md) — Implement and audit OpenVibely browser copy-to-clipboard helpers, fallbacks, feedback, and templ regressions.
+
+## openvibely_typed_broadcaster_workflow
+
+[OpenVibely Typed Broadcaster Workflow](openvibely_typed_broadcaster_workflow/SKILL.md) — Consolidate duplicated typed channel broadcasters while preserving SSE lifecycle, backpressure, and public APIs.

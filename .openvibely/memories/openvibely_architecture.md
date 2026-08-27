@@ -2,9 +2,9 @@
 name: openvibely_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-23
-source: consolidation
-source_id: memory_consolidation_2026_08_23
+updated: 2026-08-27
+source: after_complete_update
+source_id: ffe873d8461f9de8f2fd4e177c388d33:0f4298bff154dcb7
 confidence: high
 title: OpenVibely Architecture
 ---
@@ -82,6 +82,7 @@ Diagnostics, handlers, and local development:
 - When the user asks about local SQLite size or vacuum behavior, inspect live DB `$HOME/.openvibely/openvibely.db` read-only, including sidecars. Do not run checkpoints, vacuum, or modifying diagnostics unless explicitly asked.
 - For read-only live DB diagnostics, inspect schema with `PRAGMA table_info(<table>)` before writing SQL. Remember `tasks` uses `created_at`, not `started_at`; execution timing is on `executions`; swarm role/state columns are on `tasks`; execution failure/diff fields are `error_message` and `diff_output`.
 - `internal/handler` is the Echo HTTP boundary. `handler.go` owns shared dependency graph and route registration; feature-specific files attach tasks, projects, chat, models, auth, integrations, SSE, worktrees, and HTMX/API methods.
+- Task Detail's initial HTML and shared metadata-refresh content path use `ExecutionRepo.GetTaskExecutionMetrics`/`TaskExecutionMetrics` for scalar elapsed/duration metrics instead of `ListByTaskChronological`; deliberate thread, execution-history, and execution-detail routes continue using full execution projections.
 - Browser execution detail loads only executions whose owning task belongs to the current/requested project; foreign or unknown IDs return controlled not-found responses without leaking prompt/output/error content.
 - Review submission verifies the route task belongs to the selected project before listing/clearing comments, creating follow-up work, resuming goals, or starting model work; it must not invent a fallback project for an unscoped mutation.
 - Lifecycle activity list/event APIs enforce the task -> lifecycle execution -> project ownership chain and return controlled not-found responses without leaking selected skills/memory, errors, or event payloads.
@@ -89,5 +90,6 @@ Diagnostics, handlers, and local development:
 - User-facing docs generally live under `docs/` as concise `*-user-guide.md` Markdown pages.
 - `make dev` currently delegates directly to `air`; without `.air.toml`, it provides backend rebuild/restart only, not browser hot reload.
 - Editing `.templ` files requires `templ generate` or a watch process. Tailwind/CSS changes require a separate Tailwind build/watch process.
+- The standard local `make build`, `make build-desktop`, and `make run` workflows currently invoke both `templ generate` and `swag init` on every run, even when their inputs are unchanged; performance issue `#848` tracks incremental/dependency-aware generation.
 - OpenVibely logging uses `internal/applog`: `Infof` for operational logs and `Debugf` gated by `OPENVIBELY_LOG_LEVEL=debug`. Raw LLM/user content, high-frequency stream/SSE/diff/poll/routing traces, and provider headers/rate-limit dumps are debug-level diagnostics, not info logs.
 - LLM JSON reply candidate extraction is centralized in `internal/util/json.go`. `JSONPayloadCandidates` handles fenced-block extraction, balanced object/array scanning, candidate ordering, and duplicate suppression; workflow callers retain schema validation, repair, wrapper/domain normalization, and error handling.

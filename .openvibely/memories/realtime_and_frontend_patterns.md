@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-23
-source: consolidation
-source_id: memory_consolidation_2026_08_23
+updated: 2026-08-27
+source: after_complete_update
+source_id: 5c627210b646836df9ecef796defdac9:9fff40b2c50e2afb
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -16,7 +16,7 @@ Realtime and diff contracts:
 - `window._tabVisibility` owns broad realtime visibility behavior and pauses polling while hidden.
 - Per-execution `/events/chat/:exec_id` streams are token-style output path. SQLite is durable transcript/reconnect source; hot deltas flow through injected `events.ExecutionStreamHub`, not SQLite polling.
 - `ExecutionStreamHub` is keyed by exact execution ID, supports multiple subscribers, enforces subscriber limits, drops slow-subscriber deltas nonblockingly, closes on terminal events, and must be dependency-injected.
-- `internal/events` currently has three typed broadcasters (`Broadcaster`, `ChatBroadcaster`, and `FileChangeBroadcaster`) that independently duplicate the mutex-protected subscriber registry, capacity checks, idempotent unsubscribe/close, nonblocking publish, and count lifecycle. Their meaningful differences are event type and buffer capacity (`10`, `10`, and `50`); open issue `#839` proposes a private generic core with typed wrappers that preserve the public constructors and behavior.
+- `internal/events` uses one private generic broadcaster core for the three typed broadcasters (`Broadcaster`, `ChatBroadcaster`, and `FileChangeBroadcaster`). The core owns the mutex-protected subscriber registry, capacity checks, idempotent unsubscribe/close, nonblocking publish, and count lifecycle; typed wrappers preserve the public constructors/APIs and buffer capacities (`10`, `10`, and `50`). This consolidation was implemented for issue `#839` and published in PR `#850`. Handler regressions for `LiveEventsSSE` verify request-context cancellation returns task/chat/file subscriber counts to zero and that task, chat, and file `ErrMaxSubscribers` failures return HTTP 503 while cleaning up earlier successful subscriptions.
 - `llmstream.Writer.Write` publishes live deltas with cumulative UTF-8 byte offsets after releasing its mutex. It must not publish seeded existing output or `WriteText` content, and must not synchronously flush SQLite on the hot token path.
 - Periodic/final stream persistence must serialize snapshot plus SQLite update so older periodic snapshots cannot overwrite newer final flushes.
 - Per-execution SSE clamps optional untrusted UTF-8 byte offsets, subscribes before DB catch-up, skips duplicate/partial overlaps, and uses targeted DB catch-up for dropped deltas or terminal fallback.

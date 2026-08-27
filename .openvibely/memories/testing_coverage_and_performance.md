@@ -2,9 +2,9 @@
 name: testing_coverage_and_performance
 type: project
 created: 2026-06-07
-updated: 2026-08-23
-source: consolidation
-source_id: memory_consolidation_2026_08_23
+updated: 2026-08-27
+source: after_complete_update
+source_id: ffe873d8461f9de8f2fd4e177c388d33:5ff0817960088963
 confidence: high
 title: Testing Coverage and Performance
 ---
@@ -19,6 +19,7 @@ Coverage direction:
 - Codecov acceptance uses the hosted report's `line_coverage` denominator for the exact commit. Local cover-profile percentages are not sufficient, and configuration/profile workarounds are not acceptable.
 - `NewTestDB` creates fresh isolated in-memory fixtures from an immutable serialized SQLite template while preserving UTC location, foreign keys, busy timeout, `MaxOpenConns(1)`, migrated schema, seed data, cleanup, and default-agent behavior.
 - Direct runtime-tool/action tests should cover project ownership, authorization, pagination, mode restrictions, malformed JSON, and provider-tool-incapable paths.
+- The `#842`/PR `#849` pagination regression is fixed: raw numeric presence tracking now compares JSON keys case-insensitively to match `encoding/json`, so explicit zero values such as `{"Limit":0}` and `{"LIMIT":0}` are rejected before any provider call. Shared-core, Web/API, and Automation tests cover alternate casing and zero-provider-call behavior, with focused race validation and the uncached internal suite passing on 2026-08-27.
 
 Performance contracts:
 - SQLite uses one open connection, so unindexed scans, query fan-out, and long transactions can stall unrelated database-backed requests. Measure contention as well as isolated query latency.
@@ -44,6 +45,7 @@ Implemented bounded/projection paths to preserve:
 - Browser Chat prompt-context model loading uses compact selection options after the full execution model is selected.
 - Reflection changed-file scanning validates the complete JSON array before emitting filenames, so malformed rows contribute no file/type counts.
 - Task-thread polling omits large prompt/chain/swarm blobs while full detail and history paths retain full hydration.
+- Task Detail initial full-page and HTMX metadata-refresh metrics paths have a production-shaped 200-execution regression/benchmark that checks the compact SQL projection excludes prompt/output/error/reasoning/diff text, preserves scalar metric semantics, and leaves deliberate full-content history routes unchanged. The representative compact path showed zero historical execution-text bytes and more than 90% lower handler allocations than full chronological loading.
 - Schedule page model dropdowns use compact badge options; execution, editing, credentials, and persistence retain full model loading.
 - Multipart uploads use endpoint-aware caps and a raw stream limiter that handles split headers, invalid boundary-looking payload prefixes, and Go-compatible delimiter whitespace without rejecting valid multi-file requests.
 - Completed/error transcript bubbles use static raw-content markup and one shared hydrator rather than repeated inline scripts.
@@ -51,8 +53,9 @@ Implemented bounded/projection paths to preserve:
 - Read-only `list_channels` uses aggregate authorization/target summaries while Settings and routing paths retain detail projections.
 
 Open performance gaps:
-- Backlog, Insights, Architect, Automation work-item/history/portfolio, swarm-child, Chat-context, autonomous-trigger, Skill Analytics, plugin-state, agent-owned-skill, scoped-file, task-board, execution-analytics, PR-feedback, code-review, Automation Live, Email receipt, task-detail execution-history, Models refresh, Channels settings, and Automation history paths still have the bounded-projection or indexing gaps tracked by issues `#269`, `#294`, `#300`, `#314`, `#321`, `#327`, `#330`, `#345`, `#350`, `#355`, `#358`, `#457`, `#490`, `#504`, `#529`, `#541`, `#546`, `#555`, `#565`, `#572`, `#594`, `#623`, `#668`, `#840`.
+- Backlog, Insights, Architect, Automation work-item/history/portfolio, swarm-child, Chat-context, autonomous-trigger, Skill Analytics, plugin-state, agent-owned-skill, scoped-file, task-board, execution-analytics, PR-feedback, code-review, Automation Live, Email receipt, Models refresh, Channels settings, and Automation history paths still have the bounded-projection or indexing gaps tracked by issues `#269`, `#294`, `#300`, `#314`, `#321`, `#327`, `#330`, `#345`, `#350`, `#355`, `#358`, `#457`, `#490`, `#504`, `#529`, `#541`, `#546`, `#555`, `#565`, `#572`, `#594`, `#623`, `#668`.
 - Hosted-Ubuntu dependency-cache workflow `#228` has strict sample/comparator requirements; do not claim acceptance until accepted artifacts exist.
+- Local `make build`, `make build-desktop`, and `make run` workflows unconditionally rerun `templ generate` and `swag init`; performance issue `#848` tracks making generation incremental or dependency-aware, with before/after build timing and no-op regeneration criteria.
 
 CI and dependency setup:
 - `OPENVIBELY_SKIP_BROWSER_PERF=1 go test ./... -count=1 -timeout 240s -coverpkg=./... -coverprofile=coverage.txt` is the primary GitHub Actions coverage/compile gate and includes `cmd/server`; do not add a separate default server build without a distinct purpose.
@@ -80,3 +83,5 @@ Validation conventions:
 Known correctness and coverage gaps:
 - `TaskGoalService.ResumeGoalStoppedByUser()` is production-used but lacks dedicated regression coverage; existing user-stop tests exercise a different method.
 - Completed-task Task Detail edit/goal no-rerun regressions should assert no worker queue item/running worker state, no lifecycle continuation rows, no schedule-run marker, preserved completed status, and no extra execution/thread-input rows.
+- Issue `#839` / PR `#850` now includes `LiveEventsSSE` regressions for request-context cancellation (task/chat/file subscriber counts return to zero) and task/chat/file `ErrMaxSubscribers` partial-subscription cleanup with HTTP 503 responses; the 2026-08-27 audit gap is resolved.
+- The package-wide `-race` run currently exposes a pre-existing order-sensitive data race in `TestStartQueuedTaskThreadInputUsesQueuedChannelReplyContext` through an unsynchronized fake Slack callback; isolated and touched-scope race tests pass, so treat the broad failure as unrelated to Task Detail metrics work.

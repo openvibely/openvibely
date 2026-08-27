@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-08-23
+updated: 2026-08-27
 source: after_complete_update
-source_id: fd37f46bb8f14052236f06e2550dd109:aea55982691cffec
+source_id: 7993e3214b0f822ca6f84a591fcfe1e3:1b3d9bb68d134ead
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -38,6 +38,8 @@ Audit and review discipline:
 - Code review/audit work may use memory or skills only when not explicitly excluded, and only as background context; verdicts must be grounded in repository/publication evidence.
 - When reviewing a messy fix stack, inspect actual commit diffs and rerun relevant validation before recommending keep/drop.
 - If a user challenges a claimed coding change with no diff, inspect branch pointers, status, reflog, and file contents, then correct the summary plainly.
+- A strict audit pass that edits files or runs write-capable formatting, build, test, generation, or other mutating commands is invalid even if the final worktree is clean; disclose the violation and require a fresh audit from scratch. This was confirmed by the 2026-08-27 `#842` lifecycle turn.
+- For runtime numeric presence tracking, account for `encoding/json`'s case-insensitive matching of struct fields when inspecting raw keys. The 2026-08-27 `#842` audit missed that exact-key presence detection let an explicit `{"Limit":0}` bypass the intended invalid-zero validation and take the omitted/default path; PR `#849` corrected this with case-insensitive matching and shared-core, Web/API, and Automation no-provider-call regressions.
 
 Prompt and model-facing preferences:
 - Use direct role/capability wording over low-value internal labels unless the label affects authorization, routing, or correctness.

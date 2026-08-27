@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-08-23
+updated: 2026-08-27
 source: after_complete_update
-source_id: ce58dc08ee6cf3e3ca6d281fba596f35:295afde0d226ceff
+source_id: 7993e3214b0f822ca6f84a591fcfe1e3:1b3d9bb68d134ead
 confidence: high
 title: Integrations and Channels
 ---
@@ -62,7 +62,8 @@ GitHub integration:
 - Interactive Chat and Automation runtimes share the canonical issue-action service core for inbox, authorization, reads/comments/labels, PR-associated listing, and assigned-issue operations; Automation-only filtering, provenance, duplicate prevention, and PR behavior remain outside the generic core.
 - Model-facing `github_create_issue` does not advertise `idempotency_key`. Manual OpenVibely tasks that reference an existing issue use ordinary task/PR flow and do not need Automation issue-task provenance.
 - Assigned-issue discovery requires configured GitHub Authorized Users or the PAT owner, returns compact paginated records without bodies, and hydrates only likely candidates through `github_get_issue` before creating work. Existing-work reconciliation uses one broad `list_tasks` lookup per issue number/URL, omitting lifecycle filters; maintained Automation snapshots require explicit update/edit/save or recreation to adopt corrected prompts.
-- Open GitHub discovery gaps are title-only `list_tasks` matching (`#741`) and assigned-issue pagination arguments being ignored (`#842`).
+- The PR-filtered assigned-issue action's pagination contract is implemented in PR `#849`: page arguments are validated before provider calls, PR-less issues are removed before slicing, and stable `returned`, `total`, `offset`, `next_offset`, and `truncated` metadata is exposed consistently through Web/API and Automation. Because `encoding/json` matches struct fields case-insensitively, raw numeric presence checks must do the same; the 2026-08-27 follow-up fixed the explicit-zero `limit` bypass in `githubIssueActionInputHasField` and added `Limit`/`LIMIT` and `Offset`/`OFFSET` no-provider-call regressions across the shared core, Web/API, and Automation paths.
+- Open GitHub discovery gap `#741` remains title-only `list_tasks` matching. PR `#849` now carries the assigned-issue pagination fix for `#842`, including the case-insensitive explicit-zero correction, but a fresh strictly read-only audit is still required before claiming the goal complete; verify live review and merge state before treating the target branch as updated.
 - Scheduled GitHub Dev Inbox treats assignment to the PAT owner or configured Authorized User as approval to implement; it does not require an approved label, existing PR, or prior Automation mapping. Workflow labels remain unprefixed, such as `task-created`, `in-progress`, `blocked`, `needs-human`, and `pr-opened`.
 - Assigned-issue scans affected by truncation or unintended lifecycle filters must be reconciled against live GitHub/OpenVibely state; workflow labels alone are not evidence of a usable implementation-task mapping.
 - Open stale-PR gap `#233`: ordinary task PR records are not reconciled with GitHub after creation, so closed/merged remote PRs can still receive forwarded feedback or be reported reusable.

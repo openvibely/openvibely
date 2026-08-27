@@ -53,6 +53,8 @@ On macOS, the scripts install local release tooling under `.tools/` when needed:
 - `.tools/osslsigncode` for Windows signature verification.
 - `.tools/gh` for GitHub release publishing when no runnable system GitHub CLI
   is present.
+- `.tools/wails3` for desktop release builds when no runnable system Wails CLI
+  is present.
 - `.tools/jsign` for Azure Artifact Signing.
 - `.tools/jre` for the Java runtime used by `jsign` when no runnable system Java
   is present.
@@ -61,9 +63,11 @@ On macOS, the scripts install local release tooling under `.tools/` when needed:
 - `.tools/azure-cli` for `az` when the Azure CLI is absent.
 
 You can also provide `AZURE_ACCESS_TOKEN` before signing to skip Azure CLI
-authentication. No Homebrew or Docker is required by the release scripts. The
-check must pass before publishing official macOS or Windows auto-update
-artifacts.
+authentication. Homebrew is not required. Building Linux desktop artifacts on
+macOS requires Docker and the Wails cross-build images unless both Linux
+desktop binaries are supplied through the documented prebuilt artifact
+variables. macOS and Windows desktop builds do not require Docker. The check
+must pass before publishing official macOS or Windows auto-update artifacts.
 
 The normal release command runs this setup/check automatically:
 

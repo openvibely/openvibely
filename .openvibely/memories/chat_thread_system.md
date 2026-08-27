@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-08-23
-source: consolidation
-source_id: memory_consolidation_2026_08_23
+updated: 2026-08-24
+source: after_complete_update
+source_id: fd37f46bb8f14052236f06e2550dd109:7f7998065fd5c7be
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -111,6 +111,7 @@ Task goals, continuations, and cancellation:
 - Known task-control gap `#235`: Task Details replaces Run Now with disabled state for running/queued tasks instead of exposing Stop/Cancel.
 - Normal active terminal failed/cancelled rows normalize to Backlog; Chat preserves `category=chat`.
 - Direct cancel and Active-to-Backlog/Completed moves cancel queued/running executions, pause active goal, and preserve requested target category. `TaskService.UpdateCategory` must use pre-update category/status for stop semantics.
+- Maintenance finding `#845`: `TaskService.UpdateCategory` and `TaskService.CancelTask` independently implement the same active-work stop subset: worker cancellation, active-goal pause, cancellation request, and the `cancelled` status transition. Category changes (including drag/drop and Task Detail) and explicit cancel/Chat-stop paths are live callers; consolidation should share only those transitions while leaving category, swarm, queued-input, and rendering behavior at their existing callers.
 - Lifecycle-origin `send_to_task` must re-check goal state, execution freshness, and cancellation state before queueing continuations. Timeout/deadline failures are ordinary failures for lifecycle purposes; only explicit Stop/Cancel suppresses optional after-complete work.
 
 Task execution, schedules, capacity, and swarms:
