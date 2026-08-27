@@ -274,6 +274,34 @@ func (r *AgentRepo) ListRuntimeSummaries(ctx context.Context) ([]AgentRuntimeSum
 	return summaries, rows.Err()
 }
 
+// GetTaskDetailAgentLabel returns the identity needed by the recurring Task Detail
+// status fragment. The assigned agent must still be live and available to the
+// task's project, but no full Agent configuration is selected or hydrated.
+func (r *AgentRepo) GetTaskDetailAgentLabel(ctx context.Context, projectID, agentID string) (*AgentPickerOption, error) {
+	if agentID == "" {
+		return nil, nil
+	}
+
+	var option AgentPickerOption
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, name
+		FROM agents
+		WHERE id = ?
+		  AND COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND archived_at IS NULL
+		  AND (
+			COALESCE(scope, 'global') <> 'project'
+			OR (project_id IS NOT NULL AND project_id <> '' AND project_id = ?)
+		  )`, agentID, projectID).Scan(&option.ID, &option.Name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("getting task detail agent label: %w", err)
+	}
+	return &option, nil
+}
+
 func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]AgentPickerOption, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name

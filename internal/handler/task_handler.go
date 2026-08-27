@@ -183,6 +183,21 @@ func (h *Handler) listTaskFormAgentDefinitions(ctx context.Context, projectID st
 	return out
 }
 
+func (h *Handler) taskDetailAgentLabel(ctx context.Context, projectID string, agentDefinitionID *string) string {
+	if h.agentRepo == nil || agentDefinitionID == nil || *agentDefinitionID == "" {
+		return ""
+	}
+	option, err := h.agentRepo.GetTaskDetailAgentLabel(ctx, projectID, *agentDefinitionID)
+	if err != nil {
+		applog.Infof("[handler] taskDetailAgentLabel error: %v", err)
+		return ""
+	}
+	if option == nil {
+		return ""
+	}
+	return option.Name
+}
+
 func agentDefinitionAvailableToProject(agent models.Agent, projectID string) bool {
 	if agent.Scope == models.AgentScopeProject {
 		return agent.ProjectID != "" && agent.ProjectID == projectID
@@ -614,9 +629,9 @@ func (h *Handler) GetTaskDetailStatus(c echo.Context) error {
 	}
 
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(c.Request().Context())
-	agentDefs := h.listTaskFormAgentDefinitions(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
+	agentLabel := h.taskDetailAgentLabel(c.Request().Context(), task.ProjectID, task.AgentDefinitionID)
 
-	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, metrics, agents, agentDefs))
+	return render(c, http.StatusOK, pages.TaskDetailMetrics(task, metrics, agents, agentLabel))
 }
 
 // GetTaskDetailActions returns just the action buttons fragment (Run Now / Edit / Delete).

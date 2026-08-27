@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/testutil"
@@ -72,6 +74,220 @@ func TestAgentRepoListPickerOptionsUsesCompactProjection(t *testing.T) {
 	}
 	if full == nil || full.SystemPrompt == "" || len(full.Tools) == 0 || len(full.ToolConfig.ScopedFiles) == 0 || len(full.Plugins) == 0 || len(full.MCPServers) == 0 || len(full.Skills) == 0 || len(full.SourceRefs) == 0 || !full.PermissionDefaults.ReadAgents || full.ModelDefaults.Model != "gpt-5" {
 		t.Fatalf("full detail path lost hydrated fields: %#v", full)
+	}
+}
+
+func TestAgentRepoGetTaskDetailAgentLabelUsesCompactProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewAgentRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(t, db)
+
+	global := createPickerAgent(t, repo, "Global Status Agent")
+	projectAgent := &models.Agent{
+		Name:                "Project Status Agent",
+		SystemPrompt:        "Project agent details stay out of the badge query.",
+		Model:               "inherit",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           "default",
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := repo.Create(ctx, projectAgent); err != nil {
+		t.Fatalf("create project agent: %v", err)
+	}
+	archived := createPickerAgent(t, repo, "Archived Status Agent")
+	archived.GeneratedStatus = models.AgentStatusArchived
+	if err := repo.Update(ctx, archived); err != nil {
+		t.Fatalf("archive status agent: %v", err)
+	}
+	disabled := createPickerAgent(t, repo, "Disabled Status Agent")
+	disabled.Enabled = false
+	disabled.SelectableAsPrimary = false
+	if err := repo.Update(ctx, disabled); err != nil {
+		t.Fatalf("disable status agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	label, err := repo.GetTaskDetailAgentLabel(ctx, "other-project", global.ID)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("get global task detail label: %v", err)
+	}
+	if label == nil || *label != (AgentPickerOption{ID: global.ID, Name: global.Name}) {
+		t.Fatalf("global label = %#v, want id/name for %q", label, global.Name)
+	}
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one label query", statements)
+	}
+	stmt := strings.ToLower(statements[0])
+	projection := strings.Split(stmt, "from agents")[0]
+	if !strings.Contains(projection, "select id, name") {
+		t.Fatalf("task detail label projection = %q, want only identity columns: %s", projection, statements[0])
+	}
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("task detail label query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+	if !strings.Contains(stmt, "coalesce(scope, 'global')") || !strings.Contains(stmt, "project_id = ?") {
+		t.Fatalf("task detail label query must enforce project availability: %s", statements[0])
+	}
+
+	projectLabel, err := repo.GetTaskDetailAgentLabel(ctx, "default", projectAgent.ID)
+	if err != nil {
+		t.Fatalf("get available project label: %v", err)
+	}
+	if projectLabel == nil || projectLabel.Name != projectAgent.Name {
+		t.Fatalf("available project label = %#v, want %q", projectLabel, projectAgent.Name)
+	}
+	unavailableProjectLabel, err := repo.GetTaskDetailAgentLabel(ctx, "other-project", projectAgent.ID)
+	if err != nil {
+		t.Fatalf("get unavailable project label: %v", err)
+	}
+	if unavailableProjectLabel != nil {
+		t.Fatalf("unavailable project label = %#v, want nil", unavailableProjectLabel)
+	}
+	archivedLabel, err := repo.GetTaskDetailAgentLabel(ctx, "default", archived.ID)
+	if err != nil {
+		t.Fatalf("get archived label: %v", err)
+	}
+	if archivedLabel != nil {
+		t.Fatalf("archived label = %#v, want nil", archivedLabel)
+	}
+	disabledLabel, err := repo.GetTaskDetailAgentLabel(ctx, "other-project", disabled.ID)
+	if err != nil {
+		t.Fatalf("get disabled label: %v", err)
+	}
+	if disabledLabel == nil || disabledLabel.Name != disabled.Name {
+		t.Fatalf("disabled assigned label = %#v, want %q", disabledLabel, disabled.Name)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	missing, err := repo.GetTaskDetailAgentLabel(ctx, "default", "missing-agent-id")
+	_, emptyErr := repo.GetTaskDetailAgentLabel(ctx, "default", "")
+	counter.SetEnabled(false)
+	if err != nil || emptyErr != nil {
+		t.Fatalf("missing/empty labels returned errors: missing=%v empty=%v", err, emptyErr)
+	}
+	if missing != nil {
+		t.Fatalf("missing label = %#v, want nil", missing)
+	}
+	if len(counter.Statements()) != 1 {
+		t.Fatalf("empty Agent ID should skip lookup; statements = %#v", counter.Statements())
+	}
+
+	full, err := repo.GetByID(ctx, global.ID)
+	if err != nil {
+		t.Fatalf("get full status agent: %v", err)
+	}
+	if full == nil || full.SystemPrompt == "" || len(full.Tools) == 0 || len(full.ToolConfig.ScopedFiles) == 0 || len(full.Plugins) == 0 || len(full.MCPServers) == 0 || len(full.Skills) == 0 || len(full.SourceRefs) == 0 || !full.PermissionDefaults.ReadAgents || full.ModelDefaults.Model != "gpt-5" {
+		t.Fatalf("full detail path lost hydrated fields: %#v", full)
+	}
+}
+
+func BenchmarkAgentTaskDetailLabelProjectionVsFullHydration(b *testing.B) {
+	db, counter := testutil.NewStatementCountingTestDB(b)
+	repo := NewAgentRepo(db)
+	clearAgentsForRuntimeSummaryTest(b, db)
+
+	var targetID string
+	for i := 0; i < 1000; i++ {
+		agent := createPickerAgent(b, repo, fmt.Sprintf("Agent %04d", i))
+		if i == 999 {
+			targetID = agent.ID
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		lookup func(context.Context) (string, error)
+	}{
+		{
+			name: "full_hydration",
+			lookup: func(ctx context.Context) (string, error) {
+				agents, err := repo.List(ctx)
+				if err != nil {
+					return "", err
+				}
+				for _, agent := range agents {
+					if agent.ID == targetID {
+						return agent.Name, nil
+					}
+				}
+				return "", fmt.Errorf("target agent %q not found", targetID)
+			},
+		},
+		{
+			name: "task_detail_label",
+			lookup: func(ctx context.Context) (string, error) {
+				label, err := repo.GetTaskDetailAgentLabel(ctx, "benchmark-project", targetID)
+				if err != nil {
+					return "", err
+				}
+				if label == nil {
+					return "", fmt.Errorf("target agent %q not found", targetID)
+				}
+				return label.Name, nil
+			},
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.ResetTimer()
+			var totalResponseBytes int64
+			var totalLightweightWait time.Duration
+			for i := 0; i < b.N; i++ {
+				queryStarted := make(chan struct{})
+				var once sync.Once
+				counter.SetObserver(func(_ context.Context, query string) {
+					if strings.Contains(strings.ToLower(query), "from agents") {
+						once.Do(func() { close(queryStarted) })
+					}
+				})
+
+				type lookupResult struct {
+					name string
+					err  error
+				}
+				resultCh := make(chan lookupResult, 1)
+				go func() {
+					name, err := tc.lookup(context.Background())
+					resultCh <- lookupResult{name: name, err: err}
+				}()
+				var result lookupResult
+				lookupComplete := false
+				select {
+				case <-queryStarted:
+				case result = <-resultCh:
+					lookupComplete = true
+				case <-time.After(2 * time.Second):
+					b.Fatalf("Agent lookup query did not start")
+				}
+
+				lightweightStart := time.Now()
+				var projectID string
+				if err := db.QueryRowContext(context.Background(), `SELECT id FROM projects ORDER BY id LIMIT 1`).Scan(&projectID); err != nil {
+					b.Fatalf("lightweight project lookup: %v", err)
+				}
+				totalLightweightWait += time.Since(lightweightStart)
+
+				if !lookupComplete {
+					result = <-resultCh
+				}
+				counter.SetObserver(nil)
+				if result.err != nil {
+					b.Fatal(result.err)
+				}
+				totalResponseBytes += int64(len("Agent: ") + len(result.name))
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(totalResponseBytes)/float64(b.N), "response_bytes/op")
+			b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
+		})
 	}
 }
 

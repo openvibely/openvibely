@@ -139,7 +139,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 				<div class="card-body flex-1 flex flex-col min-h-0">
 					<!-- View Mode -->
 						<div id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1">
-								@TaskDetailMetrics(task, taskExecutionMetricsValue(metrics), agents, agentDefs)
+								@TaskDetailMetrics(task, taskExecutionMetricsValue(metrics), agents, taskAgentLabelFromDefinitions(task, agentDefs))
 							@SwarmContextPanel(task)
 							@TaskPromptPanel(task)
 						@TaskGoalPanel(task.ID, goal)
@@ -1694,7 +1694,7 @@ func taskExecutionMetricsValue(metrics *models.TaskExecutionMetrics) models.Task
 
 // TaskDetailMetrics renders the status/category/tag/priority/model/agent metrics grid with polling.
 // Polls every 3s to keep status badges up to date when task state changes (e.g., via chat interaction).
-templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, agents []models.LLMConfig, agentDefs []models.Agent) {
+templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, agents []models.LLMConfig, agentLabel string) {
 	<div
 		id="task-detail-metrics"
 		class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"
@@ -1736,7 +1736,7 @@ templ TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, 
 		</div>
 		<div>
 			<span class="text-sm opacity-60">Agent:</span>
-			<span class="ml-2 badge badge-sm badge-outline">{ taskAgentLabel(task, agentDefs) }</span>
+			<span class="ml-2 badge badge-sm badge-outline">{ taskAgentLabel(task, agentLabel) }</span>
 		</div>
 		if task.Status == models.StatusRunning && metrics.LatestStartedAt != nil {
 			<div>
@@ -1878,17 +1878,24 @@ func taskModelLabel(task *models.Task, agents []models.LLMConfig) string {
 	return "Unknown model"
 }
 
-func taskAgentLabel(task *models.Task, agentDefs []models.Agent) string {
+func taskAgentLabel(task *models.Task, agentName string) string {
 	if task == nil || task.AgentDefinitionID == nil || *task.AgentDefinitionID == "" {
 		return "No agent"
 	}
-	for _, agent := range agentDefs {
-		if agent.ID == *task.AgentDefinitionID {
-			if agent.Name != "" {
-				return agent.Name
-			}
-			break
-		}
+	if agentName != "" {
+		return agentName
 	}
 	return "Unknown agent"
+}
+
+func taskAgentLabelFromDefinitions(task *models.Task, agentDefs []models.Agent) string {
+	if task == nil || task.AgentDefinitionID == nil || *task.AgentDefinitionID == "" {
+		return ""
+	}
+	for _, agent := range agentDefs {
+		if agent.ID == *task.AgentDefinitionID {
+			return agent.Name
+		}
+	}
+	return ""
 }
