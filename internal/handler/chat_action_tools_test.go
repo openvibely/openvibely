@@ -2444,6 +2444,7 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 		t.Fatalf("configure dev-bot authorized actor: %v", err)
 	}
 	var sawMyAssignedIssues bool
+	var sawAssignedIssuesWithPRs bool
 	var createdRepo, commentedRepo, labeledRepo, closedRepo string
 	h.SetGitHubService(&fakeGitHubService{
 		resolveRepoFn: func(_ context.Context, repoURL, repoPath string) (*service.GitHubRepoRef, error) {
@@ -2475,6 +2476,16 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 				return []service.GitHubIssue{{Number: 8, URL: "https://github.com/example/other/issues/8", Title: "Explicit assignee URL", State: "open", Assignees: []string{"dev-bot"}}}, nil
 			}
 			return []service.GitHubIssue{{Number: 6, URL: "https://github.com/openvibely/openvibely/issues/6", Title: "Override", State: "open", Assignees: []string{"dev-bot"}}}, nil
+		},
+		listAssignedIssuesPRFn: func(_ context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssueWithPullRequest, error) {
+			sawAssignedIssuesWithPRs = true
+			if assignee != "Dev-Bot" || repo.FullName != "openvibely/openvibely" {
+				t.Fatalf("unexpected PR-filtered assigned issue request repo=%q assignee=%q", repo.FullName, assignee)
+			}
+			return []service.GitHubIssueWithPullRequest{
+				{Issue: service.GitHubIssue{Number: 10, Title: "First PR issue"}, PullRequest: service.GitHubPullRequest{Number: 110}},
+				{Issue: service.GitHubIssue{Number: 20, Title: "Second PR issue"}, PullRequest: service.GitHubPullRequest{Number: 120}},
+			}, nil
 		},
 		createIssueFn: func(_ context.Context, repo *service.GitHubRepoRef, req service.GitHubCreateIssueRequest) (*service.GitHubIssue, error) {
 			createdRepo = repo.FullName
@@ -2539,6 +2550,13 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	}
 	if !strings.Contains(out, `"assignee":"dev-bot"`) || !strings.Contains(out, `"number":6`) || !strings.Contains(out, `"returned":1`) {
 		t.Fatalf("expected explicit-assignee assigned issues output, got %s", out)
+	}
+	out, err = handlers["github_list_assigned_issues_with_prs"](ctx, json.RawMessage(`{"assignee":"Dev-Bot","limit":1,"offset":1}`))
+	if err != nil {
+		t.Fatalf("github_list_assigned_issues_with_prs returned error: %v", err)
+	}
+	if !sawAssignedIssuesWithPRs || !strings.Contains(out, `"returned":1`) || !strings.Contains(out, `"total":2`) || !strings.Contains(out, `"offset":1`) || !strings.Contains(out, `"next_offset":0`) || !strings.Contains(out, `"Number":20`) || strings.Contains(out, `"Number":10`) {
+		t.Fatalf("expected paginated PR-filtered assigned issues output, saw=%v out=%s", sawAssignedIssuesWithPRs, out)
 	}
 	if _, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"mallory"}`)); err == nil || !strings.Contains(err.Error(), "not authorized") {
 		t.Fatalf("expected unauthorized explicit-assignee error, got %v", err)

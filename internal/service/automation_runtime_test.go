@@ -2529,6 +2529,62 @@ func TestAutomationGitHubIssueRuntimeListsExistingAutomationIssues(t *testing.T)
 	require.NotContains(t, output, "Existing covered behavior")
 }
 
+func TestAutomationGitHubIssueRuntimeAssignedIssuesWithPRsPaginates(t *testing.T) {
+	provider := &fakeGitHubIssueRuntimeProvider{
+		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
+		},
+		listIssuesPRFn: func(_ context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error) {
+			require.Equal(t, "example/runtime", repo.FullName)
+			require.Equal(t, "automation-bot", assignee)
+			return []GitHubIssueWithPullRequest{
+				{Issue: GitHubIssue{Number: 1, Title: "First"}, PullRequest: GitHubPullRequest{Number: 101}},
+				{Issue: GitHubIssue{Number: 2, Title: "Second"}, PullRequest: GitHubPullRequest{Number: 102}},
+				{Issue: GitHubIssue{Number: 3, Title: "Third"}, PullRequest: GitHubPullRequest{Number: 103}},
+			}, nil
+		},
+	}
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime.git"
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+	githubAuthRepo := repository.NewGitHubAuthRepo(fixture.repo.DB())
+	require.NoError(t, githubAuthRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "automation-bot"}))
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{ProjectID: fixture.project.ID, ProjectRepo: projectRepo,
+		GitHubAuthRepo: githubAuthRepo, GitHub: provider})
+
+	type response struct {
+		Items      []GitHubIssueWithPullRequest `json:"items"`
+		Returned   int                          `json:"returned"`
+		Total      int                          `json:"total"`
+		Offset     int                          `json:"offset"`
+		NextOffset int                          `json:"next_offset"`
+		Truncated  bool                         `json:"truncated"`
+	}
+	for _, test := range []struct {
+		input      string
+		wantNumber int
+		wantOffset int
+		wantNext   int
+	}{
+		{input: `{"assignee":"automation-bot","limit":1,"offset":0}`, wantNumber: 1, wantOffset: 0, wantNext: 1},
+		{input: `{"assignee":"automation-bot","limit":1,"offset":1}`, wantNumber: 2, wantOffset: 1, wantNext: 2},
+	} {
+		output, err := handlers["github_list_assigned_issues_with_prs"](ctx, json.RawMessage(test.input))
+		require.NoError(t, err)
+		var got response
+		require.NoError(t, json.Unmarshal([]byte(output), &got))
+		require.Len(t, got.Items, 1)
+		require.Equal(t, test.wantNumber, got.Items[0].Issue.Number)
+		require.Equal(t, 1, got.Returned)
+		require.Equal(t, 3, got.Total)
+		require.Equal(t, test.wantOffset, got.Offset)
+		require.Equal(t, test.wantNext, got.NextOffset)
+		require.True(t, got.Truncated)
+	}
+}
+
 func TestAutomationGitHubIssueCreationAllowsMissingIdempotencyKey(t *testing.T) {
 	var createCalls atomic.Int32
 	provider := &fakeGitHubIssueRuntimeProvider{
