@@ -246,6 +246,22 @@ func assignedIssueListPage(req GitHubIssueActionRequest) (int, int, error) {
 	return limit, req.Offset, nil
 }
 
+func assignedIssueListPageForInput(input json.RawMessage, req GitHubIssueActionRequest) (int, int, error) {
+	if req.Limit == 0 && githubIssueActionInputHasField(input, "limit") {
+		return 0, 0, fmt.Errorf("limit must be 1-100 and offset must be non-negative")
+	}
+	return assignedIssueListPage(req)
+}
+
+func githubIssueActionInputHasField(input json.RawMessage, field string) bool {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(input, &object); err != nil {
+		return false
+	}
+	_, ok := object[field]
+	return ok
+}
+
 func compactAssignedGitHubIssues(issues []GitHubIssue, limit, offset int) ([]map[string]any, int) {
 	if offset >= len(issues) {
 		return []map[string]any{}, 0
@@ -276,8 +292,28 @@ func compactAssignedGitHubIssues(issues []GitHubIssue, limit, offset int) ([]map
 	return summaries, nextOffset
 }
 
+func pageAssignedGitHubIssuesWithPRs(items []GitHubIssueWithPullRequest, limit, offset int) ([]GitHubIssueWithPullRequest, int) {
+	if offset >= len(items) {
+		return []GitHubIssueWithPullRequest{}, 0
+	}
+	end := offset + limit
+	if end > len(items) {
+		end = len(items)
+	}
+	page := items[offset:end]
+	nextOffset := 0
+	if end < len(items) {
+		nextOffset = end
+	}
+	return page, nextOffset
+}
+
 func (c *GitHubIssueActionCore) ExecuteListAssignedIssuesWithPRs(ctx context.Context, input json.RawMessage) (string, error) {
 	req, err := c.request(input)
+	if err != nil {
+		return "", err
+	}
+	limit, offset, err := assignedIssueListPageForInput(input, req)
 	if err != nil {
 		return "", err
 	}
@@ -296,7 +332,12 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssuesWithPRs(ctx context.Con
 	if err != nil {
 		return "", err
 	}
-	return githubIssueActionJSON(map[string]any{"ok": true, "items": items, "skipped_without_pr": "Assigned issues without an associated pull request are skipped."})
+	page, nextOffset := pageAssignedGitHubIssuesWithPRs(items, limit, offset)
+	return githubIssueActionJSON(map[string]any{
+		"ok": true, "items": page, "returned": len(page), "total": len(items), "offset": offset,
+		"next_offset": nextOffset, "truncated": nextOffset > 0,
+		"skipped_without_pr": "Assigned issues without an associated pull request are skipped.",
+	})
 }
 
 func (c *GitHubIssueActionCore) requireAuthorizedAssignee(ctx context.Context, assignee string) error {

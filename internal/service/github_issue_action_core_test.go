@@ -13,15 +13,17 @@ import (
 )
 
 type fakeGitHubIssueActionProvider struct {
-	getIssueNumber   int
-	commentNumber    int
-	commentBody      string
-	labelNumber      int
-	labels           []string
-	closeNumber      int
-	createdIssues    []GitHubIssue
-	myAssignedIssues []GitHubIssue
-	assignedIssues   []GitHubIssue
+	getIssueNumber            int
+	commentNumber             int
+	commentBody               string
+	labelNumber               int
+	labels                    []string
+	closeNumber               int
+	createdIssues             []GitHubIssue
+	myAssignedIssues          []GitHubIssue
+	assignedIssues            []GitHubIssue
+	assignedIssuesWithPRs     []GitHubIssueWithPullRequest
+	assignedIssuesWithPRCalls int
 }
 
 func (f *fakeGitHubIssueActionProvider) GetIssue(_ context.Context, _ *GitHubRepoRef, issueNumber int) (*GitHubIssue, error) {
@@ -47,6 +49,10 @@ func (f *fakeGitHubIssueActionProvider) ListAssignedIssues(_ context.Context, _ 
 	return []GitHubIssue{{Number: 2}}, nil
 }
 func (f *fakeGitHubIssueActionProvider) ListAssignedIssuesWithPullRequests(_ context.Context, _ *GitHubRepoRef, _ string) ([]GitHubIssueWithPullRequest, error) {
+	f.assignedIssuesWithPRCalls++
+	if f.assignedIssuesWithPRs != nil {
+		return f.assignedIssuesWithPRs, nil
+	}
 	return []GitHubIssueWithPullRequest{{Issue: GitHubIssue{Number: 3}}}, nil
 }
 func (f *fakeGitHubIssueActionProvider) CommentOnIssue(_ context.Context, _ *GitHubRepoRef, issueNumber int, body string) error {
@@ -194,6 +200,71 @@ func TestGitHubIssueActionCoreListExistingAutomationIssuesPaginatesCallerVisible
 
 	if _, err := core.ExecuteListExistingAutomationIssues(ctx, json.RawMessage(`{"offset":-1}`)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
 		t.Fatalf("negative offset error=%v, want validation error", err)
+	}
+}
+
+func TestGitHubIssueActionCoreAssignedIssuesWithPRsPaginateCallerVisibleResults(t *testing.T) {
+	provider := &fakeGitHubIssueActionProvider{assignedIssuesWithPRs: []GitHubIssueWithPullRequest{
+		{Issue: GitHubIssue{Number: 1, Title: "First"}, PullRequest: GitHubPullRequest{Number: 101}},
+		{Issue: GitHubIssue{Number: 2, Title: "Second"}, PullRequest: GitHubPullRequest{Number: 102}},
+		{Issue: GitHubIssue{Number: 3, Title: "Third"}, PullRequest: GitHubPullRequest{Number: 103}},
+	}}
+	core := NewGitHubIssueActionCore(provider, fakeGitHubIssueAuthorizationStore{}, "project-1",
+		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
+		func(context.Context, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{FullName: "owner/repo"}, nil
+		})
+
+	type response struct {
+		Items      []GitHubIssueWithPullRequest `json:"items"`
+		Returned   int                          `json:"returned"`
+		Total      int                          `json:"total"`
+		Offset     int                          `json:"offset"`
+		NextOffset int                          `json:"next_offset"`
+		Truncated  bool                         `json:"truncated"`
+	}
+	page := func(input string, wantNumbers []int, wantOffset, wantNext int, wantTruncated bool) response {
+		t.Helper()
+		output, err := core.ExecuteListAssignedIssuesWithPRs(context.Background(), json.RawMessage(input))
+		if err != nil {
+			t.Fatalf("page input %s returned error: %v", input, err)
+		}
+		var got response
+		if err := json.Unmarshal([]byte(output), &got); err != nil {
+			t.Fatalf("decode page output %q: %v", output, err)
+		}
+		if got.Returned != len(wantNumbers) || got.Total != 3 || got.Offset != wantOffset || got.NextOffset != wantNext || got.Truncated != wantTruncated {
+			t.Fatalf("page input %s metadata=%+v, want returned=%d total=3 offset=%d next_offset=%d truncated=%t", input, got, len(wantNumbers), wantOffset, wantNext, wantTruncated)
+		}
+		if len(got.Items) != len(wantNumbers) {
+			t.Fatalf("page input %s returned %d items, want %d: %s", input, len(got.Items), len(wantNumbers), output)
+		}
+		for i, wantNumber := range wantNumbers {
+			if got.Items[i].Issue.Number != wantNumber {
+				t.Fatalf("page input %s item %d number=%d, want %d", input, i, got.Items[i].Issue.Number, wantNumber)
+			}
+		}
+		return got
+	}
+
+	page(`{"assignee":"dev-bot","limit":1,"offset":0}`, []int{1}, 0, 1, true)
+	page(`{"assignee":"dev-bot","limit":1,"offset":1}`, []int{2}, 1, 2, true)
+	page(`{"assignee":"dev-bot","limit":1,"offset":2}`, []int{3}, 2, 0, false)
+	page(`{"assignee":"dev-bot","limit":1,"offset":3}`, nil, 3, 0, false)
+	page(`{"assignee":"dev-bot","limit":1,"offset":4}`, nil, 4, 0, false)
+
+	callsBeforeInvalid := provider.assignedIssuesWithPRCalls
+	for _, input := range []string{
+		`{"assignee":"dev-bot","limit":0}`,
+		`{"assignee":"dev-bot","limit":101}`,
+		`{"assignee":"dev-bot","offset":-1}`,
+	} {
+		if _, err := core.ExecuteListAssignedIssuesWithPRs(context.Background(), json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+			t.Fatalf("invalid page input %s error=%v, want validation error", input, err)
+		}
+	}
+	if provider.assignedIssuesWithPRCalls != callsBeforeInvalid {
+		t.Fatalf("provider calls after invalid pages=%d, want %d", provider.assignedIssuesWithPRCalls, callsBeforeInvalid)
 	}
 }
 
