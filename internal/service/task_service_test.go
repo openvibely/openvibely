@@ -1949,6 +1949,73 @@ func TestTaskService_CancelTask_AllowsActivePendingTask(t *testing.T) {
 	assert.Equal(t, models.CategoryBacklog, updated.Category)
 }
 
+func TestTaskService_CancelTask_RunningTaskPreservesCancellationOrdering(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	svc.SetTaskGoalService(goalSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Running Explicit Cancel",
+		Prompt:    "test",
+		Status:    models.StatusRunning,
+		Category:  models.CategoryActive,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	goal, err := goalSvc.SetGoal(ctx, task.ID, "Keep going until done", GoalOptions{Actor: "test"})
+	require.NoError(t, err)
+
+	type cancellationObservation struct {
+		markerSet bool
+		status    models.TaskStatus
+		category  models.TaskCategory
+		err       error
+	}
+	observed := make(chan cancellationObservation, 1)
+	workerSvc.RegisterCancel(task.ID, func() {
+		beforeStatus, getErr := taskRepo.GetByID(context.Background(), task.ID)
+		if beforeStatus == nil {
+			observed <- cancellationObservation{markerSet: workerSvc.IsCancellationRequested(task.ID), err: getErr}
+			return
+		}
+		observed <- cancellationObservation{
+			markerSet: workerSvc.IsCancellationRequested(task.ID),
+			status:    beforeStatus.Status,
+			category:  beforeStatus.Category,
+			err:       getErr,
+		}
+	})
+
+	require.NoError(t, svc.CancelTask(ctx, task.ID))
+
+	select {
+	case got := <-observed:
+		require.NoError(t, got.err)
+		assert.True(t, got.markerSet, "cancellation intent must be marked before the worker callback")
+		assert.Equal(t, models.StatusRunning, got.status, "durable task cancellation must follow worker cancellation")
+		assert.Equal(t, models.CategoryActive, got.category)
+	case <-time.After(time.Second):
+		t.Fatal("expected running task cancel callback")
+	}
+
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	assert.Equal(t, models.StatusCancelled, updated.Status)
+	assert.Equal(t, models.CategoryBacklog, updated.Category)
+
+	paused, err := goalSvc.GetGoal(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, paused)
+	assert.Equal(t, goal.GoalID, paused.GoalID)
+	assert.Equal(t, models.TaskGoalStatusPaused, paused.Status)
+	assert.Equal(t, "stopped by user", paused.Reason)
+}
+
 func TestTaskService_CancelTask_AllowsQueuedTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
