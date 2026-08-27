@@ -349,36 +349,34 @@ func (h *Handler) hostedSecureCookies() bool {
 	return strings.HasPrefix(h.appBaseURL, "https://")
 }
 
-func (h *Handler) hostedSessionCookie(token string, now time.Time) *http.Cookie {
+func (h *Handler) hostedCookie(name, value, path string, maxAge int, expires time.Time) *http.Cookie {
 	return &http.Cookie{
-		Name: auth.DefaultCookieName, Value: token, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: h.hostedSecureCookies(), MaxAge: int(auth.HostedSessionLifetime.Seconds()),
-		Expires: now.Add(auth.HostedSessionLifetime),
+		Name: name, Value: value, Path: path, HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, Secure: h.hostedSecureCookies(), MaxAge: maxAge,
+		Expires: expires,
 	}
+}
+
+func (h *Handler) hostedSessionCookie(token string, now time.Time) *http.Cookie {
+	return h.hostedCookie(
+		auth.DefaultCookieName,
+		token,
+		"/",
+		int(auth.HostedSessionLifetime.Seconds()),
+		now.Add(auth.HostedSessionLifetime),
+	)
 }
 
 func (h *Handler) hostedSessionDeletionCookie() *http.Cookie {
-	return &http.Cookie{
-		Name: auth.DefaultCookieName, Value: "", Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: h.hostedSecureCookies(), MaxAge: -1,
-		Expires: time.Unix(0, 0).UTC(),
-	}
+	return h.hostedCookie(auth.DefaultCookieName, "", "/", -1, time.Unix(0, 0).UTC())
 }
 
 func (h *Handler) hostedBrowserCookie(value string) *http.Cookie {
-	return &http.Cookie{
-		Name: "ov_sso_browser", Value: value, Path: "/auth/sso", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: h.hostedSecureCookies(), MaxAge: 600,
-		Expires: time.Now().Add(10 * time.Minute),
-	}
+	return h.hostedCookie("ov_sso_browser", value, "/auth/sso", 600, time.Now().Add(10*time.Minute))
 }
 
 func (h *Handler) clearHostedBrowserCookie() *http.Cookie {
-	return &http.Cookie{
-		Name: "ov_sso_browser", Value: "", Path: "/auth/sso", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: h.hostedSecureCookies(), MaxAge: -1,
-		Expires: time.Unix(0, 0).UTC(),
-	}
+	return h.hostedCookie("ov_sso_browser", "", "/auth/sso", -1, time.Unix(0, 0).UTC())
 }
 
 func (h *Handler) hostedRetryPage(c echo.Context, status int, destination string) error {
