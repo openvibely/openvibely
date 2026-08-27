@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -246,5 +247,156 @@ func TestLiveEventsSSE_AppliesProjectAndTaskFilters(t *testing.T) {
 	}
 	if got := received["diff_snapshot"]; !strings.Contains(got, `"task_id":"task-1"`) {
 		t.Fatalf("expected filtered file event for task-1, got %q", got)
+	}
+}
+
+func waitForLiveSubscriberCount(t *testing.T, name string, count func() int, want int) {
+	t.Helper()
+
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+
+	for {
+		if got := count(); got == want {
+			return
+		}
+
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatalf("timed out waiting for %s subscriber count to become %d (got %d)", name, want, count())
+		}
+	}
+}
+
+func fillLiveSubscribers[T any, S ~chan T](t *testing.T, subscribe func() (S, error), unsubscribe func(S)) {
+	t.Helper()
+
+	subscribers := make([]S, 0, events.MaxSubscribers)
+	for i := 0; i < events.MaxSubscribers; i++ {
+		sub, err := subscribe()
+		if err != nil {
+			t.Fatalf("subscribe %d/%d: %v", i+1, events.MaxSubscribers, err)
+		}
+		subscribers = append(subscribers, sub)
+	}
+	t.Cleanup(func() {
+		for _, sub := range subscribers {
+			unsubscribe(sub)
+		}
+	})
+
+	extra, err := subscribe()
+	if err == nil {
+		unsubscribe(extra)
+	}
+	if err != events.ErrMaxSubscribers {
+		t.Fatalf("expected ErrMaxSubscribers after %d subscribers, got %v", events.MaxSubscribers, err)
+	}
+}
+
+func TestLiveEventsSSE_CleansUpAllSubscriptionsOnCancellation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping timing-sensitive SSE test in short mode")
+	}
+
+	taskBroadcaster := events.NewBroadcaster()
+	chatBroadcaster := events.NewChatBroadcaster()
+	fileBroadcaster := events.NewFileChangeBroadcaster()
+	h := &Handler{
+		broadcaster:           taskBroadcaster,
+		chatBroadcaster:       chatBroadcaster,
+		fileChangeBroadcaster: fileBroadcaster,
+	}
+
+	e := echo.New()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req := httptest.NewRequest(http.MethodGet, "/events/live", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	done := make(chan error, 1)
+	go func() {
+		done <- h.LiveEventsSSE(e.NewContext(req, rec))
+	}()
+
+	waitForLiveSubscriberCount(t, "task", taskBroadcaster.SubscriberCount, 1)
+	waitForLiveSubscriberCount(t, "chat", chatBroadcaster.SubscriberCount, 1)
+	waitForLiveSubscriberCount(t, "file-change", fileBroadcaster.SubscriberCount, 1)
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("LiveEventsSSE returned an error after request cancellation: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for LiveEventsSSE to return after request cancellation")
+	}
+
+	waitForLiveSubscriberCount(t, "task", taskBroadcaster.SubscriberCount, 0)
+	waitForLiveSubscriberCount(t, "chat", chatBroadcaster.SubscriberCount, 0)
+	waitForLiveSubscriberCount(t, "file-change", fileBroadcaster.SubscriberCount, 0)
+}
+
+func TestLiveEventsSSE_CleansUpPriorSubscriptionsOnSubscriberLimit(t *testing.T) {
+	tests := []struct {
+		name                string
+		wantTaskSubscribers int
+		wantChatSubscribers int
+		wantFileSubscribers int
+	}{
+		{name: "task", wantTaskSubscribers: events.MaxSubscribers},
+		{name: "chat", wantChatSubscribers: events.MaxSubscribers},
+		{name: "file-change", wantFileSubscribers: events.MaxSubscribers},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			taskBroadcaster := events.NewBroadcaster()
+			chatBroadcaster := events.NewChatBroadcaster()
+			fileBroadcaster := events.NewFileChangeBroadcaster()
+
+			switch tt.name {
+			case "task":
+				fillLiveSubscribers[events.TaskEvent, events.Subscriber](t, taskBroadcaster.Subscribe, taskBroadcaster.Unsubscribe)
+			case "chat":
+				fillLiveSubscribers[events.ChatEvent, events.ChatSubscriber](t, chatBroadcaster.Subscribe, chatBroadcaster.Unsubscribe)
+			case "file-change":
+				fillLiveSubscribers[events.FileChangeEvent, events.FileChangeSubscriber](t, fileBroadcaster.Subscribe, fileBroadcaster.Unsubscribe)
+			default:
+				t.Fatalf("unsupported subscriber-limit stage %q", tt.name)
+			}
+
+			h := &Handler{
+				broadcaster:           taskBroadcaster,
+				chatBroadcaster:       chatBroadcaster,
+				fileChangeBroadcaster: fileBroadcaster,
+			}
+			e := echo.New()
+			req := httptest.NewRequest(http.MethodGet, "/events/live", nil)
+			rec := httptest.NewRecorder()
+
+			if err := h.LiveEventsSSE(e.NewContext(req, rec)); err != nil {
+				t.Fatalf("LiveEventsSSE returned an error: %v", err)
+			}
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
+			}
+			if !strings.Contains(rec.Body.String(), "Too many SSE connections") {
+				t.Fatalf("expected subscriber-limit response, got %q", rec.Body.String())
+			}
+
+			if got := taskBroadcaster.SubscriberCount(); got != tt.wantTaskSubscribers {
+				t.Fatalf("expected %d task subscribers after %s limit failure, got %d", tt.wantTaskSubscribers, tt.name, got)
+			}
+			if got := chatBroadcaster.SubscriberCount(); got != tt.wantChatSubscribers {
+				t.Fatalf("expected %d chat subscribers after %s limit failure, got %d", tt.wantChatSubscribers, tt.name, got)
+			}
+			if got := fileBroadcaster.SubscriberCount(); got != tt.wantFileSubscribers {
+				t.Fatalf("expected %d file-change subscribers after %s limit failure, got %d", tt.wantFileSubscribers, tt.name, got)
+			}
+		})
 	}
 }
