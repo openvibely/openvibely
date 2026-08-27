@@ -165,28 +165,12 @@ func collectProducedCommitStat(worktreePath, sha string) (*models.TaskCommitStat
 		return nil, fmt.Errorf("reading commit numstat: %w", err)
 	}
 
-	var files []string
-	scanner := bufio.NewScanner(strings.NewReader(string(numstatOut)))
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		fields := strings.Split(line, "\t")
-		if len(fields) < 3 {
-			continue
-		}
-		if n, err := strconv.Atoi(fields[0]); err == nil {
-			stat.Insertions += n
-		}
-		if n, err := strconv.Atoi(fields[1]); err == nil {
-			stat.Deletions += n
-		}
-		files = append(files, strings.Join(fields[2:], "\t"))
-	}
-	if err := scanner.Err(); err != nil {
+	numstatLines, err := parseNumstatLines(string(numstatOut))
+	if err != nil {
 		return nil, fmt.Errorf("scanning commit numstat: %w", err)
 	}
+	var files []string
+	applyNumstatLines(stat, numstatLines, nil, &files)
 	stat.FilesChanged = len(files)
 	changedFilesJSON, err := json.Marshal(files)
 	if err != nil {
@@ -249,6 +233,22 @@ func addNumstatFromGitDiff(worktreePath, baseRef string, stat *models.TaskCommit
 }
 
 func addNumstatLines(stat *models.TaskCommitStat, output string, seenFiles map[string]bool, files *[]string) error {
+	numstatLines, err := parseNumstatLines(output)
+	if err != nil {
+		return fmt.Errorf("scanning commit numstat: %w", err)
+	}
+	applyNumstatLines(stat, numstatLines, seenFiles, files)
+	return nil
+}
+
+type parsedNumstatLine struct {
+	insertions int
+	deletions  int
+	path       string
+}
+
+func parseNumstatLines(output string) ([]parsedNumstatLine, error) {
+	var numstatLines []parsedNumstatLine
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -259,22 +259,34 @@ func addNumstatLines(stat *models.TaskCommitStat, output string, seenFiles map[s
 		if len(fields) < 3 {
 			continue
 		}
+		parsed := parsedNumstatLine{path: strings.Join(fields[2:], "\t")}
 		if n, err := strconv.Atoi(fields[0]); err == nil {
-			stat.Insertions += n
+			parsed.insertions = n
 		}
 		if n, err := strconv.Atoi(fields[1]); err == nil {
-			stat.Deletions += n
+			parsed.deletions = n
 		}
-		path := strings.Join(fields[2:], "\t")
-		if path != "" && !seenFiles[path] {
-			seenFiles[path] = true
-			*files = append(*files, path)
-		}
+		numstatLines = append(numstatLines, parsed)
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scanning commit numstat: %w", err)
+		return nil, err
 	}
-	return nil
+	return numstatLines, nil
+}
+
+func applyNumstatLines(stat *models.TaskCommitStat, numstatLines []parsedNumstatLine, seenFiles map[string]bool, files *[]string) {
+	for _, numstatLine := range numstatLines {
+		stat.Insertions += numstatLine.insertions
+		stat.Deletions += numstatLine.deletions
+		if seenFiles == nil {
+			*files = append(*files, numstatLine.path)
+			continue
+		}
+		if numstatLine.path != "" && !seenFiles[numstatLine.path] {
+			seenFiles[numstatLine.path] = true
+			*files = append(*files, numstatLine.path)
+		}
+	}
 }
 
 func countTextLines(content []byte) int {
