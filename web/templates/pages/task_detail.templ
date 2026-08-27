@@ -25,9 +25,9 @@ templ TaskChangesContentWithView(diffOutput string, taskID string, reviewComment
 	</div>
 }
 
-templ TaskDetailPage(projects []models.Project, task *models.Task, goal *models.TaskGoal, executions []models.Execution, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []models.Agent, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
+templ TaskDetailPage(projects []models.Project, task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []models.Agent, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
 	@layout.Base(task.Title, projects, task.ProjectID) {
-		@TaskDetailContent(task, goal, executions, schedules, agents, agentDefs, attachments, defaultTab, reviewComments)
+		@TaskDetailContent(task, goal, metrics, schedules, agents, agentDefs, attachments, defaultTab, reviewComments)
 	}
 }
 
@@ -42,7 +42,7 @@ script removeEditAttachment(attID string) {
 	}
 }
 
-templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []models.Execution, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []models.Agent, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
+templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models.TaskExecutionMetrics, schedules []models.Schedule, agents []models.LLMConfig, agentDefs []models.Agent, attachments []models.Attachment, defaultTab string, reviewComments []models.ReviewComment) {
 	<div id="task-detail-content" class="h-full flex flex-col">
 		@layout.PageTitle(task.Title)
 		<!-- Breadcrumb navigation -->
@@ -139,7 +139,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, executions []m
 				<div class="card-body flex-1 flex flex-col min-h-0">
 					<!-- View Mode -->
 						<div id="task-detail-view" class="flex-1 overflow-y-auto min-h-0 pr-1">
-								@TaskDetailMetrics(task, taskExecutionMetricsFromExecutions(executions), agents, agentDefs)
+								@TaskDetailMetrics(task, taskExecutionMetricsValue(metrics), agents, agentDefs)
 							@SwarmContextPanel(task)
 							@TaskPromptPanel(task)
 						@TaskGoalPanel(task.ID, goal)
@@ -1685,19 +1685,11 @@ templ TaskDetailActions(task *models.Task) {
 	</div>
 }
 
-func taskExecutionMetricsFromExecutions(executions []models.Execution) models.TaskExecutionMetrics {
-	var metrics models.TaskExecutionMetrics
-	if len(executions) > 0 {
-		started := executions[len(executions)-1].StartedAt
-		metrics.LatestStartedAt = &started
+func taskExecutionMetricsValue(metrics *models.TaskExecutionMetrics) models.TaskExecutionMetrics {
+	if metrics == nil {
+		return models.TaskExecutionMetrics{}
 	}
-	for i := len(executions) - 1; i >= 0; i-- {
-		if executions[i].DurationMs > 0 {
-			metrics.LatestDurationMs = executions[i].DurationMs
-			break
-		}
-	}
-	return metrics
+	return *metrics
 }
 
 // TaskDetailMetrics renders the status/category/tag/priority/model/agent metrics grid with polling.

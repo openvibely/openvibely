@@ -377,6 +377,227 @@ func TestHandler_GetTask_HTMX(t *testing.T) {
 	assertNotContains(t, rec, "task_detail_modal")
 }
 
+func TestHandler_GetTaskLargeHistoryUsesNarrowExecutionMetrics(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	ctx := context.Background()
+
+	agent := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Initial Detail Metrics Project")
+	task := createTask(t, h, project.ID, "Initial Detail Metrics Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+		tk.Priority = 3
+		tk.Tag = models.TagFeature
+		tk.AgentID = &agent.ID
+	})
+	task.Category = models.CategoryActive
+	if err := h.taskSvc.Update(ctx, task); err != nil {
+		t.Fatalf("update task to active completed: %v", err)
+	}
+	seedLargeExecutionHistory(t, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+	if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
+		t.Fatalf("complete latest execution: %v", err)
+	}
+
+	checkInitialDetail := func(name string, htmx bool) {
+		t.Helper()
+		counter.Reset()
+		counter.SetEnabled(true)
+		var rec *httptest.ResponseRecorder
+		if htmx {
+			rec = htmxGet(e, "/tasks/"+task.ID)
+		} else {
+			req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+			rec = httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+		}
+		counter.SetEnabled(false)
+
+		assertCode(t, rec, http.StatusOK)
+		for _, required := range []string{"Initial Detail Metrics Task", "Category:", "active", "Status:", "Completed", "Tag:", "Feature", "Priority:", "High", "Model:", "Test Agent", "Duration:", "1m 5s"} {
+			assertContains(t, rec, required)
+		}
+
+		metricsQuerySeen := false
+		for _, stmt := range counter.Statements() {
+			if !strings.Contains(stmt, "FROM executions") {
+				continue
+			}
+			if strings.Contains(stmt, "latest_started_at") && strings.Contains(stmt, "latest_duration_ms") {
+				metricsQuerySeen = true
+			}
+			for _, forbidden := range []string{"prompt_sent", "output", "error_message", "reasoning_content", "diff_output"} {
+				if strings.Contains(stmt, forbidden) {
+					t.Fatalf("%s execution query scanned historical %s text: %s", name, forbidden, stmt)
+				}
+			}
+			if strings.Contains(stmt, "ORDER BY started_at ASC, rowid ASC") {
+				t.Fatalf("%s initial detail path executed the unbounded chronological execution query: %s", name, stmt)
+			}
+		}
+		if !metricsQuerySeen {
+			t.Fatalf("%s initial detail path did not execute compact task execution metrics query; statements: %#v", name, counter.Statements())
+		}
+	}
+
+	checkInitialDetail("HTMX", true)
+	checkInitialDetail("full-page", false)
+}
+
+func BenchmarkHandler_GetTask_MetricsProjection(b *testing.B) {
+	for _, tc := range []struct {
+		name               string
+		queryPattern       string
+		executionTextBytes int64
+		run                func(context.Context, *echo.Echo, *models.Task) (*httptest.ResponseRecorder, error)
+	}{
+		{
+			name:               "legacy_all_history",
+			queryPattern:       "ORDER BY started_at ASC, rowid ASC",
+			executionTextBytes: int64(200 * (4*1024 + 64*1024)),
+		},
+		{
+			name:               "compact_metrics",
+			queryPattern:       "latest_started_at",
+			executionTextBytes: 0,
+		},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			db, counter := testutil.NewStatementCountingTestDB(b)
+			h, e, llmConfigRepo := setupTestHandlerForDB(b, db)
+			ctx := context.Background()
+			agent := createAgentTB(b, llmConfigRepo)
+			project := createProjectTB(b, h, "Initial Detail Metrics Benchmark Project")
+			task := createTaskTB(b, h, project.ID, "Initial Detail Metrics Benchmark Task", func(tk *models.Task) {
+				tk.Category = models.CategoryBacklog
+				tk.Status = models.StatusCompleted
+				tk.Priority = 3
+				tk.Tag = models.TagFeature
+				tk.AgentID = &agent.ID
+			})
+			task.Category = models.CategoryActive
+			if err := h.taskSvc.Update(ctx, task); err != nil {
+				b.Fatalf("update task to active completed: %v", err)
+			}
+			seedLargeExecutionHistory(b, db, task.ID, agent.ID, 200, 4*1024, 64*1024)
+			if _, err := db.ExecContext(ctx, `UPDATE executions SET status = ?, duration_ms = ?, completed_at = ? WHERE id = ?`, models.ExecCompleted, int64(65_000), "2026-08-13 12:03:20", "exec-199"); err != nil {
+				b.Fatalf("complete latest execution: %v", err)
+			}
+			var historicalExecutionTextBytes int64
+			if err := db.QueryRowContext(ctx, `SELECT COALESCE(SUM(LENGTH(COALESCE(prompt_sent, '')) + LENGTH(COALESCE(output, '')) + LENGTH(COALESCE(error_message, ''))), 0) FROM executions WHERE task_id = ?`, task.ID).Scan(&historicalExecutionTextBytes); err != nil {
+				b.Fatalf("sum historical execution text bytes: %v", err)
+			}
+			if tc.name == "legacy_all_history" {
+				tc.executionTextBytes = historicalExecutionTextBytes
+			} else {
+				tc.executionTextBytes = 0
+			}
+
+			legacyEcho := echo.New()
+			legacyEcho.GET("/tasks/:taskId", func(c echo.Context) error {
+				return renderLegacyTaskDetailForBenchmark(c, h)
+			})
+			if tc.name == "legacy_all_history" {
+				tc.run = func(_ context.Context, _ *echo.Echo, task *models.Task) (*httptest.ResponseRecorder, error) {
+					req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+					rec := httptest.NewRecorder()
+					legacyEcho.ServeHTTP(rec, req)
+					if rec.Code != http.StatusOK {
+						return rec, fmt.Errorf("legacy detail request status=%d", rec.Code)
+					}
+					return rec, nil
+				}
+			} else {
+				tc.run = func(_ context.Context, currentEcho *echo.Echo, task *models.Task) (*httptest.ResponseRecorder, error) {
+					req := httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID, nil)
+					rec := httptest.NewRecorder()
+					currentEcho.ServeHTTP(rec, req)
+					if rec.Code != http.StatusOK {
+						return rec, fmt.Errorf("compact detail request status=%d", rec.Code)
+					}
+					return rec, nil
+				}
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			var totalContention time.Duration
+			var totalResponseBytes int64
+			for i := 0; i < b.N; i++ {
+				queryStarted := make(chan struct{})
+				var once sync.Once
+				counter.SetObserver(func(_ context.Context, query string) {
+					if strings.Contains(query, tc.queryPattern) {
+						once.Do(func() { close(queryStarted) })
+					}
+				})
+				errCh := make(chan error, 1)
+				var response *httptest.ResponseRecorder
+				go func() {
+					var err error
+					response, err = tc.run(context.Background(), e, task)
+					errCh <- err
+				}()
+				select {
+				case <-queryStarted:
+				case err := <-errCh:
+					b.Fatalf("%s detail request ended before execution query started: %v", tc.name, err)
+				case <-time.After(2 * time.Second):
+					b.Fatalf("%s execution query did not start", tc.name)
+				}
+				contentionStart := time.Now()
+				if _, err := h.projectSvc.List(context.Background()); err != nil {
+					b.Fatalf("lightweight project list: %v", err)
+				}
+				totalContention += time.Since(contentionStart)
+				if err := <-errCh; err != nil {
+					b.Fatal(err)
+				}
+				totalResponseBytes += int64(response.Body.Len())
+				counter.SetObserver(nil)
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(tc.executionTextBytes), "execution_text_bytes/op")
+			b.ReportMetric(float64(totalResponseBytes)/float64(b.N), "rendered_response_bytes/op")
+			b.ReportMetric(float64(totalContention.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
+		})
+	}
+}
+
+func renderLegacyTaskDetailForBenchmark(c echo.Context, h *Handler) error {
+	ctx := c.Request().Context()
+	taskID := c.Param("taskId")
+	task, err := h.taskSvc.GetByID(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "task not found")
+	}
+	if task.SwarmRole == models.SwarmRoleParent {
+		if children, childErr := h.taskRepo.ListSwarmChildren(ctx, task.ID); childErr == nil {
+			task.SwarmChildren = children
+		}
+	}
+	executions, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
+	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
+	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
+	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
+	agentDefs := h.listTaskFormAgentDefinitions(ctx, task.ProjectID, task.AgentDefinitionID)
+	var reviewComments []models.ReviewComment
+	if h.reviewCommentRepo != nil {
+		reviewComments, _ = h.reviewCommentRepo.ListByTask(ctx, taskID)
+	}
+	projects, _ := h.projectSvc.ListSelectorOptions(ctx)
+	defaultTab := "details"
+	if task.Status == models.StatusCompleted || task.Status == models.StatusFailed || task.Status == models.StatusCancelled || task.Status == models.StatusRunning {
+		defaultTab = "chat"
+	}
+	metrics := taskExecutionMetricsFromExecutionsForBenchmark(executions)
+	return render(c, http.StatusOK, pages.TaskDetailPage(projects, task, h.loadTaskGoal(ctx, taskID), &metrics, schedules, agents, agentDefs, attachments, defaultTab, reviewComments))
+}
+
 func TestHandler_TasksPage_NoDialogContainer(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Test Project")

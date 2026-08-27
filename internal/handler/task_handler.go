@@ -42,14 +42,14 @@ type taskSortPreferences struct {
 }
 
 type taskDetailContentData struct {
-	task           *models.Task
-	taskGoal       *models.TaskGoal
-	executions     []models.Execution
-	schedules      []models.Schedule
-	agents         []models.LLMConfig
-	agentDefs      []models.Agent
-	attachments    []models.Attachment
-	reviewComments []models.ReviewComment
+	task             *models.Task
+	taskGoal         *models.TaskGoal
+	executionMetrics models.TaskExecutionMetrics
+	schedules        []models.Schedule
+	agents           []models.LLMConfig
+	agentDefs        []models.Agent
+	attachments      []models.Attachment
+	reviewComments   []models.ReviewComment
 }
 
 func getSortPreference(c echo.Context, cookieName string) string {
@@ -490,7 +490,7 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 		}
 	}
 
-	executions, _ := h.execRepo.ListByTaskChronological(ctx, taskID)
+	executionMetrics, _ := h.execRepo.GetTaskExecutionMetrics(ctx, taskID)
 	schedules, _ := h.scheduleRepo.ListByTask(ctx, taskID)
 	agents, _ := h.llmConfigRepo.ListBadgeOptions(ctx)
 	attachments, _ := h.attachmentRepo.ListByTask(ctx, taskID)
@@ -501,14 +501,14 @@ func (h *Handler) loadTaskDetailContentData(ctx context.Context, taskID string) 
 	}
 
 	return &taskDetailContentData{
-		task:           task,
-		taskGoal:       h.loadTaskGoal(ctx, taskID),
-		executions:     executions,
-		schedules:      schedules,
-		agents:         agents,
-		agentDefs:      agentDefs,
-		attachments:    attachments,
-		reviewComments: reviewComments,
+		task:             task,
+		taskGoal:         h.loadTaskGoal(ctx, taskID),
+		executionMetrics: executionMetrics,
+		schedules:        schedules,
+		agents:           agents,
+		agentDefs:        agentDefs,
+		attachments:      attachments,
+		reviewComments:   reviewComments,
 	}, nil
 }
 
@@ -521,7 +521,7 @@ func (h *Handler) renderTaskDetailContent(c echo.Context, taskID, selectedTab st
 }
 
 func (h *Handler) renderTaskDetailContentData(c echo.Context, data *taskDetailContentData, selectedTab string) error {
-	return render(c, http.StatusOK, pages.TaskDetailContent(data.task, data.taskGoal, data.executions, data.schedules, data.agents, data.agentDefs, data.attachments, selectedTab, data.reviewComments))
+	return render(c, http.StatusOK, pages.TaskDetailContent(data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, selectedTab, data.reviewComments))
 }
 
 func (h *Handler) GetTask(c echo.Context) error {
@@ -539,7 +539,7 @@ func (h *Handler) GetTask(c echo.Context) error {
 		return err
 	}
 	task := data.task
-	applog.Infof("[handler] GetTask id=%s executions=%d schedules=%d attachments=%d", taskID, len(data.executions), len(data.schedules), len(data.attachments))
+	applog.Infof("[handler] GetTask id=%s schedules=%d attachments=%d", taskID, len(data.schedules), len(data.attachments))
 
 	// Determine default tab
 	defaultTab := c.QueryParam("tab")
@@ -566,7 +566,7 @@ func (h *Handler) GetTask(c echo.Context) error {
 
 	// Full page load: wrap in layout
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-	return render(c, http.StatusOK, pages.TaskDetailPage(projects, data.task, data.taskGoal, data.executions, data.schedules, data.agents, data.agentDefs, data.attachments, defaultTab, data.reviewComments))
+	return render(c, http.StatusOK, pages.TaskDetailPage(projects, data.task, data.taskGoal, &data.executionMetrics, data.schedules, data.agents, data.agentDefs, data.attachments, defaultTab, data.reviewComments))
 }
 
 // GetTaskExecutions returns the bounded execution-history fragment for a task.
