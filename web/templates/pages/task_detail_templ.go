@@ -500,7 +500,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = TaskDetailMetrics(task, taskExecutionMetricsValue(metrics), agents, agentDefs).Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = TaskDetailMetrics(task, taskExecutionMetricsValue(metrics), agents, taskAgentLabelFromDefinitions(task, agentDefs)).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -2021,7 +2021,7 @@ func taskExecutionMetricsValue(metrics *models.TaskExecutionMetrics) models.Task
 
 // TaskDetailMetrics renders the status/category/tag/priority/model/agent metrics grid with polling.
 // Polls every 3s to keep status badges up to date when task state changes (e.g., via chat interaction).
-func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, agents []models.LLMConfig, agentDefs []models.Agent) templ.Component {
+func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, agents []models.LLMConfig, agentLabel string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -2195,9 +2195,9 @@ func TaskDetailMetrics(task *models.Task, metrics models.TaskExecutionMetrics, a
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var118 string
-		templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(taskAgentLabel(task, agentDefs))
+		templ_7745c5c3_Var118, templ_7745c5c3_Err = templ.JoinStringErrs(taskAgentLabel(task, agentLabel))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1739, Col: 84}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/task_detail.templ`, Line: 1739, Col: 85}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var118))
 		if templ_7745c5c3_Err != nil {
@@ -2805,19 +2805,26 @@ func taskModelLabel(task *models.Task, agents []models.LLMConfig) string {
 	return "Unknown model"
 }
 
-func taskAgentLabel(task *models.Task, agentDefs []models.Agent) string {
+func taskAgentLabel(task *models.Task, agentName string) string {
 	if task == nil || task.AgentDefinitionID == nil || *task.AgentDefinitionID == "" {
 		return "No agent"
 	}
-	for _, agent := range agentDefs {
-		if agent.ID == *task.AgentDefinitionID {
-			if agent.Name != "" {
-				return agent.Name
-			}
-			break
-		}
+	if agentName != "" {
+		return agentName
 	}
 	return "Unknown agent"
+}
+
+func taskAgentLabelFromDefinitions(task *models.Task, agentDefs []models.Agent) string {
+	if task == nil || task.AgentDefinitionID == nil || *task.AgentDefinitionID == "" {
+		return ""
+	}
+	for _, agent := range agentDefs {
+		if agent.ID == *task.AgentDefinitionID {
+			return agent.Name
+		}
+	}
+	return ""
 }
 
 var _ = templruntime.GeneratedTemplate

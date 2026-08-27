@@ -846,6 +846,233 @@ func newestHistoryExecutionID(t testing.TB, db *sql.DB, taskID string, offset in
 	return id
 }
 
+func TestHandler_GetTaskDetailStatusUsesCompactAgentLabelProjection(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+	ctx := context.Background()
+
+	model := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Compact Agent Status Project")
+	agentDef := &models.Agent{
+		Name:                "Compact Status Agent",
+		SystemPrompt:        "This must not be hydrated by status polling.",
+		Model:               "inherit",
+		Enabled:             true,
+		SelectableAsPrimary: true,
+	}
+	if err := h.agentRepo.Create(ctx, agentDef); err != nil {
+		t.Fatalf("create agent definition: %v", err)
+	}
+	assigned := createTask(t, h, project.ID, "Assigned Compact Status Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.AgentID = &model.ID
+		task.AgentDefinitionID = &agentDef.ID
+	})
+	withoutAgent := createTask(t, h, project.ID, "No Agent Compact Status Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+	})
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	assignedResponse := htmxGet(e, "/tasks/"+assigned.ID+"/detail-status")
+	counter.SetEnabled(false)
+	assertCode(t, assignedResponse, http.StatusOK)
+	assertContains(t, assignedResponse, "Agent:")
+	assertContains(t, assignedResponse, "Compact Status Agent")
+
+	agentQuerySeen := false
+	for _, statement := range counter.Statements() {
+		lower := strings.ToLower(statement)
+		if !strings.Contains(lower, "from agents") {
+			continue
+		}
+		agentQuerySeen = true
+		projection := strings.Split(lower, "from agents")[0]
+		if !strings.Contains(projection, "select id, name") {
+			t.Fatalf("status Agent query projection = %q, want only identity columns: %s", projection, statement)
+		}
+		for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json"} {
+			if strings.Contains(projection, forbidden) {
+				t.Fatalf("status Agent query selected forbidden column %q: %s", forbidden, statement)
+			}
+		}
+	}
+	if !agentQuerySeen {
+		t.Fatalf("status did not execute the compact Agent label query; statements: %#v", counter.Statements())
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	noAgentResponse := htmxGet(e, "/tasks/"+withoutAgent.ID+"/detail-status")
+	counter.SetEnabled(false)
+	assertCode(t, noAgentResponse, http.StatusOK)
+	assertContains(t, noAgentResponse, "Agent:")
+	assertContains(t, noAgentResponse, "No agent")
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from agents") {
+			t.Fatalf("status without an Agent unexpectedly queried the Agent catalog: %s", statement)
+		}
+	}
+}
+
+func TestHandler_GetTaskDetailStatusPreservesAgentAvailabilityAndTaskStates(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, e, llmConfigRepo := setupTestHandlerForDB(t, db)
+	h.SetAgentRepo(repository.NewAgentRepo(db))
+	ctx := context.Background()
+
+	model := createAgent(t, llmConfigRepo)
+	project := createProject(t, h, "Status Agent Availability Project")
+	otherProject := createProject(t, h, "Other Status Agent Project")
+
+	createDefinition := func(agent *models.Agent) *models.Agent {
+		t.Helper()
+		if err := h.agentRepo.Create(ctx, agent); err != nil {
+			t.Fatalf("create Agent definition %q: %v", agent.Name, err)
+		}
+		return agent
+	}
+	global := createDefinition(&models.Agent{Name: "Enabled Global Status Agent", Model: "inherit", SystemPrompt: "global status details", Enabled: true, SelectableAsPrimary: true})
+	projectScoped := createDefinition(&models.Agent{Name: "Enabled Project Status Agent", Model: "inherit", SystemPrompt: "project status details", Scope: models.AgentScopeProject, ProjectID: project.ID, Enabled: true, SelectableAsPrimary: true})
+	otherProjectScoped := createDefinition(&models.Agent{Name: "Other Project Status Agent", Model: "inherit", SystemPrompt: "other project status details", Scope: models.AgentScopeProject, ProjectID: otherProject.ID, Enabled: true, SelectableAsPrimary: true})
+	disabled := createDefinition(&models.Agent{Name: "Disabled Assigned Status Agent", Model: "inherit", SystemPrompt: "disabled status details", Enabled: false, SelectableAsPrimary: false})
+	archived := createDefinition(&models.Agent{Name: "Archived Status Agent", Model: "inherit", SystemPrompt: "archived status details", Enabled: true, SelectableAsPrimary: true})
+	archived.GeneratedStatus = models.AgentStatusArchived
+	if err := h.agentRepo.Update(ctx, archived); err != nil {
+		t.Fatalf("archive Agent definition: %v", err)
+	}
+	archivedTimestamp := createDefinition(&models.Agent{Name: "Archived Timestamp Status Agent", Model: "inherit", SystemPrompt: "archived timestamp status details", Enabled: true, SelectableAsPrimary: true})
+	archivedAt := time.Now().UTC()
+	archivedTimestamp.ArchivedAt = &archivedAt
+	if err := h.agentRepo.Update(ctx, archivedTimestamp); err != nil {
+		t.Fatalf("archive Agent definition by timestamp: %v", err)
+	}
+
+	statusCases := []struct {
+		name     string
+		status   models.TaskStatus
+		category models.TaskCategory
+	}{
+		{name: "pending backlog", status: models.StatusPending, category: models.CategoryBacklog},
+		{name: "running backlog", status: models.StatusRunning, category: models.CategoryBacklog},
+		{name: "completed backlog", status: models.StatusCompleted, category: models.CategoryBacklog},
+		{name: "failed backlog", status: models.StatusFailed, category: models.CategoryBacklog},
+		{name: "cancelled backlog", status: models.StatusCancelled, category: models.CategoryBacklog},
+		{name: "scheduled pending", status: models.StatusPending, category: models.CategoryScheduled},
+	}
+	for _, tc := range statusCases {
+		t.Run(tc.name, func(t *testing.T) {
+			task := createTask(t, h, project.ID, "No Agent "+tc.name, func(task *models.Task) {
+				task.Status = tc.status
+				task.Category = tc.category
+				task.AgentID = &model.ID
+			})
+			counter.Reset()
+			counter.SetEnabled(true)
+			response := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+			counter.SetEnabled(false)
+			assertCode(t, response, http.StatusOK)
+			assertContains(t, response, "Model:")
+			assertContains(t, response, "Test Agent")
+			assertContains(t, response, "Agent:")
+			assertContains(t, response, "No agent")
+			for _, statement := range counter.Statements() {
+				if strings.Contains(strings.ToLower(statement), "from agents") {
+					t.Fatalf("task without an Agent queried the Agent catalog: %s", statement)
+				}
+			}
+		})
+	}
+
+	agentCases := []struct {
+		name         string
+		definitionID string
+		want         string
+	}{
+		{name: "enabled global", definitionID: global.ID, want: global.Name},
+		{name: "enabled project scoped", definitionID: projectScoped.ID, want: projectScoped.Name},
+		{name: "disabled assigned global", definitionID: disabled.ID, want: disabled.Name},
+		{name: "other project scoped", definitionID: otherProjectScoped.ID, want: "Unknown agent"},
+		{name: "archived", definitionID: archived.ID, want: "Unknown agent"},
+		{name: "archived timestamp", definitionID: archivedTimestamp.ID, want: "Unknown agent"},
+		{name: "missing", definitionID: "missing-agent-id", want: "Unknown agent"},
+		{name: "invalid", definitionID: "not a valid persisted id", want: "Unknown agent"},
+	}
+	for _, tc := range agentCases {
+		t.Run(tc.name, func(t *testing.T) {
+			task := createTask(t, h, project.ID, "Assigned "+tc.name, func(task *models.Task) {
+				task.Status = models.StatusCompleted
+				task.Category = models.CategoryBacklog
+				task.AgentID = &model.ID
+				if tc.name != "missing" && tc.name != "invalid" {
+					task.AgentDefinitionID = &tc.definitionID
+				}
+			})
+			if tc.name == "missing" || tc.name == "invalid" {
+				if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+					t.Fatalf("disable foreign-key checks for invalid Agent fixture: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `UPDATE tasks SET agent_definition_id = ? WHERE id = ?`, tc.definitionID, task.ID); err != nil {
+					t.Fatalf("set invalid Agent definition fixture: %v", err)
+				}
+				if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+					t.Fatalf("restore foreign-key checks after invalid Agent fixture: %v", err)
+				}
+			}
+			counter.Reset()
+			counter.SetEnabled(true)
+			response := htmxGet(e, "/tasks/"+task.ID+"/detail-status")
+			counter.SetEnabled(false)
+			assertCode(t, response, http.StatusOK)
+			assertContains(t, response, "Model:")
+			assertContains(t, response, "Test Agent")
+			assertContains(t, response, "Agent:")
+			assertContains(t, response, tc.want)
+
+			agentQueries := 0
+			for _, statement := range counter.Statements() {
+				if !strings.Contains(strings.ToLower(statement), "from agents") {
+					continue
+				}
+				agentQueries++
+				projection := strings.Split(strings.ToLower(statement), "from agents")[0]
+				if !strings.Contains(projection, "select id, name") {
+					t.Fatalf("status Agent query projection = %q, want identity-only query: %s", projection, statement)
+				}
+				for _, forbidden := range []string{"system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json"} {
+					if strings.Contains(projection, forbidden) {
+						t.Fatalf("status Agent query selected forbidden column %q: %s", forbidden, statement)
+					}
+				}
+			}
+			if agentQueries != 1 {
+				t.Fatalf("status Agent lookup count = %d, want one targeted lookup; statements: %#v", agentQueries, counter.Statements())
+			}
+		})
+	}
+
+	fullDetailTask := createTask(t, h, project.ID, "Full Agent Detail Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.AgentDefinitionID = &global.ID
+	})
+	counter.Reset()
+	counter.SetEnabled(true)
+	fullPage := htmxGet(e, "/tasks/"+fullDetailTask.ID)
+	counter.SetEnabled(false)
+	assertCode(t, fullPage, http.StatusOK)
+	fullProjectionSeen := false
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from agents") && strings.Contains(strings.ToLower(statement), "system_prompt") {
+			fullProjectionSeen = true
+			break
+		}
+	}
+	if !fullProjectionSeen {
+		t.Fatalf("initial Task Detail no longer used the full Agent projection; statements: %#v", counter.Statements())
+	}
+}
+
 func TestHandler_GetTaskDetailStatus(t *testing.T) {
 	h, e, llmConfigRepo := setupTestHandler(t)
 	ctx := context.Background()
@@ -1026,10 +1253,16 @@ func BenchmarkHandler_GetTaskDetailStatus_MetricsProjection(b *testing.B) {
 					return err
 				}
 				var out bytes.Buffer
-				return pages.TaskDetailMetrics(loadedTask, taskExecutionMetricsFromExecutionsForBenchmark(executions), agents, agentDefs).Render(ctx, &out)
+				agentName := ""
+				for _, agentDef := range agentDefs {
+					if loadedTask.AgentDefinitionID != nil && agentDef.ID == *loadedTask.AgentDefinitionID {
+						agentName = agentDef.Name
+						break
+					}
+				}
+				return pages.TaskDetailMetrics(loadedTask, taskExecutionMetricsFromExecutionsForBenchmark(executions), agents, agentName).Render(ctx, &out)
 			},
-			waitQueryPattern: "prompt_sent, output",
-		},
+			waitQueryPattern: "prompt_sent, output"},
 		{
 			name:        "narrow_projection",
 			dbTextBytes: func(*sql.DB, string) int64 { return 0 },

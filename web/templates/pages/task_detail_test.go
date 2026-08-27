@@ -121,7 +121,7 @@ func TestTaskDetailMetrics_StatusBadgeVisibility(t *testing.T) {
 			metrics := models.TaskExecutionMetrics{}
 
 			var buf bytes.Buffer
-			err := TaskDetailMetrics(task, metrics, nil, nil).Render(context.Background(), &buf)
+			err := TaskDetailMetrics(task, metrics, nil, "").Render(context.Background(), &buf)
 			if err != nil {
 				t.Fatalf("render failed: %v", err)
 			}
@@ -374,7 +374,7 @@ func TestTaskDetailMetrics_ShowsMissingTagModelAndAgentClearly(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := TaskDetailMetrics(task, models.TaskExecutionMetrics{}, nil, nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskDetailMetrics(task, models.TaskExecutionMetrics{}, nil, "").Render(context.Background(), &buf); err != nil {
 		t.Fatalf("render failed: %v", err)
 	}
 	output := buf.String()
