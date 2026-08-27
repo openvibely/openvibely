@@ -303,16 +303,14 @@ func (s *TaskService) cancelActiveTaskWork(ctx context.Context, id string) error
 func (s *TaskService) UpdateCategory(ctx context.Context, id string, category models.TaskCategory) error {
 	applog.Infof("[task-svc] UpdateCategory id=%s -> %s", id, category)
 	var previousTask *models.Task
-	if category == models.CategoryActive {
-		var err error
-		previousTask, err = s.repo.GetByID(ctx, id)
-		if err != nil {
-			applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
-			return err
-		}
+	var err error
+	previousTask, err = s.repo.GetByID(ctx, id)
+	if err != nil {
+		applog.Infof("[task-svc] UpdateCategory error fetching previous task state: %v", err)
+		return err
 	}
 	rollbackActivation := func(activationErr error) error {
-		if previousTask == nil {
+		if category != models.CategoryActive || previousTask == nil {
 			return activationErr
 		}
 		rollbackCtx := context.WithoutCancel(ctx)
@@ -352,13 +350,14 @@ func (s *TaskService) UpdateCategory(ctx context.Context, id string, category mo
 	// Pending swarm children are also submitted runnable work; moving them out
 	// of Active must notify swarm orchestration instead of letting the worker
 	// queue silently prune them.
-	isCancellableActiveWork := task.Status == models.StatusRunning || task.Status == models.StatusQueued || (task.Status == models.StatusPending && models.IsSwarmChildRole(task.SwarmRole))
+	isCancellableActiveWork := previousTask != nil && previousTask.Category == models.CategoryActive &&
+		(previousTask.Status == models.StatusRunning || previousTask.Status == models.StatusQueued || (previousTask.Status == models.StatusPending && models.IsSwarmChildRole(previousTask.SwarmRole)))
 	if category != models.CategoryActive && isCancellableActiveWork {
-		applog.Infof("[task-svc] UpdateCategory cancelling active task id=%s status=%s (moved to %s)", id, task.Status, category)
+		applog.Infof("[task-svc] UpdateCategory cancelling active task id=%s status=%s (moved to %s)", id, previousTask.Status, category)
 		if err := s.cancelActiveTaskWork(ctx, id); err != nil {
 			return err
 		}
-		if s.swarmSvc != nil && models.IsSwarmChildRole(task.SwarmRole) {
+		if s.swarmSvc != nil && models.IsSwarmChildRole(previousTask.SwarmRole) {
 			if err := s.swarmSvc.OnChildCompleted(ctx, id); err != nil {
 				applog.Infof("[task-svc] UpdateCategory error notifying swarm child cancellation id=%s: %v", id, err)
 				return err
