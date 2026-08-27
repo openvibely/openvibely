@@ -1,10 +1,13 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"database/sql"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +15,101 @@ import (
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/testutil"
 )
+
+func TestParseNumstatLines(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   []parsedNumstatLine
+	}{
+		{
+			name:   "normal rows",
+			output: "12\t3\tadded.go\n0\t7\tdeleted.go\n5\t2\tmodified.go\n",
+			want: []parsedNumstatLine{
+				{insertions: 12, deletions: 3, path: "added.go"},
+				{insertions: 0, deletions: 7, path: "deleted.go"},
+				{insertions: 5, deletions: 2, path: "modified.go"},
+			},
+		},
+		{
+			name:   "empty output",
+			output: "",
+		},
+		{
+			name:   "blank and malformed rows",
+			output: "\nnot a numstat row\n1\t2\nbad\trows\tmalformed.go\n",
+			want: []parsedNumstatLine{
+				{path: "malformed.go"},
+			},
+		},
+		{
+			name:   "binary row",
+			output: "-\t-\timage.png\n",
+			want: []parsedNumstatLine{
+				{path: "image.png"},
+			},
+		},
+		{
+			name:   "tab-delimited path",
+			output: "8\t4\tdir\tfile\twith\ttabs.go\n",
+			want: []parsedNumstatLine{
+				{insertions: 8, deletions: 4, path: "dir\tfile\twith\ttabs.go"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseNumstatLines(tt.output)
+			if err != nil {
+				t.Fatalf("parseNumstatLines: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("parsed numstat = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseNumstatLinesReturnsScannerError(t *testing.T) {
+	_, err := parseNumstatLines(strings.Repeat("x", bufio.MaxScanTokenSize+1))
+	if err == nil {
+		t.Fatal("parseNumstatLines returned nil error for an overlong row")
+	}
+}
+
+func TestAddNumstatLinesDeduplicatesFilesWithoutChangingTotals(t *testing.T) {
+	stat := &models.TaskCommitStat{}
+	seenFiles := map[string]bool{}
+	var files []string
+
+	if err := addNumstatLines(stat, "1\t2\tduplicate.go\n3\t4\tduplicate.go\n", seenFiles, &files); err != nil {
+		t.Fatalf("addNumstatLines: %v", err)
+	}
+	if stat.Insertions != 4 || stat.Deletions != 6 {
+		t.Fatalf("totals = %d/%d, want 4/6", stat.Insertions, stat.Deletions)
+	}
+	if !reflect.DeepEqual(files, []string{"duplicate.go"}) {
+		t.Fatalf("files = %#v, want duplicate.go once", files)
+	}
+}
+
+func TestApplyNumstatLinesPreservesDirectCommitFileDuplicates(t *testing.T) {
+	numstatLines, err := parseNumstatLines("1\t2\tduplicate.go\n3\t4\tduplicate.go\n")
+	if err != nil {
+		t.Fatalf("parseNumstatLines: %v", err)
+	}
+	stat := &models.TaskCommitStat{}
+	var files []string
+	applyNumstatLines(stat, numstatLines, nil, &files)
+
+	if stat.Insertions != 4 || stat.Deletions != 6 {
+		t.Fatalf("totals = %d/%d, want 4/6", stat.Insertions, stat.Deletions)
+	}
+	if !reflect.DeepEqual(files, []string{"duplicate.go", "duplicate.go"}) {
+		t.Fatalf("files = %#v, want duplicate.go twice", files)
+	}
+}
 
 func TestCommitTaskWorktreeChangesRecordsProducedCommitStat(t *testing.T) {
 	ctx := context.Background()
