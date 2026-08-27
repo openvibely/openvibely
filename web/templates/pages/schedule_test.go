@@ -1351,6 +1351,67 @@ func TestScheduleContent_RunAtFieldClickablePickerAffordance(t *testing.T) {
 	}
 }
 
+func TestScheduleContent_FullHeightTimelineUsesInnerFlexChain(t *testing.T) {
+	currentProject := &models.Project{ID: "project-1", Name: "Project 1"}
+
+	var buf bytes.Buffer
+	if err := ScheduleContent(currentProject, nil, 0, nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render schedule content: %v", err)
+	}
+
+	output := buf.String()
+	timelineStart := strings.Index(output, `id="schedule-timeline-container"`)
+	if timelineStart < 0 {
+		t.Fatal("expected schedule timeline container")
+	}
+	timelineEnd := strings.Index(output[timelineStart:], ">")
+	if timelineEnd < 0 {
+		t.Fatal("expected schedule timeline opening tag")
+	}
+	timelineTag := output[timelineStart : timelineStart+timelineEnd]
+	for _, required := range []string{"flex flex-1 flex-col", "min-h-0", "overflow-y-auto"} {
+		if !strings.Contains(timelineTag, required) {
+			t.Fatalf("schedule timeline must retain %q in its opening tag, got %s", required, timelineTag)
+		}
+	}
+
+	wrapperStart := strings.Index(output[timelineStart:], `class="min-w-[800px]`)
+	if wrapperStart < 0 {
+		t.Fatal("expected schedule timeline width wrapper")
+	}
+	wrapperStart += timelineStart
+	wrapperEnd := strings.Index(output[wrapperStart:], ">")
+	if wrapperEnd < 0 {
+		t.Fatal("expected schedule timeline wrapper opening tag")
+	}
+	wrapperTag := output[wrapperStart : wrapperStart+wrapperEnd]
+	for _, required := range []string{"flex-1", "flex", "flex-col"} {
+		if !strings.Contains(wrapperTag, required) {
+			t.Fatalf("schedule timeline wrapper must contain %q, got %s", required, wrapperTag)
+		}
+	}
+
+	relativeStart := strings.Index(output[wrapperStart:], `class="relative`)
+	if relativeStart < 0 {
+		t.Fatal("expected schedule timeline grid body")
+	}
+	relativeStart += wrapperStart
+	relativeEnd := strings.Index(output[relativeStart:], ">")
+	if relativeEnd < 0 {
+		t.Fatal("expected schedule timeline grid body opening tag")
+	}
+	relativeTag := output[relativeStart : relativeStart+relativeEnd]
+	for _, required := range []string{"flex-1", "flex", "flex-col"} {
+		if !strings.Contains(relativeTag, required) {
+			t.Fatalf("schedule timeline grid body must contain %q, got %s", required, relativeTag)
+		}
+	}
+
+	if got, want := strings.Count(output, "flex-1 schedule-grid-row"), len(getTimeSlots()); got != want {
+		t.Fatalf("schedule hour rows with flex growth = %d, want %d", got, want)
+	}
+}
+
 // TestScheduleContent_ConsistentBorderStyling verifies that the schedule calendar
 // grid uses explicit schedule border tokens and a deterministic dash pattern.
 func TestScheduleContent_ConsistentBorderStyling(t *testing.T) {
