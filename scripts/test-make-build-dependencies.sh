@@ -16,6 +16,7 @@ LAST_LOG="$TEST_DIR/last.log"
 TEMPL_SOURCE="web/templates/pages/tasks.templ"
 TEMPL_OUTPUT="web/templates/pages/tasks_templ.go"
 SWAGGER_SOURCE="internal/handler/system_handler.go"
+UPDATE_SCHEMA_SOURCE="internal/update/client.go"
 GO_SOURCE="internal/service/task_service.go"
 SCHEMA_PROBE="internal/models/issue_848_schema_probe.go"
 
@@ -34,7 +35,7 @@ state_paths() {
         printf '%s\n' docs/docs.go docs/swagger.json docs/swagger.yaml
         printf '%s\n' "$TEMPL_STAMP" "$SWAGGER_STAMP" "$SERVER_BINARY" "$DESKTOP_BINARY"
         if [ "$include_sources" = "1" ]; then
-            printf '%s\n' "$TEMPL_SOURCE" "$SWAGGER_SOURCE" "$GO_SOURCE"
+            printf '%s\n' "$TEMPL_SOURCE" "$SWAGGER_SOURCE" "$UPDATE_SCHEMA_SOURCE" "$GO_SOURCE"
         fi
     ) | LC_ALL=C sort -u
 }
@@ -90,7 +91,7 @@ remove_extra_generated_files() {
 }
 
 restore_sources() {
-    for relative_path in "$TEMPL_SOURCE" "$SWAGGER_SOURCE" "$GO_SOURCE"; do
+    for relative_path in "$TEMPL_SOURCE" "$SWAGGER_SOURCE" "$UPDATE_SCHEMA_SOURCE" "$GO_SOURCE"; do
         mkdir -p "$ROOT/$(dirname "$relative_path")"
         cp -p "$INITIAL_STATE/files/$relative_path" "$ROOT/$relative_path"
     done
@@ -197,11 +198,37 @@ assert_no_delimiter_fields() {
     fi
 }
 
-# Warm the real graph and establish the baseline state used between scenarios.
+# A clean checkout has tracked generated outputs but no ignored freshness stamps.
+# Seed the stamps from that clean, issue-scoped tree instead of regenerating both artifacts.
 rm -f "$ROOT/$TEMPL_STAMP" "$ROOT/$SWAGGER_STAMP"
+git -C "$ROOT" ls-files --error-unmatch -- \
+    "$TEMPL_OUTPUT" docs/docs.go docs/swagger.json docs/swagger.yaml >/dev/null
 reset_log
 run_make build
+expect_counts 0 0 1
+assert_file_exists "$TEMPL_STAMP"
+assert_file_exists "$SWAGGER_STAMP"
 snapshot_state "$BASELINE_STATE" 0
+
+# An unavailable stamp must still regenerate when a relevant source is dirty.
+restore_baseline
+rm -f "$ROOT/$TEMPL_STAMP"
+printf '\n// issue-848 unknown template freshness state\n' >> "$ROOT/$TEMPL_SOURCE"
+reset_log
+run_make build
+expect_counts 1 0 1
+restore_baseline
+
+# Malformed fingerprint metadata must also regenerate conservatively.
+restore_baseline
+stamp_head=$(sed -n '1p' "$ROOT/$TEMPL_STAMP")
+stamp_version=$(sed -n '2p' "$ROOT/$TEMPL_STAMP")
+stamp_paths=$(sed -n '4p' "$ROOT/$TEMPL_STAMP")
+printf '%s\n' "$stamp_head" "$stamp_version" 'not-a-digest' "$stamp_paths" '0' > "$ROOT/$TEMPL_STAMP"
+reset_log
+run_make build
+expect_counts 1 0 1
+restore_baseline
 
 # Unchanged server builds must compile without either generator.
 restore_baseline
@@ -282,6 +309,28 @@ swagger_after=$(hash_file docs/docs.go)
 }
 grep -F -q 'issue-848 freshness' "$ROOT/docs/docs.go" || {
     printf '%s\n' 'generated Swagger output did not contain the changed annotation' >&2
+    exit 1
+}
+assert_no_delimiter_fields
+restore_baseline
+
+# A nested update-package schema change must also regenerate Swagger documentation,
+# even when the prior freshness state is unavailable.
+restore_baseline
+rm -f "$ROOT/$SWAGGER_STAMP"
+sed -E -i.bak 's#json:"image_ref,omitempty"#json:"issue_848_update_schema_probe,omitempty"#' "$ROOT/$UPDATE_SCHEMA_SOURCE"
+rm -f "$ROOT/$UPDATE_SCHEMA_SOURCE.bak"
+reset_log
+update_before=$(hash_file docs/docs.go)
+run_make build
+expect_counts 0 1 1
+update_after=$(hash_file docs/docs.go)
+[ "$update_before" != "$update_after" ] || {
+    printf '%s\n' 'nested update schema change did not update docs/docs.go' >&2
+    exit 1
+}
+grep -F -q 'issue_848_update_schema_probe' "$ROOT/docs/docs.go" || {
+    printf '%s\n' 'generated Swagger output did not contain the nested update schema change' >&2
     exit 1
 }
 assert_no_delimiter_fields

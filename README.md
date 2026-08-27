@@ -249,7 +249,7 @@ go test ./... -count=1 -timeout 60s
 make build
 ```
 
-Normal `make build`, `make build-desktop`, and `make run` invocations perform lightweight input-freshness checks and reuse generated template and Swagger files when their relevant sources/configuration are unchanged. Missing outputs, added/removed inputs, or changed generator inputs trigger regeneration. Use `make templ` or `make swagger` when you want to force regeneration.
+Normal `make build`, `make build-desktop`, and `make run` invocations perform lightweight input-freshness checks and reuse generated template and Swagger files when their relevant sources/configuration are unchanged. A clean checkout with tracked generated outputs seeds missing local freshness state without regenerating; missing outputs or malformed freshness state, unavailable state with dirty or untracked inputs, added/removed inputs, or changed generator inputs trigger conservative regeneration. Use `make templ` or `make swagger` when you want to force regeneration.
 
 Common targets:
 

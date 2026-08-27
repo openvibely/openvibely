@@ -1,4 +1,4 @@
-.PHONY: dev build build-desktop package-desktop-macos run migrate templ templ-fresh css clean install-tools test test-short test-cover test-build-dependencies swagger swagger-fresh docker-build docker-check-tools
+.PHONY: dev build build-desktop package-desktop-macos run migrate templ templ-fresh generated-fresh css clean install-tools test test-short test-cover test-build-dependencies swagger swagger-fresh docker-build docker-check-tools
 
 DOCKER ?= docker
 IMAGE ?= openvibely/openvibely:local
@@ -17,6 +17,7 @@ endif
 # invoke the generator only when the relevant inputs or generated outputs change.
 TEMPL_GENERATE_SCRIPT := scripts/ensure-templ-generated.sh
 SWAGGER_GENERATE_SCRIPT := scripts/ensure-swagger-generated.sh
+GENERATED_FRESH_SCRIPT := scripts/ensure-generated-fresh.sh
 
 # Install development tools
 install-tools:
@@ -47,12 +48,15 @@ swagger:
 swagger-fresh:
 	SWAG_VERSION="$(SWAG_VERSION)" ./$(SWAGGER_GENERATE_SCRIPT)
 
+generated-fresh:
+	TEMPL_VERSION="$(TEMPL_VERSION)" SWAG_VERSION="$(SWAG_VERSION)" ./$(GENERATED_FRESH_SCRIPT)
+
 # Build production server binary
-build: templ-fresh swagger-fresh
+build: generated-fresh
 	go build -ldflags="-s -w" -o bin/openvibely ./cmd/server
 
 # Build desktop binary (Wails integration - see cmd/desktop)
-build-desktop: templ-fresh swagger-fresh
+build-desktop: generated-fresh
 	go build -ldflags="-s -w" -o bin/openvibely-desktop ./cmd/desktop
 
 # Package desktop app bundle for macOS Finder/Dock launch (no Terminal)
