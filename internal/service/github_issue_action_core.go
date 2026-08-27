@@ -258,8 +258,12 @@ func githubIssueActionInputHasField(input json.RawMessage, field string) bool {
 	if err := json.Unmarshal(input, &object); err != nil {
 		return false
 	}
-	_, ok := object[field]
-	return ok
+	for key := range object {
+		if strings.EqualFold(key, field) {
+			return true
+		}
+	}
+	return false
 }
 
 func compactAssignedGitHubIssues(issues []GitHubIssue, limit, offset int) ([]map[string]any, int) {

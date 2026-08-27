@@ -2530,11 +2530,13 @@ func TestAutomationGitHubIssueRuntimeListsExistingAutomationIssues(t *testing.T)
 }
 
 func TestAutomationGitHubIssueRuntimeAssignedIssuesWithPRsPaginates(t *testing.T) {
+	providerCalls := 0
 	provider := &fakeGitHubIssueRuntimeProvider{
 		resolveRepoFn: func(context.Context, string, string) (*GitHubRepoRef, error) {
 			return &GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime", HTMLURL: "https://github.com/example/runtime"}, nil
 		},
 		listIssuesPRFn: func(_ context.Context, repo *GitHubRepoRef, assignee string) ([]GitHubIssueWithPullRequest, error) {
+			providerCalls++
 			require.Equal(t, "example/runtime", repo.FullName)
 			require.Equal(t, "automation-bot", assignee)
 			return []GitHubIssueWithPullRequest{
@@ -2583,6 +2585,15 @@ func TestAutomationGitHubIssueRuntimeAssignedIssuesWithPRsPaginates(t *testing.T
 		require.Equal(t, test.wantNext, got.NextOffset)
 		require.True(t, got.Truncated)
 	}
+	callsBeforeInvalid := providerCalls
+	for _, input := range []string{
+		`{"assignee":"automation-bot","Limit":0}`,
+		`{"assignee":"automation-bot","OFFSET":-1}`,
+	} {
+		_, err := handlers["github_list_assigned_issues_with_prs"](ctx, json.RawMessage(input))
+		require.EqualError(t, err, "limit must be 1-100 and offset must be non-negative")
+	}
+	require.Equal(t, callsBeforeInvalid, providerCalls)
 }
 
 func TestAutomationGitHubIssueCreationAllowsMissingIdempotencyKey(t *testing.T) {
