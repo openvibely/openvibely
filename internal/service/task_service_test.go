@@ -1923,6 +1923,64 @@ func TestTaskService_UpdateCategory_FromCompletedToActiveResetsStatus(t *testing
 	}
 }
 
+func TestTaskService_UpdateCategory_NonActiveRunningOrQueuedDoesNotCancel(t *testing.T) {
+	cases := []struct {
+		name     string
+		category models.TaskCategory
+		status   models.TaskStatus
+	}{
+		{name: "running scheduled task", category: models.CategoryScheduled, status: models.StatusRunning},
+		{name: "queued backlog task", category: models.CategoryBacklog, status: models.StatusQueued},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			taskRepo := repository.NewTaskRepo(db, nil)
+			workerSvc := newTestWorkerService(t)
+			goalSvc := NewTaskGoalService(repository.NewTaskGoalRepo(db), taskRepo, nil)
+			svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+			svc.SetTaskGoalService(goalSvc)
+			ctx := context.Background()
+
+			task := &models.Task{
+				ProjectID: "default",
+				Title:     tc.name,
+				Prompt:    "test",
+				Status:    tc.status,
+				Category:  tc.category,
+			}
+			require.NoError(t, taskRepo.Create(ctx, task))
+			goal, err := goalSvc.SetGoal(ctx, task.ID, "Keep going until done", GoalOptions{Actor: "test"})
+			require.NoError(t, err)
+
+			cancelled := make(chan struct{}, 1)
+			workerSvc.RegisterCancel(task.ID, func() { cancelled <- struct{}{} })
+
+			require.NoError(t, svc.UpdateCategory(ctx, task.ID, models.CategoryCompleted))
+
+			select {
+			case <-cancelled:
+				t.Fatal("non-Active task category change must not cancel worker work")
+			default:
+			}
+			assert.False(t, workerSvc.IsCancellationRequested(task.ID))
+
+			updated, err := taskRepo.GetByID(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updated)
+			assert.Equal(t, tc.status, updated.Status)
+			assert.Equal(t, models.CategoryCompleted, updated.Category)
+
+			updatedGoal, err := goalSvc.GetGoal(ctx, task.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updatedGoal)
+			assert.Equal(t, goal.GoalID, updatedGoal.GoalID)
+			assert.Equal(t, models.TaskGoalStatusActive, updatedGoal.Status)
+		})
+	}
+}
+
 func TestTaskService_CancelTask_AllowsActivePendingTask(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)
