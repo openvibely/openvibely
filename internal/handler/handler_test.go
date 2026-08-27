@@ -3743,9 +3743,32 @@ func TestHandler_Schedule_NoViewportHeightOverflow(t *testing.T) {
 	if strings.Contains(body, "100vh") {
 		t.Error("schedule page must not use viewport-relative height (100vh); use flex layout instead")
 	}
-	// The timeline container should use flex-1 to fill remaining space
-	if !strings.Contains(body, "flex-1 min-h-0") {
-		t.Error("schedule-timeline-container should use flex-1 min-h-0 for proper overflow")
+	// The timeline container should use flex-1 to fill remaining space. Treat
+	// classes as tokens so adding or reordering other layout classes does not
+	// make this assertion fail while the overflow contract is still intact.
+	timelineStart := strings.Index(body, `id="schedule-timeline-container"`)
+	if timelineStart < 0 {
+		t.Fatal("missing schedule-timeline-container element")
+	}
+	timelineTagEnd := strings.Index(body[timelineStart:], ">")
+	if timelineTagEnd < 0 {
+		t.Fatal("unterminated schedule-timeline-container element")
+	}
+	timelineTag := body[timelineStart : timelineStart+timelineTagEnd]
+	classStart := strings.Index(timelineTag, `class="`)
+	if classStart < 0 {
+		t.Fatal("schedule-timeline-container is missing its class attribute")
+	}
+	classValue := timelineTag[classStart+len(`class="`):]
+	classEnd := strings.Index(classValue, `"`)
+	if classEnd < 0 {
+		t.Fatal("schedule-timeline-container has an unterminated class attribute")
+	}
+	classes := strings.Fields(classValue[:classEnd])
+	for _, required := range []string{"flex-1", "min-h-0"} {
+		if !slices.Contains(classes, required) {
+			t.Errorf("schedule-timeline-container should include %q for proper overflow; classes=%v", required, classes)
+		}
 	}
 }
 
