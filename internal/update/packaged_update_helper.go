@@ -495,10 +495,6 @@ func readPackagedUpdateHelperOutcomeAt(staged LocalStagedUpdate, path string) (p
 }
 
 func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperConfig) (runErr error) {
-	traceExecutableUpdateHelperIntegration("started parent_pid=%d recovery=%t", cfg.ParentPID, cfg.Recovery)
-	defer func() {
-		traceExecutableUpdateHelperIntegration("finished err=%v", runErr)
-	}()
 	staged := LocalStagedUpdate{ArtifactPath: cfg.Staged, InstallPath: cfg.Current, BackupPath: cfg.Backup, Version: cfg.ExpectedVersion, PreviousVersion: cfg.PreviousVersion, OutcomeID: cfg.OutcomeID}
 	if err := validateBinaryPaths(staged); err != nil {
 		return err
@@ -531,7 +527,6 @@ func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperCo
 		if !acquired {
 			return errors.New("packaged update helper lease is already owned")
 		}
-		traceExecutableUpdateHelperIntegration("acquired helper lease")
 		defer lease.Close()
 		_, recoveryClaimErr := readPackagedUpdateHelperRecoveryClaim(staged)
 		switch {
@@ -580,14 +575,12 @@ func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperCo
 		case packagedUpdateOutcomeAuthorized, packagedUpdateOutcomeParentExited, packagedUpdateOutcomeBackupPublished,
 			packagedUpdateOutcomeTargetPublished, packagedUpdateOutcomeValidating, packagedUpdateOutcomeRollingBack:
 			phase = outcome.State
-			traceExecutableUpdateHelperIntegration("resuming phase=%s", phase)
 		default:
 			return fmt.Errorf("packaged update helper cannot resume phase %q", outcome.State)
 		}
 	}
 
 	if !outcomeEnabled || phase == packagedUpdateOutcomeAuthorized {
-		traceExecutableUpdateHelperIntegration("waiting for parent exit")
 		if err := waitForProcessExit(ctx, cfg.ParentPID, cfg.WaitTimeout); err != nil {
 			if outcomeEnabled {
 				return recoverAuthorizedParentExitFailure(cfg, staged, err)
@@ -595,7 +588,6 @@ func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperCo
 			return err
 		}
 		phase = packagedUpdateOutcomeParentExited
-		traceExecutableUpdateHelperIntegration("parent exited")
 		if outcomeEnabled {
 			if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, phase); err != nil {
 				return fmt.Errorf("persist packaged update helper parent-exit phase: %w", err)
@@ -654,7 +646,6 @@ func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperCo
 	}
 
 	if phase == packagedUpdateOutcomeParentExited {
-		traceExecutableUpdateHelperIntegration("publishing backup")
 		if err := recoverInterruptedBinarySwap(cfg.Current, cfg.Backup); err != nil {
 			return err
 		}
@@ -683,7 +674,6 @@ func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperCo
 		}
 	}
 	if phase == packagedUpdateOutcomeBackupPublished {
-		traceExecutableUpdateHelperIntegration("publishing replacement")
 		if _, err := os.Stat(cfg.Staged); err == nil {
 			if err := publishStagedBinary(cfg.Current, cfg.Staged); err != nil {
 				return err
@@ -700,7 +690,6 @@ func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperCo
 		}
 	}
 	if phase == packagedUpdateOutcomeTargetPublished {
-		traceExecutableUpdateHelperIntegration("starting replacement validation")
 		phase = packagedUpdateOutcomeValidating
 		if outcomeEnabled {
 			if err := writePackagedUpdateHelperPhaseWithRetry(ctx, staged, phase); err != nil {
@@ -711,14 +700,12 @@ func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperCo
 
 	stopSuccessor, restartErr := start("exec", cfg.Current)
 	successorStarted := restartErr == nil
-	traceExecutableUpdateHelperIntegration("replacement start succeeded=%t err=%v", successorStarted, restartErr)
 	if successorStarted {
 		validationCtx, cancel := context.WithTimeout(ctx, cfg.ValidationTimeout)
 		restartErr = waitForExpectedHealth(validationCtx, cfg.HealthURL, cfg.ExpectedVersion, cfg.HealthClient)
 		cancel()
 	}
 	if restartErr == nil {
-		traceExecutableUpdateHelperIntegration("replacement health validation succeeded")
 		if outcomeEnabled {
 			if err := writePackagedUpdateHelperOutcomeWithRetry(ctx, staged, packagedUpdateOutcomeSucceeded); err != nil {
 				return fmt.Errorf("persist binary success outcome: %w", err)
@@ -727,7 +714,6 @@ func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperCo
 		return nil
 	}
 	err := restartErr
-	traceExecutableUpdateHelperIntegration("replacement health validation failed err=%v", err)
 	if successorStarted {
 		if stopSuccessor == nil {
 			return fmt.Errorf("validation failed: %v; failed successor shutdown is unavailable", err)
@@ -761,13 +747,6 @@ func RunExecutableUpdateHelper(ctx context.Context, cfg ExecutableUpdateHelperCo
 	}
 	recoveryComplete = true
 	return fmt.Errorf("new binary validation failed and prior binary was restored: %w", err)
-}
-
-func traceExecutableUpdateHelperIntegration(format string, args ...any) {
-	if os.Getenv(updateIntegrationHelperLogEnv) == "" {
-		return
-	}
-	_, _ = fmt.Fprintf(os.Stderr, "[update-helper] "+format+"\n", args...)
 }
 
 func runExecutableUpdateRecoveryHelper(ctx context.Context, cfg ExecutableUpdateHelperConfig, staged LocalStagedUpdate) error {

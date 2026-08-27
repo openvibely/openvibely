@@ -780,26 +780,6 @@ type ModelCapacityResponse struct {
 	AvailableSlots int    `json:"available_slots"`
 }
 
-func modelCapacityResponse(agent *models.LLMConfig, running int, hasCapacity bool) ModelCapacityResponse {
-	availableSlots := 0
-	if agent.MaxWorkers > 0 {
-		availableSlots = agent.MaxWorkers - running
-		if availableSlots < 0 {
-			availableSlots = 0
-		}
-	}
-
-	return ModelCapacityResponse{
-		ID:             agent.ID,
-		Name:           agent.Name,
-		Model:          agent.Model,
-		Running:        running,
-		MaxWorkers:     agent.MaxWorkers,
-		HasCapacity:    hasCapacity,
-		AvailableSlots: availableSlots,
-	}
-}
-
 // GetGlobalCapacity returns global worker pool capacity information (API endpoint)
 // @Summary Get global worker capacity
 // @Description Returns global worker pool usage and available slots.
@@ -950,10 +930,22 @@ func (h *Handler) GetModelCapacities(c echo.Context) error {
 	}
 
 	capacities := make([]ModelCapacityResponse, 0, len(agents))
-	for i := range agents {
-		agent := &agents[i]
+	for _, agent := range agents {
 		running := h.workerSvc.ModelRunning(agent.ID)
-		capacities = append(capacities, modelCapacityResponse(agent, running, running < agent.MaxWorkers))
+		availableSlots := agent.MaxWorkers - running
+		if availableSlots < 0 {
+			availableSlots = 0
+		}
+
+		capacities = append(capacities, ModelCapacityResponse{
+			ID:             agent.ID,
+			Name:           agent.Name,
+			Model:          agent.Model,
+			Running:        running,
+			MaxWorkers:     agent.MaxWorkers,
+			HasCapacity:    running < agent.MaxWorkers,
+			AvailableSlots: availableSlots,
+		})
 	}
 
 	return c.JSON(http.StatusOK, capacities)
@@ -983,7 +975,23 @@ func (h *Handler) GetModelCapacity(c echo.Context) error {
 
 	running := h.workerSvc.ModelRunning(agent.ID)
 	hasCapacity := h.workerSvc.HasModelCapacity(agent.ID)
-	resp := modelCapacityResponse(agent, running, hasCapacity)
+	availableSlots := 0
+	if agent.MaxWorkers > 0 {
+		availableSlots = agent.MaxWorkers - running
+		if availableSlots < 0 {
+			availableSlots = 0
+		}
+	}
+
+	resp := ModelCapacityResponse{
+		ID:             agent.ID,
+		Name:           agent.Name,
+		Model:          agent.Model,
+		Running:        running,
+		MaxWorkers:     agent.MaxWorkers,
+		HasCapacity:    hasCapacity,
+		AvailableSlots: availableSlots,
+	}
 
 	return c.JSON(http.StatusOK, resp)
 }

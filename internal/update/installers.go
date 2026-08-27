@@ -35,7 +35,6 @@ type LocalStagedUpdate struct {
 const (
 	ExecutableUpdateHelperCommand = "executable-update-helper"
 	AppBundleUpdateHelperCommand  = "app-bundle-update-helper"
-	updateIntegrationHelperLogEnv = "OPENVIBELY_UPDATE_INTEGRATION_HELPER_LOG"
 )
 
 func packagedUpdateHelperPath(installPath, commandName string) string {
@@ -265,22 +264,14 @@ func startPackagedUpdateHelperHandoff(ctx context.Context, cfg packagedUpdateHel
 	}
 	cmd := exec.Command(helperPath, args...)
 	configureDetachedHelper(cmd)
-	helperLog, err := attachDetachedHelperIntegrationLog(cmd)
-	if err != nil {
-		return wrapPackagedHelperHandoffError(cfg.Errors.StartHelper, err)
-	}
 	if cfg.MetadataTransport == packagedHelperMetadataStdin {
 		cmd.Stdin = bytes.NewReader(metadata)
 	}
-	startErr := startDetachedHelper(cmd, cfg.StartHelper)
-	if helperLog != nil {
-		_ = helperLog.Close()
-	}
-	if startErr != nil {
+	if err := startDetachedHelper(cmd, cfg.StartHelper); err != nil {
 		if cfg.OnStartFailure != nil {
 			cfg.OnStartFailure(helperPath, metadataPath)
 		}
-		return wrapPackagedHelperHandoffError(cfg.Errors.StartHelper, startErr)
+		return wrapPackagedHelperHandoffError(cfg.Errors.StartHelper, err)
 	}
 	if cfg.Recovery {
 		if err := waitForPackagedUpdateHelperRecoveryReadiness(ctx, staged); err != nil {
@@ -377,23 +368,6 @@ func waitForPackagedUpdateHelperRecoveryReadiness(ctx context.Context, staged Lo
 		case <-timer.C:
 		}
 	}
-}
-
-func attachDetachedHelperIntegrationLog(cmd *exec.Cmd) (*os.File, error) {
-	path := strings.TrimSpace(os.Getenv(updateIntegrationHelperLogEnv))
-	if path == "" {
-		return nil, nil
-	}
-	if !filepath.IsAbs(path) {
-		return nil, errors.New("update integration helper log path must be absolute")
-	}
-	logFile, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("open update integration helper log: %w", err)
-	}
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
-	return logFile, nil
 }
 
 func startDetachedHelper(cmd *exec.Cmd, start func(*exec.Cmd) error) error {

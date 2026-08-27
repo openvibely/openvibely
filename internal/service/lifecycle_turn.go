@@ -60,7 +60,7 @@ func (w *WorkerService) PrepareRecallOnlyLifecycleTurn(ctx context.Context, task
 	explicitMemoryEntries := w.explicitIndexedMemoryEntries(ctx, effectiveTask)
 	runID := newLifecycleTaskRunID(task.ID)
 	if projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID); projectRoot != "" && w.agentRootSyncService != nil {
-		if err := w.agentRootSyncService.SyncRootDeclarations(ctx, projectRoot); err != nil {
+		if err := w.agentRootSyncService.SyncRootDeclarationsForProject(ctx, projectRoot, task.ProjectID); err != nil {
 			applog.Infof("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
 		}
 	}
@@ -118,7 +118,7 @@ func (w *WorkerService) PrepareLifecycleTurn(ctx context.Context, task models.Ta
 	projectRoot := projectSkillRoot(ctx, w.projectRepo, task.ProjectID)
 	assignedAgent := w.taskAgentDefinition(ctx, task)
 	if w.agentRootSyncService != nil {
-		if err := w.agentRootSyncService.SyncRootDeclarations(ctx, projectRoot); err != nil {
+		if err := w.agentRootSyncService.SyncRootDeclarationsForProject(ctx, projectRoot, task.ProjectID); err != nil {
 			applog.Infof("[lifecycle-turn] sync agent root declarations failed task=%s: %v", task.ID, err)
 		}
 	}

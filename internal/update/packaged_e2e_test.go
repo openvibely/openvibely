@@ -730,14 +730,6 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 
 	appData := filepath.Join(root, "desktop-data")
 	stdoutLog, stderrLog, readLogs := openCommandLogs(t, root, "desktop-current")
-	helperLogPath := filepath.Join(root, "desktop-update-helper.log")
-	readDiagnostics := func() string {
-		helperLog, err := os.ReadFile(helperLogPath)
-		if err != nil {
-			return fmt.Sprintf("%s\nhelper log: %v", readLogs(), err)
-		}
-		return fmt.Sprintf("%s\nhelper log:\n%s", readLogs(), helperLog)
-	}
 	cmd := exec.Command(current)
 	cmd.Dir = root
 	cmd.Env = append(envWithout("PORT"),
@@ -749,7 +741,6 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 		"OPENVIBELY_UPDATE_PUBLIC_KEY_FILE="+publicKeyFile,
 		"DISABLE_UPDATE_NOTIFICATIONS=false",
 		"OPENVIBELY_DISABLE_INSTALL_ID=1",
-		updateIntegrationHelperLogEnv+"="+helperLogPath,
 	)
 	cmd.Env = append(cmd.Env, desktopTestEnvironment()...)
 	cmd.Stdout = stdoutLog
@@ -772,22 +763,22 @@ func runDesktopExecutableUpdateE2E(t *testing.T, releaseVersion, replacementVers
 	waitForStagedUpdate(t, baseURL)
 	resp, err := http.Post(baseURL+"/api/system/update/apply", "application/json", nil)
 	if err != nil {
-		t.Fatalf("accept desktop update: %v\n%s", err, readDiagnostics())
+		t.Fatalf("accept desktop update: %v\n%s", err, readLogs())
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("accept desktop update HTTP %d\n%s", resp.StatusCode, readDiagnostics())
+		t.Fatalf("accept desktop update HTTP %d\n%s", resp.StatusCode, readLogs())
 	}
 	if err := waitForCommandExit(cmd, time.Minute); err != nil {
-		t.Fatalf("current desktop app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readDiagnostics())
+		t.Fatalf("current desktop app exit after handoff: %v\nupdate snapshot: %s\nhelper state:\n%s\n%s", err, readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
 	}
 	if wantOutcome == packagedUpdateOutcomeSucceeded {
 		waitForHealthVersionWithin(t, baseURL, releaseVersion, 120*time.Second, func() string {
-			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readDiagnostics())
+			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
 		})
 	} else {
 		waitForHealthVersionWithin(t, baseURL, "0.5.0", 120*time.Second, func() string {
-			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readDiagnostics())
+			return fmt.Sprintf("\nupdate snapshot: %s\nhelper state:\n%s\n%s", readUpdateSnapshot(baseURL), describePackagedUpdateHelperState(current), readLogs())
 		})
 	}
 	waitForUpdateState(t, baseURL, wantOutcome)

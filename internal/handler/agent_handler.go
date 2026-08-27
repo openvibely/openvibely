@@ -1473,13 +1473,17 @@ func (h *Handler) ListAgents(c echo.Context) error {
 	// applog.Debugf("[handler] ListAgents requested htmx=%v", isHtmx)
 
 	if h.agentLibraryMaintenanceSvc != nil {
+		projectID := ""
 		projectRoot := ""
-		if projectID, err := h.getCurrentProjectID(c); err == nil && projectID != "" && h.projectSvc != nil {
-			if project, getErr := h.projectSvc.GetByID(c.Request().Context(), projectID); getErr == nil && project != nil && strings.TrimSpace(project.RepoPath) != "" {
-				projectRoot = filepath.Join(project.RepoPath, ".openvibely")
+		if resolvedProjectID, err := h.getCurrentProjectID(c); err == nil && resolvedProjectID != "" {
+			projectID = resolvedProjectID
+			if h.projectSvc != nil {
+				if project, getErr := h.projectSvc.GetByID(c.Request().Context(), resolvedProjectID); getErr == nil && project != nil && strings.TrimSpace(project.RepoPath) != "" {
+					projectRoot = filepath.Join(project.RepoPath, ".openvibely")
+				}
 			}
 		}
-		if err := h.agentLibraryMaintenanceSvc.SyncRootDeclarations(c.Request().Context(), projectRoot); err != nil {
+		if err := h.agentLibraryMaintenanceSvc.SyncRootDeclarationsForProject(c.Request().Context(), projectRoot, projectID); err != nil {
 			applog.Infof("[handler] ListAgents sync root declarations warning: %v", err)
 		}
 	}
@@ -1545,10 +1549,11 @@ func (h *Handler) CreateAgent(c echo.Context) error {
 	if err := h.saveAgentLifecycleHooksFromForm(c, agent.ID); err != nil {
 		return err
 	}
-	if err := h.materializeAgentToDisk(c, &agent, h.currentProjectSkillRoot(c)); err != nil {
+	projectRoot := h.projectRootForAgentMaterialization(c, &agent)
+	if err := h.materializeAgentToDisk(c, &agent, projectRoot); err != nil {
 		return err
 	}
-	if err := h.migrateLegacyAgentSkills(c, &agent, h.currentProjectSkillRoot(c)); err != nil {
+	if err := h.migrateLegacyAgentSkills(c, &agent, projectRoot); err != nil {
 		return err
 	}
 

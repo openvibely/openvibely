@@ -360,7 +360,10 @@ func (h *Handler) currentProjectSkillRoot(c echo.Context) string {
 // directory (covers non-browser callers and older UI requests). Falls back to
 // the request-derived current project when the agent has no ProjectID set.
 func (h *Handler) projectSkillRootForAgent(c echo.Context, agent *models.Agent) string {
-	if agent != nil && strings.TrimSpace(agent.ProjectID) != "" && h.projectRepo != nil {
+	if agent != nil && strings.TrimSpace(agent.ProjectID) != "" {
+		if h.projectRepo == nil {
+			return ""
+		}
 		return service.ProjectSkillRootForResolver(c.Request().Context(), h.projectRepo, strings.TrimSpace(agent.ProjectID))
 	}
 	return h.currentProjectSkillRoot(c)
@@ -428,13 +431,14 @@ func (h *Handler) materializeDBAgentsToDisk(c echo.Context, agents []models.Agen
 	persistenceChanged := false
 	for i := range agents {
 		agent := agents[i]
+		agentProjectRoot := h.projectRootForAgentMaterialization(c, &agent)
 		originalKey := agent.Key
 		originalSkillCount := len(agent.Skills)
 		originalSelectable := agent.SelectableAsPrimary
-		if err := h.materializeAgentToDiskWithUsedKeys(c, &agent, projectRoot, usedKeys, false); err != nil {
+		if err := h.materializeAgentToDiskWithUsedKeys(c, &agent, agentProjectRoot, usedKeys, false); err != nil {
 			return persistenceChanged, err
 		}
-		if err := h.migrateLegacyAgentSkills(c, &agent, projectRoot); err != nil {
+		if err := h.migrateLegacyAgentSkills(c, &agent, agentProjectRoot); err != nil {
 			return persistenceChanged, err
 		}
 		if agent.Key != originalKey || len(agent.Skills) != originalSkillCount || agent.SelectableAsPrimary != originalSelectable {
@@ -442,6 +446,13 @@ func (h *Handler) materializeDBAgentsToDisk(c echo.Context, agents []models.Agen
 		}
 	}
 	return persistenceChanged, nil
+}
+
+func (h *Handler) projectRootForAgentMaterialization(c echo.Context, agent *models.Agent) string {
+	if agent != nil && agent.Scope == models.AgentScopeProject && strings.TrimSpace(agent.ProjectID) != "" {
+		return h.projectSkillRootForAgent(c, agent)
+	}
+	return h.currentProjectSkillRoot(c)
 }
 
 func (h *Handler) materializeAgentToDisk(c echo.Context, agent *models.Agent, projectRoot string) error {
@@ -460,6 +471,12 @@ func (h *Handler) materializeAgentToDiskWithUsedKeys(c echo.Context, agent *mode
 		scope = "global"
 	}
 	if scope == "project" && projectRoot == "" {
+		// A project-owned agent must never fall back to the global root when its
+		// recorded project has no writable repository root. Legacy project rows
+		// without ProjectID retain the historical current-project/global fallback.
+		if strings.TrimSpace(agent.ProjectID) != "" {
+			return nil
+		}
 		scope = "global"
 	}
 	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
@@ -629,6 +646,12 @@ func (h *Handler) migrateLegacyAgentSkills(c echo.Context, agent *models.Agent, 
 		scope = "global"
 	}
 	if scope == "project" && projectRoot == "" {
+		// A project-owned agent must never fall back to the global root when its
+		// recorded project has no writable repository root. Legacy project rows
+		// without ProjectID retain the historical current-project/global fallback.
+		if strings.TrimSpace(agent.ProjectID) != "" {
+			return nil
+		}
 		scope = "global"
 	}
 	root, err := h.rootForDialogScopeWithProjectRoot(scope, projectRoot)
