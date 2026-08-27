@@ -213,6 +213,54 @@ hash_file() {
     git -C "$ROOT" hash-object "$1"
 }
 
+assert_hash_unchanged() {
+    relative_path=$1
+    expected_hash=$2
+    actual_hash=$(hash_file "$relative_path")
+    [ "$actual_hash" = "$expected_hash" ] || {
+        printf '%s\n' "clean bootstrap rewrote generated output: $relative_path" >&2
+        exit 1
+    }
+}
+
+assert_bootstrap_stamp() {
+    relative_path=$1
+    stamp_path="$ROOT/$relative_path"
+    test -f "$stamp_path" || {
+        printf '%s\n' "clean bootstrap did not create freshness stamp: $relative_path" >&2
+        exit 1
+    }
+    set -- $(cat "$stamp_path")
+    [ "$#" -eq 5 ] || {
+        printf '%s\n' "clean bootstrap wrote malformed freshness stamp: $relative_path" >&2
+        exit 1
+    }
+    [ "$1" = "$(git -C "$ROOT" rev-parse HEAD)" ] || {
+        printf '%s\n' "clean bootstrap stamp has the wrong HEAD: $relative_path" >&2
+        exit 1
+    }
+    [ -n "$2" ] || {
+        printf '%s\n' "clean bootstrap stamp has no generator version: $relative_path" >&2
+        exit 1
+    }
+    for digest in "$3" "$4"; do
+        case "$digest" in
+            ''|*[!0123456789abcdef]*)
+                printf '%s\n' "clean bootstrap stamp has a non-hex digest: $relative_path" >&2
+                exit 1
+                ;;
+        esac
+        [ "${#digest}" -eq 40 ] || {
+            printf '%s\n' "clean bootstrap stamp has a short digest: $relative_path" >&2
+            exit 1
+        }
+    done
+    [ "$5" = "0" ] || {
+        printf '%s\n' "clean bootstrap stamp records untracked relevant state: $relative_path" >&2
+        exit 1
+    }
+}
+
 assert_file_exists() {
     test -f "$ROOT/$1" || {
         printf '%s\n' "expected file to exist: $1" >&2
@@ -229,14 +277,22 @@ assert_no_delimiter_fields() {
 
 # A clean checkout has tracked generated outputs but no ignored freshness stamps.
 # Seed the stamps from that clean, issue-scoped tree instead of regenerating both artifacts.
+initial_templ_hash=$(hash_file "$TEMPL_OUTPUT")
+initial_swagger_go_hash=$(hash_file docs/docs.go)
+initial_swagger_json_hash=$(hash_file docs/swagger.json)
+initial_swagger_yaml_hash=$(hash_file docs/swagger.yaml)
 rm -f "$ROOT/$TEMPL_STAMP" "$ROOT/$SWAGGER_STAMP"
 git -C "$ROOT" ls-files --error-unmatch -- \
     "$TEMPL_OUTPUT" docs/docs.go docs/swagger.json docs/swagger.yaml >/dev/null
 reset_log
 run_make build
 expect_counts 0 0 1
-assert_file_exists "$TEMPL_STAMP"
-assert_file_exists "$SWAGGER_STAMP"
+assert_hash_unchanged "$TEMPL_OUTPUT" "$initial_templ_hash"
+assert_hash_unchanged docs/docs.go "$initial_swagger_go_hash"
+assert_hash_unchanged docs/swagger.json "$initial_swagger_json_hash"
+assert_hash_unchanged docs/swagger.yaml "$initial_swagger_yaml_hash"
+assert_bootstrap_stamp "$TEMPL_STAMP"
+assert_bootstrap_stamp "$SWAGGER_STAMP"
 snapshot_state "$BASELINE_STATE" 0
 
 # A staged deletion of a non-annotated schema source disappears from the current
