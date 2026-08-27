@@ -1,4 +1,4 @@
-.PHONY: dev build build-desktop package-desktop-macos run migrate templ css clean install-tools test test-short test-cover test-build-dependencies docker-build docker-check-tools
+.PHONY: dev build build-desktop package-desktop-macos run migrate templ templ-fresh css clean install-tools test test-short test-cover test-build-dependencies swagger swagger-fresh docker-build docker-check-tools
 
 DOCKER ?= docker
 IMAGE ?= openvibely/openvibely:local
@@ -13,23 +13,10 @@ ifeq ($(GO_BIN),)
 GO_BIN := $(shell go env GOPATH)/bin
 endif
 
-# Generated outputs are tracked file targets so normal builds only regenerate
-# them when a generator input changes. Each generator writes all of its outputs;
-# the selected output is therefore used as its freshness marker.
-TEMPL_GENERATED_TARGET := web/templates/layout/base_templ.go
-TEMPL_SOURCES := $(shell find web/templates -type f -name '*.templ' -print)
-TEMPL_DIRECTORIES := $(shell find web/templates -type d -print)
-TEMPL_GENERATED_OUTPUTS := $(patsubst %.templ,%_templ.go,$(TEMPL_SOURCES))
-TEMPL_GENERATED_OTHER_OUTPUTS := $(filter-out $(TEMPL_GENERATED_TARGET),$(TEMPL_GENERATED_OUTPUTS))
-TEMPL_GENERATE := go run github.com/a-h/templ/cmd/templ@$(TEMPL_VERSION) generate
-
-SWAGGER_GENERATED_TARGET := docs/docs.go
-SWAGGER_ANNOTATION_SOURCES := $(shell find cmd internal pkg web -type d -name '.*' -prune -o -type f -name '*.go' -exec grep -lE '^[[:space:]]*//[[:space:]]+@[[:alpha:]]' {} +)
-SWAGGER_SCHEMA_SOURCES := $(filter-out %_test.go,$(wildcard internal/models/*.go internal/viewmodels/*.go)) internal/repository/execution_repo.go internal/update/coordinator.go
-SWAGGER_GENERATED_OUTPUTS := docs/docs.go docs/swagger.json docs/swagger.yaml
-SWAGGER_GENERATED_OTHER_OUTPUTS := $(filter-out $(SWAGGER_GENERATED_TARGET),$(SWAGGER_GENERATED_OUTPUTS))
-SWAGGER_INPUTS := $(SWAGGER_ANNOTATION_SOURCES) $(SWAGGER_SCHEMA_SOURCES) go.mod go.sum Makefile $(wildcard .swaggo)
-SWAGGER_GENERATE := go run github.com/swaggo/swag/cmd/swag@$(SWAG_VERSION) init -g cmd/server/main.go -o docs
+# Normal builds run narrow freshness checks that fingerprint generator inputs and
+# invoke the generator only when the relevant inputs or generated outputs change.
+TEMPL_GENERATE_SCRIPT := scripts/ensure-templ-generated.sh
+SWAGGER_GENERATE_SCRIPT := scripts/ensure-swagger-generated.sh
 
 # Install development tools
 install-tools:
@@ -45,43 +32,27 @@ dev:
 	$(GO_BIN)/air -c .air.toml
 
 # Generate templ files (no global binary required)
-# This target intentionally forces regeneration; builds use the tracked output target below.
+# This target intentionally forces regeneration; builds use the narrow freshness check below.
 templ:
-	$(TEMPL_GENERATE)
-	@touch $(TEMPL_GENERATED_TARGET)
-	@touch $(TEMPL_GENERATED_OTHER_OUTPUTS)
+	TEMPL_VERSION="$(TEMPL_VERSION)" TEMPL_FORCE=1 ./$(TEMPL_GENERATE_SCRIPT)
 
-$(TEMPL_GENERATED_TARGET): $(TEMPL_SOURCES) $(TEMPL_DIRECTORIES) go.mod go.sum Makefile
-	$(TEMPL_GENERATE)
-	@touch $(TEMPL_GENERATED_TARGET)
-	@touch $(TEMPL_GENERATED_OTHER_OUTPUTS)
-
-$(TEMPL_GENERATED_OTHER_OUTPUTS): | $(TEMPL_GENERATED_TARGET)
-	@if test -f "$@"; then :; else rm -f "$(TEMPL_GENERATED_TARGET)" && $(MAKE) --no-print-directory "$(TEMPL_GENERATED_TARGET)" && test -f "$@"; fi
+templ-fresh:
+	TEMPL_VERSION="$(TEMPL_VERSION)" ./$(TEMPL_GENERATE_SCRIPT)
 
 # Generate Swagger documentation (no global binary required)
-# This target intentionally forces regeneration; builds use the tracked output target below.
+# This target intentionally forces regeneration; builds use the narrow freshness check below.
 swagger:
-	$(SWAGGER_GENERATE)
-	@sed -i.bak '/LeftDelim:/d' docs/docs.go && sed -i.bak '/RightDelim:/d' docs/docs.go && rm docs/docs.go.bak || true
-	@touch $(SWAGGER_GENERATED_TARGET)
-	@touch $(SWAGGER_GENERATED_OTHER_OUTPUTS)
+	SWAG_VERSION="$(SWAG_VERSION)" SWAGGER_FORCE=1 ./$(SWAGGER_GENERATE_SCRIPT)
 
-$(SWAGGER_GENERATED_TARGET): $(SWAGGER_INPUTS)
-	$(SWAGGER_GENERATE)
-	@sed -i.bak '/LeftDelim:/d' docs/docs.go && sed -i.bak '/RightDelim:/d' docs/docs.go && rm docs/docs.go.bak || true
-	@touch $(SWAGGER_GENERATED_TARGET)
-	@touch $(SWAGGER_GENERATED_OTHER_OUTPUTS)
-
-$(SWAGGER_GENERATED_OTHER_OUTPUTS): | $(SWAGGER_GENERATED_TARGET)
-	@if test -f "$@"; then :; else rm -f "$(SWAGGER_GENERATED_TARGET)" && $(MAKE) --no-print-directory "$(SWAGGER_GENERATED_TARGET)" && test -f "$@"; fi
+swagger-fresh:
+	SWAG_VERSION="$(SWAG_VERSION)" ./$(SWAGGER_GENERATE_SCRIPT)
 
 # Build production server binary
-build: $(TEMPL_GENERATED_OUTPUTS) $(SWAGGER_GENERATED_OUTPUTS)
+build: templ-fresh swagger-fresh
 	go build -ldflags="-s -w" -o bin/openvibely ./cmd/server
 
 # Build desktop binary (Wails integration - see cmd/desktop)
-build-desktop: $(TEMPL_GENERATED_OUTPUTS) $(SWAGGER_GENERATED_OUTPUTS)
+build-desktop: templ-fresh swagger-fresh
 	go build -ldflags="-s -w" -o bin/openvibely-desktop ./cmd/desktop
 
 # Package desktop app bundle for macOS Finder/Dock launch (no Terminal)

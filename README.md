@@ -249,7 +249,7 @@ go test ./... -count=1 -timeout 60s
 make build
 ```
 
-Normal `make build`, `make build-desktop`, and `make run` invocations reuse generated template and Swagger files when their tracked inputs are unchanged. Use `make templ` or `make swagger` when you want to force regeneration.
+Normal `make build`, `make build-desktop`, and `make run` invocations perform lightweight input-freshness checks and reuse generated template and Swagger files when their relevant sources/configuration are unchanged. Missing outputs, added/removed inputs, or changed generator inputs trigger regeneration. Use `make templ` or `make swagger` when you want to force regeneration.
 
 Common targets:
 
