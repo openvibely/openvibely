@@ -256,8 +256,10 @@ func TestGitHubIssueActionCoreAssignedIssuesWithPRsPaginateCallerVisibleResults(
 	callsBeforeInvalid := provider.assignedIssuesWithPRCalls
 	for _, input := range []string{
 		`{"assignee":"dev-bot","limit":0}`,
+		`{"assignee":"dev-bot","Limit":0}`,
 		`{"assignee":"dev-bot","limit":101}`,
 		`{"assignee":"dev-bot","offset":-1}`,
+		`{"assignee":"dev-bot","Offset":-1}`,
 	} {
 		if _, err := core.ExecuteListAssignedIssuesWithPRs(context.Background(), json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
 			t.Fatalf("invalid page input %s error=%v, want validation error", input, err)
