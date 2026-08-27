@@ -228,9 +228,9 @@ case "$run_output" in
     *'go run github.com/swaggo/swag/cmd/swag@'*) printf '%s\n' 'make -n run exposed unconditional Swagger generation' >&2; exit 1 ;;
 esac
 
-# A Go-only edit in an annotated file must not regenerate Swagger when its annotations are unchanged.
+# A Go-only edit outside the Swagger source set must not regenerate Swagger.
 restore_baseline
-printf '\n// issue-848 non-Swagger Go change\n' >> "$ROOT/$SWAGGER_SOURCE"
+printf '\n// issue-848 non-Swagger Go change\n' >> "$ROOT/$GO_SOURCE"
 reset_log
 run_make build
 expect_counts 0 0 1

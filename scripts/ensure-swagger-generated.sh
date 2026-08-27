@@ -59,13 +59,8 @@ fingerprint() {
     {
         printf 'generator-version:%s\n' "$SWAG_VERSION"
         for source in $SWAGGER_ANNOTATION_SOURCES; do
-            printf 'annotation:%s\n' "$source"
-            if [ -f "$source" ]; then
-                grep -E "$ANNOTATION_PATTERN" "$source" || true
-            else
-                printf '%s\n' '<missing>'
-            fi
-            printf '%s\n' '--end-annotation--'
+            printf 'swagger-source:%s\n' "$source"
+            append_file "$source"
         done
         for source in $SWAGGER_SCHEMA_SOURCES; do
             printf 'schema:%s\n' "$source"
