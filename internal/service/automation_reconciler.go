@@ -194,6 +194,16 @@ func (r *AutomationReconciler) refreshStaleExternalState(ctx context.Context) er
 	if r.externalStateSvc == nil {
 		return nil
 	}
+	return r.refreshStaleExternalStateWith(ctx, func(ctx context.Context, projectID, automationID string, now time.Time) error {
+		_, err := r.externalStateSvc.Refresh(ctx, projectID, automationID, now)
+		return err
+	})
+}
+
+func (r *AutomationReconciler) refreshStaleExternalStateWith(ctx context.Context, refresh func(context.Context, string, string, time.Time) error) error {
+	if refresh == nil {
+		return nil
+	}
 	now := time.Now().UTC()
 	stale, err := r.automationRepo.ListAutomationsWithStaleExternalPullRequests(ctx, now.Add(-r.externalRefreshEach), 100)
 	if err != nil {
@@ -204,7 +214,7 @@ func (r *AutomationReconciler) refreshStaleExternalState(ctx context.Context) er
 		if r.liveViewTracker != nil && !r.liveViewTracker.IsRecentlyViewed(projectID, automationID, r.liveViewWindow) {
 			continue
 		}
-		if _, err := r.externalStateSvc.Refresh(ctx, projectID, automationID, now); err != nil {
+		if err := refresh(ctx, projectID, automationID, now); err != nil {
 			applog.Infof("[automation-reconciler] external state refresh failed project=%s automation=%s: %v", projectID, automationID, err)
 			continue
 		}

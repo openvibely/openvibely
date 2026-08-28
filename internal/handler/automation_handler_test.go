@@ -2968,3 +2968,57 @@ func TestAutomationSendToTaskPersistsCausalBindingsWithQueuedInput(t *testing.T)
 	require.Len(t, loaded.Bindings, 1)
 	require.Equal(t, item.ID, loaded.Bindings[0].WorkItemID)
 }
+
+type handlerAutomationExternalProvider struct {
+	calls int
+}
+
+func (f *handlerAutomationExternalProvider) ResolveRepo(context.Context, string, string) (*service.GitHubRepoRef, error) {
+	return &service.GitHubRepoRef{Owner: "example", Name: "runtime", FullName: "example/runtime"}, nil
+}
+
+func (f *handlerAutomationExternalProvider) GetPullRequest(context.Context, *service.GitHubRepoRef, int) (*service.GitHubPullRequest, error) {
+	f.calls++
+	return &service.GitHubPullRequest{}, nil
+}
+
+func TestRefreshAutomationExternalStateRouteRendersLiveGraphAndPreservesProjectScope(t *testing.T) {
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	project := tc.CreateProject().WithName("External refresh handler project").Build()
+	automationRepo := repository.NewAutomationRepo(tc.db)
+	registration := service.NewAutomationRegistrationService(automationRepo, service.NewAutomationAdapterRegistry())
+	tc.handler.SetAutomationServices(service.NewAutomationGraphService(automationRepo), registration)
+
+	task := models.Task{ProjectID: project.ID, Title: "Refresh route task", Category: models.CategoryScheduled, Priority: 1, Status: models.StatusPending, Prompt: "refresh"}
+	require.NoError(t, tc.taskRepo.Create(ctx, &task))
+	schedule := models.Schedule{TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour), RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, tc.scheduleRepo.Create(ctx, &schedule))
+	definition, _, err := registration.Register(ctx, service.AutomationRegistrationRequest{
+		ProjectID: project.ID, AdapterKey: service.AutomationAdapterGitHubSDLC, StableKey: "github-sdlc/external-refresh-handler",
+		Resources: []models.AutomationResourceBinding{
+			{NodeKey: "dev_inbox", ResourceType: "schedule", ResourceID: schedule.ID},
+			{NodeKey: "dev_inbox", ResourceType: "task", ResourceID: task.ID},
+		},
+	})
+	require.NoError(t, err)
+	provider := &handlerAutomationExternalProvider{}
+	tc.handler.SetAutomationExternalStateService(service.NewAutomationExternalStateService(automationRepo, repository.NewTaskPullRequestRepo(tc.db), tc.projectRepo, provider))
+
+	response := tc.HTMX().Post(fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", definition.Automation.ID, project.ID)).Execute()
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, "automationExternalRefreshed", response.Header().Get("HX-Trigger"))
+	require.Contains(t, response.Body.String(), `id="automation-live"`)
+	for _, node := range definition.Nodes {
+		require.Contains(t, response.Body.String(), node.Name, "the refresh route must render every Live graph node")
+	}
+	require.NotEmpty(t, definition.Edges)
+	require.Zero(t, provider.calls, "a zero-pull refresh must not call GitHub")
+
+	missing := tc.HTMX().Post("/automations/missing/refresh-external?project_id=" + project.ID).Execute()
+	require.Equal(t, http.StatusNotFound, missing.Code)
+	foreign := tc.CreateProject().WithName("External refresh other project").Build()
+	mismatched := tc.HTMX().Post(fmt.Sprintf("/automations/%s/refresh-external?project_id=%s", definition.Automation.ID, foreign.ID)).Execute()
+	require.Equal(t, http.StatusNotFound, mismatched.Code)
+	require.Zero(t, provider.calls, "missing and project-mismatched refreshes must not call GitHub")
+}
