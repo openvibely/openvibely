@@ -3702,6 +3702,94 @@ func automationDefinitionNodeLoadCount(statements []string) int {
 	return count
 }
 
+func refreshWithFormerDefinitionValidation(ctx context.Context, external *AutomationExternalStateService, projectID, automationID string, now time.Time) (models.AutomationExternalState, error) {
+	definition, err := external.automations.GetDefinition(ctx, projectID, automationID)
+	if err != nil {
+		return models.AutomationExternalState{}, err
+	}
+	if definition == nil {
+		return models.AutomationExternalState{}, errors.New("automation not found")
+	}
+	return external.refreshAfterValidation(ctx, projectID, automationID, now)
+}
+
+func TestAutomationExternalRefreshValidationPreservesMissingProjectAndDraftBehavior(t *testing.T) {
+	fixture, counter := newCountingAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	otherProject := models.Project{Name: "External refresh foreign project"}
+	require.NoError(t, projectRepo.Create(ctx, &otherProject))
+	provider := &fakeAutomationPullRequestProvider{}
+	external := NewAutomationExternalStateService(fixture.repo, repository.NewTaskPullRequestRepo(fixture.repo.DB()), projectRepo, provider)
+
+	assertNotFoundWithoutGitHub := func(name, projectID, automationID string) {
+		t.Helper()
+		counter.Reset()
+		counter.SetEnabled(true)
+		_, err := external.Refresh(ctx, projectID, automationID, time.Now().UTC())
+		require.EqualError(t, err, "automation not found", name)
+		require.Zero(t, provider.calls, name+" must not call GitHub")
+		statements := counter.Statements()
+		require.Equal(t, []string{"SELECT EXISTS(SELECT 1 FROM automations WHERE project_id = ? AND id = ?)"}, statements, name+" must stop after the project-scoped identity lookup")
+	}
+
+	assertNotFoundWithoutGitHub("missing automation", fixture.project.ID, "missing-automation")
+	assertNotFoundWithoutGitHub("project-mismatched automation", otherProject.ID, fixture.definition.Automation.ID)
+
+	counter.Reset()
+	provider.calls = 0
+	counter.SetEnabled(true)
+	_, err := fixture.repo.DB().ExecContext(ctx, `UPDATE automations SET published_version_id = NULL WHERE project_id = ? AND id = ?`, fixture.project.ID, fixture.definition.Automation.ID)
+	require.NoError(t, err)
+	_, err = external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, time.Now().UTC())
+	require.NoError(t, err, "an unpublished Automation must remain refreshable")
+	require.Zero(t, provider.calls, "an unpublished Automation without tracked pulls must not call GitHub")
+	for _, statement := range counter.Statements() {
+		lower := strings.ToLower(statement)
+		for _, table := range []string{"automation_versions", "automation_nodes", "automation_edges", "automation_definition_resources"} {
+			require.NotContains(t, lower, table, "unpublished refresh must not load %s", table)
+		}
+	}
+}
+
+func TestAutomationExternalRefreshClosedPullRequestWithoutMergeReconcilesFailure(t *testing.T) {
+	fixture := newAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(fixture.repo.DB())
+	fixture.project.RepoURL = "https://github.com/example/runtime"
+	require.NoError(t, projectRepo.Update(ctx, &fixture.project))
+
+	openPR := automationNodeByKey(t, fixture.definition, "open_pr")
+	review := automationNodeByKey(t, fixture.definition, "review")
+	binding := models.AutomationBinding{AutomationID: fixture.definition.Automation.ID, VersionID: fixture.definition.Version.ID, NodeID: openPR.ID}
+	_, _, err := fixture.repo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: fixture.project.ID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "github:example/runtime:issue:77", ActivityKey: "github:example/runtime:pull:77:open",
+		ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: fixture.task.ID}, {ResourceType: "pull_request", ResourceID: "github:example/runtime:pull:77"}},
+		EventKey:  "github:example/runtime:pull:77:review", FromNodeID: openPR.ID, ToNodeID: review.ID, Transition: models.AutomationTransitionWaiting,
+	})
+	require.NoError(t, err)
+
+	pullRequests := repository.NewTaskPullRequestRepo(fixture.repo.DB())
+	record := models.TaskPullRequest{TaskID: fixture.task.ID, PRNumber: 77, PRURL: "https://github.com/example/runtime/pull/77", PRState: "open"}
+	require.NoError(t, pullRequests.Upsert(ctx, &record))
+	now := time.Now().UTC().Truncate(time.Second)
+	_, err = fixture.repo.DB().ExecContext(ctx, `UPDATE task_pull_requests SET updated_at = datetime(?) WHERE id = ?`, now.Add(-time.Hour).Format("2006-01-02 15:04:05"), record.ID)
+	require.NoError(t, err)
+
+	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 77, URL: record.PRURL, State: "closed"}}
+	external := NewAutomationExternalStateService(fixture.repo, pullRequests, projectRepo, provider)
+	_, err = external.Refresh(ctx, fixture.project.ID, fixture.definition.Automation.ID, now)
+	require.NoError(t, err)
+	require.Equal(t, 1, provider.calls)
+	stored, err := pullRequests.GetByTaskID(ctx, fixture.task.ID)
+	require.NoError(t, err)
+	require.Equal(t, "closed", stored.PRState, "closed but unmerged pull requests must remain closed")
+	require.NotZero(t, countRows(t, fixture.repo.DB(), `SELECT COUNT(*) FROM automation_activities WHERE automation_id = ? AND activity_type = 'pull_request_state' AND status = 'failed'`, fixture.definition.Automation.ID), "closed pull requests must project a failed state")
+	require.Zero(t, countRows(t, fixture.repo.DB(), `SELECT COUNT(*) FROM automation_work_items WHERE automation_id = ? AND status = 'completed'`, fixture.definition.Automation.ID), "closed but unmerged pull requests must not complete their work item")
+}
+
 func TestAutomationExternalRefreshAndLiveLoadDefinitionOnce(t *testing.T) {
 	fixture, counter := newCountingAutomationRuntimeFixture(t, AutomationAdapterGitHubSDLC)
 	ctx := context.Background()
@@ -3719,6 +3807,28 @@ func TestAutomationExternalRefreshAndLiveLoadDefinitionOnce(t *testing.T) {
 	require.NotNil(t, graph)
 	require.Len(t, graph.Nodes, len(fixture.definition.Nodes), "manual Live rendering must retain the complete graph")
 	require.Len(t, graph.Edges, len(fixture.definition.Edges), "manual Live rendering must retain the complete graph")
+	for _, expected := range fixture.definition.Nodes {
+		var found *models.AutomationLiveNode
+		for i := range graph.Nodes {
+			if graph.Nodes[i].ID == expected.ID {
+				found = &graph.Nodes[i]
+				break
+			}
+		}
+		require.NotNil(t, found, "manual Live rendering must retain node %s", expected.NodeKey)
+		require.Equal(t, expected.ConfigJSON, found.ConfigJSON, "manual Live rendering must retain node configuration %s", expected.NodeKey)
+	}
+	require.Len(t, graph.Resources, len(fixture.definition.Resources), "manual Live rendering must retain definition resources")
+	for _, expected := range fixture.definition.Resources {
+		found := false
+		for _, resource := range graph.Resources {
+			if resource.NodeID == expected.NodeID && resource.ResourceType == expected.ResourceType && resource.ResourceID == expected.ResourceID && resource.Relation == expected.Relation {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "manual Live rendering must retain resource %s/%s", expected.ResourceType, expected.ResourceID)
+	}
 	require.Equal(t, 1, automationDefinitionNodeLoadCount(counter.Statements()), "manual refresh validation plus Live rendering must hydrate the full graph once")
 }
 
@@ -3822,6 +3932,315 @@ func BenchmarkOptimizationAutomationExternalRefreshDefinitionLoad(b *testing.B) 
 			})
 		})
 	}
+}
+
+type automationExternalRefreshBenchmarkFixture struct {
+	projectID     string
+	automationID  string
+	taskID        string
+	pullRequestID string
+}
+
+func seedAutomationExternalRefreshEndToEndFixture(tb testing.TB, db *sql.DB, nodeCount int) automationExternalRefreshBenchmarkFixture {
+	tb.Helper()
+	ctx := context.Background()
+	projectID, automationID := seedAutomationExternalRefreshBenchmark(tb, db, nodeCount)
+	if _, err := db.ExecContext(ctx, `UPDATE projects SET repo_url = ? WHERE id = ?`, "https://github.com/example/runtime", projectID); err != nil {
+		tb.Fatalf("set benchmark project repository: %v", err)
+	}
+	var versionID, nodeID string
+	if err := db.QueryRowContext(ctx, `SELECT id, version_id FROM automation_nodes WHERE project_id = ? AND automation_id = ? ORDER BY position_x, id LIMIT 1`, projectID, automationID).Scan(&nodeID, &versionID); err != nil {
+		tb.Fatalf("load benchmark graph identity: %v", err)
+	}
+	task := models.Task{ProjectID: projectID, Title: "External refresh benchmark task", Category: models.CategoryActive, Priority: 1, Status: models.StatusPending, Prompt: "benchmark external refresh"}
+	if err := repository.NewTaskRepo(db, nil).Create(ctx, &task); err != nil {
+		tb.Fatalf("create benchmark task: %v", err)
+	}
+	pull := models.TaskPullRequest{TaskID: task.ID, PRNumber: 7, PRURL: "https://github.com/example/runtime/pull/7", PRState: "open"}
+	pullRepo := repository.NewTaskPullRequestRepo(db)
+	if err := pullRepo.Upsert(ctx, &pull); err != nil {
+		tb.Fatalf("create benchmark pull request: %v", err)
+	}
+	automationRepo := repository.NewAutomationRepo(db)
+	binding := models.AutomationBinding{AutomationID: automationID, VersionID: versionID, NodeID: nodeID}
+	if _, _, err := automationRepo.RecordProjectionEvent(ctx, repository.AutomationProjectionEvent{
+		Context: models.AutomationContext{ProjectID: projectID, Bindings: []models.AutomationBinding{binding}}, Binding: binding,
+		WorkItemKey: "benchmark:external-refresh", ActivityKey: "benchmark:external-refresh:pull",
+		ActivityType: "open_pull_request", ActivityStatus: models.AutomationActivityCompleted,
+		Resources: []models.AutomationActivityResource{{ResourceType: "task", ResourceID: task.ID}, {ResourceType: "pull_request", ResourceID: "github:example/runtime:pull:7"}},
+	}); err != nil {
+		tb.Fatalf("seed benchmark Automation activity: %v", err)
+	}
+	return automationExternalRefreshBenchmarkFixture{projectID: projectID, automationID: automationID, taskID: task.ID, pullRequestID: pull.ID}
+}
+
+func resetAutomationExternalRefreshBenchmarkPull(tb testing.TB, db *sql.DB, pullRequestID string, now time.Time) {
+	tb.Helper()
+	if _, err := db.ExecContext(context.Background(), `UPDATE task_pull_requests SET updated_at = datetime(?) WHERE id = ?`, now.Add(-time.Hour).Format("2006-01-02 15:04:05"), pullRequestID); err != nil {
+		tb.Fatalf("reset benchmark pull request freshness: %v", err)
+	}
+}
+
+func newAutomationExternalRefreshBenchmarkServices(db *sql.DB, fixture automationExternalRefreshBenchmarkFixture) (*AutomationExternalStateService, *AutomationGraphService, *AutomationReconciler, *fakeAutomationPullRequestProvider) {
+	provider := &fakeAutomationPullRequestProvider{pull: GitHubPullRequest{Number: 7, URL: "https://github.com/example/runtime/pull/7", State: "open"}}
+	automationRepo := repository.NewAutomationRepo(db)
+	external := NewAutomationExternalStateService(automationRepo, repository.NewTaskPullRequestRepo(db), repository.NewProjectRepo(db), provider)
+	graph := NewAutomationGraphService(automationRepo)
+	reconciler := NewAutomationReconciler(automationRepo, repository.NewExecutionRepo(db), NewWorkerService(nil, 1, nil))
+	reconciler.SetAutomationExternalStateService(external)
+	reconciler.SetAutomationLiveViewTracker(NewAutomationLiveViewTracker())
+	reconciler.liveViewTracker.MarkViewed(fixture.projectID, fixture.automationID)
+	return external, graph, reconciler, provider
+}
+
+func BenchmarkOptimizationAutomationExternalRefreshEndToEnd(b *testing.B) {
+	for _, nodeCount := range []int{10, 50} {
+		b.Run(fmt.Sprintf("%d_nodes", nodeCount), func(b *testing.B) {
+			db := testutil.NewTestDB(b)
+			fixture := seedAutomationExternalRefreshEndToEndFixture(b, db, nodeCount)
+			now := time.Now().UTC().Truncate(time.Second)
+			b.Run("manual_before_full_validation", func(b *testing.B) {
+				external, graph, _, _ := newAutomationExternalRefreshBenchmarkServices(db, fixture)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					resetAutomationExternalRefreshBenchmarkPull(b, db, fixture.pullRequestID, now)
+					b.StartTimer()
+					if _, err := refreshWithFormerDefinitionValidation(context.Background(), external, fixture.projectID, fixture.automationID, now); err != nil {
+						b.Fatal(err)
+					}
+					if _, err := graph.GetLive(context.Background(), fixture.projectID, fixture.automationID, now); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("manual_after_identity_validation", func(b *testing.B) {
+				external, graph, _, _ := newAutomationExternalRefreshBenchmarkServices(db, fixture)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					resetAutomationExternalRefreshBenchmarkPull(b, db, fixture.pullRequestID, now)
+					b.StartTimer()
+					if _, err := external.Refresh(context.Background(), fixture.projectID, fixture.automationID, now); err != nil {
+						b.Fatal(err)
+					}
+					if _, err := graph.GetLive(context.Background(), fixture.projectID, fixture.automationID, now); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("background_before_full_validation", func(b *testing.B) {
+				external, _, reconciler, _ := newAutomationExternalRefreshBenchmarkServices(db, fixture)
+				_ = external
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					resetAutomationExternalRefreshBenchmarkPull(b, db, fixture.pullRequestID, now)
+					reconciler.liveViewTracker.MarkViewed(fixture.projectID, fixture.automationID)
+					b.StartTimer()
+					if err := reconciler.refreshStaleExternalStateWith(context.Background(), func(ctx context.Context, projectID, automationID string, refreshNow time.Time) error {
+						_, err := refreshWithFormerDefinitionValidation(ctx, reconciler.externalStateSvc, projectID, automationID, refreshNow)
+						return err
+					}); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("background_after_identity_validation", func(b *testing.B) {
+				external, _, reconciler, _ := newAutomationExternalRefreshBenchmarkServices(db, fixture)
+				_ = external
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					resetAutomationExternalRefreshBenchmarkPull(b, db, fixture.pullRequestID, now)
+					reconciler.liveViewTracker.MarkViewed(fixture.projectID, fixture.automationID)
+					b.StartTimer()
+					if err := reconciler.refreshStaleExternalState(context.Background()); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		})
+	}
+}
+
+type automationExternalRefreshContentionMeasurement struct {
+	refreshDuration time.Duration
+	waiterDuration  time.Duration
+	waitCount       int64
+	waitDuration    time.Duration
+	nodeQueries     int
+	providerCalls   int
+}
+
+func measureAutomationExternalRefreshContention(t *testing.T, formerDefinitionValidation, manual bool) automationExternalRefreshContentionMeasurement {
+	t.Helper()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	fixture := seedAutomationExternalRefreshEndToEndFixture(t, db, 50)
+	external, graph, reconciler, provider := newAutomationExternalRefreshBenchmarkServices(db, fixture)
+	now := time.Now().UTC().Truncate(time.Second)
+	resetAutomationExternalRefreshBenchmarkPull(t, db, fixture.pullRequestID, now)
+	var seededUpdatedAt string
+	if err := db.QueryRowContext(context.Background(), `SELECT updated_at FROM task_pull_requests WHERE id = ?`, fixture.pullRequestID).Scan(&seededUpdatedAt); err != nil {
+		t.Fatalf("load benchmark pull request freshness: %v", err)
+	}
+	tracked, err := external.automations.ListAutomationPullRequests(context.Background(), fixture.projectID, fixture.automationID, 20)
+	if err != nil {
+		t.Fatalf("list benchmark tracked pull requests: %v", err)
+	}
+	if len(tracked) != 1 || !tracked[0].UpdatedAt.Before(now.Add(-time.Minute)) {
+		t.Fatalf("benchmark pull projection updated_at=%q tracked=%+v now=%s", seededUpdatedAt, tracked, now)
+	}
+
+	nodeEntered := make(chan struct{})
+	releaseNode := make(chan struct{})
+	var nodeOnce sync.Once
+	nodeQueries := 0
+	counter.SetObserver(func(_ context.Context, query string) {
+		normalized := strings.Join(strings.Fields(strings.ToLower(query)), " ")
+		if !strings.Contains(normalized, "from automation_nodes") {
+			return
+		}
+		nodeQueries++
+		if !manual && !formerDefinitionValidation {
+			return
+		}
+		nodeOnce.Do(func() {
+			close(nodeEntered)
+			<-releaseNode
+		})
+	})
+	counter.SetEnabled(true)
+
+	statsBeforeRefresh := db.Stats()
+	refreshDone := make(chan error, 1)
+	var callbackErr error
+	refreshStarted := time.Now()
+	go func() {
+		if manual {
+			var err error
+			if formerDefinitionValidation {
+				_, err = refreshWithFormerDefinitionValidation(context.Background(), external, fixture.projectID, fixture.automationID, now)
+			} else {
+				_, err = external.Refresh(context.Background(), fixture.projectID, fixture.automationID, now)
+			}
+			if err == nil {
+				live, liveErr := graph.GetLive(context.Background(), fixture.projectID, fixture.automationID, now)
+				if liveErr != nil {
+					err = liveErr
+				} else if live == nil {
+					err = errors.New("manual refresh returned no Live graph")
+				}
+			}
+			refreshDone <- err
+			return
+		}
+		if formerDefinitionValidation {
+			refreshDone <- reconciler.refreshStaleExternalStateWith(context.Background(), func(ctx context.Context, projectID, automationID string, refreshNow time.Time) error {
+				_, callbackErr = refreshWithFormerDefinitionValidation(ctx, reconciler.externalStateSvc, projectID, automationID, refreshNow)
+				return callbackErr
+			})
+			return
+		}
+		refreshDone <- reconciler.refreshStaleExternalState(context.Background())
+	}()
+
+	var waiterDuration time.Duration
+	var waitCount int64
+	var waitDuration time.Duration
+	if manual || formerDefinitionValidation {
+		select {
+		case <-nodeEntered:
+		case err := <-refreshDone:
+			close(releaseNode)
+			t.Fatalf("refresh completed before hydrating its expected graph: %v", err)
+		case <-time.After(2 * time.Second):
+			close(releaseNode)
+			t.Fatal("timed out waiting for expected refresh graph query")
+		}
+		statsBeforeWaiter := db.Stats()
+		waiterStarted := time.Now()
+		waiterDone := make(chan error, 1)
+		go func() {
+			var one int
+			waiterDone <- db.QueryRowContext(context.Background(), `SELECT 1`).Scan(&one)
+		}()
+		select {
+		case err := <-waiterDone:
+			close(releaseNode)
+			<-refreshDone
+			t.Fatalf("lightweight query completed while graph work held the only connection: %v", err)
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(releaseNode)
+		if err := <-waiterDone; err != nil {
+			t.Fatalf("lightweight query after releasing graph work: %v", err)
+		}
+		if err := <-refreshDone; err != nil {
+			t.Fatalf("graph refresh: %v", err)
+		}
+		if callbackErr != nil {
+			t.Fatalf("background refresh callback: %v", callbackErr)
+		}
+		waiterDuration = time.Since(waiterStarted)
+		statsAfterWaiter := db.Stats()
+		waitCount = statsAfterWaiter.WaitCount - statsBeforeWaiter.WaitCount
+		waitDuration = statsAfterWaiter.WaitDuration - statsBeforeWaiter.WaitDuration
+	} else {
+		if err := <-refreshDone; err != nil {
+			t.Fatalf("identity-only background refresh: %v", err)
+		}
+		waiterStarted := time.Now()
+		var one int
+		if err := db.QueryRowContext(context.Background(), `SELECT 1`).Scan(&one); err != nil {
+			t.Fatalf("lightweight query after identity-only refresh: %v", err)
+		}
+		waiterDuration = time.Since(waiterStarted)
+		stats := db.Stats()
+		waitCount = stats.WaitCount - statsBeforeRefresh.WaitCount
+		waitDuration = stats.WaitDuration - statsBeforeRefresh.WaitDuration
+	}
+	refreshDuration := time.Since(refreshStarted)
+	counter.SetObserver(nil)
+	counter.SetEnabled(false)
+	return automationExternalRefreshContentionMeasurement{
+		refreshDuration: refreshDuration,
+		waiterDuration:  waiterDuration,
+		waitCount:       waitCount,
+		waitDuration:    waitDuration,
+		nodeQueries:     nodeQueries,
+		providerCalls:   provider.calls,
+	}
+}
+
+func TestAutomationExternalRefreshBackgroundContentionUsesNoGraphConnection(t *testing.T) {
+	before := measureAutomationExternalRefreshContention(t, true, false)
+	after := measureAutomationExternalRefreshContention(t, false, false)
+	require.Greater(t, before.nodeQueries, 0, "former background refresh must hydrate the graph")
+	require.Greater(t, before.waitCount, int64(0), "former graph hydration must make a concurrent query wait for the single connection")
+	require.Greater(t, before.waitDuration, time.Duration(0), "former graph hydration must record single-connection wait time")
+	require.Equal(t, 0, after.nodeQueries, "current background refresh must not hydrate the graph")
+	require.Equal(t, 1, before.providerCalls, "former refresh must use the shared fake provider once")
+	require.Equal(t, 1, after.providerCalls, "current refresh must use the shared fake provider once")
+	t.Logf("background external refresh before/after: refresh=%s/%s, lightweight query=%s/%s, WaitCount delta=%d/%d, WaitDuration delta=%s/%s, graph queries=%d/%d", before.refreshDuration, after.refreshDuration, before.waiterDuration, after.waiterDuration, before.waitCount, after.waitCount, before.waitDuration, after.waitDuration, before.nodeQueries, after.nodeQueries)
+}
+
+func TestAutomationExternalRefreshManualContentionLoadsGraphOnce(t *testing.T) {
+	before := measureAutomationExternalRefreshContention(t, true, true)
+	after := measureAutomationExternalRefreshContention(t, false, true)
+	require.Equal(t, 2, before.nodeQueries, "former manual refresh must hydrate once for validation and once for Live rendering")
+	require.Equal(t, 1, after.nodeQueries, "current manual refresh must hydrate the graph only for Live rendering")
+	require.Greater(t, before.waitCount, int64(0), "former manual refresh must contend for the single connection")
+	require.Greater(t, before.waitDuration, time.Duration(0), "former manual refresh must record single-connection wait time")
+	require.Greater(t, after.waitCount, int64(0), "Live rendering must still contend for the single connection")
+	require.Greater(t, after.waitDuration, time.Duration(0), "Live rendering must record single-connection wait time")
+	require.Equal(t, 1, before.providerCalls, "former manual refresh must use the shared fake provider once")
+	require.Equal(t, 1, after.providerCalls, "current manual refresh must use the shared fake provider once")
+	t.Logf("manual external refresh before/after: refresh=%s/%s, lightweight query=%s/%s, WaitCount delta=%d/%d, WaitDuration delta=%s/%s, graph queries=%d/%d", before.refreshDuration, after.refreshDuration, before.waiterDuration, after.waiterDuration, before.waitCount, after.waitCount, before.waitDuration, after.waitDuration, before.nodeQueries, after.nodeQueries)
 }
 
 func TestAutomationExternalPullRequestRefreshIsExplicitCachedAndReconcilesProjection(t *testing.T) {

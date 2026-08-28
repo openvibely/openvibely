@@ -38,6 +38,10 @@ func (s *AutomationExternalStateService) Refresh(ctx context.Context, projectID,
 	if !exists {
 		return models.AutomationExternalState{}, errors.New("automation not found")
 	}
+	return s.refreshAfterValidation(ctx, projectID, automationID, now)
+}
+
+func (s *AutomationExternalStateService) refreshAfterValidation(ctx context.Context, projectID, automationID string, now time.Time) (models.AutomationExternalState, error) {
 	pulls, err := s.automations.ListAutomationPullRequests(ctx, projectID, automationID, 20)
 	if err != nil {
 		return models.AutomationExternalState{}, err
