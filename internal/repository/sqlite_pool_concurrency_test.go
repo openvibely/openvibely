@@ -14,6 +14,131 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
+func TestDedicatedWriterDoesNotWaitForReaderPool(t *testing.T) {
+	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "reader-saturation.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connections.Close()
+	unregister := RegisterDedicatedWriter(connections.Reader, connections.Writer)
+	defer unregister()
+
+	ctx := context.Background()
+	if _, err := connections.Writer.ExecContext(ctx, `
+		INSERT INTO projects(id, name) VALUES ('reader-project', 'Reader project');
+		INSERT INTO tasks(id, project_id, title, category, status) VALUES ('reader-task', 'reader-project', 'Reader task', 'active', 'pending');
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	readers := make([]*sql.Conn, 0, connections.Reader.Stats().MaxOpenConnections)
+	for i := 0; i < connections.Reader.Stats().MaxOpenConnections; i++ {
+		conn, err := connections.Reader.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		readers = append(readers, conn)
+		if _, err := conn.ExecContext(ctx, `BEGIN`); err != nil {
+			t.Fatal(err)
+		}
+		var count int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+	}
+	defer func() {
+		for _, conn := range readers {
+			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
+			_ = conn.Close()
+		}
+	}()
+
+	writeCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	claimed, err := NewTaskRepo(connections.Reader, nil).ClaimTask(writeCtx, "reader-task")
+	if err != nil {
+		t.Fatalf("write while reader pool saturated: %v", err)
+	}
+	if !claimed {
+		t.Fatal("write while reader pool saturated was not applied")
+	}
+	if got := connections.Reader.Stats().WaitCount; got != 0 {
+		t.Fatalf("writer waited on reader pool %d times", got)
+	}
+}
+
+func TestDedicatedWriterDoesNotConsumeReaderCapacity(t *testing.T) {
+	connections, err := database.NewReadWrite(filepath.Join(t.TempDir(), "dedicated.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connections.Close()
+	unregister := RegisterDedicatedWriter(connections.Reader, connections.Writer)
+	defer unregister()
+
+	ctx := context.Background()
+	if _, err := connections.Writer.ExecContext(ctx, `
+		INSERT INTO projects(id, name) VALUES ('dedicated-project', 'Dedicated project');
+		INSERT INTO tasks(id, project_id, title, category, status) VALUES ('dedicated-task', 'dedicated-project', 'Dedicated task', 'active', 'pending');
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	locker, err := connections.Writer.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locker.Close()
+	if _, err := locker.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	defer locker.ExecContext(context.Background(), `ROLLBACK`)
+
+	writeCtx, cancelWrite := context.WithTimeout(ctx, time.Second)
+	defer cancelWrite()
+	writeResult := make(chan error, 1)
+	go func() {
+		_, err := NewTaskRepo(connections.Reader, nil).ClaimTask(writeCtx, "dedicated-task")
+		writeResult <- err
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) && connections.Writer.Stats().WaitCount == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	if connections.Writer.Stats().WaitCount == 0 {
+		t.Fatal("queued writer did not wait on the dedicated writer pool")
+	}
+	if got := connections.Reader.Stats().InUse; got != 0 {
+		t.Fatalf("reader connections in use by queued writer = %d, want 0", got)
+	}
+
+	readCtx, cancelRead := context.WithTimeout(ctx, time.Second)
+	defer cancelRead()
+	task, err := NewTaskRepo(connections.Reader, nil).GetByID(readCtx, "dedicated-task")
+	if err != nil {
+		t.Fatalf("read while writer queued: %v", err)
+	}
+	if task == nil || task.ID != "dedicated-task" {
+		t.Fatalf("read task = %#v", task)
+	}
+
+	if _, err := locker.ExecContext(ctx, `ROLLBACK`); err != nil {
+		t.Fatal(err)
+	}
+	if err := locker.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-writeResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued writer did not complete after writer release")
+	}
+}
+
 func TestLLMConfigRepoConcurrentFirstCreatesChooseOneDefault(t *testing.T) {
 	db, err := database.New(filepath.Join(t.TempDir(), "models.db"))
 	if err != nil {

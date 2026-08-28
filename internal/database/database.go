@@ -17,6 +17,64 @@ const (
 	sqliteBusyTimeoutMS  = 5000
 )
 
+type Connections struct {
+	Reader *sql.DB
+	Writer *sql.DB
+}
+
+func (c *Connections) Close() error {
+	if c == nil {
+		return nil
+	}
+	var firstErr error
+	if c.Reader != nil && c.Reader != c.Writer {
+		firstErr = c.Reader.Close()
+	}
+	if c.Writer != nil {
+		if err := c.Writer.Close(); firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func NewReadWrite(dsn string) (*Connections, error) {
+	writer, err := New(dsn)
+	if err != nil {
+		return nil, err
+	}
+	writer.SetMaxOpenConns(1)
+	writer.SetMaxIdleConns(1)
+
+	_, inMemory, err := configureSQLiteDSN(dsn)
+	if err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	if inMemory {
+		return &Connections{Reader: writer, Writer: writer}, nil
+	}
+
+	readerDSN, _, err := configureSQLiteDSNForRole(dsn, true)
+	if err != nil {
+		_ = writer.Close()
+		return nil, err
+	}
+	reader, err := sql.Open("sqlite", readerDSN)
+	if err != nil {
+		_ = writer.Close()
+		return nil, fmt.Errorf("opening read database: %w", err)
+	}
+	reader.SetMaxOpenConns(fileDatabasePoolSize)
+	reader.SetMaxIdleConns(fileDatabasePoolSize)
+	if err := reader.Ping(); err != nil {
+		_ = reader.Close()
+		_ = writer.Close()
+		return nil, fmt.Errorf("opening read database connection: %w", err)
+	}
+	return &Connections{Reader: reader, Writer: writer}, nil
+}
+
 func New(dsn string) (*sql.DB, error) {
 	return newSQLiteDatabase(dsn, initializeSQLite)
 }
@@ -71,6 +129,10 @@ func initializeSQLite(db *sql.DB) error {
 }
 
 func configureSQLiteDSN(dsn string) (configured string, inMemory bool, err error) {
+	return configureSQLiteDSNForRole(dsn, false)
+}
+
+func configureSQLiteDSNForRole(dsn string, queryOnly bool) (configured string, inMemory bool, err error) {
 	base, rawQuery, found := strings.Cut(dsn, "?")
 	inMemory = base == ":memory:"
 	values := make(url.Values)
@@ -86,12 +148,15 @@ func configureSQLiteDSN(dsn string) (configured string, inMemory bool, err error
 	pragmas := values["_pragma"][:0]
 	for _, pragma := range values["_pragma"] {
 		normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(pragma), " ", ""))
-		if strings.HasPrefix(normalized, "foreign_keys") || strings.HasPrefix(normalized, "busy_timeout") {
+		if strings.HasPrefix(normalized, "foreign_keys") || strings.HasPrefix(normalized, "busy_timeout") || strings.HasPrefix(normalized, "query_only") {
 			continue
 		}
 		pragmas = append(pragmas, pragma)
 	}
 	values["_pragma"] = append(pragmas, "foreign_keys(1)", fmt.Sprintf("busy_timeout(%d)", sqliteBusyTimeoutMS))
+	if queryOnly {
+		values["_pragma"] = append(values["_pragma"], "query_only(1)")
+	}
 	values.Set("_loc", "UTC")
 	return base + "?" + values.Encode(), inMemory, nil
 }

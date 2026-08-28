@@ -285,6 +285,71 @@ func TestNew_MultipleReadersUseDistinctPhysicalConnections(t *testing.T) {
 	}
 }
 
+func TestNewReadWrite_DedicatesWriterAndQueryOnlyReaders(t *testing.T) {
+	connections, err := NewReadWrite(filepath.Join(t.TempDir(), "split.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connections.Close()
+
+	if got := connections.Writer.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("writer MaxOpenConnections = %d, want 1", got)
+	}
+	if got := connections.Reader.Stats().MaxOpenConnections; got != 2 {
+		t.Fatalf("reader MaxOpenConnections = %d, want 2", got)
+	}
+
+	ctx := context.Background()
+	readers := make([]*sql.Conn, 0, 2)
+	for i := 0; i < 2; i++ {
+		conn, err := connections.Reader.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		readers = append(readers, conn)
+	}
+	defer func() {
+		for _, conn := range readers {
+			_ = conn.Close()
+		}
+	}()
+	for i, conn := range readers {
+		var queryOnly, foreignKeys, busyTimeout int
+		if err := conn.QueryRowContext(ctx, `PRAGMA query_only`).Scan(&queryOnly); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+			t.Fatal(err)
+		}
+		if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+			t.Fatal(err)
+		}
+		if queryOnly != 1 || foreignKeys != 1 || busyTimeout != 5000 {
+			t.Fatalf("reader %d settings: query_only=%d foreign_keys=%d busy_timeout=%d", i, queryOnly, foreignKeys, busyTimeout)
+		}
+	}
+	for _, conn := range readers {
+		if err := conn.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readers = nil
+
+	if _, err := connections.Reader.ExecContext(ctx, `UPDATE projects SET name='blocked' WHERE id='default'`); err == nil {
+		t.Fatal("query-only reader unexpectedly accepted a write")
+	}
+	if _, err := connections.Writer.ExecContext(ctx, `UPDATE projects SET name='writer' WHERE id='default'`); err != nil {
+		t.Fatalf("dedicated writer update: %v", err)
+	}
+	var name string
+	if err := connections.Reader.QueryRowContext(ctx, `SELECT name FROM projects WHERE id='default'`).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	if name != "writer" {
+		t.Fatalf("reader observed project name %q, want writer", name)
+	}
+}
+
 func TestConfigureSQLiteDSNPreservesCallerParameters(t *testing.T) {
 	configured, inMemory, err := configureSQLiteDSN("file:test.db?cache=private&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(1)&_loc=Local")
 	if err != nil {

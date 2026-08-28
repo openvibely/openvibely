@@ -25,7 +25,25 @@ var (
 	ErrExpectedTurnEmpty = errors.New("expected turn id is required")
 	ErrActiveTurnChanged = errors.New("active turn changed")
 	ErrInputNotPending   = errors.New("input is no longer pending")
+	dedicatedWriters     sync.Map
 )
+
+func RegisterDedicatedWriter(reader, writer *sql.DB) func() {
+	if reader == nil || writer == nil || reader == writer {
+		return func() {}
+	}
+	dedicatedWriters.Store(reader, writer)
+	return func() {
+		dedicatedWriters.CompareAndDelete(reader, writer)
+	}
+}
+
+func writeDatabase(db *sql.DB) *sql.DB {
+	if writer, ok := dedicatedWriters.Load(db); ok {
+		return writer.(*sql.DB)
+	}
+	return db
+}
 
 func NewThreadInputRepo(db *sql.DB) *ThreadInputRepo {
 	return &ThreadInputRepo{
@@ -1099,6 +1117,7 @@ func (r *boundSQLiteRow) Scan(dest ...interface{}) error {
 }
 
 func withBoundSQLiteConn(ctx context.Context, db *sql.DB, fn func(*sql.Conn) error) error {
+	db = writeDatabase(db)
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return err
@@ -1121,6 +1140,7 @@ func withBoundSQLiteConn(ctx context.Context, db *sql.DB, fn func(*sql.Conn) err
 }
 
 func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), error) {
+	db = writeDatabase(db)
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, nil, err

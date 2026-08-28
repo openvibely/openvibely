@@ -27,9 +27,19 @@ func BenchmarkSQLiteConnectionPool(b *testing.B) {
 	for _, poolSize := range []int{1, 2, 4, 8} {
 		for _, active := range []int{1, 4, 10} {
 			for _, workload := range []string{"read", "write", "mixed"} {
-				name := fmt.Sprintf("pool=%d/active=%d/%s", poolSize, active, workload)
+				name := fmt.Sprintf("shared=%d/active=%d/%s", poolSize, active, workload)
 				b.Run(name, func(b *testing.B) {
 					benchmarkSQLitePoolWorkload(b, poolSize, active, workload)
+				})
+			}
+		}
+	}
+	for _, readers := range []int{1, 2, 4} {
+		for _, active := range []int{1, 4, 10} {
+			for _, workload := range []string{"read", "write", "mixed"} {
+				name := fmt.Sprintf("dedicated=1W+%dR/active=%d/%s", readers, active, workload)
+				b.Run(name, func(b *testing.B) {
+					benchmarkSQLiteDedicatedWorkload(b, readers, active, workload)
 				})
 			}
 		}
@@ -46,10 +56,29 @@ func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload st
 	defer db.Close()
 	db.SetMaxOpenConns(poolSize)
 	db.SetMaxIdleConns(poolSize)
-	seedSQLitePoolBenchmark(b, db)
-	taskRepo := repository.NewTaskRepo(db, nil)
-	executionRepo := repository.NewExecutionRepo(db)
-	automationRepo := repository.NewAutomationRepo(db)
+	benchmarkSQLitePoolWorkloadWithHandles(b, dbPath, db, db, active, workload)
+}
+
+func benchmarkSQLiteDedicatedWorkload(b *testing.B, readers, active int, workload string) {
+	b.StopTimer()
+	dbPath := filepath.Join(b.TempDir(), "pool-benchmark.db")
+	connections, err := database.NewReadWrite(dbPath)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer connections.Close()
+	connections.Reader.SetMaxOpenConns(readers)
+	connections.Reader.SetMaxIdleConns(readers)
+	unregister := repository.RegisterDedicatedWriter(connections.Reader, connections.Writer)
+	defer unregister()
+	benchmarkSQLitePoolWorkloadWithHandles(b, dbPath, connections.Reader, connections.Writer, active, workload)
+}
+
+func benchmarkSQLitePoolWorkloadWithHandles(b *testing.B, dbPath string, readDB, writeDB *sql.DB, active int, workload string) {
+	seedSQLitePoolBenchmark(b, writeDB)
+	taskRepo := repository.NewTaskRepo(readDB, nil)
+	executionRepo := repository.NewExecutionRepo(readDB)
+	automationRepo := repository.NewAutomationRepo(readDB)
 
 	// A sustained independent reader models execution-history/SSE consumers and
 	// makes WAL growth visible without consuming a slot from the measured pool.
@@ -75,9 +104,9 @@ func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload st
 	}
 
 	// Exclude lazy physical-connection creation from steady-state measurements.
-	warm := make([]*sql.Conn, 0, poolSize)
-	for i := 0; i < poolSize; i++ {
-		conn, err := db.Conn(context.Background())
+	warm := make([]*sql.Conn, 0, readDB.Stats().MaxOpenConnections)
+	for i := 0; i < readDB.Stats().MaxOpenConnections; i++ {
+		conn, err := readDB.Conn(context.Background())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -94,7 +123,8 @@ func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload st
 		walBaseline = info.Size()
 	}
 
-	before := db.Stats()
+	beforeRead := readDB.Stats()
+	beforeWrite := writeDB.Stats()
 	latencies := make([]time.Duration, b.N)
 	var next atomic.Int64
 	var busy, busySnapshot, streamFlushes atomic.Int64
@@ -139,7 +169,7 @@ func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload st
 					return
 				}
 				opStarted := time.Now()
-				err := runSQLitePoolBenchmarkOperation(db, taskRepo, executionRepo, automationRepo, workload, i, payload)
+				err := runSQLitePoolBenchmarkOperation(writeDB, taskRepo, executionRepo, automationRepo, workload, i, payload)
 				latencies[i] = time.Since(opStarted)
 				if err != nil {
 					message := strings.ToUpper(err.Error())
@@ -164,15 +194,28 @@ func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload st
 	elapsed := time.Since(started)
 	b.StopTimer()
 
-	after := db.Stats()
+	afterRead := readDB.Stats()
+	afterWrite := writeDB.Stats()
+	readWaitCount := afterRead.WaitCount - beforeRead.WaitCount
+	readWaitDuration := afterRead.WaitDuration - beforeRead.WaitDuration
+	writeWaitCount := afterWrite.WaitCount - beforeWrite.WaitCount
+	writeWaitDuration := afterWrite.WaitDuration - beforeWrite.WaitDuration
+	if readDB == writeDB {
+		writeWaitCount = 0
+		writeWaitDuration = 0
+	}
 	sort.Slice(latencies, func(i, j int) bool { return latencies[i] < latencies[j] })
 	if len(latencies) > 0 {
 		b.ReportMetric(float64(latencies[len(latencies)/2].Microseconds()), "p50-us")
 		b.ReportMetric(float64(latencies[(len(latencies)-1)*95/100].Microseconds()), "p95-us")
 	}
 	b.ReportMetric(float64(b.N)/elapsed.Seconds(), "ops/s")
-	b.ReportMetric(float64(after.WaitCount-before.WaitCount), "wait-count")
-	b.ReportMetric(float64((after.WaitDuration - before.WaitDuration).Microseconds()), "wait-us")
+	b.ReportMetric(float64(readWaitCount+writeWaitCount), "wait-count")
+	b.ReportMetric(float64((readWaitDuration + writeWaitDuration).Microseconds()), "wait-us")
+	b.ReportMetric(float64(readWaitCount), "read-wait-count")
+	b.ReportMetric(float64(readWaitDuration.Microseconds()), "read-wait-us")
+	b.ReportMetric(float64(writeWaitCount), "write-wait-count")
+	b.ReportMetric(float64(writeWaitDuration.Microseconds()), "write-wait-us")
 	b.ReportMetric(float64(busy.Load()), "sqlite-busy")
 	b.ReportMetric(float64(busySnapshot.Load()), "busy-snapshot")
 	b.ReportMetric(float64(streamFlushes.Load()), "stream-flushes")
@@ -230,7 +273,7 @@ func seedSQLitePoolBenchmark(b *testing.B, db *sql.DB) {
 	}
 }
 
-func runSQLitePoolBenchmarkOperation(db *sql.DB, taskRepo *repository.TaskRepo, executionRepo *repository.ExecutionRepo, automationRepo *repository.AutomationRepo, workload string, i int, payload string) error {
+func runSQLitePoolBenchmarkOperation(writeDB *sql.DB, taskRepo *repository.TaskRepo, executionRepo *repository.ExecutionRepo, automationRepo *repository.AutomationRepo, workload string, i int, payload string) error {
 	id := i % 256
 	taskID := fmt.Sprintf("pool-task-%03d", id)
 	switch workload {
@@ -244,7 +287,7 @@ func runSQLitePoolBenchmarkOperation(db *sql.DB, taskRepo *repository.TaskRepo, 
 		return executionRepo.UpdateOutput(context.Background(), fmt.Sprintf("pool-exec-%03d", id), payload)
 	case "mixed":
 		if i%5 != 0 {
-			return runSQLitePoolBenchmarkOperation(db, taskRepo, executionRepo, automationRepo, "read", i, payload)
+			return runSQLitePoolBenchmarkOperation(writeDB, taskRepo, executionRepo, automationRepo, "read", i, payload)
 		}
 		if i%10 == 0 {
 			claimed, err := taskRepo.ClaimTask(context.Background(), taskID)
@@ -252,7 +295,7 @@ func runSQLitePoolBenchmarkOperation(db *sql.DB, taskRepo *repository.TaskRepo, 
 				return err
 			}
 			if claimed {
-				_, err = db.Exec(`UPDATE tasks SET status='pending' WHERE id=? AND status='running'`, taskID)
+				_, err = writeDB.Exec(`UPDATE tasks SET status='pending' WHERE id=? AND status='running'`, taskID)
 			}
 			return err
 		}
@@ -260,7 +303,7 @@ func runSQLitePoolBenchmarkOperation(db *sql.DB, taskRepo *repository.TaskRepo, 
 		if err != nil || dispatch == nil {
 			return err
 		}
-		_, err = db.Exec(`UPDATE automation_dispatch_outbox SET status='pending', claimed_by='', claim_expires_at=NULL WHERE id=? AND status='processing'`, dispatch.ID)
+		_, err = writeDB.Exec(`UPDATE automation_dispatch_outbox SET status='pending', claimed_by='', claim_expires_at=NULL WHERE id=? AND status='processing'`, dispatch.ID)
 		return err
 	default:
 		return fmt.Errorf("unknown workload %q", workload)
