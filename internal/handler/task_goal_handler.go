@@ -33,14 +33,25 @@ func (h *Handler) renderTaskGoal(c echo.Context, taskID string, status int) erro
 }
 
 func (h *Handler) GetTaskGoal(c echo.Context) error {
-	return h.renderTaskGoal(c, c.Param("taskId"), http.StatusOK)
+	if h.taskGoalSvc == nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "task goal service unavailable")
+	}
+	taskID := c.Param("taskId")
+	if _, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.mutationProjectID(c)); err != nil {
+		return err
+	}
+	return h.renderTaskGoal(c, taskID, http.StatusOK)
 }
 
 func (h *Handler) SetTaskGoal(c echo.Context) error {
 	if h.taskGoalSvc == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "task goal service unavailable")
 	}
-	goal, err := h.taskGoalSvc.SetGoal(c.Request().Context(), c.Param("taskId"), c.FormValue("goal"), service.GoalOptions{Actor: "user"})
+	taskID := c.Param("taskId")
+	if _, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.mutationProjectID(c)); err != nil {
+		return err
+	}
+	goal, err := h.taskGoalSvc.SetGoal(c.Request().Context(), taskID, c.FormValue("goal"), service.GoalOptions{Actor: "user"})
 	if err != nil {
 		if err == service.ErrTaskGoalEmpty || err == service.ErrTaskGoalTooLong {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -50,41 +61,53 @@ func (h *Handler) SetTaskGoal(c echo.Context) error {
 	if wantsJSON(c) {
 		return c.JSON(http.StatusOK, taskGoalResponse{OK: true, Goal: goal})
 	}
-	return render(c, http.StatusOK, pages.TaskGoalPanel(c.Param("taskId"), goal))
+	return render(c, http.StatusOK, pages.TaskGoalPanel(taskID, goal))
 }
 
 func (h *Handler) PauseTaskGoal(c echo.Context) error {
 	if h.taskGoalSvc == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "task goal service unavailable")
 	}
-	if err := h.taskGoalSvc.PauseGoal(c.Request().Context(), c.Param("taskId"), "user"); err != nil {
+	taskID := c.Param("taskId")
+	if _, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.mutationProjectID(c)); err != nil {
+		return err
+	}
+	if err := h.taskGoalSvc.PauseGoal(c.Request().Context(), taskID, "user"); err != nil {
 		if err == service.ErrTaskGoalNotFound {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
 		return err
 	}
-	return h.renderTaskGoal(c, c.Param("taskId"), http.StatusOK)
+	return h.renderTaskGoal(c, taskID, http.StatusOK)
 }
 
 func (h *Handler) ResumeTaskGoal(c echo.Context) error {
 	if h.taskGoalSvc == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "task goal service unavailable")
 	}
-	if err := h.taskGoalSvc.ResumeGoal(c.Request().Context(), c.Param("taskId"), "user"); err != nil {
+	taskID := c.Param("taskId")
+	if _, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.mutationProjectID(c)); err != nil {
+		return err
+	}
+	if err := h.taskGoalSvc.ResumeGoal(c.Request().Context(), taskID, "user"); err != nil {
 		if err == service.ErrTaskGoalNotFound {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
 		return err
 	}
-	return h.renderTaskGoal(c, c.Param("taskId"), http.StatusOK)
+	return h.renderTaskGoal(c, taskID, http.StatusOK)
 }
 
 func (h *Handler) ClearTaskGoal(c echo.Context) error {
 	if h.taskGoalSvc == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "task goal service unavailable")
 	}
-	if err := h.taskGoalSvc.ClearGoal(c.Request().Context(), c.Param("taskId"), "user"); err != nil {
+	taskID := c.Param("taskId")
+	if _, err := h.requireTaskInRequestProject(c.Request().Context(), taskID, h.mutationProjectID(c)); err != nil {
 		return err
 	}
-	return h.renderTaskGoal(c, c.Param("taskId"), http.StatusOK)
+	if err := h.taskGoalSvc.ClearGoal(c.Request().Context(), taskID, "user"); err != nil {
+		return err
+	}
+	return h.renderTaskGoal(c, taskID, http.StatusOK)
 }

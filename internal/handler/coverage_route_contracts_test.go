@@ -215,25 +215,26 @@ func TestTaskGoalRoutesReturnJSONLifecycle(t *testing.T) {
 	project := tc.CreateProject().WithName("Goal Route Contracts").Build()
 	task := tc.CreateTask(project.ID).WithTitle("Goal-backed task").WithCategory(models.CategoryBacklog).Build()
 
-	getEmpty := requestWithAccept(tc, http.MethodGet, "/tasks/"+task.ID+"/goal", "application/json", "")
+	projectQuery := "?project_id=" + project.ID
+	getEmpty := requestWithAccept(tc, http.MethodGet, "/tasks/"+task.ID+"/goal"+projectQuery, "application/json", "")
 	require.Equal(t, http.StatusOK, getEmpty.Code)
 	require.Contains(t, getEmpty.Body.String(), `"ok":true`)
 
-	setEmpty := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal", "application/json", url.Values{"goal": {""}}.Encode())
+	setEmpty := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal"+projectQuery, "application/json", url.Values{"goal": {""}}.Encode())
 	require.Equal(t, http.StatusBadRequest, setEmpty.Code)
 
-	setGoal := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal", "application/json", url.Values{"goal": {"Ship reliable coverage"}}.Encode())
+	setGoal := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal"+projectQuery, "application/json", url.Values{"goal": {"Ship reliable coverage"}}.Encode())
 	require.Equal(t, http.StatusOK, setGoal.Code)
 	require.Contains(t, setGoal.Body.String(), "Ship reliable coverage")
 
-	pause := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/pause", "application/json", "")
+	pause := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/pause"+projectQuery, "application/json", "")
 	require.Equal(t, http.StatusOK, pause.Code)
-	resume := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/resume", "application/json", "")
+	resume := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/resume"+projectQuery, "application/json", "")
 	require.Equal(t, http.StatusOK, resume.Code)
-	clear := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/clear", "application/json", "")
+	clear := requestWithAccept(tc, http.MethodPost, "/tasks/"+task.ID+"/goal/clear"+projectQuery, "application/json", "")
 	require.Equal(t, http.StatusOK, clear.Code)
 
-	missingPause := requestWithAccept(tc, http.MethodPost, "/tasks/missing/goal/pause", "application/json", "")
+	missingPause := requestWithAccept(tc, http.MethodPost, "/tasks/missing/goal/pause"+projectQuery, "application/json", "")
 	require.Equal(t, http.StatusNotFound, missingPause.Code)
 }
 
