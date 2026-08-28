@@ -2,9 +2,9 @@
 name: chat_thread_system
 type: project
 created: 2026-05-09
-updated: 2026-08-24
-source: after_complete_update
-source_id: fd37f46bb8f14052236f06e2550dd109:7f7998065fd5c7be
+updated: 2026-08-28
+source: task_completion
+source_id: 66f05446ade8e7fd8e32f3957dc75477
 confidence: high
 title: Chat and Task-Thread Behavior
 ---
@@ -46,6 +46,7 @@ Task-thread admission and lifecycle:
 - Task-thread follow-ups use chronological execution history, not reinjection of original task prompt. Replay history is bounded to preserve up to 20 prior turns after filtering current execution.
 - Task-thread HTTP send/acceptance stays lightweight; full transcript/model-context setup runs in background after durable acceptance. Deferred setup failures should still run terminal cleanup that can promote queued input.
 - Task-thread transcript/pagination renders `executions` history; `tasks.prompt` may not appear as the oldest paged item unless also recorded as execution prompt.
+- Runtime `view_task_thread` pagination gap `#887` is separate from browser polling: the tool advertises `offset`/`limit` but currently hydrates the full chronological execution history before slicing. The fix should push page bounds into the repository read while preserving chronological transcript semantics.
 - Lifecycle-agent activity belongs in the Lifecycle tab rather than main Thread. Task-thread follow-ups run normal task lifecycle routing before model call.
 
 Composer shortcuts and steering races:
@@ -98,6 +99,7 @@ Task goals, continuations, and cancellation:
 - Goal continuation uses normal task-thread follow-ups through `thread_inputs`; it does not start work inline.
 - Tasks do not support direct peer-to-peer chat. Coordination is through app state and control-plane tools such as `send_to_task`, `view_task_thread`, child tasks, schedules, dynamic wakeups, goals, and `thread_inputs`.
 - `view_task_thread` and other task-identity tools are strictly project-scoped. Cross-project task IDs return an explicit different-project error; there is no cross-project switch/view capability.
+- Browser task-goal routes (`GET/POST /tasks/:taskId/goal` and pause/resume/clear siblings) enforce a non-empty explicit `project_id` or selected-project boundary before reading or mutating goals. Known tasks requested without either scope source return controlled `400` without invoking goal services; unknown tasks remain `404`, and explicit/selected foreign-task requests remain rejected without leaking or changing state.
 - A durable “inbox task” pattern is a canonical task thread, not an automatic mailbox.
 - Goal status writes use stale `goal_id` plus active-status guards. Goal tools can be granted beyond Goal Agent, but ungranted/default agents do not see or execute them.
 - Manual/user follow-ups on achieved goals reactivate the same goal before prompt context/lifecycle evaluation; Goal Agent/system continuations do not reopen achieved goals.
@@ -111,7 +113,7 @@ Task goals, continuations, and cancellation:
 - Known task-control gap `#235`: Task Details replaces Run Now with disabled state for running/queued tasks instead of exposing Stop/Cancel.
 - Normal active terminal failed/cancelled rows normalize to Backlog; Chat preserves `category=chat`.
 - Direct cancel and Active-to-Backlog/Completed moves cancel queued/running executions, pause active goal, and preserve requested target category. `TaskService.UpdateCategory` must use pre-update category/status for stop semantics.
-- Maintenance finding `#845`: `TaskService.UpdateCategory` and `TaskService.CancelTask` independently implement the same active-work stop subset: worker cancellation, active-goal pause, cancellation request, and the `cancelled` status transition. Category changes (including drag/drop and Task Detail) and explicit cancel/Chat-stop paths are live callers; consolidation should share only those transitions while leaving category, swarm, queued-input, and rendering behavior at their existing callers.
+- Task cancellation/category behavior is centralized through `TaskService.cancelActiveTaskWork`: preserve worker cancellation intent, pause active goals, persist durable cancellation before category changes, retain requested category, and handle pending swarm-child notification. Capture the pre-update category/status before mutation and cancel only work that originated in Active; explicit CancelTask retains its Backlog behavior. Regression coverage must include non-Active running/queued tasks so category writes cannot trigger accidental cancellation.
 - Lifecycle-origin `send_to_task` must re-check goal state, execution freshness, and cancellation state before queueing continuations. Timeout/deadline failures are ordinary failures for lifecycle purposes; only explicit Stop/Cancel suppresses optional after-complete work.
 
 Task execution, schedules, capacity, and swarms:
@@ -141,8 +143,3 @@ Task execution, schedules, capacity, and swarms:
 - Read-only `view_swarm` is available in Plan and Orchestrate modes for web/API Chat, supported channels, and task-thread follow-ups. It accepts a project-scoped swarm parent task ID, exact title, or task-thread `current`, resolves child-task selectors back to the parent hierarchy, returns controlled non-swarm responses, and keeps output compact by omitting prompts, execution outputs, diff hunks, and large config blobs.
 - Swarm child cancellation/deletion should cancel running child work. Swarm cancellation marks parent/child in-process cancellation intent before runtime callbacks/status persistence, preventing lifecycle continuations during races.
 - Known swarm gap `#502`: `shared` isolation is exposed in UI/runtime creation but planner output application rejects inherited `shared` isolation when planner entries omit per-worker isolation.
-
-Retained incident lessons:
-- Attachment-bearing steering is one-shot and race-safe: accepted submissions clear their draft/session, stale-steer `409` retries once as normal send/queue, and late attachments are requeued rather than attached to the completed execution.
-- A failed task-thread rerun resolves the current task model at retry/promotion time, so a later provider change is honored.
-- Supported task-thread follow-up tools resolve omitted/current task selectors where implemented; PR, execute, goal, and channel-runtime gaps remain explicit. One-time schedules reset terminal non-running tasks to pending, legitimate scheduled work clears stale cancellation markers, goal resume after user Stop is conditional, and completed-task edits remain metadata-only.

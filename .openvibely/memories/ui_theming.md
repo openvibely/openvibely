@@ -2,9 +2,9 @@
 name: ui_theming
 type: project
 created: 2026-08-11
-updated: 2026-08-19
-source: consolidation
-source_id: memory_consolidation_2026_08_19
+updated: 2026-08-28
+source: after_complete_update
+source_id: d87ef6d051970bf69bec289136a3a796:3f707b55470e59b3
 confidence: high
 title: UI Theming
 ---
@@ -43,3 +43,10 @@ Exact imported-theme styling:
 - Generator and attribution docs should describe semantic fallback/derivation: ordered upstream keys win first, transparent/invalid values are ignored, missing roles derive through theme-aware mixes/alpha/best-text helpers, then fallback to bundled light/dark defaults.
 - Automation graph and YAML surfaces are exact-theme UI under imported themes: panels, nodes, connectors, arrows, handles, state colors, delete controls, focus outlines, editor backgrounds, gutters, line numbers, overlays, caret, YAML tokens, diagnostics, dots, and rails should use generated variables.
 - YAML indentation rails remain visible by default; when editor is focused only the innermost active group rail switches to focus role.
+
+Resolved contrast contracts (2026-08-28):
+- Imported Automation graph/YAML theming emits generated semantic roles `automationNodeBorder`, `automationEdge`, and `yamlIndentRail`, each derived against its actual drawing surface. The generator enforces minimum contrast ratios of `1.5` for node stroke versus node fill, `3.0` for connectors versus graph surface, and `1.5` for YAML rails versus code canvas, using a theme-aware foreground fallback when upstream values collapse into a surface.
+- Imported graph nodes consume `--ov-automation-node-border`; live/edit edges and arrows consume `--ov-automation-edge` at full opacity. This covers low-contrast palettes such as Dark Modern, Abyss, Kimbie Dark, and Monokai Dimmed without changing selected/active state roles.
+- YAML panel defaults consume `--ov-yaml-indent-rail`; imported rail CSS intentionally does not use `!important`, so the renderer's inline active-rail color can win. Default rails remain visible, and only the innermost active group rail changes to the focus color.
+- The early theme bootstrap keeps these three roles in a compact runtime `r` payload and expands them to allowlisted CSS variables, retaining the base-page size budget while the full catalog retains semantic/CSS data. Generated catalog, templ output, and attribution documentation remain source-derived and must stay synchronized through their generators.
+- Catalog, rendered CSS, runtime-script, and browser regressions cover the contrast and cascade invariants across imported themes.

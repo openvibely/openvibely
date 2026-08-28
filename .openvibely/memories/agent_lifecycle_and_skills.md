@@ -2,9 +2,9 @@
 name: agent_lifecycle_and_skills
 type: project
 created: 2026-05-24
-updated: 2026-08-24
-source: after_complete_update
-source_id: ce58dc08ee6cf3e3ca6d281fba596f35:8da8297f2204b6c5
+updated: 2026-08-28
+source: consolidation
+source_id: memory_consolidation_2026_08_28
 confidence: high
 title: Agent Lifecycle and Skills
 ---
@@ -35,6 +35,7 @@ Agent and skill catalog facts:
 - Browser-dialog request-to-declaration conversion for standalone and agent-owned skill saves is centralized before importer persistence. Standalone saves reject agent-root/`agent.key` declarations; agent-owned saves validate `agent.key` scope.
 - Open duplication gap `#806`: agent plugin MCP server resolution is duplicated between `ResolveRuntimeBundle` and `pluginServersForIDs`, covering selected-plugin parsing, auto-install/load, deduplication, and sorting for runtime bundles and persistent MCP process reconciliation.
 - Open bug `#846`: the browser plugin-install path accepts an agent ID and persists plugin IDs without applying the protected system-agent read-only/`GeneratedStatus` guard, so a user can mutate a protected agent's plugin configuration through installation even though normal agent editing blocks it.
+- Per-agent materialization resolves project-scoped declarations and legacy embedded skills from the Agent's recorded `ProjectID`; refreshes must not create a project-B tree under project A. Project-aware declaration sync ignores mismatched stored project IDs, including warm-cache refreshes, while global/unowned legacy rows retain fallback behavior. Cross-project switching, legacy migration, and warm-refresh regressions cover this boundary.
 - `skill_import` is a skill-library write capability alongside `skill_manage`; grant it to write-authorized skill/curation agents rather than ordinary task turns.
 - The standalone `git_worktree_discipline` skill is intentionally compact at routing time; detailed recovery and prompt-orientation references live in support files.
 
@@ -96,3 +97,4 @@ Scheduled maintenance and UI facts:
 - Agent create/update browser handlers share server-side modal payload parsing/normalization. Handlers still own construction/loading, protected checks, repository writes, lifecycle hook persistence, disk materialization, legacy skill migration, logging, and list rendering.
 - Protected system agents are read-only in the agent modal and skipped by dialog disk materialization. Non-protected lifecycle hook form saves are ordinary user-agent edits and must be audited separately if they need to preserve custom `payload_json`.
 - Agent edit modals must hydrate persisted Advanced-tab values, including unchecked booleans such as `enabled` and `selectable_as_primary`, before saving so hidden defaults do not overwrite backend state.
+- Open suggestion `#886`: Agents cards currently hide the persisted routing-critical `enabled`, `selectable_as_primary`, and global/project `scope` values even though `/agents` loads them; users can see those controls only in the Advanced modal. Showing this state on each card would explain why an agent is absent from task or schedule pickers without changing routing or selection rules.

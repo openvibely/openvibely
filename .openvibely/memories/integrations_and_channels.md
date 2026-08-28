@@ -2,9 +2,9 @@
 name: integrations_and_channels
 type: project
 created: 2026-05-09
-updated: 2026-08-27
-source: after_complete_update
-source_id: 7993e3214b0f822ca6f84a591fcfe1e3:1b3d9bb68d134ead
+updated: 2026-08-28
+source: consolidation
+source_id: memory_consolidation_2026_08_28
 confidence: high
 title: Integrations and Channels
 ---
@@ -15,6 +15,7 @@ Generic inbound webhooks:
 - Open review-gated intake gap `#349`: inbound webhooks can create and submit Active tasks but lack a Backlog-for-human-review mode for less-trusted events.
 - Open Automation-trigger gap `#665`: inbound webhooks are Channels integrations that create standalone Active tasks, but are not Automation trigger nodes/resources.
 - Open project-boundary defect `#373`: webhook update/delete/rotate/test routes must enforce selected-project ownership for webhook IDs.
+- Open correctness defect `#885`: the Channels webhook picker exposes every non-archived Agent, and webhook save/inbound task execution do not validate that a project-scoped Agent belongs to the selected project. Project A can therefore assign and execute a Project B Agent by foreign ID; regression coverage should prove same-project assignment succeeds while foreign-project picker/save/ingress execution is rejected. This is distinct from endpoint-ID ownership in `#373`.
 - Webhook delivery and Settings `Test` should share private webhook task create/assign/submit logic while preserving separate inbound authentication/parsing and UI rendering.
 - Inbound webhook create/update Settings saves should share form normalization for name, enabled, system instructions, default priority, prompt templates, and ordered agent IDs, while preserving create/update-specific behavior.
 - Inbound webhook compact cards should keep sensitive/detail-only fields, prompts/templates, secrets, and agent assignments out of card attributes; Edit modals lazy-load authorized full detail and disable Save until hydration succeeds.
@@ -31,6 +32,7 @@ Shared channel direction:
 - Slack/Discord/Telegram service-side `list_channels` aligns GitHub App status with Web/API behavior, reports App mode connected only from stored installation state, and includes only prompt-safe account login/type metadata. Channel-provided handlers include Email/Webhook/outbound target status and counts consistently with Web/API Chat without exposing passwords, webhook path tokens/secrets, or raw target credentials.
 - Email and Slack inbound receipts share atomic receipt/deduplication and durable execution-or-queued-handoff mechanics while retaining channel-specific tables, identity keys, polling behavior, and retry semantics.
 - Channel task-creation callback assembly should stay DRY across Slack, Discord, and Telegram while preserving platform-specific callbacks.
+- Issue `#878` is implemented in PR `#888`: the unexported `fallbackProjectID(projects []models.Project) string` selector in `internal/service` owns the channel-independent “default project, otherwise first project, otherwise empty” rule for Slack, Discord, Telegram, and Email. Each channel retains its saved-selection validation, authorization, cache/persistence/versioning, and error handling; this does not merge channel-specific user-project repositories or Telegram command/runtime switching.
 - Slack, Telegram, Discord, and Email own their `switch_project` authorization and active-project persistence callbacks. Slack, Discord, and Email use shared channel runtime switch handler rather than Telegram-style direct `/project` commands.
 - Channel-provided runtime tools take precedence by name, then fall back to generic tools a partial channel runtime does not implement.
 - Slack, Telegram, and Discord channel utility runtimes advertise and execute the read-only `view_pulse` upcoming-work action through the shared Pulse/Upcoming service path; Email does not advertise it unless explicit handler support is added.
@@ -42,6 +44,7 @@ Shared channel direction:
 
 Outbound message targets:
 - `send_message` is a first-class outbound runtime tool for Slack, Telegram, Discord, and Email. It sends through existing channel services/configuration and records project-scoped send audits.
+- Open product visibility gap `#853`: outbound send attempts already persist project, destination, caller, preview, result, error, and timestamp, but Channels exposes only transient `Sent`/`Failed` feedback and has no project-scoped delivery-history/read path. A bounded audit view should expose safe delivery history without changing outbound-target policy or routing behavior.
 - Outbound targets are distinct from inbound authorization allowlists. Default policy requires saved targets or saved home target; arbitrary explicit targets require project setting `send_message_allow_explicit_targets`.
 - Saved target kinds are `channel`, `user`, `chat`, and `email`. Slack/Discord user-DM destinations are first-class saved targets.
 - Backward compatibility: project-authorized Slack/Discord user IDs can be outbound DMs for that same project when no saved target exists. Cross-project authorized IDs must fail closed.
@@ -62,8 +65,9 @@ GitHub integration:
 - Interactive Chat and Automation runtimes share the canonical issue-action service core for inbox, authorization, reads/comments/labels, PR-associated listing, and assigned-issue operations; Automation-only filtering, provenance, duplicate prevention, and PR behavior remain outside the generic core.
 - Model-facing `github_create_issue` does not advertise `idempotency_key`. Manual OpenVibely tasks that reference an existing issue use ordinary task/PR flow and do not need Automation issue-task provenance.
 - Assigned-issue discovery requires configured GitHub Authorized Users or the PAT owner, returns compact paginated records without bodies, and hydrates only likely candidates through `github_get_issue` before creating work. Existing-work reconciliation uses one broad `list_tasks` lookup per issue number/URL, omitting lifecycle filters; maintained Automation snapshots require explicit update/edit/save or recreation to adopt corrected prompts.
-- The PR-filtered assigned-issue action's pagination contract is implemented in PR `#849`: page arguments are validated before provider calls, PR-less issues are removed before slicing, and stable `returned`, `total`, `offset`, `next_offset`, and `truncated` metadata is exposed consistently through Web/API and Automation. Because `encoding/json` matches struct fields case-insensitively, raw numeric presence checks must do the same; the 2026-08-27 follow-up fixed the explicit-zero `limit` bypass in `githubIssueActionInputHasField` and added `Limit`/`LIMIT` and `Offset`/`OFFSET` no-provider-call regressions across the shared core, Web/API, and Automation paths.
-- Open GitHub discovery gap `#741` remains title-only `list_tasks` matching. PR `#849` now carries the assigned-issue pagination fix for `#842`, including the case-insensitive explicit-zero correction, but a fresh strictly read-only audit is still required before claiming the goal complete; verify live review and merge state before treating the target branch as updated.
+- The PR-filtered assigned-issue action's pagination contract is implemented in PR `#849`: page arguments are validated before provider calls, PR-less issues are removed before slicing, and stable `returned`, `total`, `offset`, `next_offset`, and `truncated` metadata is exposed consistently through Web/API and Automation.
+- Issue `#872` is implemented in PR `#889`: ordinary assigned-issue core and Automation handlers now preserve JSON field presence with case-insensitive raw-key validation, so omitted `limit` still defaults to 100 while explicit zero (including `Limit:0`) and other invalid pagination fail with the existing validation error before repository/provider calls. Regression coverage covers both ordinary action names, mixed-case invalid values, out-of-range limits, negative offsets, and the no-call guarantee; the PR-filtered behavior remains unchanged.
+- Open GitHub discovery gap `#741` remains title-only `list_tasks` matching. Assigned-issue pagination must preserve pre-provider validation, PR filtering, stable metadata, and no-provider-call behavior across ordinary and PR-filtered paths.
 - Scheduled GitHub Dev Inbox treats assignment to the PAT owner or configured Authorized User as approval to implement; it does not require an approved label, existing PR, or prior Automation mapping. Workflow labels remain unprefixed, such as `task-created`, `in-progress`, `blocked`, `needs-human`, and `pr-opened`.
 - Assigned-issue scans affected by truncation or unintended lifecycle filters must be reconciled against live GitHub/OpenVibely state; workflow labels alone are not evidence of a usable implementation-task mapping.
 - Open stale-PR gap `#233`: ordinary task PR records are not reconciled with GitHub after creation, so closed/merged remote PRs can still receive forwarded feedback or be reported reusable.
@@ -75,6 +79,7 @@ GitHub integration:
 - PR opening publishes the branch, records the published remote head SHA, live-verifies stored open PR rows before reuse, ignores closed branch PRs, and creates/reuses only when the live PR is open on the task branch/repository and `head.sha` matches the recorded published head.
 - PR publication is the only stale-origin GitHub mutation allowed to use durable Automation issue-task provenance after graph replacement. Branch replacement and other writes require current graph authorization.
 - Publication/review state is volatile: verify live `main`, PR head/file list/checks, issue closure, and task PR publication evidence before claiming workflow completion.
+- `github_open_pull_request` accepts `pr_body` when creating a PR, but existing-PR reuse may not update the live description. Re-read the authoritative body after reconciliation; stale validation or benchmark claims are a publication handoff blocker. If no authorized body-only operation exists, report it instead of attempting unsafe branch publication or unauthorized API mutation.
 - Shared paginated GitHub reads cover PR issue comments, reviews, review comments, assigned issues, and issue-to-PR cross-reference lookup with authenticated headers, API error decoding, same-origin Link traversal, cycle prevention, and whole-read failure on later-page errors.
 - `ListPullRequestFeedback` fetches issue comments, reviews, and review comments concurrently through one cancellable context, merges fixed source order, stably sorts by creation time, and returns no partial feedback on first source error.
 
@@ -136,4 +141,5 @@ Email facts:
 - Attachment-bearing emails with empty bodies should be processed; empty-body/no-attachment messages remain ignored.
 - Inbound receipt insertion is atomic with durable execution or queued input writes. Existing receipts suppress duplicate work after interruption or IMAP `Seen` failure. No-`Message-ID` receipts use mailbox `UIDVALIDITY` plus UID; if identity is invalid, leave unread rather than false-deduplicate.
 - Open performance gap `#529`: accepted inbound email polling can touch the same receipt row up to three times; optimize while preserving durable handoff atomicity and retry semantics.
+- Email polling acknowledgement performance issue `#858` is implemented: `EmailService.pollOnce` accumulates sequence IDs for newly durably handed-off and already-received messages, then sends one grouped IMAP `STORE` per poll. Parse, authorization, processing, and durable-handoff failures remain unread and retryable; if grouped acknowledgement fails, receipt recovery prevents duplicate durable work on the next poll. Regression coverage preserves mixed-batch retry and receipt-recovery behavior, and a controlled-delay benchmark covers representative 10-, 100-, and 1,000-message batches with command-count, elapsed-time, and allocation evidence.
 - Outbound Email chat/task replies generate app-owned `Message-ID` headers and persist project-scoped normalized-sender aliases so replies with only `In-Reply-To` to an app-owned response ID resolve back to the original session.

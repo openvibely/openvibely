@@ -2,9 +2,9 @@
 name: usage_analytics
 type: project
 created: 2026-06-03
-updated: 2026-08-23
+updated: 2026-08-28
 source: consolidation
-source_id: memory_consolidation_2026_08_23
+source_id: memory_consolidation_2026_08_28
 confidence: high
 title: Usage Analytics
 ---
@@ -38,6 +38,7 @@ Analytics surface facts:
 - `/analytics` includes local task/execution/productivity analytics, LLM usage/account-limit views, and Skill Curator analytics.
 - Project memory recall effectiveness and follow-through are not currently inspectable alongside skill analytics; proposed in issue `#85`.
 - Open suggestion `#841`: Analytics task-result queries (`GetMostFrequentTasks`, `GetFailedTaskPatterns`, and the average-time query) already return task IDs, but the dashboard renders only titles, counts, and chart labels without links; add project-scoped read-only drill-down links to the matching task details. This is distinct from `#380`, which concerns navigation and context on an execution-detail page.
+- Duplication issue `#884` tracks repeated `UsageFilter` date/range normalization and fallback handling across the web usage API and the Chat `view_usage_analytics` action; provider refresh and compact response shaping are intentionally separate responsibilities.
 - Failed-task-pattern analytics and Insights should share task-level latest-error query/projection semantics while preserving API JSON fields, project scoping, limits, and minimum-failure behavior.
 - `/api/analytics/usage` backs model usage; `/api/analytics/skills` backs Skill Curator Analytics.
 - Read-only `view_usage_analytics` Chat/runtime action exposes current-project model usage, token totals, cost availability, top model/provider breakdowns, recent buckets, and sanitized stored account-limit summaries in Plan and Orchestrate modes. It uses locally stored analytics only through `BuildLocalAnalyticsUsage`, a compact model-account projection that excludes credentials and large provider-config columns, skips unused dashboard aggregates, does not refresh external provider usage, and omits raw payloads, account IDs, config IDs, events, and provider response IDs; the full web `/api/analytics/usage` path remains unchanged.

@@ -1,6 +1,6 @@
 ---
 kind: openvibely.agent_skill
-version: 19
+version: 22
 skill:
     key: openvibely_project_guidance
     name: OpenVibely Project Guidance
@@ -35,7 +35,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - Never delete, truncate, or overwrite `openvibely.db`; it contains user data.
 - Never run `DROP TABLE` on production tables except in goose migrations.
 - Never run `DELETE FROM` without a `WHERE` clause on production tables.
-- Never change `busy_timeout`, `MaxOpenConns`, or `_loc=UTC` in `internal/database/database.go`.
+- Do not change `busy_timeout`, `MaxOpenConns`, or `_loc=UTC` in `internal/database/database.go` casually. An explicitly authorized SQLite pool architectural change may change them only with per-connection coverage, duration-based benchmark evidence, transaction audit, and updated guidance; preserve the 5000 busy timeout, UTC behavior, and isolated `:memory:` one-connection fixtures. File-backed production currently uses one dedicated writer and one query-only reader (`1W+1R`), selected by the duration-based benchmark; any future topology change must remeasure rather than assume the former two-reader result. Every mutation and read-write transaction must route through the writer handle, while ordinary reads use the reader handle. The background incremental-vacuum writer must use the writer handle with bounded same-connection timeout handling and restore or discard the connection before reuse.
 - Never write tests that hit real LLM APIs. Use `models.ProviderTest` with `SetLLMCaller(testutil.NewMockLLMCaller())`; retired OpenAI/Anthropic model CLI auth should be covered as unsupported legacy state without spawning subprocesses.
 - Do not reintroduce OpenAI/Anthropic model CLI subprocess transports; `AuthMethodCLI` is legacy data compatibility only.
 - Never persist or log GitHub App installation access tokens, GitHub PATs, private-key material, OAuth tokens, API keys, or webhook secrets. Mint operation tokens per operation and keep token use in process.
@@ -162,7 +162,6 @@ go test ./internal/... -count=1 -timeout 60s  # Focused/internal tests; use the 
 - For inline scripts inside HTMX-swapped fragments, use window-level one-time binding guards.
 - Prefer app-scoped `HX-Trigger` events bridged in the base layout for cross-page toast feedback.
 - For async actions, show explicit in-progress state, disable conflicting actions, and restore state in `finally`.
-- Pair template-level action gating with server-side enforcement.
 - Guard async refreshes against out-of-order responses.
 - Batch high-frequency streaming UI updates with `requestAnimationFrame` and flush on completion.
 - Preserve drafts during polling by keying them to entity identity and clearing only on successful intentional submits.

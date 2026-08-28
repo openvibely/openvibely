@@ -302,3 +302,7 @@ always_use:
 ## openvibely_typed_broadcaster_workflow
 
 [OpenVibely Typed Broadcaster Workflow](openvibely_typed_broadcaster_workflow/SKILL.md) — Consolidate duplicated typed channel broadcasters while preserving SSE lifecycle, backpressure, and public APIs.
+
+## openvibely_sqlite_pool_concurrency_workflow
+
+[OpenVibely SQLite Pool And Concurrency Workflow](openvibely_sqlite_pool_concurrency_workflow/SKILL.md) — Safely change OpenVibely's SQLite connection pool, per-connection settings, transaction boundaries, concurrency tests, and pool-size benchmarks.

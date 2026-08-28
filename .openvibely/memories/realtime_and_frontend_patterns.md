@@ -2,9 +2,9 @@
 name: realtime_and_frontend_patterns
 type: project
 created: 2026-05-09
-updated: 2026-08-27
-source: after_complete_update
-source_id: 5c627210b646836df9ecef796defdac9:9fff40b2c50e2afb
+updated: 2026-08-28
+source: consolidation
+source_id: memory_consolidation_2026_08_28
 confidence: high
 title: Realtime and Frontend Patterns
 ---
@@ -16,7 +16,7 @@ Realtime and diff contracts:
 - `window._tabVisibility` owns broad realtime visibility behavior and pauses polling while hidden.
 - Per-execution `/events/chat/:exec_id` streams are token-style output path. SQLite is durable transcript/reconnect source; hot deltas flow through injected `events.ExecutionStreamHub`, not SQLite polling.
 - `ExecutionStreamHub` is keyed by exact execution ID, supports multiple subscribers, enforces subscriber limits, drops slow-subscriber deltas nonblockingly, closes on terminal events, and must be dependency-injected.
-- `internal/events` uses one private generic broadcaster core for the three typed broadcasters (`Broadcaster`, `ChatBroadcaster`, and `FileChangeBroadcaster`). The core owns the mutex-protected subscriber registry, capacity checks, idempotent unsubscribe/close, nonblocking publish, and count lifecycle; typed wrappers preserve the public constructors/APIs and buffer capacities (`10`, `10`, and `50`). This consolidation was implemented for issue `#839` and published in PR `#850`. Handler regressions for `LiveEventsSSE` verify request-context cancellation returns task/chat/file subscriber counts to zero and that task, chat, and file `ErrMaxSubscribers` failures return HTTP 503 while cleaning up earlier successful subscriptions.
+- `internal/events` uses one private generic broadcaster core for the three typed broadcasters (`Broadcaster`, `ChatBroadcaster`, and `FileChangeBroadcaster`). The core owns the mutex-protected subscriber registry, capacity checks, idempotent unsubscribe/close, nonblocking publish, and count lifecycle; typed wrappers preserve the public constructors/APIs and buffer capacities (`10`, `10`, and `50`). Handler coverage must verify request-context cancellation returns task/chat/file subscriber counts to zero and that max-subscriber failures return HTTP 503 while cleaning up earlier successful subscriptions.
 - `llmstream.Writer.Write` publishes live deltas with cumulative UTF-8 byte offsets after releasing its mutex. It must not publish seeded existing output or `WriteText` content, and must not synchronously flush SQLite on the hot token path.
 - Periodic/final stream persistence must serialize snapshot plus SQLite update so older periodic snapshots cannot overwrite newer final flushes.
 - Per-execution SSE clamps optional untrusted UTF-8 byte offsets, subscribes before DB catch-up, skips duplicate/partial overlaps, and uses targeted DB catch-up for dropped deltas or terminal fallback.
@@ -48,14 +48,11 @@ Chat and task-thread rendering:
 
 Shared composer and steering UI:
 - Chat and task-thread composers share `web/templates/components/chat_shared.templ` and one `ChatInputForm` contract.
-- Plain Enter sends/queues; Shift+Enter newline; Meta/Ctrl+Enter steers when active and falls back to normal send when idle.
 - Active primary button becomes Stop with same primary styling and square stop icon. Sends/stops that do not replace full form return OOB primary-action fragment.
 - While running, primary action is reconciled client-side from current trimmed text: empty shows Stop, non-empty shows Send for queue/steer. Server-rendered OOB fragments remain authoritative for running/idle transitions.
 - Submit logic resolves/delegates to current submit button after OOB swaps rather than caching original node.
 - Platform hints are concise and Apple detection prefers `navigator.userAgentData.platform` with fallback.
-- Modifier-click can steer through guarded endpoints when active turn ID is resolvable. Steering responses target pending-input containers, not transcript.
-- Accepted steering, queue, and idle sends clear submitted textarea after acceptance and submitted attachment session only if visible session still matches.
-- Drafts and pending attachment sessions survive failed/non-accepted sends, stale/unavailable steering, OOB swaps, visibility changes, and live reconnects. Detailed semantics live in `chat_thread_system.md`.
+- Steering, queue, and draft/attachment-session semantics are canonical in `chat_thread_system.md`; this topic owns their DOM/OOB rendering, stale-response handling, and hydration behavior.
 - Desktop Chat clear-actions uses a semantic button with `aria-expanded` and explicit `data-chat-actions-open` state rather than a focusable DaisyUI label. CSS must explicitly enforce hidden and open states because WebKit/DaisyUI defaults can make a marker-only open state appear inert. Focus-out, outside pointer activity, history restoration, and fresh fragment initialization reset the state; Escape restores focus to the live trigger, and Clear Chat preserves `hx-confirm="Clear all chat history? This cannot be undone."`. Native WebKit coverage is required for desktop-specific focus and visibility regressions.
 - Known race `#48`: overlapping composer action-only refreshes lack stale-response guards and can regress Send to Stop.
 
@@ -94,9 +91,10 @@ Responsive and shared UI contracts:
 - Active kanban pending dropzones render only real active pending/queued/blocked work; terminal failed/cancelled rows must not appear as queued work.
 - Tasks page date sorting defaults newest-first for Backlog and Completed. Task Detail edit-form saves are metadata-only.
 - Task tag badge labels/classes are centralized through exported task-card component helpers such as `components.TagLabel` and `components.TagBadgeClass`; Pulse `/upcoming` reuses the same mapping instead of rendering raw tag strings or a page-local badge switch.
+- Known Pulse actionable-failure gap [#866](https://github.com/openvibely/openvibely/issues/866): the backend summary computes failed-task counts, but browser Pulse drops failed-task identities before rendering, leaving users with a failure signal but no task-level action. Its pending total and priority buckets also include non-completed failed tasks, so the visible pending/empty-state wording can conflict with the failure count; a focused failed-task section should expose affected tasks and keep summary copy consistent without mutating task state.
 - Responsive card pages must keep roots/grids/cards/badges shrink-safe. Long badge values truncate within rows.
 - Workers settings tables are intentionally non-shrinking within viewport-bound `#main-content`, with horizontal overflow contained inside the wrapper.
-- Schedule UI should distinguish disabled schedules; dynamic loop wakeups remain visually distinct.
+- Schedule UI should distinguish disabled schedules; dynamic loop wakeups remain visually distinct. The Schedules page uses the bounded app-shell `#main-content` as its outer scrollport: the page root, timeline, `min-w-[800px]` wrapper, grid body, and hour rows form a nested flex-column chain (`flex-1`/`min-h-0`), so tall viewports fill without `100vh` sizing while narrow viewports preserve timeline scrolling and horizontal width.
 - Draggable task-board cards and enabled schedule cards use pointer-driven movement, not native HTML5 `draggable`, to preserve cursor feedback. Do not introduce custom cursor overlays/images/preview clones. Auto-scroll relevant scrollports during drag and refresh drop-zone tracking each scroll frame.
 - Destructive task delete flows from schedule-origin detail pages preserve origin with whitelisted `return_to=schedule`, not arbitrary return URLs.
 - Global link color token is `--ov-link-color: #7480ff`.
