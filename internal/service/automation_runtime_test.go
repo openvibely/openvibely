@@ -162,6 +162,36 @@ func TestGitHubIssueRuntimeAssignedIssuePaginationPresenceAware(t *testing.T) {
 	}
 }
 
+func TestGitHubIssueRuntimeMyAssignedIssuesValidatesPaginationBeforeRepoResolution(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	var providerCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			providerCalls.Add(1)
+			return &GitHubAuthenticatedUser{Login: "openvibely"}, nil, nil
+		},
+	}
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{
+		ProjectID: "missing-project", ProjectRepo: projectRepo, GitHub: provider,
+	})
+
+	for _, input := range []string{
+		`{"limit":0}`,
+		`{"Limit":0}`,
+		`{"limit":101}`,
+		`{"offset":-1}`,
+	} {
+		if _, err := handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+			t.Fatalf("invalid page input %s error=%v, want validation error", input, err)
+		}
+	}
+	if providerCalls.Load() != 0 {
+		t.Fatalf("provider calls=%d, want 0 for invalid pagination", providerCalls.Load())
+	}
+}
+
 func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testing.T) {
 	fixture := newAutomationRuntimeFixture(t, AutomationAdapterNativeSDLC)
 	ctx := context.Background()
