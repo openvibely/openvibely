@@ -122,7 +122,7 @@ func parseSkillAnalyticsFilter(c echo.Context) repository.SkillAnalyticsFilter {
 		filter.GroupBy = "day"
 	}
 	now := time.Now()
-	if days, ok := analyticsRangeDays(c.QueryParam("range")); ok {
+	if days, ok := skillAnalyticsRangeDays(c.QueryParam("range")); ok {
 		filter.DateFrom = now.AddDate(0, 0, -days)
 		filter.DateTo = now
 	} else if c.QueryParam("range") == "all" {
@@ -201,8 +201,15 @@ func parseUsageFilter(c echo.Context) repository.UsageFilter {
 	return filter
 }
 
-func analyticsRangeDays(value string) (int, bool) {
-	return service.ParseUsageAnalyticsRangeDays(value)
+func skillAnalyticsRangeDays(value string) (int, bool) {
+	if !strings.HasSuffix(value, "d") {
+		return 0, false
+	}
+	days, err := strconv.Atoi(strings.TrimSuffix(value, "d"))
+	if err != nil || days <= 0 {
+		return 0, false
+	}
+	return days, true
 }
 
 func parseAnalyticsTime(value string) time.Time {
