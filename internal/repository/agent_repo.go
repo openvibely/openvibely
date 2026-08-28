@@ -539,7 +539,7 @@ func (r *AgentRepo) MarkArchived(ctx context.Context, id, absorbedInto, reason s
 	if absorbedInto != "" {
 		absorbed = absorbedInto
 	}
-	_, err := execBoundSQLite(ctx, r.db,
+	_, err := r.db.ExecContext(ctx,
 		`UPDATE agents SET generated_status = 'archived', enabled = 0,
 		 absorbed_into = ?, source_refs_json = ?, archived_at = datetime('now'),
 		 updated_at = datetime('now') WHERE id = ?`,
@@ -626,7 +626,7 @@ func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {
 	if a.AbsorbedInto != "" {
 		absorbedInto = a.AbsorbedInto
 	}
-	err = queryRowBoundSQLite(ctx, r.db,
+	err = r.db.QueryRowContext(ctx,
 		`INSERT INTO agents (
 		   id, name, description, system_prompt, model, tools, tool_config,
 		   plugins, mcp_servers, skills, system_kind,
@@ -717,7 +717,7 @@ func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 	if a.ArchivedAt != nil {
 		archivedAt = a.ArchivedAt.UTC()
 	}
-	_, err = execBoundSQLite(ctx, r.db,
+	_, err = r.db.ExecContext(ctx,
 		`UPDATE agents SET name = ?, description = ?, system_prompt = ?,
 		 model = ?, tools = ?, tool_config = ?, plugins = ?, mcp_servers = ?, skills = ?, system_kind = ?,
 		 key = ?, scope = ?, project_id = ?, selectable_as_primary = ?, enabled = ?,
@@ -741,10 +741,10 @@ func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 
 func (r *AgentRepo) Delete(ctx context.Context, id string) error {
 	// Nullify FK references in tasks before deleting
-	if _, err := execBoundSQLite(ctx, r.db, `UPDATE tasks SET agent_definition_id = NULL WHERE agent_definition_id = ?`, id); err != nil {
+	if _, err := r.db.ExecContext(ctx, `UPDATE tasks SET agent_definition_id = NULL WHERE agent_definition_id = ?`, id); err != nil {
 		return fmt.Errorf("nullifying agent in tasks: %w", err)
 	}
-	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM agents WHERE id = ?`, id)
+	_, err := r.db.ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting agent: %w", err)
 	}
