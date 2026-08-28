@@ -661,12 +661,12 @@ func (r *LLMConfigRepo) UpdateOAuthTokens(ctx context.Context, id string, access
 		err    error
 	)
 	if len(accountID) > 0 {
-		result, err = r.db.ExecContext(ctx,
+		result, err = execBoundSQLite(ctx, r.db,
 			`UPDATE agent_configs SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
 			accessToken, refreshToken, expiresAt, accountID[0], id)
 	} else {
-		result, err = r.db.ExecContext(ctx,
+		result, err = execBoundSQLite(ctx, r.db,
 			`UPDATE agent_configs SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
 			accessToken, refreshToken, expiresAt, id)
@@ -690,13 +690,13 @@ func (r *LLMConfigRepo) UpdateStandardOAuthTokensIfRevision(ctx context.Context,
 		err    error
 	)
 	if len(accountID) > 0 {
-		result, err = r.db.ExecContext(ctx,
+		result, err = execBoundSQLite(ctx, r.db,
 			`UPDATE agent_configs
 			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?, updated_at = datetime('now')
 			 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
 			accessToken, refreshToken, expiresAt, accountID[0], id, expectedRevision, provider, models.AuthMethodOAuth)
 	} else {
-		result, err = r.db.ExecContext(ctx,
+		result, err = execBoundSQLite(ctx, r.db,
 			`UPDATE agent_configs
 			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, updated_at = datetime('now')
 			 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
@@ -713,7 +713,7 @@ func (r *LLMConfigRepo) UpdateStandardOAuthTokensIfRevision(ctx context.Context,
 }
 
 func (r *LLMConfigRepo) UpdateCustomAuthState(ctx context.Context, id, stateJSON string) error {
-	if _, err := r.db.ExecContext(ctx,
+	if _, err := execBoundSQLite(ctx, r.db,
 		`UPDATE agent_configs SET custom_auth_state_json = ?, updated_at = datetime('now') WHERE id = ?`,
 		stateJSON, id); err != nil {
 		return fmt.Errorf("updating custom authentication state: %w", err)
@@ -725,7 +725,7 @@ func (r *LLMConfigRepo) UpdateCustomAuthState(ctx context.Context, id, stateJSON
 // required to use them, so a connected token is never stored without its
 // mandatory request metadata.
 func (r *LLMConfigRepo) UpdateCustomOAuthConnection(ctx context.Context, id, accessToken, refreshToken string, expiresAt int64, stateJSON string) error {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE agent_configs
 		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?,
 		     custom_auth_state_json = ?, updated_at = datetime('now')
@@ -743,7 +743,7 @@ func (r *LLMConfigRepo) UpdateCustomOAuthConnection(ctx context.Context, id, acc
 }
 
 func (r *LLMConfigRepo) UpdateCustomOAuthConnectionIfRevision(ctx context.Context, id string, expectedRevision int64, accessToken, refreshToken string, expiresAt int64, stateJSON string) (bool, error) {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE agent_configs
 		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?,
 		     custom_auth_state_json = ?, updated_at = datetime('now')
@@ -765,7 +765,7 @@ func (r *LLMConfigRepo) UpdateCustomOAuthConnectionIfRevision(ctx context.Contex
 // refreshes that were created from an earlier generation.
 func (r *LLMConfigRepo) AdvanceCustomOAuthRevision(ctx context.Context, id string) (int64, bool, error) {
 	var revision int64
-	err := r.db.QueryRowContext(ctx,
+	err := queryRowBoundSQLite(ctx, r.db,
 		`UPDATE agent_configs
 		 SET oauth_config_revision = oauth_config_revision + 1
 		 WHERE id = ? AND provider = ? AND auth_method = ?
@@ -782,7 +782,7 @@ func (r *LLMConfigRepo) AdvanceCustomOAuthRevision(ctx context.Context, id strin
 }
 
 func (r *LLMConfigRepo) UpdateCustomOAuthTokensIfRevision(ctx context.Context, id string, expectedRevision int64, accessToken, refreshToken string, expiresAt int64) (bool, error) {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE agent_configs
 		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, updated_at = datetime('now')
 		 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
@@ -805,7 +805,7 @@ func (r *LLMConfigRepo) TryAcquireOAuthRefreshLease(ctx context.Context, configI
 		return false, fmt.Errorf("complete OAuth refresh lease identity is required")
 	}
 	nowMillis := now.UTC().UnixMilli()
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`INSERT INTO oauth_refresh_leases (config_id, owner_token, lease_expires_at)
 		 VALUES (?, ?, ?)
 		 ON CONFLICT(config_id) DO UPDATE SET
@@ -825,7 +825,7 @@ func (r *LLMConfigRepo) TryAcquireOAuthRefreshLease(ctx context.Context, configI
 }
 
 func (r *LLMConfigRepo) ReleaseOAuthRefreshLease(ctx context.Context, configID, ownerToken string) error {
-	if _, err := r.db.ExecContext(ctx,
+	if _, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM oauth_refresh_leases WHERE config_id = ? AND owner_token = ?`,
 		strings.TrimSpace(configID), strings.TrimSpace(ownerToken)); err != nil {
 		return fmt.Errorf("releasing OAuth refresh lease: %w", err)

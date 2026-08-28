@@ -93,7 +93,7 @@ func (r *LifecycleRepo) CreateHook(ctx context.Context, h *models.AgentLifecycle
 	if h.ScheduleJSON != "" {
 		schedule = h.ScheduleJSON
 	}
-	err := r.db.QueryRowContext(ctx, `
+	err := queryRowBoundSQLite(ctx, r.db, `
         INSERT INTO agent_lifecycle_hooks
             (id, agent_id, when_slot, skill_key, prompt_override, output_contract,
              blocking, enabled, permissions_json, run_policy_json, schedule_json, payload_json)
@@ -134,7 +134,7 @@ func (r *LifecycleRepo) UpdateHook(ctx context.Context, h *models.AgentLifecycle
 	if h.ScheduleJSON != "" {
 		schedule = h.ScheduleJSON
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
         UPDATE agent_lifecycle_hooks
         SET when_slot = ?, skill_key = ?, prompt_override = ?, output_contract = ?,
             blocking = ?, enabled = ?, permissions_json = ?, run_policy_json = ?,
@@ -151,7 +151,7 @@ func (r *LifecycleRepo) UpdateHook(ctx context.Context, h *models.AgentLifecycle
 
 // DeleteHook removes a lifecycle hook configuration.
 func (r *LifecycleRepo) DeleteHook(ctx context.Context, id string) error {
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM agent_lifecycle_hooks WHERE id = ?`, id); err != nil {
+	if _, err := execBoundSQLite(ctx, r.db, `DELETE FROM agent_lifecycle_hooks WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("deleting lifecycle hook: %w", err)
 	}
 	return nil
@@ -300,7 +300,7 @@ func (r *LifecycleRepo) CreateExecution(ctx context.Context, e *models.Lifecycle
 	if output == "" {
 		output = "{}"
 	}
-	err := r.db.QueryRowContext(ctx, `
+	err := queryRowBoundSQLite(ctx, r.db, `
         INSERT INTO lifecycle_executions
             (id, task_id, task_run_id, agent_id, when_slot, lifecycle_hook_id,
              parent_execution_id, skill_key, output_contract, status,
@@ -401,7 +401,7 @@ func (r *LifecycleRepo) UpdateExecution(ctx context.Context, e *models.Lifecycle
 	if output == "" {
 		output = "{}"
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
         UPDATE lifecycle_executions
         SET status = ?, output_json = ?, error = ?, attempt_count = ?,
             next_retry_at = ?, completed_at = ?
@@ -457,7 +457,7 @@ func (r *LifecycleRepo) AppendExecutionEvent(ctx context.Context, event *models.
 	r.eventSeqMu.Lock()
 	defer r.eventSeqMu.Unlock()
 
-	err := r.db.QueryRowContext(ctx, `
+	err := queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO lifecycle_execution_events
 		    (lifecycle_execution_id, seq, event_type, payload_json)
 		VALUES (?, COALESCE((SELECT MAX(seq) + 1 FROM lifecycle_execution_events WHERE lifecycle_execution_id = ?), 1), ?, ?)
@@ -563,7 +563,7 @@ func (r *LifecycleRepo) PatchExecutionOutputSkills(ctx context.Context, execID s
 	if err != nil {
 		return fmt.Errorf("patching execution output_json: %w", err)
 	}
-	_, err = r.db.ExecContext(ctx,
+	_, err = execBoundSQLite(ctx, r.db,
 		`UPDATE lifecycle_executions SET output_json = ? WHERE id = ?`,
 		string(patched), execID,
 	)

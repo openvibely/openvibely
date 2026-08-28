@@ -347,7 +347,9 @@ func defaultJSON(raw string) string {
 }
 
 func (r *TaskRepo) Create(ctx context.Context, t *models.Task) error {
-	return r.createWithExecutor(ctx, r.db, t)
+	return r.withImmediateTx(ctx, func(exec sqlExecutor) error {
+		return r.createWithExecutor(ctx, exec, t)
+	})
 }
 
 // CreateWithExecutor persists a task using the caller's transaction.
@@ -465,7 +467,7 @@ func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
 	if t.AutoMerge {
 		autoMerge = 1
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET title = ?, category = ?, priority = ?, status = ?,
 			 prompt = ?, agent_id = ?, agent_definition_id = ?, tag = ?, display_order = ?, parent_task_id = ?, chain_config = ?,
 			 swarm_role = ?, swarm_status = ?, swarm_config = ?, swarm_sequence = ?, auto_merge = ?, merge_target_branch = ?, base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now')
@@ -506,7 +508,7 @@ func (r *TaskRepo) UpdateCategory(ctx context.Context, id string, category model
 		displayOrder = int(maxOrder.Int64) + 1
 	}
 
-	_, err = r.db.ExecContext(ctx,
+	_, err = execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET category = ?, display_order = ?, updated_at = datetime('now'), completed_at = CASE WHEN ? = 'completed' THEN datetime('now') ELSE NULL END WHERE id = ?`,
 		category, displayOrder, string(category), id)
 	if err != nil {
@@ -540,7 +542,7 @@ func (r *TaskRepo) UpdateStatus(ctx context.Context, id string, status models.Ta
 
 	oldStatus := task.Status
 
-	_, err = r.db.ExecContext(ctx,
+	_, err = execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`,
 		status, id)
 	if err != nil {
@@ -575,7 +577,7 @@ func (r *TaskRepo) SetPendingIfNotRunningOrQueued(ctx context.Context, id string
 		return false, fmt.Errorf("task not found: %s", id)
 	}
 
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET status = 'pending', updated_at = datetime('now')
 		 WHERE id = ? AND status NOT IN ('running', 'queued')`,
 		id)
@@ -1191,7 +1193,7 @@ func isTaskDeletionUploadSessionID(sessionID string) bool {
 }
 
 func (r *TaskRepo) Delete(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM tasks WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting task: %w", err)
 	}
@@ -1220,7 +1222,7 @@ func (r *TaskRepo) FindBlockedChildByParent(ctx context.Context, parentTaskID st
 
 // DeleteBlockedChildrenByParent removes all blocked child tasks for the given parent task ID.
 func (r *TaskRepo) DeleteBlockedChildrenByParent(ctx context.Context, parentTaskID string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM tasks WHERE parent_task_id = ? AND status = ?`,
 		parentTaskID, models.StatusBlocked)
 	if err != nil {
@@ -1289,7 +1291,7 @@ func scanSwarmChildTask(scan func(dest ...any) error) (models.Task, error) {
 }
 
 func (r *TaskRepo) UpdateSwarmFields(ctx context.Context, id string, role models.SwarmRole, status, config string, sequence int) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET swarm_role = ?, swarm_status = ?, swarm_config = ?, swarm_sequence = ?, updated_at = datetime('now') WHERE id = ?`,
 		role, status, defaultJSON(config), sequence, id)
 	if err != nil {
@@ -1358,7 +1360,7 @@ func (r *TaskRepo) ListStaleQueuedTasks(ctx context.Context, staleDuration time.
 // recovery so a newly admitted follow-up or reservation cannot be overwritten.
 func (r *TaskRepo) ReclaimStaleQueuedTask(ctx context.Context, id string, staleDuration time.Duration) (bool, error) {
 	cutoff := time.Now().UTC().Add(-staleDuration).Format("2006-01-02 15:04:05")
-	result, err := r.db.ExecContext(ctx, `UPDATE tasks
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE tasks
 		SET status = 'pending', updated_at = datetime('now')
 		WHERE id = ? AND category = 'active' AND status = 'queued' AND updated_at < ?
 		  AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
@@ -1497,7 +1499,7 @@ func (r *TaskRepo) CountPendingByProject(ctx context.Context) (map[string]int, e
 // Tasks with durable queued follow-ups remain queue-owned (failed/backlog) until
 // FIFO promotion; ownerless ordinary tasks return to pending for scheduler retry.
 func (r *TaskRepo) ResetOrphanedRunning(ctx context.Context) (int, error) {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks
 		 SET status = CASE
 		       WHEN EXISTS (SELECT 1 FROM thread_inputs i
@@ -1528,7 +1530,7 @@ func (r *TaskRepo) ResetOrphanedRunning(ctx context.Context) (int, error) {
 // MoveCompletedActiveToCompleted moves all tasks with category='active' and status='completed'
 // to category='completed'. Returns the number of tasks moved.
 func (r *TaskRepo) MoveCompletedActiveToCompleted(ctx context.Context) (int, error) {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET category = 'completed', updated_at = datetime('now'), completed_at = datetime('now')
 		 WHERE category = 'active' AND status = 'completed'`)
 	if err != nil {
@@ -1568,7 +1570,7 @@ func (r *TaskRepo) ListByCategory(ctx context.Context, category models.TaskCateg
 // DeleteAllCompleted deletes all tasks in the 'completed' category.
 // Returns the number of tasks deleted.
 func (r *TaskRepo) DeleteAllCompleted(ctx context.Context, projectID string) (int, error) {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM tasks WHERE category = 'completed' AND project_id = ?`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("deleting completed tasks: %w", err)
@@ -1583,7 +1585,7 @@ func (r *TaskRepo) DeleteAllCompleted(ctx context.Context, projectID string) (in
 // DeleteAllBacklog deletes all tasks in the 'backlog' category.
 // Returns the number of tasks deleted.
 func (r *TaskRepo) DeleteAllBacklog(ctx context.Context, projectID string) (int, error) {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM tasks WHERE category = 'backlog' AND project_id = ?`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("deleting backlog tasks: %w", err)
@@ -1599,7 +1601,7 @@ func (r *TaskRepo) DeleteAllBacklog(ctx context.Context, projectID string) (int,
 // Executions are cascade-deleted via FK constraint.
 // Returns the number of tasks deleted.
 func (r *TaskRepo) DeleteAllChat(ctx context.Context, projectID string) (int, error) {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM tasks WHERE category = 'chat' AND project_id = ?`, projectID)
 	if err != nil {
 		return 0, fmt.Errorf("deleting chat tasks: %w", err)
@@ -1634,7 +1636,7 @@ func (r *TaskRepo) ListRunningChatTaskIDs(ctx context.Context, projectID string)
 // ActivateAllBacklog moves all tasks in the 'backlog' category to 'active' category
 // with status 'pending'. Returns the number of tasks updated.
 func (r *TaskRepo) ActivateAllBacklog(ctx context.Context, projectID string) (int, error) {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET category = 'active', status = 'pending'
 		 WHERE category = 'backlog'
 		   AND project_id = ?
@@ -1691,14 +1693,14 @@ func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition i
 	// Update positions of affected tasks
 	if newPosition < oldPosition {
 		// Moving up: increment display_order of tasks between newPosition and oldPosition
-		_, err = r.db.ExecContext(ctx,
+		_, err = execBoundSQLite(ctx, r.db,
 			`UPDATE tasks
 			 SET display_order = display_order + 1, updated_at = datetime('now')
 			 WHERE project_id = ? AND category = ? AND display_order >= ? AND display_order < ?`,
 			task.ProjectID, task.Category, newPosition, oldPosition)
 	} else {
 		// Moving down: decrement display_order of tasks between oldPosition and newPosition
-		_, err = r.db.ExecContext(ctx,
+		_, err = execBoundSQLite(ctx, r.db,
 			`UPDATE tasks
 			 SET display_order = display_order - 1, updated_at = datetime('now')
 			 WHERE project_id = ? AND category = ? AND display_order > ? AND display_order <= ?`,
@@ -1710,7 +1712,7 @@ func (r *TaskRepo) ReorderTask(ctx context.Context, taskID string, newPosition i
 	}
 
 	// Update the task's position
-	_, err = r.db.ExecContext(ctx,
+	_, err = execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET display_order = ?, updated_at = datetime('now') WHERE id = ?`,
 		newPosition, taskID)
 	if err != nil {
@@ -1846,7 +1848,7 @@ func (r *TaskRepo) UpdateAgentID(ctx context.Context, id, agentID string) error 
 	if agentID != "" {
 		value = &agentID
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET agent_id = ?, updated_at = datetime('now') WHERE id = ?`,
 		value, id)
 	if err != nil {
@@ -1857,7 +1859,7 @@ func (r *TaskRepo) UpdateAgentID(ctx context.Context, id, agentID string) error 
 
 // UpdateWorktreeInfo sets the worktree path and branch for a task.
 func (r *TaskRepo) UpdateWorktreeInfo(ctx context.Context, id, worktreePath, branch string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET worktree_path = ?, worktree_branch = ?, updated_at = datetime('now') WHERE id = ?`,
 		worktreePath, branch, id)
 	if err != nil {
@@ -1868,7 +1870,7 @@ func (r *TaskRepo) UpdateWorktreeInfo(ctx context.Context, id, worktreePath, bra
 
 // UpdateMergeStatus sets the merge status for a task.
 func (r *TaskRepo) UpdateMergeStatus(ctx context.Context, id string, status models.MergeStatus) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET merge_status = ?, updated_at = datetime('now') WHERE id = ?`,
 		status, id)
 	if err != nil {
@@ -1883,7 +1885,7 @@ func (r *TaskRepo) UpdateAutoMerge(ctx context.Context, id string, autoMerge boo
 	if autoMerge {
 		am = 1
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET auto_merge = ?, merge_target_branch = ?, updated_at = datetime('now') WHERE id = ?`,
 		am, targetBranch, id)
 	if err != nil {
@@ -1894,7 +1896,7 @@ func (r *TaskRepo) UpdateAutoMerge(ctx context.Context, id string, autoMerge boo
 
 // ClearWorktreeInfo removes worktree path/branch from a task (after cleanup).
 func (r *TaskRepo) ClearWorktreeInfo(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET worktree_path = '', worktree_branch = '', updated_at = datetime('now') WHERE id = ?`,
 		id)
 	if err != nil {
@@ -1933,7 +1935,7 @@ func (r *TaskRepo) ListWithWorktrees(ctx context.Context) ([]models.Task, error)
 
 // UpdateLineage sets the base_branch, base_commit_sha, and lineage_depth for a task.
 func (r *TaskRepo) UpdateLineage(ctx context.Context, id, baseBranch, baseCommitSHA string, lineageDepth int) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET base_branch = ?, base_commit_sha = ?, lineage_depth = ?, updated_at = datetime('now') WHERE id = ?`,
 		baseBranch, baseCommitSHA, lineageDepth, id)
 	if err != nil {
@@ -1964,7 +1966,7 @@ func (r *TaskRepo) HasNonTerminalDescendants(ctx context.Context, parentID strin
 // UpdateTelegramOrigin marks a task as created via Telegram and stores the chat ID
 // for sending completion notifications back.
 func (r *TaskRepo) UpdateTelegramOrigin(ctx context.Context, id string, chatID int64) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET created_via = 'telegram', telegram_chat_id = ?, updated_at = datetime('now') WHERE id = ?`,
 		chatID, id)
 	if err != nil {
@@ -1975,7 +1977,7 @@ func (r *TaskRepo) UpdateTelegramOrigin(ctx context.Context, id string, chatID i
 
 // UpdateSlackOrigin marks a task as created via Slack.
 func (r *TaskRepo) UpdateSlackOrigin(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET created_via = 'slack', updated_at = datetime('now') WHERE id = ?`,
 		id)
 	if err != nil {
@@ -1986,7 +1988,7 @@ func (r *TaskRepo) UpdateSlackOrigin(ctx context.Context, id string) error {
 
 // UpdateEmailOrigin marks a task as created via Email.
 func (r *TaskRepo) UpdateEmailOrigin(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET created_via = 'email', updated_at = datetime('now') WHERE id = ?`,
 		id)
 	if err != nil {
@@ -1997,7 +1999,7 @@ func (r *TaskRepo) UpdateEmailOrigin(ctx context.Context, id string) error {
 
 // UpdateDiscordOrigin marks a task as created via Discord.
 func (r *TaskRepo) UpdateDiscordOrigin(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE tasks SET created_via = 'discord', updated_at = datetime('now') WHERE id = ?`,
 		id)
 	if err != nil {

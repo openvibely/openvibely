@@ -64,8 +64,12 @@ func (r *GitHubPRFeedbackRepo) RecordForwardedAndQueue(ctx context.Context, thre
 	return recorded, nil
 }
 
-func (r *GitHubPRFeedbackRepo) RecordForwarded(ctx context.Context, feedback *models.GitHubPRFeedbackForwarded) (bool, error) {
-	return r.recordForwardedWithExecutor(ctx, r.db, feedback)
+func (r *GitHubPRFeedbackRepo) RecordForwarded(ctx context.Context, feedback *models.GitHubPRFeedbackForwarded) (recorded bool, err error) {
+	err = withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		recorded, err = r.recordForwardedWithExecutor(ctx, conn, feedback)
+		return err
+	})
+	return recorded, err
 }
 
 func (r *GitHubPRFeedbackRepo) recordForwardedWithExecutor(ctx context.Context, exec SQLExecutor, feedback *models.GitHubPRFeedbackForwarded) (bool, error) {

@@ -176,7 +176,7 @@ func (r *TaskGoalRepo) ClearBlockedReport(ctx context.Context, taskID string, bl
 }
 
 func (r *TaskGoalRepo) Clear(ctx context.Context, taskID string, reason string) error {
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
 		UPDATE task_goals
 		SET status = 'cleared', reason = ?, updated_at = datetime('now')
 		WHERE task_id = ?`, reason, taskID)
@@ -187,7 +187,7 @@ func (r *TaskGoalRepo) Clear(ctx context.Context, taskID string, reason string) 
 }
 
 func (r *TaskGoalRepo) Delete(ctx context.Context, taskID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM task_goals WHERE task_id = ?`, taskID)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM task_goals WHERE task_id = ?`, taskID)
 	if err != nil {
 		return fmt.Errorf("deleting task goal: %w", err)
 	}

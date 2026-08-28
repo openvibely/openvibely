@@ -68,7 +68,7 @@ func (r *WebhookRepo) Create(ctx context.Context, w *models.WebhookEndpoint) err
 	if w.Enabled {
 		enabled = 1
 	}
-	err := r.db.QueryRowContext(ctx,
+	err := queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO webhook_endpoints (project_id, name, enabled, path_token, secret, system_instructions, title_template, prompt_template, default_priority)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
@@ -162,7 +162,7 @@ func (r *WebhookRepo) Update(ctx context.Context, w *models.WebhookEndpoint) err
 	if w.Enabled {
 		enabled = 1
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE webhook_endpoints SET name = ?, enabled = ?, system_instructions = ?,
 		 title_template = ?, prompt_template = ?, default_priority = ?,
 		 updated_at = datetime('now')
@@ -176,7 +176,7 @@ func (r *WebhookRepo) Update(ctx context.Context, w *models.WebhookEndpoint) err
 }
 
 func (r *WebhookRepo) Delete(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM webhook_endpoints WHERE id = ?`, id)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM webhook_endpoints WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting webhook endpoint: %w", err)
 	}
@@ -189,7 +189,7 @@ func (r *WebhookRepo) RotateSecret(ctx context.Context, id string) (string, erro
 	if err != nil {
 		return "", fmt.Errorf("generating new secret: %w", err)
 	}
-	_, err = r.db.ExecContext(ctx,
+	_, err = execBoundSQLite(ctx, r.db,
 		`UPDATE webhook_endpoints SET secret = ?, updated_at = datetime('now') WHERE id = ?`,
 		newSecret, id)
 	if err != nil {
@@ -201,11 +201,11 @@ func (r *WebhookRepo) RotateSecret(ctx context.Context, id string) (string, erro
 // --- Webhook endpoint agent assignments ---
 
 func (r *WebhookRepo) SetEndpointAgents(ctx context.Context, endpointID string, agentIDs []string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM webhook_endpoint_agents WHERE webhook_endpoint_id = ?`, endpointID); err != nil {
 		return fmt.Errorf("clearing endpoint agents: %w", err)
@@ -243,11 +243,11 @@ func (r *WebhookRepo) GetEndpointAgents(ctx context.Context, endpointID string) 
 // --- Task agent assignments (future multi-agent) ---
 
 func (r *WebhookRepo) SetTaskAgentAssignments(ctx context.Context, taskID string, agentIDs []string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM task_agent_assignments WHERE task_id = ?`, taskID); err != nil {
 		return fmt.Errorf("clearing task agent assignments: %w", err)

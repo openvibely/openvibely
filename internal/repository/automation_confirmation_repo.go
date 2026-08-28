@@ -13,7 +13,7 @@ func (r *AutomationRepo) CreateAutomationConfirmationReceipt(ctx context.Context
 	if receipt == nil {
 		return errors.New("automation confirmation receipt is required")
 	}
-	_, err := r.db.ExecContext(ctx, `INSERT INTO automation_chat_confirmation_receipts
+	_, err := execBoundSQLite(ctx, r.db, `INSERT INTO automation_chat_confirmation_receipts
 		(token_id, project_id, principal_id, thread_id, plan_message_id, automation_name, source, candidate_json, expires_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, receipt.TokenID, receipt.ProjectID, receipt.PrincipalID,
 		receipt.ThreadID, receipt.PlanMessageID, receipt.AutomationName, receipt.Source, receipt.CandidateJSON, receipt.ExpiresAt)
@@ -73,7 +73,7 @@ type AutomationConfirmationInputMarker struct {
 }
 
 func (r *AutomationRepo) MarkAutomationConfirmationInput(ctx context.Context, marker AutomationConfirmationInputMarker) error {
-	_, err := r.db.ExecContext(ctx, `INSERT INTO automation_chat_confirmation_inputs
+	_, err := execBoundSQLite(ctx, r.db, `INSERT INTO automation_chat_confirmation_inputs
 		(input_id, token_id, project_id, principal_id, thread_id, confirmation_method)
 		SELECT ?, r.token_id, r.project_id, r.principal_id, r.thread_id, ?
 		FROM automation_chat_confirmation_receipts r

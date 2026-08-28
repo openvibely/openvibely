@@ -416,7 +416,7 @@ func (r *AlertRepo) withImmediateAlertMutation(ctx context.Context, mutate func(
 }
 
 func (r *AlertRepo) MarkRead(ctx context.Context, projectID, id string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, projectID, id)
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND id = ?`, projectID, id)
 	if err != nil {
 		return fmt.Errorf("marking alert read: %w", err)
 	}
@@ -424,7 +424,7 @@ func (r *AlertRepo) MarkRead(ctx context.Context, projectID, id string) error {
 }
 
 func (r *AlertRepo) MarkAllRead(ctx context.Context, projectID string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND is_read = 0`, projectID)
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE alerts SET is_read = 1, updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND is_read = 0`, projectID)
 	if err != nil {
 		return fmt.Errorf("marking all alerts read: %w", err)
 	}
@@ -432,7 +432,7 @@ func (r *AlertRepo) MarkAllRead(ctx context.Context, projectID string) error {
 }
 
 func (r *AlertRepo) Delete(ctx context.Context, projectID, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM alerts WHERE project_id = ? AND id = ?`, projectID, id)
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM alerts WHERE project_id = ? AND id = ?`, projectID, id)
 	if err != nil {
 		return fmt.Errorf("deleting alert: %w", err)
 	}
@@ -440,7 +440,7 @@ func (r *AlertRepo) Delete(ctx context.Context, projectID, id string) error {
 }
 
 func (r *AlertRepo) DeleteAll(ctx context.Context, projectID string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM alerts WHERE project_id = ?`, projectID)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM alerts WHERE project_id = ?`, projectID)
 	if err != nil {
 		return fmt.Errorf("deleting all alerts: %w", err)
 	}

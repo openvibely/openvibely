@@ -42,7 +42,7 @@ Use this project-managed skill for coding-agent work in the OpenVibely repositor
 - Do not print raw prompts, streamed model tokens, provider payloads, OAuth/API-key data, or other content-carrying LLM data at info level. In high-frequency streaming paths, especially `internal/llm/stream.Writer`, do not call logging methods per chunk in normal code; leave raw stream `Debugf` instrumentation commented out and only temporarily uncomment it for a debugging session. For lower-frequency raw stream diagnostics outside hot chunk loops, use `internal/applog.Debugf` gated by `OPENVIBELY_LOG_LEVEL=debug`.
 - Server-side git commands that may contact remotes must run non-interactively and use the same GitHub operation-token environment injection as clone/push paths.
 - Use `TaskRepo.ClaimTask()` for atomic task claiming. Never set task status to `running` directly.
-- Use parameterized SQL with `?` placeholders.
+- Use parameterized SQL with `?` placeholders. Production repository mutations must use the bounded SQLite direct-write helpers, a bounded dedicated connection, or the shared immediate transaction boundary; do not call `*sql.DB.ExecContext` or start an unbounded write transaction directly.
 - Use `context.Context` for database and service calls.
 - Respect foreign-key and CHECK constraints in test fixtures. Create referenced rows first and use valid enum values.
 

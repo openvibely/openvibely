@@ -306,7 +306,7 @@ func (r *ThreadInputRepo) BindPreExecutionQueuedTaskInputs(ctx context.Context, 
 	if taskID == "" || executionID == "" {
 		return nil
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET run_execution_id = ?, updated_at = datetime('now')
 		WHERE scope = 'task_thread'
@@ -617,7 +617,7 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 }
 
 func (r *ThreadInputRepo) MarkApplied(ctx context.Context, id, runExecutionID, turnID string) error {
-	res, err := r.db.ExecContext(ctx, `
+	res, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_status = 'applied', run_execution_id = NULLIF(?, ''), turn_id = NULLIF(?, ''), applied_at = datetime('now'), updated_at = datetime('now')
 		WHERE id = ? AND input_status = 'pending'`, runExecutionID, turnID, id)
@@ -937,7 +937,7 @@ func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models
 }
 
 func (r *ThreadInputRepo) CancelPendingForTask(ctx context.Context, taskID string) error {
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_status = 'cancelled', updated_at = datetime('now')
 		WHERE task_id = ? AND input_status = 'pending'
@@ -1015,7 +1015,7 @@ func (r *ThreadInputRepo) RetireAttachmentSessionIfUnowned(ctx context.Context, 
 }
 
 func (r *ThreadInputRepo) CancelPendingForChat(ctx context.Context, projectID string) error {
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_status = 'cancelled', updated_at = datetime('now')
 		WHERE scope = 'chat' AND project_id = ? AND input_status = 'pending'
@@ -1069,6 +1069,31 @@ func beginImmediateTx(ctx context.Context, db *sql.DB) (*manualTx, func(), error
 		_ = tx.Rollback()
 		cleanup()
 	}, nil
+}
+
+func execBoundSQLite(ctx context.Context, db *sql.DB, query string, args ...interface{}) (result sql.Result, err error) {
+	err = withBoundSQLiteConn(ctx, db, func(conn *sql.Conn) error {
+		result, err = conn.ExecContext(ctx, query, args...)
+		return err
+	})
+	return result, err
+}
+
+type boundSQLiteRow struct {
+	ctx   context.Context
+	db    *sql.DB
+	query string
+	args  []interface{}
+}
+
+func queryRowBoundSQLite(ctx context.Context, db *sql.DB, query string, args ...interface{}) *boundSQLiteRow {
+	return &boundSQLiteRow{ctx: ctx, db: db, query: query, args: args}
+}
+
+func (r *boundSQLiteRow) Scan(dest ...interface{}) error {
+	return withBoundSQLiteConn(r.ctx, r.db, func(conn *sql.Conn) error {
+		return conn.QueryRowContext(r.ctx, r.query, r.args...).Scan(dest...)
+	})
 }
 
 func withBoundSQLiteConn(ctx context.Context, db *sql.DB, fn func(*sql.Conn) error) error {

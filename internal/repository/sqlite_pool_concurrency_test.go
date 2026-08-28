@@ -179,9 +179,58 @@ func lockedWriterRepositoryOperations() []struct {
 				return NewExecutionRepo(db).UpdateOutput(ctx, "locked-execution", "output")
 			},
 		},
+		{
+			name: "execution completion",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewExecutionRepo(db).Complete(ctx, "locked-execution", models.ExecCompleted, "output", "", 0, 0)
+			},
+		},
+		{
+			name: "execution replay replacement transaction",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewExecutionRepo(db).ReplaceReasoningReplay(ctx, "locked-execution", "reasoning", nil)
+			},
+		},
+		{
+			name: "thread input binding",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewThreadInputRepo(db).BindPreExecutionQueuedTaskInputs(ctx, "locked-task", "locked-execution")
+			},
+		},
+		{
+			name: "thread input applied transition",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewThreadInputRepo(db).MarkApplied(ctx, "locked-input", "locked-execution", "locked-turn")
+			},
+		},
+		{
+			name: "alert mark read",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewAlertRepo(db).MarkRead(ctx, "locked-project", "locked-alert")
+			},
+		},
+		{
+			name: "alert delete",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewAlertRepo(db).Delete(ctx, "locked-project", "locked-alert")
+			},
+		},
+		{
+			name: "automation reconcile completions",
+			run: func(ctx context.Context, db *sql.DB) error {
+				_, err := NewAutomationRepo(db).ReconcileInvocationCompletions(ctx, 10)
+				return err
+			},
+		},
+		{
+			name: "automation prune terminal positions",
+			run: func(ctx context.Context, db *sql.DB) error {
+				_, err := NewAutomationRepo(db).PruneTerminalizedAutomationPositions(ctx, 10)
+				return err
+			},
+		},
 	}
 }
-
 func TestImmediateRepositoryOperationsHonorCancellationWithoutDeadline(t *testing.T) {
 	for _, tt := range lockedWriterRepositoryOperations() {
 		t.Run(tt.name, func(t *testing.T) {
@@ -263,6 +312,24 @@ func assertEveryPooledConnectionBusyTimeout(t *testing.T, db *sql.DB, want int) 
 }
 
 func TestSuccessfulAutomationOperationsRestoreBusyTimeoutBeforePoolRelease(t *testing.T) {
+	t.Run("direct exec and returning writes", func(t *testing.T) {
+		db, err := database.New(filepath.Join(t.TempDir(), "direct-write-restore.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := NewAlertRepo(db).MarkAllRead(ctx, "missing-project"); err != nil {
+			t.Fatal(err)
+		}
+		project := &models.Project{Name: "Bounded returning write"}
+		if err := NewProjectRepo(db).Create(ctx, project); err != nil {
+			t.Fatal(err)
+		}
+		assertEveryPooledConnectionBusyTimeout(t, db, 5000)
+	})
+
 	t.Run("resume", func(t *testing.T) {
 		db, err := database.New(filepath.Join(t.TempDir(), "resume-restore.db"))
 		if err != nil {

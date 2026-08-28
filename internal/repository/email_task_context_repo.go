@@ -43,7 +43,9 @@ var emailTaskContextLifecycle = taskContextLifecycle[models.EmailTaskContext]{
 }
 
 func (r *EmailTaskContextRepo) Upsert(ctx context.Context, etc *models.EmailTaskContext) error {
-	return r.UpsertWithExecutor(ctx, r.db, etc)
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return r.UpsertWithExecutor(ctx, conn, etc)
+	})
 }
 
 // UpsertWithExecutor persists Email task context using the caller's transaction.
@@ -70,7 +72,7 @@ func (r *EmailTaskContextRepo) RecordOutboundMessageRef(ctx context.Context, pro
 	if projectID == "" || sender == "" || outboundMessageID == "" || sessionKey == "" {
 		return fmt.Errorf("project, sender, outbound message id, and session key are required")
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
 		INSERT INTO email_outbound_message_refs (project_id, email_from, outbound_message_id, email_session_key)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(project_id, email_from, outbound_message_id) DO UPDATE SET

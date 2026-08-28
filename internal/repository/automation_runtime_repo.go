@@ -970,7 +970,7 @@ func (r *AutomationRepo) ReconcileInvocationCompletions(ctx context.Context, lim
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_invocations SET
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE automation_invocations SET
 		status = CASE WHEN EXISTS (SELECT 1 FROM automation_activities a
 			WHERE a.invocation_id = automation_invocations.id AND a.status IN ('failed','cancelled'))
 			THEN 'failed' ELSE 'completed' END,
@@ -999,7 +999,7 @@ func (r *AutomationRepo) PruneTerminalizedAutomationPositions(ctx context.Contex
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	result, err := r.db.ExecContext(ctx, `DELETE FROM automation_work_item_positions
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM automation_work_item_positions
 		WHERE rowid IN (
 			SELECT p.rowid
 			FROM automation_work_item_positions p
@@ -2332,7 +2332,7 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 }
 
 func (r *AutomationRepo) MarkGitHubIssueDedupDispatched(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE automation_github_issue_dedup_leases
 		SET mutation_state = 'dispatched', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
 			AND mutation_state = 'reserved' AND created_issue_number IS NULL`,
@@ -2352,7 +2352,7 @@ func (r *AutomationRepo) CompleteGitHubIssueDedupLease(ctx context.Context, proj
 	if issueNumber <= 0 {
 		return errors.New("created GitHub issue number is required")
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE automation_github_issue_dedup_leases
 		SET created_issue_number = ?, mutation_state = 'completed', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
 			AND (mutation_state = 'dispatched' OR (mutation_state = 'completed' AND created_issue_number = ?))`,
@@ -2370,7 +2370,7 @@ func (r *AutomationRepo) CompleteGitHubIssueDedupLease(ctx context.Context, proj
 }
 
 func (r *AutomationRepo) ReleaseGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM automation_github_issue_dedup_leases
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM automation_github_issue_dedup_leases
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
 			AND mutation_state = 'reserved' AND created_issue_number IS NULL`,
 		strings.TrimSpace(projectID), strings.ToLower(strings.TrimSpace(repositoryFullName)), strings.TrimSpace(titleFingerprint), strings.TrimSpace(ownerToken))
@@ -2441,7 +2441,7 @@ func (r *AutomationRepo) ReleaseExternalActivityReservation(ctx context.Context,
 	if projectID == "" || binding.AutomationID == "" || binding.VersionID == "" || binding.NodeID == "" || binding.InvocationID == "" || strings.TrimSpace(activityKey) == "" {
 		return errors.New("complete invocation binding is required to release an external mutation reservation")
 	}
-	_, err := r.db.ExecContext(ctx, `DELETE FROM automation_activities
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM automation_activities
 		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND node_id = ? AND invocation_id = ?
 		  AND activity_key = ? AND status = 'pending'
 		  AND NOT EXISTS (SELECT 1 FROM automation_activity_resources WHERE activity_id = automation_activities.id)`,
@@ -2676,25 +2676,18 @@ func (r *AutomationRepo) RepairExecutionProjection(ctx context.Context, repair A
 	case models.ExecCancelled:
 		activityStatus = models.AutomationActivityCancelled
 	}
-	conn, err := r.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := conn.QueryContext(ctx, `UPDATE automation_activities SET status = ?,
-		completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE NULL END,
-		error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
-		AND id IN (SELECT activity_id FROM automation_activity_resources
-		WHERE resource_type = 'execution' AND resource_id = ?) RETURNING id`, activityStatus, activityStatus,
-		strings.TrimSpace(repair.Error), repair.ExecutionID)
-	if err != nil {
-		_ = conn.Close()
-		return err
-	}
-	if err := syncAutomationLiveActivityStateRows(ctx, conn, rows); err != nil {
-		_ = conn.Close()
-		return err
-	}
-	if err := conn.Close(); err != nil {
+	if err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx, `UPDATE automation_activities SET status = ?,
+			completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE NULL END,
+			error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
+			AND id IN (SELECT activity_id FROM automation_activity_resources
+			WHERE resource_type = 'execution' AND resource_id = ?) RETURNING id`, activityStatus, activityStatus,
+			strings.TrimSpace(repair.Error), repair.ExecutionID)
+		if err != nil {
+			return err
+		}
+		return syncAutomationLiveActivityStateRows(ctx, conn, rows)
+	}); err != nil {
 		return err
 	}
 	return r.FinalizeExecutionProjection(ctx, repair.ProjectID, repair.ExecutionID, repair.Status)
