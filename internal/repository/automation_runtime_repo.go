@@ -685,16 +685,18 @@ func (r *AutomationRepo) RenewDispatchLease(ctx context.Context, dispatchID, cla
 }
 
 func (r *AutomationRepo) MarkDispatchQueued(ctx context.Context, dispatchID, claimant string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = NULL,
-		claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND status = 'processing' AND claimed_by = ?`, dispatchID, claimant)
-	if err != nil {
-		return err
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return ErrAutomationDispatchLease
-	}
-	return nil
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		result, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = NULL,
+			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND status = 'processing' AND claimed_by = ?`, dispatchID, claimant)
+		if err != nil {
+			return err
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return ErrAutomationDispatchLease
+		}
+		return nil
+	})
 }
 
 func (r *AutomationRepo) AbandonQueuedDispatch(ctx context.Context, dispatchID, message string) error {
@@ -757,16 +759,18 @@ func (r *AutomationRepo) ListAbandonedQueuedDispatches(ctx context.Context, limi
 }
 
 func (r *AutomationRepo) MarkDispatchSubmitted(ctx context.Context, dispatchID, claimant, executionID string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = ?,
-		claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND status = 'processing' AND claimed_by = ?`, executionID, dispatchID, claimant)
-	if err != nil {
-		return err
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return ErrAutomationDispatchLease
-	}
-	return nil
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		result, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = ?,
+			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND status = 'processing' AND claimed_by = ?`, executionID, dispatchID, claimant)
+		if err != nil {
+			return err
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return ErrAutomationDispatchLease
+		}
+		return nil
+	})
 }
 
 func (r *AutomationRepo) FailDispatch(ctx context.Context, dispatchID, claimant, message string, maxAttempts int, now time.Time) error {

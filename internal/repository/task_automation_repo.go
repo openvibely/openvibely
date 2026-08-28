@@ -321,7 +321,7 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, err
 	}
-	_ = conn.Close()
+	finishImmediate()
 
 	execution, err := NewExecutionRepo(r.db).GetByID(ctx, executionID)
 	if err != nil {

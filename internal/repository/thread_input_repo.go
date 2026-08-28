@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -1081,7 +1082,15 @@ func withBoundSQLiteConn(ctx context.Context, db *sql.DB, fn func(*sql.Conn) err
 		return err
 	}
 	defer restoreBusyTimeout()
-	return fn(conn)
+	for {
+		err := fn(conn)
+		if !shouldRetrySQLiteBusyUntilCancellation(ctx, err) {
+			if ctx.Err() != nil && isSQLiteBusy(err) {
+				return ctx.Err()
+			}
+			return err
+		}
+	}
 }
 
 func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), error) {
@@ -1094,12 +1103,26 @@ func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), err
 		_ = conn.Close()
 		return nil, nil, err
 	}
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+	for {
+		_, err = conn.ExecContext(ctx, `BEGIN IMMEDIATE`)
+		if !shouldRetrySQLiteBusyUntilCancellation(ctx, err) {
+			break
+		}
+	}
+	if err != nil {
+		if ctx.Err() != nil && isSQLiteBusy(err) {
+			err = ctx.Err()
+		}
 		restoreBusyTimeout()
 		_ = conn.Close()
 		return nil, nil, err
 	}
+	cleaned := false
 	return conn, func() {
+		if cleaned {
+			return
+		}
+		cleaned = true
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), sqliteBusyTimeoutRestoreReserve)
 		defer cancel()
 		_, _ = conn.ExecContext(rollbackCtx, `ROLLBACK`)
@@ -1108,21 +1131,27 @@ func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), err
 	}, nil
 }
 
-const sqliteBusyTimeoutRestoreReserve = 20 * time.Millisecond
+const (
+	sqliteBusyTimeoutRestoreReserve = 20 * time.Millisecond
+	sqliteCancellationPollInterval  = 50 * time.Millisecond
+)
 
 func boundSQLiteBusyTimeoutToContext(ctx context.Context, conn *sql.Conn) (func(), error) {
-	deadline, ok := ctx.Deadline()
-	if !ok {
+	deadline, hasDeadline := ctx.Deadline()
+	if !hasDeadline && ctx.Done() == nil {
 		return func() {}, nil
 	}
 	var previousMS int
 	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&previousMS); err != nil {
 		return nil, err
 	}
-	remaining := time.Until(deadline) - sqliteBusyTimeoutRestoreReserve
-	boundedMS := int(remaining / time.Millisecond)
-	if boundedMS < 1 {
-		boundedMS = 1
+	boundedMS := int(sqliteCancellationPollInterval / time.Millisecond)
+	if hasDeadline {
+		remaining := time.Until(deadline) - sqliteBusyTimeoutRestoreReserve
+		boundedMS = int(remaining / time.Millisecond)
+		if boundedMS < 1 {
+			boundedMS = 1
+		}
 	}
 	if previousMS > 0 && previousMS <= boundedMS {
 		return func() {}, nil
@@ -1135,6 +1164,25 @@ func boundSQLiteBusyTimeoutToContext(ctx context.Context, conn *sql.Conn) (func(
 		defer cancel()
 		_, _ = conn.ExecContext(restoreCtx, fmt.Sprintf(`PRAGMA busy_timeout=%d`, previousMS))
 	}, nil
+}
+
+func shouldRetrySQLiteBusyUntilCancellation(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil || ctx.Done() == nil {
+		return false
+	}
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		return false
+	}
+	return isSQLiteBusy(err)
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToUpper(err.Error())
+	return !strings.Contains(message, "BUSY_SNAPSHOT") &&
+		(strings.Contains(message, "SQLITE_BUSY") || strings.Contains(message, "DATABASE IS LOCKED"))
 }
 
 type manualTx struct {

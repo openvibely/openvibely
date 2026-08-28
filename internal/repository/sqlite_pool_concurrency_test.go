@@ -101,38 +101,7 @@ func TestBoundSQLiteBusyTimeoutToContextRestoresSameConnection(t *testing.T) {
 }
 
 func TestImmediateRepositoryOperationsHonorContextDeadline(t *testing.T) {
-	tests := []struct {
-		name string
-		run  func(context.Context, *sql.DB) error
-	}{
-		{
-			name: "task dispatch claim",
-			run: func(ctx context.Context, db *sql.DB) error {
-				_, _, err := NewTaskRepo(db, nil).ClaimTaskForDispatch(ctx, "locked-task")
-				return err
-			},
-		},
-		{
-			name: "automation resume",
-			run: func(ctx context.Context, db *sql.DB) error {
-				_, err := NewAutomationRepo(db).ResumeAutomation(ctx, "locked-project", "locked-automation")
-				return err
-			},
-		},
-		{
-			name: "automation dispatch lease",
-			run: func(ctx context.Context, db *sql.DB) error {
-				_, err := NewAutomationRepo(db).LeaseNextDispatch(ctx, "locked-worker", time.Now().UTC(), time.Minute)
-				return err
-			},
-		},
-		{
-			name: "execution output flush",
-			run: func(ctx context.Context, db *sql.DB) error {
-				return NewExecutionRepo(db).UpdateOutput(ctx, "locked-execution", "output")
-			},
-		},
-	}
+	tests := lockedWriterRepositoryOperations()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			db, err := database.New(filepath.Join(t.TempDir(), "deadline.db"))
@@ -161,6 +130,184 @@ func TestImmediateRepositoryOperationsHonorContextDeadline(t *testing.T) {
 			}
 		})
 	}
+}
+
+func lockedWriterRepositoryOperations() []struct {
+	name string
+	run  func(context.Context, *sql.DB) error
+} {
+	return []struct {
+		name string
+		run  func(context.Context, *sql.DB) error
+	}{
+		{
+			name: "task dispatch claim",
+			run: func(ctx context.Context, db *sql.DB) error {
+				_, _, err := NewTaskRepo(db, nil).ClaimTaskForDispatch(ctx, "locked-task")
+				return err
+			},
+		},
+		{
+			name: "automation resume",
+			run: func(ctx context.Context, db *sql.DB) error {
+				_, err := NewAutomationRepo(db).ResumeAutomation(ctx, "locked-project", "locked-automation")
+				return err
+			},
+		},
+		{
+			name: "automation dispatch lease",
+			run: func(ctx context.Context, db *sql.DB) error {
+				_, err := NewAutomationRepo(db).LeaseNextDispatch(ctx, "locked-worker", time.Now().UTC(), time.Minute)
+				return err
+			},
+		},
+		{
+			name: "automation mark queued",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewAutomationRepo(db).MarkDispatchQueued(ctx, "locked-dispatch", "locked-worker")
+			},
+		},
+		{
+			name: "automation mark submitted",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewAutomationRepo(db).MarkDispatchSubmitted(ctx, "locked-dispatch", "locked-worker", "locked-execution")
+			},
+		},
+		{
+			name: "execution output flush",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewExecutionRepo(db).UpdateOutput(ctx, "locked-execution", "output")
+			},
+		},
+	}
+}
+
+func TestImmediateRepositoryOperationsHonorCancellationWithoutDeadline(t *testing.T) {
+	for _, tt := range lockedWriterRepositoryOperations() {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := database.New(filepath.Join(t.TempDir(), "cancellation.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			locker, err := db.Conn(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer locker.Close()
+			if _, err := locker.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+				t.Fatal(err)
+			}
+			defer locker.ExecContext(context.Background(), `ROLLBACK`)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			result := make(chan error, 1)
+			go func() { result <- tt.run(ctx, db) }()
+			waitForDBInUse(t, db, 2)
+			cancel()
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("operation error = %v, want context.Canceled", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("operation did not stop promptly after cancellation")
+			}
+			if _, err := locker.ExecContext(context.Background(), `ROLLBACK`); err != nil {
+				t.Fatal(err)
+			}
+			if err := locker.Close(); err != nil {
+				t.Fatal(err)
+			}
+			assertEveryPooledConnectionBusyTimeout(t, db, 5000)
+		})
+	}
+}
+
+func waitForDBInUse(t *testing.T, db *sql.DB, want int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if db.Stats().InUse >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("database in-use connections = %d, want at least %d", db.Stats().InUse, want)
+}
+
+func assertEveryPooledConnectionBusyTimeout(t *testing.T, db *sql.DB, want int) {
+	t.Helper()
+	connections := make([]*sql.Conn, 0, db.Stats().MaxOpenConnections)
+	for i := 0; i < db.Stats().MaxOpenConnections; i++ {
+		conn, err := db.Conn(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		connections = append(connections, conn)
+	}
+	defer func() {
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+	}()
+	for i, conn := range connections {
+		var got int
+		if err := conn.QueryRowContext(context.Background(), `PRAGMA busy_timeout`).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("connection %d busy_timeout = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestSuccessfulAutomationOperationsRestoreBusyTimeoutBeforePoolRelease(t *testing.T) {
+	t.Run("resume", func(t *testing.T) {
+		db, err := database.New(filepath.Join(t.TempDir(), "resume-restore.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+		if _, err := db.Exec(`UPDATE automations SET lifecycle_state='paused' WHERE id=?`, fixture.AutomationID); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if _, err := NewAutomationRepo(db).ResumeAutomation(ctx, fixture.ProjectID, fixture.AutomationID); err != nil {
+			t.Fatal(err)
+		}
+		assertEveryPooledConnectionBusyTimeout(t, db, 5000)
+	})
+
+	t.Run("dispatch claim", func(t *testing.T) {
+		db, err := database.New(filepath.Join(t.TempDir(), "claim-restore.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		ctx := context.Background()
+		fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+		repo := NewAutomationRepo(db)
+		taskRepo := NewTaskRepo(db, nil)
+		task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Restore timeout claim")
+		due := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+		schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], due)
+		if _, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, time.Now().UTC(), nil); err != nil || dispatch == nil {
+			t.Fatalf("seed dispatch = %#v, %v", dispatch, err)
+		}
+		leased, err := repo.LeaseNextDispatch(ctx, "restore-worker", time.Now().UTC(), time.Minute)
+		if err != nil || leased == nil {
+			t.Fatalf("lease = %#v, %v", leased, err)
+		}
+		claimCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if _, err := taskRepo.ClaimAutomationDispatch(claimCtx, leased.ID, "restore-worker"); err != nil {
+			t.Fatal(err)
+		}
+		assertEveryPooledConnectionBusyTimeout(t, db, 5000)
+	})
 }
 
 func TestExecutionRepoPeriodicOutputCannotOverwriteTerminalOutput(t *testing.T) {

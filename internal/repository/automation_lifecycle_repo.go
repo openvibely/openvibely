@@ -200,9 +200,7 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, err
 	}
-	if err := conn.Close(); err != nil {
-		return nil, err
-	}
+	finishImmediate()
 
 	admittedTasks := make([]models.Task, 0, len(admittedTaskIDs))
 	taskRepo := NewTaskRepo(r.db, nil)
