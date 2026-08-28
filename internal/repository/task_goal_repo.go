@@ -195,7 +195,7 @@ func (r *TaskGoalRepo) Delete(ctx context.Context, taskID string) error {
 }
 
 func (r *TaskGoalRepo) updateReturning(ctx context.Context, query string, args ...any) (*models.TaskGoal, error) {
-	goal, err := scanTaskGoal(r.db.QueryRowContext(ctx, query, args...))
+	goal, err := scanTaskGoal(queryRowBoundSQLite(ctx, r.db, query, args...))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

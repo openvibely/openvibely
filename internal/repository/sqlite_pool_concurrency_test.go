@@ -219,6 +219,13 @@ func lockedWriterRepositoryOperations() []struct {
 			},
 		},
 		{
+			name: "task goal update returning write",
+			run: func(ctx context.Context, db *sql.DB) error {
+				_, err := NewTaskGoalRepo(db).UpdateStatus(ctx, "locked-task", "locked-goal", models.TaskGoalStatusPaused, "locked", false)
+				return err
+			},
+		},
+		{
 			name: "alert mark read",
 			run: func(ctx context.Context, db *sql.DB) error {
 				return NewAlertRepo(db).MarkRead(ctx, "locked-project", "locked-alert")
@@ -385,11 +392,19 @@ func TestSuccessfulAutomationOperationsRestoreBusyTimeoutBeforePoolRelease(t *te
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		goal := &models.TaskGoal{TaskID: "returning-task", GoalID: "returning-goal", Objective: "finish"}
-		if err := NewTaskGoalRepo(db).CreateOrReplace(ctx, goal); err != nil {
+		goalRepo := NewTaskGoalRepo(db)
+		if err := goalRepo.CreateOrReplace(ctx, goal); err != nil {
 			t.Fatal(err)
 		}
 		if goal.GoalID != "returning-goal" || goal.Status != models.TaskGoalStatusActive {
 			t.Fatalf("created goal = %#v", goal)
+		}
+		updatedGoal, err := goalRepo.UpdateStatus(ctx, goal.TaskID, goal.GoalID, models.TaskGoalStatusPaused, "paused", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updatedGoal == nil || updatedGoal.Status != models.TaskGoalStatusPaused || updatedGoal.Reason != "paused" {
+			t.Fatalf("updated goal = %#v", updatedGoal)
 		}
 		input, err := NewThreadInputRepo(db).CancelPending(ctx, "returning-input")
 		if err != nil {
