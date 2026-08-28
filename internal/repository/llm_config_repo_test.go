@@ -1723,10 +1723,14 @@ func TestLLMConfigRepo_VisionSelectionProjectionMeetsPerformanceTargetOnLargeFix
 	})
 
 	const (
+		maxCompactDuration     = 200 * time.Microsecond
 		maxCompactBytesPerOp   = 300 * 1024
 		minFullListImprovement = 20
 	)
 	t.Logf("full List: %d ns/op, %d B/op; compact vision selection+GetByID: %d ns/op, %d B/op", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp())
+	if compactThenGet.NsPerOp() > maxCompactDuration.Nanoseconds() {
+		t.Fatalf("compact vision selection took %d ns/op, want <= %s", compactThenGet.NsPerOp(), maxCompactDuration)
+	}
 	if compactThenGet.AllocedBytesPerOp() > maxCompactBytesPerOp {
 		t.Fatalf("compact vision selection allocated %d B/op, want <= %d", compactThenGet.AllocedBytesPerOp(), maxCompactBytesPerOp)
 	}
