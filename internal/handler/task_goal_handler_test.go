@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -24,7 +25,7 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 		t.Fatalf("create task: %v", err)
 	}
 
-	rec := tc.HTMX().Post("/tasks/" + task.ID + "/goal").WithForm(url.Values{"goal": {"All checks pass"}}).Execute()
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/goal?project_id=" + project.ID).WithForm(url.Values{"goal": {"All checks pass"}}).Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set goal status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -36,7 +37,7 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 	}
 
 	for _, path := range []string{"/pause", "/resume", "/clear"} {
-		rec = tc.HTMX().Post("/tasks/" + task.ID + "/goal" + path).Execute()
+		rec = tc.HTMX().Post("/tasks/" + task.ID + "/goal" + path + "?project_id=" + project.ID).Execute()
 		if rec.Code != http.StatusOK {
 			t.Fatalf("post %s status=%d body=%s", path, rec.Code, rec.Body.String())
 		}
@@ -48,6 +49,106 @@ func TestTaskGoalRoutes_HTMXEditPauseResumeClear(t *testing.T) {
 	if goal.Status != models.TaskGoalStatusCleared {
 		t.Fatalf("goal status = %s", goal.Status)
 	}
+}
+
+func TestTaskGoalRoutesRejectForeignTaskFromExplicitAndSelectedProjects(t *testing.T) {
+	routes := []struct {
+		name   string
+		suffix string
+		method string
+		body   string
+	}{
+		{name: "get", suffix: "/goal", method: http.MethodGet},
+		{name: "set", suffix: "/goal", method: http.MethodPost, body: url.Values{"goal": {"Changed from Project B"}}.Encode()},
+		{name: "pause", suffix: "/goal/pause", method: http.MethodPost},
+		{name: "resume", suffix: "/goal/resume", method: http.MethodPost},
+		{name: "clear", suffix: "/goal/clear", method: http.MethodPost},
+	}
+
+	for _, route := range routes {
+		for _, scope := range []struct {
+			name          string
+			useExplicitID bool
+		}{
+			{name: "explicit", useExplicitID: true},
+			{name: "selected", useExplicitID: false},
+		} {
+			t.Run(scope.name+"/"+route.name, func(t *testing.T) {
+				tc, projectB, task, originalGoal := newForeignTaskGoalRouteFixture(t)
+				if !scope.useExplicitID {
+					if err := tc.settingsRepo.Set(context.Background(), uiPreferenceSelectedProjectIDKey, projectB.ID); err != nil {
+						t.Fatalf("select project B: %v", err)
+					}
+				}
+
+				path := "/tasks/" + task.ID + route.suffix
+				if scope.useExplicitID {
+					path += "?project_id=" + projectB.ID
+				}
+				rec := requestWithAccept(tc, route.method, path, "application/json", route.body)
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("foreign %s status=%d body=%s", route.name, rec.Code, rec.Body.String())
+				}
+				body := rec.Body.String()
+				for _, leaked := range []string{originalGoal.Objective, originalGoal.Reason, originalGoal.BlockerKey, originalGoal.BlockerReason} {
+					if leaked != "" && strings.Contains(body, leaked) {
+						t.Fatalf("foreign %s response leaked %q: %s", route.name, leaked, body)
+					}
+				}
+
+				currentGoal, err := tc.handler.taskGoalSvc.GetGoal(context.Background(), task.ID)
+				if err != nil {
+					t.Fatalf("get foreign goal after rejected %s: %v", route.name, err)
+				}
+				if !reflect.DeepEqual(originalGoal, currentGoal) {
+					t.Fatalf("foreign goal changed after rejected %s:\noriginal=%#v\ncurrent=%#v", route.name, originalGoal, currentGoal)
+				}
+			})
+		}
+	}
+}
+
+func TestTaskGoalRoutesUnknownTaskReturnNotFound(t *testing.T) {
+	tc := NewTestContext(t)
+	for _, route := range []struct {
+		name   string
+		suffix string
+		method string
+		body   string
+	}{
+		{name: "get", suffix: "/goal", method: http.MethodGet},
+		{name: "set", suffix: "/goal", method: http.MethodPost, body: url.Values{"goal": {"Unknown task goal"}}.Encode()},
+		{name: "pause", suffix: "/goal/pause", method: http.MethodPost},
+		{name: "resume", suffix: "/goal/resume", method: http.MethodPost},
+		{name: "clear", suffix: "/goal/clear", method: http.MethodPost},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			rec := requestWithAccept(tc, route.method, "/tasks/missing"+route.suffix, "application/json", route.body)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("unknown %s status=%d body=%s", route.name, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+func newForeignTaskGoalRouteFixture(t *testing.T) (*TestContext, *models.Project, *models.Task, *models.TaskGoal) {
+	t.Helper()
+	tc := NewTestContext(t)
+	ctx := context.Background()
+	projectA := tc.CreateProject().WithName("Project A").Build()
+	projectB := tc.CreateProject().WithName("Project B").Build()
+	task := tc.CreateTask(projectA.ID).WithTitle("Project A goal task").WithCategory(models.CategoryBacklog).Build()
+	goal, err := tc.handler.taskGoalSvc.SetGoal(ctx, task.ID, "Foreign objective", service.GoalOptions{Actor: "seed"})
+	if err != nil {
+		t.Fatalf("set foreign goal: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		goal, err = tc.handler.taskGoalSvc.RecordBlockedReport(ctx, task.ID, goal.GoalID, "dependency", "waiting on dependency")
+		if err != nil {
+			t.Fatalf("record blocker report %d: %v", i+1, err)
+		}
+	}
+	return tc, projectB, task, goal
 }
 
 func TestUpdateTask_EditFormSavesGoalAndRefreshesReadOnlySummary(t *testing.T) {
