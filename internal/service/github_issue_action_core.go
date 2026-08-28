@@ -142,11 +142,15 @@ func (c *GitHubIssueActionCore) ExecuteIsActorAuthorized(ctx context.Context, in
 }
 
 func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context, input json.RawMessage) (string, error) {
-	req, repo, err := c.requestAndRepo(ctx, input, nil)
+	req, err := c.request(input)
 	if err != nil {
 		return "", err
 	}
 	limit, offset, err := assignedIssueListPageForInput(input, req)
+	if err != nil {
+		return "", err
+	}
+	repo, err := c.resolve(ctx, req.RepoURL)
 	if err != nil {
 		return "", err
 	}

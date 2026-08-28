@@ -449,6 +449,34 @@ func TestGitHubIssueActionCoreAssignedIssuePaginationDistinguishesOmittedLimitFr
 	}
 }
 
+func TestGitHubIssueActionCoreMyAssignedIssuesValidatesPaginationBeforeRepoResolution(t *testing.T) {
+	provider := &fakeGitHubIssueActionProvider{}
+	resolveCalls := 0
+	core := NewGitHubIssueActionCore(provider, fakeGitHubIssueAuthorizationStore{}, "project-1",
+		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
+		func(context.Context, string) (*GitHubRepoRef, error) {
+			resolveCalls++
+			return nil, nil
+		})
+
+	for _, input := range []string{
+		`{"limit":0}`,
+		`{"Limit":0}`,
+		`{"limit":101}`,
+		`{"offset":-1}`,
+	} {
+		if _, err := core.ExecuteListMyAssignedIssues(context.Background(), json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+			t.Fatalf("invalid page input %s error=%v, want validation error", input, err)
+		}
+	}
+	if resolveCalls != 0 {
+		t.Fatalf("resolve calls=%d, want 0 for invalid pagination", resolveCalls)
+	}
+	if provider.myAssignedCalls != 0 {
+		t.Fatalf("provider calls=%d, want 0 for invalid pagination", provider.myAssignedCalls)
+	}
+}
+
 func TestGitHubIssueActionCoreAssignedIssueValidationPrecedesRepoResolution(t *testing.T) {
 	resolveCalls := 0
 	core := NewGitHubIssueActionCore(&fakeGitHubIssueActionProvider{}, nil, "",
