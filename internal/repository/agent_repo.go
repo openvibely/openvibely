@@ -324,6 +324,35 @@ func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]AgentPickerOption,
 	return options, rows.Err()
 }
 
+// ListPickerOptionsForProject returns compact options for global agents and
+// project-scoped agents owned by projectID. It intentionally keeps the picker
+// projection small because the settings page only needs IDs and names.
+func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID string) ([]AgentPickerOption, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name
+		FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND (
+			COALESCE(scope, 'global') <> 'project'
+			OR (project_id IS NOT NULL AND project_id <> '' AND project_id = ?)
+		  )
+		ORDER BY name ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing project agent picker options: %w", err)
+	}
+	defer rows.Close()
+
+	var options []AgentPickerOption
+	for rows.Next() {
+		var option AgentPickerOption
+		if err := rows.Scan(&option.ID, &option.Name); err != nil {
+			return nil, fmt.Errorf("scanning project agent picker option: %w", err)
+		}
+		options = append(options, option)
+	}
+	return options, rows.Err()
+}
+
 func (r *AgentRepo) ListSkillCatalogRefs(ctx context.Context) ([]AgentSkillCatalogRef, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, COALESCE(key, ''), project_id
@@ -510,7 +539,7 @@ func (r *AgentRepo) MarkArchived(ctx context.Context, id, absorbedInto, reason s
 	if absorbedInto != "" {
 		absorbed = absorbedInto
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE agents SET generated_status = 'archived', enabled = 0,
 		 absorbed_into = ?, source_refs_json = ?, archived_at = datetime('now'),
 		 updated_at = datetime('now') WHERE id = ?`,
@@ -597,7 +626,7 @@ func (r *AgentRepo) Create(ctx context.Context, a *models.Agent) error {
 	if a.AbsorbedInto != "" {
 		absorbedInto = a.AbsorbedInto
 	}
-	err = r.db.QueryRowContext(ctx,
+	err = queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO agents (
 		   id, name, description, system_prompt, model, tools, tool_config,
 		   plugins, mcp_servers, skills, system_kind,
@@ -688,7 +717,7 @@ func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 	if a.ArchivedAt != nil {
 		archivedAt = a.ArchivedAt.UTC()
 	}
-	_, err = r.db.ExecContext(ctx,
+	_, err = execBoundSQLite(ctx, r.db,
 		`UPDATE agents SET name = ?, description = ?, system_prompt = ?,
 		 model = ?, tools = ?, tool_config = ?, plugins = ?, mcp_servers = ?, skills = ?, system_kind = ?,
 		 key = ?, scope = ?, project_id = ?, selectable_as_primary = ?, enabled = ?,
@@ -712,10 +741,10 @@ func (r *AgentRepo) Update(ctx context.Context, a *models.Agent) error {
 
 func (r *AgentRepo) Delete(ctx context.Context, id string) error {
 	// Nullify FK references in tasks before deleting
-	if _, err := r.db.ExecContext(ctx, `UPDATE tasks SET agent_definition_id = NULL WHERE agent_definition_id = ?`, id); err != nil {
+	if _, err := execBoundSQLite(ctx, r.db, `UPDATE tasks SET agent_definition_id = NULL WHERE agent_definition_id = ?`, id); err != nil {
 		return fmt.Errorf("nullifying agent in tasks: %w", err)
 	}
-	_, err := r.db.ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM agents WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting agent: %w", err)
 	}
