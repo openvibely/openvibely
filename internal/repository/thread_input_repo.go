@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -1157,7 +1159,7 @@ func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), err
 }
 
 const (
-	sqliteBusyTimeoutRestoreReserve = 20 * time.Millisecond
+	sqliteBusyTimeoutRestoreReserve = 250 * time.Millisecond
 	sqliteCancellationPollInterval  = 50 * time.Millisecond
 )
 
@@ -1172,30 +1174,57 @@ func boundSQLiteBusyTimeoutToContext(ctx context.Context, conn *sql.Conn) (func(
 	}
 	boundedMS := int(sqliteCancellationPollInterval / time.Millisecond)
 	if hasDeadline {
-		remaining := time.Until(deadline) - sqliteBusyTimeoutRestoreReserve
-		boundedMS = int(remaining / time.Millisecond)
-		if boundedMS < 1 {
-			boundedMS = 1
+		deadlineBoundMS := int((time.Until(deadline) - sqliteBusyTimeoutRestoreReserve) / time.Millisecond)
+		if deadlineBoundMS < 1 {
+			deadlineBoundMS = 1
+		}
+		if deadlineBoundMS < boundedMS {
+			boundedMS = deadlineBoundMS
 		}
 	}
 	if previousMS > 0 && previousMS <= boundedMS {
 		return func() {}, nil
 	}
+
+	var restoreOnce sync.Once
+	restore := func() {
+		restoreOnce.Do(func() {
+			// A canceled modernc statement can finish applying a PRAGMA before it
+			// reports the context error. Let interruption cleanup settle first.
+			if ctx.Err() != nil {
+				time.Sleep(sqliteCancellationPollInterval)
+			}
+			restoreCtx, cancel := context.WithTimeout(context.Background(), sqliteBusyTimeoutRestoreReserve)
+			defer cancel()
+			query := fmt.Sprintf(`PRAGMA busy_timeout=%d`, previousMS)
+			for restoreCtx.Err() == nil {
+				if _, err := conn.ExecContext(restoreCtx, query); err == nil {
+					var restoredMS int
+					if err := conn.QueryRowContext(restoreCtx, `PRAGMA busy_timeout`).Scan(&restoredMS); err == nil && restoredMS == previousMS {
+						return
+					}
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			// Never return a connection with altered connection-local state.
+			_ = conn.Raw(func(raw any) error {
+				if driverConn, ok := raw.(driver.Conn); ok {
+					_ = driverConn.Close()
+				}
+				return driver.ErrBadConn
+			})
+		})
+	}
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout=%d`, boundedMS)); err != nil {
+		// SQLite may apply the PRAGMA before modernc reports cancellation.
+		restore()
 		return nil, err
 	}
-	return func() {
-		restoreCtx, cancel := context.WithTimeout(context.Background(), sqliteBusyTimeoutRestoreReserve)
-		defer cancel()
-		_, _ = conn.ExecContext(restoreCtx, fmt.Sprintf(`PRAGMA busy_timeout=%d`, previousMS))
-	}, nil
+	return restore, nil
 }
 
 func shouldRetrySQLiteBusyUntilCancellation(ctx context.Context, err error) bool {
 	if err == nil || ctx.Err() != nil || ctx.Done() == nil {
-		return false
-	}
-	if _, hasDeadline := ctx.Deadline(); hasDeadline {
 		return false
 	}
 	return isSQLiteBusy(err)

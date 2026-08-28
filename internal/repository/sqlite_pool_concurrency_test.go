@@ -231,6 +231,47 @@ func lockedWriterRepositoryOperations() []struct {
 		},
 	}
 }
+func TestImmediateRepositoryOperationsHonorEarlyCancellationWithDeadline(t *testing.T) {
+	for _, tt := range lockedWriterRepositoryOperations() {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := database.New(filepath.Join(t.TempDir(), "early-cancellation.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			locker, err := db.Conn(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := locker.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+				_ = locker.Close()
+				t.Fatal(err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			result := make(chan error, 1)
+			go func() { result <- tt.run(ctx, db) }()
+			waitForDBInUse(t, db, 2)
+			cancel()
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("operation error = %v, want context.Canceled", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("operation with a live deadline did not stop promptly after early cancellation")
+			}
+			if _, err := locker.ExecContext(context.Background(), `ROLLBACK`); err != nil {
+				t.Fatal(err)
+			}
+			if err := locker.Close(); err != nil {
+				t.Fatal(err)
+			}
+			assertEveryPooledConnectionBusyTimeout(t, db, 5000)
+		})
+	}
+}
+
 func TestImmediateRepositoryOperationsHonorCancellationWithoutDeadline(t *testing.T) {
 	for _, tt := range lockedWriterRepositoryOperations() {
 		t.Run(tt.name, func(t *testing.T) {

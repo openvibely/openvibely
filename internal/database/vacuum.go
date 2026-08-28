@@ -109,9 +109,12 @@ func boundVacuumBusyTimeout(ctx context.Context, conn *sql.Conn) (func(), error)
 	}
 	boundedMS := int(vacuumCancellationPollInterval / time.Millisecond)
 	if hasDeadline {
-		boundedMS = int((time.Until(deadline) - vacuumTimeoutRestoreReserve) / time.Millisecond)
-		if boundedMS < 1 {
-			boundedMS = 1
+		deadlineBoundMS := int((time.Until(deadline) - vacuumTimeoutRestoreReserve) / time.Millisecond)
+		if deadlineBoundMS < 1 {
+			deadlineBoundMS = 1
+		}
+		if deadlineBoundMS < boundedMS {
+			boundedMS = deadlineBoundMS
 		}
 	}
 	if previousMS > 0 && previousMS <= boundedMS {
@@ -154,9 +157,6 @@ func boundVacuumBusyTimeout(ctx context.Context, conn *sql.Conn) (func(), error)
 
 func retryVacuumBusyUntilCancellation(ctx context.Context, err error) bool {
 	if err == nil || ctx.Err() != nil || ctx.Done() == nil {
-		return false
-	}
-	if _, hasDeadline := ctx.Deadline(); hasDeadline {
 		return false
 	}
 	return isVacuumBusy(err)

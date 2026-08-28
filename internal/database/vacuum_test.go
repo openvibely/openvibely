@@ -104,14 +104,16 @@ func TestStartIncrementalVacuumExitsWhenContextCancelled(t *testing.T) {
 
 func TestIncrementalVacuumHeldWriterHonorsContextAndRestoresTimeout(t *testing.T) {
 	for _, test := range []struct {
-		name       string
-		newContext func() (context.Context, context.CancelFunc)
+		name        string
+		newContext  func() (context.Context, context.CancelFunc)
+		cancelEarly bool
 	}{
 		{
 			name: "cancellation only",
 			newContext: func() (context.Context, context.CancelFunc) {
 				return context.WithCancel(context.Background())
 			},
+			cancelEarly: true,
 		},
 		{
 			name: "deadline",
@@ -119,14 +121,21 @@ func TestIncrementalVacuumHeldWriterHonorsContextAndRestoresTimeout(t *testing.T
 				return context.WithTimeout(context.Background(), 150*time.Millisecond)
 			},
 		},
+		{
+			name: "early cancellation with deadline",
+			newContext: func() (context.Context, context.CancelFunc) {
+				return context.WithTimeout(context.Background(), 10*time.Second)
+			},
+			cancelEarly: true,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			testIncrementalVacuumHeldWriterContext(t, test.newContext)
+			testIncrementalVacuumHeldWriterContext(t, test.newContext, test.cancelEarly)
 		})
 	}
 }
 
-func testIncrementalVacuumHeldWriterContext(t *testing.T, newContext func() (context.Context, context.CancelFunc)) {
+func testIncrementalVacuumHeldWriterContext(t *testing.T, newContext func() (context.Context, context.CancelFunc), cancelEarly bool) {
 	t.Helper()
 	db, err := New(filepath.Join(t.TempDir(), "vacuum-held-writer.db"))
 	if err != nil {
@@ -171,12 +180,12 @@ func testIncrementalVacuumHeldWriterContext(t *testing.T, newContext func() (con
 	}
 
 	var contextEndedAt time.Time
-	if _, hasDeadline := vacuumCtx.Deadline(); hasDeadline {
-		<-vacuumCtx.Done()
-		contextEndedAt = time.Now()
-	} else {
+	if cancelEarly {
 		contextEndedAt = time.Now()
 		cancel()
+	} else {
+		<-vacuumCtx.Done()
+		contextEndedAt = time.Now()
 	}
 	select {
 	case <-done:
