@@ -17,8 +17,8 @@ const (
 )
 
 // StartIncrementalVacuum reclaims free pages in small batches on a ticker.
-// Batches are kept small deliberately: the pool is capped at one connection, so
-// each pass blocks all other queries for its duration. It returns immediately;
+// Batches are kept small deliberately: SQLite still permits only one writer, so
+// each pass briefly competes with other writes while WAL readers continue. It returns immediately;
 // the goroutine exits when ctx is cancelled.
 func StartIncrementalVacuum(ctx context.Context, db *sql.DB) {
 	go func() {

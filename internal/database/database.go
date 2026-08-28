@@ -18,6 +18,10 @@ const (
 )
 
 func New(dsn string) (*sql.DB, error) {
+	return newSQLiteDatabase(dsn, initializeSQLite)
+}
+
+func newSQLiteDatabase(dsn string, initialize func(*sql.DB) error) (*sql.DB, error) {
 	configuredDSN, inMemory, err := configureSQLiteDSN(dsn)
 	if err != nil {
 		return nil, err
@@ -26,33 +30,14 @@ func New(dsn string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
-	closeOnError := func(operation string, operationErr error) (*sql.DB, error) {
-		_ = db.Close()
-		return nil, fmt.Errorf("%s: %w", operation, operationErr)
-	}
 
 	// Bootstrap, auto-vacuum initialization, and migrations are deliberately
 	// serialized. The pool expands only after startup has completed successfully.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-
-	// WAL permits readers on other physical connections while SQLite's single
-	// writer commits. Connection-local settings are enforced by the DSN below.
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		return closeOnError("setting journal mode", err)
-	}
-
-	if err := enableIncrementalVacuum(db); err != nil {
+	if err := initialize(db); err != nil {
 		_ = db.Close()
 		return nil, err
-	}
-
-	goose.SetBaseFS(migrations.FS)
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		return closeOnError("setting dialect", err)
-	}
-	if err := goose.Up(db, ".", goose.WithAllowMissing()); err != nil {
-		return closeOnError("running migrations", err)
 	}
 
 	if !inMemory {
@@ -62,6 +47,27 @@ func New(dsn string) (*sql.DB, error) {
 		db.SetMaxIdleConns(fileDatabasePoolSize)
 	}
 	return db, nil
+}
+
+func initializeSQLite(db *sql.DB) error {
+	// WAL permits readers on other physical connections while SQLite's single
+	// writer commits. Connection-local settings are enforced by the DSN below.
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		return fmt.Errorf("setting journal mode: %w", err)
+	}
+
+	if err := enableIncrementalVacuum(db); err != nil {
+		return err
+	}
+
+	goose.SetBaseFS(migrations.FS)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		return fmt.Errorf("setting dialect: %w", err)
+	}
+	if err := goose.Up(db, ".", goose.WithAllowMissing()); err != nil {
+		return fmt.Errorf("running migrations: %w", err)
+	}
+	return nil
 }
 
 func configureSQLiteDSN(dsn string) (configured string, inMemory bool, err error) {

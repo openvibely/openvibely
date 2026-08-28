@@ -1059,6 +1059,32 @@ func (r *ThreadInputRepo) WithImmediateTx(ctx context.Context, fn func(SQLExecut
 }
 
 func beginImmediateTx(ctx context.Context, db *sql.DB) (*manualTx, func(), error) {
+	conn, cleanup, err := beginImmediateConn(ctx, db)
+	if err != nil {
+		return nil, nil, err
+	}
+	tx := &manualTx{conn: conn, ctx: ctx}
+	return tx, func() {
+		_ = tx.Rollback()
+		cleanup()
+	}, nil
+}
+
+func withBoundSQLiteConn(ctx context.Context, db *sql.DB, fn func(*sql.Conn) error) error {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	restoreBusyTimeout, err := boundSQLiteBusyTimeoutToContext(ctx, conn)
+	if err != nil {
+		return err
+	}
+	defer restoreBusyTimeout()
+	return fn(conn)
+}
+
+func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -1073,9 +1099,10 @@ func beginImmediateTx(ctx context.Context, db *sql.DB) (*manualTx, func(), error
 		_ = conn.Close()
 		return nil, nil, err
 	}
-	tx := &manualTx{conn: conn, ctx: ctx}
-	return tx, func() {
-		_ = tx.Rollback()
+	return conn, func() {
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), sqliteBusyTimeoutRestoreReserve)
+		defer cancel()
+		_, _ = conn.ExecContext(rollbackCtx, `ROLLBACK`)
 		restoreBusyTimeout()
 		_ = conn.Close()
 	}, nil

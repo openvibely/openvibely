@@ -391,32 +391,24 @@ func requireAffected(result sql.Result) error {
 }
 
 func (r *AlertRepo) withImmediateAlertMutation(ctx context.Context, mutate func(*sql.Conn) error, afterCommit func()) error {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	committed := false
-	closed := false
+	finished := false
 	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-		if !closed {
-			_ = conn.Close()
+		if !finished {
+			finishImmediate()
 		}
 	}()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
 	if err := mutate(conn); err != nil {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
-	_ = conn.Close()
-	closed = true
+	finishImmediate()
+	finished = true
 	if afterCommit != nil {
 		afterCommit()
 	}

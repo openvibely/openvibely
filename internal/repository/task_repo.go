@@ -613,8 +613,13 @@ const taskThreadInputOwnsAdmissionPredicate = `EXISTS (
 // ClaimTask atomically sets status to running only if the task is currently pending.
 // Returns true if the claim succeeded, false if the task was already running/completed/failed.
 func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
-	// Get the task first to know the project ID
-	task, err := r.GetByID(ctx, id)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
+	if err != nil {
+		return false, fmt.Errorf("beginning task claim: %w", err)
+	}
+	defer cleanup()
+
+	task, err := getTaskWithExecutor(ctx, tx, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
 	if err != nil {
 		return false, fmt.Errorf("getting task before claim: %w", err)
 	}
@@ -622,7 +627,7 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 		return false, fmt.Errorf("task not found: %s", id)
 	}
 
-	result, err := r.db.ExecContext(ctx,
+	result, err := tx.ExecContext(ctx,
 		`UPDATE tasks SET status = 'running', updated_at = datetime('now')
 		 WHERE id = ? AND status = 'pending'
 		   AND NOT EXISTS (SELECT 1 FROM automation_task_run_reservations r WHERE r.task_id = tasks.id)
@@ -635,6 +640,9 @@ func (r *TaskRepo) ClaimTask(ctx context.Context, id string) (bool, error) {
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("claiming task rows affected: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("committing task claim: %w", err)
 	}
 
 	claimed := rows > 0
@@ -667,20 +675,11 @@ type TaskDispatchClaim struct {
 // prevents a concurrent Automation Save from mixing a stale queued snapshot
 // with a replacement graph.
 func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDispatchClaim, bool, error) {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, false, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, false, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	task, err := getTaskWithExecutor(ctx, conn, `SELECT `+taskSelectColumns+` FROM tasks WHERE id = ?`, id)
 	if err != nil {
@@ -693,7 +692,6 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		committed = true
 		return &TaskDispatchClaim{Task: *task}, false, nil
 	}
 
@@ -750,7 +748,6 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		committed = true
 		return &TaskDispatchClaim{Task: *task, AutomationContext: automationContext}, false, nil
 	}
 	result, err := conn.ExecContext(ctx, `UPDATE tasks SET status = 'running', updated_at = datetime('now')
@@ -769,14 +766,12 @@ func (r *TaskRepo) ClaimTaskForDispatch(ctx context.Context, id string) (*TaskDi
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		committed = true
 		return &TaskDispatchClaim{Task: *task}, false, nil
 	}
 	task.Status = models.StatusRunning
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, false, err
 	}
-	committed = true
 
 	if r.broadcaster != nil {
 		r.broadcaster.Publish(events.TaskEvent{Type: events.TaskStatusChanged, TaskID: task.ID, TaskName: task.Title,

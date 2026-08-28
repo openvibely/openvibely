@@ -1,4 +1,4 @@
-package database
+package database_test
 
 import (
 	"context"
@@ -12,11 +12,14 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/openvibely/openvibely/internal/database"
+	"github.com/openvibely/openvibely/internal/repository"
 )
 
 // BenchmarkSQLiteConnectionPool compares disposable WAL databases only. Run with:
 //
-//	go test ./internal/database -run '^$' -bench '^BenchmarkSQLiteConnectionPool$' -benchtime=1000x -count=3
+//	go test ./internal/database -run '^$' -bench '^BenchmarkSQLiteConnectionPool$' -benchtime=2s -count=3
 //
 // The mixed case models status/history reads, atomic task claims, and execution
 // output persistence. The held WAL reader makes WAL growth visible under writes.
@@ -36,7 +39,7 @@ func BenchmarkSQLiteConnectionPool(b *testing.B) {
 func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload string) {
 	b.StopTimer()
 	dbPath := filepath.Join(b.TempDir(), "pool-benchmark.db")
-	db, err := New(dbPath)
+	db, err := database.New(dbPath)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -44,10 +47,13 @@ func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload st
 	db.SetMaxOpenConns(poolSize)
 	db.SetMaxIdleConns(poolSize)
 	seedSQLitePoolBenchmark(b, db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	executionRepo := repository.NewExecutionRepo(db)
+	automationRepo := repository.NewAutomationRepo(db)
 
 	// A sustained independent reader models execution-history/SSE consumers and
 	// makes WAL growth visible without consuming a slot from the measured pool.
-	readerDB, err := sql.Open("sqlite", mustConfigureBenchmarkDSN(b, dbPath))
+	readerDB, err := database.New(dbPath)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -83,11 +89,43 @@ func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload st
 		}
 	}
 
+	walBaseline := int64(0)
+	if info, err := os.Stat(dbPath + "-wal"); err == nil {
+		walBaseline = info.Size()
+	}
+
 	before := db.Stats()
 	latencies := make([]time.Duration, b.N)
 	var next atomic.Int64
-	var busy, busySnapshot atomic.Int64
+	var busy, busySnapshot, streamFlushes atomic.Int64
 	payload := strings.Repeat("stream-output-", 256)
+	streamStop := make(chan struct{})
+	streamErrors := make(chan error, active)
+	var streamWG sync.WaitGroup
+	if workload == "mixed" {
+		for worker := 0; worker < active; worker++ {
+			worker := worker
+			streamWG.Add(1)
+			go func() {
+				defer streamWG.Done()
+				ticker := time.NewTicker(500 * time.Millisecond)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-streamStop:
+						return
+					case <-ticker.C:
+						id := worker % 256
+						if err := executionRepo.UpdateOutput(context.Background(), fmt.Sprintf("pool-exec-%03d", id), payload); err != nil {
+							streamErrors <- err
+							return
+						}
+						streamFlushes.Add(1)
+					}
+				}
+			}()
+		}
+	}
 	started := time.Now()
 	b.StartTimer()
 	var wg sync.WaitGroup
@@ -101,7 +139,7 @@ func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload st
 					return
 				}
 				opStarted := time.Now()
-				err := runSQLitePoolBenchmarkOperation(db, workload, i, payload)
+				err := runSQLitePoolBenchmarkOperation(db, taskRepo, executionRepo, automationRepo, workload, i, payload)
 				latencies[i] = time.Since(opStarted)
 				if err != nil {
 					message := strings.ToUpper(err.Error())
@@ -117,6 +155,12 @@ func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload st
 		}()
 	}
 	wg.Wait()
+	close(streamStop)
+	streamWG.Wait()
+	close(streamErrors)
+	for err := range streamErrors {
+		b.Errorf("stream flush: %v", err)
+	}
 	elapsed := time.Since(started)
 	b.StopTimer()
 
@@ -131,18 +175,14 @@ func benchmarkSQLitePoolWorkload(b *testing.B, poolSize, active int, workload st
 	b.ReportMetric(float64((after.WaitDuration - before.WaitDuration).Microseconds()), "wait-us")
 	b.ReportMetric(float64(busy.Load()), "sqlite-busy")
 	b.ReportMetric(float64(busySnapshot.Load()), "busy-snapshot")
+	b.ReportMetric(float64(streamFlushes.Load()), "stream-flushes")
 	if info, err := os.Stat(dbPath + "-wal"); err == nil {
-		b.ReportMetric(float64(info.Size()), "wal-bytes")
+		growth := info.Size() - walBaseline
+		if growth < 0 {
+			growth = 0
+		}
+		b.ReportMetric(float64(growth), "wal-growth-bytes")
 	}
-}
-
-func mustConfigureBenchmarkDSN(b *testing.B, dsn string) string {
-	b.Helper()
-	configured, _, err := configureSQLiteDSN(dsn)
-	if err != nil {
-		b.Fatal(err)
-	}
-	return configured
 }
 
 func seedSQLitePoolBenchmark(b *testing.B, db *sql.DB) {
@@ -155,13 +195,33 @@ func seedSQLitePoolBenchmark(b *testing.B, db *sql.DB) {
 	if _, err := tx.Exec(`INSERT INTO projects(id, name) VALUES ('pool-bench', 'Pool benchmark')`); err != nil {
 		b.Fatal(err)
 	}
+	if _, err := tx.Exec(`
+		INSERT INTO automations(id, project_id, stable_key, name, lifecycle_state) VALUES ('pool-automation', 'pool-bench', 'pool-automation', 'Pool Automation', 'active');
+		INSERT INTO automation_versions(id, project_id, automation_id, version, state, source, adapter_key) VALUES ('pool-version', 'pool-bench', 'pool-automation', 1, 'published', 'bootstrap', 'custom');
+		INSERT INTO automation_nodes(id, project_id, automation_id, version_id, node_key, name, node_type, role) VALUES ('pool-trigger', 'pool-bench', 'pool-automation', 'pool-version', 'trigger', 'Trigger', 'trigger', 'trigger');
+		UPDATE automations SET published_version_id='pool-version' WHERE id='pool-automation';
+	`); err != nil {
+		b.Fatal(err)
+	}
 	for i := 0; i < 256; i++ {
 		taskID := fmt.Sprintf("pool-task-%03d", i)
+		streamTaskID := fmt.Sprintf("stream-task-%03d", i)
 		execID := fmt.Sprintf("pool-exec-%03d", i)
+		invocationID := fmt.Sprintf("pool-invocation-%03d", i)
+		dispatchID := fmt.Sprintf("pool-dispatch-%03d", i)
 		if _, err := tx.Exec(`INSERT INTO tasks(id, project_id, title, category, status) VALUES (?, 'pool-bench', ?, 'active', 'pending')`, taskID, "Pool task "+taskID); err != nil {
 			b.Fatal(err)
 		}
-		if _, err := tx.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent, output) VALUES (?, ?, 'running', 'benchmark prompt', 'initial output')`, execID, taskID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO tasks(id, project_id, title, category, status) VALUES (?, 'pool-bench', ?, 'active', 'running')`, streamTaskID, "Stream task "+streamTaskID); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := tx.Exec(`INSERT INTO executions(id, task_id, status, prompt_sent, output) VALUES (?, ?, 'running', 'benchmark prompt', 'initial output')`, execID, streamTaskID); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := tx.Exec(`INSERT INTO automation_invocations(id, project_id, automation_id, version_id, trigger_node_id, trigger_resource_type, trigger_resource_id, occurrence_key, status) VALUES (?, 'pool-bench', 'pool-automation', 'pool-version', 'pool-trigger', 'task', ?, ?, 'claimed')`, invocationID, taskID, "occurrence-"+taskID); err != nil {
+			b.Fatal(err)
+		}
+		if _, err := tx.Exec(`INSERT INTO automation_dispatch_outbox(id, invocation_id, task_id, status) VALUES (?, ?, ?, 'pending')`, dispatchID, invocationID, taskID); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -170,35 +230,37 @@ func seedSQLitePoolBenchmark(b *testing.B, db *sql.DB) {
 	}
 }
 
-func runSQLitePoolBenchmarkOperation(db *sql.DB, workload string, i int, payload string) error {
+func runSQLitePoolBenchmarkOperation(db *sql.DB, taskRepo *repository.TaskRepo, executionRepo *repository.ExecutionRepo, automationRepo *repository.AutomationRepo, workload string, i int, payload string) error {
 	id := i % 256
+	taskID := fmt.Sprintf("pool-task-%03d", id)
 	switch workload {
 	case "read":
-		var status, title, output string
-		if err := db.QueryRow(`SELECT status, title FROM tasks WHERE id = ?`, fmt.Sprintf("pool-task-%03d", id)).Scan(&status, &title); err != nil {
+		if _, err := taskRepo.GetByID(context.Background(), taskID); err != nil {
 			return err
 		}
-		return db.QueryRow(`SELECT output FROM executions WHERE task_id = ? ORDER BY started_at DESC LIMIT 1`, fmt.Sprintf("pool-task-%03d", id)).Scan(&output)
-	case "write":
-		_, err := db.Exec(`UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, payload, fmt.Sprintf("pool-exec-%03d", id))
+		_, err := executionRepo.ListByTaskHistoryPage(context.Background(), fmt.Sprintf("stream-task-%03d", id), 20)
 		return err
+	case "write":
+		return executionRepo.UpdateOutput(context.Background(), fmt.Sprintf("pool-exec-%03d", id), payload)
 	case "mixed":
 		if i%5 != 0 {
-			return runSQLitePoolBenchmarkOperation(db, "read", i, payload)
+			return runSQLitePoolBenchmarkOperation(db, taskRepo, executionRepo, automationRepo, "read", i, payload)
 		}
-		// Atomic conditional claim and reset represent scheduler/Automation claims
-		// without introducing a deferred read-before-write snapshot.
-		result, err := db.Exec(`UPDATE tasks SET status='running' WHERE id=? AND status='pending'`, fmt.Sprintf("pool-task-%03d", id))
-		if err != nil {
-			return err
-		}
-		claimed, _ := result.RowsAffected()
-		if claimed == 1 {
-			if _, err := db.Exec(`UPDATE executions SET output=? WHERE id=? AND status='running'`, payload, fmt.Sprintf("pool-exec-%03d", id)); err != nil {
+		if i%10 == 0 {
+			claimed, err := taskRepo.ClaimTask(context.Background(), taskID)
+			if err != nil {
 				return err
 			}
-			_, err = db.Exec(`UPDATE tasks SET status='pending' WHERE id=? AND status='running'`, fmt.Sprintf("pool-task-%03d", id))
+			if claimed {
+				_, err = db.Exec(`UPDATE tasks SET status='pending' WHERE id=? AND status='running'`, taskID)
+			}
+			return err
 		}
+		dispatch, err := automationRepo.LeaseNextDispatch(context.Background(), fmt.Sprintf("benchmark-worker-%d", i), time.Now().UTC(), time.Minute)
+		if err != nil || dispatch == nil {
+			return err
+		}
+		_, err = db.Exec(`UPDATE automation_dispatch_outbox SET status='pending', claimed_by='', claim_expires_at=NULL WHERE id=? AND status='processing'`, dispatch.ID)
 		return err
 	default:
 		return fmt.Errorf("unknown workload %q", workload)

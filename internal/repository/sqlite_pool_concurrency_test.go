@@ -2,6 +2,9 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -97,6 +100,69 @@ func TestBoundSQLiteBusyTimeoutToContextRestoresSameConnection(t *testing.T) {
 	}
 }
 
+func TestImmediateRepositoryOperationsHonorContextDeadline(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(context.Context, *sql.DB) error
+	}{
+		{
+			name: "task dispatch claim",
+			run: func(ctx context.Context, db *sql.DB) error {
+				_, _, err := NewTaskRepo(db, nil).ClaimTaskForDispatch(ctx, "locked-task")
+				return err
+			},
+		},
+		{
+			name: "automation resume",
+			run: func(ctx context.Context, db *sql.DB) error {
+				_, err := NewAutomationRepo(db).ResumeAutomation(ctx, "locked-project", "locked-automation")
+				return err
+			},
+		},
+		{
+			name: "automation dispatch lease",
+			run: func(ctx context.Context, db *sql.DB) error {
+				_, err := NewAutomationRepo(db).LeaseNextDispatch(ctx, "locked-worker", time.Now().UTC(), time.Minute)
+				return err
+			},
+		},
+		{
+			name: "execution output flush",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewExecutionRepo(db).UpdateOutput(ctx, "locked-execution", "output")
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := database.New(filepath.Join(t.TempDir(), "deadline.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			locker, err := db.Conn(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer locker.Close()
+			if _, err := locker.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+				t.Fatal(err)
+			}
+			defer locker.ExecContext(context.Background(), `ROLLBACK`)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+			defer cancel()
+			started := time.Now()
+			if err := tt.run(ctx, db); err == nil {
+				t.Fatal("operation unexpectedly acquired held writer lock")
+			}
+			if elapsed := time.Since(started); elapsed > time.Second {
+				t.Fatalf("context-bounded operation took %s", elapsed)
+			}
+		})
+	}
+}
+
 func TestExecutionRepoPeriodicOutputCannotOverwriteTerminalOutput(t *testing.T) {
 	db, err := database.New(filepath.Join(t.TempDir(), "stream-output.db"))
 	if err != nil {
@@ -120,6 +186,145 @@ func TestExecutionRepoPeriodicOutputCannotOverwriteTerminalOutput(t *testing.T) 
 	}
 	if output != "final" {
 		t.Fatalf("terminal output = %q, want final", output)
+	}
+}
+
+func TestAutomationRepoConcurrentLeaseAdmitsExactlyOnceWithFilePool(t *testing.T) {
+	db, err := database.New(filepath.Join(t.TempDir(), "automation-claim.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+	repo := NewAutomationRepo(db)
+	task := createRuntimeScheduledTask(t, ctx, NewTaskRepo(db, nil), fixture.ProjectID, "Concurrent Automation claim")
+	due := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], due)
+	if _, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, time.Now().UTC(), nil); err != nil || dispatch == nil {
+		t.Fatalf("seed dispatch = %#v, %v", dispatch, err)
+	}
+
+	start := make(chan struct{})
+	claims := make(chan *models.AutomationDispatch, 8)
+	errs := make(chan error, 8)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			claim, err := repo.LeaseNextDispatch(ctx, fmt.Sprintf("worker-%d", i), time.Now().UTC(), time.Minute)
+			claims <- claim
+			errs <- err
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(claims)
+	close(errs)
+	count := 0
+	for claim := range claims {
+		if claim != nil {
+			count++
+		}
+	}
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if count != 1 {
+		t.Fatalf("Automation dispatch leases = %d, want 1", count)
+	}
+}
+
+func TestThreadInputSteeringPreparationAndPromotionAreAtomicWithFilePool(t *testing.T) {
+	db, err := database.New(filepath.Join(t.TempDir(), "thread-input.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if _, err := db.Exec(`
+		INSERT INTO agent_configs(id, name, provider, model, is_default) VALUES ('thread-model', 'Thread model', 'test', 'test-model', 1);
+		INSERT INTO projects(id, name) VALUES ('thread-project', 'Thread project');
+		INSERT INTO tasks(id, project_id, title, category, status) VALUES ('thread-task', 'thread-project', 'Thread task', 'active', 'running');
+		INSERT INTO executions(id, task_id, status) VALUES ('active-execution', 'thread-task', 'running');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewThreadInputRepo(db)
+	steering := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "thread-project", TaskID: "thread-task", ExpectedTurnID: "active-execution", Content: "steer"}
+	if err := repo.CreateSteeringForActiveExecution(ctx, steering, "active-execution"); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	prepared := make(chan int, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rows, err := repo.PreparePendingSteering(ctx, "active-execution", "active-execution")
+			prepared <- len(rows)
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(prepared)
+	close(errs)
+	totalPrepared := 0
+	for count := range prepared {
+		totalPrepared += count
+	}
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if totalPrepared != 1 {
+		t.Fatalf("prepared steering rows = %d, want 1", totalPrepared)
+	}
+
+	if _, err := db.Exec(`UPDATE executions SET status='completed' WHERE id='active-execution'; UPDATE tasks SET status='pending' WHERE id='thread-task'`); err != nil {
+		t.Fatal(err)
+	}
+	queued := &models.ThreadInput{Scope: models.ThreadInputScopeTask, ProjectID: "thread-project", TaskID: "thread-task", Content: "queued"}
+	if err := repo.CreateQueued(ctx, queued); err != nil {
+		t.Fatal(err)
+	}
+	start = make(chan struct{})
+	promotionErrs := make(chan error, 2)
+	var agentConfigID string
+	if err := db.QueryRow(`SELECT id FROM agent_configs ORDER BY created_at, id LIMIT 1`).Scan(&agentConfigID); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			promotionErrs <- repo.ClaimQueuedForTaskExecution(ctx, queued.ID, &models.Execution{TaskID: "thread-task", AgentConfigID: agentConfigID, PromptSent: "queued", IsFollowup: true})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(promotionErrs)
+	successes := 0
+	for err := range promotionErrs {
+		if err == nil {
+			successes++
+		} else if !errors.Is(err, ErrInputNotPending) && !errors.Is(err, ErrActiveTurnChanged) {
+			t.Fatal(err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("queued promotions = %d, want 1", successes)
 	}
 }
 

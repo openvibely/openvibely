@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -200,6 +201,87 @@ func TestNew_WriteLockUsesConfiguredBusyTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed < 4*time.Second || elapsed > 7*time.Second {
 		t.Fatalf("write lock wait = %s, want the configured five-second timeout", elapsed)
+	}
+}
+
+func TestNew_StartupStaysSerializedAndFailureClosesDatabase(t *testing.T) {
+	sentinel := errors.New("injected startup failure")
+	var opened *sql.DB
+	db, err := newSQLiteDatabase(filepath.Join(t.TempDir(), "startup.db"), func(candidate *sql.DB) error {
+		opened = candidate
+		stats := candidate.Stats()
+		if stats.MaxOpenConnections != 1 {
+			t.Fatalf("startup MaxOpenConnections = %d, want 1", stats.MaxOpenConnections)
+		}
+		conn, err := candidate.Conn(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if candidate.Stats().OpenConnections != 1 {
+			t.Fatalf("startup opened %d physical connections, want 1", candidate.Stats().OpenConnections)
+		}
+		return sentinel
+	})
+	if db != nil || !errors.Is(err, sentinel) {
+		t.Fatalf("newSQLiteDatabase = %#v, %v; want nil, sentinel", db, err)
+	}
+	if opened == nil {
+		t.Fatal("initializer did not receive database")
+	}
+	if err := opened.Ping(); err == nil || !strings.Contains(err.Error(), "database is closed") {
+		t.Fatalf("Ping after startup failure = %v, want closed database error", err)
+	}
+}
+
+func TestNew_MultipleReadersUseDistinctPhysicalConnections(t *testing.T) {
+	db, err := New(filepath.Join(t.TempDir(), "readers.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	conns := make([]*sql.Conn, 2)
+	for i := range conns {
+		conns[i], err = db.Conn(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conns[i].Close()
+	}
+	start := make(chan struct{})
+	ready := make(chan struct{}, 2)
+	release := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, conn := range conns {
+		go func(conn *sql.Conn) {
+			<-start
+			if _, err := conn.ExecContext(context.Background(), `BEGIN`); err != nil {
+				ready <- struct{}{}
+				errs <- err
+				return
+			}
+			var count int
+			err := conn.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM tasks`).Scan(&count)
+			ready <- struct{}{}
+			<-release
+			if _, rollbackErr := conn.ExecContext(context.Background(), `ROLLBACK`); err == nil {
+				err = rollbackErr
+			}
+			errs <- err
+		}(conn)
+	}
+	close(start)
+	<-ready
+	<-ready
+	if db.Stats().InUse != 2 {
+		t.Fatalf("simultaneous readers in use = %d, want 2", db.Stats().InUse)
+	}
+	close(release)
+	for range conns {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

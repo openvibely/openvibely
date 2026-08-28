@@ -35,7 +35,39 @@ func TestReclaimOnceSkipsLowFreelistAndReclaimsHighFreelist(t *testing.T) {
 	if freeBefore < vacuumMinPages {
 		t.Skipf("fixture produced only %d free pages; need at least %d to exercise reclaim path", freeBefore, vacuumMinPages)
 	}
-	reclaimOnce(ctx, db)
+	reader, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("acquire WAL reader: %v", err)
+	}
+	defer reader.Close()
+	if _, err := reader.ExecContext(ctx, `BEGIN`); err != nil {
+		t.Fatalf("begin WAL reader: %v", err)
+	}
+	defer reader.ExecContext(context.Background(), `ROLLBACK`)
+	var heldCount int
+	if err := reader.QueryRowContext(ctx, `SELECT COUNT(*) FROM vacuum_payload`).Scan(&heldCount); err != nil {
+		t.Fatalf("read held snapshot: %v", err)
+	}
+
+	start := make(chan struct{})
+	vacuumDone := make(chan struct{})
+	writerDone := make(chan error, 1)
+	go func() {
+		<-start
+		reclaimOnce(ctx, db)
+		close(vacuumDone)
+	}()
+	go func() {
+		<-start
+		_, err := db.ExecContext(ctx, `INSERT INTO vacuum_payload(body) VALUES ('concurrent writer')`)
+		writerDone <- err
+	}()
+	close(start)
+	<-vacuumDone
+	if err := <-writerDone; err != nil {
+		t.Fatalf("writer concurrent with incremental vacuum: %v", err)
+	}
+
 	var freeAfter int
 	if err := db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&freeAfter); err != nil {
 		t.Fatalf("freelist after: %v", err)

@@ -129,20 +129,11 @@ func (r *AutomationRepo) GetDefinition(ctx context.Context, projectID, automatio
 }
 
 func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.AutomationRegisteredPublication) (*models.AutomationDefinition, bool, error) {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
-		return nil, false, fmt.Errorf("automation publication connection: %w", err)
-	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return nil, false, fmt.Errorf("beginning automation publication: %w", err)
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	a, err := getAutomationByStableKeyQuery(ctx, conn, in.ProjectID, in.StableKey)
 	if err != nil {
@@ -175,7 +166,6 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		committed = true
 		return def, true, nil
 	}
 	if a == nil {
@@ -298,7 +288,6 @@ func (r *AutomationRepo) PublishRegistered(ctx context.Context, in models.Automa
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, false, fmt.Errorf("committing automation publication: %w", err)
 	}
-	committed = true
 	r.PublishInvalidation(events.AutomationDefinitionUpdated, in.ProjectID, models.AutomationBinding{AutomationID: def.Automation.ID, VersionID: def.Version.ID})
 	return def, false, nil
 }
