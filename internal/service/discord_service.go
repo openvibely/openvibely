@@ -680,13 +680,7 @@ func (s *DiscordService) getActiveProject(ctx context.Context, userID string) st
 	if err != nil || len(projects) == 0 {
 		return ""
 	}
-	selected := projects[0].ID
-	for _, p := range projects {
-		if p.IsDefault {
-			selected = p.ID
-			break
-		}
-	}
+	selected := fallbackProjectID(projects)
 	s.mu.Lock()
 	s.userProjects[key] = selected
 	s.mu.Unlock()
