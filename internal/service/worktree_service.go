@@ -1849,8 +1849,14 @@ func worktreeDiffFileTargets(worktreePath string, mergeBase string) ([]worktreeD
 	return targets, nil
 }
 
-func parseWorktreeDiffFileTargets(out []byte) []worktreeDiffFileTarget {
-	var targets []worktreeDiffFileTarget
+type worktreeNameStatusRecord struct {
+	Status     string
+	Path       string
+	SourcePath string
+}
+
+func parseWorktreeNameStatus(out []byte) []worktreeNameStatusRecord {
+	var records []worktreeNameStatusRecord
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
@@ -1859,12 +1865,26 @@ func parseWorktreeDiffFileTargets(out []byte) []worktreeDiffFileTarget {
 		if len(parts) < 2 {
 			continue
 		}
-		status := parts[0]
-		if (strings.HasPrefix(status, "R") || strings.HasPrefix(status, "C")) && len(parts) >= 3 {
-			targets = append(targets, worktreeDiffFileTarget{Path: parts[2], Pathspecs: []string{parts[1], parts[2]}})
-			continue
+
+		record := worktreeNameStatusRecord{Status: parts[0], Path: parts[1]}
+		if (strings.HasPrefix(record.Status, "R") || strings.HasPrefix(record.Status, "C")) && len(parts) >= 3 {
+			record.SourcePath = parts[1]
+			record.Path = parts[2]
 		}
-		targets = append(targets, worktreeDiffFileTarget{Path: parts[1], Pathspecs: []string{parts[1]}})
+		records = append(records, record)
+	}
+	return records
+}
+
+func parseWorktreeDiffFileTargets(out []byte) []worktreeDiffFileTarget {
+	records := parseWorktreeNameStatus(out)
+	targets := make([]worktreeDiffFileTarget, 0, len(records))
+	for _, record := range records {
+		pathspecs := []string{record.Path}
+		if record.SourcePath != "" {
+			pathspecs = []string{record.SourcePath, record.Path}
+		}
+		targets = append(targets, worktreeDiffFileTarget{Path: record.Path, Pathspecs: pathspecs})
 	}
 	return targets
 }
@@ -2040,16 +2060,10 @@ func GetWorktreeFileStatsWithUncommitted(repoDir string, branchName string, targ
 }
 
 func parseWorktreeFileStats(out []byte) []WorktreeFileStat {
-	var stats []WorktreeFileStat
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		stats = append(stats, WorktreeFileStat{Path: parts[1], Status: gitStatusToWorktreeFileStatus(parts[0])})
+	records := parseWorktreeNameStatus(out)
+	stats := make([]WorktreeFileStat, 0, len(records))
+	for _, record := range records {
+		stats = append(stats, WorktreeFileStat{Path: record.Path, Status: gitStatusToWorktreeFileStatus(record.Status)})
 	}
 	return stats
 }
