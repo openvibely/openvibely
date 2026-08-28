@@ -23,6 +23,8 @@ type fakeGitHubIssueActionProvider struct {
 	myAssignedIssues          []GitHubIssue
 	assignedIssues            []GitHubIssue
 	assignedIssuesWithPRs     []GitHubIssueWithPullRequest
+	myAssignedCalls           int
+	assignedIssuesCalls       int
 	assignedIssuesWithPRCalls int
 }
 
@@ -31,6 +33,7 @@ func (f *fakeGitHubIssueActionProvider) GetIssue(_ context.Context, _ *GitHubRep
 	return &GitHubIssue{Number: issueNumber, Title: "shared"}, nil
 }
 func (f *fakeGitHubIssueActionProvider) ListAuthenticatedAssignedIssues(_ context.Context, _ *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+	f.myAssignedCalls++
 	if f.myAssignedIssues != nil {
 		return &GitHubAuthenticatedUser{Login: "Me"}, f.myAssignedIssues, nil
 	}
@@ -43,6 +46,7 @@ func (f *fakeGitHubIssueActionProvider) ListAuthenticatedCreatedIssues(_ context
 	return &GitHubAuthenticatedUser{Login: "Me"}, []GitHubIssue{{Number: 9, URL: "https://github.com/owner/repo/issues/9", Title: "Existing issue", Body: "Detailed existing issue body", State: "open", UserLogin: "Me", Labels: []string{"bug"}}}, nil
 }
 func (f *fakeGitHubIssueActionProvider) ListAssignedIssues(_ context.Context, _ *GitHubRepoRef, _ string) ([]GitHubIssue, error) {
+	f.assignedIssuesCalls++
 	if f.assignedIssues != nil {
 		return f.assignedIssues, nil
 	}
@@ -354,6 +358,94 @@ func TestGitHubIssueActionCoreAssignedIssuesPaginateCompactCandidateList(t *test
 	}
 	if _, err := core.ExecuteListAssignedIssues(context.Background(), json.RawMessage(`{"assignee":"openvibely","limit":101}`)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
 		t.Fatalf("invalid limit error=%v, want validation error", err)
+	}
+}
+
+func TestGitHubIssueActionCoreAssignedIssuePaginationDistinguishesOmittedLimitFromExplicitZero(t *testing.T) {
+	issues := make([]GitHubIssue, 101)
+	issuesWithPRs := make([]GitHubIssueWithPullRequest, 101)
+	for i := range issues {
+		issue := GitHubIssue{Number: i + 1, Title: fmt.Sprintf("Issue %d", i+1)}
+		issues[i] = issue
+		issuesWithPRs[i] = GitHubIssueWithPullRequest{Issue: issue, PullRequest: GitHubPullRequest{Number: i + 1001}}
+	}
+	provider := &fakeGitHubIssueActionProvider{
+		myAssignedIssues:      issues,
+		assignedIssues:        issues,
+		assignedIssuesWithPRs: issuesWithPRs,
+	}
+	core := NewGitHubIssueActionCore(provider, fakeGitHubIssueAuthorizationStore{}, "project-1",
+		func(input json.RawMessage, dst any) error { return json.Unmarshal(input, dst) },
+		func(context.Context, string) (*GitHubRepoRef, error) {
+			return &GitHubRepoRef{FullName: "owner/repo"}, nil
+		})
+
+	type paginationMetadata struct {
+		Returned   int  `json:"returned"`
+		Total      int  `json:"total"`
+		Offset     int  `json:"offset"`
+		NextOffset int  `json:"next_offset"`
+		Truncated  bool `json:"truncated"`
+	}
+	type action struct {
+		name      string
+		omitted   string
+		invalid   []string
+		execute   func(context.Context, json.RawMessage) (string, error)
+		callCount func() int
+	}
+	actions := []action{
+		{
+			name:      "my assigned issues",
+			omitted:   `{}`,
+			invalid:   []string{`{"limit":0}`, `{"Limit":0}`, `{"LIMIT":0}`, `{"limit":101}`, `{"offset":-1}`, `{"Offset":-1}`},
+			execute:   core.ExecuteListMyAssignedIssues,
+			callCount: func() int { return provider.myAssignedCalls },
+		},
+		{
+			name:      "assigned issues",
+			omitted:   `{"assignee":"openvibely"}`,
+			invalid:   []string{`{"assignee":"openvibely","limit":0}`, `{"assignee":"openvibely","Limit":0}`, `{"assignee":"openvibely","LIMIT":0}`, `{"assignee":"openvibely","limit":101}`, `{"assignee":"openvibely","offset":-1}`, `{"assignee":"openvibely","Offset":-1}`},
+			execute:   core.ExecuteListAssignedIssues,
+			callCount: func() int { return provider.assignedIssuesCalls },
+		},
+		{
+			name:      "assigned issues with pull requests",
+			omitted:   `{"assignee":"openvibely"}`,
+			invalid:   []string{`{"assignee":"openvibely","limit":0}`, `{"assignee":"openvibely","Limit":0}`, `{"assignee":"openvibely","LIMIT":0}`, `{"assignee":"openvibely","limit":101}`, `{"assignee":"openvibely","offset":-1}`, `{"assignee":"openvibely","Offset":-1}`},
+			execute:   core.ExecuteListAssignedIssuesWithPRs,
+			callCount: func() int { return provider.assignedIssuesWithPRCalls },
+		},
+	}
+
+	for _, action := range actions {
+		t.Run(action.name, func(t *testing.T) {
+			callsBeforeOmitted := action.callCount()
+			output, err := action.execute(context.Background(), json.RawMessage(action.omitted))
+			if err != nil {
+				t.Fatalf("omitted limit error=%v output=%q", err, output)
+			}
+			var metadata paginationMetadata
+			if err := json.Unmarshal([]byte(output), &metadata); err != nil {
+				t.Fatalf("decode omitted-limit output %q: %v", output, err)
+			}
+			if metadata.Returned != 100 || metadata.Total != 101 || metadata.Offset != 0 || metadata.NextOffset != 100 || !metadata.Truncated {
+				t.Fatalf("omitted-limit metadata=%+v, want returned=100 total=101 offset=0 next_offset=100 truncated=true", metadata)
+			}
+			if calls := action.callCount(); calls != callsBeforeOmitted+1 {
+				t.Fatalf("provider calls after omitted limit=%d, want %d", calls, callsBeforeOmitted+1)
+			}
+
+			callsBeforeInvalid := action.callCount()
+			for _, input := range action.invalid {
+				if output, err := action.execute(context.Background(), json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+					t.Fatalf("invalid input %s output=%q error=%v, want validation error", input, output, err)
+				}
+				if calls := action.callCount(); calls != callsBeforeInvalid {
+					t.Fatalf("provider calls after invalid input %s=%d, want %d", input, calls, callsBeforeInvalid)
+				}
+			}
+		})
 	}
 }
 

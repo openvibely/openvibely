@@ -294,7 +294,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			limit, offset, err := assignedIssueListPage(req)
+			limit, offset, err := assignedIssueListPageForInput(input, req)
 			if err != nil {
 				return "", err
 			}
@@ -315,7 +315,7 @@ func buildGitHubIssueRuntimeHandlers(opts githubIssueRuntimeOptions) map[string]
 			if err != nil {
 				return "", err
 			}
-			limit, offset, err := assignedIssueListPage(req)
+			limit, offset, err := assignedIssueListPageForInput(input, req)
 			if err != nil {
 				return "", err
 			}

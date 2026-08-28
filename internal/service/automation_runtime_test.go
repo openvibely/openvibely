@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/automationobs"
+	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/events"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
@@ -67,6 +68,98 @@ func automationNodeByKey(t *testing.T, definition *models.AutomationDefinition, 
 	}
 	t.Fatalf("missing automation node %s", key)
 	return models.AutomationNode{}
+}
+
+func TestGitHubIssueRuntimeAssignedIssuePaginationPresenceAware(t *testing.T) {
+	ctx := context.Background()
+	db := testutil.NewTestDB(t)
+	projectRepo := repository.NewProjectRepo(db)
+	project := models.Project{Name: "GitHub pagination runtime", RepoURL: "https://github.com/openvibely/openvibely"}
+	require.NoError(t, projectRepo.Create(ctx, &project))
+	authRepo := repository.NewGitHubAuthRepo(db)
+	require.NoError(t, authRepo.UpsertAuthorizedActor(ctx, &models.GitHubAuthorizedActor{GitHubLogin: "openvibely"}))
+
+	issues := make([]GitHubIssue, 101)
+	for i := range issues {
+		issues[i] = GitHubIssue{Number: i + 1, Title: fmt.Sprintf("Issue %d", i+1)}
+	}
+	var myAssignedCalls atomic.Int32
+	var assignedIssuesCalls atomic.Int32
+	provider := &fakeGitHubIssueRuntimeProvider{
+		listMyIssuesFn: func(context.Context, *GitHubRepoRef) (*GitHubAuthenticatedUser, []GitHubIssue, error) {
+			myAssignedCalls.Add(1)
+			return &GitHubAuthenticatedUser{Login: "openvibely"}, issues, nil
+		},
+		listAssignedIssuesFn: func(_ context.Context, _ *GitHubRepoRef, assignee string) ([]GitHubIssue, error) {
+			require.Equal(t, "openvibely", assignee)
+			assignedIssuesCalls.Add(1)
+			return issues, nil
+		},
+	}
+	handlers := buildGitHubIssueRuntimeHandlers(githubIssueRuntimeOptions{
+		ProjectID: project.ID, ProjectRepo: projectRepo, GitHubAuthRepo: authRepo, GitHub: provider,
+	})
+
+	type paginationMetadata struct {
+		Returned   int  `json:"returned"`
+		Total      int  `json:"total"`
+		Offset     int  `json:"offset"`
+		NextOffset int  `json:"next_offset"`
+		Truncated  bool `json:"truncated"`
+	}
+	type action struct {
+		name      string
+		omitted   string
+		invalid   []string
+		handler   chatcontrol.RuntimeActionHandler
+		callCount func() int32
+	}
+	actions := []action{
+		{
+			name:      "my assigned issues",
+			omitted:   `{}`,
+			invalid:   []string{`{"limit":0}`, `{"Limit":0}`, `{"LIMIT":0}`, `{"limit":101}`, `{"offset":-1}`, `{"Offset":-1}`},
+			handler:   handlers["github_list_my_assigned_issues"],
+			callCount: myAssignedCalls.Load,
+		},
+		{
+			name:      "assigned issues",
+			omitted:   `{"assignee":"openvibely"}`,
+			invalid:   []string{`{"assignee":"openvibely","limit":0}`, `{"assignee":"openvibely","Limit":0}`, `{"assignee":"openvibely","LIMIT":0}`, `{"assignee":"openvibely","limit":101}`, `{"assignee":"openvibely","offset":-1}`, `{"assignee":"openvibely","Offset":-1}`},
+			handler:   handlers["github_list_assigned_issues"],
+			callCount: assignedIssuesCalls.Load,
+		},
+	}
+
+	for _, action := range actions {
+		t.Run(action.name, func(t *testing.T) {
+			callsBeforeOmitted := action.callCount()
+			output, err := action.handler(ctx, json.RawMessage(action.omitted))
+			if err != nil {
+				t.Fatalf("omitted limit error=%v output=%q", err, output)
+			}
+			var metadata paginationMetadata
+			if err := json.Unmarshal([]byte(output), &metadata); err != nil {
+				t.Fatalf("decode omitted-limit output %q: %v", output, err)
+			}
+			if metadata.Returned != 100 || metadata.Total != 101 || metadata.Offset != 0 || metadata.NextOffset != 100 || !metadata.Truncated {
+				t.Fatalf("omitted-limit metadata=%+v, want returned=100 total=101 offset=0 next_offset=100 truncated=true", metadata)
+			}
+			if calls := action.callCount(); calls != callsBeforeOmitted+1 {
+				t.Fatalf("provider calls after omitted limit=%d, want %d", calls, callsBeforeOmitted+1)
+			}
+
+			callsBeforeInvalid := action.callCount()
+			for _, input := range action.invalid {
+				if output, err := action.handler(ctx, json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+					t.Fatalf("invalid input %s output=%q error=%v, want validation error", input, output, err)
+				}
+				if calls := action.callCount(); calls != callsBeforeInvalid {
+					t.Fatalf("provider calls after invalid input %s=%d, want %d", input, calls, callsBeforeInvalid)
+				}
+			}
+		})
+	}
 }
 
 func TestAutomationManualRunUsesExistingDispatchWithoutChangingSchedule(t *testing.T) {
