@@ -83,7 +83,7 @@ func (r *agentRoutingStrategy) resolveVisionRoutingDecision(ctx context.Context,
 		return decision
 	}
 
-	configs, listErr := r.svc.llmConfigRepo.List(ctx)
+	configs, listErr := r.svc.llmConfigRepo.ListVisionSelectionOptions(ctx)
 	if listErr != nil || len(configs) == 0 {
 		if listErr != nil {
 			decision.Reason = "vision_config_lookup_failed"
@@ -97,7 +97,24 @@ func (r *agentRoutingStrategy) resolveVisionRoutingDecision(ctx context.Context,
 	complexity := AnalyzeComplexity(prompt)
 	visionResult := SelectLLMWithVision(complexity, configs, true)
 	if visionResult != nil && visionResult.LLMConfig != nil {
-		decision.Agent = *visionResult.LLMConfig
+		selectedID := visionResult.LLMConfig.ID
+		if selectedID == "" {
+			decision.Reason = "vision_config_lookup_failed"
+			decision.Detail = "selected vision-capable model has no stored ID"
+			return decision
+		}
+		selectedAgent, getErr := r.svc.llmConfigRepo.GetByID(ctx, selectedID)
+		if getErr != nil {
+			decision.Reason = "vision_config_lookup_failed"
+			decision.Detail = getErr.Error()
+			return decision
+		}
+		if selectedAgent == nil {
+			decision.Reason = "vision_config_lookup_failed"
+			decision.Detail = fmt.Sprintf("selected vision-capable model %q was not found", selectedID)
+			return decision
+		}
+		decision.Agent = *selectedAgent
 		decision.Changed = true
 		decision.Reason = "vision_agent_selected"
 		decision.Detail = visionResult.Reason
