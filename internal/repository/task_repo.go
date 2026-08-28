@@ -449,16 +449,11 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 }
 
 func (r *TaskRepo) withImmediateTx(ctx context.Context, fn func(sqlExecutor) error) error {
-	conn, err := r.db.Conn(ctx)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	tx := &manualTx{conn: conn, ctx: ctx}
-	defer tx.Rollback()
+	defer cleanup()
 	if err := fn(tx); err != nil {
 		return err
 	}
@@ -1030,15 +1025,11 @@ func (r *TaskRepo) DeleteWithCleanupManifestIfCategory(ctx context.Context, id, 
 }
 
 func (r *TaskRepo) deleteWithCleanupManifest(ctx context.Context, id, projectID, category string, beforeDelete func(TaskDeletionManifest) error) (manifest TaskDeletionManifest, deleted bool, err error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return manifest, false, fmt.Errorf("beginning task deletion: %w", err)
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	defer cleanup()
 
 	where := `id = ?`
 	args := []any{id}

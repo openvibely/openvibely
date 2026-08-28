@@ -111,7 +111,7 @@ func validateLLMConfigModel(a *models.LLMConfig) error {
 	return nil
 }
 
-func validateLLMConfigNameAvailableTx(ctx context.Context, tx *sql.Tx, name, excludeID string) (string, error) {
+func validateLLMConfigNameAvailableTx(ctx context.Context, tx SQLExecutor, name, excludeID string) (string, error) {
 	normalized, err := normalizeLLMConfigName(name)
 	if err != nil {
 		return "", err
@@ -137,19 +137,7 @@ func validateLLMConfigNameAvailableTx(ctx context.Context, tx *sql.Tx, name, exc
 }
 
 func (r *LLMConfigRepo) ValidateNameAvailable(ctx context.Context, name, excludeID string) (string, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", fmt.Errorf("begin validate model config name tx: %w", err)
-	}
-	defer tx.Rollback()
-	normalized, err := validateLLMConfigNameAvailableTx(ctx, tx, name, excludeID)
-	if err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("commit validate model config name tx: %w", err)
-	}
-	return normalized, nil
+	return validateLLMConfigNameAvailableTx(ctx, r.db, name, excludeID)
 }
 
 func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
@@ -504,7 +492,7 @@ func (r *LLMConfigRepo) GetDefault(ctx context.Context) (*models.LLMConfig, erro
 	return &a, nil
 }
 
-func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx *sql.Tx) error {
+func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx SQLExecutor) error {
 	var total int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_configs`).Scan(&total); err != nil {
 		return fmt.Errorf("counting model configs: %w", err)
@@ -535,7 +523,7 @@ func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx *sql.Tx) er
 	return nil
 }
 
-func (r *LLMConfigRepo) deleteWithTx(ctx context.Context, tx *sql.Tx, id string) error {
+func (r *LLMConfigRepo) deleteWithTx(ctx context.Context, tx SQLExecutor, id string) error {
 	// Nullify FK references in tasks and executions before deleting
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET agent_id = NULL WHERE agent_id = ?`, id); err != nil {
 		return fmt.Errorf("nullifying model config in tasks: %w", err)
@@ -554,11 +542,11 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 		return err
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin create model config tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	name, err := validateLLMConfigNameAvailableTx(ctx, tx, a.Name, "")
 	if err != nil {
@@ -613,11 +601,11 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 		return err
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin update model config tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	name, err := validateLLMConfigNameAvailableTx(ctx, tx, a.Name, a.ID)
 	if err != nil {
@@ -855,11 +843,11 @@ func (r *LLMConfigRepo) Count(ctx context.Context) (int, error) {
 }
 
 func (r *LLMConfigRepo) TransferDefaultAndDelete(ctx context.Context, deleteID, newDefaultID string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin transfer default tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	// Set the new default (unsets all others first)
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_configs SET is_default = 0`); err != nil {
@@ -914,11 +902,11 @@ func (r *LLMConfigRepo) GetByIDs(ctx context.Context, ids []string) (map[string]
 }
 
 func (r *LLMConfigRepo) Delete(ctx context.Context, id string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin delete model config tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	if err := r.deleteWithTx(ctx, tx, id); err != nil {
 		return err

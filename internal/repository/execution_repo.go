@@ -373,7 +373,7 @@ func (r *ExecutionRepo) SetAgentConfigIfEmpty(ctx context.Context, id, agentConf
 
 func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output string) error {
 	_, err := r.db.ExecContext(ctx,
-		`UPDATE executions SET output = ? WHERE id = ?`, output, id)
+		`UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, output, id)
 	if err != nil {
 		return fmt.Errorf("updating execution output: %w", err)
 	}

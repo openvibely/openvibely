@@ -152,7 +152,7 @@ func (r *ThreadInputRepo) CreateSteeringForActiveExecution(ctx context.Context, 
 	if input.ExpectedTurnID != activeExecutionID {
 		return ErrActiveTurnChanged
 	}
-	return r.withTx(ctx, func(tx *sql.Tx) error {
+	return r.withTx(ctx, func(tx SQLExecutor) error {
 		input.RunExecutionID = activeExecutionID
 		input.TurnID = activeExecutionID
 		input.InputMode = models.ThreadInputModeSteering
@@ -346,7 +346,7 @@ func (r *ThreadInputRepo) PreparePendingTextSteering(ctx context.Context, runExe
 
 func (r *ThreadInputRepo) preparePendingSteering(ctx context.Context, runExecutionID, turnID string, textOnly bool) ([]models.ThreadInput, error) {
 	var prepared []models.ThreadInput
-	err := r.withTx(ctx, func(tx *sql.Tx) error {
+	err := r.withTx(ctx, func(tx SQLExecutor) error {
 		where := `WHERE run_execution_id = ? AND turn_id = ? AND input_mode = 'steering' AND input_status = 'pending' AND COALESCE(expected_turn_id, '') != ''`
 		if textOnly {
 			where += ` AND COALESCE(attachment_session_id, '') = ''`
@@ -558,7 +558,7 @@ func (r *ThreadInputRepo) ConvertQueuedToSteering(ctx context.Context, id, runEx
 		return nil, ErrExpectedTurnEmpty
 	}
 	var converted *models.ThreadInput
-	err := r.withTx(ctx, func(tx *sql.Tx) error {
+	err := r.withTx(ctx, func(tx SQLExecutor) error {
 		queued, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, id))
 		if err == sql.ErrNoRows {
 			return ErrInputNotPending
@@ -634,7 +634,7 @@ func (r *ThreadInputRepo) RestorePreparedSteering(ctx context.Context, ids []str
 	if len(ids) == 0 {
 		return nil
 	}
-	return r.withTx(ctx, func(tx *sql.Tx) error {
+	return r.withTx(ctx, func(tx SQLExecutor) error {
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE thread_inputs
@@ -652,7 +652,7 @@ func (r *ThreadInputRepo) RequeuePendingSteering(ctx context.Context, ids []stri
 		return nil, nil
 	}
 	var requeued []models.ThreadInput
-	err := r.withTx(ctx, func(tx *sql.Tx) error {
+	err := r.withTx(ctx, func(tx SQLExecutor) error {
 		for _, id := range ids {
 			if _, err := tx.ExecContext(ctx, `
 						UPDATE thread_inputs
@@ -682,7 +682,7 @@ func (r *ThreadInputRepo) RequeuePendingSteeringForExecution(ctx context.Context
 		return nil, nil
 	}
 	var requeued []models.ThreadInput
-	err := r.withTx(ctx, func(tx *sql.Tx) error {
+	err := r.withTx(ctx, func(tx SQLExecutor) error {
 		inputs, err := r.listWithExecutor(ctx, tx, `WHERE input_mode = 'steering' AND input_status = 'pending' AND run_execution_id = ? ORDER BY queue_position ASC, created_at ASC, rowid ASC`, runExecutionID)
 		if err != nil {
 			return err
@@ -840,7 +840,7 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 	if task == nil || exec == nil {
 		return fmt.Errorf("task and execution are required")
 	}
-	return r.withTx(ctx, func(tx *sql.Tx) error {
+	return r.withTx(ctx, func(tx SQLExecutor) error {
 		promoted, err := scanThreadInput(tx.QueryRowContext(ctx, `SELECT `+threadInputSelectColumns+` FROM thread_inputs WHERE id = ?`, inputID))
 		if err == sql.ErrNoRows {
 			return ErrInputNotPending
@@ -981,15 +981,11 @@ func (r *ThreadInputRepo) IsAttachmentSessionRetired(ctx context.Context, sessio
 }
 
 func (r *ThreadInputRepo) RetireAttachmentSessionIfUnowned(ctx context.Context, sessionID string) (retired bool, err error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return false, fmt.Errorf("beginning attachment session retirement: %w", err)
 	}
-	defer func() {
-		if err != nil {
-			_ = tx.Rollback()
-		}
-	}()
+	defer cleanup()
 
 	var referenced int
 	if err = tx.QueryRowContext(ctx, `
@@ -1046,38 +1042,43 @@ type queryExecutor interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 }
 
-func (r *ThreadInputRepo) withTx(ctx context.Context, fn func(*sql.Tx) error) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+func (r *ThreadInputRepo) withTx(ctx context.Context, fn func(SQLExecutor) error) error {
+	return r.WithImmediateTx(ctx, fn)
+}
+
+func (r *ThreadInputRepo) WithImmediateTx(ctx context.Context, fn func(SQLExecutor) error) error {
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer cleanup()
 	if err := fn(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (r *ThreadInputRepo) WithImmediateTx(ctx context.Context, fn func(SQLExecutor) error) error {
-	conn, err := r.db.Conn(ctx)
+func beginImmediateTx(ctx context.Context, db *sql.DB) (*manualTx, func(), error) {
+	conn, err := db.Conn(ctx)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
-	defer conn.Close()
 	restoreBusyTimeout, err := boundSQLiteBusyTimeoutToContext(ctx, conn)
 	if err != nil {
-		return err
+		_ = conn.Close()
+		return nil, nil, err
 	}
-	defer restoreBusyTimeout()
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
+		restoreBusyTimeout()
+		_ = conn.Close()
+		return nil, nil, err
 	}
 	tx := &manualTx{conn: conn, ctx: ctx}
-	defer tx.Rollback()
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return tx, func() {
+		_ = tx.Rollback()
+		restoreBusyTimeout()
+		_ = conn.Close()
+	}, nil
 }
 
 const sqliteBusyTimeoutRestoreReserve = 20 * time.Millisecond

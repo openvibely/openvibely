@@ -1,0 +1,234 @@
+package database
+
+import (
+	"context"
+	"database/sql"
+	"net/url"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestNew_FileBackedPoolAndPerConnectionSettings(t *testing.T) {
+	db, err := New(filepath.Join(t.TempDir(), "pool.db") + "?cache=private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	stats := db.Stats()
+	if stats.MaxOpenConnections != 2 {
+		t.Fatalf("MaxOpenConnections = %d, want 2", stats.MaxOpenConnections)
+	}
+
+	ctx := context.Background()
+	conns := make([]*sql.Conn, 0, 2)
+	for i := 0; i < 2; i++ {
+		conn, err := db.Conn(ctx)
+		if err != nil {
+			t.Fatalf("acquire connection %d: %v", i, err)
+		}
+		conns = append(conns, conn)
+	}
+	defer func() {
+		for _, conn := range conns {
+			_ = conn.Close()
+		}
+	}()
+
+	for i, conn := range conns {
+		var foreignKeys, busyTimeout int
+		var journalMode string
+		if err := conn.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+			t.Fatalf("connection %d foreign_keys: %v", i, err)
+		}
+		if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+			t.Fatalf("connection %d busy_timeout: %v", i, err)
+		}
+		if err := conn.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&journalMode); err != nil {
+			t.Fatalf("connection %d journal_mode: %v", i, err)
+		}
+		if foreignKeys != 1 || busyTimeout != 5000 || journalMode != "wal" {
+			t.Fatalf("connection %d settings: foreign_keys=%d busy_timeout=%d journal_mode=%q", i, foreignKeys, busyTimeout, journalMode)
+		}
+
+		var parsed time.Time
+		if err := conn.QueryRowContext(ctx, `SELECT created_at FROM projects ORDER BY created_at LIMIT 1`).Scan(&parsed); err != nil {
+			t.Fatalf("connection %d UTC parse: %v", i, err)
+		}
+		if parsed.Location() != time.UTC {
+			t.Fatalf("connection %d datetime location = %v, want UTC", i, parsed.Location())
+		}
+	}
+
+	for _, conn := range conns {
+		if err := conn.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	conns = nil
+	if got := db.Stats().Idle; got != 2 {
+		t.Fatalf("idle connections = %d, want 2", got)
+	}
+}
+
+func TestNew_InMemoryPoolRemainsIsolated(t *testing.T) {
+	db, err := New(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if got := db.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("MaxOpenConnections = %d, want 1", got)
+	}
+}
+
+func TestNew_FileBackedWALReaderDoesNotBlockWriter(t *testing.T) {
+	db, err := New(filepath.Join(t.TempDir(), "wal.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE pool_counter (id INTEGER PRIMARY KEY, value INTEGER NOT NULL); INSERT INTO pool_counter VALUES (1, 0)`); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	reader, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	if _, err := reader.ExecContext(ctx, `BEGIN`); err != nil {
+		t.Fatal(err)
+	}
+	defer reader.ExecContext(context.Background(), `ROLLBACK`)
+	var value int
+	if err := reader.QueryRowContext(ctx, `SELECT value FROM pool_counter WHERE id=1`).Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.ExecContext(ctx, `UPDATE pool_counter SET value=value+1 WHERE id=1`); err != nil {
+		t.Fatalf("writer blocked by WAL reader: %v", err)
+	}
+	if err := reader.QueryRowContext(ctx, `SELECT value FROM pool_counter WHERE id=1`).Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value != 0 {
+		t.Fatalf("held reader snapshot = %d, want 0", value)
+	}
+	if _, err := reader.ExecContext(ctx, `COMMIT`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT value FROM pool_counter WHERE id=1`).Scan(&value); err != nil {
+		t.Fatal(err)
+	}
+	if value != 1 {
+		t.Fatalf("committed value = %d, want 1", value)
+	}
+}
+
+func TestNew_ConcurrentWritersPreserveAtomicUpdates(t *testing.T) {
+	db, err := New(filepath.Join(t.TempDir(), "writers.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE pool_counter (id INTEGER PRIMARY KEY, value INTEGER NOT NULL); INSERT INTO pool_counter VALUES (1, 0)`); err != nil {
+		t.Fatal(err)
+	}
+
+	const writers = 4
+	const updates = 25
+	start := make(chan struct{})
+	errCh := make(chan error, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < updates; j++ {
+				if _, err := db.Exec(`UPDATE pool_counter SET value=value+1 WHERE id=1`); err != nil {
+					errCh <- err
+					return
+				}
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+	var got int
+	if err := db.QueryRow(`SELECT value FROM pool_counter WHERE id=1`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != writers*updates {
+		t.Fatalf("counter = %d, want %d", got, writers*updates)
+	}
+}
+
+func TestNew_WriteLockUsesConfiguredBusyTimeout(t *testing.T) {
+	db, err := New(filepath.Join(t.TempDir(), "deadline.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE pool_counter (id INTEGER PRIMARY KEY, value INTEGER NOT NULL); INSERT INTO pool_counter VALUES (1, 0)`); err != nil {
+		t.Fatal(err)
+	}
+
+	locker, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer locker.Close()
+	if _, err := locker.ExecContext(context.Background(), `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	defer locker.ExecContext(context.Background(), `ROLLBACK`)
+
+	started := time.Now()
+	_, err = db.Exec(`UPDATE pool_counter SET value=value+1 WHERE id=1`)
+	if err == nil {
+		t.Fatal("write unexpectedly succeeded while writer lock was held")
+	}
+	if elapsed := time.Since(started); elapsed < 4*time.Second || elapsed > 7*time.Second {
+		t.Fatalf("write lock wait = %s, want the configured five-second timeout", elapsed)
+	}
+}
+
+func TestConfigureSQLiteDSNPreservesCallerParameters(t *testing.T) {
+	configured, inMemory, err := configureSQLiteDSN("file:test.db?cache=private&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(1)&_loc=Local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inMemory {
+		t.Fatal("file-backed DSN classified as in-memory")
+	}
+	_, rawQuery, found := strings.Cut(configured, "?")
+	if !found {
+		t.Fatalf("configured DSN has no query: %q", configured)
+	}
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values.Get("cache") != "private" || values.Get("_loc") != "UTC" {
+		t.Fatalf("configured query = %#v", values)
+	}
+	joined := strings.Join(values["_pragma"], "|")
+	for _, want := range []string{"synchronous(NORMAL)", "foreign_keys(1)", "busy_timeout(5000)"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("PRAGMAs %q do not contain %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, "busy_timeout(1)") {
+		t.Fatalf("caller busy timeout was not replaced: %q", joined)
+	}
+}

@@ -3,6 +3,7 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/openvibely/openvibely/internal/applog"
@@ -11,49 +12,82 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const (
+	fileDatabasePoolSize = 2
+	sqliteBusyTimeoutMS  = 5000
+)
+
 func New(dsn string) (*sql.DB, error) {
-	// Add timezone parameter to parse SQLite datetime as UTC.
-	// This must apply to ALL databases including :memory: (test DBs)
-	// to ensure test behavior matches production.
-	if strings.Contains(dsn, "?") {
-		dsn = dsn + "&_loc=UTC"
-	} else {
-		dsn = dsn + "?_loc=UTC"
+	configuredDSN, inMemory, err := configureSQLiteDSN(dsn)
+	if err != nil {
+		return nil, err
 	}
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", configuredDSN)
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
 	}
+	closeOnError := func(operation string, operationErr error) (*sql.DB, error) {
+		_ = db.Close()
+		return nil, fmt.Errorf("%s: %w", operation, operationErr)
+	}
 
-	// Enable WAL mode for concurrent reads
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		return nil, fmt.Errorf("setting journal mode: %w", err)
-	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		return nil, fmt.Errorf("enabling foreign keys: %w", err)
-	}
-	// Set busy timeout to 5 seconds to avoid SQLITE_BUSY errors
-	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		return nil, fmt.Errorf("setting busy timeout: %w", err)
-	}
-	// Limit to 1 open connection to prevent concurrent write conflicts
+	// Bootstrap, auto-vacuum initialization, and migrations are deliberately
+	// serialized. The pool expands only after startup has completed successfully.
 	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	// WAL permits readers on other physical connections while SQLite's single
+	// writer commits. Connection-local settings are enforced by the DSN below.
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		return closeOnError("setting journal mode", err)
+	}
 
 	if err := enableIncrementalVacuum(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 
-	// Run migrations
 	goose.SetBaseFS(migrations.FS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
-		return nil, fmt.Errorf("setting dialect: %w", err)
+		return closeOnError("setting dialect", err)
 	}
 	if err := goose.Up(db, ".", goose.WithAllowMissing()); err != nil {
-		return nil, fmt.Errorf("running migrations: %w", err)
+		return closeOnError("running migrations", err)
 	}
 
+	if !inMemory {
+		// Two is intentionally small: benchmarks show meaningful concurrent-read
+		// gains without creating excess connections competing for SQLite's writer.
+		db.SetMaxOpenConns(fileDatabasePoolSize)
+		db.SetMaxIdleConns(fileDatabasePoolSize)
+	}
 	return db, nil
+}
+
+func configureSQLiteDSN(dsn string) (configured string, inMemory bool, err error) {
+	base, rawQuery, found := strings.Cut(dsn, "?")
+	inMemory = base == ":memory:"
+	values := make(url.Values)
+	if found {
+		values, err = url.ParseQuery(rawQuery)
+		if err != nil {
+			return "", false, fmt.Errorf("parsing database DSN query: %w", err)
+		}
+	}
+
+	// _pragma is applied by modernc.org/sqlite whenever it opens a physical
+	// connection. Preserve unrelated caller PRAGMAs while enforcing invariants.
+	pragmas := values["_pragma"][:0]
+	for _, pragma := range values["_pragma"] {
+		normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(pragma), " ", ""))
+		if strings.HasPrefix(normalized, "foreign_keys") || strings.HasPrefix(normalized, "busy_timeout") {
+			continue
+		}
+		pragmas = append(pragmas, pragma)
+	}
+	values["_pragma"] = append(pragmas, "foreign_keys(1)", fmt.Sprintf("busy_timeout(%d)", sqliteBusyTimeoutMS))
+	values.Set("_loc", "UTC")
+	return base + "?" + values.Encode(), inMemory, nil
 }
 
 // enableIncrementalVacuum turns on incremental auto-vacuum so freed pages can be
