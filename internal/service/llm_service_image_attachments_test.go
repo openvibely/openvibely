@@ -181,6 +181,242 @@ func TestLLMService_ImageAttachments_TextOnlyAgentRoutesToVisionAgent(t *testing
 	}
 }
 
+func TestLLMService_ImageAttachments_VisionRoutingKeepsNoQueryFastPaths(t *testing.T) {
+	ctx := context.Background()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+	textOnly := &models.LLMConfig{
+		Name:       "Fast-path text model",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "text-key",
+		Model:      "text-only-model",
+	}
+	vision := &models.LLMConfig{
+		Name:       "Fast-path vision model",
+		Provider:   models.ProviderAnthropic,
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "vision-key",
+		Model:      "claude-sonnet-4-5-20250929",
+	}
+	for _, cfg := range []*models.LLMConfig{textOnly, vision} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	svc := NewLLMService(llmConfigRepo, nil, nil, nil, nil, nil)
+	cases := []struct {
+		name        string
+		attachments []models.Attachment
+		agent       models.LLMConfig
+		reason      string
+	}{
+		{name: "no attachments", reason: "no_attachments", agent: *textOnly},
+		{name: "non-image attachment", attachments: []models.Attachment{{MediaType: "text/plain"}}, reason: "no_image_attachments", agent: *textOnly},
+		{name: "already vision capable", attachments: []models.Attachment{{MediaType: "image/png"}}, reason: "agent_already_vision_capable", agent: *vision},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			counter.Reset()
+			counter.SetEnabled(true)
+			decision := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, "describe the attachment", tc.attachments, tc.agent, "Test", "")
+			counter.SetEnabled(false)
+			if decision.Reason != tc.reason {
+				t.Fatalf("reason = %q, want %q", decision.Reason, tc.reason)
+			}
+			if statements := counter.Statements(); len(statements) != 0 {
+				t.Fatalf("fast path executed model queries: %#v", statements)
+			}
+		})
+	}
+}
+
+func TestLLMService_ImageAttachments_VisionRoutingHydratesStoredConfigForStreaming(t *testing.T) {
+	ctx := context.Background()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	textOnly := &models.LLMConfig{
+		Name:       "Text-only local model",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "text-only-key",
+		Model:      "local-text-model",
+	}
+	vision := &models.LLMConfig{
+		Name:                 "Stored Anthropic Vision",
+		Provider:             models.ProviderAnthropic,
+		AuthMethod:           models.AuthMethodAPIKey,
+		APIKey:               "stored-api-key",
+		OAuthAccessToken:     "stored-oauth-access",
+		OAuthRefreshToken:    "stored-oauth-refresh",
+		OAuthClientID:        "stored-client-id",
+		OAuthClientSecret:    "stored-client-secret",
+		Model:                "claude-sonnet-4-5-20250929",
+		BaseURL:              "https://anthropic.example/v1",
+		Transport:            "messages",
+		ExtraHeadersJSON:     `{"x-provider-secret":"header"}`,
+		ExtraBodyJSON:        `{"provider_setting":"body"}`,
+		CustomAuthConfigJSON: `{"signing_secret":"custom-config"}`,
+		CustomAuthStateJSON:  `{"access":"custom-state"}`,
+		MixtureConfigJSON:    `{"enabled":true,"aggregator":"stored"}`,
+		MaxTokens:            4096,
+	}
+	for _, cfg := range []*models.LLMConfig{textOnly, vision} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	svc := NewLLMService(llmConfigRepo, repository.NewExecutionRepo(db), repository.NewTaskRepo(db, nil), nil, nil, nil)
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderAnthropic: capture}
+	attachments := []models.Attachment{{FileName: "screenshot.png", MediaType: "image/png"}}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	_, err := svc.CallAgentDirectStreamingDetailed(ctx, "What is in this screenshot?", attachments, *textOnly, "streaming-exec", nil, "", "", nil)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("CallAgentDirectStreamingDetailed: %v", err)
+	}
+
+	requests := capture.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("provider requests = %d, want one request", len(requests))
+	}
+	got := requests[0].Agent
+	if got.ID != vision.ID || got.Name != vision.Name || got.Provider != vision.Provider || got.Model != vision.Model || got.AuthMethod != vision.AuthMethod {
+		t.Fatalf("provider received wrong selected model: %#v", got)
+	}
+	if got.APIKey != vision.APIKey || got.OAuthAccessToken != vision.OAuthAccessToken || got.OAuthRefreshToken != vision.OAuthRefreshToken ||
+		got.OAuthClientSecret != vision.OAuthClientSecret || got.BaseURL != vision.BaseURL || got.Transport != vision.Transport ||
+		got.ExtraHeadersJSON != vision.ExtraHeadersJSON || got.ExtraBodyJSON != vision.ExtraBodyJSON ||
+		got.CustomAuthConfigJSON != vision.CustomAuthConfigJSON || got.CustomAuthStateJSON != vision.CustomAuthStateJSON ||
+		got.MixtureConfigJSON != vision.MixtureConfigJSON {
+		t.Fatalf("provider received compact or incomplete model config: %#v", got)
+	}
+
+	var compactQueries, detailQueries int
+	for _, raw := range counter.Statements() {
+		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+		if strings.Contains(stmt, "order by is_default desc, name asc") {
+			compactQueries++
+			projection := strings.Split(stmt, " from agent_configs ")[0]
+			for _, forbidden := range []string{"oauth_refresh_token", "oauth_client_secret", "base_url", "transport", "extra_headers_json", "extra_body_json", "custom_auth_config_json", "custom_auth_state_json", "mixture_config_json", "max_tokens", "temperature", "created_at", "updated_at"} {
+				if strings.Contains(projection, forbidden) {
+					t.Fatalf("streaming vision query selected forbidden column %q: %s", forbidden, raw)
+				}
+			}
+		}
+		if strings.Contains(stmt, "from agent_configs where id = ?") {
+			detailQueries++
+		}
+	}
+	if compactQueries != 1 || detailQueries != 1 {
+		t.Fatalf("vision routing queries = compact %d, detail %d; statements=%#v", compactQueries, detailQueries, counter.Statements())
+	}
+}
+
+func TestLLMService_ExecuteTaskWithAgent_ImageAttachmentsPassHydratedVisionConfig(t *testing.T) {
+	ctx := context.Background()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	textOnly := &models.LLMConfig{
+		Name:       "Task text-only model",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "task-text-key",
+		Model:      "local-text-model",
+	}
+	vision := &models.LLMConfig{
+		Name:                 "Task stored vision model",
+		Provider:             models.ProviderAnthropic,
+		AuthMethod:           models.AuthMethodOAuth,
+		OAuthAccessToken:     "task-oauth-access",
+		OAuthRefreshToken:    "task-oauth-refresh",
+		OAuthClientSecret:    "task-client-secret",
+		Model:                "claude-opus-5-20250929",
+		BaseURL:              "https://anthropic.example/v1",
+		ExtraBodyJSON:        `{"task_setting":"body"}`,
+		CustomAuthConfigJSON: `{"task_secret":"config"}`,
+		CustomAuthStateJSON:  `{"task_state":"state"}`,
+		MixtureConfigJSON:    `{"task_mixture":true}`,
+		MaxTokens:            4096,
+	}
+	for _, cfg := range []*models.LLMConfig{textOnly, vision} {
+		if err := llmConfigRepo.Create(ctx, cfg); err != nil {
+			t.Fatalf("create %s: %v", cfg.Name, err)
+		}
+	}
+
+	imagePath := filepath.Join(t.TempDir(), "task.png")
+	if err := os.WriteFile(imagePath, []byte("fake png"), 0644); err != nil {
+		t.Fatalf("create task image: %v", err)
+	}
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Execute screenshot task",
+		Prompt:    "Describe this screenshot",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusPending,
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := attachmentRepo.Create(ctx, &models.Attachment{TaskID: task.ID, FileName: "task.png", FilePath: imagePath, MediaType: "image/png", FileSize: 9}); err != nil {
+		t.Fatalf("create task attachment: %v", err)
+	}
+
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, nil, nil, attachmentRepo)
+	capture := &captureProviderAdapter{}
+	svc.providerAdapters = map[models.LLMProvider]ProviderAdapter{models.ProviderAnthropic: capture}
+	counter.Reset()
+	counter.SetEnabled(true)
+	_, err := svc.ExecuteTaskWithAgent(ctx, *task, *textOnly)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ExecuteTaskWithAgent: %v", err)
+	}
+
+	requests := capture.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("provider requests = %d, want one request", len(requests))
+	}
+	got := requests[0].Agent
+	if got.ID != vision.ID || got.AuthMethod != vision.AuthMethod || got.OAuthAccessToken != vision.OAuthAccessToken ||
+		got.OAuthRefreshToken != vision.OAuthRefreshToken || got.OAuthClientSecret != vision.OAuthClientSecret ||
+		got.BaseURL != vision.BaseURL || got.ExtraBodyJSON != vision.ExtraBodyJSON ||
+		got.CustomAuthConfigJSON != vision.CustomAuthConfigJSON || got.CustomAuthStateJSON != vision.CustomAuthStateJSON ||
+		got.MixtureConfigJSON != vision.MixtureConfigJSON {
+		t.Fatalf("task provider received compact or incomplete model config: %#v", got)
+	}
+	compactQueries := 0
+	for _, raw := range counter.Statements() {
+		stmt := strings.ToLower(strings.Join(strings.Fields(raw), " "))
+		if strings.Contains(stmt, "order by is_default desc, name asc") {
+			compactQueries++
+		}
+	}
+	if compactQueries != 1 {
+		t.Fatalf("task vision routing should use one compact selection query, statements=%#v", counter.Statements())
+	}
+}
+
 func TestLLMService_ImageAttachments_VisionRouting_Integration(t *testing.T) {
 	ctx := context.Background()
 	db := testutil.NewTestDB(t)

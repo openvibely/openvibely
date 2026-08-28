@@ -49,6 +49,13 @@ const llmConfigPickerColumns = `id, name, model`
 // default-marker semantics while excluding credentials and large provider JSON.
 const llmConfigChatSelectionColumns = `id, name, provider, model, is_default`
 
+// llmConfigVisionSelectionColumns is the compact image-routing projection. It
+// preserves only the fields used by SelectLLMWithVision and non-secret
+// credential-presence sentinels needed to exclude legacy Anthropic CLI rows.
+const llmConfigVisionSelectionColumns = `id, name, provider, model, auth_method, is_default,
+		CASE WHEN COALESCE(api_key, '') != '' THEN 1 ELSE 0 END,
+		CASE WHEN COALESCE(oauth_access_token, '') != '' THEN 1 ELSE 0 END`
+
 // llmConfigTaskCreationSelectionColumns is the compact runtime create_task
 // selection/category projection. It adds auto_start_tasks to the Chat selection
 // fields while deliberately excluding credentials, endpoint settings, request
@@ -252,6 +259,41 @@ func (r *LLMConfigRepo) ListChatSelectionOptions(ctx context.Context) ([]models.
 		var a models.LLMConfig
 		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.IsDefault); err != nil {
 			return nil, fmt.Errorf("scanning chat model selection option: %w", err)
+		}
+		configs = append(configs, a)
+	}
+	return configs, rows.Err()
+}
+
+// ListVisionSelectionOptions returns the compact rows needed for image-aware
+// model selection. The returned LLMConfig values are intentionally incomplete
+// and must not be used for provider execution, model editing, credential access,
+// OAuth refresh, or persistence. APIKey and OAuthAccessToken contain only the
+// non-secret sentinel "present" when the corresponding credential exists.
+func (r *LLMConfigRepo) ListVisionSelectionOptions(ctx context.Context) ([]models.LLMConfig, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+llmConfigVisionSelectionColumns+`
+					 FROM agent_configs ORDER BY is_default DESC, name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("listing vision model selection options: %w", err)
+	}
+	defer rows.Close()
+
+	var configs []models.LLMConfig
+	for rows.Next() {
+		var (
+			a             models.LLMConfig
+			hasAPIKey     bool
+			hasOAuthToken bool
+		)
+		if err := rows.Scan(&a.ID, &a.Name, &a.Provider, &a.Model, &a.AuthMethod, &a.IsDefault, &hasAPIKey, &hasOAuthToken); err != nil {
+			return nil, fmt.Errorf("scanning vision model selection option: %w", err)
+		}
+		if hasAPIKey {
+			a.APIKey = "present"
+		}
+		if hasOAuthToken {
+			a.OAuthAccessToken = "present"
 		}
 		configs = append(configs, a)
 	}
