@@ -81,7 +81,7 @@ func (r *TaskGoalRepo) CreateOrReplace(ctx context.Context, goal *models.TaskGoa
 	if goal.Status == "" {
 		goal.Status = models.TaskGoalStatusActive
 	}
-	row := r.db.QueryRowContext(ctx, `
+	row := queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO task_goals (task_id, goal_id, objective, status, reason, blocker_key, blocker_count, blocker_reason, blocker_last_seen_at, last_checked_at, achieved_at)
 		VALUES (?, ?, ?, ?, ?, '', 0, '', NULL, NULL, NULL)
 		ON CONFLICT(task_id) DO UPDATE SET

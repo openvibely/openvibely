@@ -918,7 +918,7 @@ func (r *ThreadInputRepo) ClaimQueuedForChatExecution(ctx context.Context, input
 }
 
 func (r *ThreadInputRepo) CancelPending(ctx context.Context, id string) (*models.ThreadInput, error) {
-	cancelled, err := scanThreadInput(r.db.QueryRowContext(ctx, `
+	cancelled, err := scanThreadInput(queryRowBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_status = 'cancelled', updated_at = datetime('now')
 		WHERE id = ? AND input_status = 'pending'

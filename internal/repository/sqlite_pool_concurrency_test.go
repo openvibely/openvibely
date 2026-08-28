@@ -204,6 +204,21 @@ func lockedWriterRepositoryOperations() []struct {
 			},
 		},
 		{
+			name: "thread input cancellation returning write",
+			run: func(ctx context.Context, db *sql.DB) error {
+				_, err := NewThreadInputRepo(db).CancelPending(ctx, "locked-input")
+				return err
+			},
+		},
+		{
+			name: "task goal create returning write",
+			run: func(ctx context.Context, db *sql.DB) error {
+				return NewTaskGoalRepo(db).CreateOrReplace(ctx, &models.TaskGoal{
+					TaskID: "locked-task", GoalID: "locked-goal", Objective: "locked",
+				})
+			},
+		},
+		{
 			name: "alert mark read",
 			run: func(ctx context.Context, db *sql.DB) error {
 				return NewAlertRepo(db).MarkRead(ctx, "locked-project", "locked-alert")
@@ -353,6 +368,39 @@ func assertEveryPooledConnectionBusyTimeout(t *testing.T, db *sql.DB, want int) 
 }
 
 func TestSuccessfulAutomationOperationsRestoreBusyTimeoutBeforePoolRelease(t *testing.T) {
+	t.Run("audited returning writes", func(t *testing.T) {
+		db, err := database.New(filepath.Join(t.TempDir(), "audited-returning-restore.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer db.Close()
+		if _, err := db.Exec(`
+			INSERT INTO projects(id, name) VALUES ('returning-project', 'Returning project');
+			INSERT INTO tasks(id, project_id, title, category, status) VALUES ('returning-task', 'returning-project', 'Returning task', 'active', 'pending');
+			INSERT INTO thread_inputs(id, scope, project_id, task_id, input_mode, input_status, content, queue_position)
+			VALUES ('returning-input', 'task_thread', 'returning-project', 'returning-task', 'queued', 'pending', 'cancel me', 1);
+		`); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		goal := &models.TaskGoal{TaskID: "returning-task", GoalID: "returning-goal", Objective: "finish"}
+		if err := NewTaskGoalRepo(db).CreateOrReplace(ctx, goal); err != nil {
+			t.Fatal(err)
+		}
+		if goal.GoalID != "returning-goal" || goal.Status != models.TaskGoalStatusActive {
+			t.Fatalf("created goal = %#v", goal)
+		}
+		input, err := NewThreadInputRepo(db).CancelPending(ctx, "returning-input")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if input == nil || input.InputStatus != models.ThreadInputCancelled {
+			t.Fatalf("cancelled input = %#v", input)
+		}
+		assertEveryPooledConnectionBusyTimeout(t, db, 5000)
+	})
+
 	t.Run("direct exec and returning writes", func(t *testing.T) {
 		db, err := database.New(filepath.Join(t.TempDir(), "direct-write-restore.db"))
 		if err != nil {
