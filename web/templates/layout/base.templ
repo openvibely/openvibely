@@ -115,7 +115,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							function normalizeStoredTheme(value) { value = String(value || '').trim(); if (value === 'light' || value === 'dark') return fallbackIDForMode(value); if (validTheme(value)) return value; return ''; }
 							function normalizeThemeID(value) { return normalizeStoredTheme(value); }
 							function persistUIPreference(payload) { try { fetch('/ui/preferences', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(function() {}); } catch (_) {} }
-							function setCSSVars(theme) { var css = theme && theme.css ? theme.css : {}; Object.keys(css).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.setProperty(name, String(css[name] || '')); }); }
+							function setCSSVars(theme) { var css = theme && theme.css ? theme.css : {}; Object.keys(css).forEach(function(name) { if (/^--ov-[a-z0-9-]+$/.test(name)) document.documentElement.style.setProperty(name, String(css[name] || '')); }); var roles = theme && Array.isArray(theme.r) ? theme.r : []; ['automation-node-border', 'automation-edge', 'yaml-indent-rail'].forEach(function(name, index) { if (roles[index]) document.documentElement.style.setProperty('--ov-' + name, String(roles[index])); }); }
 							function updateThemeToggleState(theme) { var mode = modeForTheme(theme); var label = mode === 'dark' ? 'Switch to last light theme' : 'Switch to last dark theme'; document.querySelectorAll('.theme-toggle-icon').forEach(function(icon) { icon.setAttribute('data-theme-current', mode); }); document.querySelectorAll('[data-theme-mode-toggle]').forEach(function(el) { el.setAttribute('aria-pressed', mode === 'dark' ? 'true' : 'false'); el.setAttribute('title', label); el.setAttribute('aria-label', label); el.setAttribute('data-tip', label); }); }
 							function applyTheme(id, options) { options = options || {}; var theme = validTheme(normalizeStoredTheme(id)) || validTheme(defaultDark) || catalog[0]; if (!theme) return null; var themeID = theme.id; var mode = modeForTheme(theme); document.documentElement.setAttribute('data-theme', mode); document.documentElement.setAttribute('data-color-theme', themeID); document.documentElement.setAttribute('data-color-theme-kind', theme.kind || mode); setCSSVars(theme); if (options.persistLocal !== false) { safeSet(exactKey, themeID); try { localStorage.setItem('theme', themeID); } catch (_) {} } if (options.persistDB) persistUIPreference({ theme: themeID }); safeSet(mode === 'light' ? lastLightKey : lastDarkKey, themeID); updateThemeToggleState(theme); if (window.openVibelyThemes && typeof window.openVibelyThemes.refreshThemeCards === 'function') window.openVibelyThemes.refreshThemeCards(); return theme; }
 							function initialThemeID() { var rawSaved = document.documentElement.getAttribute('data-ui-theme') || ''; var saved = normalizeStoredTheme(rawSaved); if (saved) { if (rawSaved !== saved) setTimeout(function() { persistUIPreference({ theme: saved }); }, 0); return saved; } var exactRaw = safeGet(exactKey); var exact = normalizeStoredTheme(exactRaw); if (exact) return exact; if (exactRaw) safeRemove(exactKey); var legacy = normalizeStoredTheme(safeGet(legacyModeKey)); if (legacy) return legacy; return defaultDark; }
@@ -2706,6 +2706,8 @@ border-color: var(--ov-focus) !important;
 background-color: var(--ov-code-bg) !important;
 color: var(--ov-code-fg) !important;
 border-color: var(--ov-border) !important;
+--ov-yaml-indent-dot: var(--ov-yaml-indent-rail);
+--ov-yaml-indent-active: var(--ov-focus);
 font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace !important;
 }
 [data-color-theme^="vscode-"] [data-automation-yaml-editor-shell],
@@ -2719,8 +2721,8 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 [data-color-theme^="vscode-"] [data-automation-yaml-scalar] { color: var(--ov-syntax-number) !important; }
 [data-color-theme^="vscode-"] [data-automation-yaml-comment] { color: var(--ov-syntax-comment) !important; }
 [data-color-theme^="vscode-"] [data-automation-yaml-fold-summary] { color: var(--ov-text-muted) !important; }
-[data-color-theme^="vscode-"] [data-automation-yaml-indent-dot]{background-color:var(--ov-yaml-indent-dot,var(--ov-subtle-border))!important}
-[data-color-theme^="vscode-"] [data-automation-yaml-indent-rail]{background-color:var(--ov-yaml-indent-rail,var(--ov-subtle-border))!important}
+[data-color-theme^="vscode-"] [data-automation-yaml-indent-dot]{background-color:var(--ov-yaml-indent-dot,var(--ov-yaml-indent-rail,var(--ov-border-strong)))!important}
+[data-color-theme^="vscode-"] [data-automation-yaml-indent-rail]{background-color:var(--ov-yaml-indent-rail,var(--ov-border-strong))}
 [data-color-theme^="vscode-"] [data-automation-yaml-error-line] { text-decoration-color: var(--ov-error) !important; }
 [data-color-theme] pre,				[data-color-theme] code { color: var(--ov-syntax-foreground); }
 				[data-color-theme] pre { background-color: var(--ov-syntax-background); }

@@ -1,6 +1,12 @@
 package themes
 
-import "testing"
+import (
+	"encoding/json"
+	"math"
+	"strconv"
+	"strings"
+	"testing"
+)
 
 func TestCatalogContainsOpenVibelyDefaultsAndPinnedVSCodeThemes(t *testing.T) {
 	catalog := Catalog()
@@ -33,7 +39,7 @@ func TestCatalogThemeIDsKindsAndRequiredColors(t *testing.T) {
 	validKinds := map[string]bool{
 		KindLight: true, KindDark: true, KindHighContrastLight: true, KindHighContrastDark: true,
 	}
-	requiredSemantic := []string{"bg", "contentBg", "sidebarBg", "surface", "surfaceRaised", "text", "textMuted", "border", "borderStrong", "primary", "primaryForeground", "focus", "link", "inputBg", "inputBorder", "buttonBg", "buttonFg", "buttonHoverBg", "buttonHoverFg", "buttonSecondaryBg", "buttonSecondaryFg", "selectionBg", "hoverBg", "info", "infoForeground", "success", "successForeground", "warning", "warningForeground", "error", "errorForeground", "diffAddBg", "diffAddFg", "diffModifyBg", "diffModifyFg", "diffDeleteBg", "diffDeleteFg", "codeBg", "codeFg"}
+	requiredSemantic := []string{"bg", "contentBg", "sidebarBg", "surface", "surfaceRaised", "text", "textMuted", "border", "borderStrong", "automationNodeBorder", "automationEdge", "yamlIndentRail", "primary", "primaryForeground", "focus", "link", "inputBg", "inputBorder", "buttonBg", "buttonFg", "buttonHoverBg", "buttonHoverFg", "buttonSecondaryBg", "buttonSecondaryFg", "selectionBg", "hoverBg", "info", "infoForeground", "success", "successForeground", "warning", "warningForeground", "error", "errorForeground", "diffAddBg", "diffAddFg", "diffModifyBg", "diffModifyFg", "diffDeleteBg", "diffDeleteFg", "codeBg", "codeFg"}
 	requiredSyntax := []string{"background", "foreground", "comment", "string", "number", "keyword", "function", "type", "variable", "title", "error"}
 	seen := map[string]string{}
 	for _, theme := range Catalog() {
@@ -76,6 +82,127 @@ func TestCatalogThemeIDsKindsAndRequiredColors(t *testing.T) {
 	if DefaultLightThemeID != OpenVibelyLightThemeID || DefaultDarkThemeID != OpenVibelyDarkThemeID {
 		t.Fatalf("default fallback IDs must point at OpenVibely themes, got %s/%s", DefaultLightThemeID, DefaultDarkThemeID)
 	}
+}
+
+func TestCatalogAutomationGraphAndYAMLContrastRoles(t *testing.T) {
+	for _, theme := range VSCodeCatalog() {
+		if got := contrastRatioForTest(theme.Semantic["yamlIndentRail"], theme.Semantic["codeBg"]); got < 1.5 {
+			t.Fatalf("theme %s YAML rail contrast = %.2f, want at least 1.50 against code canvas", theme.Name, got)
+		}
+		if got := contrastRatioForTest(theme.Semantic["automationNodeBorder"], theme.Semantic["surfaceRaised"]); got < 1.5 {
+			t.Fatalf("theme %s Automation node border contrast = %.2f, want at least 1.50 against node fill", theme.Name, got)
+		}
+		if got := contrastRatioForTest(theme.Semantic["automationEdge"], theme.Semantic["surface"]); got < 3.0 {
+			t.Fatalf("theme %s Automation connector contrast = %.2f, want at least 3.00 against graph canvas", theme.Name, got)
+		}
+	}
+}
+
+func TestRuntimeCatalogCarriesContrastRolesInCompactBootstrapShape(t *testing.T) {
+	type runtimeTheme struct {
+		ID    string            `json:"id"`
+		CSS   map[string]string `json:"css"`
+		Roles [3]string         `json:"r"`
+	}
+	var runtime []runtimeTheme
+	if err := json.Unmarshal([]byte(RuntimeCatalogJSON()), &runtime); err != nil {
+		t.Fatalf("runtime catalog JSON: %v", err)
+	}
+	expected := make(map[string]Theme, len(Catalog()))
+	for _, theme := range Catalog() {
+		expected[theme.ID] = theme
+	}
+	if len(runtime) != len(expected) {
+		t.Fatalf("runtime catalog has %d themes, want %d", len(runtime), len(expected))
+	}
+	roleNames := []string{"--ov-automation-node-border", "--ov-automation-edge", "--ov-yaml-indent-rail"}
+	for _, theme := range runtime {
+		expectedTheme, ok := expected[theme.ID]
+		if !ok {
+			t.Fatalf("runtime catalog contains unknown theme %s", theme.ID)
+		}
+		for index, name := range roleNames {
+			if theme.Roles[index] == "" {
+				t.Fatalf("runtime theme %s is missing compact contrast role %d", theme.ID, index)
+			}
+			if theme.Roles[index] != expectedTheme.CSS[name] {
+				t.Fatalf("runtime theme %s role %s = %q, want %q", theme.ID, name, theme.Roles[index], expectedTheme.CSS[name])
+			}
+			if _, ok := theme.CSS[name]; ok {
+				t.Fatalf("runtime theme %s should keep %s in compact roles, not CSS map", theme.ID, name)
+			}
+		}
+	}
+}
+
+func contrastRatioForTest(foreground, background string) float64 {
+	fr, fg, fb, fa, foregroundOK := parseHexColorForTest(foreground)
+	br, bg, bb, ba, backgroundOK := parseHexColorForTest(background)
+	if !foregroundOK || !backgroundOK {
+		return 0
+	}
+	backgroundAlpha := ba / 255
+	baseR, baseG, baseB := br*backgroundAlpha, bg*backgroundAlpha, bb*backgroundAlpha
+	foregroundAlpha := fa / 255
+	r := fr*foregroundAlpha + baseR*(1-foregroundAlpha)
+	g := fg*foregroundAlpha + baseG*(1-foregroundAlpha)
+	b := fb*foregroundAlpha + baseB*(1-foregroundAlpha)
+	foregroundLuminance := relativeLuminanceForTest(r, g, b)
+	backgroundLuminance := relativeLuminanceForTest(baseR, baseG, baseB)
+	if foregroundLuminance < backgroundLuminance {
+		foregroundLuminance, backgroundLuminance = backgroundLuminance, foregroundLuminance
+	}
+	return (foregroundLuminance + 0.05) / (backgroundLuminance + 0.05)
+}
+
+func parseHexColorForTest(value string) (r, g, b, a float64, ok bool) {
+	hexValue := strings.TrimPrefix(strings.TrimSpace(value), "#")
+	if len(hexValue) == 3 || len(hexValue) == 4 {
+		var expanded strings.Builder
+		for _, digit := range hexValue {
+			expanded.WriteRune(digit)
+			expanded.WriteRune(digit)
+		}
+		hexValue = expanded.String()
+	}
+	if len(hexValue) != 6 && len(hexValue) != 8 {
+		return 0, 0, 0, 0, false
+	}
+	parse := func(value string) (float64, bool) {
+		parsed, err := strconv.ParseUint(value, 16, 8)
+		return float64(parsed), err == nil
+	}
+	r, ok = parse(hexValue[0:2])
+	if !ok {
+		return 0, 0, 0, 0, false
+	}
+	g, ok = parse(hexValue[2:4])
+	if !ok {
+		return 0, 0, 0, 0, false
+	}
+	b, ok = parse(hexValue[4:6])
+	if !ok {
+		return 0, 0, 0, 0, false
+	}
+	a = 255
+	if len(hexValue) == 8 {
+		a, ok = parse(hexValue[6:8])
+		if !ok {
+			return 0, 0, 0, 0, false
+		}
+	}
+	return r, g, b, a, true
+}
+
+func relativeLuminanceForTest(r, g, b float64) float64 {
+	linearize := func(value float64) float64 {
+		value /= 255
+		if value <= 0.03928 {
+			return value / 12.92
+		}
+		return math.Pow((value+0.055)/1.055, 2.4)
+	}
+	return 0.2126*linearize(r) + 0.7152*linearize(g) + 0.0722*linearize(b)
 }
 
 func TestOpenVibelyDefaultThemesMatchOriginalSurfaceRoles(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 const vscodeRef = "1.130.0"
 const vscodeRepo = "https://github.com/microsoft/vscode.git"
 
-var requiredSemantic = []string{"bg", "contentBg", "sidebarBg", "surface", "surfaceRaised", "text", "textMuted", "border", "borderStrong", "primary", "primaryForeground", "focus", "link", "inputBg", "inputBorder", "buttonBg", "buttonFg", "buttonHoverBg", "buttonHoverFg", "buttonSecondaryBg", "buttonSecondaryFg", "selectionBg", "hoverBg", "info", "infoForeground", "success", "successForeground", "warning", "warningForeground", "error", "errorForeground", "diffAddBg", "diffAddFg", "diffModifyBg", "diffModifyFg", "diffDeleteBg", "diffDeleteFg", "codeBg", "codeFg"}
+var requiredSemantic = []string{"bg", "contentBg", "sidebarBg", "surface", "surfaceRaised", "text", "textMuted", "border", "borderStrong", "automationNodeBorder", "automationEdge", "yamlIndentRail", "primary", "primaryForeground", "focus", "link", "inputBg", "inputBorder", "buttonBg", "buttonFg", "buttonHoverBg", "buttonHoverFg", "buttonSecondaryBg", "buttonSecondaryFg", "selectionBg", "hoverBg", "info", "infoForeground", "success", "successForeground", "warning", "warningForeground", "error", "errorForeground", "diffAddBg", "diffAddFg", "diffModifyBg", "diffModifyFg", "diffDeleteBg", "diffDeleteFg", "codeBg", "codeFg"}
 var cssVarName = regexp.MustCompile(`^--ov-[a-z0-9-]+$`)
 
 type manifest struct {
@@ -386,6 +386,9 @@ func normalizeSemantic(kind string, c map[string]string) map[string]string {
 	m["diffDeleteFg"] = m["error"]
 	m["codeBg"] = fallback(pick("textCodeBlock.background", "editor.background"), m["bg"])
 	m["codeFg"] = fallback(pick("editor.foreground", "foreground"), m["text"])
+	m["yamlIndentRail"] = ensureContrast(fallback(pick("editorIndentGuide.background"), m["border"]), m["codeBg"], m["text"], 1.5)
+	m["automationNodeBorder"] = ensureContrast(m["border"], m["surfaceRaised"], m["text"], 1.5)
+	m["automationEdge"] = ensureContrast(fallback(pick("editorLineNumber.foreground"), m["textMuted"]), m["surface"], m["text"], 3.0)
 	for _, k := range requiredSemantic {
 		if !validCSSColor(m[k]) {
 			m[k] = fb[k]
@@ -488,9 +491,9 @@ func camelToKebab(s string) string {
 
 func defaults(dark bool) map[string]string {
 	if dark {
-		return map[string]string{"bg": "#1e1e1e", "contentBg": "#252526", "sidebarBg": "#181818", "surface": "#252526", "surfaceRaised": "#2d2d30", "text": "#cccccc", "textMuted": "#9d9d9d", "border": "#3c3c3c", "borderStrong": "#6f6f6f", "primary": "#0078d4", "primaryForeground": "#ffffff", "focus": "#007fd4", "link": "#3794ff", "info": "#3794ff", "success": "#89d185", "warning": "#cca700", "error": "#f85149", "codeBg": "#1e1e1e", "codeFg": "#d4d4d4"}
+		return map[string]string{"bg": "#1e1e1e", "contentBg": "#252526", "sidebarBg": "#181818", "surface": "#252526", "surfaceRaised": "#2d2d30", "text": "#cccccc", "textMuted": "#9d9d9d", "border": "#3c3c3c", "borderStrong": "#6f6f6f", "automationNodeBorder": "#6f6f6f", "automationEdge": "#cccccc", "yamlIndentRail": "#6f6f6f", "primary": "#0078d4", "primaryForeground": "#ffffff", "focus": "#007fd4", "link": "#3794ff", "info": "#3794ff", "success": "#89d185", "warning": "#cca700", "error": "#f85149", "codeBg": "#1e1e1e", "codeFg": "#d4d4d4"}
 	}
-	return map[string]string{"bg": "#ffffff", "contentBg": "#f3f3f3", "sidebarBg": "#f3f3f3", "surface": "#ffffff", "surfaceRaised": "#ffffff", "text": "#1f1f1f", "textMuted": "#616161", "border": "#e5e5e5", "borderStrong": "#cccccc", "primary": "#005fb8", "primaryForeground": "#ffffff", "focus": "#0078d4", "link": "#006ab1", "info": "#0078d4", "success": "#16825d", "warning": "#9d5d00", "error": "#d13438", "codeBg": "#f6f8fa", "codeFg": "#24292f"}
+	return map[string]string{"bg": "#ffffff", "contentBg": "#f3f3f3", "sidebarBg": "#f3f3f3", "surface": "#ffffff", "surfaceRaised": "#ffffff", "text": "#1f1f1f", "textMuted": "#616161", "border": "#e5e5e5", "borderStrong": "#cccccc", "automationNodeBorder": "#cccccc", "automationEdge": "#1f1f1f", "yamlIndentRail": "#cccccc", "primary": "#005fb8", "primaryForeground": "#ffffff", "focus": "#0078d4", "link": "#006ab1", "info": "#0078d4", "success": "#16825d", "warning": "#9d5d00", "error": "#d13438", "codeBg": "#f6f8fa", "codeFg": "#24292f"}
 }
 func syntaxDefaults(dark bool) map[string]string {
 	if dark {
@@ -569,6 +572,71 @@ func mix(a, b string, t float64) string {
 	bl := int(math.Round(float64(ab)*(1-t) + float64(bb)*t))
 	return fmt.Sprintf("#%02X%02X%02X", r, g, bl)
 }
+
+func ensureContrast(preferred, background, fallbackColor string, minimum float64) string {
+	background = opaqueColor(background)
+	preferred = opaqueColor(preferred)
+	if contrastRatio(preferred, background) >= minimum {
+		return preferred
+	}
+
+	fallbackColor = opaqueColor(fallbackColor)
+	if contrastRatio(fallbackColor, background) < minimum {
+		if contrastRatio("#000000", background) >= contrastRatio("#FFFFFF", background) {
+			fallbackColor = "#000000"
+		} else {
+			fallbackColor = "#FFFFFF"
+		}
+	}
+
+	// Move the high-contrast fallback toward the drawing surface until it is
+	// just strong enough to remain visible. This keeps ordinary rails and
+	// borders subtle while preventing upstream colors that match the surface
+	// from disappearing entirely.
+	for step := 1000; step >= 0; step-- {
+		candidate := mix(fallbackColor, background, float64(step)/1000)
+		if contrastRatio(candidate, background) >= minimum {
+			return candidate
+		}
+	}
+	return fallbackColor
+}
+
+func opaqueColor(color string) string {
+	r, g, b, _ := rgba(color)
+	return fmt.Sprintf("#%02X%02X%02X", r, g, b)
+}
+
+func contrastRatio(foreground, background string) float64 {
+	fr, fg, fb, fa := rgba(foreground)
+	br, bg, bb, ba := rgba(background)
+	backgroundAlpha := float64(ba) / 255
+	baseR := float64(br) * backgroundAlpha
+	baseG := float64(bg) * backgroundAlpha
+	baseB := float64(bb) * backgroundAlpha
+	foregroundAlpha := float64(fa) / 255
+	r := float64(fr)*foregroundAlpha + baseR*(1-foregroundAlpha)
+	g := float64(fg)*foregroundAlpha + baseG*(1-foregroundAlpha)
+	b := float64(fb)*foregroundAlpha + baseB*(1-foregroundAlpha)
+	foregroundLuminance := relativeLuminance(r, g, b)
+	backgroundLuminance := relativeLuminance(baseR, baseG, baseB)
+	if foregroundLuminance < backgroundLuminance {
+		foregroundLuminance, backgroundLuminance = backgroundLuminance, foregroundLuminance
+	}
+	return (foregroundLuminance + 0.05) / (backgroundLuminance + 0.05)
+}
+
+func relativeLuminance(r, g, b float64) float64 {
+	linearize := func(value float64) float64 {
+		value /= 255
+		if value <= 0.03928 {
+			return value / 12.92
+		}
+		return math.Pow((value+0.055)/1.055, 2.4)
+	}
+	return 0.2126*linearize(r) + 0.7152*linearize(g) + 0.0722*linearize(b)
+}
+
 func bestText(bg string) string {
 	r, g, b, _ := rgba(bg)
 	lum := (0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)) / 255
@@ -665,7 +733,10 @@ func writeAttribution(root string, catalog []outTheme) error {
 	for _, t := range catalog {
 		fmt.Fprintf(&b, "- %s (%s)\n", t.Name, t.Kind)
 	}
-	fmt.Fprintf(&b, "\n## Semantic Color Mapping\n\nTheme generation reads the built-in VS Code extension manifests, resolves each contributed theme JSON file including its `include` chain, and then normalizes VS Code workbench colors into OpenVibely roles. Missing, transparent, or invalid upstream colors are not emitted directly; each role falls back to a theme-kind default or to a value derived from another validated role.\n\nPrimary derivation rules:\n\n- Application and content backgrounds prefer VS Code editor/window backgrounds first so the whole OpenVibely canvas follows the selected palette; sidebar, surface, raised surface, foreground, muted foreground, borders, links, inputs, buttons, selection, hover, focus, status, diff, and code-block roles are then selected from matching VS Code workbench color keys when present.\n- Transparent upstream colors are skipped so they cannot erase readable surfaces; invalid CSS color values are rejected at generation time.\n- Muted text and borders are derived by mixing validated foreground and background colors when VS Code does not provide a direct role.\n- Button foregrounds, button hover foregrounds, secondary button colors, and status button foregrounds fall back to validated VS Code button/status keys or to black/white based on the generated background luminance.\n- Selection, hover, and diff backgrounds fall back to generated `rgba(...)` colors derived from the accent, success, warning, and error roles.\n- Code-block and syntax colors prefer VS Code editor and token scopes, then fall back to bundled light or dark syntax defaults.\n- High-contrast-light and high-contrast-dark themes use the same mapping pipeline but retain their high-contrast `kind` in the generated catalog and DOM attribute.\n\nThese rules are implemented in `internal/themes/cmd/generate/main.go` and the sanitized output is committed in `internal/themes/catalog_gen.go` for offline runtime use.\n")
-	fmt.Fprintf(&b, "\n## License\n\nThe imported upstream theme data is from Visual Studio Code, licensed under the MIT License. The upstream license text at tag %s follows.\n\n```text\n%s\n```\n", vscodeRef, strings.TrimSpace(string(lic)))
+	fmt.Fprintf(&b, "\n## Semantic Color Mapping\n\nTheme generation reads the built-in VS Code extension manifests, resolves each contributed theme JSON file including its `include` chain, and then normalizes VS Code workbench colors into OpenVibely roles. Missing, transparent, or invalid upstream colors are not emitted directly; each role falls back to a theme-kind default or to a value derived from another validated role.\n\nPrimary derivation rules:\n\n- Application and content backgrounds prefer VS Code editor/window backgrounds first so the whole OpenVibely canvas follows the selected palette; sidebar, surface, raised surface, foreground, muted foreground, borders, links, inputs, buttons, selection, hover, focus, status, diff, and code-block roles are then selected from matching VS Code workbench color keys when present.\n- Transparent upstream colors are skipped so they cannot erase readable surfaces; invalid CSS color values are rejected at generation time.\n- Muted text and borders are derived by mixing validated foreground and background colors when VS Code does not provide a direct role.\n- Automation node borders, connector colors, and YAML indentation rails are derived from their actual drawing surfaces; when an upstream border or muted color is too close, a theme-aware foreground mix is used to enforce visible contrast.\n- Button foregrounds, button hover foregrounds, secondary button colors, and status button foregrounds fall back to validated VS Code button/status keys or to black/white based on the generated background luminance.\n- Selection, hover, and diff backgrounds fall back to generated `rgba(...)` colors derived from the accent, success, warning, and error roles.\n- Code-block and syntax colors prefer VS Code editor and token scopes, then fall back to bundled light or dark syntax defaults.\n- High-contrast-light and high-contrast-dark themes use the same mapping pipeline but retain their high-contrast `kind` in the generated catalog and DOM attribute.\n\nThese rules are implemented in `internal/themes/cmd/generate/main.go` and the sanitized output is committed in `internal/themes/catalog_gen.go` for offline runtime use.\n")
+	licenseText := strings.TrimSpace(string(lic))
+	licenseText = strings.ReplaceAll(licenseText, "\r\n", "\n")
+	licenseText = strings.ReplaceAll(licenseText, "\r", "\n")
+	fmt.Fprintf(&b, "\n## License\n\nThe imported upstream theme data is from Visual Studio Code, licensed under the MIT License. The upstream license text at tag %s follows.\n\n```text\n%s\n```\n", vscodeRef, licenseText)
 	return os.WriteFile(filepath.Join("docs", "licenses", "vscode-built-in-themes.md"), b.Bytes(), 0644)
 }

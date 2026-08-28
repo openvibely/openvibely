@@ -67,15 +67,28 @@ var runtimeCatalog struct {
 func RuntimeCatalogJSON() string {
 	runtimeCatalog.once.Do(func() {
 		type runtimeTheme struct {
-			ID   string            `json:"id"`
-			Kind string            `json:"kind"`
-			Mode string            `json:"mode"`
-			CSS  map[string]string `json:"css"`
+			ID    string            `json:"id"`
+			Kind  string            `json:"kind"`
+			Mode  string            `json:"mode"`
+			CSS   map[string]string `json:"css"`
+			Roles [3]string         `json:"r"`
 		}
 		catalog := Catalog()
 		runtime := make([]runtimeTheme, 0, len(catalog))
 		for _, theme := range catalog {
-			runtime = append(runtime, runtimeTheme{ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, CSS: theme.CSS})
+			css := make(map[string]string, len(theme.CSS)-3)
+			for name, value := range theme.CSS {
+				switch name {
+				case "--ov-automation-node-border", "--ov-automation-edge", "--ov-yaml-indent-rail":
+					continue
+				default:
+					css[name] = value
+				}
+			}
+			runtime = append(runtime, runtimeTheme{
+				ID: theme.ID, Kind: theme.Kind, Mode: theme.Mode, CSS: css,
+				Roles: [3]string{theme.CSS["--ov-automation-node-border"], theme.CSS["--ov-automation-edge"], theme.CSS["--ov-yaml-indent-rail"]},
+			})
 		}
 		data, err := json.Marshal(runtime)
 		if err != nil {
@@ -112,7 +125,7 @@ func openVibelyDarkTheme() Theme {
 		// and base-100 for sidebar/cards/modals. Keep those roles exact so the
 		// selectable default theme is a true "switch back" target.
 		"bg": "#1D232A", "contentBg": "#191E24", "sidebarBg": "#1D232A", "surface": "#1D232A", "surfaceRaised": "#1D232A",
-		"text": "#A6ADBB", "textMuted": "#A6ADBB", "border": "#15191E", "borderStrong": "#303844",
+		"text": "#A6ADBB", "textMuted": "#A6ADBB", "border": "#15191E", "borderStrong": "#303844", "automationNodeBorder": "#303844", "automationEdge": "#A6ADBB", "yamlIndentRail": "#303844",
 		"primary": "#646FE4", "primaryForeground": "#FFFFFF", "focus": "#7480FF", "link": "#7480FF",
 		"inputBg": "#1D232A", "inputBorder": "#303844", "buttonBg": "#646FE4", "buttonFg": "#FFFFFF",
 		"buttonHoverBg": "#646FE4", "buttonHoverFg": "#FFFFFF", "buttonSecondaryBg": "#273140", "buttonSecondaryFg": "#A6ADBB",
@@ -133,7 +146,7 @@ func openVibelyLightTheme() Theme {
 		// layout: #F5F5F5 for the app canvas and #FAFAFA for cards, sidebar,
 		// dropdowns, inputs, and modals.
 		"bg": "#FAFAFA", "contentBg": "#F5F5F5", "sidebarBg": "#FAFAFA", "surface": "#FAFAFA", "surfaceRaised": "#FAFAFA",
-		"text": "#1F1F1F", "textMuted": "#616161", "border": "#E5E5E5", "borderStrong": "#CECECE",
+		"text": "#1F1F1F", "textMuted": "#616161", "border": "#E5E5E5", "borderStrong": "#CECECE", "automationNodeBorder": "#CECECE", "automationEdge": "#1F1F1F", "yamlIndentRail": "#CECECE",
 		"primary": "#7480FF", "primaryForeground": "#FFFFFF", "focus": "#7480FF", "link": "#646FE4",
 		"inputBg": "#FAFAFA", "inputBorder": "#CECECE", "buttonBg": "#7480FF", "buttonFg": "#FFFFFF",
 		"buttonHoverBg": "#4F3CB8", "buttonHoverFg": "#FFFFFF", "buttonSecondaryBg": "#E8E8E8", "buttonSecondaryFg": "#3B3B3B",

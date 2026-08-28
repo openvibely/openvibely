@@ -2324,12 +2324,12 @@ templ automationGraphThemeStyles() {
 			.automation-graph-link:focus-visible .automation-graph-node,
 			.automation-graph-focus:focus-visible .automation-graph-node { stroke-width: 4; }
 				[data-color-theme^="vscode-"] .automation-canvas-shell { background: var(--ov-surface) !important; border-color: var(--ov-subtle-border) !important; }
-				[data-color-theme^="vscode-"] .automation-graph-edge { stroke: var(--ov-text-muted); opacity: 0.72; }
+				[data-color-theme^="vscode-"] .automation-graph-edge { stroke: var(--ov-automation-edge); opacity: 1; }
 				[data-color-theme^="vscode-"] .automation-graph-edge--highlighted,
 				[data-color-theme^="vscode-"] .automation-graph-edge--preview { stroke: var(--ov-focus); opacity: 1; }
-				[data-color-theme^="vscode-"] .automation-graph-arrow { fill: var(--ov-text-muted); opacity: 0.82; }
+				[data-color-theme^="vscode-"] .automation-graph-arrow { fill: var(--ov-automation-edge); opacity: 1; }
 				[data-color-theme^="vscode-"] .automation-graph-preview-arrow { fill: var(--ov-focus); opacity: 1; }
-				[data-color-theme^="vscode-"] .automation-graph-node { fill: var(--ov-surface-raised); stroke: var(--ov-border); stroke-width: 2.5; }			[data-color-theme^="vscode-"] .automation-graph-node--failed { fill: var(--ov-diff-delete-bg); stroke: var(--ov-error); }
+				[data-color-theme^="vscode-"] .automation-graph-node { fill: var(--ov-surface-raised); stroke: var(--ov-automation-node-border); stroke-width: 2.5; }			[data-color-theme^="vscode-"] .automation-graph-node--failed { fill: var(--ov-diff-delete-bg); stroke: var(--ov-error); }
 			[data-color-theme^="vscode-"] .automation-graph-node--blocked { fill: var(--ov-diff-modify-bg); stroke: var(--ov-warning); }
 			[data-color-theme^="vscode-"] .automation-graph-node--waiting { fill: var(--ov-selection-bg); stroke: var(--ov-info); }
 			[data-color-theme^="vscode-"] .automation-graph-node--running { fill: var(--ov-selection-bg); stroke: var(--ov-focus); }
@@ -2363,8 +2363,8 @@ templ automationGraphThemeStyles() {
 			[data-color-theme^="vscode-"] .automation-connect-handle--selected,
 			[data-color-theme^="vscode-"] .automation-edge-endpoint { fill: var(--ov-focus); }
 			[data-color-theme^="vscode-"] .automation-connect-handle--eligible { fill: var(--ov-success); stroke: var(--ov-success); }
-				[data-color-theme^="vscode-"] .automation-edge-foreground { stroke: var(--ov-text-muted); opacity: 0.9; }
-				[data-color-theme^="vscode-"] .automation-edge-foreground-arrow { fill: var(--ov-text-muted); opacity: 0.9; }
+				[data-color-theme^="vscode-"] .automation-edge-foreground { stroke: var(--ov-automation-edge); opacity: 1; }
+				[data-color-theme^="vscode-"] .automation-edge-foreground-arrow { fill: var(--ov-automation-edge); opacity: 1; }
 				[data-color-theme^="vscode-"] .automation-edge-foreground--selected { stroke: var(--ov-focus); opacity: 1; }			[data-color-theme^="vscode-"] .automation-edge-delete circle,
 			[data-color-theme^="vscode-"] .automation-node-delete circle { fill: var(--ov-error); stroke: var(--ov-surface); }
 			[data-color-theme^="vscode-"] .automation-edge-delete .automation-delete-x,
@@ -2373,7 +2373,7 @@ templ automationGraphThemeStyles() {
 			[data-color-theme^="vscode-"] .automation-node-delete:focus-visible circle,
 			[data-color-theme^="vscode-"] .automation-graph-link:focus-visible .automation-graph-node,
 			[data-color-theme^="vscode-"] .automation-graph-focus:focus-visible .automation-graph-node { stroke: var(--ov-focus); }
-				[data-color-theme^="vscode-"] [data-automation-yaml-panel] { --ov-yaml-indent-dot: var(--ov-subtle-border); --ov-yaml-indent-rail: var(--ov-subtle-border); --ov-yaml-indent-active: var(--ov-focus); }		</style>}
+				[data-color-theme^="vscode-"] [data-automation-yaml-panel] { --ov-yaml-indent-dot: var(--ov-yaml-indent-rail); --ov-yaml-indent-active: var(--ov-focus); }		</style>}
 
 templ automationLiveMoreActions(graph models.AutomationLiveGraph, currentProjectID string, deleteAvailable bool) {
 	@components.CardActionDropdown(components.CardActionDropdownConfig{WrapperClass: "dropdown dropdown-end shrink-0", TriggerClass: "sidebar-toggle-btn header-action-btn btn btn-ghost btn-sm btn-square", IconClass: "h-5 w-5", MenuClass: "z-[100] w-48", Label: "More actions for " + graph.Automation.Name, AutomationLiveMenu: true}) {

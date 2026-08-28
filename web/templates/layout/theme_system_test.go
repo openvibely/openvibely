@@ -65,6 +65,9 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		`background-color: var(--ov-hover-bg) !important;`,
 		`[data-theme="light"][data-color-theme^="vscode-"] dialog.modal::backdrop`,
 		`[data-color-theme^="vscode-"] [data-automation-yaml-panel] {`,
+		`--ov-yaml-indent-dot: var(--ov-yaml-indent-rail);`,
+		`--ov-yaml-indent-active: var(--ov-focus);`,
+		`[data-color-theme^="vscode-"] [data-automation-yaml-indent-rail]{background-color:var(--ov-yaml-indent-rail,var(--ov-border-strong))}`,
 		`background-color: var(--ov-code-bg) !important;`,
 		`font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace !important;`,
 		`[data-color-theme^="vscode-"] [data-automation-yaml-key] { color: var(--ov-syntax-keyword) !important; }`,
@@ -121,6 +124,12 @@ func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
 		if !strings.Contains(html, fragment) {
 			t.Fatalf("base theme system missing %q", fragment)
 		}
+	}
+	if strings.Contains(html, `[data-color-theme^="vscode-"] [data-automation-yaml-indent-rail]{background-color:var(--ov-yaml-indent-rail,var(--ov-border-strong))!important}`) {
+		t.Fatal("imported-theme YAML rail CSS must not override the active inline rail color with !important")
+	}
+	if strings.Contains(html, `[data-color-theme^="vscode-"] [data-automation-yaml-indent-rail]{background-color:var(--ov-yaml-indent-rail,var(--ov-subtle-border))`) {
+		t.Fatal("imported-theme YAML rails must not fall back to the surface-raised alias")
 	}
 	if strings.Contains(html, "github-dark.min.css") {
 		t.Fatal("base layout must not pin Highlight.js to GitHub Dark")
@@ -244,9 +253,8 @@ func TestBuiltInThemeRuntimeMigratesPersistsAndToggles(t *testing.T) {
 if (legacy.attrs['data-theme'] !== 'light') throw new Error('legacy light mode did not migrate to light mode');
 if (legacy.attrs['data-color-theme'] !== 'openvibely-light') throw new Error('legacy light mode did not choose OpenVibely light theme');
 if (Object.prototype.hasOwnProperty.call(legacy.store, 'openvibely.colorTheme')) throw new Error('legacy migration should not create an exact theme preference');
-if (!legacy.styleVars['--ov-bg'] || !legacy.styleVars['--ov-syntax-keyword']) throw new Error('theme css variables were not applied before paint');
-let lateToggle = toggleEl();
-legacy.toggles.push(lateToggle);
+if (!legacy.styleVars['--ov-bg'] || !legacy.styleVars['--ov-syntax-keyword'] || !legacy.styleVars['--ov-automation-node-border'] || !legacy.styleVars['--ov-automation-edge'] || !legacy.styleVars['--ov-yaml-indent-rail']) throw new Error('theme css variables were not applied before paint');
+let lateToggle = toggleEl();legacy.toggles.push(lateToggle);
 legacy.api.syncThemeControls();
 if (lateToggle.attrs['aria-pressed'] !== 'false') throw new Error('late light-mode toggle aria state was not synchronized');
 if (lateToggle.attrs['title'] !== 'Switch to last dark theme') throw new Error('late light-mode toggle title was not synchronized');

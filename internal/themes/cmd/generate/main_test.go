@@ -26,6 +26,35 @@ func TestNormalizeSemanticUsesEditorBackgroundForAppContent(t *testing.T) {
 	}
 }
 
+func TestNormalizeSemanticDerivesVisibleGraphAndYAMLRoles(t *testing.T) {
+	semantic := normalizeSemantic("dark", map[string]string{
+		"editor.background":           "#000C18",
+		"textCodeBlock.background":    "#000C18",
+		"editor.foreground":           "#6688CC",
+		"descriptionForeground":       "#425D8D",
+		"contrastBorder":              "#2B2B4A",
+		"dropdown.background":         "#181F2F",
+		"editorLineNumber.foreground": "#425D8D",
+	})
+
+	for _, role := range []struct {
+		name       string
+		background string
+		minimum    float64
+	}{
+		{name: "yamlIndentRail", background: "codeBg", minimum: 1.5},
+		{name: "automationNodeBorder", background: "surfaceRaised", minimum: 1.5},
+		{name: "automationEdge", background: "surface", minimum: 3.0},
+	} {
+		if got := contrastRatio(semantic[role.name], semantic[role.background]); got < role.minimum {
+			t.Fatalf("%s contrast = %.2f, want at least %.2f", role.name, got, role.minimum)
+		}
+		if semantic[role.name] == semantic[role.background] {
+			t.Fatalf("%s must not reuse its drawing surface color %s", role.name, semantic[role.background])
+		}
+	}
+}
+
 func TestResolveThemeResolvesIncludesAndOverrides(t *testing.T) {
 	dir := t.TempDir()
 	base := filepath.Join(dir, "base.json")
