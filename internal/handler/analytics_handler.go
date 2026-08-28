@@ -189,67 +189,24 @@ func serviceProjectSkillRoot(c echo.Context, h *Handler, projectID string) strin
 }
 
 func parseUsageFilter(c echo.Context) repository.UsageFilter {
-	filter := repository.UsageFilter{
+	filter, _ := service.NormalizeUsageFilter(service.UsageFilterInput{
 		ProjectID: c.QueryParam("project_id"),
 		Provider:  c.QueryParam("provider"),
 		GroupBy:   c.QueryParam("group_by"),
+		Range:     c.QueryParam("range"),
+		DateFrom:  c.QueryParam("date_from"),
+		DateTo:    c.QueryParam("date_to"),
 		Refresh:   c.QueryParam("refresh") == "true" || c.QueryParam("refresh") == "1",
-	}
-	if filter.GroupBy == "" {
-		filter.GroupBy = "day"
-	}
-	if from := parseAnalyticsTime(c.QueryParam("date_from")); !from.IsZero() {
-		filter.DateFrom = from
-	}
-	if to := parseAnalyticsTime(c.QueryParam("date_to")); !to.IsZero() {
-		filter.DateTo = to
-	}
-	if filter.DateFrom.IsZero() && filter.DateTo.IsZero() {
-		// Use local time so the range boundaries match the user's calendar day,
-		// consistent with how the Schedules page uses time.Local / time.Now().
-		now := time.Now()
-		if days, ok := analyticsRangeDays(c.QueryParam("range")); ok {
-			filter.DateFrom = now.AddDate(0, 0, -days)
-			filter.DateTo = now
-		} else {
-			switch c.QueryParam("range") {
-			case "month":
-				// Start of the current local month at midnight local time.
-				filter.DateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
-				filter.DateTo = now
-			case "all":
-				// no date bounds
-			default:
-				filter.DateFrom = now.AddDate(0, 0, -30)
-				filter.DateTo = now
-			}
-		}
-	}
+	})
 	return filter
 }
 
 func analyticsRangeDays(value string) (int, bool) {
-	if !strings.HasSuffix(value, "d") {
-		return 0, false
-	}
-	days, err := strconv.Atoi(strings.TrimSuffix(value, "d"))
-	if err != nil || days <= 0 {
-		return 0, false
-	}
-	return days, true
+	return service.ParseUsageAnalyticsRangeDays(value)
 }
 
 func parseAnalyticsTime(value string) time.Time {
-	if value == "" {
-		return time.Time{}
-	}
-	if t, err := time.Parse(time.RFC3339, value); err == nil {
-		return t.UTC()
-	}
-	if t, err := time.Parse("2006-01-02", value); err == nil {
-		return t.UTC()
-	}
-	return time.Time{}
+	return service.ParseUsageAnalyticsTime(value)
 }
 
 // GetSuccessFailureRates returns success/failure rates data
