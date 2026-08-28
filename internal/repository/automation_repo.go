@@ -111,6 +111,14 @@ func (r *AutomationRepo) GetByStableKey(ctx context.Context, projectID, stableKe
 	return &a, nil
 }
 
+func (r *AutomationRepo) Exists(ctx context.Context, projectID, automationID string) (bool, error) {
+	var exists bool
+	if err := r.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM automations WHERE project_id = ? AND id = ?)`, projectID, automationID).Scan(&exists); err != nil {
+		return false, fmt.Errorf("checking automation existence: %w", err)
+	}
+	return exists, nil
+}
+
 func (r *AutomationRepo) GetDefinition(ctx context.Context, projectID, automationID string) (*models.AutomationDefinition, error) {
 	var a models.Automation
 	err := scanAutomation(r.db.QueryRowContext(ctx, `SELECT id, project_id, stable_key, name, description, automation_type,
