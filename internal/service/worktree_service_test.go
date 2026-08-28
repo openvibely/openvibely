@@ -213,17 +213,68 @@ func TestParseGitStatusFileStats(t *testing.T) {
 }
 
 func TestParseWorktreeNameStatus(t *testing.T) {
-	input := []byte("\nM\tmodified.go\nA\tadded.go\nD\tdeleted.go\nR100\told.go\tnew.go\nC75\tsource.go\tcopy.go\nmalformed\nM\n")
-	got := parseWorktreeNameStatus(input)
-	want := []worktreeNameStatusRecord{
-		{Status: "M", Path: "modified.go"},
-		{Status: "A", Path: "added.go"},
-		{Status: "D", Path: "deleted.go"},
-		{Status: "R100", Path: "new.go", SourcePath: "old.go"},
-		{Status: "C75", Path: "copy.go", SourcePath: "source.go"},
+	tests := []struct {
+		name  string
+		input string
+		want  []worktreeNameStatusRecord
+	}{
+		{
+			name:  "empty output",
+			input: "",
+			want:  nil,
+		},
+		{
+			name:  "blank lines",
+			input: "\n\n",
+			want:  nil,
+		},
+		{
+			name:  "ordinary modified record",
+			input: "M\tmodified.go\n",
+			want:  []worktreeNameStatusRecord{{Status: "M", Path: "modified.go"}},
+		},
+		{
+			name:  "added record",
+			input: "A\tadded.go\n",
+			want:  []worktreeNameStatusRecord{{Status: "A", Path: "added.go"}},
+		},
+		{
+			name:  "deleted record",
+			input: "D\tdeleted.go\n",
+			want:  []worktreeNameStatusRecord{{Status: "D", Path: "deleted.go"}},
+		},
+		{
+			name:  "rename record",
+			input: "R100\told.go\tnew.go\n",
+			want:  []worktreeNameStatusRecord{{Status: "R100", Path: "new.go", SourcePath: "old.go"}},
+		},
+		{
+			name:  "copy record",
+			input: "C75\tsource.go\tcopy.go\n",
+			want:  []worktreeNameStatusRecord{{Status: "C75", Path: "copy.go", SourcePath: "source.go"}},
+		},
+		{
+			name:  "malformed records are skipped",
+			input: "malformed\nM\n",
+			want:  nil,
+		},
+		{
+			name:  "valid and malformed records preserve order",
+			input: "M\tfirst.go\nmalformed\nA\tsecond.go\nD\n",
+			want: []worktreeNameStatusRecord{
+				{Status: "M", Path: "first.go"},
+				{Status: "A", Path: "second.go"},
+			},
+		},
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("records = %#v, want %#v", got, want)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseWorktreeNameStatus([]byte(tt.input))
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("records = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -1855,6 +1855,9 @@ type worktreeNameStatusRecord struct {
 	SourcePath string
 }
 
+// parseWorktreeNameStatus decodes tracked git diff --name-status records for the
+// Changes projections. Path is the destination for rename/copy records, while
+// SourcePath is populated with their source path.
 func parseWorktreeNameStatus(out []byte) []worktreeNameStatusRecord {
 	var records []worktreeNameStatusRecord
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
