@@ -1670,13 +1670,7 @@ func (s *TelegramService) getActiveProject(userID int64) string {
 		return ""
 	}
 
-	projectID = projects[0].ID
-	for _, project := range projects {
-		if project.IsDefault {
-			projectID = project.ID
-			break
-		}
-	}
+	projectID = fallbackProjectID(projects)
 	return s.populateTelegramActiveProject(userID, projectID, cacheVersion)
 }
 

@@ -1040,7 +1040,7 @@ func (s *EmailService) resolveAuthorizedProjectForInbound(ctx context.Context, s
 	if len(projects) == 0 {
 		return "", true, fmt.Errorf("no projects configured")
 	}
-	return projects[0].ID, true, nil
+	return fallbackProjectID(projects), true, nil
 }
 
 // buildEmailActionToolRuntime returns channel-specific RuntimeTools for an
