@@ -108,6 +108,53 @@ func TestTaskGoalRoutesRejectForeignTaskFromExplicitAndSelectedProjects(t *testi
 	}
 }
 
+func TestTaskGoalRoutesRejectKnownTaskWithoutProjectContext(t *testing.T) {
+	routes := []struct {
+		name   string
+		suffix string
+		method string
+		body   string
+	}{
+		{name: "get", suffix: "/goal", method: http.MethodGet},
+		{name: "set", suffix: "/goal", method: http.MethodPost, body: url.Values{"goal": {"Changed without a project"}}.Encode()},
+		{name: "pause", suffix: "/goal/pause", method: http.MethodPost},
+		{name: "resume", suffix: "/goal/resume", method: http.MethodPost},
+		{name: "clear", suffix: "/goal/clear", method: http.MethodPost},
+	}
+
+	for _, route := range routes {
+		t.Run(route.name, func(t *testing.T) {
+			tc, _, task, originalGoal := newForeignTaskGoalRouteFixture(t)
+			selectedProjectID, err := tc.settingsRepo.Get(context.Background(), uiPreferenceSelectedProjectIDKey)
+			if err != nil {
+				t.Fatalf("get selected project: %v", err)
+			}
+			if strings.TrimSpace(selectedProjectID) != "" {
+				t.Fatalf("test unexpectedly has selected project %q", selectedProjectID)
+			}
+
+			rec := requestWithAccept(tc, route.method, "/tasks/"+task.ID+route.suffix, "application/json", route.body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("unscoped %s status=%d body=%s", route.name, rec.Code, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, leaked := range []string{originalGoal.Objective, originalGoal.Reason, originalGoal.BlockerKey, originalGoal.BlockerReason} {
+				if leaked != "" && strings.Contains(body, leaked) {
+					t.Fatalf("unscoped %s response leaked %q: %s", route.name, leaked, body)
+				}
+			}
+
+			currentGoal, err := tc.handler.taskGoalSvc.GetGoal(context.Background(), task.ID)
+			if err != nil {
+				t.Fatalf("get goal after rejected unscoped %s: %v", route.name, err)
+			}
+			if !reflect.DeepEqual(originalGoal, currentGoal) {
+				t.Fatalf("goal changed after rejected unscoped %s:\noriginal=%#v\ncurrent=%#v", route.name, originalGoal, currentGoal)
+			}
+		})
+	}
+}
+
 func TestTaskGoalRoutesUnknownTaskReturnNotFound(t *testing.T) {
 	tc := NewTestContext(t)
 	for _, route := range []struct {
@@ -213,7 +260,7 @@ func TestSetTaskGoalOnCompletedTaskDoesNotStartWork(t *testing.T) {
 	tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(time.Hour)).Build()
 	tc.CreateExecution(task.ID, agent.ID).WithStatus(models.ExecCompleted).WithPromptSent(task.Prompt).WithOutput("done").Build()
 
-	rec := tc.HTMX().Post("/tasks/" + task.ID + "/goal").WithForm(url.Values{"goal": {"New metadata-only goal"}}).Execute()
+	rec := tc.HTMX().Post("/tasks/" + task.ID + "/goal?project_id=" + project.ID).WithForm(url.Values{"goal": {"New metadata-only goal"}}).Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set goal status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -372,7 +419,7 @@ func TestTaskGoalPanelLabelsUserStoppedPause(t *testing.T) {
 		t.Fatalf("pause after user stop: %v", err)
 	}
 
-	rec := tc.HTMX().Get("/tasks/" + task.ID + "/goal").Execute()
+	rec := tc.HTMX().Get("/tasks/" + task.ID + "/goal?project_id=" + project.ID).Execute()
 	if rec.Code != http.StatusOK {
 		t.Fatalf("goal panel status=%d body=%s", rec.Code, rec.Body.String())
 	}
