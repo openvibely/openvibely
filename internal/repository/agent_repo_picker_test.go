@@ -77,6 +77,79 @@ func TestAgentRepoListPickerOptionsUsesCompactProjection(t *testing.T) {
 	}
 }
 
+func TestAgentRepoListPickerOptionsForProjectExcludesForeignProjectAgents(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := NewAgentRepo(db)
+	projectRepo := NewProjectRepo(db)
+	ctx := context.Background()
+	clearAgentsForRuntimeSummaryTest(t, db)
+
+	projectA := &models.Project{Name: "Picker Project A"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Picker Project B"}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	global := createPickerAgent(t, repo, "Global Picker Agent")
+	projectAgentA := createPickerAgent(t, repo, "Project A Picker Agent")
+	projectAgentA.Scope = models.AgentScopeProject
+	projectAgentA.ProjectID = projectA.ID
+	if err := repo.Update(ctx, projectAgentA); err != nil {
+		t.Fatalf("update project A agent: %v", err)
+	}
+	projectAgentB := createPickerAgent(t, repo, "Project B Picker Agent")
+	projectAgentB.Scope = models.AgentScopeProject
+	projectAgentB.ProjectID = projectB.ID
+	if err := repo.Update(ctx, projectAgentB); err != nil {
+		t.Fatalf("update project B agent: %v", err)
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	options, err := repo.ListPickerOptionsForProject(ctx, projectA.ID)
+	counter.SetEnabled(false)
+	if err != nil {
+		t.Fatalf("ListPickerOptionsForProject: %v", err)
+	}
+	gotIDs := make([]string, 0, len(options))
+	for _, option := range options {
+		gotIDs = append(gotIDs, option.ID)
+	}
+	if len(gotIDs) != 2 || !containsString(gotIDs, global.ID) || !containsString(gotIDs, projectAgentA.ID) || containsString(gotIDs, projectAgentB.ID) {
+		t.Fatalf("project A picker IDs = %#v, want global=%s and project A=%s without project B=%s", gotIDs, global.ID, projectAgentA.ID, projectAgentB.ID)
+	}
+
+	statements := counter.Statements()
+	if len(statements) != 1 {
+		t.Fatalf("statements = %#v, want exactly one compact query", statements)
+	}
+	stmt := strings.ToLower(statements[0])
+	projection := strings.Split(stmt, "from agents")[0]
+	if !strings.Contains(projection, "select id, name") {
+		t.Fatalf("project picker projection = %q, want only identity columns: %s", projection, statements[0])
+	}
+	if !strings.Contains(stmt, "coalesce(scope, 'global')") || !strings.Contains(stmt, "project_id = ?") {
+		t.Fatalf("project picker query must enforce project availability: %s", statements[0])
+	}
+	for _, forbidden := range []string{"description", "system_prompt", "tools", "tool_config", "plugins", "mcp_servers", "skills", "permission_defaults_json", "model_defaults_json", "source_refs_json", "created_at", "updated_at"} {
+		if strings.Contains(projection, forbidden) {
+			t.Fatalf("project picker query selected forbidden column %q: %s", forbidden, statements[0])
+		}
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAgentRepoGetTaskDetailAgentLabelUsesCompactProjection(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	repo := NewAgentRepo(db)
