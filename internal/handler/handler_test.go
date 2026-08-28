@@ -4367,6 +4367,26 @@ func TestHandler_ViewSchedule_TimelineTracerUsesAccentColor(t *testing.T) {
 	}
 }
 
+func TestHandler_ViewSchedule_DragFeedbackUsesThemeTokens(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Test Project")
+
+	rec := htmxGet(e, "/schedule?project_id="+project.ID)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	for _, snippet := range []string{
+		`var(--ov-schedule-drop-valid-bg, rgba(99, 102, 241, 0.2))`,
+		`var(--ov-schedule-drop-valid-outline, rgba(99, 102, 241, 0.5))`,
+		`var(--ov-schedule-drop-invalid-bg, rgba(239, 68, 68, 0.15))`,
+		`var(--ov-schedule-drop-invalid-outline, rgba(239, 68, 68, 0.6))`,
+	} {
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("schedule drag feedback missing theme token: %s", snippet)
+		}
+	}
+}
+
 func TestHandler_ViewSchedule_NoFlickerOnHTMXNav(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	project := createProject(t, h, "Test Project")
@@ -5577,7 +5597,7 @@ func TestSidebar_AutomationInvocationStartedShowsToast(t *testing.T) {
 	}
 }
 
-func TestSidebar_DoesNotPersistSelectedNavHighlight(t *testing.T) {
+func TestSidebar_SyncsActiveNavigationMetadata(t *testing.T) {
 	_, e, _ := setupTestHandler(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/tasks", nil)
@@ -5586,14 +5606,16 @@ func TestSidebar_DoesNotPersistSelectedNavHighlight(t *testing.T) {
 	body := rec.Body.String()
 
 	for _, snippet := range []string{
-		`setSidebarActiveNav`,
-		`_sidebarPendingActiveBase`,
-		`aria-current`,
-		`:focus:not(:focus-visible):not(.active)`,
+		`function syncSidebarActiveNavigation()`,
+		`link.setAttribute('aria-current', 'page');`,
+		`data-nav-base="/themes"`,
 	} {
-		if strings.Contains(body, snippet) {
-			t.Fatalf("sidebar should not persist selected nav highlight, found snippet: %s", snippet)
+		if !strings.Contains(body, snippet) {
+			t.Fatalf("sidebar active navigation metadata missing snippet: %s", snippet)
 		}
+	}
+	if strings.Contains(body, `link.classList.toggle('active', active);`) {
+		t.Fatal("sidebar navigation metadata must not apply DaisyUI's visual active class")
 	}
 }
 

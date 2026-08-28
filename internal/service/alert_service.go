@@ -259,8 +259,7 @@ func (s *AlertService) SetDecision(ctx context.Context, projectID, id string, st
 	if err := s.alertRepo.SetDecision(ctx, projectID, id, state); err != nil {
 		return err
 	}
-	a, _ := s.GetByID(ctx, projectID, id)
-	s.publish(a)
+	s.publishProjectAlert(projectID, id)
 	return nil
 }
 

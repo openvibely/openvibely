@@ -1,0 +1,332 @@
+package layout
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/themes"
+)
+
+func TestBaseIncludesBuiltInThemeSystem(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Base: %v", err)
+	}
+	html := buf.String()
+	for _, fragment := range []string{
+		`data-color-theme="` + themes.DefaultDarkThemeID + `"`,
+		`id="ov-theme-catalog"`,
+		`data-catalog=`,
+		`getAttribute('data-catalog')`,
+		`openvibely.colorTheme`,
+		`openvibely.lastLightTheme`,
+		`openvibely.lastDarkTheme`,
+		`var rawSaved = document.documentElement.getAttribute('data-ui-theme') || '';`,
+		`var saved = normalizeStoredTheme(rawSaved);`,
+		`persistUIPreference({ theme: saved });`,
+		`data-color-theme-kind`,
+		`window.openVibelyThemes.toggleMode`,
+		`window.openVibelyThemes.applySystemMode`,
+		`window.openVibelyThemes.syncThemeControls`,
+		`[data-color-theme^="vscode-"]{--ov-subtle-border:var(--ov-surface-raised);background-color:var(--ov-content-bg)}`,
+		`[data-color-theme^="vscode-"] #main-content { background-color: var(--ov-content-bg) !important; color: var(--ov-text); }`,
+		`[data-color-theme] .hljs-keyword`,
+		`var(--ov-syntax-keyword)`,
+		`[data-color-theme] pre { background-color: var(--ov-syntax-background); }`,
+		`[data-color-theme^="vscode-"] ::selection { background-color: var(--ov-selection-bg);`,
+		`border-color: var(--ov-input-border);`,
+		`outline-color: var(--ov-focus);`,
+		`[data-color-theme^="vscode-"] .badge-info`,
+		`color: var(--ov-info) !important;`,
+		`color: var(--ov-success) !important;`,
+		`color: var(--ov-warning) !important;`,
+		`color: var(--ov-error) !important;`,
+		`background-color: var(--ov-hover-bg) !important;`,
+		`var(--ov-diff-modify-bg)`,
+		`[data-color-theme^="vscode-"] .card,`,
+		`background-color:var(--ov-surface)!important;border-color:var(--ov-subtle-border)!important`,
+		`[data-color-theme^="vscode-"] .hover\:border-primary\/40:hover`,
+		`border-color:var(--ov-subtle-border)!important`,
+		`[data-color-theme^="vscode-"] .border-base-300\/80,`,
+		`[data-color-theme^="vscode-"] .divide-base-300\/70 > :not([hidden]) ~ :not([hidden])`,
+		`[data-color-theme^="vscode-"] .modal-box {`,
+		`background-color: var(--ov-surface-raised) !important;`,
+		`color: var(--ov-text) !important;`,
+		`border: 1px solid var(--ov-border) !important;`,
+		`[data-color-theme^="vscode-"] .modal-box .modal-action`,
+		`[data-color-theme^="vscode-"] .modal-box .bg-base-200`,
+		`[data-color-theme^="vscode-"] .ov-modal-close:hover`,
+		`background-color: var(--ov-hover-bg) !important;`,
+		`[data-theme="light"][data-color-theme^="vscode-"] dialog.modal::backdrop`,
+		`[data-color-theme^="vscode-"] [data-automation-yaml-panel] {`,
+		`background-color: var(--ov-code-bg) !important;`,
+		`font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace !important;`,
+		`[data-color-theme^="vscode-"] [data-automation-yaml-key] { color: var(--ov-syntax-keyword) !important; }`,
+		`[data-color-theme^="vscode-"] [data-automation-yaml-value] { color: var(--ov-syntax-string) !important; }`,
+		`[data-color-theme^="vscode-"] [data-automation-yaml-scalar] { color: var(--ov-syntax-number) !important; }`,
+		`[data-color-theme^="vscode-"] [data-automation-yaml-comment] { color: var(--ov-syntax-comment) !important; }`,
+		`[data-color-theme^="vscode-"] [data-automation-yaml-editor] { caret-color: var(--ov-syntax-foreground) !important;`,
+		`--ov-link-color: var(--ov-link);`,
+		`--ov-account-limit-track: var(--ov-hover-bg);`,
+		`--ov-account-limit-fill: var(--ov-button-bg);`,
+		`--ov-schedule-grid-border: var(--ov-border);`,
+		`--ov-schedule-task-bg: var(--ov-surface-raised);`,
+		`--ov-schedule-task-border: var(--ov-link);`,
+		`--ov-schedule-drop-valid-bg: var(--ov-selection-bg);`,
+		`[data-color-theme^="vscode-"] .drag-over { border-color: var(--ov-focus) !important; background-color: var(--ov-selection-bg) !important; }`,
+		`[data-color-theme^="vscode-"] .task-selected {`,
+		`[data-color-theme^="vscode-"] .category-drop-zone,`,
+		`[data-color-theme^="vscode-"] .category-drop-zone.drag-over,`,
+		`[data-color-theme^="vscode-"] .task-drop-zone.drag-over { border-color: var(--ov-focus) !important; background-color: var(--ov-selection-bg) !important; }`,
+		`[data-color-theme^="vscode-"] #schedule-timeline-container { background-color: var(--ov-surface) !important; border-color: var(--ov-border) !important; }`, `[data-color-theme^="vscode-"] #schedule-content .bg-indigo-600 { background-color: var(--ov-schedule-task-bg) !important; }`,
+		`[data-color-theme^="vscode-"] #schedule-content .border-indigo-500 { border-color: var(--ov-schedule-task-border) !important; }`,
+		`[data-color-theme^="vscode-"] .chat-bubble-user-msg,`,
+		`[data-color-theme^="vscode-"] .chat-bubble-assistant-msg{`,
+		`--chat-user-bg:var(--ov-surface-raised);`,
+		`background:var(--ov-surface-raised)!important;`,
+		`color:var(--ov-text)!important;`,
+		`--chat-user-border:var(--ov-subtle-border);`,
+		`border:1px solid var(--ov-subtle-border)!important;`,
+		`[data-color-theme^="vscode-"] .chat-input-container{background:var(--ov-surface-raised)!important;border:1px solid var(--ov-subtle-border)!important;`,
+		`[data-color-theme^="vscode-"] .chat-markdown blockquote{border-left-color:var(--ov-subtle-border)!important;`, `[data-color-theme^="vscode-"] .stream-thinking summary{color:var(--ov-text-muted)!important`,
+		`[data-color-theme^="vscode-"] .stream-tool-body{background:var(--ov-surface)!important;`,
+		`[data-color-theme^="vscode-"] .ov-loading-dots{--ov-loading-dot-color:var(--ov-button-bg);`,
+		`[data-color-theme^="vscode-"] .ov-task-result-start-btn{color:var(--ov-link)!important`,
+		`[data-color-theme^="vscode-"] #selection-counter{background:var(--ov-button-bg)!important;`,
+		`[data-color-theme^="vscode-"] .stt-recording{background:var(--ov-diff-delete-bg)!important;animation-name:ov-stt-pulse-vscode`,
+		`@keyframes ov-stt-pulse-vscode{`,
+		`[data-color-theme^="vscode-"] .tabs-bordered,`,
+		`[data-color-theme^="vscode-"] .toggle{background:var(--ov-surface)!important;`,
+		`[data-color-theme^="vscode-"] .theme-toggle-pill{background:var(--ov-surface-raised)!important;border:1px solid var(--ov-border)!important`,
+		`[data-color-theme^="vscode-"] .btn-primary,`,
+		`[data-color-theme^="vscode-"] .ov-badge-default{--ov-btn-bg:var(--ov-button-bg);`,
+		`--ov-btn-hover-bg:var(--ov-button-hover-bg);`,
+		`[data-color-theme^="vscode-"] .btn-secondary,`,
+		`--ov-btn-bg:var(--ov-button-secondary-bg);`,
+		`[data-color-theme^="vscode-"] .btn-info{--ov-btn-bg:var(--ov-info);--ov-btn-fg:var(--ov-info-foreground);`,
+		`[data-color-theme^="vscode-"] .btn-success{--ov-btn-bg:var(--ov-success);--ov-btn-fg:var(--ov-success-foreground);`,
+		`[data-color-theme^="vscode-"] .btn-warning{--ov-btn-bg:var(--ov-warning);--ov-btn-fg:var(--ov-warning-foreground);`,
+		`[data-color-theme^="vscode-"] .btn-error{--ov-btn-bg:var(--ov-error);--ov-btn-fg:var(--ov-error-foreground);`,
+		`[data-color-theme^="vscode-"] .btn:not(.btn-link):not(.btn-ghost):not(.btn-outline),`,
+		`background:var(--ov-btn-bg,var(--ov-surface-raised))!important;`,
+		`background:var(--ov-btn-hover-bg,var(--ov-hover-bg))!important;`,
+		`[data-color-theme^="vscode-"] .btn-outline:hover{background:var(--ov-btn-hover-bg,var(--ov-button-hover-bg))!important;`,
+	} {
+		if !strings.Contains(html, fragment) {
+			t.Fatalf("base theme system missing %q", fragment)
+		}
+	}
+	if strings.Contains(html, "github-dark.min.css") {
+		t.Fatal("base layout must not pin Highlight.js to GitHub Dark")
+	}
+	chatUserStart := strings.Index(html, `[data-color-theme^="vscode-"] .chat-bubble-user-msg,[data-color-theme^="vscode-"] .chat-bubble-assistant-msg{`)
+	if chatUserStart < 0 {
+		t.Fatal("expected imported-theme shared chat-bubble override")
+	}
+	chatUserEnd := strings.Index(html[chatUserStart:], `[data-color-theme^="vscode-"] .chat-input-container`)
+	if chatUserEnd < 0 {
+		t.Fatal("expected imported-theme chat input override after bubble styles")
+	}
+	chatUserCSS := html[chatUserStart : chatUserStart+chatUserEnd]
+	if strings.Contains(chatUserCSS, `background-color: var(--ov-button-bg)`) || strings.Contains(chatUserCSS, `background:var(--ov-button-bg)`) || strings.Contains(chatUserCSS, `color: var(--ov-button-fg)`) || strings.Contains(chatUserCSS, `color:var(--ov-button-fg)`) {
+		t.Fatal("imported-theme user chat bubbles should stay neutral surfaces, not primary/accent button fills")
+	}
+	if strings.Contains(chatUserCSS, `.chat-bubble-user-msg{`) || strings.Contains(chatUserCSS, `--ov-border-strong`) {
+		t.Fatal("imported-theme user chat bubbles should not receive a separate high-contrast border")
+	}
+	chatInputStart := strings.Index(html, `[data-color-theme^="vscode-"] .chat-input-container{`)
+	if chatInputStart < 0 {
+		t.Fatal("expected imported-theme chat input CSS block")
+	}
+	chatInputEnd := strings.Index(html[chatInputStart:], `[data-color-theme^="vscode-"] .chat-bubble-user-msg code`)
+	if chatInputEnd < 0 {
+		t.Fatal("expected imported-theme chat input CSS block before chat code styles")
+	}
+	chatInputCSS := html[chatInputStart : chatInputStart+chatInputEnd]
+	if strings.Contains(chatInputCSS, `border:1px solid var(--ov-border)`) {
+		t.Fatal("imported-theme chat input should use the same subtle border as chat bubbles")
+	}
+	dropzoneBaseline := strings.Index(html, `[data-color-theme^="vscode-"] .task-drop-zone { border-color: transparent !important; }`)
+	dropzoneDragOver := strings.Index(html, `[data-color-theme^="vscode-"] .task-drop-zone.drag-over { border-color: var(--ov-focus) !important; background-color: var(--ov-selection-bg) !important; }`)
+	if dropzoneBaseline < 0 || dropzoneDragOver < 0 || dropzoneDragOver < dropzoneBaseline {
+		t.Fatal("imported-theme task dropzone drag-over border must override the transparent baseline while preserving dashed geometry")
+	}
+	for _, broadOverride := range []string{`[data-color-theme] { background-color: var(--ov-content-bg); }`,
+		`[data-color-theme] .sidebar-aside { background-color: var(--ov-sidebar-bg); border-color: var(--ov-border); }`,
+		`[data-color-theme] .card,`,
+		`[data-color-theme] .border-base-300,`,
+		`[data-color-theme] .modal-box {`,
+		`[data-color-theme] .drag-over {`,
+		`[data-color-theme] .task-selected {`,
+		`[data-color-theme] .category-drop-zone,`,
+		`[data-color-theme] #schedule-timeline-container {`,
+		`[data-color-theme] [data-automation-yaml-panel] {`,
+		`[data-color-theme] .chat-bubble-user-msg {`,
+		`[data-color-theme] .chat-bubble-assistant-msg {`,
+		`[data-color-theme] .chat-input-container {`,
+		`[data-color-theme] .stream-thinking summary {`,
+		`[data-color-theme] .ov-loading-dots {`,
+		`[data-color-theme] .ov-task-result-start-btn {`,
+		`[data-color-theme] #selection-counter {`,
+		`[data-color-theme] .toggle {`,
+		`[data-color-theme] .theme-toggle-pill {`,
+		"[data-color-theme] {\n--ov-account-limit-track:",
+		"[data-color-theme] {\n--ov-account-limit-fill:",
+		`[data-color-theme] .btn-primary,`, `[data-color-theme] .btn-ghost:hover,`,
+	} {
+		if strings.Contains(html, broadOverride) {
+			t.Fatalf("native OpenVibely defaults must not be captured by broad exact-theme override %q", broadOverride)
+		}
+	}
+}
+
+func TestBuiltInThemeRuntimeMigratesPersistsAndToggles(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Base("Test", []models.Project{}, "").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Base: %v", err)
+	}
+	html := buf.String()
+	marker := "var exactKey = 'openvibely.colorTheme';"
+	idx := strings.Index(html, marker)
+	if idx < 0 {
+		t.Fatal("theme init script not rendered")
+	}
+	start := strings.LastIndex(html[:idx], "<script>")
+	if start < 0 {
+		t.Fatal("theme init script start not found")
+	}
+	start += len("<script>")
+	endRel := strings.Index(html[start:], "</script>")
+	if endRel < 0 {
+		t.Fatal("theme init script end not found")
+	}
+	themeScript := html[start : start+endRel]
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is required to execute the rendered built-in theme script")
+	}
+	js := `
+	const themeScript = ` + strconv.Quote(themeScript) + `;
+	const catalogJSON = ` + strconv.Quote(themes.RuntimeCatalogJSON()) + `;
+	function toggleEl() { return { attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); } }; }
+	function run(initialStore, systemLight, initialToggles) {
+	  const store = Object.assign({}, initialStore || {});
+	  const attrs = {};
+	  const styleVars = {};
+	  const listeners = {};
+	  const toggles = initialToggles || [];
+	  global.localStorage = {
+	    getItem(k) { return Object.prototype.hasOwnProperty.call(store, k) ? store[k] : null; },
+	    setItem(k, v) { store[k] = String(v); },
+	    removeItem(k) { delete store[k]; }
+	  };
+	  global.window = { location: { protocol: 'http:' }, matchMedia() { return { matches: !!systemLight }; } };
+	  global.document = {
+	    readyState: 'loading',
+	    addEventListener(name, fn) { listeners[name] = fn; },
+	    documentElement: {
+	      setAttribute(k, v) { attrs[k] = String(v); },
+	      getAttribute(k) { return attrs[k] || ''; },
+	      style: { setProperty(k, v) { if (!/^--ov-[a-z0-9-]+$/.test(k)) throw new Error('unsafe css var ' + k); styleVars[k] = String(v); } }
+	    },
+	    getElementById(id) { return id === 'ov-theme-catalog' ? { getAttribute() { return catalogJSON; } } : null; },
+	    querySelectorAll(selector) { return selector === '[data-theme-mode-toggle]' ? toggles : []; }
+	  };
+	  eval(themeScript);
+	  return { store, attrs, styleVars, toggles, listeners, api: window.openVibelyThemes };
+	}let legacy = run({ theme: 'light' }, false);
+if (legacy.attrs['data-theme'] !== 'light') throw new Error('legacy light mode did not migrate to light mode');
+if (legacy.attrs['data-color-theme'] !== 'openvibely-light') throw new Error('legacy light mode did not choose OpenVibely light theme');
+if (Object.prototype.hasOwnProperty.call(legacy.store, 'openvibely.colorTheme')) throw new Error('legacy migration should not create an exact theme preference');
+if (!legacy.styleVars['--ov-bg'] || !legacy.styleVars['--ov-syntax-keyword']) throw new Error('theme css variables were not applied before paint');
+let lateToggle = toggleEl();
+legacy.toggles.push(lateToggle);
+legacy.api.syncThemeControls();
+if (lateToggle.attrs['aria-pressed'] !== 'false') throw new Error('late light-mode toggle aria state was not synchronized');
+if (lateToggle.attrs['title'] !== 'Switch to last dark theme') throw new Error('late light-mode toggle title was not synchronized');
+if (lateToggle.attrs['aria-label'] !== 'Switch to last dark theme') throw new Error('late light-mode toggle aria label was not synchronized');
+if (lateToggle.attrs['data-tip'] !== 'Switch to last dark theme') throw new Error('late light-mode toggle tooltip was not synchronized');
+let invalid = run({ 'openvibely.colorTheme': 'missing-theme-id' }, false);
+if (Object.prototype.hasOwnProperty.call(invalid.store, 'openvibely.colorTheme')) throw new Error('invalid exact theme id was not removed');
+if (invalid.attrs['data-color-theme'] !== 'openvibely-dark') throw new Error('invalid exact theme did not fall back to OpenVibely dark');
+let selected = run({}, false, [toggleEl()]);
+selected.api.apply('vscode-default-high-contrast');
+if (selected.attrs['data-theme'] !== 'dark') throw new Error('high-contrast dark did not retain dark mode');
+if (selected.attrs['data-color-theme-kind'] !== 'high-contrast-dark') throw new Error('high-contrast dark kind was lost');
+if (selected.store['openvibely.colorTheme'] !== 'vscode-default-high-contrast') throw new Error('selection did not persist exact high-contrast theme');
+selected.store['openvibely.lastLightTheme'] = 'vscode-default-high-contrast-light';
+selected.api.toggleMode();
+if (selected.attrs['data-theme'] !== 'light') throw new Error('toggle did not switch to light mode');
+if (selected.attrs['data-color-theme'] !== 'vscode-default-high-contrast-light') throw new Error('toggle did not use remembered light theme');
+if (selected.attrs['data-color-theme-kind'] !== 'high-contrast-light') throw new Error('high-contrast light kind was lost');
+if (selected.store['openvibely.colorTheme'] !== 'vscode-default-high-contrast-light') throw new Error('toggle did not persist exact light theme');
+if (selected.toggles[0].attrs['aria-pressed'] !== 'false') throw new Error('toggle aria state did not reflect light mode');
+`
+	if output, err := exec.Command(node, "-e", js).CombinedOutput(); err != nil {
+		t.Fatalf("rendered built-in theme runtime failed: %v\n%s", err, output)
+	}
+}
+
+func TestVSCodeThemeAttributionDocumentsFallbackRules(t *testing.T) {
+	data, err := os.ReadFile("../../../docs/licenses/vscode-built-in-themes.md")
+	if err != nil {
+		t.Fatalf("read attribution doc: %v", err)
+	}
+	doc := string(data)
+	for _, fragment := range []string{
+		"## Semantic Color Mapping",
+		"Missing, transparent, or invalid upstream colors are not emitted directly",
+		"Muted text and borders are derived by mixing validated foreground and background colors",
+		"Button foregrounds, button hover foregrounds, secondary button colors, and status button foregrounds fall back",
+		"Selection, hover, and diff backgrounds fall back to generated `rgba(...)` colors",
+		"Code-block and syntax colors prefer VS Code editor and token scopes",
+	} {
+		if !strings.Contains(doc, fragment) {
+			t.Fatalf("attribution doc missing fallback/derivation fragment %q", fragment)
+		}
+	}
+}
+
+func TestSidebarThemesLinkIsMainNavigationItem(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Sidebar([]models.Project{}, "project-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Sidebar: %v", err)
+	}
+	html := buf.String()
+	if !strings.Contains(html, `data-nav-base="/themes"`) || !strings.Contains(html, `>Themes</span>`) {
+		t.Fatal("sidebar missing main Themes nav item")
+	}
+	footerStart := strings.Index(html, `id="sidebar-user-menu"`)
+	if footerStart == -1 {
+		t.Fatal("sidebar user menu not rendered")
+	}
+	if strings.Contains(html[footerStart:], `data-nav-base="/themes"`) {
+		t.Fatal("Themes nav item must not be rendered inside the footer user menu")
+	}
+}
+
+func TestSidebarFooterToggleUsesThemeModeSwitch(t *testing.T) {
+	var buf bytes.Buffer
+	if err := Sidebar([]models.Project{}, "project-1").Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render Sidebar: %v", err)
+	}
+	html := buf.String()
+	for _, fragment := range []string{
+		`data-theme-mode-toggle`,
+		`Switch theme mode`,
+		`aria-pressed="false"`,
+		`aria-label="Switch theme mode"`,
+		`onkeydown="if (event.key === 'Enter' || event.key === ' ')`,
+		`window.toggleTheme(); return false;`,
+	} {
+		if !strings.Contains(html, fragment) {
+			t.Fatalf("sidebar theme toggle missing %q", fragment)
+		}
+	}
+}

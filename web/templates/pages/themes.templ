@@ -1,0 +1,180 @@
+package pages
+
+import (
+	"strings"
+
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/themes"
+	"github.com/openvibely/openvibely/web/templates/layout"
+)
+
+templ Themes(projects []models.Project, currentProjectID string, catalog []themes.Theme) {
+	@layout.Base("Themes", projects, currentProjectID) {
+		@ThemesContent(catalog)
+	}
+}
+
+templ ThemesContent(catalog []themes.Theme) {
+	<div id="themes-container" data-search-container>
+		@layout.PageTitle("Themes")
+		<div class="flex items-center justify-between mb-6">
+			<div>
+				<h2 class="text-2xl font-bold">Themes</h2>
+					<p class="text-sm opacity-60 mt-1">Choose an OpenVibely default or built-in VS Code color theme for this browser.</p>			</div>
+		</div>
+		@CardSearchInput("themes", "Search themes...")
+		<div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3" data-themes-grid>
+			for _, theme := range catalog {
+				@themeCard(theme)
+			}
+		</div>
+		<script>
+			(function() {
+				function refreshThemeCards() {
+					var root = document.getElementById('themes-container');
+					if (!root) return;
+					var current = document.documentElement.getAttribute('data-color-theme') || '';
+					var cards = Array.prototype.slice.call(root.querySelectorAll('[data-theme-card]'));
+					cards.forEach(function(card) {
+						var active = card.getAttribute('data-theme-id') === current;
+						card.setAttribute('aria-pressed', active ? 'true' : 'false');
+						card.classList.toggle('border-primary', active);
+						card.classList.toggle('shadow-md', active);
+						card.querySelectorAll('[data-theme-active-badge]').forEach(function(badge) {
+							badge.classList.toggle('hidden', !active);
+						});
+					});
+					if (window.refreshCardSearches) window.refreshCardSearches(root);
+				}
+				window.openVibelyThemes = window.openVibelyThemes || {};
+				window.openVibelyThemes.refreshThemeCards = refreshThemeCards;
+				window.selectOpenVibelyTheme = function(id) {
+					if (window.openVibelyThemes && typeof window.openVibelyThemes.apply === 'function') {
+						window.openVibelyThemes.apply(id);
+					}
+					refreshThemeCards();
+				};
+				refreshThemeCards();
+			})();
+		</script>
+	</div>
+}
+
+templ themeCard(theme themes.Theme) {
+	<button
+		type="button"
+		class="card bg-base-100 shadow-sm border border-base-300 cursor-pointer hover:border-primary/40 hover:shadow-md transition-all text-left w-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+		data-theme-card
+		data-theme-id={ theme.ID }
+		data-theme-name={ theme.Name }
+		data-search-card
+		data-search-text={ theme.SearchText }
+		aria-pressed="false"
+		onclick="window.selectOpenVibelyTheme && window.selectOpenVibelyTheme(this.getAttribute('data-theme-id'))"
+	>
+		<div class="card-body gap-4">
+			<div class="flex items-start justify-between gap-3">
+				<div class="min-w-0">
+					<h3 class="font-bold truncate">{ theme.Name }</h3>
+					<p class="text-xs opacity-60 truncate">{ theme.Source }</p>
+				</div>
+				<div class="flex flex-wrap gap-2 justify-end shrink-0">
+					<span class={ "badge badge-sm", themeKindBadgeClass(theme.Kind) }>{ themeKindLabel(theme.Kind) }</span>
+					<span class="badge badge-primary badge-sm hidden" data-theme-active-badge>Active</span>
+				</div>
+			</div>
+			<div class="rounded-lg border overflow-hidden" style={ previewOuterStyle(theme) } aria-hidden="true">
+				<div class="flex min-h-24">
+					<div class="w-16 p-2 space-y-2" style={ previewSidebarStyle(theme) }>
+						<div class="h-2 rounded" style={ previewAccentStyle(theme) }></div>
+						<div class="h-2 rounded opacity-70" style={ previewMutedBarStyle(theme) }></div>
+						<div class="h-2 rounded opacity-50" style={ previewMutedBarStyle(theme) }></div>
+					</div>
+					<div class="flex-1 p-3 space-y-2" style={ previewSurfaceStyle(theme) }>
+						<div class="flex items-center gap-2">
+							<div class="h-3 w-20 rounded" style={ previewTextBarStyle(theme) }></div>
+							<div class="h-3 w-12 rounded" style={ previewAccentStyle(theme) }></div>
+						</div>
+						<div class="rounded p-2 text-xs font-mono leading-relaxed" style={ previewCodeStyle(theme) }>
+							<span style={ previewSyntaxStyle(theme, "keyword") }>{ "func" }</span>
+							<span style={ previewSyntaxStyle(theme, "function") }>{ " theme" }</span>
+							<span style={ previewSyntaxStyle(theme, "foreground") }>{ ">() " }</span>
+							<span style={ previewSyntaxStyle(theme, "comment") }>{ "// preview" }</span>
+							<br/>
+							<span style={ previewSyntaxStyle(theme, "string") }>{ "\"OpenVibely\"" }</span>
+							<span style={ previewSyntaxStyle(theme, "number") }>{ " 130" }</span>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</button>
+}
+
+func themeKindLabel(kind string) string {
+	switch kind {
+	case themes.KindHighContrastLight, themes.KindHighContrastDark:
+		return "High Contrast"
+	case themes.KindLight:
+		return "Light"
+	default:
+		return "Dark"
+	}
+}
+
+func themeKindBadgeClass(kind string) string {
+	if strings.HasPrefix(kind, "high-contrast") {
+		return "badge-warning"
+	}
+	if kind == themes.KindLight {
+		return "badge-info"
+	}
+	return "badge-ghost"
+}
+
+func previewColor(theme themes.Theme, group, key, fallback string) string {
+	var source map[string]string
+	if group == "syntax" {
+		source = theme.Syntax
+	} else if group == "preview" {
+		source = theme.Preview
+	} else {
+		source = theme.Semantic
+	}
+	if source != nil && source[key] != "" {
+		return source[key]
+	}
+	return fallback
+}
+
+func previewOuterStyle(theme themes.Theme) string {
+	return "border-color:" + previewColor(theme, "semantic", "border", "#444") + ";background:" + previewColor(theme, "semantic", "bg", "#1e1e1e") + ";color:" + previewColor(theme, "semantic", "text", "#ddd")
+}
+
+func previewSidebarStyle(theme themes.Theme) string {
+	return "background:" + previewColor(theme, "semantic", "sidebarBg", "#181818")
+}
+
+func previewSurfaceStyle(theme themes.Theme) string {
+	return "background:" + previewColor(theme, "semantic", "surface", "#252526")
+}
+
+func previewAccentStyle(theme themes.Theme) string {
+	return "background:" + previewColor(theme, "semantic", "primary", "#0078d4")
+}
+
+func previewMutedBarStyle(theme themes.Theme) string {
+	return "background:" + previewColor(theme, "semantic", "textMuted", "#888")
+}
+
+func previewTextBarStyle(theme themes.Theme) string {
+	return "background:" + previewColor(theme, "semantic", "text", "#ddd")
+}
+
+func previewCodeStyle(theme themes.Theme) string {
+	return "background:" + previewColor(theme, "syntax", "background", "#1e1e1e") + ";color:" + previewColor(theme, "syntax", "foreground", "#d4d4d4")
+}
+
+func previewSyntaxStyle(theme themes.Theme, key string) string {
+	return "color:" + previewColor(theme, "syntax", key, previewColor(theme, "syntax", "foreground", "#d4d4d4"))
+}
