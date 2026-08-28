@@ -146,7 +146,7 @@ func (c *GitHubIssueActionCore) ExecuteListMyAssignedIssues(ctx context.Context,
 	if err != nil {
 		return "", err
 	}
-	limit, offset, err := assignedIssueListPage(req)
+	limit, offset, err := assignedIssueListPageForInput(input, req)
 	if err != nil {
 		return "", err
 	}
@@ -212,7 +212,7 @@ func (c *GitHubIssueActionCore) ExecuteListAssignedIssues(ctx context.Context, i
 	if err != nil {
 		return "", err
 	}
-	limit, offset, err := assignedIssueListPage(req)
+	limit, offset, err := assignedIssueListPageForInput(input, req)
 	if err != nil {
 		return "", err
 	}
