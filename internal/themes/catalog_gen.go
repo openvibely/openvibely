@@ -36,6 +36,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-defaults/themes/dark_modern.json",
     "semantic": {
+      "automationEdge": "#6E7681",
+      "automationNodeBorder": "#4C4C4C",
       "bg": "#1F1F1F",
       "border": "#313131",
       "borderStrong": "#0078D4",
@@ -74,7 +76,8 @@ const CatalogJSONRaw = `[
       "text": "#CCCCCC",
       "textMuted": "#9D9D9D",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#464646"
     },
     "syntax": {
       "background": "#1F1F1F",
@@ -101,6 +104,8 @@ const CatalogJSONRaw = `[
       "text": "#CCCCCC"
     },
     "css": {
+      "--ov-automation-edge": "#6E7681",
+      "--ov-automation-node-border": "#4C4C4C",
       "--ov-bg": "#1F1F1F",
       "--ov-border": "#313131",
       "--ov-border-strong": "#0078D4",
@@ -150,7 +155,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#CCCCCC",
       "--ov-text-muted": "#9D9D9D",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#464646"
     },
     "searchText": "Dark Modern dark dark VS Code theme-defaults theme-defaults"
   },
@@ -162,6 +168,8 @@ const CatalogJSONRaw = `[
     "mode": "light",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-defaults/themes/light_modern.json",
     "semantic": {
+      "automationEdge": "#6E7681",
+      "automationNodeBorder": "#D2D2D2",
       "bg": "#FFFFFF",
       "border": "#E5E5E5",
       "borderStrong": "#005FB8",
@@ -200,7 +208,8 @@ const CatalogJSONRaw = `[
       "text": "#3B3B3B",
       "textMuted": "#3B3B3B",
       "warning": "#9D5D00",
-      "warningForeground": "#FFFFFF"
+      "warningForeground": "#FFFFFF",
+      "yamlIndentRail": "#CCCCCC"
     },
     "syntax": {
       "background": "#FFFFFF",
@@ -227,6 +236,8 @@ const CatalogJSONRaw = `[
       "text": "#3B3B3B"
     },
     "css": {
+      "--ov-automation-edge": "#6E7681",
+      "--ov-automation-node-border": "#D2D2D2",
       "--ov-bg": "#FFFFFF",
       "--ov-border": "#E5E5E5",
       "--ov-border-strong": "#005FB8",
@@ -276,7 +287,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#3B3B3B",
       "--ov-text-muted": "#3B3B3B",
       "--ov-warning": "#9D5D00",
-      "--ov-warning-foreground": "#FFFFFF"
+      "--ov-warning-foreground": "#FFFFFF",
+      "--ov-yaml-indent-rail": "#CCCCCC"
     },
     "searchText": "Light Modern light light VS Code theme-defaults theme-defaults"
   },
@@ -288,6 +300,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-abyss/themes/abyss-color-theme.json",
     "semantic": {
+      "automationEdge": "#50679B",
+      "automationNodeBorder": "#2E3D5B",
       "bg": "#000C18",
       "border": "#2B2B4A",
       "borderStrong": "#596F99",
@@ -326,7 +340,8 @@ const CatalogJSONRaw = `[
       "text": "#6688CC",
       "textMuted": "#425D8D",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#1E314D"
     },
     "syntax": {
       "background": "#000C18",
@@ -353,6 +368,8 @@ const CatalogJSONRaw = `[
       "text": "#6688CC"
     },
     "css": {
+      "--ov-automation-edge": "#50679B",
+      "--ov-automation-node-border": "#2E3D5B",
       "--ov-bg": "#000C18",
       "--ov-border": "#2B2B4A",
       "--ov-border-strong": "#596F99",
@@ -402,7 +419,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#6688CC",
       "--ov-text-muted": "#425D8D",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#1E314D"
     },
     "searchText": "Abyss dark dark VS Code theme-abyss theme-abyss"
   },
@@ -414,6 +432,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-defaults/themes/dark_vs.json",
     "semantic": {
+      "automationEdge": "#A6A6A6",
+      "automationNodeBorder": "#414141",
       "bg": "#1E1E1E",
       "border": "#303031",
       "borderStrong": "#949494",
@@ -452,7 +472,8 @@ const CatalogJSONRaw = `[
       "text": "#D4D4D4",
       "textMuted": "#A6A6A6",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#3C3C3C"
     },
     "syntax": {
       "background": "#1E1E1E",
@@ -479,6 +500,8 @@ const CatalogJSONRaw = `[
       "text": "#D4D4D4"
     },
     "css": {
+      "--ov-automation-edge": "#A6A6A6",
+      "--ov-automation-node-border": "#414141",
       "--ov-bg": "#1E1E1E",
       "--ov-border": "#303031",
       "--ov-border-strong": "#949494",
@@ -528,7 +551,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#D4D4D4",
       "--ov-text-muted": "#A6A6A6",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#3C3C3C"
     },
     "searchText": "Dark (Visual Studio) dark dark VS Code theme-defaults theme-defaults"
   },
@@ -540,6 +564,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-defaults/themes/2026-dark.json",
     "semantic": {
+      "automationEdge": "#858889",
+      "automationNodeBorder": "#383939",
       "bg": "#121314",
       "border": "#2A2B2CFF",
       "borderStrong": "#3994BCB3",
@@ -578,7 +604,8 @@ const CatalogJSONRaw = `[
       "text": "#BFBFBF",
       "textMuted": "#8C8C8C",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#838485"
     },
     "syntax": {
       "background": "#121314",
@@ -605,6 +632,8 @@ const CatalogJSONRaw = `[
       "text": "#BFBFBF"
     },
     "css": {
+      "--ov-automation-edge": "#858889",
+      "--ov-automation-node-border": "#383939",
       "--ov-bg": "#121314",
       "--ov-border": "#2A2B2CFF",
       "--ov-border-strong": "#3994BCB3",
@@ -654,7 +683,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#BFBFBF",
       "--ov-text-muted": "#8C8C8C",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#838485"
     },
     "searchText": "Dark 2026 dark dark VS Code theme-defaults theme-defaults"
   },
@@ -666,6 +696,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-defaults/themes/hc_black.json",
     "semantic": {
+      "automationEdge": "#A6A6A6",
+      "automationNodeBorder": "#D1D1D1",
       "bg": "#000000",
       "border": "#D1D1D1",
       "borderStrong": "#A6A6A6",
@@ -704,7 +736,8 @@ const CatalogJSONRaw = `[
       "text": "#FFFFFF",
       "textMuted": "#A6A6A6",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#D1D1D1"
     },
     "syntax": {
       "background": "#000000",
@@ -731,6 +764,8 @@ const CatalogJSONRaw = `[
       "text": "#FFFFFF"
     },
     "css": {
+      "--ov-automation-edge": "#A6A6A6",
+      "--ov-automation-node-border": "#D1D1D1",
       "--ov-bg": "#000000",
       "--ov-border": "#D1D1D1",
       "--ov-border-strong": "#A6A6A6",
@@ -780,7 +815,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#FFFFFF",
       "--ov-text-muted": "#A6A6A6",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#D1D1D1"
     },
     "searchText": "Dark High Contrast high-contrast-dark high contrast dark VS Code theme-defaults theme-defaults"
   },
@@ -792,6 +828,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-defaults/themes/dark_plus.json",
     "semantic": {
+      "automationEdge": "#A6A6A6",
+      "automationNodeBorder": "#414141",
       "bg": "#1E1E1E",
       "border": "#303031",
       "borderStrong": "#949494",
@@ -830,7 +868,8 @@ const CatalogJSONRaw = `[
       "text": "#D4D4D4",
       "textMuted": "#A6A6A6",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#3C3C3C"
     },
     "syntax": {
       "background": "#1E1E1E",
@@ -857,6 +896,8 @@ const CatalogJSONRaw = `[
       "text": "#D4D4D4"
     },
     "css": {
+      "--ov-automation-edge": "#A6A6A6",
+      "--ov-automation-node-border": "#414141",
       "--ov-bg": "#1E1E1E",
       "--ov-border": "#303031",
       "--ov-border-strong": "#949494",
@@ -906,7 +947,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#D4D4D4",
       "--ov-text-muted": "#A6A6A6",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#3C3C3C"
     },
     "searchText": "Dark+ dark dark VS Code theme-defaults theme-defaults"
   },
@@ -918,6 +960,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-kimbie-dark/themes/kimbie-dark-color-theme.json",
     "semantic": {
+      "automationEdge": "#957B5C",
+      "automationNodeBorder": "#B39471",
       "bg": "#221A0F",
       "border": "#B39471",
       "borderStrong": "#A57A4C",
@@ -956,7 +1000,8 @@ const CatalogJSONRaw = `[
       "text": "#D3AF86",
       "textMuted": "#957B5C",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#B39471"
     },
     "syntax": {
       "background": "#221A0F",
@@ -983,6 +1028,8 @@ const CatalogJSONRaw = `[
       "text": "#D3AF86"
     },
     "css": {
+      "--ov-automation-edge": "#957B5C",
+      "--ov-automation-node-border": "#B39471",
       "--ov-bg": "#221A0F",
       "--ov-border": "#B39471",
       "--ov-border-strong": "#A57A4C",
@@ -1032,7 +1079,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#D3AF86",
       "--ov-text-muted": "#957B5C",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#B39471"
     },
     "searchText": "Kimbie Dark dark dark VS Code theme-kimbie-dark theme-kimbie-dark"
   },
@@ -1044,6 +1092,8 @@ const CatalogJSONRaw = `[
     "mode": "light",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-defaults/themes/light_vs.json",
     "semantic": {
+      "automationEdge": "#767676",
+      "automationNodeBorder": "#D2D2D2",
       "bg": "#FFFFFF",
       "border": "#D4D4D4",
       "borderStrong": "#595959",
@@ -1082,7 +1132,8 @@ const CatalogJSONRaw = `[
       "text": "#000000",
       "textMuted": "#767676",
       "warning": "#9D5D00",
-      "warningForeground": "#FFFFFF"
+      "warningForeground": "#FFFFFF",
+      "yamlIndentRail": "#D2D2D2"
     },
     "syntax": {
       "background": "#FFFFFF",
@@ -1109,6 +1160,8 @@ const CatalogJSONRaw = `[
       "text": "#000000"
     },
     "css": {
+      "--ov-automation-edge": "#767676",
+      "--ov-automation-node-border": "#D2D2D2",
       "--ov-bg": "#FFFFFF",
       "--ov-border": "#D4D4D4",
       "--ov-border-strong": "#595959",
@@ -1158,7 +1211,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#000000",
       "--ov-text-muted": "#767676",
       "--ov-warning": "#9D5D00",
-      "--ov-warning-foreground": "#FFFFFF"
+      "--ov-warning-foreground": "#FFFFFF",
+      "--ov-yaml-indent-rail": "#D2D2D2"
     },
     "searchText": "Light (Visual Studio) light light VS Code theme-defaults theme-defaults"
   },
@@ -1170,6 +1224,8 @@ const CatalogJSONRaw = `[
     "mode": "light",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-defaults/themes/2026-light.json",
     "semantic": {
+      "automationEdge": "#606060",
+      "automationNodeBorder": "#D2D2D2",
       "bg": "#FFFFFF",
       "border": "#E2E2E5",
       "borderStrong": "#0069CCFF",
@@ -1208,7 +1264,8 @@ const CatalogJSONRaw = `[
       "text": "#202020",
       "textMuted": "#606060",
       "warning": "#B69500",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#C0C0C0"
     },
     "syntax": {
       "background": "#FFFFFF",
@@ -1235,6 +1292,8 @@ const CatalogJSONRaw = `[
       "text": "#202020"
     },
     "css": {
+      "--ov-automation-edge": "#606060",
+      "--ov-automation-node-border": "#D2D2D2",
       "--ov-bg": "#FFFFFF",
       "--ov-border": "#E2E2E5",
       "--ov-border-strong": "#0069CCFF",
@@ -1284,7 +1343,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#202020",
       "--ov-text-muted": "#606060",
       "--ov-warning": "#B69500",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#C0C0C0"
     },
     "searchText": "Light 2026 light light VS Code theme-defaults theme-defaults"
   },
@@ -1296,6 +1356,8 @@ const CatalogJSONRaw = `[
     "mode": "light",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-defaults/themes/hc_light.json",
     "semantic": {
+      "automationEdge": "#6D6D6D",
+      "automationNodeBorder": "#474747",
       "bg": "#FFFFFF",
       "border": "#474747",
       "borderStrong": "#6D6D6D",
@@ -1334,7 +1396,8 @@ const CatalogJSONRaw = `[
       "text": "#1F1F1F",
       "textMuted": "#6D6D6D",
       "warning": "#9D5D00",
-      "warningForeground": "#FFFFFF"
+      "warningForeground": "#FFFFFF",
+      "yamlIndentRail": "#474747"
     },
     "syntax": {
       "background": "#FFFFFF",
@@ -1361,6 +1424,8 @@ const CatalogJSONRaw = `[
       "text": "#1F1F1F"
     },
     "css": {
+      "--ov-automation-edge": "#6D6D6D",
+      "--ov-automation-node-border": "#474747",
       "--ov-bg": "#FFFFFF",
       "--ov-border": "#474747",
       "--ov-border-strong": "#6D6D6D",
@@ -1410,7 +1475,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#1F1F1F",
       "--ov-text-muted": "#6D6D6D",
       "--ov-warning": "#9D5D00",
-      "--ov-warning-foreground": "#FFFFFF"
+      "--ov-warning-foreground": "#FFFFFF",
+      "--ov-yaml-indent-rail": "#474747"
     },
     "searchText": "Light High Contrast high-contrast-light high contrast light VS Code theme-defaults theme-defaults"
   },
@@ -1422,6 +1488,8 @@ const CatalogJSONRaw = `[
     "mode": "light",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-defaults/themes/light_plus.json",
     "semantic": {
+      "automationEdge": "#767676",
+      "automationNodeBorder": "#D2D2D2",
       "bg": "#FFFFFF",
       "border": "#D4D4D4",
       "borderStrong": "#595959",
@@ -1460,7 +1528,8 @@ const CatalogJSONRaw = `[
       "text": "#000000",
       "textMuted": "#767676",
       "warning": "#9D5D00",
-      "warningForeground": "#FFFFFF"
+      "warningForeground": "#FFFFFF",
+      "yamlIndentRail": "#D2D2D2"
     },
     "syntax": {
       "background": "#FFFFFF",
@@ -1487,6 +1556,8 @@ const CatalogJSONRaw = `[
       "text": "#000000"
     },
     "css": {
+      "--ov-automation-edge": "#767676",
+      "--ov-automation-node-border": "#D2D2D2",
       "--ov-bg": "#FFFFFF",
       "--ov-border": "#D4D4D4",
       "--ov-border-strong": "#595959",
@@ -1536,7 +1607,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#000000",
       "--ov-text-muted": "#767676",
       "--ov-warning": "#9D5D00",
-      "--ov-warning-foreground": "#FFFFFF"
+      "--ov-warning-foreground": "#FFFFFF",
+      "--ov-yaml-indent-rail": "#D2D2D2"
     },
     "searchText": "Light+ light light VS Code theme-defaults theme-defaults"
   },
@@ -1548,6 +1620,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-monokai/themes/monokai-color-theme.json",
     "semantic": {
+      "automationEdge": "#90908A",
+      "automationNodeBorder": "#5B5D53",
       "bg": "#272822",
       "border": "#414339",
       "borderStrong": "#99947C",
@@ -1586,7 +1660,8 @@ const CatalogJSONRaw = `[
       "text": "#F8F8F2",
       "textMuted": "#AFAFA9",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#464741"
     },
     "syntax": {
       "background": "#272822",
@@ -1613,6 +1688,8 @@ const CatalogJSONRaw = `[
       "text": "#F8F8F2"
     },
     "css": {
+      "--ov-automation-edge": "#90908A",
+      "--ov-automation-node-border": "#5B5D53",
       "--ov-bg": "#272822",
       "--ov-border": "#414339",
       "--ov-border-strong": "#99947C",
@@ -1662,7 +1739,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#F8F8F2",
       "--ov-text-muted": "#AFAFA9",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#464741"
     },
     "searchText": "Monokai dark dark VS Code theme-monokai theme-monokai"
   },
@@ -1674,6 +1752,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-monokai-dimmed/themes/dimmed-monokai-color-theme.json",
     "semantic": {
+      "automationEdge": "#8B8D8B",
+      "automationNodeBorder": "#A7A9A8",
       "bg": "#1E1E1E",
       "border": "#A7A9A8",
       "borderStrong": "#3655B5",
@@ -1712,7 +1792,8 @@ const CatalogJSONRaw = `[
       "text": "#C5C8C6",
       "textMuted": "#8B8D8B",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#A7A9A8"
     },
     "syntax": {
       "background": "#1E1E1E",
@@ -1739,6 +1820,8 @@ const CatalogJSONRaw = `[
       "text": "#C5C8C6"
     },
     "css": {
+      "--ov-automation-edge": "#8B8D8B",
+      "--ov-automation-node-border": "#A7A9A8",
       "--ov-bg": "#1E1E1E",
       "--ov-border": "#A7A9A8",
       "--ov-border-strong": "#3655B5",
@@ -1788,7 +1871,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#C5C8C6",
       "--ov-text-muted": "#8B8D8B",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#A7A9A8"
     },
     "searchText": "Monokai Dimmed dark dark VS Code theme-monokai-dimmed theme-monokai-dimmed"
   },
@@ -1800,6 +1884,8 @@ const CatalogJSONRaw = `[
     "mode": "light",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-quietlight/themes/quietlight-color-theme.json",
     "semantic": {
+      "automationEdge": "#6D705B",
+      "automationNodeBorder": "#464646",
       "bg": "#F5F5F5",
       "border": "#464646",
       "borderStrong": "#9769DC",
@@ -1838,7 +1924,8 @@ const CatalogJSONRaw = `[
       "text": "#1F1F1F",
       "textMuted": "#6A6A6A",
       "warning": "#9D5D00",
-      "warningForeground": "#FFFFFF"
+      "warningForeground": "#FFFFFF",
+      "yamlIndentRail": "#AAAAAA"
     },
     "syntax": {
       "background": "#F5F5F5",
@@ -1865,6 +1952,8 @@ const CatalogJSONRaw = `[
       "text": "#1F1F1F"
     },
     "css": {
+      "--ov-automation-edge": "#6D705B",
+      "--ov-automation-node-border": "#464646",
       "--ov-bg": "#F5F5F5",
       "--ov-border": "#464646",
       "--ov-border-strong": "#9769DC",
@@ -1914,7 +2003,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#1F1F1F",
       "--ov-text-muted": "#6A6A6A",
       "--ov-warning": "#9D5D00",
-      "--ov-warning-foreground": "#FFFFFF"
+      "--ov-warning-foreground": "#FFFFFF",
+      "--ov-yaml-indent-rail": "#AAAAAA"
     },
     "searchText": "Quiet Light light light VS Code theme-quietlight theme-quietlight"
   },
@@ -1926,6 +2016,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-red/themes/Red-color-theme.json",
     "semantic": {
+      "automationEdge": "#FF7777",
+      "automationNodeBorder": "#D6CBCB",
       "bg": "#390000",
       "border": "#D6CBCB",
       "borderStrong": "#FF6666AA",
@@ -1964,7 +2056,8 @@ const CatalogJSONRaw = `[
       "text": "#F8F8F8",
       "textMuted": "#B5A1A1",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#D6CBCB"
     },
     "syntax": {
       "background": "#390000",
@@ -1991,6 +2084,8 @@ const CatalogJSONRaw = `[
       "text": "#F8F8F8"
     },
     "css": {
+      "--ov-automation-edge": "#FF7777",
+      "--ov-automation-node-border": "#D6CBCB",
       "--ov-bg": "#390000",
       "--ov-border": "#D6CBCB",
       "--ov-border-strong": "#FF6666AA",
@@ -2040,7 +2135,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#F8F8F8",
       "--ov-text-muted": "#B5A1A1",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#D6CBCB"
     },
     "searchText": "Red dark dark VS Code theme-red theme-red"
   },
@@ -2052,6 +2148,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-solarized-dark/themes/solarized-dark-color-theme.json",
     "semantic": {
+      "automationEdge": "#93A1A1",
+      "automationNodeBorder": "#234047",
       "bg": "#002B36",
       "border": "#2B2B4A",
       "borderStrong": "#2AA19899",
@@ -2090,7 +2188,8 @@ const CatalogJSONRaw = `[
       "text": "#839496",
       "textMuted": "#93A1A1AA",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#93A1A1"
     },
     "syntax": {
       "background": "#002B36",
@@ -2117,6 +2216,8 @@ const CatalogJSONRaw = `[
       "text": "#839496"
     },
     "css": {
+      "--ov-automation-edge": "#93A1A1",
+      "--ov-automation-node-border": "#234047",
       "--ov-bg": "#002B36",
       "--ov-border": "#2B2B4A",
       "--ov-border-strong": "#2AA19899",
@@ -2166,7 +2267,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#839496",
       "--ov-text-muted": "#93A1A1AA",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#93A1A1"
     },
     "searchText": "Solarized Dark dark dark VS Code theme-solarized-dark theme-solarized-dark"
   },
@@ -2178,6 +2280,8 @@ const CatalogJSONRaw = `[
     "mode": "light",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-solarized-light/themes/solarized-light-color-theme.json",
     "semantic": {
+      "automationEdge": "#586E75",
+      "automationNodeBorder": "#BCC0B7",
       "bg": "#FDF6E3",
       "border": "#DDD6C1",
       "borderStrong": "#B49471",
@@ -2216,7 +2320,8 @@ const CatalogJSONRaw = `[
       "text": "#657B83",
       "textMuted": "#586E75AA",
       "warning": "#9D5D00",
-      "warningForeground": "#FFFFFF"
+      "warningForeground": "#FFFFFF",
+      "yamlIndentRail": "#586E75"
     },
     "syntax": {
       "background": "#FDF6E3",
@@ -2243,6 +2348,8 @@ const CatalogJSONRaw = `[
       "text": "#657B83"
     },
     "css": {
+      "--ov-automation-edge": "#586E75",
+      "--ov-automation-node-border": "#BCC0B7",
       "--ov-bg": "#FDF6E3",
       "--ov-border": "#DDD6C1",
       "--ov-border-strong": "#B49471",
@@ -2292,7 +2399,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#657B83",
       "--ov-text-muted": "#586E75AA",
       "--ov-warning": "#9D5D00",
-      "--ov-warning-foreground": "#FFFFFF"
+      "--ov-warning-foreground": "#FFFFFF",
+      "--ov-yaml-indent-rail": "#586E75"
     },
     "searchText": "Solarized Light light light VS Code theme-solarized-light theme-solarized-light"
   },
@@ -2304,6 +2412,8 @@ const CatalogJSONRaw = `[
     "mode": "dark",
     "upstream": "https://github.com/microsoft/vscode.git@1.130.0:extensions/theme-tomorrow-night-blue/themes/tomorrow-night-blue-color-theme.json",
     "semantic": {
+      "automationEdge": "#A6B2C2",
+      "automationNodeBorder": "#D1D8E0",
       "bg": "#002451",
       "border": "#D1D8E0",
       "borderStrong": "#BBDAFF",
@@ -2342,7 +2452,8 @@ const CatalogJSONRaw = `[
       "text": "#FFFFFF",
       "textMuted": "#A6B2C2",
       "warning": "#CCA700",
-      "warningForeground": "#000000"
+      "warningForeground": "#000000",
+      "yamlIndentRail": "#D1D8E0"
     },
     "syntax": {
       "background": "#002451",
@@ -2369,6 +2480,8 @@ const CatalogJSONRaw = `[
       "text": "#FFFFFF"
     },
     "css": {
+      "--ov-automation-edge": "#A6B2C2",
+      "--ov-automation-node-border": "#D1D8E0",
       "--ov-bg": "#002451",
       "--ov-border": "#D1D8E0",
       "--ov-border-strong": "#BBDAFF",
@@ -2418,7 +2531,8 @@ const CatalogJSONRaw = `[
       "--ov-text": "#FFFFFF",
       "--ov-text-muted": "#A6B2C2",
       "--ov-warning": "#CCA700",
-      "--ov-warning-foreground": "#000000"
+      "--ov-warning-foreground": "#000000",
+      "--ov-yaml-indent-rail": "#D1D8E0"
     },
     "searchText": "Tomorrow Night Blue dark dark VS Code theme-tomorrow-night-blue theme-tomorrow-night-blue"
   }

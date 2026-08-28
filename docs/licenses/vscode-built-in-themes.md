@@ -39,6 +39,7 @@ Primary derivation rules:
 - Application and content backgrounds prefer VS Code editor/window backgrounds first so the whole OpenVibely canvas follows the selected palette; sidebar, surface, raised surface, foreground, muted foreground, borders, links, inputs, buttons, selection, hover, focus, status, diff, and code-block roles are then selected from matching VS Code workbench color keys when present.
 - Transparent upstream colors are skipped so they cannot erase readable surfaces; invalid CSS color values are rejected at generation time.
 - Muted text and borders are derived by mixing validated foreground and background colors when VS Code does not provide a direct role.
+- Automation node borders, connector colors, and YAML indentation rails are derived from their actual drawing surfaces; when an upstream border or muted color is too close, a theme-aware foreground mix is used to enforce visible contrast.
 - Button foregrounds, button hover foregrounds, secondary button colors, and status button foregrounds fall back to validated VS Code button/status keys or to black/white based on the generated background luminance.
 - Selection, hover, and diff backgrounds fall back to generated `rgba(...)` colors derived from the accent, success, warning, and error roles.
 - Code-block and syntax colors prefer VS Code editor and token scopes, then fall back to bundled light or dark syntax defaults.
