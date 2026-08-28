@@ -750,6 +750,7 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 	for _, want := range []string{`data-automation-yaml-builder`, `data-automation-builder-cancel`, `data-automation-builder-save`,
 		`data-automation-view-switcher`, `data-automation-view-graph`, `data-automation-view-yaml`, `data-automation-view-details`,
 		`data-automation-yaml-editor`, `name="automation_yaml"`, `schema_version: 1`,
+		`style="caret-color: var(--ov-syntax-foreground, currentColor);"`, `data-automation-yaml-key`, `data-automation-yaml-value`, `data-automation-yaml-scalar`, `data-automation-yaml-comment`,
 		`data-automation-yaml-editor-shell`, `data-automation-yaml-line-numbers`, `data-automation-yaml-diagnostic`,
 		`data-automation-graph-panel`, `data-automation-details-panel`, `data-automation-details-form`, `data-automation-node-details`, `data-automation-edge-details`,
 		`min-h-[20rem] flex-1 flex-col overflow-hidden rounded-box border border-base-300 bg-base-200/20 px-0 py-4 font-mono text-sm leading-6`,
@@ -758,7 +759,7 @@ func TestAutomationBuilderEditHeaderUsesYAMLAuthoring(t *testing.T) {
 			t.Errorf("expected synchronized Automation Edit view to contain %q", want)
 		}
 	}
-	for _, forbidden := range []string{`data-automation-yaml-preview`, "Automation YAML", "YAML controls node and connection configuration"} {
+	for _, forbidden := range []string{`data-automation-yaml-preview`, "Automation YAML", "YAML controls node and connection configuration", `caret-color: oklch(var(--bc));`} {
 		if strings.Contains(body, forbidden) {
 			t.Errorf("interactive graph must omit obsolete YAML authoring chrome %q", forbidden)
 		}
@@ -887,6 +888,10 @@ func TestAutomationLiveYAMLPanelMatchesEditorButIsReadOnly(t *testing.T) {
 		`data-automation-copy-yaml-status`,
 		`Copy YAML`,
 		`aria-label="Copy saved Automation YAML"`,
+		`data-automation-yaml-key`,
+		`data-automation-yaml-value`,
+		`data-automation-yaml-scalar`,
+		`data-automation-yaml-comment`,
 		`readonly`,
 		`tabindex="-1"`,
 		`cursor-default`,
@@ -1171,11 +1176,13 @@ func TestAutomationLiveActionsUsePrimaryButtonsAndBreadcrumbKebab(t *testing.T) 
 			t.Errorf("expected Live Automation Details view to contain %q", want)
 		}
 	}
-	if !(strings.Index(body, `data-automation-graph-panel`) < strings.Index(body, `data-automation-live-details-panel`) && strings.Index(body, `data-automation-live-details-panel`) < strings.Index(body, `data-automation-yaml-panel`)) {
+	panelBody := body[viewportStart:]
+	detailsPanel := strings.Index(panelBody, `data-automation-live-details-panel`)
+	yamlPanel := strings.Index(panelBody, `data-automation-yaml-panel hidden style="display: none"`)
+	if detailsPanel < 0 || yamlPanel < 0 || detailsPanel >= yamlPanel {
 		t.Error("expected Live Automation panels in Graph, Details, YAML order")
 	}
-	for _, forbidden := range []string{
-		`Node states`, `A node’s border and label show the highest-priority work state currently present.`,
+	for _, forbidden := range []string{`Node states`, `A node’s border and label show the highest-priority work state currently present.`,
 		`data-automation-live-legend-row`, `aria-label="Graph status legend"`, `Failed`, `Waiting human`, `Recently Completed`,
 	} {
 		if strings.Contains(cardHeader, forbidden) {
@@ -1502,7 +1509,7 @@ func TestAutomationBuilderUsesInteractiveGraphAndYAMLEditor(t *testing.T) {
 		t.Fatalf("render Automation YAML builder: %v", err)
 	}
 	body := out.String()
-	for _, want := range []string{`[data-automation-yaml-fold]:focus-visible { outline: 1px solid oklch(var(--bc) / .5);`, `aria-label="Automation graph builder"`, `data-automation-graph-panel`, `data-automation-yaml-panel`, `data-automation-yaml-editor`, `data-automation-zoom-in`, `data-automation-fit`, `data-automation-reset`, `data-automation-node-tool`} {
+	for _, want := range []string{`[data-automation-yaml-fold]:focus-visible { outline: 1px solid oklch(var(--bc) / .5);`, `aria-label="Automation graph builder"`, `data-automation-graph-panel`, `data-automation-yaml-panel`, `data-automation-yaml-editor`, `data-automation-zoom-in`, `data-automation-fit`, `data-automation-reset`, `data-automation-node-tool`, `[data-color-theme^="vscode-"] .automation-canvas-shell`, `[data-color-theme^="vscode-"] .automation-graph-node { fill: var(--ov-surface-raised); stroke: var(--ov-border); stroke-width: 2.5; }`, `[data-color-theme^="vscode-"] .automation-graph-edge { stroke: var(--ov-text-muted); opacity: 0.72; }`, `[data-color-theme^="vscode-"] .automation-edge-foreground--selected { stroke: var(--ov-focus); opacity: 1; }`, `[data-color-theme^="vscode-"] [data-automation-yaml-panel] { --ov-yaml-indent-dot: var(--ov-subtle-border); --ov-yaml-indent-rail: var(--ov-subtle-border); --ov-yaml-indent-active: var(--ov-focus); }`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected interactive YAML builder to contain %q", want)
 		}
@@ -1545,11 +1552,14 @@ func TestAutomationYAMLBuilderUsesConsistentLayout(t *testing.T) {
 				t.Errorf("%s YAML indentation must use visual-only guides over source spaces: missing %q", source, want)
 			}
 		}
-		if !strings.Contains(body, `data-automation-yaml-indent-rail`) || !strings.Contains(body, `width:1px;z-index:20;background-color:`) || !strings.Contains(body, `function yamlRailColor(active)`) || !strings.Contains(body, `oklch(var(--bc) / 0.3)`) {
+		if !strings.Contains(body, `data-automation-yaml-indent-rail`) || !strings.Contains(body, `width:1px;z-index:20;background-color:`) || !strings.Contains(body, `function yamlRailColor(active)`) || !strings.Contains(body, `var(--ov-yaml-indent-active, var(--ov-focus`) || !strings.Contains(body, `var(--ov-yaml-indent-rail, var(--ov-border-strong`) {
 			t.Errorf("%s YAML indentation rails must use a visible continuous theme-colored layer", source)
 		}
 		if strings.Contains(body, `marker = column % 2 === 0 ? '│' : '·'`) {
 			t.Errorf("%s YAML indentation must not substitute guide characters into the source overlay flow", source)
+		}
+		if strings.Contains(body, `[data-automation-yaml-panel]:focus-within { --ov-yaml-indent-dot: var(--ov-focus); --ov-yaml-indent-rail: var(--ov-focus); }`) {
+			t.Errorf("%s YAML focus must not recolor every indentation guide; only the active innermost rail should highlight", source)
 		}
 	}
 }
