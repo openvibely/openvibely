@@ -1878,7 +1878,7 @@ func parseWorktreeNameStatus(out []byte) []worktreeNameStatusRecord {
 
 func parseWorktreeDiffFileTargets(out []byte) []worktreeDiffFileTarget {
 	records := parseWorktreeNameStatus(out)
-	targets := make([]worktreeDiffFileTarget, 0, len(records))
+	var targets []worktreeDiffFileTarget
 	for _, record := range records {
 		pathspecs := []string{record.Path}
 		if record.SourcePath != "" {
@@ -2061,7 +2061,7 @@ func GetWorktreeFileStatsWithUncommitted(repoDir string, branchName string, targ
 
 func parseWorktreeFileStats(out []byte) []WorktreeFileStat {
 	records := parseWorktreeNameStatus(out)
-	stats := make([]WorktreeFileStat, 0, len(records))
+	var stats []WorktreeFileStat
 	for _, record := range records {
 		stats = append(stats, WorktreeFileStat{Path: record.Path, Status: gitStatusToWorktreeFileStatus(record.Status)})
 	}
