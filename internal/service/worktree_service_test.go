@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -208,6 +209,49 @@ func TestParseGitStatusFileStats(t *testing.T) {
 		if stats[i] != want[i] {
 			t.Fatalf("stats[%d] = %#v, want %#v", i, stats[i], want[i])
 		}
+	}
+}
+
+func TestParseWorktreeNameStatus(t *testing.T) {
+	input := []byte("\nM\tmodified.go\nA\tadded.go\nD\tdeleted.go\nR100\told.go\tnew.go\nC75\tsource.go\tcopy.go\nmalformed\nM\n")
+	got := parseWorktreeNameStatus(input)
+	want := []worktreeNameStatusRecord{
+		{Status: "M", Path: "modified.go"},
+		{Status: "A", Path: "added.go"},
+		{Status: "D", Path: "deleted.go"},
+		{Status: "R100", Path: "new.go", SourcePath: "old.go"},
+		{Status: "C75", Path: "copy.go", SourcePath: "source.go"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("records = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseWorktreeNameStatusProjections(t *testing.T) {
+	input := []byte("\nM\tmodified.go\nA\tadded.go\nD\tdeleted.go\nR100\told.go\tnew.go\nC75\tsource.go\tcopy.go\nmalformed\nM\n")
+
+	targets := parseWorktreeDiffFileTargets(input)
+	wantTargets := []worktreeDiffFileTarget{
+		{Path: "modified.go", Pathspecs: []string{"modified.go"}},
+		{Path: "added.go", Pathspecs: []string{"added.go"}},
+		{Path: "deleted.go", Pathspecs: []string{"deleted.go"}},
+		{Path: "new.go", Pathspecs: []string{"old.go", "new.go"}},
+		{Path: "copy.go", Pathspecs: []string{"source.go", "copy.go"}},
+	}
+	if !reflect.DeepEqual(targets, wantTargets) {
+		t.Fatalf("targets = %#v, want %#v", targets, wantTargets)
+	}
+
+	stats := parseWorktreeFileStats(input)
+	wantStats := []WorktreeFileStat{
+		{Path: "modified.go", Status: "modified"},
+		{Path: "added.go", Status: "added"},
+		{Path: "deleted.go", Status: "deleted"},
+		{Path: "new.go", Status: "modified"},
+		{Path: "copy.go", Status: "modified"},
+	}
+	if !reflect.DeepEqual(stats, wantStats) {
+		t.Fatalf("stats = %#v, want %#v", stats, wantStats)
 	}
 }
 
