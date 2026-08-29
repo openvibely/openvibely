@@ -21,6 +21,10 @@ type automationTaskSubmissionService interface {
 	SubmitSavedAutomationTask(models.Task)
 }
 
+type automationQueuedWorkPruner interface {
+	PruneQueuedWork()
+}
+
 type AutomationCompiler struct {
 	automationRepo *repository.AutomationRepo
 	taskSvc        automationTaskMutationService
@@ -397,7 +401,13 @@ func (s *AutomationLifecycleService) Pause(ctx context.Context, projectID, autom
 	if s == nil || s.repo == nil {
 		return errors.New("automation lifecycle service is unavailable")
 	}
-	return s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationPaused)
+	if err := s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationPaused); err != nil {
+		return err
+	}
+	if pruner, ok := s.taskSvc.(automationQueuedWorkPruner); ok {
+		pruner.PruneQueuedWork()
+	}
+	return nil
 }
 
 func (s *AutomationLifecycleService) Resume(ctx context.Context, projectID, automationID string) error {
@@ -421,7 +431,13 @@ func (s *AutomationLifecycleService) Archive(ctx context.Context, projectID, aut
 	if s == nil || s.repo == nil {
 		return errors.New("automation lifecycle service is unavailable")
 	}
-	return s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationArchived)
+	if err := s.repo.SetAutomationLifecycle(ctx, projectID, automationID, models.AutomationArchived); err != nil {
+		return err
+	}
+	if pruner, ok := s.taskSvc.(automationQueuedWorkPruner); ok {
+		pruner.PruneQueuedWork()
+	}
+	return nil
 }
 
 func (s *AutomationLifecycleService) Delete(ctx context.Context, projectID, automationID string) error {

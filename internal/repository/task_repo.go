@@ -27,12 +27,16 @@ const scheduleCalendarTaskSelectColumns = `t.id, t.project_id, t.title, t.catego
 
 const taskSelectColumnsWithGoal = `t.id, t.project_id, t.title, t.category, t.priority, t.status, t.prompt, t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 			EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
+			0 AS automation_capacity_queued,
 			t.created_at, t.updated_at, t.completed_at`
 
 const BoardPromptPreviewCodePoints = 300
 
 var taskBoardSelectColumnsWithGoal = fmt.Sprintf(`t.id, t.project_id, t.title, t.category, t.priority, t.status, substr(t.prompt, 1, %d), t.agent_id, t.agent_definition_id, t.tag, t.display_order, t.parent_task_id, t.chain_config, t.swarm_role, t.swarm_status, t.swarm_config, t.swarm_sequence, t.worktree_path, t.worktree_branch, t.auto_merge, t.merge_target_branch, t.merge_status, t.base_branch, t.base_commit_sha, t.lineage_depth, t.created_via, t.telegram_chat_id,
 			EXISTS(SELECT 1 FROM task_goals g WHERE g.task_id = t.id AND g.status != 'cleared') AS has_goal,
+			EXISTS(SELECT 1 FROM automation_dispatch_outbox d
+				JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
+				WHERE d.task_id = t.id AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')) AS automation_capacity_queued,
 			t.created_at, t.updated_at, t.completed_at`, BoardPromptPreviewCodePoints)
 
 type TaskRepo struct {
@@ -49,6 +53,18 @@ func NewTaskRepo(db *sql.DB, broadcaster *events.Broadcaster) *TaskRepo {
 
 func (r *TaskRepo) ListByProject(ctx context.Context, projectID string, category string) ([]models.Task, error) {
 	return r.ListByProjectWithSort(ctx, projectID, category, "")
+}
+
+// HasPendingAutomationDispatch reports whether a task has an unfinished,
+// execution-free Automation dispatch holding a durable run reservation.
+func (r *TaskRepo) HasPendingAutomationDispatch(ctx context.Context, taskID string) (bool, error) {
+	var queued bool
+	err := r.db.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM automation_dispatch_outbox d
+		JOIN automation_task_run_reservations r ON r.dispatch_id = d.id AND r.task_id = d.task_id
+		WHERE d.task_id = ? AND d.execution_id IS NULL AND d.status IN ('pending', 'processing', 'submitted')
+	)`, taskID).Scan(&queued)
+	return queued, err
 }
 
 func (r *TaskRepo) ListAutomationReusableTasks(ctx context.Context, projectID string, limit int) ([]models.Task, error) {
@@ -109,7 +125,7 @@ func (r *TaskRepo) listByProjectWithCategorySorts(ctx context.Context, selectCol
 	for rows.Next() {
 		var t models.Task
 		if err := rows.Scan(&t.ID, &t.ProjectID, &t.Title, &t.Category,
-			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
+			&t.Priority, &t.Status, &t.Prompt, &t.AgentID, &t.AgentDefinitionID, &t.Tag, &t.DisplayOrder, &t.ParentTaskID, &t.ChainConfig, &t.SwarmRole, &t.SwarmStatus, &t.SwarmConfig, &t.SwarmSequence, &t.WorktreePath, &t.WorktreeBranch, &t.AutoMerge, &t.MergeTargetBranch, &t.MergeStatus, &t.BaseBranch, &t.BaseCommitSHA, &t.LineageDepth, &t.CreatedVia, &t.TelegramChatID, &t.HasGoal, &t.AutomationCapacityQueued, &t.CreatedAt, &t.UpdatedAt, &t.CompletedAt); err != nil {
 			return nil, fmt.Errorf("scanning task: %w", err)
 		}
 		tasks = append(tasks, t)

@@ -860,6 +860,9 @@ func (h *Handler) CreateModel(c echo.Context) error {
 		return err
 	}
 	applog.Infof("[handler] CreateModel success id=%s", a.ID)
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
+	}
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
@@ -928,6 +931,9 @@ func (h *Handler) updateModelByID(c echo.Context, id string) error {
 		return err
 	}
 	applog.Infof("[handler] UpdateModel success id=%s", id)
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
+	}
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
@@ -960,6 +966,9 @@ func (h *Handler) SetDefaultModel(c echo.Context) error {
 		return err
 	}
 	applog.Infof("[handler] SetDefaultModel success id=%s", id)
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
+	}
 
 	// Return updated agents list for HTMX
 	if isHTMX(c) {
@@ -1027,6 +1036,10 @@ func (h *Handler) DeleteModel(c echo.Context) error {
 			return err
 		}
 		applog.Infof("[handler] DeleteModel success id=%s", id)
+	}
+
+	if h.workerSvc != nil {
+		h.workerSvc.DispatchNext()
 	}
 
 	// Return updated agents list for HTMX

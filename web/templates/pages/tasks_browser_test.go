@@ -280,6 +280,104 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
+func TestCapacityQueuedAutomationAndTerminalTasksAreVisibleInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatalf("read pinned HTMX fixture: %v", err)
+	}
+
+	project := models.Project{ID: "project-automation-capacity-browser", Name: "Automation Capacity Browser"}
+	tasks := []models.Task{
+		{ID: "automation-capacity", ProjectID: project.ID, Title: "Queued Automation", Category: models.CategoryScheduled, Status: models.StatusPending, AutomationCapacityQueued: true},
+		{ID: "automation-future", ProjectID: project.ID, Title: "Future Automation", Category: models.CategoryScheduled, Status: models.StatusPending, CreatedVia: "automation:auto:future"},
+		{ID: "ordinary-scheduled", ProjectID: project.ID, Title: "Ordinary Scheduled", Category: models.CategoryScheduled, Status: models.StatusPending},
+		{ID: "terminal-failed", ProjectID: project.ID, Title: "Failed Automation", Category: models.CategoryBacklog, Status: models.StatusFailed, CreatedVia: "automation:auto:worker"},
+		{ID: "terminal-cancelled", ProjectID: project.ID, Title: "Cancelled Automation", Category: models.CategoryBacklog, Status: models.StatusCancelled, CreatedVia: "automation:auto:worker"},
+	}
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+  function fail(message) { throw new Error(message); }
+  function waitFor(check, label) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try { if (check()) return resolve(); } catch (error) { return reject(error); }
+        if (performance.now() - started > 8000) return reject(new Error('timed out waiting for ' + label));
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
+  (async function() {
+    await waitFor(function() { return document.getElementById('task-automation-capacity'); }, 'Tasks board');
+    var pending = document.querySelector('.task-drop-zone[data-status="pending"][data-category="active"]');
+    if (!pending || !pending.contains(document.getElementById('task-automation-capacity'))) fail('capacity-queued Automation is not in Active pending dropzone');
+    var queued = document.getElementById('task-automation-capacity');
+    if (queued.dataset.taskCategory !== 'scheduled' || queued.dataset.taskStatus !== 'pending') fail('queued Automation card lost its persisted category/status');
+    if (document.getElementById('task-automation-future')) fail('future Automation schedule was incorrectly projected as queued');
+    if (document.getElementById('task-ordinary-scheduled')) fail('ordinary scheduled task was incorrectly projected onto the board');
+    var backlog = document.querySelector('.category-drop-zone[data-category="backlog"]');
+    if (!backlog || !backlog.contains(document.getElementById('task-terminal-failed')) || !backlog.contains(document.getElementById('task-terminal-cancelled'))) fail('terminal Automation cards are not visible in Backlog');
+    await report('pass', '');
+  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+
+	browserResult := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/htmx-2.0.4.min.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write(htmxJS)
+		case "/tasks":
+			var out bytes.Buffer
+			if err := Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
+				t.Fatalf("render Tasks page: %v", err)
+			}
+			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, "</head>", runner+"</head>", 1)
+			_, _ = w.Write([]byte(page))
+		case "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "automation-capacity-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "automation-capacity-browser-profile"), server.URL+"/tasks?project_id="+project.ID,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(20 * time.Second):
+		outcome = "fail:timed out waiting for browser result"
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("Automation capacity browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
+	}
+}
 func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))

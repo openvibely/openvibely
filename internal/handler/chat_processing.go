@@ -350,28 +350,18 @@ func (h *Handler) processStreamingResponse(params streamingResponseParams) {
 		// pool needs to check if any queued tasks can now be dispatched.
 		defer h.workerSvc.DispatchNext()
 
-		// Block until global and per-project slots are available. This queues the
-		// thread follow-up instead of rejecting it when either limit is at capacity.
-		if err := h.workerSvc.AcquireProjectSlot(waitCtx, params.ProjectID); err != nil {
-			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled waiting for project slot %s: %v",
-				params.ExecID, params.TaskID, params.ProjectID, err)
+		// Block until all global, project, and model slots are available. The
+		// combined admission keeps a blocked model from holding unrelated
+		// global/project capacity while this follow-up waits.
+		if err := h.workerSvc.AcquireWorkerSlots(waitCtx, params.ProjectID, agentConfigID); err != nil {
+			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled waiting for worker capacity project=%s model=%s: %v",
+				params.ExecID, params.TaskID, params.ProjectID, agentConfigID, err)
 			cleanupWaitCancellation()
 			h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
 			h.finalizeStreamingTurn(params, "")
 			return
 		}
-		defer h.workerSvc.ReleaseProjectSlot(params.ProjectID)
-
-		// Block until a model slot is available (respects max_workers).
-		if err := h.workerSvc.AcquireModelSlot(waitCtx, agentConfigID); err != nil {
-			applog.Infof("[handler] processStreamingResponse exec=%s task=%s cancelled waiting for model slot for %s: %v",
-				params.ExecID, params.TaskID, agentConfigID, err)
-			cleanupWaitCancellation()
-			h.completeWithCancellation(params.ExecID, params.TaskID, "", 0, 0, 0, params.ChannelReply)
-			h.finalizeStreamingTurn(params, "")
-			return
-		}
-		defer h.workerSvc.ReleaseModelSlot(agentConfigID)
+		defer h.workerSvc.ReleaseWorkerSlots(params.ProjectID, agentConfigID)
 		applog.Infof("[handler] processStreamingResponse exec=%s acquired project + model slots for %s", params.ExecID, agentConfigID)
 		if alreadyCancelledBeforeModel() {
 			completeCancelledBeforeModel()

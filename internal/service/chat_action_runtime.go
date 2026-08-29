@@ -1780,13 +1780,14 @@ func ExecuteUpdateProjectSettingsRuntime(ctx context.Context, opts UpdateProject
 		updatedFields = append(updatedFields, "default_model")
 	}
 
-	workerChanged, shouldDispatch, errMsg := applyProjectWorkerLimitUpdate(&updated, req)
+	workerChanged, projectLimitIncrease, errMsg := applyProjectWorkerLimitUpdate(&updated, req)
 	if errMsg != "" {
 		return fail(errMsg)
 	}
 	if workerChanged {
 		updatedFields = append(updatedFields, "max_workers")
 	}
+	shouldDispatch := modelChanged || projectLimitIncrease
 
 	if len(updatedFields) > 0 {
 		if err := opts.ProjectSvc.Update(ctx, &updated); err != nil {

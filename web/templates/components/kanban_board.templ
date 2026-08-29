@@ -27,8 +27,8 @@ func filterByCategory(tasks []models.Task, cat models.TaskCategory) []models.Tas
 }
 
 // filterActiveColumn returns tasks for the active column: all active-category tasks,
-// plus scheduled-category tasks that are currently running (so users can see scheduled
-// tasks executing alongside active tasks without them being invisible on the kanban board).
+// scheduled-category tasks that are currently running, and scheduled Automation tasks
+// whose occurrence is queued for worker capacity.
 func filterActiveColumn(tasks []models.Task) []models.Task {
 	var result []models.Task
 	for _, t := range tasks {
@@ -37,11 +37,21 @@ func filterActiveColumn(tasks []models.Task) []models.Task {
 		}
 		if boardCategory(t) == models.CategoryActive {
 			result = append(result, t)
+		} else if boardCategory(t) == models.CategoryScheduled &&
+			isAutomationTask(t) && (t.Status == models.StatusPending || t.Status == models.StatusQueued) {
+			// Scheduled Automation tasks are normally managed on the Schedule page,
+			// but a capacity-queued occurrence is runnable work and belongs in the
+			// board's pending dropzone while it waits for worker admission.
+			result = append(result, t)
 		} else if boardCategory(t) == models.CategoryScheduled && t.Status == models.StatusRunning {
 			result = append(result, t)
 		}
 	}
 	return result
+}
+
+func isAutomationTask(task models.Task) bool {
+	return task.AutomationCapacityQueued
 }
 
 func hasRunnableSwarmChild(task models.Task) bool {

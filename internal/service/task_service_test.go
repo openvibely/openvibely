@@ -2007,6 +2007,32 @@ func TestTaskService_CancelTask_AllowsActivePendingTask(t *testing.T) {
 	assert.Equal(t, models.CategoryBacklog, updated.Category)
 }
 
+func TestTaskService_CancelTask_DoesNotAllowOrdinaryScheduledPendingTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	svc := NewTaskService(taskRepo, repository.NewAttachmentRepo(db), workerSvc)
+	ctx := context.Background()
+
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "Ordinary Scheduled Pending Task",
+		Prompt:    "test",
+		Status:    models.StatusPending,
+		Category:  models.CategoryScheduled,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+
+	err := svc.CancelTask(ctx, task.ID)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not running, queued, or active pending")
+	updated, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.NotNil(t, updated)
+	require.Equal(t, models.StatusPending, updated.Status)
+	require.Equal(t, models.CategoryScheduled, updated.Category)
+}
+
 func TestTaskService_CancelTask_RunningTaskPreservesCancellationOrdering(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := repository.NewTaskRepo(db, nil)

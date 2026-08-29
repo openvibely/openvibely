@@ -233,6 +233,47 @@ func TestKanbanBoard_DoesNotRenderActiveCancelledTaskAsQueued(t *testing.T) {
 	}
 }
 
+func TestKanbanBoard_RendersCapacityQueuedAutomationInPendingDropzone(t *testing.T) {
+	tasks := []models.Task{
+		{
+			ID:                       "automation-capacity-queued",
+			ProjectID:                "default",
+			Title:                    "Capacity Queued Automation",
+			Category:                 models.CategoryScheduled,
+			Status:                   models.StatusPending,
+			AutomationCapacityQueued: true,
+		},
+		{
+			ID:         "automation-future",
+			ProjectID:  "default",
+			Title:      "Future Automation Schedule",
+			Category:   models.CategoryScheduled,
+			Status:     models.StatusPending,
+			CreatedVia: "automation:automation-1:future",
+		},
+		{
+			ID:        "ordinary-scheduled",
+			ProjectID: "default",
+			Title:     "Ordinary Scheduled Task",
+			Category:  models.CategoryScheduled,
+			Status:    models.StatusPending,
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := KanbanBoard(tasks, "default", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render kanban board: %v", err)
+	}
+	body := buf.String()
+	pending := activeStatusDropZone(t, body, "pending")
+	if !strings.Contains(pending, "Capacity Queued Automation") {
+		t.Fatalf("capacity-queued Automation task should render in Active pending dropzone, got %s", pending)
+	}
+	if strings.Contains(body, "Ordinary Scheduled Task") {
+		t.Fatalf("ordinary scheduled task should remain managed by the Schedule page, got %s", body)
+	}
+}
+
 func TestKanbanBoard_RendersSwarmParentWithRunningChildInProgress(t *testing.T) {
 	tests := []struct {
 		name         string

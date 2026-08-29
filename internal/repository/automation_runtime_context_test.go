@@ -414,6 +414,245 @@ func TestAutomationRepoDispatchRetryAndAbandonQueued(t *testing.T) {
 	}
 }
 
+func TestAutomationRepoCancelsQueuedDispatchAndPreparedExecution(t *testing.T) {
+	t.Run("capacity queued dispatch", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		ctx := context.Background()
+		fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+		repo := NewAutomationRepo(db)
+		taskRepo := NewTaskRepo(db, nil)
+		task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Capacity queued cancellation")
+		schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], time.Now().UTC().Add(-time.Minute))
+		_, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, time.Now().UTC(), schedule.ComputeNextRun(time.Now().UTC()))
+		if err != nil {
+			t.Fatalf("claim capacity queued occurrence: %v", err)
+		}
+		leased, err := repo.LeaseNextDispatch(ctx, "queued-cancellation-owner", time.Now().UTC(), time.Minute)
+		if err != nil || leased == nil || leased.ID != dispatch.ID {
+			t.Fatalf("lease capacity queued dispatch = %#v, %v", leased, err)
+		}
+		if err := repo.MarkDispatchQueued(ctx, dispatch.ID, "queued-cancellation-owner"); err != nil {
+			t.Fatalf("mark dispatch queued: %v", err)
+		}
+		boardTasks, err := taskRepo.ListBoardByProjectWithCategorySorts(ctx, fixture.ProjectID, "", "", "")
+		if err != nil {
+			t.Fatalf("list board tasks while capacity queued: %v", err)
+		}
+		var projected *models.Task
+		for i := range boardTasks {
+			if boardTasks[i].ID == task.ID {
+				projected = &boardTasks[i]
+				break
+			}
+		}
+		if projected == nil || !projected.AutomationCapacityQueued {
+			t.Fatalf("board projection did not mark durable capacity queue: %#v", projected)
+		}
+		if err := repo.CancelDispatchesForTask(ctx, task.ID, "cancelled while waiting for capacity"); err != nil {
+			t.Fatalf("CancelDispatchesForTask: %v", err)
+		}
+
+		var dispatchStatus, invocationStatus string
+		var reservations int
+		if err := db.QueryRowContext(ctx, `SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&dispatchStatus); err != nil {
+			t.Fatalf("load dispatch status: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT status FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).Scan(&invocationStatus); err != nil {
+			t.Fatalf("load invocation status: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations); err != nil {
+			t.Fatalf("load reservation count: %v", err)
+		}
+		if dispatchStatus != "failed" || invocationStatus != string(models.AutomationInvocationCancelled) || reservations != 0 {
+			t.Fatalf("queued cancellation state dispatch=%q invocation=%q reservations=%d", dispatchStatus, invocationStatus, reservations)
+		}
+		stored, err := taskRepo.GetByID(ctx, task.ID)
+		if err != nil {
+			t.Fatalf("load task after queued cancellation: %v", err)
+		}
+		if stored == nil || stored.Status != models.StatusPending || stored.Category != models.CategoryScheduled {
+			t.Fatalf("queued cancellation changed task unexpectedly: %#v", stored)
+		}
+	})
+
+	t.Run("prepared execution", func(t *testing.T) {
+		db := testutil.NewTestDB(t)
+		ctx := context.Background()
+		fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+		repo := NewAutomationRepo(db)
+		taskRepo := NewTaskRepo(db, nil)
+		task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Prepared execution cancellation")
+		schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], time.Now().UTC().Add(-time.Minute))
+		_, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, time.Now().UTC(), schedule.ComputeNextRun(time.Now().UTC()))
+		if err != nil {
+			t.Fatalf("claim prepared occurrence: %v", err)
+		}
+		leased, err := repo.LeaseNextDispatch(ctx, "prepared-cancellation-owner", time.Now().UTC(), time.Minute)
+		if err != nil || leased == nil || leased.ID != dispatch.ID {
+			t.Fatalf("lease prepared dispatch = %#v, %v", leased, err)
+		}
+		execution, err := taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "prepared-cancellation-owner")
+		if err != nil {
+			t.Fatalf("claim prepared execution: %v", err)
+		}
+		if err := repo.MarkDispatchSubmitted(ctx, dispatch.ID, "prepared-cancellation-owner", execution.ID); err != nil {
+			t.Fatalf("mark prepared dispatch submitted: %v", err)
+		}
+		if err := repo.CancelDispatchesForTask(ctx, task.ID, "prepared execution cancelled"); err != nil {
+			t.Fatalf("CancelDispatchesForTask prepared execution: %v", err)
+		}
+
+		var taskStatus, taskCategory, executionStatus, dispatchStatus, invocationStatus, activityStatus string
+		var reservations int
+		if err := db.QueryRowContext(ctx, `SELECT status, category FROM tasks WHERE id = ?`, task.ID).Scan(&taskStatus, &taskCategory); err != nil {
+			t.Fatalf("load prepared task state: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT status FROM executions WHERE id = ?`, execution.ID).Scan(&executionStatus); err != nil {
+			t.Fatalf("load prepared execution status: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&dispatchStatus); err != nil {
+			t.Fatalf("load prepared dispatch status: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT status FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).Scan(&invocationStatus); err != nil {
+			t.Fatalf("load prepared invocation status: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT status FROM automation_activities WHERE invocation_id = ? AND activity_key = ?`, dispatch.InvocationID, "dispatch:"+dispatch.ID+":execute").Scan(&activityStatus); err != nil {
+			t.Fatalf("load prepared activity status: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations); err != nil {
+			t.Fatalf("load prepared reservation count: %v", err)
+		}
+		if taskStatus != string(models.StatusCancelled) || taskCategory != string(models.CategoryBacklog) || executionStatus != string(models.ExecCancelled) ||
+			dispatchStatus != "failed" || invocationStatus != string(models.AutomationInvocationCancelled) ||
+			activityStatus != string(models.AutomationActivityCancelled) || reservations != 0 {
+			t.Fatalf("prepared cancellation state task=%q/%q execution=%q dispatch=%q invocation=%q activity=%q reservations=%d",
+				taskStatus, taskCategory, executionStatus, dispatchStatus, invocationStatus, activityStatus, reservations)
+		}
+	})
+}
+
+func TestAutomationRepoTerminalAutomationFailureMovesScheduledTaskToCompleted(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+	repo := NewAutomationRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Terminal Automation failure")
+	schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], time.Now().UTC().Add(-time.Minute))
+	_, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, time.Now().UTC(), schedule.ComputeNextRun(time.Now().UTC()))
+	if err != nil {
+		t.Fatalf("claim terminal failure occurrence: %v", err)
+	}
+	leased, err := repo.LeaseNextDispatch(ctx, "terminal-failure-owner", time.Now().UTC(), time.Minute)
+	if err != nil || leased == nil || leased.ID != dispatch.ID {
+		t.Fatalf("lease terminal failure dispatch = %#v, %v", leased, err)
+	}
+	execution, err := taskRepo.ClaimAutomationDispatch(ctx, dispatch.ID, "terminal-failure-owner")
+	if err != nil {
+		t.Fatalf("claim terminal failure execution: %v", err)
+	}
+	if err := repo.MarkDispatchSubmitted(ctx, dispatch.ID, "terminal-failure-owner", execution.ID); err != nil {
+		t.Fatalf("mark terminal failure dispatch submitted: %v", err)
+	}
+	if err := repo.CompleteDispatch(ctx, dispatch.ID, execution.ID, models.ExecFailed, "provider failed"); err != nil {
+		t.Fatalf("complete terminal failure dispatch: %v", err)
+	}
+
+	stored, err := taskRepo.GetByID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("load terminal failure task: %v", err)
+	}
+	if stored == nil || stored.Status != models.StatusFailed || stored.Category != models.CategoryCompleted {
+		t.Fatalf("terminal Automation failure task = %#v, want failed/completed", stored)
+	}
+}
+func TestAutomationRepoLifecyclePauseCancelsScheduledCapacityQueue(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+	repo := NewAutomationRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Lifecycle queued task")
+	schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], time.Now().UTC().Add(-time.Minute))
+	_, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, time.Now().UTC(), schedule.ComputeNextRun(time.Now().UTC()))
+	if err != nil {
+		t.Fatalf("claim lifecycle occurrence: %v", err)
+	}
+	leased, err := repo.LeaseNextDispatch(ctx, "lifecycle-owner", time.Now().UTC(), time.Minute)
+	if err != nil || leased == nil || leased.ID != dispatch.ID {
+		t.Fatalf("lease lifecycle dispatch = %#v, %v", leased, err)
+	}
+	if err := repo.MarkDispatchQueued(ctx, dispatch.ID, "lifecycle-owner"); err != nil {
+		t.Fatalf("mark lifecycle dispatch queued: %v", err)
+	}
+	if err := repo.SetAutomationLifecycle(ctx, fixture.ProjectID, fixture.AutomationID, models.AutomationPaused); err != nil {
+		t.Fatalf("pause Automation: %v", err)
+	}
+
+	var dispatchStatus, invocationStatus, taskStatus, taskCategory string
+	var reservations int
+	if err := db.QueryRowContext(ctx, `SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&dispatchStatus); err != nil {
+		t.Fatalf("load lifecycle dispatch status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).Scan(&invocationStatus); err != nil {
+		t.Fatalf("load lifecycle invocation status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status, category FROM tasks WHERE id = ?`, task.ID).Scan(&taskStatus, &taskCategory); err != nil {
+		t.Fatalf("load lifecycle task state: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations); err != nil {
+		t.Fatalf("load lifecycle reservation count: %v", err)
+	}
+	if dispatchStatus != "failed" || invocationStatus != string(models.AutomationInvocationCancelled) ||
+		taskStatus != string(models.StatusPending) || taskCategory != string(models.CategoryBacklog) || reservations != 0 {
+		t.Fatalf("lifecycle pause state dispatch=%q invocation=%q task=%q/%q reservations=%d",
+			dispatchStatus, invocationStatus, taskStatus, taskCategory, reservations)
+	}
+}
+func TestAutomationRepoResumePreservesScheduledCapacityQueue(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	fixture := seedAutomationLiveCountsDefinition(t, db, map[string]string{"trigger": "trigger"})
+	repo := NewAutomationRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	task := createRuntimeScheduledTask(t, ctx, taskRepo, fixture.ProjectID, "Resume queued task")
+	schedule := createRuntimeAutomationSchedule(t, ctx, db, fixture, task.ID, fixture.Nodes["trigger"], time.Now().UTC().Add(-time.Minute))
+	_, dispatch, err := repo.ClaimScheduledOccurrence(ctx, schedule, time.Now().UTC(), schedule.ComputeNextRun(time.Now().UTC()))
+	if err != nil {
+		t.Fatalf("claim resume occurrence: %v", err)
+	}
+	leased, err := repo.LeaseNextDispatch(ctx, "resume-owner", time.Now().UTC(), time.Minute)
+	if err != nil || leased == nil || leased.ID != dispatch.ID {
+		t.Fatalf("lease resume dispatch = %#v, %v", leased, err)
+	}
+	if err := repo.MarkDispatchQueued(ctx, dispatch.ID, "resume-owner"); err != nil {
+		t.Fatalf("mark resume dispatch queued: %v", err)
+	}
+	if err := repo.SetAutomationLifecycle(ctx, fixture.ProjectID, fixture.AutomationID, models.AutomationActive); err != nil {
+		t.Fatalf("resume Automation: %v", err)
+	}
+
+	var dispatchStatus, invocationStatus, taskStatus, taskCategory string
+	var reservations int
+	if err := db.QueryRowContext(ctx, `SELECT status FROM automation_dispatch_outbox WHERE id = ?`, dispatch.ID).Scan(&dispatchStatus); err != nil {
+		t.Fatalf("load resumed dispatch status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status FROM automation_invocations WHERE id = ?`, dispatch.InvocationID).Scan(&invocationStatus); err != nil {
+		t.Fatalf("load resumed invocation status: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT status, category FROM tasks WHERE id = ?`, task.ID).Scan(&taskStatus, &taskCategory); err != nil {
+		t.Fatalf("load resumed task state: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM automation_task_run_reservations WHERE dispatch_id = ?`, dispatch.ID).Scan(&reservations); err != nil {
+		t.Fatalf("load resumed reservation count: %v", err)
+	}
+	if dispatchStatus != "submitted" || invocationStatus != string(models.AutomationInvocationClaimed) ||
+		taskStatus != string(models.StatusPending) || taskCategory != string(models.CategoryScheduled) || reservations != 1 {
+		t.Fatalf("resume queue state dispatch=%q invocation=%q task=%q/%q reservations=%d",
+			dispatchStatus, invocationStatus, taskStatus, taskCategory, reservations)
+	}
+}
+
 func TestAutomationRepoGitHubDedupAndExternalActivityLeases(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
