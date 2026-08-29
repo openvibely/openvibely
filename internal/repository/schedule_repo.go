@@ -277,9 +277,9 @@ func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
 	return nil
 }
 
-// UpdateForTask updates a schedule only while it is still owned by the supplied
-// task. Schedule IDs are not sufficient as a write boundary because a schedule
-// can be reassigned between the read and the mutation.
+// UpdateForTask updates timing and schedule-owned policy only while the row is
+// still owned by the supplied task. It deliberately leaves enabled unchanged:
+// stale timing snapshots must not restore a pause that won the race.
 func (r *ScheduleRepo) UpdateForTask(ctx context.Context, s *models.Schedule, taskID string) error {
 	if err := models.ValidateScheduleRepeatInterval(s.RepeatInterval); err != nil {
 		return fmt.Errorf("updating schedule: %w", err)
@@ -288,9 +288,9 @@ func (r *ScheduleRepo) UpdateForTask(ctx context.Context, s *models.Schedule, ta
 	s.NextRun = normalizeScheduleNextRun(s.NextRun)
 	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE schedules SET run_at = ?, repeat_type = ?, repeat_interval = ?,
-			enabled = ?, clear_context_on_start = ?, next_run = ?, updated_at = datetime('now')
+			clear_context_on_start = ?, next_run = ?, updated_at = datetime('now')
 		 WHERE id = ? AND task_id = ?`,
-		s.RunAt, s.RepeatType, s.RepeatInterval, s.Enabled, s.ClearContextOnStart, s.NextRun, s.ID, taskID)
+		s.RunAt, s.RepeatType, s.RepeatInterval, s.ClearContextOnStart, s.NextRun, s.ID, taskID)
 	if err != nil {
 		return fmt.Errorf("updating schedule: %w", err)
 	}

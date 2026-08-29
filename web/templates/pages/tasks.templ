@@ -41,6 +41,60 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 		}
 	</div>
 
+	<!-- Delete All Tasks Dialog -->
+	if project != nil {
+		@DestructiveConfirmDialog("delete_all_tasks_confirm_modal", "Close delete all tasks confirmation", "Delete All Tasks", "Are you sure you want to delete ", "delete_all_tasks_confirm_name", "", "? This action cannot be undone.", templ.ComponentScript{Call: "delete_all_tasks_confirm_modal.close()"}, templ.ComponentScript{Call: "confirmDeleteAllTasks()"}) {
+			All tasks in the selected dropzone for this project will be permanently deleted.
+		}
+
+		<script>
+			var deleteAllTasksURL = '';
+			var deleteAllTasksRequestInFlight = false;
+
+			function openDeleteAllTasksConfirm(button) {
+				if (!button || deleteAllTasksRequestInFlight) return;
+				var modal = document.getElementById('delete_all_tasks_confirm_modal');
+				if (!modal || modal.open) return;
+				var category = button.dataset.deleteAllTasksCategory || '';
+				var projectID = button.dataset.projectId || '';
+				var displayName = button.dataset.deleteAllTasksName || '';
+				if ((category !== 'completed' && category !== 'backlog') || !projectID || !displayName) return;
+				deleteAllTasksURL = '/tasks/' + category + '?project_id=' + encodeURIComponent(projectID);
+				button.focus({preventScroll: true});
+				window.openDestructiveConfirmDialog('delete_all_tasks_confirm_modal', 'delete_all_tasks_confirm_name', displayName);
+			}
+
+			function confirmDeleteAllTasks() {
+				if (deleteAllTasksRequestInFlight || !deleteAllTasksURL) return;
+				var requestURL = deleteAllTasksURL;
+				var modal = document.getElementById('delete_all_tasks_confirm_modal');
+				var confirmButton = modal && modal.querySelector('.modal-action button.btn-error');
+				deleteAllTasksRequestInFlight = true;
+				if (confirmButton) confirmButton.disabled = true;
+				if (modal && modal.open) modal.close();
+				htmx.ajax('DELETE', requestURL, {
+					target: '#kanban-board',
+					swap: 'outerHTML'
+				});
+			}
+
+			if (!window._tasksDeleteAllRequestHandlerAttached) {
+				window._tasksDeleteAllRequestHandlerAttached = true;
+				document.body.addEventListener('htmx:afterRequest', function(event) {
+					var detail = event && event.detail;
+					var requestConfig = detail && detail.requestConfig;
+					if (!requestConfig || requestConfig.path !== deleteAllTasksURL) return;
+					deleteAllTasksRequestInFlight = false;
+					var modal = document.getElementById('delete_all_tasks_confirm_modal');
+					var confirmButton = modal && modal.querySelector('.modal-action button.btn-error');
+					if (confirmButton) confirmButton.disabled = false;
+					var status = detail.xhr && detail.xhr.status;
+					if (status >= 200 && status < 300) deleteAllTasksURL = '';
+				});
+			}
+		</script>
+	}
+
 	<!-- New Task Dialog -->
 	if project != nil {
 			<dialog id="new_task_modal" class="modal">

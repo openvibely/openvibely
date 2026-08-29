@@ -573,6 +573,59 @@ func TestScheduleRepo_UpdateNextRunIfCurrent(t *testing.T) {
 	}
 }
 
+func TestScheduleRepo_UpdateForTaskPreservesConcurrentPause(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+	task := createTestTask(t, taskRepo)
+
+	originalRunAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	schedule := &models.Schedule{
+		TaskID: task.ID, RunAt: originalRunAt, RepeatType: models.RepeatDaily,
+		RepeatInterval: 1, Enabled: true, ClearContextOnStart: true,
+	}
+	if err := repo.Create(ctx, schedule); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stale, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID before stale update: %v", err)
+	}
+	if stale == nil || !stale.Enabled {
+		t.Fatalf("expected enabled stale snapshot, got %#v", stale)
+	}
+
+	paused, err := repo.ToggleEnabledForTask(ctx, schedule.ID, task.ID)
+	if err != nil {
+		t.Fatalf("pause schedule: %v", err)
+	}
+	if paused == nil || paused.Enabled {
+		t.Fatalf("expected pause to disable schedule, got %#v", paused)
+	}
+
+	stale.RunAt = originalRunAt.Add(24 * time.Hour)
+	stale.NextRun = &stale.RunAt
+	stale.ClearContextOnStart = false
+	if err := repo.UpdateForTask(ctx, stale, task.ID); err != nil {
+		t.Fatalf("UpdateForTask stale snapshot: %v", err)
+	}
+
+	stored, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID after stale update: %v", err)
+	}
+	if stored.Enabled {
+		t.Fatal("stale timing update must not restore enabled=true after pause")
+	}
+	if !stored.RunAt.Equal(stale.RunAt) || stored.NextRun == nil || !stored.NextRun.Equal(*stale.NextRun) {
+		t.Fatalf("expected timing update to persist, got run_at=%v next_run=%v", stored.RunAt, stored.NextRun)
+	}
+	if stored.ClearContextOnStart {
+		t.Fatal("expected intentional policy update to persist")
+	}
+}
+
 func TestScheduleRepo_ToggleEnabledForTaskIsAtomicAndTaskScoped(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)
