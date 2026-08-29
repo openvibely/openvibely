@@ -2675,6 +2675,89 @@ func TestLLMService_ExecuteTask_GitWorktreeIsolation(t *testing.T) {
 	}
 }
 
+func TestLLMService_ExecuteTask_StartupConflictContinuesWithRecoveryContext(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	llmConfigRepo := repository.NewLLMConfigRepo(db)
+	execRepo := repository.NewExecutionRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	projectRepo := repository.NewProjectRepo(db)
+	settingsRepo := repository.NewSettingsRepo(db)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	attachmentRepo := repository.NewAttachmentRepo(db)
+
+	repoDir := createTestGitRepo(t)
+	project := &models.Project{Name: "Startup Conflict Recovery", RepoPath: repoDir}
+	if err := projectRepo.Create(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	agent := ensureDefaultAgent(t, llmConfigRepo)
+	task := &models.Task{
+		ProjectID:         project.ID,
+		Title:             "Continue conflicted task",
+		Category:          models.CategoryScheduled,
+		Status:            models.StatusPending,
+		Prompt:            "finish the scheduled update",
+		AgentID:           &agent.ID,
+		MergeTargetBranch: "main",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	worktreeSvc := NewWorktreeService(taskRepo, projectRepo, settingsRepo)
+	wtPath, wtBranch, err := worktreeSvc.SetupWorktree(ctx, task, repoDir)
+	if err != nil {
+		t.Fatalf("setup worktree: %v", err)
+	}
+	task.WorktreePath = wtPath
+	task.WorktreeBranch = wtBranch
+
+	if err := os.WriteFile(filepath.Join(wtPath, "conflict.txt"), []byte("task version\n"), 0o644); err != nil {
+		t.Fatalf("write task version: %v", err)
+	}
+	if err := CommitWorktreeChanges(wtPath, "task version"); err != nil {
+		t.Fatalf("commit task version: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "conflict.txt"), []byte("main version\n"), 0o644); err != nil {
+		t.Fatalf("write main version: %v", err)
+	}
+	runGitTest(t, repoDir, "add", "conflict.txt")
+	runGitTest(t, repoDir, "commit", "-m", "main version")
+
+	mock := &testutil.MockLLMCaller{Response: "conflict resolved", TextOnly: "conflict resolved"}
+	svc := NewLLMService(llmConfigRepo, execRepo, taskRepo, projectRepo, scheduleRepo, attachmentRepo)
+	svc.SetWorktreeService(worktreeSvc)
+	svc.SetLLMCaller(mock)
+
+	execRec, err := svc.ExecuteTaskWithAgent(ctx, *task, *agent)
+	if err != nil {
+		t.Fatalf("startup conflict should continue to the model: %v", err)
+	}
+	if execRec == nil || execRec.Status != models.ExecCompleted {
+		t.Fatalf("expected completed execution, got %#v", execRec)
+	}
+	if mock.CallCount() != 1 {
+		t.Fatalf("expected one model call, got %d", mock.CallCount())
+	}
+	request := mock.LastAgentRequest()
+	if request.WorkDir != wtPath {
+		t.Fatalf("expected preserved worktree %q, got %q", wtPath, request.WorkDir)
+	}
+	for _, want := range []string{"Worktree Sync Warning", "merge was aborted", "conflict.txt", "run the merge", "build, test, and commit"} {
+		if !strings.Contains(request.ProjectInstructions, want) {
+			t.Fatalf("expected recovery instructions to contain %q, got %q", want, request.ProjectInstructions)
+		}
+	}
+	status, err := GitStatusPorcelain(wtPath)
+	if err != nil {
+		t.Fatalf("git status: %v", err)
+	}
+	if strings.TrimSpace(status) != "" || worktreeHasActiveMerge(wtPath) {
+		t.Fatalf("expected clean aborted merge state, status=%q", status)
+	}
+}
+
 func TestLLMService_ExecuteTask_DirectCheckoutCompletionIgnoresStaleWorktreeMetadata(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
