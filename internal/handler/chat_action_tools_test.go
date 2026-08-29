@@ -2445,6 +2445,8 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	}
 	var sawMyAssignedIssues bool
 	var sawAssignedIssuesWithPRs bool
+	var myAssignedIssueCalls int
+	var assignedIssueCalls int
 	var assignedIssuesWithPRCalls int
 	var createdRepo, commentedRepo, labeledRepo, closedRepo string
 	h.SetGitHubService(&fakeGitHubService{
@@ -2464,12 +2466,14 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 		},
 		listMyAssignedIssuesFn: func(_ context.Context, repo *service.GitHubRepoRef) (*service.GitHubAuthenticatedUser, []service.GitHubIssue, error) {
 			sawMyAssignedIssues = true
+			myAssignedIssueCalls++
 			if repo.Owner == "example" && repo.Name == "other" {
 				return &service.GitHubAuthenticatedUser{Login: "channel-user", Source: service.GitHubAuthModePAT}, []service.GitHubIssue{{Number: 7, URL: "https://github.com/example/other/issues/7", Title: "Explicit URL", State: "open", Assignees: []string{"channel-user"}}}, nil
 			}
 			return &service.GitHubAuthenticatedUser{Login: "channel-user", Source: service.GitHubAuthModePAT}, []service.GitHubIssue{{Number: 5, URL: "https://github.com/openvibely/openvibely/issues/5", Title: "Testing", State: "open", Assignees: []string{"channel-user"}}}, nil
 		},
 		listAssignedIssuesFn: func(_ context.Context, repo *service.GitHubRepoRef, assignee string) ([]service.GitHubIssue, error) {
+			assignedIssueCalls++
 			if assignee != "Dev-Bot" {
 				t.Fatalf("expected explicit assignee Dev-Bot, got %q", assignee)
 			}
@@ -2578,6 +2582,37 @@ func TestGitHubAuthAndInboxRuntimeToolsUseConfiguredRepository(t *testing.T) {
 	if assignedIssuesWithPRCalls != callsBeforeInvalid {
 		t.Fatalf("Web/API provider calls after invalid pagination=%d, want %d", assignedIssuesWithPRCalls, callsBeforeInvalid)
 	}
+
+	callsBeforeInvalidMyAssigned := myAssignedIssueCalls
+	callsBeforeInvalidAssigned := assignedIssueCalls
+	for _, surface := range []struct {
+		name     string
+		handlers map[string]chatcontrol.RuntimeActionHandler
+	}{
+		{name: "Web", handlers: handlers},
+		{name: "API", handlers: apiHandlers},
+	} {
+		for _, input := range []string{
+			`{"limit":0}`,
+			`{"Limit":0}`,
+			`{"LIMIT":0}`,
+			`{"limit":101}`,
+			`{"offset":-1}`,
+			`{"Offset":-1}`,
+		} {
+			if _, err := surface.handlers["github_list_my_assigned_issues"](ctx, json.RawMessage(input)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+				t.Fatalf("%s my-assigned invalid pagination input %s error=%v, want validation error", surface.name, input, err)
+			}
+			assignedInput := strings.TrimSuffix(input, "}") + `,"assignee":"Dev-Bot"}`
+			if _, err := surface.handlers["github_list_assigned_issues"](ctx, json.RawMessage(assignedInput)); err == nil || err.Error() != "limit must be 1-100 and offset must be non-negative" {
+				t.Fatalf("%s assigned invalid pagination input %s error=%v, want validation error", surface.name, assignedInput, err)
+			}
+		}
+	}
+	if myAssignedIssueCalls != callsBeforeInvalidMyAssigned || assignedIssueCalls != callsBeforeInvalidAssigned {
+		t.Fatalf("Web/API ordinary provider calls after invalid pagination=%d/%d, want %d/%d", myAssignedIssueCalls, assignedIssueCalls, callsBeforeInvalidMyAssigned, callsBeforeInvalidAssigned)
+	}
+
 	if _, err = handlers["github_list_assigned_issues"](ctx, json.RawMessage(`{"assignee":"mallory"}`)); err == nil || !strings.Contains(err.Error(), "not authorized") {
 		t.Fatalf("expected unauthorized explicit-assignee error, got %v", err)
 	}
