@@ -1084,9 +1084,9 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								var timeDifference = timestamp(right.started_at) - timestamp(left.started_at);
 								if (timeDifference !== 0) return timeDifference;
 								if (String(right.id || '') === String(left.id || '')) return 0;
-								return String(right.id || '') < String(left.id || '') ? 1 : -1;
+								return String(left.id || '') < String(right.id || '') ? 1 : -1;
 							});
-					}
+						}
 
 						function mergeRows(state, rows) {
 							if (!Array.isArray(rows)) return;
@@ -1234,15 +1234,22 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							return fetchPage(taskID, projectID, 'initial', '').then(function(page) {
 								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return;
 								var firstLoad = !state.initialized;
-								if (!state.loadedOlder) {
-									state.records = Object.create(null);
-									state.order = [];
+								var wasEmpty = state.order.length === 0;
+								if (page.items.length === 0) {
+										state.records = Object.create(null);
+										state.order = [];
+										state.loadedOlder = false;
+										state.olderCursor = '';
+										state.olderHasMore = false;
+								} else if (firstLoad || wasEmpty) {
+										state.records = Object.create(null);
+										state.order = [];
 								}
 								mergeRows(state, page.items);
-								if (firstLoad || !state.loadedOlder) {
-									state.olderCursor = page.nextCursor || '';
-									state.olderHasMore = page.hasMore;
-								}
+								if (firstLoad || wasEmpty) {
+										state.olderCursor = page.nextCursor || '';
+										state.olderHasMore = page.hasMore;
+									}
 								state.initialized = true;
 								state.initialLoading = false;
 								state.refreshLoading = false;
@@ -1256,6 +1263,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								state.refreshLoading = false;
 								state.refreshError = error && error.message || 'Unable to load lifecycle activity';
 								renderState(state, container, state.order.length > 0);
+								schedulePendingNewer(state, taskID, projectID);
 							});
 						}
 
@@ -1327,6 +1335,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									mergeRows(state, page.items);
 									state.newerLoading = false;
 									state.newerError = '';
+									state.refreshError = '';
 									renderState(state, container, true);
 									var pendingNewer = state.newerPending;
 									schedulePendingNewer(state, taskID, projectID);
@@ -1401,6 +1410,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								task_status_changed: true,
 								task_category_changed: true,
 								task_thread_execution_started: true,
+								task_lifecycle_execution_changed: true,
 								task_thread_input_applied: true,
 								task_thread_input_queued: true,
 								task_thread_input_steered: true

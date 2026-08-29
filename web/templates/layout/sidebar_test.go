@@ -536,4 +536,10 @@ func TestSidebar_ForwardsChatTurnSteeredEvents(t *testing.T) {
 	if !strings.Contains(html, "'task_thread_input_steered': handleLiveEvent") {
 		t.Fatal("shared live SSE must subscribe to task thread steering events")
 	}
+	if !strings.Contains(html, "|| eventType === 'task_lifecycle_execution_changed'") {
+		t.Fatal("sidebar dispatcher must forward lifecycle execution changes to task pages")
+	}
+	if !strings.Contains(html, "'task_lifecycle_execution_changed': handleLiveEvent") {
+		t.Fatal("shared live SSE must subscribe to lifecycle execution changes")
+	}
 }

@@ -906,6 +906,18 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		return service.ProjectSkillRootForResolver(ctx, projectRepo, projectID)
 	})
 	lifecycleRunner := lifecycle.NewRunner(lifecycleRepo, llmHookInvoker, skillResolver)
+	lifecycleRunner.SetExecutionChangedObserver(func(_ context.Context, projectID string, exec models.LifecycleExecution) {
+		if broadcaster == nil {
+			return
+		}
+		broadcaster.Publish(events.TaskEvent{
+			Type:      events.TaskLifecycleExecutionChanged,
+			ProjectID: projectID,
+			TaskID:    exec.TaskID,
+			ExecID:    exec.ID,
+			Status:    string(exec.Status),
+		})
+	})
 	workerSvc.SetLifecycleRunner(lifecycleRunner)
 	workerSvc.SetLifecycleSkillRoot(globalSkillRoot)
 	// Give the LLM service the same root used for global skill catalog and

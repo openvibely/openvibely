@@ -191,7 +191,7 @@ func TestTaskDetailLifecycleTabRendersSelectedMemoryClientUI(t *testing.T) {
 	body := rec.Body.String()
 	for _, want := range []string{
 		"Selected memories", "Selected skills", "badge badge-outline", "renderBadgeRow", "row.selected_skills", "row.selected_memories",
-		`id="lifecycle-activity-scroll"`, `data-lifecycle-scrollport="true"`, `limit=' + pageSize`, "before=", "after=", "has_more", "next_cursor", "sse-task-event", "requestVersion", "newerPending", "data-lifecycle-load-older", "data-lifecycle-no-more"} {
+		`id="lifecycle-activity-scroll"`, `data-lifecycle-scrollport="true"`, `limit=' + pageSize`, "before=", "after=", "has_more", "next_cursor", "sse-task-event", "requestVersion", "newerPending", "task_lifecycle_execution_changed", "data-lifecycle-load-older", "data-lifecycle-no-more"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected lifecycle tab script to render lifecycle lists as badge rows containing %q, got:\n%s", want, body)
 		}
