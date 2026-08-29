@@ -1318,6 +1318,59 @@ func TestSchedulerService_CheckDueTasks_ReenabledScheduleRuns(t *testing.T) {
 	}
 }
 
+func TestSchedulerService_CheckDueTasks_PausedDueScheduleResumesWithoutLosingOccurrence(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	workerSvc := newTestWorkerService(t)
+	ctx := context.Background()
+	task := &models.Task{
+		ProjectID: "default", Title: "Paused due task", Category: models.CategoryScheduled,
+		Status: models.StatusPending, Prompt: "run after resume",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	dueAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: task.ID, RunAt: dueAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	original, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	actionSvc := NewScheduleActionService(taskRepo, scheduleRepo)
+
+	_, err = actionSvc.Toggle(ctx, "default", schedule.ID)
+	require.NoError(t, err)
+	paused, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.False(t, paused.Enabled)
+	require.NotNil(t, paused.NextRun)
+	require.True(t, paused.NextRun.Equal(*original.NextRun))
+
+	scheduler := NewSchedulerService(scheduleRepo, taskRepo, workerSvc)
+	scheduler.checkDueTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		t.Fatalf("paused due schedule submitted task %s", submitted.ID)
+	default:
+	}
+	stillPaused, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.Nil(t, stillPaused.LastRun)
+	require.True(t, stillPaused.NextRun.Equal(*original.NextRun))
+
+	_, err = actionSvc.Toggle(ctx, "default", schedule.ID)
+	require.NoError(t, err)
+	scheduler.checkDueTasks(ctx)
+	select {
+	case submitted := <-workerSvc.Submitted():
+		require.Equal(t, task.ID, submitted.ID)
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("resumed due schedule was not submitted")
+	}
+	resumed, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, resumed.LastRun)
+	require.Nil(t, resumed.NextRun)
+}
+
 func TestSchedulerService_CheckActiveTasksStartsSwarmPlanner(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	scheduleRepo := repository.NewScheduleRepo(db)
