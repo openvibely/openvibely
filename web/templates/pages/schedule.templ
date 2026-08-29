@@ -921,6 +921,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				if (!counter) return;
 				if (selectedScheduleCards.size > 0) {
 					counter.querySelector('#selection-count').textContent = selectedScheduleCards.size;
+					counter.querySelector('#selection-label').textContent = selectedScheduleCards.size === 1 ? 'schedule selected' : 'schedules selected';
+					window.clearActiveSelection = clearScheduleSelection;
 					counter.classList.add('visible');
 				} else {
 					counter.classList.remove('visible');

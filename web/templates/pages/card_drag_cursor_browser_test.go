@@ -342,10 +342,15 @@ window.addEventListener('DOMContentLoaded', function() {
     if (!first || !second || !single) fail('expected all schedule cards');
     click(single, true);
     if (!single.classList.contains('schedule-selected') || document.querySelector('#selection-count').textContent !== '1') fail('modifier click must select one schedule');
+    if (document.querySelector('#selection-label').textContent.trim() !== 'schedule selected') fail('counter must use schedule-specific singular semantics');
+    document.querySelector('#selection-counter button').click();
+    if (single.classList.contains('schedule-selected') || document.getElementById('selection-counter').classList.contains('visible')) fail('Clear button must clear schedule selection');
+    click(single, true);
     click(single, true);
     if (single.classList.contains('schedule-selected') || document.getElementById('selection-counter').classList.contains('visible')) fail('second modifier click must clear selection');
 
     click(first, true); click(second, true);
+    if (document.querySelector('#selection-label').textContent.trim() !== 'schedules selected') fail('counter must use schedule-specific plural semantics');
     if (!first.classList.contains('schedule-selected') || !second.classList.contains('schedule-selected')) fail('modifier clicks must select both schedules');
     var source = first.closest('.drop-zone');
     var targetHour = Number(source.dataset.hour) + 4;

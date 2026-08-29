@@ -667,10 +667,11 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 			Sub(time.Date(sourceDate.Year(), sourceDate.Month(), sourceDate.Day(), 0, 0, 0, 0, time.UTC)).Hours() / 24)
 		hourDelta := hour - sourceHour
 		move := func(value time.Time) time.Time {
-			local := value.Local().AddDate(0, 0, calendarDayDelta).Add(time.Duration(hourDelta) * time.Hour)
-			return local.UTC()
+			local := value.Local().AddDate(0, 0, calendarDayDelta)
+			moved := time.Date(local.Year(), local.Month(), local.Day(), local.Hour()+hourDelta,
+				local.Minute(), local.Second(), local.Nanosecond(), time.Local)
+			return moved.UTC()
 		}
-		schedules := make([]*models.Schedule, 0, len(ids))
 		for _, id := range ids {
 			schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, projectID)
 			if err != nil {
@@ -679,10 +680,12 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 			if !schedule.Enabled {
 				return echo.NewHTTPError(http.StatusBadRequest, "disabled schedules cannot be moved as part of a selection")
 			}
-			updateScheduleAfterMove(schedule, move, time.Now())
-			schedules = append(schedules, schedule)
 		}
-		if err := h.scheduleRepo.UpdateBatchForProject(c.Request().Context(), projectID, schedules); err != nil {
+		now := time.Now()
+		if err := h.scheduleRepo.UpdateBatchForProject(c.Request().Context(), projectID, ids, func(schedule *models.Schedule) error {
+			updateScheduleAfterMove(schedule, move, now)
+			return nil
+		}); err != nil {
 			return err
 		}
 	}

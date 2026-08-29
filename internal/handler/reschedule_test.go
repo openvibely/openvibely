@@ -529,6 +529,62 @@ func TestHandler_RescheduleTask_MultiSelectMovesEveryScheduleTogether(t *testing
 	}
 }
 
+func TestHandler_RescheduleTask_MultiSelectPreservesLocalHourAcrossDST(t *testing.T) {
+	location, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousLocal := time.Local
+	time.Local = location
+	t.Cleanup(func() { time.Local = previousLocal })
+
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "DST grouped schedules"}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	makeSchedule := func(title string) *models.Schedule {
+		t.Helper()
+		task := &models.Task{Title: title, Prompt: "test", Category: models.CategoryScheduled, Status: models.StatusPending, ProjectID: project.ID}
+		if err := h.taskSvc.Create(ctx, task); err != nil {
+			t.Fatal(err)
+		}
+		runAt := time.Date(2031, 3, 9, 1, 30, 0, 0, location).UTC()
+		schedule := &models.Schedule{TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+		if err := h.scheduleRepo.Create(ctx, schedule); err != nil {
+			t.Fatal(err)
+		}
+		return schedule
+	}
+	first := makeSchedule("DST first")
+	second := makeSchedule("DST second")
+
+	form := url.Values{
+		"new_date": {"2031-03-09"}, "hour": {"3"},
+		"source_date": {"2031-03-09"}, "source_hour": {"1"},
+		"schedule_ids": {first.ID + "," + second.ID}, "project_id": {project.ID},
+	}
+	req := httptest.NewRequest(http.MethodPatch, "/schedules/"+first.ID+"/reschedule?project_id="+url.QueryEscape(project.ID), strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	for _, id := range []string{first.ID, second.ID} {
+		stored, err := h.scheduleRepo.GetByID(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stored.RunAt.In(location); got.Hour() != 3 || got.Minute() != 30 {
+			t.Fatalf("schedule %s moved to local %v, want 03:30 across spring-forward", id, got)
+		}
+	}
+}
+
 func TestHandler_RescheduleTask_MultiSelectRejectsForeignOrDisabledWithoutMutation(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
 	ctx := context.Background()
