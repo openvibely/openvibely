@@ -60,6 +60,7 @@ func TestTaskDetailLifecyclePaginationInChrome(t *testing.T) {
 	initialCalls := 0
 	olderCalls := 0
 	newerCalls := 0
+	newerAfterCalls := []string{}
 	sawProject := false
 	sawBoundedLimit := false
 
@@ -100,13 +101,14 @@ func TestTaskDetailLifecyclePaginationInChrome(t *testing.T) {
 		}
 		if after != "" {
 			newerCalls++
+			newerAfterCalls = append(newerAfterCalls, after)
 		}
 		if before == "" && after == "" {
 			initialCalls++
 		}
 		currentInitialCall := initialCalls
+		currentNewerCall := newerCalls
 		mu.Unlock()
-
 		if before != "" {
 			// Delaying the page makes two rapid loader clicks exercise the
 			// browser's single-flight guard instead of racing a fast response.
@@ -123,13 +125,19 @@ func TestTaskDetailLifecyclePaginationInChrome(t *testing.T) {
 		}
 		if after != "" {
 			if after == "event-4" {
-				writePage(w, []map[string]any{row("event-5", 5, "live-hook")}, false, "")
+				if currentNewerCall == 1 {
+					// The first newer request intentionally misses a row that is
+					// announced while the request is still in flight.
+					time.Sleep(300 * time.Millisecond)
+					writePage(w, []map[string]any{}, false, "")
+				} else {
+					writePage(w, []map[string]any{row("event-5", 5, "live-hook")}, false, "")
+				}
 			} else {
 				writePage(w, nil, false, "")
 			}
 			return
 		}
-
 		switch currentInitialCall {
 		case 1:
 			http.Error(w, "fixture initial lifecycle failure", http.StatusServiceUnavailable)
@@ -204,9 +212,10 @@ window.addEventListener('DOMContentLoaded', function() {
     await wait(20);
     var anchor = list().querySelector('[data-lifecycle-execution-id="event-4"]');
     var anchorBeforeLive = anchor.getBoundingClientRect().top;
-    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_thread_execution_started', task_id:'task-lifecycle-browser', project_id:'project-lifecycle-browser'}}));
-    await waitFor(function() { return list().querySelector('[data-lifecycle-execution-id="event-5"]'); }, 'newer live insert');
-    var anchorAfterLive = list().querySelector('[data-lifecycle-execution-id="event-4"]').getBoundingClientRect().top;
+			window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_thread_execution_started', task_id:'task-lifecycle-browser', project_id:'project-lifecycle-browser'}}));
+			await wait(240);
+			window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_thread_execution_started', task_id:'task-lifecycle-browser', project_id:'project-lifecycle-browser'}}));
+			await waitFor(function() { return list().querySelector('[data-lifecycle-execution-id="event-5"]'); }, 'newer live insert after pending retry');    var anchorAfterLive = list().querySelector('[data-lifecycle-execution-id="event-4"]').getBoundingClientRect().top;
     if (Math.abs(anchorAfterLive - anchorBeforeLive) > 2) fail('newer live insert moved the reading anchor: before=' + anchorBeforeLive + ' after=' + anchorAfterLive);
 
     var anchorBeforeRefresh = list().querySelector('[data-lifecycle-execution-id="event-4"]').getBoundingClientRect().top;
@@ -284,6 +293,7 @@ window.addEventListener('DOMContentLoaded', function() {
 	mu.Lock()
 	gotInitialCalls, gotOlderCalls, gotNewerCalls := initialCalls, olderCalls, newerCalls
 	gotProject, gotLimit := sawProject, sawBoundedLimit
+	gotNewerAfterCalls := append([]string(nil), newerAfterCalls...)
 	mu.Unlock()
 	if gotInitialCalls < 7 {
 		t.Fatalf("browser refresh fixture received %d initial-page requests, want retry, refresh, stale/latest race, and empty/live recovery", gotInitialCalls)
@@ -291,8 +301,8 @@ window.addEventListener('DOMContentLoaded', function() {
 	if gotOlderCalls != 2 {
 		t.Fatalf("browser rapid-scroll fixture received %d older-page requests, want exactly 2", gotOlderCalls)
 	}
-	if gotNewerCalls != 1 {
-		t.Fatalf("browser live fixture received %d newer-page requests, want exactly 1", gotNewerCalls)
+	if gotNewerCalls != 3 || len(gotNewerAfterCalls) != 3 || gotNewerAfterCalls[0] != "event-4" || gotNewerAfterCalls[1] != "event-4" || gotNewerAfterCalls[2] != "event-empty-live" {
+		t.Fatalf("browser live fixture received newer-page requests %v, want two coalesced event-4 requests plus the empty-state follow-up", gotNewerAfterCalls)
 	}
 	if !gotProject || !gotLimit {
 		t.Fatalf("browser lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
