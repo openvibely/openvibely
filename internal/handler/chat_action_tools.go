@@ -351,6 +351,9 @@ func (h *Handler) chatActionHandlers(params streamingResponseParams, collector *
 		"resume_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeResumeAutomationTool(ctx, params, input)
 		},
+		"delete_automation": func(ctx context.Context, input json.RawMessage) (string, error) {
+			return h.executeDeleteAutomationTool(ctx, params, input)
+		},
 		"create_swarm_task": func(ctx context.Context, input json.RawMessage) (string, error) {
 			return h.executeCreateSwarmTaskTool(ctx, params, input, collector)
 		},

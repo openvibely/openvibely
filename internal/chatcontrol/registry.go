@@ -13,7 +13,7 @@
 //   - personality: set_personality, save_custom_personality
 //   - projects: create_project, update_project_settings, switch_project
 //   - agents: create_agent, update_agent
-//   - automations: save_automation, update_automation_template, run_automation_now, pause_automation, resume_automation
+//   - automations: save_automation, update_automation_template, run_automation_now, pause_automation, resume_automation, delete_automation
 //   - chat: set_chat_mode
 //
 // Chat read-only (plan + orchestrate):
@@ -989,6 +989,17 @@ var registry = []ActionDef{
 		AllowedModes: []models.ChatMode{models.ChatModeOrchestrate},
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(automationLifecycleParams),
+	},
+	{
+		Name:              "delete_automation",
+		Description:       "Permanently delete a saved Automation by ID or exact unambiguous name in the current project. This destructive action requires explicit confirmation and uses the same guarded lifecycle path as browser deletion; it preserves existing domain tasks and removes only Automation-owned trigger schedules. Do not infer deletion from a read or cleanup request.",
+		Domain:            DomainAutomations,
+		Access:            AccessWrite,
+		Sensitivity:       SensitivityDestructive,
+		NeedsConfirmation: true,
+		AllowedModes:      []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:          allSurfaces(),
+		Parameters:        json.RawMessage(automationLifecycleParams),
 	},
 	// --- Chat domain ---
 	{

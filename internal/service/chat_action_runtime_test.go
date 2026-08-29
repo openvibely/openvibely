@@ -261,7 +261,7 @@ func TestChannelRuntimeHandlerMapsCoverAdvertisedTools(t *testing.T) {
 
 func channelRuntimeGenericFallbackTool(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "memory_view", "preview_automation_description", "save_automation", "run_automation_now", "pause_automation", "resume_automation":
+	case "memory_view", "preview_automation_description", "save_automation", "run_automation_now", "pause_automation", "resume_automation", "delete_automation":
 		return true
 	default:
 		return false

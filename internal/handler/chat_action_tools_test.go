@@ -1585,10 +1585,16 @@ func TestChatActionHandlers_CoverageWebAndAPI(t *testing.T) {
 	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceWeb, true, webHandlers); err != nil {
 		t.Fatalf("web handler coverage mismatch: %v", err)
 	}
+	if webHandlers["delete_automation"] == nil {
+		t.Fatal("web handler coverage missing delete_automation")
+	}
 
 	apiHandlers := h.chatActionHandlers(params, nil, models.ChatModeOrchestrate, chatcontrol.SurfaceAPI)
 	if err := chatcontrol.ValidateHandlerCoverage(models.ChatModeOrchestrate, chatcontrol.SurfaceAPI, true, apiHandlers); err != nil {
 		t.Fatalf("api handler coverage mismatch: %v", err)
+	}
+	if apiHandlers["delete_automation"] == nil {
+		t.Fatal("api handler coverage missing delete_automation")
 	}
 }
 
