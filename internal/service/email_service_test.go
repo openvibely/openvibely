@@ -253,6 +253,7 @@ func TestEmailPollOnceRecordsMIMEMessageIDAfterUIDMetadataFallback(t *testing.T)
 	assert.Equal(t, 2, h.receipts.existsCalls, "the first poll checks the provisional UID and then the canonical MIME key")
 	assert.Equal(t, 1, h.receipts.withHandoffCalls)
 	assert.Zero(t, h.receipts.recordCalls, "a successful WithHandoff must not use the provisional UID Record path")
+	assert.Equal(t, [][]uint32{{1}}, client.fullBodyFetchIDs, "the canonical key must be discovered from the full MIME fetch after metadata falls back to UID")
 	canonicalKey := "message-id:<message-1@example.com>"
 	provisionalKey := "imap-uid:77:101"
 	canonicalExists, err := h.receipts.inner.Exists(h.ctx, emailMailboxIdentity(cfg), canonicalKey)
