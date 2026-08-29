@@ -641,6 +641,98 @@ func TestWebhookCRUD_CreateViaForm(t *testing.T) {
 	expectStringSlice(t, wtc.endpointAgentIDs(t, webhooks[0].ID), []string{agent1.ID, agent2.ID})
 }
 
+func TestWebhookCRUD_CreatePreservesEnabledFormValue(t *testing.T) {
+	tests := []struct {
+		name         string
+		enabledValue string
+		wantEnabled  bool
+	}{
+		{name: "omitted", wantEnabled: false},
+		{name: "true", enabledValue: "true", wantEnabled: true},
+		{name: "one", enabledValue: "1", wantEnabled: true},
+		{name: "on", enabledValue: "on", wantEnabled: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			wtc := newWebhookTestContext(t)
+			project := wtc.CreateProject().WithName("WH Enabled Form").Build()
+
+			form := url.Values{
+				"name": {"Form Webhook " + tt.name},
+			}
+			if tt.enabledValue != "" {
+				form.Set("enabled", tt.enabledValue)
+			}
+			req := httptest.NewRequest("POST", "/channels/webhooks?project_id="+project.ID, strings.NewReader(form.Encode()))
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			rec := httptest.NewRecorder()
+			wtc.echo.ServeHTTP(rec, req)
+			if rec.Code != http.StatusCreated {
+				t.Fatalf("create: expected 201, got %d; body=%s", rec.Code, rec.Body.String())
+			}
+
+			webhooks, err := wtc.webhookRepo.ListByProject(context.Background(), project.ID)
+			if err != nil {
+				t.Fatalf("ListByProject: %v", err)
+			}
+			if len(webhooks) != 1 {
+				t.Fatalf("expected 1 webhook, got %d", len(webhooks))
+			}
+			created, err := wtc.webhookRepo.GetByID(context.Background(), webhooks[0].ID)
+			if err != nil || created == nil {
+				t.Fatalf("GetByID after create: %v", err)
+			}
+			if created.Enabled != tt.wantEnabled {
+				t.Fatalf("created webhook Enabled = %t, want %t", created.Enabled, tt.wantEnabled)
+			}
+
+			if !tt.wantEnabled {
+				channelsRec := wtc.HTMX().Get("/channels?project_id=" + project.ID).Execute()
+				wtc.Assert(channelsRec).StatusCode(http.StatusOK)
+				card := webhookCardSectionByName(channelsRec.Body.String(), created.Name)
+				if !strings.Contains(card, `badge badge-sm badge-ghost">Disabled`) {
+					t.Fatalf("expected disabled webhook card badge, got %q", card)
+				}
+			}
+
+			payload := `{"event_type":"form_test","summary":"Form webhook event"}`
+			mac := hmac.New(sha256.New, []byte(created.Secret))
+			mac.Write([]byte(payload))
+			sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+			inboundRec := wtc.jsonRequest("POST", "/webhooks/inbound/"+created.PathToken, payload,
+				map[string]string{"X-Hub-Signature-256": sig})
+
+			tasks, err := wtc.taskRepo.ListByProject(context.Background(), project.ID, "")
+			if err != nil {
+				t.Fatalf("ListByProject tasks: %v", err)
+			}
+			if !tt.wantEnabled {
+				if inboundRec.Code != http.StatusForbidden {
+					t.Fatalf("disabled inbound: expected 403, got %d; body=%s", inboundRec.Code, inboundRec.Body.String())
+				}
+				if len(tasks) != 0 {
+					t.Fatalf("disabled inbound created %d tasks, want 0", len(tasks))
+				}
+				select {
+				case submitted := <-wtc.handler.workerSvc.Submitted():
+					t.Fatalf("disabled inbound submitted task %s", submitted.ID)
+				default:
+				}
+				return
+			}
+
+			if inboundRec.Code != http.StatusAccepted {
+				t.Fatalf("enabled inbound: expected 202, got %d; body=%s", inboundRec.Code, inboundRec.Body.String())
+			}
+			if len(tasks) != 1 {
+				t.Fatalf("enabled inbound created %d tasks, want 1", len(tasks))
+			}
+			wtc.expectSubmittedTasks(t, 1)
+		})
+	}
+}
+
 func TestWebhookCRUD_CreateAndUpdateNormalizeEditableFieldsAndAgents(t *testing.T) {
 	wtc := newWebhookTestContext(t)
 	project := wtc.CreateProject().WithName("WH Form Parity").Build()
@@ -651,6 +743,7 @@ func TestWebhookCRUD_CreateAndUpdateNormalizeEditableFieldsAndAgents(t *testing.
 	createForm := url.Values{
 		"project_id":          {project.ID},
 		"name":                {"  Created Hook  "},
+		"enabled":             {"true"},
 		"system_instructions": {"  Created system  "},
 		"default_priority":    {"4"},
 		"title_template":      {"  Created {{summary}}  "},

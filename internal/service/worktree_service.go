@@ -428,7 +428,17 @@ type StartupSyncConflictError struct {
 }
 
 func (e *StartupSyncConflictError) Error() string {
-	return fmt.Sprintf("startup auto-merge conflict while merging %s into %s (conflicts: %s); merge was aborted. Resolve conflicts in %s and rerun the task", e.TargetBranch, e.TaskBranch, strings.Join(e.ConflictFiles, ", "), e.WorktreePath)
+	return fmt.Sprintf("startup auto-merge conflict while merging %s into %s (conflicts: %s); merge was aborted and conflict resolution is required in %s", e.TargetBranch, e.TaskBranch, strings.Join(e.ConflictFiles, ", "), e.WorktreePath)
+}
+
+// StartupSyncConflictContext turns an aborted startup merge conflict into
+// recovery instructions for an agent that can continue in the clean,
+// preserved task worktree.
+func StartupSyncConflictContext(conflict *StartupSyncConflictError) string {
+	if conflict == nil {
+		return ""
+	}
+	return fmt.Sprintf("# Worktree Sync Warning\n\nStartup sync could not merge %s into %s because Git reported conflicts in: %s. The merge was aborted before this turn started, so the preserved worktree is clean but may be behind or diverged from %s. Before handling the task, run the merge in %s, resolve the conflicts while preserving both the task changes and current target changes, then build, test, and commit the resolution. Sync error: %v", conflict.TargetBranch, conflict.TaskBranch, strings.Join(conflict.ConflictFiles, ", "), conflict.TargetBranch, conflict.WorktreePath, conflict)
 }
 
 // SyncWorktreeFromMainAtStart updates a task branch with the latest local
