@@ -991,20 +991,43 @@ type channelWebhookStatusActionSummary struct {
 	Configured bool `json:"configured"`
 }
 
-type channelTargetStatusActionSummary struct {
-	Total                         int                                     `json:"total"`
-	Configured                    bool                                    `json:"configured"`
-	ExplicitUnsavedTargetsAllowed bool                                    `json:"explicit_unsaved_targets_allowed"`
-	MessagingAvailable            bool                                    `json:"messaging_available"`
-	ByPlatform                    map[string]channelTargetPlatformSummary `json:"by_platform"`
+type OutboundTargetStatusSummary struct {
+	Total      int                                      `json:"total"`
+	Configured bool                                     `json:"configured"`
+	ByPlatform map[string]OutboundTargetPlatformSummary `json:"by_platform"`
 }
 
-type channelTargetPlatformSummary struct {
+type OutboundTargetPlatformSummary struct {
 	Total  int            `json:"total"`
 	Home   int            `json:"home"`
 	Named  int            `json:"named"`
 	ByKind map[string]int `json:"by_kind"`
 }
+
+func OutboundTargetStatusSummaryFromRepoSummary(summary repository.ChannelTargetProjectSummary) OutboundTargetStatusSummary {
+	out := OutboundTargetStatusSummary{
+		Total:      summary.Total,
+		Configured: summary.Configured,
+		ByPlatform: map[string]OutboundTargetPlatformSummary{},
+	}
+	for platform, platformSummary := range summary.ByPlatform {
+		out.ByPlatform[platform] = OutboundTargetPlatformSummary{
+			Total:  platformSummary.Total,
+			Home:   platformSummary.Home,
+			Named:  platformSummary.Named,
+			ByKind: platformSummary.ByKind,
+		}
+	}
+	return out
+}
+
+type channelTargetStatusActionSummary struct {
+	OutboundTargetStatusSummary
+	ExplicitUnsavedTargetsAllowed bool `json:"explicit_unsaved_targets_allowed"`
+	MessagingAvailable            bool `json:"messaging_available"`
+}
+
+type channelTargetPlatformSummary = OutboundTargetPlatformSummary
 
 func channelTargetsFromRouter(router *ChannelMessageRouter) channelTargetStore {
 	if router == nil {
@@ -1033,7 +1056,9 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		ProjectID:          projectID,
 		ConfiguredChannels: []string{},
 		OutboundTargets: channelTargetStatusActionSummary{
-			ByPlatform: map[string]channelTargetPlatformSummary{},
+			OutboundTargetStatusSummary: OutboundTargetStatusSummary{
+				ByPlatform: map[string]channelTargetPlatformSummary{},
+			},
 		},
 	}
 	if projectID == "" {
@@ -1275,27 +1300,18 @@ func channelSummarizeWebhooks(webhooks []models.WebhookEndpoint) channelWebhookS
 }
 
 func channelTargetStatusFromRepoSummary(summary repository.ChannelTargetProjectSummary) channelTargetStatusActionSummary {
-	out := channelTargetStatusActionSummary{
-		Total:      summary.Total,
-		Configured: summary.Configured,
-		ByPlatform: map[string]channelTargetPlatformSummary{},
+	return channelTargetStatusActionSummary{
+		OutboundTargetStatusSummary: OutboundTargetStatusSummaryFromRepoSummary(summary),
 	}
-	for platform, platformSummary := range summary.ByPlatform {
-		out.ByPlatform[platform] = channelTargetPlatformSummary{
-			Total:  platformSummary.Total,
-			Home:   platformSummary.Home,
-			Named:  platformSummary.Named,
-			ByKind: platformSummary.ByKind,
-		}
-	}
-	return out
 }
 
 func channelSummarizeTargets(targets []models.ChannelTarget) channelTargetStatusActionSummary {
 	out := channelTargetStatusActionSummary{
-		Total:      len(targets),
-		Configured: len(targets) > 0,
-		ByPlatform: map[string]channelTargetPlatformSummary{},
+		OutboundTargetStatusSummary: OutboundTargetStatusSummary{
+			Total:      len(targets),
+			Configured: len(targets) > 0,
+			ByPlatform: map[string]channelTargetPlatformSummary{},
+		},
 	}
 	for _, target := range targets {
 		platform := strings.ToLower(strings.TrimSpace(target.Platform))

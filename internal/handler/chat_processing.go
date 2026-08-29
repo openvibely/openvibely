@@ -3680,10 +3680,7 @@ func buildThreadSystemContext(taskTitle string, hasHistory bool, attachmentConte
 // This standardized context combining ensures consistent formatting across chat
 // and task follow-up scenarios.
 func buildStartupSyncConflictContext(conflict *service.StartupSyncConflictError) string {
-	if conflict == nil {
-		return ""
-	}
-	return fmt.Sprintf("# Worktree Sync Warning\n\nStartup sync could not merge %s into %s because Git reported conflicts in: %s. The merge was aborted before this turn started, so the preserved worktree is clean but may be behind or diverged from %s. Before handling the follow-up, run the merge in %s, resolve the conflicts while preserving both the task changes and current target changes, then build, test, and commit the resolution. Sync error: %v", conflict.TargetBranch, conflict.TaskBranch, strings.Join(conflict.ConflictFiles, ", "), conflict.TargetBranch, conflict.WorktreePath, conflict)
+	return service.StartupSyncConflictContext(conflict)
 }
 
 func combineContexts(taskContext, attachmentContext string) string {
