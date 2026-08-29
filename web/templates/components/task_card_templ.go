@@ -262,7 +262,7 @@ type taskCardState struct {
 }
 
 func taskCardDisplayState(task models.Task) taskCardState {
-	if task.MergeStatus == models.MergeStatusMerged {
+	if task.Status == models.StatusCompleted && task.MergeStatus == models.MergeStatusMerged {
 		return taskCardState{Key: "merged", Label: "Merged", TextClass: "text-success"}
 	}
 

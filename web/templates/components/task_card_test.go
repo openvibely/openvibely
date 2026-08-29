@@ -332,6 +332,9 @@ func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) 
 		{name: "cancelled", status: models.StatusCancelled, category: models.CategoryBacklog, wantState: "cancelled", wantLabel: "Cancelled"},
 		{name: "blocked", status: models.StatusBlocked, category: models.CategoryActive, wantState: "blocked", wantLabel: "Waiting for Parent"},
 		{name: "merged overrides completion", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusMerged, wantState: "merged", wantLabel: "Merged"},
+		{name: "stale merged does not override running", status: models.StatusRunning, category: models.CategoryActive, mergeStatus: models.MergeStatusMerged, wantState: "running", wantLabel: "In Progress"},
+		{name: "stale merged does not override failed", status: models.StatusFailed, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "failed", wantLabel: "Failed"},
+		{name: "stale merged does not override cancelled", status: models.StatusCancelled, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "cancelled", wantLabel: "Cancelled"},
 	}
 
 	for _, tt := range tests {
