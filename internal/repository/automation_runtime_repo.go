@@ -2843,7 +2843,7 @@ func (r *AutomationRepo) BindThreadInput(ctx context.Context, inputID string, au
 	if inputID == "" || automationContext.ProjectID == "" || strings.TrimSpace(bindingKey) == "" || len(automationContext.Bindings) == 0 {
 		return errors.New("thread input and automation bindings are required")
 	}
-	return NewThreadInputRepo(r.db).WithImmediateTx(ctx, func(exec SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
 		return bindAutomationThreadInputWithExecutor(ctx, exec, inputID, automationContext, strings.TrimSpace(bindingKey))
 	})
 }

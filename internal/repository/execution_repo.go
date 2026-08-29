@@ -302,7 +302,7 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	}
 	threadRepo := NewThreadInputRepo(r.db)
 	started := false
-	err := threadRepo.WithImmediateTx(ctx, func(dbexec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		var status models.TaskStatus
 		var projectID string
 		if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
@@ -665,9 +665,8 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 }
 
 func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Context) (int64, error) {
-	threadRepo := NewThreadInputRepo(r.db)
 	var recovered int64
-	err := threadRepo.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
 		// No direct or promoted task-thread runner survives a process restart.
 		// Automation dispatches retain a durable dispatch identity/reservation and
 		// are deliberately left to Automation reconciliation.

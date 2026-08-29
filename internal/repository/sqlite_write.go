@@ -53,6 +53,18 @@ func beginImmediateTx(ctx context.Context, db *sql.DB) (*manualTx, func(), error
 	}, nil
 }
 
+func withImmediateTx(ctx context.Context, db *sql.DB, fn func(SQLExecutor) error) error {
+	tx, cleanup, err := beginImmediateTx(ctx, db)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func execBoundSQLite(ctx context.Context, db *sql.DB, query string, args ...interface{}) (result sql.Result, err error) {
 	err = withBoundSQLiteConn(ctx, db, func(conn *sql.Conn) error {
 		result, err = conn.ExecContext(ctx, query, args...)

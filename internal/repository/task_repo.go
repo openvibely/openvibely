@@ -347,7 +347,7 @@ func defaultJSON(raw string) string {
 }
 
 func (r *TaskRepo) Create(ctx context.Context, t *models.Task) error {
-	return r.withImmediateTx(ctx, func(exec sqlExecutor) error {
+	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		return r.createWithExecutor(ctx, exec, t)
 	})
 }
@@ -361,7 +361,7 @@ func (r *TaskRepo) CreateWithGoal(ctx context.Context, t *models.Task, goal *mod
 	if goal == nil || strings.TrimSpace(goal.Objective) == "" {
 		return r.Create(ctx, t)
 	}
-	return r.withImmediateTx(ctx, func(exec sqlExecutor) error {
+	return withImmediateTx(ctx, r.db, func(exec sqlExecutor) error {
 		if err := r.createWithExecutor(ctx, exec, t); err != nil {
 			return err
 		}
@@ -448,18 +448,6 @@ func (r *TaskRepo) createWithExecutor(ctx context.Context, exec sqlExecutor, t *
 	}
 	t.DisplayOrder = displayOrder
 	return nil
-}
-
-func (r *TaskRepo) withImmediateTx(ctx context.Context, fn func(sqlExecutor) error) error {
-	tx, cleanup, err := beginImmediateTx(ctx, r.db)
-	if err != nil {
-		return err
-	}
-	defer cleanup()
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 func (r *TaskRepo) Update(ctx context.Context, t *models.Task) error {
