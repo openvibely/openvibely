@@ -351,7 +351,8 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 		"outboundTargetsFindDraftGroup",
 		"form.dataset.editingRowKey",
 		"Update Target",
-		"const fieldsID = 'outbound-target-draft-fields-'", `name="target_default_subject" value="Original subject"`,
+		"const fieldsID = 'outbound-target-draft-fields-'",
+		"const id = outboundTargetsDraftValue(editingGroup, 'target_row_id');", `name="target_default_subject" value="Original subject"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected saved target edit flow to contain %q, body=%q", want, body)

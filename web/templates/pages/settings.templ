@@ -2035,7 +2035,7 @@ templ settingsContent(view ChannelsSettingsView) {
 							outboundTargetsAppendDraftFields(rowKey, '', platform, targetKind, name, targetID, threadID, isHome, defaultSubject);
 							if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(row);
 						} else {
-							const id = outboundTargetsDraftValue(editingGroup, 'target_row_id') || editingRowKey;
+							const id = outboundTargetsDraftValue(editingGroup, 'target_row_id');
 							editingRow.setAttribute('data-platform', platform);
 							editingRow.innerHTML = outboundTargetsRenderDraftRow(editingRowKey, platform, targetKind, name, targetID, threadID, isHome);
 							outboundTargetsAppendDraftFields(editingRowKey, id, platform, targetKind, name, targetID, threadID, isHome, defaultSubject);
