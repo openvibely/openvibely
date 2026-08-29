@@ -1525,28 +1525,37 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							window.removeEventListener('sse-live-connected', handleLiveConnected);
 							document.body && document.body.removeEventListener('htmx:beforeSwap', handleBeforeSwap);
 							Object.keys(states).forEach(function(key) {
-								if (states[key].liveTimer) {
-									clearTimeout(states[key].liveTimer);
-									states[key].liveTimer = null;
+								var state = states[key];
+								if (state.liveTimer) {
+									clearTimeout(state.liveTimer);
+									state.liveTimer = null;
 								}
-								if (states[key].newerLiveTimer) {
-									clearTimeout(states[key].newerLiveTimer);
-									states[key].newerLiveTimer = null;
+								if (state.newerLiveTimer) {
+									clearTimeout(state.newerLiveTimer);
+									state.newerLiveTimer = null;
 								}
-								if (states[key].refreshLiveTimer) {
-									clearTimeout(states[key].refreshLiveTimer);
-									states[key].refreshLiveTimer = null;
+								if (state.refreshLiveTimer) {
+									clearTimeout(state.refreshLiveTimer);
+									state.refreshLiveTimer = null;
 								}
-								if (states[key].newerRetryTimer) {
-									clearTimeout(states[key].newerRetryTimer);
-									states[key].newerRetryTimer = null;
+								if (state.newerRetryTimer) {
+									clearTimeout(state.newerRetryTimer);
+									state.newerRetryTimer = null;
 								}
-								if (states[key].refreshRetryTimer) {
-									clearTimeout(states[key].refreshRetryTimer);
-									states[key].refreshRetryTimer = null;
+								if (state.refreshRetryTimer) {
+									clearTimeout(state.refreshRetryTimer);
+									state.refreshRetryTimer = null;
 								}
-								states[key].newerPending = false;
-								states[key].refreshPending = false;
+								state.newerPending = false;
+								state.refreshPending = false;
+								state.refreshLoading = false;
+								state.olderLoading = false;
+								state.newerLoading = false;
+								state.initialLoading = false;
+								state.refreshRequestID = 0;
+								state.olderRequestID = 0;
+								state.newerRequestID = 0;
+								state.requestVersion++;
 							});
 						}
 

@@ -1592,3 +1592,208 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("older failure lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
 	}
 }
+
+func TestTaskDetailLifecycleHTMXSwapDuringRequestReconcilesOnReconnectInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := &models.Task{
+		ID:        "task-lifecycle-htmx-swap-browser",
+		ProjectID: "project-lifecycle-htmx-swap-browser",
+		Title:     "Lifecycle HTMX swap browser fixture",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+	var fragment bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &fragment); err != nil {
+		t.Fatalf("render TaskDetailContent: %v", err)
+	}
+
+	row := func(id string, hour int) map[string]any {
+		return map[string]any{
+			"id":              id,
+			"when":            "after_complete",
+			"skill_key":       "hook-" + id,
+			"status":          "completed",
+			"output_contract": "activity_summary",
+			"summary":         "summary for " + id,
+			"started_at":      time.Date(2026, time.January, 1, hour, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		}
+	}
+	writePage := func(w http.ResponseWriter, items []map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "has_more": false, "next_cursor": ""})
+	}
+
+	var mu sync.Mutex
+	initialCalls := 0
+	sawProject := false
+	sawLimit := false
+	initialStarted := make(chan struct{})
+	releaseInitial := make(chan struct{})
+	var initialStartedOnce sync.Once
+	var releaseInitialOnce sync.Once
+	releaseInitialRequest := func() {
+		releaseInitialOnce.Do(func() { close(releaseInitial) })
+	}
+	browserResult := make(chan string, 1)
+	page := ""
+	fixtureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/browser-result":
+			select {
+			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case "/lifecycle-state":
+			select {
+			case <-initialStarted:
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("1"))
+			default:
+				w.WriteHeader(http.StatusNoContent)
+			}
+			return
+		case "/tasks/task-lifecycle-htmx-swap-browser":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+			return
+		case "/api/tasks/task-lifecycle-htmx-swap-browser/lifecycle-executions":
+		default:
+			http.NotFound(w, r)
+			return
+		}
+
+		query := r.URL.Query()
+		if query.Get("before") != "" || query.Get("after") != "" {
+			http.Error(w, "unexpected lifecycle cursor", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		if query.Get("project_id") == task.ProjectID {
+			sawProject = true
+		}
+		if query.Get("limit") == "20" {
+			sawLimit = true
+		}
+		initialCalls++
+		currentInitialCall := initialCalls
+		mu.Unlock()
+		if currentInitialCall == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			initialStartedOnce.Do(func() { close(initialStarted) })
+			<-releaseInitial
+			writePage(w, []map[string]any{row("event-0", 0)})
+			return
+		}
+		writePage(w, []map[string]any{row("event-1", 1)})
+	})
+	server := httptest.NewServer(fixtureHandler)
+	defer server.Close()
+	defer releaseInitialRequest()
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function waitFor(check, label, timeout) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        Promise.resolve().then(check).then(function(ok) {
+          if (ok) { resolve(); return; }
+          if (performance.now() - started > (timeout || 6000)) { reject(new Error('timed out waiting for ' + label)); return; }
+          setTimeout(poll, 10);
+        }).catch(reject);
+      }
+      poll();
+    });
+  }
+  function report(status, message) {
+    return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
+  }
+  function fail(message) { throw new Error(message); }
+  async function run() {
+    await waitFor(function() {
+      return fetch('/lifecycle-state').then(function(response) { return response.status === 200; });
+    }, 'lifecycle request in flight', 3000);
+
+    var oldRoot = document.getElementById('task-detail-content');
+    if (!oldRoot) fail('missing original task detail root');
+    var lifecycleScriptSource = '';
+    Array.prototype.some.call(document.getElementsByTagName('script'), function(script) {
+      if (script.textContent.indexOf('window._taskLifecycleActivityHandlers') < 0) return false;
+      lifecycleScriptSource = script.textContent;
+      return true;
+    });
+    if (!lifecycleScriptSource) fail('missing lifecycle script source');
+
+    oldRoot.dispatchEvent(new CustomEvent('htmx:beforeSwap', {bubbles:true, detail:{target:oldRoot}}));
+    oldRoot.outerHTML = '<div id="task-detail-content" class="h-full flex flex-col">' +
+      '<div><a data-tab="details" class="tab-active">Details</a><a data-tab="lifecycle">Lifecycle</a></div>' +
+      '<div id="tab-lifecycle" class="task-tab-panel hidden">' +
+      '<div id="lifecycle-activity-scroll" data-lifecycle-scrollport="true" style="height:240px;overflow-y:auto;">' +
+      '<div id="lifecycle-activity-list" data-task-id="task-lifecycle-htmx-swap-browser" data-project-id="project-lifecycle-htmx-swap-browser"></div>' +
+      '</div></div></div>';
+    var reboundScript = document.createElement('script');
+    reboundScript.textContent = lifecycleScriptSource;
+    document.body.appendChild(reboundScript);
+
+    window.dispatchEvent(new CustomEvent('sse-live-connected', {detail:{reconnected:true}}));
+    await waitFor(function() {
+      return !!document.querySelector('[data-lifecycle-execution-id="event-1"]');
+    }, 'lifecycle reconnect recovery after HTMX swap', 4000);
+    await report('pass', '');
+  }
+  run().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+
+	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-htmx-swap.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-htmx-swap-profile")
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		server.URL+"/tasks/task-lifecycle-htmx-swap-browser",
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome lifecycle HTMX swap fixture: %v", err)
+	}
+
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail: timed out waiting for lifecycle browser result"
+	}
+	releaseInitialRequest()
+	stopBrowserProcess(cmd)
+	if outcome != "pass:" {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(stderr) > 8000 {
+			stderr = stderr[len(stderr)-8000:]
+		}
+		t.Fatalf("Task Detail Lifecycle HTMX swap browser regression failed: %s\nChrome stderr tail:\n%s", outcome, stderr)
+	}
+
+	mu.Lock()
+	gotInitialCalls := initialCalls
+	gotProject, gotLimit := sawProject, sawLimit
+	mu.Unlock()
+	if gotInitialCalls != 2 {
+		t.Fatalf("HTMX swap lifecycle fixture received %d initial-page requests, want the detached request and reconnect refresh", gotInitialCalls)
+	}
+	if !gotProject || !gotLimit {
+		t.Fatalf("HTMX swap lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
+	}
+}
