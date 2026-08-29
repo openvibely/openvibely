@@ -2,6 +2,7 @@ package pages
 
 import (
 	"fmt"
+	"net/url"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/layout"
 )
@@ -85,7 +86,7 @@ templ InsightCard(insight *models.Insight) {
 					if insight.Status == models.InsightStatusNew {
 						<button
 							class="btn btn-xs btn-success"
-							hx-patch={ fmt.Sprintf("/insights/%s/status", insight.ID) }
+							hx-patch={ fmt.Sprintf("/insights/%s/status?project_id=%s", insight.ID, url.QueryEscape(insight.ProjectID)) }
 							hx-vals='{"status": "accepted"}'
 							hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
 							hx-swap="outerHTML"
@@ -93,7 +94,7 @@ templ InsightCard(insight *models.Insight) {
 						>Accept</button>
 						<button
 							class="btn btn-xs btn-ghost"
-							hx-patch={ fmt.Sprintf("/insights/%s/status", insight.ID) }
+							hx-patch={ fmt.Sprintf("/insights/%s/status?project_id=%s", insight.ID, url.QueryEscape(insight.ProjectID)) }
 							hx-vals='{"status": "rejected"}'
 							hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
 							hx-swap="outerHTML"
@@ -103,7 +104,7 @@ templ InsightCard(insight *models.Insight) {
 					if insight.Status == models.InsightStatusAccepted {
 						<button
 							class="btn btn-xs btn-primary"
-							hx-patch={ fmt.Sprintf("/insights/%s/status", insight.ID) }
+							hx-patch={ fmt.Sprintf("/insights/%s/status?project_id=%s", insight.ID, url.QueryEscape(insight.ProjectID)) }
 							hx-vals='{"status": "resolved"}'
 							hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
 							hx-swap="outerHTML"
@@ -112,7 +113,7 @@ templ InsightCard(insight *models.Insight) {
 					}
 					<button
 						class="btn btn-xs btn-ghost btn-error"
-						hx-delete={ fmt.Sprintf("/insights/%s", insight.ID) }
+						hx-delete={ fmt.Sprintf("/insights/%s?project_id=%s", insight.ID, url.QueryEscape(insight.ProjectID)) }
 						hx-target={ fmt.Sprintf("#insight-%s", insight.ID) }
 						hx-swap="outerHTML"
 						hx-confirm="Delete this insight?"

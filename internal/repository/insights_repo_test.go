@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
@@ -41,7 +43,7 @@ func TestInsightsRepo_CreateAndGet(t *testing.T) {
 		t.Fatal("expected insight ID to be set")
 	}
 
-	got, err := repo.GetInsight(ctx, insight.ID)
+	got, err := repo.GetInsight(ctx, project.ID, insight.ID)
 	if err != nil {
 		t.Fatalf("get insight: %v", err)
 	}
@@ -146,10 +148,10 @@ func TestInsightsRepo_UpdateStatusAndDelete(t *testing.T) {
 	}
 
 	// Update to resolved
-	if err := repo.UpdateStatus(ctx, insight.ID, models.InsightStatusResolved); err != nil {
+	if err := repo.UpdateStatus(ctx, project.ID, insight.ID, models.InsightStatusResolved); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
-	got, _ := repo.GetInsight(ctx, insight.ID)
+	got, _ := repo.GetInsight(ctx, project.ID, insight.ID)
 	if got.Status != models.InsightStatusResolved {
 		t.Errorf("status: got %q, want resolved", got.Status)
 	}
@@ -158,12 +160,109 @@ func TestInsightsRepo_UpdateStatusAndDelete(t *testing.T) {
 	}
 
 	// Delete
-	if err := repo.DeleteInsight(ctx, insight.ID); err != nil {
+	if err := repo.DeleteInsight(ctx, project.ID, insight.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	got, _ = repo.GetInsight(ctx, insight.ID)
+	got, _ = repo.GetInsight(ctx, project.ID, insight.ID)
 	if got != nil {
 		t.Error("expected nil after delete")
+	}
+}
+
+func TestInsightsRepo_ProjectScopedMutations(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+
+	projectRepo := NewProjectRepo(db)
+	repo := NewInsightsRepo(db)
+	projectA := &models.Project{Name: "Project A"}
+	projectB := &models.Project{Name: "Project B"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+
+	insight := &models.Insight{
+		ProjectID:  projectB.ID,
+		Type:       models.InsightBugPattern,
+		Severity:   models.InsightSeverityHigh,
+		Status:     models.InsightStatusNew,
+		Title:      "Project B insight",
+		Evidence:   "{}",
+		Confidence: 0.8,
+	}
+	if err := repo.CreateInsight(ctx, insight); err != nil {
+		t.Fatalf("create insight: %v", err)
+	}
+
+	if got, err := repo.GetInsight(ctx, projectA.ID, insight.ID); err != nil || got != nil {
+		t.Fatalf("foreign insight lookup = %#v, err=%v; want not found", got, err)
+	}
+	before, err := repo.GetInsight(ctx, projectB.ID, insight.ID)
+	if err != nil || before == nil {
+		t.Fatalf("get project B insight = %#v, err=%v", before, err)
+	}
+	if err := repo.UpdateStatus(ctx, projectA.ID, insight.ID, models.InsightStatusAccepted); !errors.Is(err, ErrInsightNotFound) {
+		t.Fatalf("foreign status update error = %v, want %v", err, ErrInsightNotFound)
+	}
+	after, err := repo.GetInsight(ctx, projectB.ID, insight.ID)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("foreign insight changed after rejected update: before=%#v after=%#v err=%v", before, after, err)
+	}
+
+	if err := repo.UpdateStatus(ctx, projectB.ID, insight.ID, models.InsightStatusAccepted); err != nil {
+		t.Fatalf("same-project accept: %v", err)
+	}
+	if err := repo.UpdateStatus(ctx, projectB.ID, insight.ID, models.InsightStatusResolved); err != nil {
+		t.Fatalf("same-project resolve: %v", err)
+	}
+	resolved, err := repo.GetInsight(ctx, projectB.ID, insight.ID)
+	if err != nil || resolved == nil || resolved.Status != models.InsightStatusResolved || resolved.ResolvedAt == nil {
+		t.Fatalf("resolved insight = %#v, err=%v", resolved, err)
+	}
+	resolvedAt := *resolved.ResolvedAt
+	if err := repo.UpdateStatus(ctx, projectB.ID, insight.ID, models.InsightStatusRejected); err != nil {
+		t.Fatalf("same-project reject after resolve: %v", err)
+	}
+	preserved, err := repo.GetInsight(ctx, projectB.ID, insight.ID)
+	if err != nil || preserved == nil || preserved.Status != models.InsightStatusRejected || preserved.ResolvedAt == nil || !preserved.ResolvedAt.Equal(resolvedAt) {
+		t.Fatalf("resolved_at was not preserved: insight=%#v err=%v", preserved, err)
+	}
+
+	if err := repo.DeleteInsight(ctx, projectA.ID, insight.ID); !errors.Is(err, ErrInsightNotFound) {
+		t.Fatalf("foreign insight delete error = %v, want %v", err, ErrInsightNotFound)
+	}
+	if stillThere, err := repo.GetInsight(ctx, projectB.ID, insight.ID); err != nil || stillThere == nil {
+		t.Fatalf("foreign insight disappeared after rejected delete: %#v err=%v", stillThere, err)
+	}
+	if err := repo.DeleteInsight(ctx, projectB.ID, insight.ID); err != nil {
+		t.Fatalf("same-project insight delete: %v", err)
+	}
+
+	knowledge := &models.KnowledgeEntry{
+		ProjectID: projectB.ID,
+		Topic:     "Project B knowledge",
+		Content:   "Project B content",
+		Source:    "test",
+		SourceRef: "project-b",
+		Tags:      "[]",
+	}
+	if err := repo.CreateKnowledge(ctx, knowledge); err != nil {
+		t.Fatalf("create knowledge: %v", err)
+	}
+	if got, err := repo.GetKnowledge(ctx, projectA.ID, knowledge.ID); err != nil || got != nil {
+		t.Fatalf("foreign knowledge lookup = %#v, err=%v; want not found", got, err)
+	}
+	if err := repo.DeleteKnowledge(ctx, projectA.ID, knowledge.ID); !errors.Is(err, ErrKnowledgeNotFound) {
+		t.Fatalf("foreign knowledge delete error = %v, want %v", err, ErrKnowledgeNotFound)
+	}
+	if stillThere, err := repo.GetKnowledge(ctx, projectB.ID, knowledge.ID); err != nil || stillThere == nil {
+		t.Fatalf("foreign knowledge disappeared after rejected delete: %#v err=%v", stillThere, err)
+	}
+	if err := repo.DeleteKnowledge(ctx, projectB.ID, knowledge.ID); err != nil {
+		t.Fatalf("same-project knowledge delete: %v", err)
 	}
 }
 
@@ -597,7 +696,7 @@ func TestInsightsRepo_Knowledge(t *testing.T) {
 		t.Fatal("expected knowledge ID")
 	}
 
-	got, err := repo.GetKnowledge(ctx, entry.ID)
+	got, err := repo.GetKnowledge(ctx, project.ID, entry.ID)
 	if err != nil {
 		t.Fatalf("get knowledge: %v", err)
 	}
@@ -606,10 +705,10 @@ func TestInsightsRepo_Knowledge(t *testing.T) {
 	}
 
 	// Delete
-	if err := repo.DeleteKnowledge(ctx, entry.ID); err != nil {
+	if err := repo.DeleteKnowledge(ctx, project.ID, entry.ID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	got, _ = repo.GetKnowledge(ctx, entry.ID)
+	got, _ = repo.GetKnowledge(ctx, project.ID, entry.ID)
 	if got != nil {
 		t.Error("expected nil after delete")
 	}

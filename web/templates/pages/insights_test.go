@@ -22,6 +22,35 @@ func renderInsightsComponentForTest(t *testing.T, component interface {
 	return buf.String()
 }
 
+func TestInsightCardMutationURLsIncludeProjectContext(t *testing.T) {
+	newInsight := &models.Insight{
+		ID:         "insight-new",
+		ProjectID:  "project-insights",
+		Type:       models.InsightBugPattern,
+		Severity:   models.InsightSeverityHigh,
+		Status:     models.InsightStatusNew,
+		Title:      "New insight",
+		Confidence: 0.8,
+	}
+	newBody := renderInsightsComponentForTest(t, InsightCard(newInsight))
+	for _, expected := range []string{
+		`hx-patch="/insights/insight-new/status?project_id=project-insights"`,
+		`hx-delete="/insights/insight-new?project_id=project-insights"`,
+	} {
+		if !strings.Contains(newBody, expected) {
+			t.Fatalf("new insight card missing scoped action URL %q\n%s", expected, newBody)
+		}
+	}
+
+	acceptedInsight := *newInsight
+	acceptedInsight.ID = "insight-accepted"
+	acceptedInsight.Status = models.InsightStatusAccepted
+	acceptedBody := renderInsightsComponentForTest(t, InsightCard(&acceptedInsight))
+	if !strings.Contains(acceptedBody, `hx-patch="/insights/insight-accepted/status?project_id=project-insights"`) || !strings.Contains(acceptedBody, `hx-delete="/insights/insight-accepted?project_id=project-insights"`) {
+		t.Fatalf("accepted insight card missing scoped action URL\n%s", acceptedBody)
+	}
+}
+
 func TestInsightsContent_EmptyGradeCardsKeepDistinctActionsAndCopy(t *testing.T) {
 	project := &models.Project{ID: "project-insights", Name: "Insights Project"}
 	body := renderInsightsComponentForTest(t, InsightsContent(project, &models.InsightDashboardData{}))
