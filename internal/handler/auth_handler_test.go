@@ -165,6 +165,38 @@ func TestAuthMiddleware_HTMXGets401WithHXRedirect(t *testing.T) {
 	}
 }
 
+func TestAuthMiddleware_RejectsLocalSessionAtExpirationBoundary(t *testing.T) {
+	h, e := authTestHandler(t)
+	cfg := *h.authCfg
+	cfg.SessionTTL = time.Second
+	h.SetAuthConfig(cfg)
+
+	for attempt := 0; attempt < 20; attempt++ {
+		expiresAt := time.Now().Unix()
+		token, err := h.authCfg.SignToken(time.Unix(expiresAt-1, 0))
+		if err != nil {
+			t.Fatalf("SignToken error: %v", err)
+		}
+		if time.Now().Unix() != expiresAt {
+			continue
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/tasks?project_id=p1", nil)
+		req.AddCookie(&http.Cookie{Name: h.authCfg.CookieName, Value: token})
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+
+		if rec.Code == http.StatusFound && strings.HasPrefix(rec.Header().Get("Location"), "/login?next=") {
+			return
+		}
+		if time.Now().Unix() == expiresAt {
+			t.Fatalf("local session was accepted at its expiration boundary: status=%d location=%q", rec.Code, rec.Header().Get("Location"))
+		}
+	}
+
+	t.Fatal("could not observe a stable exact expiration boundary")
+}
+
 func TestAuthMiddleware_AllowsAuthenticatedPassThrough(t *testing.T) {
 	h, e := authTestHandler(t)
 	token, err := h.authCfg.SignToken(time.Now())
@@ -384,7 +416,7 @@ func TestAuthLoginLockout_SlidingWindowAndDuration(t *testing.T) {
 	if !h.isLoginLocked(thirdInWindow) {
 		t.Fatal("expected lock after third failure within one-hour sliding window")
 	}
-	if !h.isLoginLocked(thirdInWindow.Add(6*time.Hour-time.Second)) {
+	if !h.isLoginLocked(thirdInWindow.Add(6*time.Hour - time.Second)) {
 		t.Fatal("expected lock to remain active until full six-hour duration elapsed")
 	}
 	if h.isLoginLocked(thirdInWindow.Add(6*time.Hour + time.Second)) {

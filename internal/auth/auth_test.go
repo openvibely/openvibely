@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +84,72 @@ func TestSignVerifyToken(t *testing.T) {
 	}
 	if user.Username != "admin" {
 		t.Fatalf("expected username admin, got %q", user.Username)
+	}
+}
+
+func TestVerifyTokenExpiresAtExactBoundary(t *testing.T) {
+	cfg := testConfig()
+	signTime := time.Unix(1_700_000_000, 123_456_789)
+	token, err := cfg.SignToken(signTime)
+	if err != nil {
+		t.Fatalf("SignToken error: %v", err)
+	}
+
+	_, err = cfg.VerifyToken(token, signTime.Add(cfg.SessionTTL))
+	if err != ErrExpiredToken {
+		t.Fatalf("expected ErrExpiredToken at exact expiration boundary, got %v", err)
+	}
+}
+
+func TestVerifyTokenValidImmediatelyBeforeBoundary(t *testing.T) {
+	cfg := testConfig()
+	signTime := time.Unix(1_700_000_000, 123_456_789)
+	token, err := cfg.SignToken(signTime)
+	if err != nil {
+		t.Fatalf("SignToken error: %v", err)
+	}
+
+	user, err := cfg.VerifyToken(token, signTime.Add(cfg.SessionTTL).Add(-time.Nanosecond))
+	if err != nil {
+		t.Fatalf("expected token to remain valid immediately before expiration, got %v", err)
+	}
+	if user.Username != cfg.Username {
+		t.Fatalf("expected username %q, got %q", cfg.Username, user.Username)
+	}
+}
+
+func TestVerifyTokenAcceptsLegacySecondPrecisionToken(t *testing.T) {
+	cfg := testConfig()
+	expiresAt := int64(1_700_000_100)
+	payload := cfg.Username + ":" + strconv.FormatInt(expiresAt, 10)
+	token := base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." +
+		base64.RawURLEncoding.EncodeToString(sign(payload, cfg.SessionSecret))
+
+	if _, err := cfg.VerifyToken(token, time.Unix(expiresAt-1, 999_999_999)); err != nil {
+		t.Fatalf("expected legacy token to remain valid before expiration, got %v", err)
+	}
+	if _, err := cfg.VerifyToken(token, time.Unix(expiresAt, 0)); err != ErrExpiredToken {
+		t.Fatalf("expected legacy token to expire at its second boundary, got %v", err)
+	}
+}
+
+func TestSubsecondSessionTTLExpiresAtConfiguredBoundary(t *testing.T) {
+	cfg := testConfig()
+	cfg.SessionTTL = 100 * time.Millisecond
+	signTime := time.Unix(1_700_000_000, 900_000_000)
+	token, err := cfg.SignToken(signTime)
+	if err != nil {
+		t.Fatalf("SignToken error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.AddCookie(&http.Cookie{Name: cfg.CookieName, Value: token})
+	boundary := signTime.Add(cfg.SessionTTL)
+	if _, err := UserFromRequest(req, cfg, boundary.Add(-time.Nanosecond)); err != nil {
+		t.Fatalf("expected subsecond token to remain valid immediately before expiration, got %v", err)
+	}
+	if _, err := UserFromRequest(req, cfg, boundary); err != ErrExpiredToken {
+		t.Fatalf("expected subsecond token to expire at configured boundary, got %v", err)
 	}
 }
 
