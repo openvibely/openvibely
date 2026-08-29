@@ -365,9 +365,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					z-index: 10;
 					box-shadow: 0 3px 8px rgba(0,0,0,0.5);
 				}
-				.task-selected .btn-circle {
-					display: none;
-				}
+					.task-selected .btn-circle {
+						display: none;
+					}
+					.schedule-selected {
+						outline: 2px solid oklch(var(--p));
+						outline-offset: 1px;
+						background: oklch(var(--p) / 0.35) !important;
+						box-shadow: 0 0 0 2px oklch(var(--p) / 0.2);
+					}
 				/* Modal layering */
 				dialog.modal {
 					z-index: 1200;

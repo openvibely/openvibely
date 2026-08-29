@@ -950,3 +950,43 @@ func drainScheduleDiscoveryRows(tb testing.TB, rows *sql.Rows) int {
 	}
 	return count
 }
+
+func TestScheduleRepo_UpdateBatchForProjectRollsBackOnFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	firstTask := createTestTask(t, taskRepo)
+	secondTask := &models.Task{ProjectID: "default", Title: "Second scheduled task", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "test prompt"}
+	if err := taskRepo.Create(ctx, secondTask); err != nil {
+		t.Fatalf("creating second test task: %v", err)
+	}
+	first := &models.Schedule{TaskID: firstTask.ID, RunAt: time.Date(2031, 1, 2, 9, 15, 0, 0, time.UTC), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	second := &models.Schedule{TaskID: secondTask.ID, RunAt: time.Date(2031, 1, 2, 11, 45, 0, 0, time.UTC), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	if err := repo.Create(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	originalFirst := first.RunAt
+	originalSecond := second.RunAt
+	first.RunAt = first.RunAt.Add(3 * time.Hour)
+	first.NextRun = &first.RunAt
+	second.RunAt = second.RunAt.Add(3 * time.Hour)
+	second.NextRun = &second.RunAt
+
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_second_schedule_update BEFORE UPDATE ON schedules WHEN OLD.id = '`+second.ID+`' BEGIN SELECT RAISE(ABORT, 'forced batch failure'); END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	if err := repo.UpdateBatchForProject(ctx, "default", []*models.Schedule{first, second}); err == nil {
+		t.Fatal("expected forced batch update failure")
+	}
+
+	storedFirst, _ := repo.GetByID(ctx, first.ID)
+	storedSecond, _ := repo.GetByID(ctx, second.ID)
+	if !storedFirst.RunAt.Equal(originalFirst) || !storedSecond.RunAt.Equal(originalSecond) {
+		t.Fatalf("batch failure must roll back every schedule: first=%v second=%v", storedFirst.RunAt, storedSecond.RunAt)
+	}
+}

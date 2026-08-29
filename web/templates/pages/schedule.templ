@@ -568,7 +568,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 																data-schedule-id={ getScheduleID(occurrence.Task) }
 																data-task-id={ occurrence.Task.Task.ID }
 																data-has-schedule={ fmt.Sprintf("%t", occurrence.Task.Schedule != nil && getScheduleID(occurrence.Task) != "") }
-																onclick="openTaskDialog(this.dataset.taskId)"
+																onclick="handleScheduleSelect(event)"
 																onpointerdown="handleSchedulePointerDown(event)"
 															>
 																<div class="font-semibold truncate leading-tight">{ scheduleDisplayTitle(occurrence.Task) }</div>
@@ -894,6 +894,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				// Close modal on successful task creation (schedule-content swap)
 				document.body.addEventListener('htmx:afterSwap', function(event) {
 					if (event.detail.target && event.detail.target.id === 'schedule-content') {
+						if (typeof clearScheduleSelection === 'function') clearScheduleSelection();
 						const modal = document.getElementById('new_scheduled_task_modal');
 						if (modal && modal.open) {
 							modal.close();
@@ -902,16 +903,59 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				});
 			}
 
-			let draggedScheduleId = null;
-			let draggedTaskId = null;
-			let draggedHasSchedule = false;
+			var draggedScheduleId = null;
+			var draggedScheduleIds = [];
+			var selectedScheduleCards = new Set();
+			var draggedTaskId = null;
+			var draggedHasSchedule = false;
 			// Flag to suppress scroll-to-now after drag-drop reschedule
-			let _schedDragDropJustCompleted = false;
+			var _schedDragDropJustCompleted = false;
 			// Flag to suppress click events that fire after short drags.
 			// Browsers may fire click after a very short drag (e.g. adjacent slot),
 			// even though the drag completed successfully. Without this guard,
 			// openTaskDialog navigates away and the user never sees the reschedule.
-			let _schedDragActive = false;
+			var _schedDragActive = false;
+
+			function updateScheduleSelectionCounter() {
+				var counter = document.getElementById('selection-counter');
+				if (!counter) return;
+				if (selectedScheduleCards.size > 0) {
+					counter.querySelector('#selection-count').textContent = selectedScheduleCards.size;
+					counter.classList.add('visible');
+				} else {
+					counter.classList.remove('visible');
+				}
+			}
+
+			function clearScheduleSelection() {
+				selectedScheduleCards.forEach(function(card) { card.classList.remove('schedule-selected'); });
+				selectedScheduleCards.clear();
+				draggedScheduleIds = [];
+				updateScheduleSelectionCounter();
+			}
+
+			function handleScheduleSelect(event) {
+				var card = event.currentTarget;
+				if (!card || _schedDragActive) {
+					event.preventDefault();
+					return;
+				}
+				if (event.metaKey || event.ctrlKey) {
+					event.preventDefault();
+					event.stopPropagation();
+					if (selectedScheduleCards.has(card)) {
+						selectedScheduleCards.delete(card);
+						card.classList.remove('schedule-selected');
+					} else {
+						selectedScheduleCards.add(card);
+						card.classList.add('schedule-selected');
+					}
+					updateScheduleSelectionCounter();
+					return;
+				}
+				openTaskDialog(card.dataset.taskId);
+			}
+			window.handleScheduleSelect = handleScheduleSelect;
 
 			function openTaskDialog(taskId) {
 				// Only navigate if not dragging and not just finished dragging
@@ -924,8 +968,8 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 				}
 			}
 
-			let _dragSourceHour = null;
-			let _dragSourceDate = null;
+			var _dragSourceHour = null;
+			var _dragSourceDate = null;
 
 				var _schedulePointerDrag = null;
 
@@ -943,9 +987,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 
 				function resetSchedulePointerDrag() {
 					var state = _schedulePointerDrag;
+					var wasStarted = !!(state && state.started);
 					if (window.stopPointerAutoScroll) window.stopPointerAutoScroll();
 					if (state && state.dropZone) clearDropZoneFeedback(state.dropZone);
-					if (state && state.card) {
+					if (state && state.motions) {
+						state.motions.forEach(function(motion) {
+							window.endPointerCardMotion(motion);
+							motion.card.classList.remove('dragging');
+						});
+					} else if (state && state.card) {
 						window.endPointerCardMotion(state.motion);
 						state.card.classList.remove('dragging');
 					}
@@ -956,13 +1006,14 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					window.removeEventListener('pointercancel', handleSchedulePointerCancel, true);
 					_schedulePointerDrag = null;
 					draggedScheduleId = null;
+					draggedScheduleIds = [];
 					draggedTaskId = null;
 					draggedHasSchedule = false;
 					_dragSourceHour = null;
 					_dragSourceDate = null;
-					setTimeout(function() { _schedDragActive = false; }, 150);
+					if (wasStarted) clearScheduleSelection();
+					setTimeout(function() { _schedDragActive = false; }, 0);
 				}
-
 				function beginSchedulePointerDrag() {
 					var state = _schedulePointerDrag;
 					if (!state || state.started) return;
@@ -971,16 +1022,27 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					draggedScheduleId = card.dataset.scheduleId;
 					draggedTaskId = card.dataset.taskId;
 					draggedHasSchedule = card.dataset.hasSchedule === 'true';
+					if (selectedScheduleCards.has(card) && selectedScheduleCards.size > 1) {
+						state.dragCards = Array.from(selectedScheduleCards);
+					} else {
+						clearScheduleSelection();
+						state.dragCards = [card];
+					}
+					draggedScheduleIds = Array.from(new Set(state.dragCards.map(function(selected) {
+						return selected.dataset.scheduleId;
+					}).filter(Boolean)));
 					_schedDragActive = true;
 					document.documentElement.classList.add('drag-cursor-active');
 					document.body.classList.add('drag-cursor-active');
-					card.classList.add('dragging');
-					state.motion = window.beginPointerCardMotion(card);
+					state.motions = state.dragCards.map(function(selected) {
+						selected.classList.add('dragging');
+						return window.beginPointerCardMotion(selected);
+					});
+					state.motion = state.motions[state.dragCards.indexOf(card)];
 					var sourceZone = state.motion.placeholder.closest('.drop-zone');
 					_dragSourceHour = sourceZone ? sourceZone.dataset.hour : null;
 					_dragSourceDate = sourceZone ? sourceZone.dataset.date : null;
 				}
-
 				function refreshSchedulePointerDropZone(clientX, clientY) {
 					var state = _schedulePointerDrag;
 					if (!state || !state.started) return null;
@@ -1018,7 +1080,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					if (!state.started && Math.hypot(deltaX, deltaY) < 4) return;
 					beginSchedulePointerDrag();
 					event.preventDefault();
-					window.movePointerCard(state.motion, deltaX, deltaY);
+					state.motions.forEach(function(motion) { window.movePointerCard(motion, deltaX, deltaY); });
 					updateSchedulePointerDropZone(event);
 				}
 
@@ -1123,8 +1185,15 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 					var formData = new FormData();
 					formData.append('new_date', newDate);
 					formData.append('hour', newHour);
+					formData.append('source_date', _dragSourceDate || '');
+					formData.append('source_hour', _dragSourceHour || '');
+					formData.append('schedule_ids', draggedScheduleIds.join(','));
+					var scheduleRoot = document.getElementById('schedule-content');
+					var mutationProjectId = scheduleRoot ? (scheduleRoot.dataset.projectId || '') : '';
+					var mutationURL = '/schedules/' + encodeURIComponent(draggedScheduleId) + '/reschedule';
+					if (mutationProjectId) mutationURL += '?project_id=' + encodeURIComponent(mutationProjectId);
 
-					fetch('/schedules/' + draggedScheduleId + '/reschedule', {
+					fetch(mutationURL, {
 						method: 'PATCH',
 						headers: {
 							'HX-Request': 'true'
@@ -1359,7 +1428,7 @@ templ scheduleContent(currentProject *models.Project, weekData WeekData, weekOff
 			}
 
 			// Track if we've already scrolled for this page visit
-			let hasScrolledToNow = false;
+			var hasScrolledToNow = false;
 
 			// Update on load — run synchronously (no setTimeout) so scroll
 			// position is set before the browser's first paint. The script

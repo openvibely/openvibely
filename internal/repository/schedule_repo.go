@@ -260,6 +260,46 @@ func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
 	return nil
 }
 
+// UpdateBatchForProject atomically updates schedules owned by one project. Every
+// row must still belong to the project at write time or the complete batch is
+// rolled back.
+func (r *ScheduleRepo) UpdateBatchForProject(ctx context.Context, projectID string, schedules []*models.Schedule) error {
+	if len(schedules) == 0 {
+		return nil
+	}
+	for _, schedule := range schedules {
+		if schedule == nil {
+			return fmt.Errorf("updating schedule batch: nil schedule")
+		}
+		if err := models.ValidateScheduleRepeatInterval(schedule.RepeatInterval); err != nil {
+			return fmt.Errorf("updating schedule batch: %w", err)
+		}
+	}
+	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
+		for _, schedule := range schedules {
+			result, err := exec.ExecContext(ctx,
+				`UPDATE schedules SET run_at = ?, repeat_type = ?, repeat_interval = ?,
+				 enabled = ?, clear_context_on_start = ?, next_run = ?, updated_at = datetime('now')
+				 WHERE id = ? AND schedules.enabled = 1 AND EXISTS (
+				  SELECT 1 FROM tasks WHERE tasks.id = schedules.task_id AND tasks.project_id = ?
+				 )`,
+				schedule.RunAt, schedule.RepeatType, schedule.RepeatInterval, schedule.Enabled,
+				schedule.ClearContextOnStart, schedule.NextRun, schedule.ID, projectID)
+			if err != nil {
+				return fmt.Errorf("updating schedule %s in batch: %w", schedule.ID, err)
+			}
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("checking schedule %s batch update: %w", schedule.ID, err)
+			}
+			if rows != 1 {
+				return fmt.Errorf("updating schedule %s in batch: schedule not owned by project", schedule.ID)
+			}
+		}
+		return nil
+	})
+}
+
 func (r *ScheduleRepo) UpdateClearContextOnStart(ctx context.Context, id, taskID string, clearContextOnStart bool) error {
 	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE schedules SET clear_context_on_start = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
