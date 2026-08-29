@@ -643,6 +643,7 @@ func ResolveAuthEnabled(explicitValue, username, password string) bool {
 }
 
 // ResolveAuthSessionTTL parses AUTH_SESSION_TTL and falls back to 24h on empty/invalid.
+// Positive durations, including subsecond values, are preserved for local auth.
 func ResolveAuthSessionTTL(raw string) time.Duration {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

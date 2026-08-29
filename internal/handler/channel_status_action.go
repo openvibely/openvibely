@@ -100,12 +100,19 @@ type webhookEndpointLabel struct {
 }
 
 type outboundTargetsStatusSummary struct {
-	service.OutboundTargetStatusSummary
-	ExplicitUnsavedTargetsAllowed bool `json:"explicit_unsaved_targets_allowed"`
-	MessagingAvailable            bool `json:"messaging_available"`
+	Total                         int                                      `json:"total"`
+	Configured                    bool                                     `json:"configured"`
+	ExplicitUnsavedTargetsAllowed bool                                     `json:"explicit_unsaved_targets_allowed"`
+	MessagingAvailable            bool                                     `json:"messaging_available"`
+	ByPlatform                    map[string]outboundTargetPlatformSummary `json:"by_platform"`
 }
 
-type outboundTargetPlatformSummary = service.OutboundTargetPlatformSummary
+type outboundTargetPlatformSummary struct {
+	Total  int            `json:"total"`
+	Home   int            `json:"home"`
+	Named  int            `json:"named"`
+	ByKind map[string]int `json:"by_kind"`
+}
 
 func (h *Handler) executeListChannels(ctx context.Context, projectID string) string {
 	resp := h.buildChannelStatusSummary(ctx, strings.TrimSpace(projectID))
@@ -127,9 +134,7 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 		ProjectID:          projectID,
 		ConfiguredChannels: []string{},
 		OutboundTargets: outboundTargetsStatusSummary{
-			OutboundTargetStatusSummary: service.OutboundTargetStatusSummary{
-				ByPlatform: map[string]outboundTargetPlatformSummary{},
-			},
+			ByPlatform: map[string]outboundTargetPlatformSummary{},
 		},
 	}
 	if projectID == "" {
@@ -369,18 +374,27 @@ func summarizeWebhooks(webhooks []models.WebhookEndpoint) webhookStatusSummary {
 }
 
 func outboundTargetsStatusFromRepoSummary(summary repository.ChannelTargetProjectSummary) outboundTargetsStatusSummary {
-	return outboundTargetsStatusSummary{
-		OutboundTargetStatusSummary: service.OutboundTargetStatusSummaryFromRepoSummary(summary),
+	out := outboundTargetsStatusSummary{
+		Total:      summary.Total,
+		Configured: summary.Configured,
+		ByPlatform: map[string]outboundTargetPlatformSummary{},
 	}
+	for platform, platformSummary := range summary.ByPlatform {
+		out.ByPlatform[platform] = outboundTargetPlatformSummary{
+			Total:  platformSummary.Total,
+			Home:   platformSummary.Home,
+			Named:  platformSummary.Named,
+			ByKind: platformSummary.ByKind,
+		}
+	}
+	return out
 }
 
 func summarizeOutboundTargets(targets []models.ChannelTarget) outboundTargetsStatusSummary {
 	out := outboundTargetsStatusSummary{
-		OutboundTargetStatusSummary: service.OutboundTargetStatusSummary{
-			Total:      len(targets),
-			Configured: len(targets) > 0,
-			ByPlatform: map[string]outboundTargetPlatformSummary{},
-		},
+		Total:      len(targets),
+		Configured: len(targets) > 0,
+		ByPlatform: map[string]outboundTargetPlatformSummary{},
 	}
 	for _, target := range targets {
 		platform := strings.ToLower(strings.TrimSpace(target.Platform))

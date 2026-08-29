@@ -16,6 +16,8 @@ import (
 const (
 	DefaultCookieName = "ov_session"
 	DefaultSessionTTL = 24 * time.Hour
+
+	localTokenPrecisionVersion = "v2"
 )
 
 type AuthMode string
@@ -90,8 +92,8 @@ func (c Config) SignToken(now time.Time) (string, error) {
 	if cfg.Username == "" || cfg.SessionSecret == "" {
 		return "", errors.New("username and session secret are required")
 	}
-	expiresAt := now.Add(cfg.SessionTTL).Unix()
-	payload := cfg.Username + ":" + strconv.FormatInt(expiresAt, 10)
+	expiresAt := now.Add(cfg.SessionTTL)
+	payload := cfg.Username + ":" + localTokenPrecisionVersion + ":" + strconv.FormatInt(expiresAt.UnixNano(), 10)
 	sig := sign(payload, cfg.SessionSecret)
 	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
@@ -119,15 +121,28 @@ func (c Config) VerifyToken(token string, now time.Time) (*User, error) {
 	}
 
 	payloadParts := strings.Split(payload, ":")
-	if len(payloadParts) != 2 {
+	var expired bool
+	switch len(payloadParts) {
+	case 2:
+		// Tokens issued before the precision update use Unix seconds.
+		expUnix, err := strconv.ParseInt(payloadParts[1], 10, 64)
+		if err != nil {
+			return nil, ErrInvalidToken
+		}
+		expired = now.Unix() >= expUnix
+	case 3:
+		if payloadParts[1] != localTokenPrecisionVersion {
+			return nil, ErrInvalidToken
+		}
+		expUnixNano, err := strconv.ParseInt(payloadParts[2], 10, 64)
+		if err != nil {
+			return nil, ErrInvalidToken
+		}
+		expired = now.UnixNano() >= expUnixNano
+	default:
 		return nil, ErrInvalidToken
 	}
-
-	expUnix, err := strconv.ParseInt(payloadParts[1], 10, 64)
-	if err != nil {
-		return nil, ErrInvalidToken
-	}
-	if now.Unix() > expUnix {
+	if expired {
 		return nil, ErrExpiredToken
 	}
 

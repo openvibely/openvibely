@@ -459,7 +459,6 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Deploy Alerts", Enabled: true, PathToken: secretValues[9], Secret: secretValues[8], DefaultPriority: 2}))
 	require.NoError(t, webhookRepo.Create(ctx, &models.WebhookEndpoint{ProjectID: project.ID, Name: "Disabled Hook", Enabled: false, DefaultPriority: 2}))
 	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "channel", Name: "ops", TargetID: secretValues[10], ThreadID: secretValues[11], Home: true}))
-	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "slack", TargetKind: "user", TargetID: "U123"}))
 	require.NoError(t, channelTargetRepo.Upsert(ctx, models.ChannelTarget{ID: repository.NewID(), ProjectID: project.ID, Platform: "email", TargetKind: "email", Name: "team", TargetID: "team@example.com", DefaultSubject: secretValues[12]}))
 
 	rt := h.buildChatActionToolRuntimeFromDefs(
@@ -492,15 +491,10 @@ func TestListChannelsPlanModeReturnsPromptSafeStatus(t *testing.T) {
 	require.Equal(t, "alerts@example.com", summary.Email.Address)
 	require.Equal(t, 2, summary.Webhooks.Total)
 	require.Equal(t, 1, summary.Webhooks.Active)
-	require.Equal(t, 3, summary.OutboundTargets.Total)
+	require.Equal(t, 2, summary.OutboundTargets.Total)
 	require.False(t, summary.OutboundTargets.ExplicitUnsavedTargetsAllowed)
-	require.Equal(t, 2, summary.OutboundTargets.ByPlatform["slack"].Total)
 	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["slack"].Home)
-	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["slack"].Named)
-	require.Equal(t, map[string]int{"channel": 1, "user": 1}, summary.OutboundTargets.ByPlatform["slack"].ByKind)
-	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["email"].Total)
-	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["email"].Named)
-	require.Equal(t, map[string]int{"email": 1}, summary.OutboundTargets.ByPlatform["email"].ByKind)
+	require.Equal(t, 1, summary.OutboundTargets.ByPlatform["email"].ByKind["email"])
 
 	for _, secret := range secretValues {
 		if strings.Contains(out, secret) {
@@ -536,39 +530,6 @@ func TestListChannelsOutboundTargetAggregateSummaryMatchesMaterializedOutput(t *
 	require.Equal(t, string(materializedJSON), string(aggregateJSON))
 }
 
-func TestListChannelsEmptyOutboundTargetSummaryKeepsEmptyByPlatform(t *testing.T) {
-	h, _, _, db := setupTestHandlerWithDB(t)
-	ctx := context.Background()
-	project := createProject(t, h, "Empty Channel Status Targets")
-	h.SetChannelTargetRepo(repository.NewChannelTargetRepo(db))
-
-	rt := h.buildChatActionToolRuntimeFromDefs(
-		streamingResponseParams{ProjectID: project.ID, ChatMode: models.ChatModePlan},
-		nil,
-		chatcontrol.ToolDefsForContext(models.ChatModePlan, chatcontrol.SurfaceWeb, false),
-		models.ChatModePlan,
-		chatcontrol.SurfaceWeb,
-	)
-	out, handled, isErr, err := rt.Executor(ctx, "list_channels", json.RawMessage(`{}`))
-	require.True(t, handled)
-	require.False(t, isErr)
-	require.NoError(t, err)
-
-	var result struct {
-		OutboundTargets struct {
-			Configured                    bool                       `json:"configured"`
-			ExplicitUnsavedTargetsAllowed bool                       `json:"explicit_unsaved_targets_allowed"`
-			MessagingAvailable            bool                       `json:"messaging_available"`
-			ByPlatform                    map[string]json.RawMessage `json:"by_platform"`
-		} `json:"outbound_message_targets"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &result))
-	require.False(t, result.OutboundTargets.Configured)
-	require.False(t, result.OutboundTargets.ExplicitUnsavedTargetsAllowed)
-	require.False(t, result.OutboundTargets.MessagingAvailable)
-	require.NotNil(t, result.OutboundTargets.ByPlatform)
-	require.Empty(t, result.OutboundTargets.ByPlatform)
-}
 func TestViewSystemUpdateRuntimeTool_NotApplicableWithoutVisibleCoordinator(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

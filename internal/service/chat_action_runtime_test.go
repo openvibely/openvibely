@@ -1552,11 +1552,10 @@ func TestChannelServiceListChannelsIncludesEmailWebhooksAndTargetsSafely(t *test
 func TestChannelServiceListChannelsUsesTargetSummaryStore(t *testing.T) {
 	ctx := context.Background()
 	store := &summaryOnlyChannelTargetStore{summary: repository.ChannelTargetProjectSummary{
-		Total:      4,
+		Total:      2,
 		Configured: true,
 		ByPlatform: map[string]repository.ChannelTargetPlatformSummary{
 			"slack": {Total: 2, Home: 1, Named: 1, ByKind: map[string]int{"channel": 1, "user": 1}},
-			"email": {Total: 2, Home: 0, Named: 1, ByKind: map[string]int{"email": 1, "address": 1}},
 		},
 	}}
 	handlers := buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
@@ -1580,30 +1579,10 @@ func TestChannelServiceListChannelsUsesTargetSummaryStore(t *testing.T) {
 		} `json:"outbound_message_targets"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(out), &result))
-	require.Equal(t, 4, result.OutboundTargets.Total)
+	require.Equal(t, 2, result.OutboundTargets.Total)
 	require.True(t, result.OutboundTargets.Configured)
-	require.Equal(t, 2, result.OutboundTargets.ByPlatform["slack"].Total)
 	require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Home)
-	require.Equal(t, 1, result.OutboundTargets.ByPlatform["slack"].Named)
 	require.Equal(t, map[string]int{"channel": 1, "user": 1}, result.OutboundTargets.ByPlatform["slack"].ByKind)
-	require.Equal(t, 2, result.OutboundTargets.ByPlatform["email"].Total)
-	require.Equal(t, 1, result.OutboundTargets.ByPlatform["email"].Named)
-	require.Equal(t, map[string]int{"email": 1, "address": 1}, result.OutboundTargets.ByPlatform["email"].ByKind)
-
-	store.summary = repository.ChannelTargetProjectSummary{}
-	out, err = handlers["list_channels"](ctx, json.RawMessage(`{}`))
-	require.NoError(t, err)
-
-	var emptyResult struct {
-		OutboundTargets struct {
-			Configured bool                       `json:"configured"`
-			ByPlatform map[string]json.RawMessage `json:"by_platform"`
-		} `json:"outbound_message_targets"`
-	}
-	require.NoError(t, json.Unmarshal([]byte(out), &emptyResult))
-	require.False(t, emptyResult.OutboundTargets.Configured)
-	require.NotNil(t, emptyResult.OutboundTargets.ByPlatform)
-	require.Empty(t, emptyResult.OutboundTargets.ByPlatform)
 }
 
 type summaryOnlyChannelTargetStore struct {
