@@ -15,6 +15,11 @@ import (
 	"github.com/openvibely/openvibely/internal/util"
 )
 
+var (
+	ErrInsightNotFound   = repository.ErrInsightNotFound
+	ErrKnowledgeNotFound = repository.ErrKnowledgeNotFound
+)
+
 type InsightsService struct {
 	insightsRepo  *repository.InsightsRepo
 	taskRepo      *repository.TaskRepo
@@ -731,22 +736,22 @@ Respond with ONLY the JSON array, no markdown fences.`, project.Name, strings.Jo
 	return results, nil
 }
 
-// UpdateInsightStatus updates the status of an insight
-func (s *InsightsService) UpdateInsightStatus(ctx context.Context, id string, status models.InsightStatus) error {
-	return s.insightsRepo.UpdateStatus(ctx, id, status)
+// UpdateInsightStatus updates the status of an insight within a project.
+func (s *InsightsService) UpdateInsightStatus(ctx context.Context, projectID, id string, status models.InsightStatus) error {
+	return s.insightsRepo.UpdateStatus(ctx, projectID, id, status)
 }
 
-// AcceptInsight marks an insight as accepted and optionally links a task
-func (s *InsightsService) AcceptInsight(ctx context.Context, insightID string, taskID *string) error {
+// AcceptInsight marks an insight as accepted within a project and optionally links a task.
+func (s *InsightsService) AcceptInsight(ctx context.Context, projectID, insightID string, taskID *string) error {
 	if taskID != nil && *taskID != "" {
-		return s.insightsRepo.LinkTask(ctx, insightID, *taskID)
+		return s.insightsRepo.LinkTask(ctx, projectID, insightID, *taskID)
 	}
-	return s.insightsRepo.UpdateStatus(ctx, insightID, models.InsightStatusAccepted)
+	return s.insightsRepo.UpdateStatus(ctx, projectID, insightID, models.InsightStatusAccepted)
 }
 
-// GetInsight returns a single insight
-func (s *InsightsService) GetInsight(ctx context.Context, id string) (*models.Insight, error) {
-	return s.insightsRepo.GetInsight(ctx, id)
+// GetInsight returns a single insight within a project.
+func (s *InsightsService) GetInsight(ctx context.Context, projectID, id string) (*models.Insight, error) {
+	return s.insightsRepo.GetInsight(ctx, projectID, id)
 }
 
 // ListByType returns insights filtered by type
@@ -754,14 +759,14 @@ func (s *InsightsService) ListByType(ctx context.Context, projectID string, insi
 	return s.insightsRepo.ListByType(ctx, projectID, insightType, 50)
 }
 
-// DeleteInsight removes an insight
-func (s *InsightsService) DeleteInsight(ctx context.Context, id string) error {
-	return s.insightsRepo.DeleteInsight(ctx, id)
+// DeleteInsight removes an insight from a project.
+func (s *InsightsService) DeleteInsight(ctx context.Context, projectID, id string) error {
+	return s.insightsRepo.DeleteInsight(ctx, projectID, id)
 }
 
-// DeleteKnowledge removes a knowledge entry
-func (s *InsightsService) DeleteKnowledge(ctx context.Context, id string) error {
-	return s.insightsRepo.DeleteKnowledge(ctx, id)
+// DeleteKnowledge removes a knowledge entry from a project.
+func (s *InsightsService) DeleteKnowledge(ctx context.Context, projectID, id string) error {
+	return s.insightsRepo.DeleteKnowledge(ctx, projectID, id)
 }
 
 // ListReports returns recent insight reports
