@@ -1565,7 +1565,7 @@ func (h *Handler) xRuntimeToolsForThreadInput(taskID string, input models.Thread
 		svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
 		svc.SetRuntime(h.agentRepo, h.customPersonalityRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
 	}
-	return svc.RuntimeTools(taskID, input.ProjectID, input.XUserID, input.XConversationID, input.XReplyToTweetID, input.XUsername)
+	return svc.RuntimeTools(taskID, input.ProjectID, input.XAccountID, input.XUserID, input.XConversationID, input.XReplyToTweetID, input.XUsername)
 }
 
 func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyContext {
@@ -1585,6 +1585,7 @@ func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyC
 		DiscordThreadID:  input.DiscordThreadID,
 		DiscordMessageID: input.DiscordMessageID,
 		DiscordUserID:    input.DiscordUserID,
+		XAccountID:       input.XAccountID,
 		XConversationID:  input.XConversationID,
 		XReplyToTweetID:  input.XReplyToTweetID,
 		XUserID:          input.XUserID,
@@ -2194,7 +2195,7 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 	}
 	if reply.Source == models.TaskOriginX && reply.XReplyToTweetID != "" {
 		if xService := h.getXService(); xService != nil {
-			xService.SendReply(ctx, reply.XReplyToTweetID, output, errMsg)
+			xService.SendReplyForAccount(ctx, reply.XAccountID, reply.XReplyToTweetID, output, errMsg)
 		}
 		return
 	}

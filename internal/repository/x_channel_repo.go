@@ -86,14 +86,14 @@ func NewXTaskContextRepo(db *sql.DB) *XTaskContextRepo { return &XTaskContextRep
 
 var xTaskContextLifecycle = taskContextLifecycle[models.XTaskContext]{
 	table: "x_task_context", errLabel: "X task context",
-	metadataColumns: []string{"project_id", "conversation_id", "reply_to_tweet_id", "x_user_id", "username"},
-	selectColumns:   "task_id, project_id, conversation_id, reply_to_tweet_id, x_user_id, username, created_at, updated_at",
+	metadataColumns: []string{"project_id", "account_id", "conversation_id", "reply_to_tweet_id", "x_user_id", "username"},
+	selectColumns:   "task_id, project_id, account_id, conversation_id, reply_to_tweet_id, x_user_id, username, created_at, updated_at",
 	values: func(v models.XTaskContext) (string, []any) {
-		return v.TaskID, []any{v.ProjectID, v.ConversationID, v.ReplyToTweetID, v.XUserID, v.Username}
+		return v.TaskID, []any{v.ProjectID, v.AccountID, v.ConversationID, v.ReplyToTweetID, v.XUserID, v.Username}
 	},
 	scan: func(row taskContextScanner) (models.XTaskContext, error) {
 		var v models.XTaskContext
-		err := row.Scan(&v.TaskID, &v.ProjectID, &v.ConversationID, &v.ReplyToTweetID, &v.XUserID, &v.Username, &v.CreatedAt, &v.UpdatedAt)
+		err := row.Scan(&v.TaskID, &v.ProjectID, &v.AccountID, &v.ConversationID, &v.ReplyToTweetID, &v.XUserID, &v.Username, &v.CreatedAt, &v.UpdatedAt)
 		return v, err
 	},
 }

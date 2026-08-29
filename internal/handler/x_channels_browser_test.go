@@ -88,11 +88,15 @@ window.addEventListener('DOMContentLoaded', function() {
   function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
   function fail(message) { throw new Error(message); }
 	  function waitFor(check, label) { return new Promise(function(resolve, reject) { var started = performance.now(); (function poll() { try { if (check()) return resolve(); } catch (error) { return reject(error); } if (performance.now() - started > 5000) return reject(new Error('timed out waiting for ' + label)); setTimeout(poll, 20); })(); }); }
-	  async function runConnectionTest() {
-	    var response = await fetch('/channels/x/test', {method:'POST', headers:{'HX-Request':'true'}});
-	    var html = await response.text();
-	    document.getElementById('x-test-feedback').innerHTML = html;
-	    return html;
+	  async function runConnectionTest(expected) {
+	    var modal = document.getElementById('x_config_modal');
+	    var button = modal && modal.querySelector('button[hx-post="/channels/x/test"]');
+	    var feedback = modal && modal.querySelector('#x-test-feedback');
+	    if (!button || !feedback) fail('missing production connection-test control');
+	    htmx.process(modal);
+	    button.click();
+	    await waitFor(function() { return feedback.textContent.indexOf(expected) >= 0; }, 'production connection test ' + expected);
+	    return feedback.innerHTML;
 	  }
 	  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });  (async function() {
     if (!window.htmx || htmx.version !== '2.0.4') fail('real HTMX 2.0.4 was not loaded');
@@ -111,10 +115,10 @@ window.addEventListener('DOMContentLoaded', function() {
     modal = document.getElementById('x_config_modal');
     var testButton = modal.querySelector('button[hx-post="/channels/x/test"]');
     if (!testButton) fail('missing production connection-test control');
-	    var successFeedback = await runConnectionTest();
+	    var successFeedback = await runConnectionTest('Connection successful');
 	    if (successFeedback.indexOf('Connection successful') < 0) fail('unexpected production connection success feedback: ' + successFeedback);
 	    await report('progress', 'fail-mentions');
-	    var failureFeedback = await runConnectionTest();
+	    var failureFeedback = await runConnectionTest('Connection failed');
 	    if (failureFeedback.indexOf('Connection failed') < 0) fail('unexpected production mention-read failure feedback: ' + failureFeedback);
 	    await report('progress', 'restore-mentions');
     var authForm = modal.querySelector('form[action="/channels/x/authorized-users"]');

@@ -274,6 +274,9 @@ func (s *XService) pollOnce(ctx context.Context) error {
 			continue
 		}
 		user := users[tweet.AuthorID]
+		// The immutable tweet author_id is the authorization identity. Expanded
+		// profile metadata is optional and must never erase that identity.
+		user.ID = tweet.AuthorID
 		if ok, err := s.processMention(ctx, tweet, user); err != nil {
 			return err
 		} else if !ok {
@@ -286,6 +289,16 @@ func (s *XService) pollOnce(ctx context.Context) error {
 			return fmt.Errorf("save X mention cursor: %w", err)
 		}
 		if !updated {
+			accountID, loadErr := s.settingsRepo.Get(ctx, XSettingAccountID)
+			if loadErr != nil {
+				return fmt.Errorf("reload X account after cursor race: %w", loadErr)
+			}
+			if accountID == s.me.ID {
+				// Another same-account poller advanced the cursor first. Receipt
+				// deduplication made this poll's durable handoffs safe, and the
+				// winning cursor is authoritative without degrading readiness.
+				return nil
+			}
 			return fmt.Errorf("X mention cursor configuration changed during polling")
 		}
 	}
@@ -384,9 +397,8 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 		ProjectRepo: s.projectRepo, TaskSvc: s.taskSvc, ChatBroadcaster: s.chatBroadcaster,
 		FindActiveExecution: s.execRepo.FindLatestActiveChatExecution,
 		NewQueuedInput: func() *models.ThreadInput {
-			return &models.ThreadInput{XConversationID: conversationID, XReplyToTweetID: tweet.ID, XUserID: user.ID, XUsername: user.Username}
-		},
-		CreateQueuedInput: func(ctx context.Context, input *models.ThreadInput) (bool, error) {
+			return &models.ThreadInput{XAccountID: s.me.ID, XConversationID: conversationID, XReplyToTweetID: tweet.ID, XUserID: user.ID, XUsername: user.Username}
+		}, CreateQueuedInput: func(ctx context.Context, input *models.ThreadInput) (bool, error) {
 			if s.threadInputRepo == nil {
 				return false, fmt.Errorf("thread input repository is not configured")
 			}
@@ -398,10 +410,9 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 		FirstTurn: channelChatIngressFirstTurnOptions{
 			Task: &models.Task{Title: fmt.Sprintf("X @%s: %s", user.Username, util.Truncate(text, 48)), CreatedVia: models.TaskOriginX},
 			RuntimeToolsForTask: func(string) *llmcontracts.RuntimeTools {
-				return s.runtimeTools(taskID, projectID, user.ID, conversationID, tweet.ID, user.Username)
+				return s.runtimeTools(taskID, projectID, s.me.ID, user.ID, conversationID, tweet.ID, user.Username)
 			},
-			ReplyContext:      ChannelReplyContext{Source: models.TaskOriginX, XConversationID: conversationID, XReplyToTweetID: tweet.ID, XUserID: user.ID, XUsername: user.Username},
-			ChannelChatRunner: s.channelChatRunner,
+			ReplyContext: ChannelReplyContext{Source: models.TaskOriginX, XAccountID: s.me.ID, XConversationID: conversationID, XReplyToTweetID: tweet.ID, XUserID: user.ID, XUsername: user.Username}, ChannelChatRunner: s.channelChatRunner,
 			CompleteExecution: channelCompletionFunc("x", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 			CreateDurableFirstTurn: func(ctx context.Context, task *models.Task, execution *models.Execution, _ []models.ChatAttachment) (bool, error) {
 				if s.taskContextRepo == nil {
@@ -412,7 +423,7 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 						return err
 					}
 					taskID = task.ID
-					if err := s.taskContextRepo.UpsertWithExecutor(ctx, exec, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, ConversationID: conversationID, ReplyToTweetID: tweet.ID, XUserID: user.ID, Username: user.Username}); err != nil {
+					if err := s.taskContextRepo.UpsertWithExecutor(ctx, exec, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: s.me.ID, ConversationID: conversationID, ReplyToTweetID: tweet.ID, XUserID: user.ID, Username: user.Username}); err != nil {
 						return err
 					}
 					execution.TaskID = task.ID
@@ -448,11 +459,11 @@ func mergeSelectedChannelRuntimeActionHandlers(dst, src map[string]chatcontrol.R
 // RuntimeTools builds the X-identity-sensitive runtime overrides. The Handler
 // composes these ahead of its complete generic runtime so unrelated actions keep
 // their full application dependencies.
-func (s *XService) RuntimeTools(callerTaskID, projectID, userID, conversationID, replyToTweetID, username string) *llmcontracts.RuntimeTools {
-	return s.runtimeTools(callerTaskID, projectID, userID, conversationID, replyToTweetID, username)
+func (s *XService) RuntimeTools(callerTaskID, projectID, accountID, userID, conversationID, replyToTweetID, username string) *llmcontracts.RuntimeTools {
+	return s.runtimeTools(callerTaskID, projectID, accountID, userID, conversationID, replyToTweetID, username)
 }
 
-func (s *XService) runtimeTools(callerTaskID, projectID, userID, conversationID, replyToTweetID, username string) *llmcontracts.RuntimeTools {
+func (s *XService) runtimeTools(callerTaskID, projectID, accountID, userID, conversationID, replyToTweetID, username string) *llmcontracts.RuntimeTools {
 	handlers := map[string]chatcontrol.RuntimeActionHandler{}
 	taskHandlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID: projectID,
@@ -467,7 +478,7 @@ func (s *XService) runtimeTools(callerTaskID, projectID, userID, conversationID,
 				if err := s.taskRepo.UpdateXOrigin(ctx, task.ID); err != nil {
 					return err
 				}
-				if err := s.taskContextRepo.Upsert(ctx, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username}); err != nil {
+				if err := s.taskContextRepo.Upsert(ctx, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, AccountID: accountID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username}); err != nil {
 					return err
 				}
 			}
@@ -482,9 +493,9 @@ func (s *XService) runtimeTools(callerTaskID, projectID, userID, conversationID,
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
 		CompleteExecution:        channelCompletionFunc("x", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 		ChannelMessageRouter:     s.channelMessageRouter,
-		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginX, XConversationID: conversationID, XReplyToTweetID: replyToTweetID, XUserID: userID, XUsername: username},
+		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginX, XAccountID: accountID, XConversationID: conversationID, XReplyToTweetID: replyToTweetID, XUserID: userID, XUsername: username},
 		NewQueuedInput: func(_ *models.Task, _, _ string) *models.ThreadInput {
-			return &models.ThreadInput{XConversationID: conversationID, XReplyToTweetID: replyToTweetID, XUserID: userID, XUsername: username}
+			return &models.ThreadInput{XAccountID: accountID, XConversationID: conversationID, XReplyToTweetID: replyToTweetID, XUserID: userID, XUsername: username}
 		},
 		FilterHistory: filterXChatHistory,
 	})
@@ -540,6 +551,17 @@ func (s *XService) SendOutboundMessage(ctx context.Context, targetID, threadID, 
 	}
 	return SendMessageResult{OK: true, Platform: "x", Target: "x:" + targetID, MessageID: id}
 }
+func (s *XService) SendReplyForAccount(ctx context.Context, accountID, replyTo, output, errMsg string) bool {
+	s.mu.RLock()
+	matches := strings.TrimSpace(accountID) != "" && accountID == s.me.ID
+	s.mu.RUnlock()
+	if !matches {
+		return false
+	}
+	s.SendReply(ctx, replyTo, output, errMsg)
+	return true
+}
+
 func (s *XService) SendReply(ctx context.Context, replyTo, output, errMsg string) {
 	if s.settingsRepo != nil {
 		enabled, _ := s.settingsRepo.Get(ctx, XSettingSendResponses)
@@ -567,7 +589,7 @@ func (s *XService) SendChatResponse(ctx context.Context, task models.Task, outpu
 	if err != nil || meta == nil {
 		return
 	}
-	s.SendReply(ctx, meta.ReplyToTweetID, output, errMsg)
+	s.SendReplyForAccount(ctx, meta.AccountID, meta.ReplyToTweetID, output, errMsg)
 }
 func truncateXPost(v string) string {
 	r := []rune(strings.TrimSpace(v))

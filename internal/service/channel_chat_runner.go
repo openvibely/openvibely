@@ -62,6 +62,7 @@ type ChannelReplyContext struct {
 	DiscordThreadID  string
 	DiscordMessageID string
 	DiscordUserID    string
+	XAccountID       string
 	XConversationID  string
 	XReplyToTweetID  string
 	XUserID          string

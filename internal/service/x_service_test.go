@@ -13,15 +13,19 @@ import (
 )
 
 type fakeXAPI struct {
-	me          XUser
-	mentions    xMentionsResponse
-	mentionsErr error
-	posted      []string
-	postErr     error
+	me           XUser
+	mentions     xMentionsResponse
+	mentionsErr  error
+	mentionsFunc func(context.Context, string, string, string) (xMentionsResponse, error)
+	posted       []string
+	postErr      error
 }
 
 func (f *fakeXAPI) Me(context.Context) (XUser, error) { return f.me, nil }
-func (f *fakeXAPI) Mentions(context.Context, string, string, string) (xMentionsResponse, error) {
+func (f *fakeXAPI) Mentions(ctx context.Context, userID, sinceID, pagination string) (xMentionsResponse, error) {
+	if f.mentionsFunc != nil {
+		return f.mentionsFunc(ctx, userID, sinceID, pagination)
+	}
 	return f.mentions, f.mentionsErr
 }
 func (f *fakeXAPI) Post(_ context.Context, text, reply string) (string, error) {
@@ -58,7 +62,7 @@ func setupXServiceTest(t *testing.T) (context.Context, *XService, *repository.Se
 func TestXRuntimeProjectSwitchRequiresTargetAuthorizationAndPersists(t *testing.T) {
 	ctx, svc, _, auth, selections, p1, p2 := setupXServiceTest(t)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: p1.ID, XUserID: "123"}))
-	runtime := svc.runtimeTools("caller-task", p1.ID, "123", "conv", "tweet", "alice")
+	runtime := svc.runtimeTools("caller-task", p1.ID, "bot", "123", "conv", "tweet", "alice")
 
 	output, handled, isError, err := runtime.Executor(ctx, "switch_project", []byte(`{"project":"Two"}`))
 	require.True(t, handled)
@@ -151,6 +155,7 @@ func TestXAuthorizedMentionUsesSharedIngressAndAdvancesCursorAfterDurableHandoff
 	meta, err := svc.taskContextRepo.GetByTaskID(ctx, tasks[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, "20", meta.ReplyToTweetID)
+	require.Equal(t, "bot", meta.AccountID)
 
 	// Provider redelivery after the durable transaction must observe the completed
 	// receipt and never create duplicate work.
@@ -158,6 +163,59 @@ func TestXAuthorizedMentionUsesSharedIngressAndAdvancesCursorAfterDurableHandoff
 	tasks, err = svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
 	require.NoError(t, err)
 	require.Len(t, tasks, 1)
+}
+
+func TestXAuthorizedMentionUsesAuthorIDWhenExpansionIsMissing(t *testing.T) {
+	ctx, svc, settings, auth, _, project, _ := setupXServiceTest(t)
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+	require.NoError(t, svc.llmConfigRepo.Create(ctx, &models.LLMConfig{Name: "X Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}))
+	var run ChannelChatRunRequest
+	svc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) { run = req }, nil, nil, nil, nil)
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentions.Meta.NewestID = "21"
+	api.mentions.Data = []XTweet{{ID: "21", Text: "@openvibely ship it", AuthorID: "author", ConversationID: "conversation"}}
+	svc.setAPI(api)
+	svc.me = api.me
+
+	require.NoError(t, svc.pollOnce(ctx))
+	require.Equal(t, "author", run.ReplyContext.XUserID)
+	require.Equal(t, "bot", run.ReplyContext.XAccountID)
+	cursor, err := settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Equal(t, "21", cursor)
+}
+
+func TestXSameAccountCursorRaceIsBenign(t *testing.T) {
+	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentionsFunc = func(context.Context, string, string, string) (xMentionsResponse, error) {
+		require.NoError(t, settings.Set(ctx, XSettingSinceID, "20"))
+		var page xMentionsResponse
+		page.Meta.NewestID = "20"
+		return page, nil
+	}
+	svc.setAPI(api)
+	svc.me = api.me
+	svc.running = true
+	svc.connected = true
+
+	err := svc.pollOnce(ctx)
+	require.NoError(t, err)
+	svc.recordPollResult(err)
+	require.True(t, svc.Status().Connected)
+	require.Empty(t, svc.Status().LastError)
+}
+
+func TestXReplyRequiresOriginatingAccount(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+	svc.me = XUser{ID: "new-account", Username: "new"}
+
+	require.False(t, svc.SendReplyForAccount(ctx, "old-account", "tweet", "response", ""))
+	require.Empty(t, api.posted)
+	require.True(t, svc.SendReplyForAccount(ctx, "new-account", "tweet", "response", ""))
+	require.Equal(t, []string{"tweet|response"}, api.posted)
 }
 
 func TestXPollActiveReceiptLeaseDoesNotAdvanceCursor(t *testing.T) {
@@ -183,7 +241,7 @@ func TestXPollActiveReceiptLeaseDoesNotAdvanceCursor(t *testing.T) {
 func TestXRuntimeOwnsOnlyIdentitySensitiveOverrides(t *testing.T) {
 	ctx, svc, _, auth, _, project, _ := setupXServiceTest(t)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
-	runtime := svc.RuntimeTools("caller", project.ID, "123", "conversation", "tweet", "alice")
+	runtime := svc.RuntimeTools("caller", project.ID, "bot", "123", "conversation", "tweet", "alice")
 	names := map[string]bool{}
 	for _, def := range runtime.Definitions {
 		names[def.Name] = true

@@ -92,11 +92,12 @@ func TestThreadInputRepoPreservesXReplyMetadataAndPromotesContextAtomically(t *t
 	p := &models.Project{Name: "X Project"}
 	require.NoError(t, projects.Create(ctx, p))
 	inputs := NewThreadInputRepo(db)
-	input := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: p.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "hello", Source: models.TaskOriginX, XConversationID: "conv", XReplyToTweetID: "tweet", XUserID: "123", XUsername: "alice"}
+	input := &models.ThreadInput{Scope: models.ThreadInputScopeChat, ProjectID: p.ID, InputMode: models.ThreadInputModeQueued, InputStatus: models.ThreadInputPending, Content: "hello", Source: models.TaskOriginX, XAccountID: "bot-account", XConversationID: "conv", XReplyToTweetID: "tweet", XUserID: "123", XUsername: "alice"}
 	require.NoError(t, inputs.CreateQueued(ctx, input))
 	loaded, err := inputs.GetByID(ctx, input.ID)
 	require.NoError(t, err)
 	require.Equal(t, "tweet", loaded.XReplyToTweetID)
+	require.Equal(t, "bot-account", loaded.XAccountID)
 	agent := createThreadInputLLMConfig(t, ctx, db)
 	task := &models.Task{ProjectID: p.ID, Title: "queued X", Category: models.CategoryChat, Priority: 2, Status: models.StatusRunning, Prompt: "hello", CreatedVia: models.TaskOriginX}
 	exec := &models.Execution{AgentConfigID: agent.ID, Status: models.ExecRunning, PromptSent: "hello"}
@@ -105,5 +106,6 @@ func TestThreadInputRepoPreservesXReplyMetadataAndPromotesContextAtomically(t *t
 	require.NoError(t, err)
 	require.NotNil(t, meta)
 	require.Equal(t, "tweet", meta.ReplyToTweetID)
+	require.Equal(t, "bot-account", meta.AccountID)
 	require.Equal(t, p.ID, meta.ProjectID)
 }

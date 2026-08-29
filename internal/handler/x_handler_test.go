@@ -33,6 +33,7 @@ func (f failingXSettingsAPI) Post(context.Context, string, string) (string, erro
 type readyXSettingsAPI struct {
 	accountID string
 	newest    string
+	posted    []string
 }
 
 func (f *readyXSettingsAPI) Me(context.Context) (service.XUser, error) {
@@ -47,7 +48,8 @@ func (f *readyXSettingsAPI) Mentions(context.Context, string, string, string) (s
 	out.Meta.NewestID = f.newest
 	return out, nil
 }
-func (f *readyXSettingsAPI) Post(context.Context, string, string) (string, error) {
+func (f *readyXSettingsAPI) Post(_ context.Context, text, reply string) (string, error) {
+	f.posted = append(f.posted, reply+"|"+text)
 	return "tweet", nil
 }
 
@@ -306,6 +308,23 @@ func TestXStopServiceStopsDynamicallyInstalledPoller(t *testing.T) {
 	require.Nil(t, h.getXService())
 }
 
+func TestXCompletionUsesOnlyOriginatingAccount(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	api := &readyXSettingsAPI{accountID: "new-account"}
+	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetAPI(api)
+	svc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), h.threadInputRepo)
+	require.NoError(t, svc.StartVerified(service.XUser{ID: "new-account", Username: "new"}))
+	t.Cleanup(svc.Stop)
+	h.SetXService(svc)
+	task := &models.Task{ID: "task", Category: models.CategoryActive, CreatedVia: models.TaskOriginX}
+
+	h.sendChannelResponse(context.Background(), task, service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "old-account", XReplyToTweetID: "old-tweet"}, "done", "", 0)
+	require.Empty(t, api.posted)
+	h.sendChannelResponse(context.Background(), task, service.ChannelReplyContext{Source: models.TaskOriginX, XAccountID: "new-account", XReplyToTweetID: "new-tweet"}, "done", "", 0)
+	require.Equal(t, []string{"new-tweet|done"}, api.posted)
+}
+
 func TestXQueuedInputRuntimePreservesAuthorizedProjectSwitchPersistence(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	p1 := createProject(t, h, "Queued X One")
@@ -317,7 +336,8 @@ func TestXQueuedInputRuntimePreservesAuthorizedProjectSwitchPersistence(t *testi
 	require.NoError(t, auth.Create(context.Background(), &models.XAuthorizedUser{ProjectID: p1.ID, XUserID: "123"}))
 	require.NoError(t, auth.Create(context.Background(), &models.XAuthorizedUser{ProjectID: p2.ID, XUserID: "123"}))
 	h.SetXRepositories(auth, selections, contexts, receipts)
-	input := models.ThreadInput{Source: models.TaskOriginX, ProjectID: p1.ID, XUserID: "123", XUsername: "alice", XConversationID: "conversation", XReplyToTweetID: "tweet"}
+	input := models.ThreadInput{Source: models.TaskOriginX, ProjectID: p1.ID, XAccountID: "bot-account", XUserID: "123", XUsername: "alice", XConversationID: "conversation", XReplyToTweetID: "tweet"}
+	require.Equal(t, "bot-account", channelReplyFromThreadInput(input).XAccountID)
 
 	runtime := h.xRuntimeToolsForThreadInput("promoted-task", input)
 	require.NotNil(t, runtime)

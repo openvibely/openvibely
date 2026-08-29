@@ -15,6 +15,7 @@ type XAuthorizedUser struct {
 type XTaskContext struct {
 	TaskID         string    `json:"task_id"`
 	ProjectID      string    `json:"project_id"`
+	AccountID      string    `json:"account_id"`
 	ConversationID string    `json:"conversation_id"`
 	ReplyToTweetID string    `json:"reply_to_tweet_id"`
 	XUserID        string    `json:"x_user_id"`
