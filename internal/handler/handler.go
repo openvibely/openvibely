@@ -60,6 +60,8 @@ type Handler struct {
 	executionStreamHub         *events.ExecutionStreamHub
 	telegramService            *service.TelegramService
 	xService                   *service.XService
+	xServiceMu                 sync.RWMutex
+	xConfigMu                  sync.Mutex
 	emailService               EmailServiceProvider
 	telegramAuthRepo           *repository.TelegramAuthRepo
 	slackAuthRepo              *repository.SlackAuthRepo
@@ -497,7 +499,23 @@ func (h *Handler) SetXRepositories(auth *repository.XAuthRepo, selections *repos
 }
 
 func (h *Handler) SetXService(svc *service.XService) {
+	h.xServiceMu.Lock()
 	h.xService = svc
+	h.xServiceMu.Unlock()
+}
+
+func (h *Handler) getXService() *service.XService {
+	h.xServiceMu.RLock()
+	defer h.xServiceMu.RUnlock()
+	return h.xService
+}
+
+func (h *Handler) swapXService(svc *service.XService) *service.XService {
+	h.xServiceMu.Lock()
+	old := h.xService
+	h.xService = svc
+	h.xServiceMu.Unlock()
+	return old
 }
 
 func (h *Handler) SetChannelMessageRouter(router *service.ChannelMessageRouter) {

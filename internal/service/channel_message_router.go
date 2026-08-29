@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/openvibely/openvibely/internal/chatcontrol"
 	"github.com/openvibely/openvibely/internal/models"
@@ -65,12 +66,17 @@ type outboundTelegramAuthorizedUserStore interface {
 	IsAuthorized(ctx context.Context, projectID string, telegramUserID int64, username string) (bool, error)
 }
 
+type outboundXState struct {
+	mu     sync.RWMutex
+	sender outboundXSender
+}
+
 type ChannelMessageRouter struct {
+	xState       *outboundXState
 	slack        outboundSlackSender
 	telegram     outboundTelegramSender
 	email        outboundEmailSender
 	discord      outboundDiscordSender
-	x            outboundXSender
 	slackAuth    outboundAuthorizedUserStore
 	telegramAuth outboundTelegramAuthorizedUserStore
 	emailAuth    outboundAuthorizedUserStore
@@ -110,14 +116,21 @@ type SendMessageResult struct {
 }
 
 func NewChannelMessageRouter(targets channelTargetStore, settings *repository.SettingsRepo) *ChannelMessageRouter {
-	return &ChannelMessageRouter{targets: targets, settings: settings, newID: repository.NewID}
+	return &ChannelMessageRouter{targets: targets, settings: settings, newID: repository.NewID, xState: &outboundXState{}}
 }
 
 func (r *ChannelMessageRouter) SetSlackService(svc outboundSlackSender)       { r.slack = svc }
 func (r *ChannelMessageRouter) SetTelegramService(svc outboundTelegramSender) { r.telegram = svc }
 func (r *ChannelMessageRouter) SetEmailService(svc outboundEmailSender)       { r.email = svc }
 func (r *ChannelMessageRouter) SetDiscordService(svc outboundDiscordSender)   { r.discord = svc }
-func (r *ChannelMessageRouter) SetXService(svc outboundXSender)               { r.x = svc }
+func (r *ChannelMessageRouter) SetXService(svc outboundXSender) {
+	if r.xState == nil {
+		r.xState = &outboundXState{}
+	}
+	r.xState.mu.Lock()
+	r.xState.sender = svc
+	r.xState.mu.Unlock()
+}
 func (r *ChannelMessageRouter) SetSlackAuthStore(store outboundAuthorizedUserStore) {
 	r.slackAuth = store
 }
@@ -442,10 +455,16 @@ func (r *ChannelMessageRouter) dispatch(ctx context.Context, req SendMessageRequ
 		}
 		return r.discord.SendOutboundMessage(ctx, target.TargetID, target.ThreadID, req.Message)
 	case "x":
-		if r.x == nil {
+		if r.xState == nil {
 			return sendMessageError("X channel is not configured")
 		}
-		return r.x.SendOutboundMessage(ctx, target.TargetID, target.ThreadID, req.Message)
+		r.xState.mu.RLock()
+		xSender := r.xState.sender
+		r.xState.mu.RUnlock()
+		if xSender == nil {
+			return sendMessageError("X channel is not configured")
+		}
+		return xSender.SendOutboundMessage(ctx, target.TargetID, target.ThreadID, req.Message)
 	default:
 		return sendMessageError("unknown platform")
 	}

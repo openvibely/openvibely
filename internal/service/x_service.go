@@ -29,6 +29,7 @@ const (
 	XSettingSinceID             = "x_mentions_since_id"
 	xProcessTimeout             = 5 * time.Minute
 	xReceiptLease               = 10 * time.Minute
+	xMaxMentionPages            = 10
 )
 
 type XConnectionStatus struct {
@@ -38,15 +39,15 @@ type XConnectionStatus struct {
 	Username   string
 	LastError  string
 }
-type xAPI interface {
+type XAPI interface {
 	Me(context.Context) (XUser, error)
-	Mentions(context.Context, string, string, string) (xMentionsResponse, error)
+	Mentions(context.Context, string, string, string) (XMentionsResponse, error)
 	Post(context.Context, string, string) (string, error)
 }
 
 type XService struct {
 	mu                       sync.RWMutex
-	api                      xAPI
+	api                      XAPI
 	credentials              XCredentials
 	settingsRepo             *repository.SettingsRepo
 	projectRepo              *repository.ProjectRepo
@@ -101,9 +102,45 @@ func (s *XService) SetRuntime(agent *repository.AgentRepo, personalities *reposi
 	s.queuedTaskThreadPromoter = taskPromoter
 	s.channelMessageRouter = router
 }
-func (s *XService) setAPI(api xAPI) { s.api = api }
+func (s *XService) setAPI(api XAPI) { s.api = api }
+
+// SetAPI replaces the provider transport before the service starts. It is used
+// by settings reconfiguration so verification and the running service share one
+// credential-bound client.
+func (s *XService) SetAPI(api XAPI) { s.api = api }
+
+// PrepareConnection verifies both authenticated identity and mention-read
+// capability, returning the newest current mention as the safe initial cursor.
+func (s *XService) PrepareConnection(ctx context.Context) (XUser, string, error) {
+	if !s.credentials.Ready() {
+		return XUser{}, "", fmt.Errorf("X OAuth 1.0a credentials are incomplete")
+	}
+	me, err := s.api.Me(ctx)
+	if err != nil {
+		return XUser{}, "", err
+	}
+	page, err := s.api.Mentions(ctx, me.ID, "", "")
+	if err != nil {
+		return XUser{}, "", fmt.Errorf("verify X mention access: %w", err)
+	}
+	return me, page.Meta.NewestID, nil
+}
 
 func (s *XService) Start() error {
+	me, _, err := s.PrepareConnection(s.ctx)
+	if err != nil {
+		s.mu.Lock()
+		s.lastError = err.Error()
+		s.mu.Unlock()
+		return err
+	}
+	return s.StartVerified(me)
+}
+
+// StartVerified starts polling after PrepareConnection has succeeded. It makes
+// no provider call, so a settings transaction can commit before activation
+// without a second verification race.
+func (s *XService) StartVerified(me XUser) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.running {
@@ -112,10 +149,8 @@ func (s *XService) Start() error {
 	if !s.credentials.Ready() {
 		return fmt.Errorf("X OAuth 1.0a credentials are incomplete")
 	}
-	me, err := s.api.Me(s.ctx)
-	if err != nil {
-		s.lastError = err.Error()
-		return err
+	if strings.TrimSpace(me.ID) == "" {
+		return fmt.Errorf("X authenticated user is required")
 	}
 	s.me = me
 	s.lastError = ""
@@ -180,7 +215,7 @@ func (s *XService) pollOnce(ctx context.Context) error {
 	newest := ""
 	var mentions []XTweet
 	users := map[string]XUser{}
-	for {
+	for pageNumber := 0; pageNumber < xMaxMentionPages; pageNumber++ {
 		page, err := s.api.Mentions(ctx, s.me.ID, sinceID, pagination)
 		if err != nil {
 			return err
@@ -196,6 +231,9 @@ func (s *XService) pollOnce(ctx context.Context) error {
 		if pagination == "" {
 			break
 		}
+	}
+	if pagination != "" {
+		return fmt.Errorf("X mention pagination exceeded %d pages", xMaxMentionPages)
 	}
 	sort.SliceStable(mentions, func(i, j int) bool { return xTweetIDLess(mentions[i].ID, mentions[j].ID) })
 	for _, tweet := range mentions {
@@ -234,9 +272,20 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 		applog.Infof("[x] ignored unauthorized user id=%s", user.ID)
 		return true, nil
 	}
-	claimed, err := s.receiptRepo.Claim(ctx, tweet.ID, projectID, s.now(), xReceiptLease)
-	if err != nil || !claimed {
-		return !claimed, err
+	claim, err := s.receiptRepo.Claim(ctx, tweet.ID, projectID, s.now(), xReceiptLease)
+	if err != nil {
+		return false, err
+	}
+	switch claim {
+	case repository.XReceiptCompleted:
+		return true, nil
+	case repository.XReceiptActive:
+		// Another process may still be between receipt claim and durable ingress.
+		// Do not advance the cursor until that lease completes or expires.
+		return false, nil
+	case repository.XReceiptClaimed:
+	default:
+		return false, fmt.Errorf("unexpected X receipt claim state %q", claim)
 	}
 	text := strings.TrimSpace(strings.ReplaceAll(tweet.Text, "@"+s.me.Username, ""))
 	if text == "" {
@@ -316,9 +365,24 @@ func filterXChatHistory(execs []models.Execution, current string) []models.Execu
 	return out
 }
 
+func mergeSelectedChannelRuntimeActionHandlers(dst, src map[string]chatcontrol.RuntimeActionHandler, names ...string) {
+	for _, name := range names {
+		if handler := src[name]; handler != nil {
+			dst[name] = handler
+		}
+	}
+}
+
+// RuntimeTools builds the X-identity-sensitive runtime overrides. The Handler
+// composes these ahead of its complete generic runtime so unrelated actions keep
+// their full application dependencies.
+func (s *XService) RuntimeTools(callerTaskID, projectID, userID, conversationID, replyToTweetID, username string) *llmcontracts.RuntimeTools {
+	return s.runtimeTools(callerTaskID, projectID, userID, conversationID, replyToTweetID, username)
+}
+
 func (s *XService) runtimeTools(callerTaskID, projectID, userID, conversationID, replyToTweetID, username string) *llmcontracts.RuntimeTools {
 	handlers := map[string]chatcontrol.RuntimeActionHandler{}
-	mergeChannelRuntimeActionHandlers(handlers, buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
+	taskHandlers := buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
 		ProjectID: projectID,
 		TaskSvc:   s.taskSvc, TaskRepo: s.taskRepo, ExecRepo: s.execRepo,
 		ThreadInputRepo: s.threadInputRepo, ExecutionStreamHub: s.executionStreamHub,
@@ -337,11 +401,9 @@ func (s *XService) runtimeTools(callerTaskID, projectID, userID, conversationID,
 			}
 			return nil
 		},
-	}))
-	if s.taskSvc != nil {
-		mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskSvc.goalSvc}))
-	}
-	mergeChannelRuntimeActionHandlers(handlers, buildChannelThreadActionHandlers(channelThreadActionHandlerOptions{
+	})
+	mergeSelectedChannelRuntimeActionHandlers(handlers, taskHandlers, "create_task", "create_swarm_task")
+	threadHandlers := buildChannelThreadActionHandlers(channelThreadActionHandlerOptions{
 		Platform: "x", ProjectID: projectID, Surface: chatcontrol.SurfaceX, Source: models.TaskOriginX, ActorID: userID,
 		TaskRepo: s.taskRepo, ExecRepo: s.execRepo, ThreadInputRepo: s.threadInputRepo, LLMConfigRepo: s.llmConfigRepo,
 		SettingsRepo: s.settingsRepo, CustomPersonalityRepo: s.customPersonalityRepo, ChannelTaskRunner: s.channelTaskRunner,
@@ -353,17 +415,10 @@ func (s *XService) runtimeTools(callerTaskID, projectID, userID, conversationID,
 			return &models.ThreadInput{XConversationID: conversationID, XReplyToTweetID: replyToTweetID, XUserID: userID, XUsername: username}
 		},
 		FilterHistory: filterXChatHistory,
-	}))
-	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
-		ProjectID: projectID, CallerTaskID: callerTaskID, TaskRepo: s.taskRepo, ScheduleRepo: s.scheduleRepo,
-		WorkerSvc: workerFromTaskService(s.taskSvc), LLMConfigRepo: s.llmConfigRepo, AgentRepo: s.agentRepo,
-		SettingsRepo: s.settingsRepo, CustomPersonalityRepo: s.customPersonalityRepo, ProjectRepo: s.projectRepo,
-		UsageAnalyticsSvc: usageAnalyticsServiceFromRepos(nil, s.execRepo, s.llmConfigRepo), XStatus: s.Status, XAuthRepo: s.authRepo,
-		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
-		UnavailableAgentsText: "Agent listing is currently unavailable on X (no agent repository configured on this surface).",
-	}))
-	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
-		ProjectID: projectID, ProjectRepo: s.projectRepo, LLMConfigRepo: s.llmConfigRepo, WorkerSvc: workerFromTaskService(s.taskSvc),
+	})
+	mergeSelectedChannelRuntimeActionHandlers(handlers, threadHandlers, "send_to_task")
+	projectHandlers := buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
+		ProjectID: projectID, ProjectRepo: s.projectRepo,
 		SwitchProject: func(ctx context.Context, project *models.Project) error {
 			if project == nil || s.authRepo == nil || s.userProjectRepo == nil {
 				return fmt.Errorf("X project switching is unavailable")
@@ -377,7 +432,8 @@ func (s *XService) runtimeTools(callerTaskID, projectID, userID, conversationID,
 			}
 			return s.userProjectRepo.SetUserProject(ctx, userID, project.ID)
 		},
-	}))
+	})
+	mergeSelectedChannelRuntimeActionHandlers(handlers, projectHandlers, "switch_project")
 	mergeChannelRuntimeActionHandlers(handlers, buildChannelContextModeActionHandlers(channelContextModeActionHandlerOptions{ChannelDisplayName: "X", ProjectID: projectID, ProjectRepo: s.projectRepo}))
 
 	defs := make([]llmcontracts.RuntimeToolDefinition, 0, len(handlers))

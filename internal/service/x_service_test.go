@@ -79,27 +79,17 @@ func TestXRuntimeProjectSwitchRequiresTargetAuthorizationAndPersists(t *testing.
 	require.Equal(t, p2.ID, selected)
 }
 
-func TestXRuntimeListChannelsReportsLiveStatusAndProjectAuthorization(t *testing.T) {
-	ctx, svc, settings, auth, _, p1, _ := setupXServiceTest(t)
-	for key, value := range map[string]string{
-		XSettingConsumerKey: "a", XSettingConsumerSecret: "b", XSettingAccessToken: "c", XSettingAccessTokenSecret: "d",
-	} {
-		require.NoError(t, settings.Set(ctx, key, value))
-	}
-	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: p1.ID, XUserID: "123"}))
-	svc.mu.Lock()
-	svc.me = XUser{ID: "bot", Username: "openvibely"}
-	svc.running = true
-	svc.mu.Unlock()
-
-	runtime := svc.runtimeTools("caller-task", p1.ID, "123", "conv", "tweet", "alice")
-	output, handled, isError, err := runtime.Executor(ctx, "list_channels", []byte(`{}`))
-	require.True(t, handled)
-	require.False(t, isError)
+func TestXPollBoundsPaginationWithoutAdvancingCursor(t *testing.T) {
+	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{me: XUser{ID: "bot"}}
+	api.mentions.Meta.NewestID = "100"
+	api.mentions.Meta.NextToken = "more"
+	svc.setAPI(api)
+	svc.me = api.me
+	require.ErrorContains(t, svc.pollOnce(ctx), "pagination exceeded")
+	cursor, err := settings.Get(ctx, XSettingSinceID)
 	require.NoError(t, err)
-	require.Contains(t, output, `"running": true`)
-	require.Contains(t, output, `"username": "openvibely"`)
-	require.Contains(t, output, `"authorized_user_count": 1`)
+	require.Empty(t, cursor)
 }
 
 func TestXPollProviderFailureDoesNotAdvanceCursor(t *testing.T) {
@@ -111,6 +101,69 @@ func TestXPollProviderFailureDoesNotAdvanceCursor(t *testing.T) {
 	cursor, err := settings.Get(ctx, XSettingSinceID)
 	require.NoError(t, err)
 	require.Empty(t, cursor)
+}
+
+func TestXAuthorizedMentionUsesSharedIngressAndAdvancesCursorAfterDurableHandoff(t *testing.T) {
+	ctx, svc, settings, auth, _, project, _ := setupXServiceTest(t)
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+	require.NoError(t, svc.llmConfigRepo.Create(ctx, &models.LLMConfig{Name: "X Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}))
+	var run ChannelChatRunRequest
+	svc.SetRuntime(nil, nil, nil, nil, func(_ context.Context, req ChannelChatRunRequest) { run = req }, nil, nil, nil, nil)
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentions.Meta.NewestID = "20"
+	api.mentions.Data = []XTweet{{ID: "20", Text: "@openvibely ship it", AuthorID: "author", ConversationID: "conversation"}}
+	api.mentions.Includes.Users = []XUser{{ID: "author", Username: "alice"}}
+	svc.setAPI(api)
+	svc.me = api.me
+
+	require.NoError(t, svc.pollOnce(ctx))
+	require.Equal(t, "20", run.ReplyContext.XReplyToTweetID)
+	require.NotNil(t, run.RuntimeTools)
+	cursor, err := settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Equal(t, "20", cursor)
+	tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, models.TaskOriginX, tasks[0].CreatedVia)
+	meta, err := svc.taskContextRepo.GetByTaskID(ctx, tasks[0].ID)
+	require.NoError(t, err)
+	require.Equal(t, "20", meta.ReplyToTweetID)
+}
+
+func TestXPollActiveReceiptLeaseDoesNotAdvanceCursor(t *testing.T) {
+	ctx, svc, settings, auth, _, project, _ := setupXServiceTest(t)
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentions.Meta.NewestID = "10"
+	api.mentions.Data = []XTweet{{ID: "10", Text: "@openvibely hello", AuthorID: "author", ConversationID: "conversation"}}
+	api.mentions.Includes.Users = []XUser{{ID: "author", Username: "alice"}}
+	svc.setAPI(api)
+	svc.me = api.me
+	receipts := svc.receiptRepo
+	claim, err := receipts.Claim(ctx, "10", project.ID, svc.now(), xReceiptLease)
+	require.NoError(t, err)
+	require.Equal(t, repository.XReceiptClaimed, claim)
+
+	require.Error(t, svc.pollOnce(ctx))
+	cursor, err := settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Empty(t, cursor)
+}
+
+func TestXRuntimeOwnsOnlyIdentitySensitiveOverrides(t *testing.T) {
+	ctx, svc, _, auth, _, project, _ := setupXServiceTest(t)
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
+	runtime := svc.RuntimeTools("caller", project.ID, "123", "conversation", "tweet", "alice")
+	names := map[string]bool{}
+	for _, def := range runtime.Definitions {
+		names[def.Name] = true
+	}
+	require.True(t, names["switch_project"])
+	require.True(t, names["create_task"])
+	require.True(t, names["send_to_task"])
+	require.False(t, names["list_channels"], "generic handler must retain complete cross-channel status dependencies")
+	require.False(t, names["view_pulse"], "generic handler must retain complete upcoming-work dependencies")
 }
 
 func TestXPollAcknowledgesUnauthorizedMentionsWithoutCreatingWork(t *testing.T) {
@@ -132,6 +185,20 @@ func TestXTweetIDsSortNumerically(t *testing.T) {
 	require.True(t, xTweetIDLess("9", "10"))
 	require.True(t, xTweetIDLess("0009", "10"))
 	require.False(t, xTweetIDLess("10", "9"))
+}
+
+func TestXDisconnectedAndResponsesDisabledFailClosed(t *testing.T) {
+	_, incomplete, _, _, _, _, _ := setupXServiceTest(t)
+	incomplete.credentials = XCredentials{}
+	require.Error(t, incomplete.Start())
+	require.False(t, incomplete.Status().Running)
+
+	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+	require.NoError(t, settings.Set(ctx, XSettingSendResponses, "false"))
+	svc.SendReply(ctx, "tweet", "response", "")
+	require.Empty(t, api.posted)
 }
 
 func TestXOutboundRejectsUnsupportedTargetAndOversizeAndPropagatesProviderFailure(t *testing.T) {

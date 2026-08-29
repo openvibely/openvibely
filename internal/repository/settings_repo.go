@@ -89,6 +89,23 @@ func (r *SettingsRepo) observeQueryAcquired(query string) {
 	}
 }
 
+// SetMany atomically replaces a coherent settings snapshot.
+func (r *SettingsRepo) SetMany(ctx context.Context, values map[string]string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		for key, value := range values {
+			if _, err := tx.ExecContext(ctx,
+				"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+				key, value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // Set upserts a setting value.
 func (r *SettingsRepo) Set(ctx context.Context, key, value string) error {
 	_, err := execBoundSQLite(ctx, r.db,

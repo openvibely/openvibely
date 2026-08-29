@@ -13,9 +13,7 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 )
 
-var newXAPIClientForSettings = func(credentials service.XCredentials) interface {
-	Me(context.Context) (service.XUser, error)
-} {
+var newXAPIClientForSettings = func(credentials service.XCredentials) service.XAPI {
 	return service.NewXAPIClient(credentials)
 }
 
@@ -39,6 +37,8 @@ func (h *Handler) xCredentials(ctx context.Context, form echo.Context) (service.
 }
 
 func (h *Handler) handleXConfigure(c echo.Context) error {
+	h.xConfigMu.Lock()
+	defer h.xConfigMu.Unlock()
 	ctx := c.Request().Context()
 	creds, err := h.xCredentials(ctx, c)
 	if err != nil {
@@ -51,52 +51,67 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 	if err != nil || pollSeconds < 15 || pollSeconds > 300 {
 		return echo.NewHTTPError(http.StatusBadRequest, "X poll interval must be between 15 and 300 seconds")
 	}
-	if _, err := newXAPIClientForSettings(creds).Me(ctx); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "X connection failed: "+err.Error())
-	}
-	values := map[string]string{service.XSettingConsumerKey: creds.ConsumerKey, service.XSettingConsumerSecret: creds.ConsumerSecret, service.XSettingAccessToken: creds.AccessToken, service.XSettingAccessTokenSecret: creds.AccessTokenSecret, service.XSettingPollIntervalSeconds: strconv.Itoa(pollSeconds), service.XSettingSendResponses: strconv.FormatBool(c.FormValue("x_send_responses") == "true")}
-	for key, value := range values {
-		if err := h.settingsRepo.Set(ctx, key, value); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save X settings")
-		}
-	}
+	api := newXAPIClientForSettings(creds)
 	svc := service.NewXService(creds, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetAPI(api)
 	svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
 	svc.SetRuntime(h.agentRepo, h.customPersonalityRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
 	svc.SetPollInterval(time.Duration(pollSeconds) * time.Second)
-	if err := svc.Start(); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "X failed to start: "+err.Error())
+	me, baselineCursor, err := svc.PrepareConnection(ctx)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "X connection failed: "+err.Error())
 	}
-	if h.xService != nil {
-		h.xService.Stop()
+	values := map[string]string{
+		service.XSettingConsumerKey: creds.ConsumerKey, service.XSettingConsumerSecret: creds.ConsumerSecret,
+		service.XSettingAccessToken: creds.AccessToken, service.XSettingAccessTokenSecret: creds.AccessTokenSecret,
+		service.XSettingPollIntervalSeconds: strconv.Itoa(pollSeconds),
+		service.XSettingSendResponses:       strconv.FormatBool(c.FormValue("x_send_responses") == "true"),
+		service.XSettingSinceID:             baselineCursor,
 	}
-	h.xService = svc
+	if err := h.settingsRepo.SetMany(ctx, values); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save X settings")
+	}
+	// PrepareConnection proved the only StartVerified preconditions before the
+	// atomic settings commit, so activation performs no fallible provider call.
+	if err := svc.StartVerified(me); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "X failed to activate: "+err.Error())
+	}
+	old := h.swapXService(svc)
 	if h.channelMessageRouter != nil {
 		h.channelMessageRouter.SetXService(svc)
+	}
+	if old != nil {
+		old.Stop()
 	}
 	return returnToChannels(c)
 }
 func (h *Handler) handleXTest(c echo.Context) error {
-	if h.xService == nil {
+	svc := h.getXService()
+	if svc == nil {
 		return renderStandardChannelConnectionTestFeedback(c, "X", false, fmt.Errorf("channel is not running"), channelConnectionTestFeedbackOptions{})
 	}
-	_, err := h.xService.TestConnection(c.Request().Context())
+	_, err := svc.TestConnection(c.Request().Context())
 	return renderStandardChannelConnectionTestFeedback(c, "X", err == nil, err, channelConnectionTestFeedbackOptions{})
 }
 func (h *Handler) handleXRemove(c echo.Context) error {
+	h.xConfigMu.Lock()
+	defer h.xConfigMu.Unlock()
 	if h.settingsRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "settings repository not configured")
 	}
-	if h.xService != nil {
-		h.xService.Stop()
-		h.xService = nil
+	values := map[string]string{
+		service.XSettingConsumerKey: "", service.XSettingConsumerSecret: "", service.XSettingAccessToken: "",
+		service.XSettingAccessTokenSecret: "", service.XSettingPollIntervalSeconds: "", service.XSettingSendResponses: "", service.XSettingSinceID: "",
 	}
+	if err := h.settingsRepo.SetMany(c.Request().Context(), values); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove X channel settings")
+	}
+	old := h.swapXService(nil)
 	if h.channelMessageRouter != nil {
 		h.channelMessageRouter.SetXService(nil)
 	}
-	resets := []channelSettingReset{{service.XSettingConsumerKey, ""}, {service.XSettingConsumerSecret, ""}, {service.XSettingAccessToken, ""}, {service.XSettingAccessTokenSecret, ""}, {service.XSettingPollIntervalSeconds, ""}, {service.XSettingSendResponses, ""}, {service.XSettingSinceID, ""}}
-	if err := applyChannelSettingResets(c.Request().Context(), h.settingsRepo, resets); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove X channel settings")
+	if old != nil {
+		old.Stop()
 	}
 	return returnToChannels(c)
 }

@@ -260,8 +260,8 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 	}
 
 	xStatus := service.XConnectionStatus{}
-	if h.xService != nil {
-		xStatus = h.xService.Status()
+	if xService := h.getXService(); xService != nil {
+		xStatus = xService.Status()
 	}
 	xStatus.Configured = xStatus.Configured || (get(service.XSettingConsumerKey) != "" && get(service.XSettingConsumerSecret) != "" && get(service.XSettingAccessToken) != "" && get(service.XSettingAccessTokenSecret) != "")
 	resp.X = xChannelStatusSummary{Configured: xStatus.Configured, Connected: xStatus.Connected, Running: xStatus.Running, Status: runningStatus(xStatus.Configured, xStatus.Running), Username: strings.TrimSpace(xStatus.Username), SendResponses: !isFalse(service.XSettingSendResponses), LastError: safeSingleLine(xStatus.LastError)}

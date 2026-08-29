@@ -38,7 +38,7 @@ type XTweet struct {
 	AuthorID       string `json:"author_id"`
 	ConversationID string `json:"conversation_id"`
 }
-type xMentionsResponse struct {
+type XMentionsResponse struct {
 	Data     []XTweet `json:"data"`
 	Includes struct {
 		Users []XUser `json:"users"`
@@ -48,6 +48,8 @@ type xMentionsResponse struct {
 		NextToken string `json:"next_token"`
 	} `json:"meta"`
 }
+
+type xMentionsResponse = XMentionsResponse
 
 type XAPIClient struct {
 	baseURL     string
@@ -60,7 +62,9 @@ type XAPIClient struct {
 }
 
 func NewXAPIClient(credentials XCredentials) *XAPIClient {
-	return &XAPIClient{baseURL: xAPIBaseURL, client: &http.Client{Timeout: 30 * time.Second}, credentials: credentials, now: time.Now, nonce: xNonce, sleep: sleepContext, maxAttempts: 3}
+	return &XAPIClient{baseURL: xAPIBaseURL, client: &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}, credentials: credentials, now: time.Now, nonce: xNonce, sleep: sleepContext, maxAttempts: 3}
 }
 
 func xNonce() string {

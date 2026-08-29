@@ -207,8 +207,8 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	xHasConsumerSecret := strings.TrimSpace(setting(service.XSettingConsumerSecret)) != ""
 	xHasAccessToken := strings.TrimSpace(setting(service.XSettingAccessToken)) != ""
 	xHasAccessTokenSecret := strings.TrimSpace(setting(service.XSettingAccessTokenSecret)) != ""
-	if h.xService != nil {
-		xStatus = h.xService.Status()
+	if xService := h.getXService(); xService != nil {
+		xStatus = xService.Status()
 	} else {
 		xStatus.Configured = xHasConsumerKey && xHasConsumerSecret && xHasAccessToken && xHasAccessTokenSecret
 	}

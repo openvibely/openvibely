@@ -16,6 +16,7 @@ func testXClient(server *httptest.Server) *XAPIClient {
 	c := NewXAPIClient(XCredentials{ConsumerKey: "consumer-key", ConsumerSecret: "consumer-secret", AccessToken: "access-token", AccessTokenSecret: "access-secret"})
 	c.baseURL = server.URL
 	c.client = server.Client()
+	c.client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	c.now = func() time.Time { return time.Unix(1700000000, 0) }
 	c.nonce = func() string { return "nonce" }
 	c.sleep = func(context.Context, time.Duration) error { return nil }
@@ -88,6 +89,21 @@ func TestXAPIClientCancellationStopsRetry(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.LessOrEqual(t, calls.Load(), int32(1))
 }
+func TestXAPIClientRejectsRedirectWithoutReplayingAuthorization(t *testing.T) {
+	var redirected atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirected.Add(1) }))
+	defer target.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", target.URL)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer origin.Close()
+
+	_, err := testXClient(origin).Me(context.Background())
+	require.Error(t, err)
+	require.Equal(t, int32(0), redirected.Load())
+}
+
 func TestXProviderErrorDoesNotExposeResponseBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `token=secret-provider-payload`, http.StatusUnauthorized)
