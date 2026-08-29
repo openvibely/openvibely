@@ -130,6 +130,94 @@ func TestXPollProviderFailureDoesNotAdvanceCursor(t *testing.T) {
 	require.Empty(t, cursor)
 }
 
+func TestXPollCursorReadFailureDoesNotCallProvider(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settings := repository.NewSettingsRepo(db)
+	svc := NewXService(
+		XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"},
+		settings,
+		repository.NewProjectRepo(db),
+		repository.NewLLMConfigRepo(db),
+		repository.NewTaskRepo(db, nil),
+		repository.NewExecutionRepo(db),
+		repository.NewScheduleRepo(db),
+		nil,
+	)
+	svc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), repository.NewThreadInputRepo(db))
+	called := false
+	svc.setAPI(&fakeXAPI{mentionsFunc: func(context.Context, string, string, string) (xMentionsResponse, error) {
+		called = true
+		return xMentionsResponse{}, nil
+	}})
+	svc.me = XUser{ID: "bot"}
+	require.NoError(t, db.Close())
+
+	require.ErrorContains(t, svc.pollOnce(context.Background()), "load X polling settings")
+	require.False(t, called)
+}
+
+func TestXReplySettingReadFailureDoesNotPost(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	settings := repository.NewSettingsRepo(db)
+	svc := NewXService(
+		XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"},
+		settings, nil, nil, nil, nil, nil, nil,
+	)
+	api := &fakeXAPI{}
+	svc.setAPI(api)
+	require.NoError(t, db.Close())
+
+	svc.SendReply(context.Background(), "tweet", "must not post", "")
+	require.Empty(t, api.posted)
+}
+
+func TestXPollConfigurationRemovalDuringProviderRequestCreatesNoWork(t *testing.T) {
+	ctx, svc, settings, auth, _, project, _ := setupXServiceTest(t)
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+	require.NoError(t, svc.llmConfigRepo.Create(ctx, &models.LLMConfig{Name: "X Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}))
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentionsFunc = func(context.Context, string, string, string) (xMentionsResponse, error) {
+		require.NoError(t, settings.SetMany(ctx, map[string]string{XSettingAccountID: "", XSettingSinceID: ""}))
+		var page xMentionsResponse
+		page.Meta.NewestID = "22"
+		page.Data = []XTweet{{ID: "22", Text: "@openvibely stale", AuthorID: "author", ConversationID: "conversation"}}
+		return page, nil
+	}
+	svc.setAPI(api)
+	svc.me = api.me
+
+	require.ErrorContains(t, svc.pollOnce(ctx), "configuration changed")
+	tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
+	require.NoError(t, err)
+	require.Empty(t, tasks)
+	cursor, err := settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Empty(t, cursor)
+}
+
+func TestXPollSameAccountReplacementGenerationCreatesNoWork(t *testing.T) {
+	ctx, svc, settings, auth, _, project, _ := setupXServiceTest(t)
+	require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "old-generation"))
+	svc.SetConfigurationID("old-generation")
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
+	require.NoError(t, svc.llmConfigRepo.Create(ctx, &models.LLMConfig{Name: "X Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}))
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentionsFunc = func(context.Context, string, string, string) (xMentionsResponse, error) {
+		require.NoError(t, settings.Set(ctx, XSettingConfigurationID, "replacement-generation"))
+		var page xMentionsResponse
+		page.Meta.NewestID = "23"
+		page.Data = []XTweet{{ID: "23", Text: "@openvibely stale", AuthorID: "author", ConversationID: "conversation"}}
+		return page, nil
+	}
+	svc.setAPI(api)
+	svc.me = api.me
+
+	require.ErrorContains(t, svc.pollOnce(ctx), "configuration changed")
+	tasks, err := svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
+	require.NoError(t, err)
+	require.Empty(t, tasks)
+}
+
 func TestXAuthorizedMentionUsesSharedIngressAndAdvancesCursorAfterDurableHandoff(t *testing.T) {
 	ctx, svc, settings, auth, _, project, _ := setupXServiceTest(t)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))

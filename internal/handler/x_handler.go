@@ -10,6 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
 )
 
@@ -86,6 +87,7 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load X settings")
 	}
 	cursor := xCursorForConfiguration(existing, creds, me.ID, baselineCursor)
+	configurationID := repository.NewID()
 	values := map[string]string{
 		service.XSettingConsumerKey: creds.ConsumerKey, service.XSettingConsumerSecret: creds.ConsumerSecret,
 		service.XSettingAccessToken: creds.AccessToken, service.XSettingAccessTokenSecret: creds.AccessTokenSecret,
@@ -93,18 +95,27 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 		service.XSettingSendResponses:       strconv.FormatBool(c.FormValue("x_send_responses") == "true"),
 		service.XSettingSinceID:             cursor,
 		service.XSettingAccountID:           me.ID,
+		service.XSettingConfigurationID:     configurationID,
 	}
 	if err := h.settingsRepo.SetMany(ctx, values); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to save X settings")
 	}
-	// PrepareConnection proved the only StartVerified preconditions before the
-	// atomic settings commit, so activation performs no fallible provider call.
-	if err := svc.StartVerified(me); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "X failed to activate: "+err.Error())
-	}
+	svc.SetConfigurationID(configurationID)
+	// Install the verified candidate before its poll goroutine can perform any
+	// provider work. The committed generation fences the old service immediately.
 	old := h.swapXService(svc)
 	if h.channelMessageRouter != nil {
 		h.channelMessageRouter.SetXService(svc)
+	}
+	if err := svc.StartVerified(me); err != nil {
+		h.swapXService(nil)
+		if h.channelMessageRouter != nil {
+			h.channelMessageRouter.SetXService(nil)
+		}
+		if old != nil {
+			old.Stop()
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "X failed to activate: "+err.Error())
 	}
 	if old != nil {
 		old.Stop()
@@ -127,7 +138,7 @@ func (h *Handler) handleXRemove(c echo.Context) error {
 	}
 	values := map[string]string{
 		service.XSettingConsumerKey: "", service.XSettingConsumerSecret: "", service.XSettingAccessToken: "",
-		service.XSettingAccessTokenSecret: "", service.XSettingPollIntervalSeconds: "", service.XSettingSendResponses: "", service.XSettingSinceID: "", service.XSettingAccountID: "",
+		service.XSettingAccessTokenSecret: "", service.XSettingPollIntervalSeconds: "", service.XSettingSendResponses: "", service.XSettingSinceID: "", service.XSettingAccountID: "", service.XSettingConfigurationID: "",
 	}
 	if err := h.settingsRepo.SetMany(c.Request().Context(), values); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to remove X channel settings")

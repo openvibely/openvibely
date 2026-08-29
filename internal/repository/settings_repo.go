@@ -112,26 +112,13 @@ func (r *SettingsRepo) SetMany(ctx context.Context, values map[string]string) er
 func (r *SettingsRepo) CompareAndSet(ctx context.Context, key, expected, value string, guards map[string]string) (bool, error) {
 	updated := false
 	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
-		read := func(settingKey string) (string, error) {
-			var current string
-			err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT value FROM app_settings WHERE key = ?), '')`, settingKey).Scan(&current)
-			return current, err
-		}
-		current, err := read(key)
-		if err != nil {
+		matches, err := r.MatchesWithExecutor(ctx, tx, map[string]string{key: expected})
+		if err != nil || !matches {
 			return err
 		}
-		if current != expected {
-			return nil
-		}
-		for guardKey, guardValue := range guards {
-			currentGuard, err := read(guardKey)
-			if err != nil {
-				return err
-			}
-			if currentGuard != guardValue {
-				return nil
-			}
+		matches, err = r.MatchesWithExecutor(ctx, tx, guards)
+		if err != nil || !matches {
+			return err
 		}
 		if _, err := tx.ExecContext(ctx,
 			"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -142,6 +129,22 @@ func (r *SettingsRepo) CompareAndSet(ctx context.Context, key, expected, value s
 		return nil
 	})
 	return updated, err
+}
+
+// MatchesWithExecutor checks an expected settings snapshot using the caller's
+// transaction. It lets durable channel handoffs assert configuration authority
+// in the same commit that creates work.
+func (r *SettingsRepo) MatchesWithExecutor(ctx context.Context, exec SQLExecutor, expected map[string]string) (bool, error) {
+	for key, value := range expected {
+		var current string
+		if err := exec.QueryRowContext(ctx, `SELECT COALESCE((SELECT value FROM app_settings WHERE key = ?), '')`, key).Scan(&current); err != nil {
+			return false, err
+		}
+		if current != value {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // Set upserts a setting value.

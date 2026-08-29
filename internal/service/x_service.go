@@ -29,6 +29,7 @@ const (
 	XSettingSendResponses       = "x_send_responses"
 	XSettingSinceID             = "x_mentions_since_id"
 	XSettingAccountID           = "x_account_id"
+	XSettingConfigurationID     = "x_configuration_id"
 	xProcessTimeout             = 5 * time.Minute
 	xReceiptLease               = 10 * time.Minute
 	xMaxMentionPages            = 10
@@ -79,6 +80,7 @@ type XService struct {
 	runDone                  chan struct{}
 	running                  bool
 	me                       XUser
+	configurationID          string
 	connected                bool
 	lastError                string
 	pollInterval             time.Duration
@@ -114,6 +116,10 @@ func (s *XService) setAPI(api XAPI) { s.api = api }
 // credential-bound client.
 func (s *XService) SetAPI(api XAPI) { s.api = api }
 
+// SetConfigurationID binds this service instance to one persisted configuration
+// generation before it is made authoritative and starts polling.
+func (s *XService) SetConfigurationID(id string) { s.configurationID = strings.TrimSpace(id) }
+
 // PrepareConnection verifies both authenticated identity and mention-read
 // capability, returning the newest current mention as the safe initial cursor.
 func (s *XService) PrepareConnection(ctx context.Context) (XUser, string, error) {
@@ -140,17 +146,26 @@ func (s *XService) Start() error {
 		return err
 	}
 	if s.settingsRepo != nil {
-		accountID, err := s.settingsRepo.Get(s.ctx, XSettingAccountID)
+		values, err := s.settingsRepo.GetMany(s.ctx, []string{XSettingAccountID, XSettingConfigurationID})
 		if err != nil {
-			return fmt.Errorf("load X account identity: %w", err)
+			return fmt.Errorf("load X configuration identity: %w", err)
 		}
+		accountID := values[XSettingAccountID]
+		configurationID := strings.TrimSpace(values[XSettingConfigurationID])
+		updates := map[string]string{}
 		if strings.TrimSpace(accountID) == "" {
-			if err := s.settingsRepo.Set(s.ctx, XSettingAccountID, me.ID); err != nil {
-				return fmt.Errorf("save X account identity: %w", err)
-			}
+			updates[XSettingAccountID] = me.ID
 		} else if accountID != me.ID {
 			return fmt.Errorf("configured X account does not match persisted mention cursor")
 		}
+		if configurationID == "" {
+			configurationID = repository.NewID()
+			updates[XSettingConfigurationID] = configurationID
+		}
+		if err := s.settingsRepo.SetMany(s.ctx, updates); err != nil {
+			return fmt.Errorf("save X configuration identity: %w", err)
+		}
+		s.SetConfigurationID(configurationID)
 	}
 	return s.StartVerified(me)
 }
@@ -242,14 +257,49 @@ func (s *XService) poll(ctx context.Context, done chan struct{}) {
 		}
 	}
 }
+func (s *XService) configurationGuards() map[string]string {
+	return map[string]string{
+		XSettingAccountID:       s.me.ID,
+		XSettingConfigurationID: s.configurationID,
+	}
+}
+
+func (s *XService) pollingSettings(ctx context.Context) (map[string]string, error) {
+	if s.settingsRepo == nil {
+		return nil, fmt.Errorf("X settings repository is not configured")
+	}
+	values, err := s.settingsRepo.GetMany(ctx, []string{XSettingSinceID, XSettingAccountID, XSettingConfigurationID})
+	if err != nil {
+		return nil, fmt.Errorf("load X polling settings: %w", err)
+	}
+	for key, expected := range s.configurationGuards() {
+		if values[key] != expected {
+			return nil, fmt.Errorf("X configuration changed during polling")
+		}
+	}
+	return values, nil
+}
+
+func (s *XService) requireConfigurationWithExecutor(ctx context.Context, exec repository.SQLExecutor) error {
+	matches, err := s.settingsRepo.MatchesWithExecutor(ctx, exec, s.configurationGuards())
+	if err != nil {
+		return fmt.Errorf("verify X configuration during durable handoff: %w", err)
+	}
+	if !matches {
+		return fmt.Errorf("X configuration changed during durable handoff")
+	}
+	return nil
+}
+
 func (s *XService) pollOnce(ctx context.Context) error {
 	if s.receiptRepo == nil || s.authRepo == nil || s.projectRepo == nil {
 		return fmt.Errorf("X channel persistence is not configured")
 	}
-	sinceID := ""
-	if s.settingsRepo != nil {
-		sinceID, _ = s.settingsRepo.Get(ctx, XSettingSinceID)
+	pollingSettings, err := s.pollingSettings(ctx)
+	if err != nil {
+		return err
 	}
+	sinceID := pollingSettings[XSettingSinceID]
 	pagination := ""
 	newest := ""
 	var mentions []XTweet
@@ -282,6 +332,9 @@ func (s *XService) pollOnce(ctx context.Context) error {
 		if tweet.AuthorID == s.me.ID {
 			continue
 		}
+		if _, err := s.pollingSettings(ctx); err != nil {
+			return err
+		}
 		user := users[tweet.AuthorID]
 		// The immutable tweet author_id is the authorization identity. Expanded
 		// profile metadata is optional and must never erase that identity.
@@ -292,23 +345,22 @@ func (s *XService) pollOnce(ctx context.Context) error {
 			return fmt.Errorf("X mention %s was not durably handed off", tweet.ID)
 		}
 	}
-	if newest != "" && s.settingsRepo != nil {
-		updated, err := s.settingsRepo.CompareAndSet(ctx, XSettingSinceID, sinceID, newest, map[string]string{XSettingAccountID: s.me.ID})
+	if newest != "" {
+		updated, err := s.settingsRepo.CompareAndSet(ctx, XSettingSinceID, sinceID, newest, s.configurationGuards())
 		if err != nil {
 			return fmt.Errorf("save X mention cursor: %w", err)
 		}
 		if !updated {
-			accountID, loadErr := s.settingsRepo.Get(ctx, XSettingAccountID)
+			values, loadErr := s.pollingSettings(ctx)
 			if loadErr != nil {
-				return fmt.Errorf("reload X account after cursor race: %w", loadErr)
+				return loadErr
 			}
-			if accountID == s.me.ID {
-				// Another same-account poller advanced the cursor first. Receipt
-				// deduplication made this poll's durable handoffs safe, and the
-				// winning cursor is authoritative without degrading readiness.
+			if values[XSettingSinceID] != sinceID {
+				// Another poller for this exact configuration advanced the cursor
+				// first. Receipt deduplication makes this handoff safe.
 				return nil
 			}
-			return fmt.Errorf("X mention cursor configuration changed during polling")
+			return fmt.Errorf("X mention cursor changed during polling")
 		}
 	}
 	return nil
@@ -339,18 +391,12 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 	case repository.XReceiptCompleted:
 		return true, nil
 	case repository.XReceiptActive:
-		// Another same-account poller may still be between receipt claim and
-		// durable ingress. Keep the cursor retryable without degrading the
-		// verified replacement service's provider readiness.
-		if s.settingsRepo == nil {
-			return false, fmt.Errorf("X settings are unavailable while receipt was actively leased")
-		}
-		accountID, err := s.settingsRepo.Get(ctx, XSettingAccountID)
-		if err != nil {
-			return false, fmt.Errorf("reload X account for active receipt: %w", err)
-		}
-		if accountID != s.me.ID {
-			return false, fmt.Errorf("X configuration changed while receipt was actively leased")
+		// Another poller for this exact configuration may still be between
+		// receipt claim and durable ingress. Keep the cursor retryable without
+		// degrading provider readiness, but never grant this treatment to a
+		// replaced generation.
+		if _, err := s.pollingSettings(ctx); err != nil {
+			return false, err
 		}
 		return false, errXReceiptActive
 	case repository.XReceiptClaimed:
@@ -359,7 +405,12 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 	}
 	text := strings.TrimSpace(strings.ReplaceAll(tweet.Text, "@"+s.me.Username, ""))
 	if text == "" {
-		_, err := s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, claim.Token, nil, nil)
+		_, err := s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, claim.Token, nil, func(exec repository.SQLExecutor) error {
+			return s.requireConfigurationWithExecutor(ctx, exec)
+		})
+		if err != nil {
+			_ = s.receiptRepo.Release(context.Background(), tweet.ID, claim.Token)
+		}
 		return err == nil, err
 	}
 	handed, _ := s.ingestMention(ctx, projectID, tweet, user, text, claim.Token)
@@ -408,7 +459,15 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 		conversationID = tweet.ID
 	}
 	completeWithHandoff := func(ctx context.Context, taskID *string, persist func(repository.SQLExecutor) error) (bool, error) {
-		return s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, receiptToken, taskID, persist)
+		return s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, receiptToken, taskID, func(exec repository.SQLExecutor) error {
+			if err := s.requireConfigurationWithExecutor(ctx, exec); err != nil {
+				return err
+			}
+			if persist != nil {
+				return persist(exec)
+			}
+			return nil
+		})
 	}
 	runChannelChatIngress(ctx, channelChatIngressOptions{
 		Platform: "x", ProjectID: projectID, Message: text, Source: models.TaskOriginX, Surface: chatcontrol.SurfaceX, Start: s.now(),
@@ -586,11 +645,12 @@ func (s *XService) SendReplyForAccount(ctx context.Context, accountID, replyTo, 
 }
 
 func (s *XService) SendReply(ctx context.Context, replyTo, output, errMsg string) {
-	if s.settingsRepo != nil {
-		enabled, _ := s.settingsRepo.Get(ctx, XSettingSendResponses)
-		if strings.EqualFold(strings.TrimSpace(enabled), "false") {
-			return
-		}
+	if s.settingsRepo == nil {
+		return
+	}
+	enabled, err := s.settingsRepo.Get(ctx, XSettingSendResponses)
+	if err != nil || strings.EqualFold(strings.TrimSpace(enabled), "false") {
+		return
 	}
 	text := strings.TrimSpace(output)
 	if errMsg != "" {

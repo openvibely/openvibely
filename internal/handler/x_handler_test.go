@@ -79,6 +79,30 @@ type blockingXSettingsAPI struct {
 	once    sync.Once
 }
 
+type candidateAuthorityXAPI struct {
+	mu        sync.Mutex
+	calls     int
+	authority chan bool
+	check     func() bool
+}
+
+func (f *candidateAuthorityXAPI) Me(context.Context) (service.XUser, error) {
+	return service.XUser{ID: "candidate-account", Username: "candidate"}, nil
+}
+func (f *candidateAuthorityXAPI) Mentions(context.Context, string, string, string) (service.XMentionsResponse, error) {
+	f.mu.Lock()
+	f.calls++
+	call := f.calls
+	f.mu.Unlock()
+	if call == 2 {
+		f.authority <- f.check()
+	}
+	return service.XMentionsResponse{}, nil
+}
+func (f *candidateAuthorityXAPI) Post(context.Context, string, string) (string, error) {
+	return "", nil
+}
+
 func (f *blockingXSettingsAPI) Me(context.Context) (service.XUser, error) {
 	return service.XUser{ID: "old-account", Username: "old"}, nil
 }
@@ -188,6 +212,35 @@ func TestXConfigureProviderFailureDoesNotOverwriteSettingsOrStopExistingService(
 	require.True(t, old.Status().Running)
 }
 
+func TestXConfigureInstallsCandidateBeforeFirstPoll(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetXRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db))
+	api := &candidateAuthorityXAPI{authority: make(chan bool, 1)}
+	api.check = func() bool {
+		current := h.getXService()
+		return current != nil && current.Status().Username == "candidate"
+	}
+	originalFactory := newXAPIClientForSettings
+	newXAPIClientForSettings = func(service.XCredentials) service.XAPI { return api }
+	t.Cleanup(func() {
+		newXAPIClientForSettings = originalFactory
+		h.StopXService()
+	})
+	form := url.Values{
+		"x_consumer_key": {"new-key"}, "x_consumer_secret": {"new-secret"},
+		"x_access_token": {"new-token"}, "x_access_token_secret": {"new-token-secret"},
+		"x_poll_interval_seconds": {"30"},
+	}
+
+	require.NoError(t, h.handleXConfigure(xFormContext(e, http.MethodPost, "/channels/x/configure", form)))
+	select {
+	case authoritative := <-api.authority:
+		require.True(t, authoritative)
+	case <-time.After(time.Second):
+		t.Fatal("candidate X poller did not start")
+	}
+}
+
 func TestXConfigureInitializesCursorAndCancelsReplacedService(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	authRepo := repository.NewXAuthRepo(db)
@@ -195,6 +248,7 @@ func TestXConfigureInitializesCursorAndCancelsReplacedService(t *testing.T) {
 	contextRepo := repository.NewXTaskContextRepo(db)
 	receiptRepo := repository.NewXInboundReceiptRepo(db)
 	h.SetXRepositories(authRepo, selectionRepo, contextRepo, receiptRepo)
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.XSettingAccountID, "old"))
 	oldAPI := &cancelAwareXAPI{started: make(chan struct{}), cancelled: make(chan struct{})}
 	old := service.NewXService(service.XCredentials{ConsumerKey: "old-key", ConsumerSecret: "old-secret", AccessToken: "old-token", AccessTokenSecret: "old-token-secret"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 	old.SetAPI(oldAPI)
@@ -292,6 +346,7 @@ func TestXReconfigurationFencesOldInFlightCursorWrite(t *testing.T) {
 
 func TestXStopServiceStopsDynamicallyInstalledPoller(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.XSettingAccountID, "dynamic"))
 	api := &cancelAwareXAPI{started: make(chan struct{}), cancelled: make(chan struct{})}
 	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 	svc.SetAPI(api)
@@ -359,6 +414,7 @@ func TestGenericChannelStatusReportsRunningButUnhealthyXAsNotConnected(t *testin
 	contexts := repository.NewXTaskContextRepo(db)
 	receipts := repository.NewXInboundReceiptRepo(db)
 	h.SetXRepositories(auth, selections, contexts, receipts)
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.XSettingAccountID, "bot"))
 	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 	svc.SetAPI(failingXSettingsAPI{err: errors.New("mention access revoked")})
 	svc.SetRepositories(auth, selections, contexts, receipts, h.threadInputRepo)
@@ -383,6 +439,7 @@ func TestGenericChannelStatusRetainsXReadinessAndAuthorization(t *testing.T) {
 	receipts := repository.NewXInboundReceiptRepo(db)
 	h.SetXRepositories(auth, selections, contexts, receipts)
 	require.NoError(t, auth.Create(context.Background(), &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
+	require.NoError(t, h.settingsRepo.Set(context.Background(), service.XSettingAccountID, "bot"))
 	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
 	svc.SetAPI(&readyXSettingsAPI{})
 	svc.SetRepositories(auth, selections, contexts, receipts, h.threadInputRepo)
