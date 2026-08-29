@@ -18,6 +18,83 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRunChannelViewTaskThreadUsesBoundedExecutionPage(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	execRepo := repository.NewExecutionRepo(db)
+	project := &models.Project{Name: "Bounded Channel Thread Project"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID,
+		Title:     "Bounded Channel Thread Task",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusCompleted,
+		Prompt:    "original prompt",
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	for i := 0; i < 40; i++ {
+		output := fmt.Sprintf("output-%02d %s", i, strings.Repeat("x", 20*1024))
+		exec := &models.Execution{
+			ID:         fmt.Sprintf("channel-thread-exec-%02d", i),
+			TaskID:     task.ID,
+			Status:     models.ExecRunning,
+			PromptSent: fmt.Sprintf("prompt-%02d", i),
+			IsFollowup: i > 0,
+		}
+		require.NoError(t, execRepo.Create(ctx, exec))
+		require.NoError(t, execRepo.Complete(ctx, exec.ID, models.ExecCompleted, output, "", 0, 0))
+	}
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	transcript, err := runChannelViewTaskThread(ctx, taskRepo, execRepo, project.ID, ViewThreadRequest{
+		TaskID: task.ID,
+		Offset: 5,
+		Limit:  3,
+	})
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Total executions: 40")
+	require.Contains(t, transcript, "prompt-05")
+	require.Contains(t, transcript, "prompt-07")
+	require.NotContains(t, transcript, "prompt-04")
+	require.NotContains(t, transcript, "prompt-08")
+	require.Contains(t, transcript, "Showing executions 6–8 of 40")
+
+	var executionQueries []string
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from executions") {
+			executionQueries = append(executionQueries, statement)
+		}
+	}
+	require.Len(t, executionQueries, 2)
+	require.Contains(t, executionQueries[0], "COUNT(*)")
+	require.Contains(t, executionQueries[1], "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	transcript, err = runChannelViewTaskThread(ctx, taskRepo, execRepo, project.ID, ViewThreadRequest{
+		TaskID: task.ID,
+	})
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Total executions: 40")
+	require.Contains(t, transcript, "Transcript size limit reached")
+
+	executionQueries = nil
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from executions") {
+			executionQueries = append(executionQueries, statement)
+		}
+	}
+	require.GreaterOrEqual(t, len(executionQueries), 2)
+	for _, statement := range executionQueries[1:] {
+		require.Contains(t, statement, "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+	}
+}
+
 func TestChannelContextModeActionHandlers(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

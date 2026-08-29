@@ -7941,3 +7941,75 @@ func TestChannelReplyAndQueuedAgentResolutionBranches(t *testing.T) {
 	require.Equal(t, chatcontrol.SurfaceDiscord, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginDiscord}))
 	require.Equal(t, chatcontrol.SurfaceWeb, surfaceForThreadInput(models.ThreadInput{Source: models.TaskOriginWeb}))
 }
+
+func TestExecuteViewTaskThreadUsesBoundedExecutionReads(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	h, _, agentRepo := setupTestHandlerForDB(t, db)
+	project := createProject(t, h, "Bounded Thread Project")
+	agent := createAgent(t, agentRepo)
+	task := createTask(t, h, project.ID, "Bounded Thread Task", func(tk *models.Task) {
+		tk.Category = models.CategoryBacklog
+		tk.Status = models.StatusCompleted
+		tk.Prompt = "original prompt"
+	})
+
+	for i := 0; i < 40; i++ {
+		output := fmt.Sprintf("output-%02d %s", i, strings.Repeat("x", 20*1024))
+		exec := createExec(t, h, task.ID, agent.ID, func(exec *models.Execution) {
+			exec.ID = fmt.Sprintf("thread-exec-%02d", i)
+			exec.Status = models.ExecRunning
+			exec.PromptSent = fmt.Sprintf("prompt-%02d", i)
+			exec.IsFollowup = i > 0
+		})
+		require.NoError(t, h.execRepo.Complete(context.Background(), exec.ID, models.ExecCompleted, output, "", 0, 0))
+	}
+
+	ctx := context.Background()
+	counter.Reset()
+	counter.SetEnabled(true)
+	transcript, err := h.executeViewTaskThreadRequest(ctx, streamingResponseParams{ProjectID: project.ID}, service.ViewThreadRequest{
+		TaskID: task.ID,
+		Offset: 5,
+		Limit:  3,
+	})
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Total executions: 40")
+	require.Contains(t, transcript, "prompt-05")
+	require.Contains(t, transcript, "prompt-07")
+	require.NotContains(t, transcript, "prompt-04")
+	require.NotContains(t, transcript, "prompt-08")
+	require.Contains(t, transcript, "Showing executions 6–8 of 40")
+
+	var executionQueries []string
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from executions") {
+			executionQueries = append(executionQueries, statement)
+		}
+	}
+	require.Len(t, executionQueries, 2)
+	require.Contains(t, executionQueries[0], "COUNT(*)")
+	require.Contains(t, executionQueries[1], "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+
+	counter.Reset()
+	counter.SetEnabled(true)
+	transcript, err = h.executeViewTaskThreadRequest(ctx, streamingResponseParams{ProjectID: project.ID}, service.ViewThreadRequest{
+		TaskID: task.ID,
+		Limit:  0,
+	})
+	counter.SetEnabled(false)
+	require.NoError(t, err)
+	require.Contains(t, transcript, "Total executions: 40")
+	require.Contains(t, transcript, "Transcript size limit reached")
+
+	executionQueries = nil
+	for _, statement := range counter.Statements() {
+		if strings.Contains(strings.ToLower(statement), "from executions") {
+			executionQueries = append(executionQueries, statement)
+		}
+	}
+	require.GreaterOrEqual(t, len(executionQueries), 2)
+	for _, statement := range executionQueries[1:] {
+		require.Contains(t, statement, "ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?")
+	}
+}

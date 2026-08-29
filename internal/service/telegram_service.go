@@ -1544,6 +1544,31 @@ const telegramMaxPerMessageBytes = 50 * 1024
 // limit is the max number of executions to include (0 = all that fit).
 func formatThreadTranscript(task *models.Task, executions []models.Execution, offset, limit int) string {
 	total := len(executions)
+	if offset > 0 {
+		if offset >= total {
+			return formatThreadTranscriptPage(task, nil, total, offset).transcript
+		}
+		executions = executions[offset:]
+	}
+	if limit > 0 && limit < len(executions) {
+		executions = executions[:limit]
+	}
+	return formatThreadTranscriptWithTotal(task, executions, total, offset)
+}
+
+// formatThreadTranscriptWithTotal formats a page that has already been bounded
+// by the repository. total is the full execution count used for pagination
+// metadata and executions starts at offset.
+func formatThreadTranscriptWithTotal(task *models.Task, executions []models.Execution, total, offset int) string {
+	return formatThreadTranscriptPage(task, executions, total, offset).transcript
+}
+
+type threadTranscriptFormatResult struct {
+	transcript     string
+	budgetExceeded bool
+}
+
+func formatThreadTranscriptPage(task *models.Task, executions []models.Execution, total, offset int) threadTranscriptFormatResult {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("\n\n---\n**Thread history for task: \"%s\"** [TASK_ID:%s]\n", task.Title, task.ID))
 	sb.WriteString(fmt.Sprintf("Status: %s | Category: %s | Priority: %d\n", task.Status, task.Category, task.Priority))
@@ -1551,21 +1576,11 @@ func formatThreadTranscript(task *models.Task, executions []models.Execution, of
 
 	if total == 0 {
 		sb.WriteString("No execution history found for this task.\n")
-		return sb.String()
+		return threadTranscriptFormatResult{transcript: sb.String()}
 	}
-
-	// Apply offset
-	if offset > 0 {
-		if offset >= total {
-			sb.WriteString(fmt.Sprintf("Offset %d exceeds total executions (%d). Use a lower offset.\n", offset, total))
-			return sb.String()
-		}
-		executions = executions[offset:]
-	}
-
-	// Apply limit
-	if limit > 0 && limit < len(executions) {
-		executions = executions[:limit]
+	if offset > 0 && offset >= total {
+		sb.WriteString(fmt.Sprintf("Offset %d exceeds total executions (%d). Use a lower offset.\n", offset, total))
+		return threadTranscriptFormatResult{transcript: sb.String()}
 	}
 
 	// Format each execution, tracking total size
@@ -1616,7 +1631,7 @@ func formatThreadTranscript(task *models.Task, executions []models.Execution, of
 		sb.WriteString(fmt.Sprintf("\n---\nShowing executions %d–%d of %d.\n", offset+1, offset+included, total))
 	}
 
-	return sb.String()
+	return threadTranscriptFormatResult{transcript: sb.String(), budgetExceeded: budgetExceeded}
 }
 
 // buildTelegramTaskChatContext builds the system context for task chat follow-ups.

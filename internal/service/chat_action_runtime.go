@@ -639,11 +639,66 @@ func runChannelViewTaskThread(ctx context.Context, taskRepo *repository.TaskRepo
 	if execRepo == nil {
 		return "", fmt.Errorf("execution repository not configured")
 	}
-	executions, err := execRepo.ListByTaskChronological(ctx, task.ID)
+	total, err := execRepo.CountByTask(ctx, task.ID)
 	if err != nil {
-		return "", fmt.Errorf("retrieving thread for %q: %w", task.Title, err)
+		return "", fmt.Errorf("counting thread executions for %q: %w", task.Title, err)
 	}
-	return strings.TrimSpace(formatThreadTranscript(task, executions, req.Offset, req.Limit)), nil
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	var executions []models.Execution
+	if total > 0 && offset < total {
+		if req.Limit > 0 {
+			executions, err = execRepo.ListByTaskChronologicalPage(ctx, task.ID, offset, req.Limit)
+		} else {
+			executions, err = loadChannelTaskThreadExecutions(ctx, execRepo, task, total, offset)
+		}
+		if err != nil {
+			return "", fmt.Errorf("retrieving thread for %q: %w", task.Title, err)
+		}
+	}
+	return strings.TrimSpace(formatThreadTranscriptWithTotal(task, executions, total, offset)), nil
+}
+
+// channelTaskThreadExecutionFetchBatchSize bounds zero-limit channel reads to
+// formatter-sized chronological pages. The loader stops after the existing
+// 80 KiB transcript budget is reached instead of scanning the full history.
+const channelTaskThreadExecutionFetchBatchSize = 20
+
+func loadChannelTaskThreadExecutions(ctx context.Context, execRepo *repository.ExecutionRepo, task *models.Task, total, offset int) ([]models.Execution, error) {
+	if execRepo == nil || task == nil || total <= 0 || offset < 0 || offset >= total {
+		return []models.Execution{}, nil
+	}
+
+	executions := make([]models.Execution, 0, minServiceInt(channelTaskThreadExecutionFetchBatchSize, total-offset))
+	nextOffset := offset
+	for nextOffset < total {
+		batchLimit := minServiceInt(channelTaskThreadExecutionFetchBatchSize, total-nextOffset)
+		batch, err := execRepo.ListByTaskChronologicalPage(ctx, task.ID, nextOffset, batchLimit)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		executions = append(executions, batch...)
+		if formatThreadTranscriptPage(task, executions, total, offset).budgetExceeded {
+			break
+		}
+		if len(batch) < batchLimit {
+			break
+		}
+		nextOffset += len(batch)
+	}
+	return executions, nil
+}
+
+func minServiceInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func runChannelSendToTaskAction(ctx context.Context, opts channelThreadActionHandlerOptions, req SendToTaskRequest) string {
