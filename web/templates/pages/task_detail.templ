@@ -965,22 +965,23 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 										refreshPending: false,
 										refreshRetryTimer: null,
 										refreshLoading: false,
-									refreshError: '',
-									initialLoading: false,
-									requestVersion: 0,
-									requestSerial: 0,
-									refreshRequestID: 0,
-									olderRequestID: 0,
-									newerRequestID: 0,
-									container: null,
-									scrollTop: 0,
-									anchorID: '',
-									anchorOffset: 0,
-									savedScrollTop: null,
-									savedAnchorID: '',
-									savedAnchorOffset: 0,
-									restoreSerial: 0,
-									liveTimer: null
+										refreshError: '',
+										initialLoading: false,
+										requestVersion: 0,
+										requestSerial: 0,
+										refreshRequestID: 0,
+										olderRequestID: 0,
+										newerRequestID: 0,
+										container: null,
+										scrollTop: 0,
+										anchorID: '',
+										anchorOffset: 0,
+										savedScrollTop: null,
+										savedAnchorID: '',
+										savedAnchorOffset: 0,
+										restoreSerial: 0,
+										newerLiveTimer: null,
+										refreshLiveTimer: null
 								};
 								states[key] = state;
 							}
@@ -1207,8 +1208,12 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							return state.newerRequestID === requestID;
 						}
 
+						function hasActiveLifecycleRequest(state) {
+							return state.refreshLoading || state.olderLoading || state.newerLoading;
+						}
+
 						function schedulePendingNewer(state, taskID, projectID) {
-							if (!state.newerPending || state.newerLoading || state.refreshLoading || state.newerRetryTimer) return;
+							if (!state.newerPending || state.newerLoading || state.refreshLoading || state.olderLoading || state.refreshPending || state.refreshLiveTimer || state.refreshRetryTimer || state.newerRetryTimer || state.newerLiveTimer) return;
 							state.newerPending = false;
 							state.newerRetryTimer = setTimeout(function() {
 								state.newerRetryTimer = null;
@@ -1217,23 +1222,43 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						}
 
 						function schedulePendingRefresh(state, taskID, projectID) {
-							if (!state.refreshPending || state.refreshLoading || state.refreshRetryTimer) return;
-							state.refreshPending = false;
+							if (!state.refreshPending || hasActiveLifecycleRequest(state) || state.refreshRetryTimer || state.refreshLiveTimer) return;
 							state.refreshRetryTimer = setTimeout(function() {
 								state.refreshRetryTimer = null;
-								if (state.refreshLoading) {
+								if (hasActiveLifecycleRequest(state)) {
 									state.refreshPending = true;
 									return;
 								}
-								refreshLifecycleActivity(taskID, projectID);
+								refreshLifecycleActivity(taskID, projectID, true);
 							}, 0);
 						}
 
-						function refreshLifecycleActivity(taskID, projectID) {
+						function refreshLifecycleActivity(taskID, projectID, fromPending) {
 							var container = lifecycleContainer(taskID, projectID);
 							if (!container) return Promise.resolve();
 							projectID = projectID || container.dataset.projectId || '';
 							var state = getState(taskID, projectID);
+							if (fromPending && hasActiveLifecycleRequest(state)) {
+								state.refreshPending = true;
+								return Promise.resolve();
+							}
+							if (state.refreshLiveTimer) {
+								clearTimeout(state.refreshLiveTimer);
+								state.refreshLiveTimer = null;
+							}
+							if (state.refreshRetryTimer) {
+								clearTimeout(state.refreshRetryTimer);
+								state.refreshRetryTimer = null;
+							}
+							if (state.newerLiveTimer) {
+								clearTimeout(state.newerLiveTimer);
+								state.newerLiveTimer = null;
+							}
+							if (state.newerRetryTimer) {
+								clearTimeout(state.newerRetryTimer);
+								state.newerRetryTimer = null;
+							}
+							state.refreshPending = false;
 							var version = ++state.requestVersion;
 							var requestID = ++state.requestSerial;
 							state.refreshRequestID = requestID;
@@ -1252,36 +1277,36 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								var firstLoad = !state.initialized;
 								var wasEmpty = state.order.length === 0;
 								if (page.items.length === 0) {
-										state.records = Object.create(null);
-										state.order = [];
-										state.loadedOlder = false;
-										state.olderCursor = '';
-										state.olderHasMore = false;
+									state.records = Object.create(null);
+									state.order = [];
+									state.loadedOlder = false;
+									state.olderCursor = '';
+									state.olderHasMore = false;
 								} else if (firstLoad || wasEmpty) {
-										state.records = Object.create(null);
-										state.order = [];
+									state.records = Object.create(null);
+									state.order = [];
 								}
 								mergeRows(state, page.items);
 								if (firstLoad || wasEmpty) {
-										state.olderCursor = page.nextCursor || '';
-										state.olderHasMore = page.hasMore;
-									}
+									state.olderCursor = page.nextCursor || '';
+									state.olderHasMore = page.hasMore;
+								}
 								state.initialized = true;
 								state.initialLoading = false;
 								state.refreshLoading = false;
 								state.refreshError = '';
 								state.newerError = '';
 								renderState(state, container, true);
-								schedulePendingNewer(state, taskID, projectID);
 								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
 							}).catch(function(error) {
 								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return;
 								state.initialLoading = false;
 								state.refreshLoading = false;
 								state.refreshError = error && error.message || 'Unable to load lifecycle activity';
 								renderState(state, container, state.order.length > 0);
-								schedulePendingNewer(state, taskID, projectID);
 								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
 							});
 						}
 
@@ -1290,7 +1315,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							if (!container) return Promise.resolve();
 							projectID = projectID || container.dataset.projectId || '';
 							var state = getState(taskID, projectID);
-							if (!state.initialized || !state.olderHasMore || state.olderLoading) return Promise.resolve();
+							if (!state.initialized || !state.olderHasMore || state.olderLoading || state.refreshLoading) return Promise.resolve();
 							var cursor = state.olderCursor;
 							if (!cursor) {
 								state.olderHasMore = false;
@@ -1312,74 +1337,107 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								state.olderLoading = false;
 								state.olderError = '';
 								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
 							}).catch(function(error) {
 								if (!requestIsCurrent(state, container, version, requestID, 'older')) return;
 								state.olderLoading = false;
 								state.olderError = error && error.message || 'Unable to load older lifecycle activity';
 								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
 							});
 						}
 
-							function loadNewer(taskID, projectID, catchupCount, fromPending) {
-								var container = lifecycleContainer(taskID, projectID);
-								if (!container) return Promise.resolve();
-								projectID = projectID || container.dataset.projectId || '';
-								var state = getState(taskID, projectID);
-								if (state.newerLoading) {
-									state.newerPending = true;
-									return Promise.resolve();
-								}
-								if (state.refreshLoading) {
-									state.newerPending = true;
-									return Promise.resolve();
-								}
-								if (!state.initialized) {
-									if (!fromPending) state.newerPending = true;
-									return refreshLifecycleActivity(taskID, projectID);
-								}
-								var newest = state.order.length > 0 && state.records[state.order[0]];
-								if (!newest || !newest.id) {
-									if (!fromPending) state.newerPending = true;
-									return refreshLifecycleActivity(taskID, projectID);
-								}
-								var version = state.requestVersion;
-								var requestID = ++state.requestSerial;
-								state.newerRequestID = requestID;
-								state.newerLoading = true;
-								state.newerError = '';
-								renderState(state, container, true);
-								return fetchPage(taskID, projectID, 'newer', newest.id).then(function(page) {
-									if (!requestIsCurrent(state, container, version, requestID, 'newer')) return;
-									mergeRows(state, page.items);
-									state.newerLoading = false;
-									state.newerError = '';
-									state.refreshError = '';
-									renderState(state, container, true);
-									var pendingNewer = state.newerPending;
-									schedulePendingNewer(state, taskID, projectID);
-									if (!pendingNewer && page.hasMore && page.items.length > 0 && (catchupCount || 0) < 4) {
-										setTimeout(function() { loadNewer(taskID, projectID, (catchupCount || 0) + 1, false); }, 0);
-									}
-								}).catch(function(error) {
-									if (!requestIsCurrent(state, container, version, requestID, 'newer')) return;
-									state.newerLoading = false;
-									state.newerError = error && error.message || 'Unable to check for new lifecycle activity';
-									renderState(state, container, true);
-									schedulePendingNewer(state, taskID, projectID);
-								});
+						function loadNewer(taskID, projectID, catchupCount, fromPending) {
+							var container = lifecycleContainer(taskID, projectID);
+							if (!container) return Promise.resolve();
+							projectID = projectID || container.dataset.projectId || '';
+							var state = getState(taskID, projectID);
+							if (state.newerLoading) {
+								state.newerPending = true;
+								return Promise.resolve();
 							}
+							if (state.refreshPending || state.refreshLoading || state.refreshLiveTimer || state.refreshRetryTimer) return Promise.resolve();
+							if (state.olderLoading) {
+								state.newerPending = true;
+								return Promise.resolve();
+							}
+							if (!state.initialized) {
+								if (!fromPending) state.newerPending = true;
+								return refreshLifecycleActivity(taskID, projectID);
+							}
+							var newest = state.order.length > 0 && state.records[state.order[0]];
+							if (!newest || !newest.id) {
+								if (!fromPending) state.newerPending = true;
+								return refreshLifecycleActivity(taskID, projectID);
+							}
+							var version = state.requestVersion;
+							var requestID = ++state.requestSerial;
+							state.newerRequestID = requestID;
+							state.newerLoading = true;
+							state.newerError = '';
+							renderState(state, container, true);
+							return fetchPage(taskID, projectID, 'newer', newest.id).then(function(page) {
+								if (!requestIsCurrent(state, container, version, requestID, 'newer')) return;
+								mergeRows(state, page.items);
+								state.newerLoading = false;
+								state.newerError = '';
+								state.refreshError = '';
+								renderState(state, container, true);
+								var pendingNewer = state.newerPending;
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+								if (!pendingNewer && !state.refreshPending && !state.refreshLiveTimer && !state.refreshRetryTimer && page.hasMore && page.items.length > 0 && (catchupCount || 0) < 4) {
+									setTimeout(function() { loadNewer(taskID, projectID, (catchupCount || 0) + 1, false); }, 0);
+								}
+							}).catch(function(error) {
+								if (!requestIsCurrent(state, container, version, requestID, 'newer')) return;
+								state.newerLoading = false;
+								state.newerError = error && error.message || 'Unable to check for new lifecycle activity';
+								renderState(state, container, true);
+								schedulePendingRefresh(state, taskID, projectID);
+								schedulePendingNewer(state, taskID, projectID);
+							});
+						}
 						function scheduleLiveRefresh(taskID, projectID, mode) {
 							var state = getState(taskID, projectID);
-							if (mode !== 'newer' && state.refreshLoading) {
-								state.refreshPending = true;
+							if (mode === 'newer') {
+								if (state.refreshPending || state.refreshLiveTimer || state.refreshRetryTimer) return;
+								if (state.refreshLoading || state.newerLoading || state.olderLoading) {
+									state.newerPending = true;
+									return;
+								}
+								if (state.newerLiveTimer) return;
+								state.newerLiveTimer = setTimeout(function() {
+									state.newerLiveTimer = null;
+									if (state.refreshPending || state.refreshLoading || state.refreshLiveTimer || state.refreshRetryTimer || state.olderLoading || state.newerLoading) {
+										if (!state.refreshPending && !state.refreshLiveTimer && !state.refreshRetryTimer) state.newerPending = true;
+										return;
+									}
+									loadNewer(taskID, projectID, 0);
+								}, 150);
 								return;
 							}
-							if (state.liveTimer) clearTimeout(state.liveTimer);
-							state.liveTimer = setTimeout(function() {
-								state.liveTimer = null;
-								if (mode === 'newer') loadNewer(taskID, projectID, 0);
-								else if (state.refreshLoading) state.refreshPending = true;
-								else refreshLifecycleActivity(taskID, projectID);
+
+							state.refreshPending = true;
+							if (state.newerLiveTimer) {
+								clearTimeout(state.newerLiveTimer);
+								state.newerLiveTimer = null;
+							}
+							if (state.newerRetryTimer) {
+								clearTimeout(state.newerRetryTimer);
+								state.newerRetryTimer = null;
+							}
+							state.newerPending = false;
+							if (hasActiveLifecycleRequest(state) || state.refreshLiveTimer || state.refreshRetryTimer) return;
+							state.refreshLiveTimer = setTimeout(function() {
+								state.refreshLiveTimer = null;
+								if (hasActiveLifecycleRequest(state)) {
+									state.refreshPending = true;
+									return;
+								}
+								refreshLifecycleActivity(taskID, projectID, true);
 							}, 150);
 						}
 
@@ -1421,6 +1479,14 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							if (tabContainer) refreshLifecycleActivity(tabContainer.dataset.taskId, tabContainer.dataset.projectId || '');
 						}
 
+						function handleLiveConnected(event) {
+							var detail = event && event.detail || {};
+							if (!detail.reconnected) return;
+							var container = document.getElementById('lifecycle-activity-list');
+							if (!container) return;
+							scheduleLiveRefresh(container.dataset.taskId, container.dataset.projectId || '', 'refresh');
+						}
+
 						function handleTaskEvent(event) {
 							var data = event && event.detail || {};
 							if (typeof data === 'string') {
@@ -1456,32 +1522,42 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							document.removeEventListener('scroll', handleScroll, true);
 							window.removeEventListener('scroll', handleScroll, true);
 							window.removeEventListener('sse-task-event', handleTaskEvent);
+							window.removeEventListener('sse-live-connected', handleLiveConnected);
 							document.body && document.body.removeEventListener('htmx:beforeSwap', handleBeforeSwap);
 							Object.keys(states).forEach(function(key) {
 								if (states[key].liveTimer) {
 									clearTimeout(states[key].liveTimer);
 									states[key].liveTimer = null;
 								}
-									if (states[key].newerRetryTimer) {
-										clearTimeout(states[key].newerRetryTimer);
-										states[key].newerRetryTimer = null;
-									}
-									if (states[key].refreshRetryTimer) {
-										clearTimeout(states[key].refreshRetryTimer);
-										states[key].refreshRetryTimer = null;
-									}
-									states[key].newerPending = false;
-									states[key].refreshPending = false;
+								if (states[key].newerLiveTimer) {
+									clearTimeout(states[key].newerLiveTimer);
+									states[key].newerLiveTimer = null;
+								}
+								if (states[key].refreshLiveTimer) {
+									clearTimeout(states[key].refreshLiveTimer);
+									states[key].refreshLiveTimer = null;
+								}
+								if (states[key].newerRetryTimer) {
+									clearTimeout(states[key].newerRetryTimer);
+									states[key].newerRetryTimer = null;
+								}
+								if (states[key].refreshRetryTimer) {
+									clearTimeout(states[key].refreshRetryTimer);
+									states[key].refreshRetryTimer = null;
+								}
+								states[key].newerPending = false;
+								states[key].refreshPending = false;
 							});
 						}
 
 						window.refreshLifecycleActivity = refreshLifecycleActivity;
 						window._taskLifecycleActivityHandlers = { cleanup: cleanup };
-					document.addEventListener('click', handleClick);
-					document.addEventListener('scroll', handleScroll, true);
-					window.addEventListener('scroll', handleScroll, true);
-					window.addEventListener('sse-task-event', handleTaskEvent);
-					if (document.body) document.body.addEventListener('htmx:beforeSwap', handleBeforeSwap);
+						document.addEventListener('click', handleClick);
+						document.addEventListener('scroll', handleScroll, true);
+						window.addEventListener('scroll', handleScroll, true);
+						window.addEventListener('sse-task-event', handleTaskEvent);
+						window.addEventListener('sse-live-connected', handleLiveConnected);
+						if (document.body) document.body.addEventListener('htmx:beforeSwap', handleBeforeSwap);
 
 					if (document.querySelector('[data-tab="lifecycle"].tab-active')) {
 						var initial = document.getElementById('lifecycle-activity-list');

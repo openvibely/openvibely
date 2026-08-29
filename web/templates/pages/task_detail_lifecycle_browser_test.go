@@ -872,3 +872,723 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("anchor lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
 	}
 }
+
+func TestTaskDetailLifecycleMixedLiveRefreshInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := &models.Task{
+		ID:        "task-lifecycle-mixed-browser",
+		ProjectID: "project-lifecycle-mixed-browser",
+		Title:     "Lifecycle mixed refresh browser fixture",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+	var fragment bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &fragment); err != nil {
+		t.Fatalf("render TaskDetailContent: %v", err)
+	}
+	row := func(id, status string, hour int) map[string]any {
+		return map[string]any{
+			"id":              id,
+			"when":            "after_complete",
+			"skill_key":       "hook-" + id,
+			"status":          status,
+			"output_contract": "activity_summary",
+			"summary":         "summary for " + id,
+			"started_at":      time.Date(2026, time.January, 1, hour, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		}
+	}
+	writePage := func(w http.ResponseWriter, items []map[string]any) {
+		if items == nil {
+			items = []map[string]any{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "has_more": false, "next_cursor": ""})
+	}
+
+	var mu sync.Mutex
+	initialCalls := 0
+	newerCalls := 0
+	sawProject := false
+	sawLimit := false
+	page := ""
+	browserResult := make(chan string, 1)
+	fixtureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/browser-result":
+			select {
+			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case "/tasks/task-lifecycle-mixed-browser":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+			return
+		case "/api/tasks/task-lifecycle-mixed-browser/lifecycle-executions":
+		default:
+			http.NotFound(w, r)
+			return
+		}
+
+		query := r.URL.Query()
+		if query.Get("before") != "" {
+			http.Error(w, "unexpected older cursor", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		if query.Get("project_id") == task.ProjectID {
+			sawProject = true
+		}
+		if query.Get("limit") == "20" {
+			sawLimit = true
+		}
+		if after := query.Get("after"); after != "" {
+			newerCalls++
+			mu.Unlock()
+			if after != "event-0" {
+				http.Error(w, "unexpected newer cursor", http.StatusBadRequest)
+				return
+			}
+			writePage(w, nil)
+			return
+		}
+		initialCalls++
+		currentInitialCall := initialCalls
+		mu.Unlock()
+
+		if currentInitialCall == 1 {
+			writePage(w, []map[string]any{row("event-0", "completed", 0)})
+			return
+		}
+		writePage(w, []map[string]any{row("event-0", "failed", 0)})
+	})
+	server := httptest.NewServer(fixtureHandler)
+	defer server.Close()
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+  function waitFor(check, label, timeout) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try { if (check()) { resolve(); return; } } catch (error) { reject(error); return; }
+        if (performance.now() - started > (timeout || 6000)) { reject(new Error('timed out waiting for ' + label)); return; }
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  function report(status, message) {
+    return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
+  }
+  function fail(message) { throw new Error(message); }
+  function row(id) { return document.querySelector('[data-lifecycle-execution-id="' + id + '"]'); }
+  function hasStatus(id, status) { var item = row(id); return !!item && item.textContent.indexOf(status) >= 0; }
+  async function run() {
+    await waitFor(function() { return hasStatus('event-0', 'completed'); }, 'initial lifecycle row');
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_lifecycle_execution_changed', task_id:'task-lifecycle-mixed-browser', project_id:'project-lifecycle-mixed-browser'}}));
+    await wait(40);
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_thread_execution_started', task_id:'task-lifecycle-mixed-browser', project_id:'project-lifecycle-mixed-browser'}}));
+    await waitFor(function() { return hasStatus('event-0', 'failed'); }, 'full refresh after mixed live invalidation', 3000);
+    if (document.querySelector('[data-lifecycle-refresh-error]')) fail('mixed live invalidation left a refresh error');
+    await report('pass', '');
+  }
+  run().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+
+	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-mixed.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-mixed-profile")
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		server.URL+"/tasks/task-lifecycle-mixed-browser",
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome lifecycle mixed fixture: %v", err)
+	}
+
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail: timed out waiting for lifecycle browser result"
+	}
+	stopBrowserProcess(cmd)
+	if outcome != "pass:" {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(stderr) > 8000 {
+			stderr = stderr[len(stderr)-8000:]
+		}
+		t.Fatalf("Task Detail Lifecycle mixed browser regression failed: %s\nChrome stderr tail:\n%s", outcome, stderr)
+	}
+
+	mu.Lock()
+	gotInitialCalls, gotNewerCalls := initialCalls, newerCalls
+	gotProject, gotLimit := sawProject, sawLimit
+	mu.Unlock()
+	if gotInitialCalls != 2 {
+		t.Fatalf("mixed lifecycle fixture received %d initial-page requests, want initial page and one full refresh", gotInitialCalls)
+	}
+	if gotNewerCalls > 1 {
+		t.Fatalf("mixed lifecycle fixture received %d newer-page requests, want at most one coalesced request", gotNewerCalls)
+	}
+	if !gotProject || !gotLimit {
+		t.Fatalf("mixed lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
+	}
+}
+
+func TestTaskDetailLifecycleFullInvalidationDuringNewerFailureInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := &models.Task{
+		ID:        "task-lifecycle-mixed-failure-browser",
+		ProjectID: "project-lifecycle-mixed-failure-browser",
+		Title:     "Lifecycle mixed failure browser fixture",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+	var fragment bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &fragment); err != nil {
+		t.Fatalf("render TaskDetailContent: %v", err)
+	}
+	row := func(id, status string, hour int) map[string]any {
+		return map[string]any{
+			"id":              id,
+			"when":            "after_complete",
+			"skill_key":       "hook-" + id,
+			"status":          status,
+			"output_contract": "activity_summary",
+			"summary":         "summary for " + id,
+			"started_at":      time.Date(2026, time.January, 1, hour, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		}
+	}
+	writePage := func(w http.ResponseWriter, items []map[string]any) {
+		if items == nil {
+			items = []map[string]any{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "has_more": false, "next_cursor": ""})
+	}
+
+	var mu sync.Mutex
+	initialCalls := 0
+	newerCalls := 0
+	newerInFlight := false
+	sawProject := false
+	sawLimit := false
+	page := ""
+	browserResult := make(chan string, 1)
+	fixtureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/browser-result":
+			select {
+			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case "/lifecycle-state":
+			mu.Lock()
+			inFlight := newerInFlight
+			mu.Unlock()
+			if inFlight {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("1"))
+			} else {
+				w.WriteHeader(http.StatusNoContent)
+			}
+			return
+		case "/tasks/task-lifecycle-mixed-failure-browser":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+			return
+		case "/api/tasks/task-lifecycle-mixed-failure-browser/lifecycle-executions":
+		default:
+			http.NotFound(w, r)
+			return
+		}
+
+		query := r.URL.Query()
+		if query.Get("before") != "" {
+			http.Error(w, "unexpected older cursor", http.StatusBadRequest)
+			return
+		}
+		if after := query.Get("after"); after != "" {
+			if after != "event-0" {
+				http.Error(w, "unexpected newer cursor", http.StatusBadRequest)
+				return
+			}
+			mu.Lock()
+			newerCalls++
+			newerInFlight = true
+			mu.Unlock()
+			time.Sleep(300 * time.Millisecond)
+			mu.Lock()
+			newerInFlight = false
+			mu.Unlock()
+			http.Error(w, "fixture newer failure", http.StatusServiceUnavailable)
+			return
+		}
+
+		mu.Lock()
+		if query.Get("project_id") == task.ProjectID {
+			sawProject = true
+		}
+		if query.Get("limit") == "20" {
+			sawLimit = true
+		}
+		initialCalls++
+		currentInitialCall := initialCalls
+		replacementSawNewer := newerInFlight
+		mu.Unlock()
+		if currentInitialCall == 1 {
+			writePage(w, []map[string]any{row("event-0", "completed", 0)})
+			return
+		}
+		if replacementSawNewer {
+			http.Error(w, "full refresh raced newer request", http.StatusServiceUnavailable)
+			return
+		}
+		writePage(w, []map[string]any{row("event-1", "completed", 1), row("event-0", "completed", 0)})
+	})
+	server := httptest.NewServer(fixtureHandler)
+	defer server.Close()
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+  function waitFor(check, label, timeout) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        Promise.resolve().then(check).then(function(ok) {
+          if (ok) { resolve(); return; }
+          if (performance.now() - started > (timeout || 6000)) { reject(new Error('timed out waiting for ' + label)); return; }
+          setTimeout(poll, 10);
+        }).catch(reject);
+      }
+      poll();
+    });
+  }
+  function report(status, message) {
+    return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
+  }
+  function fail(message) { throw new Error(message); }
+  function row(id) { return document.querySelector('[data-lifecycle-execution-id="' + id + '"]'); }
+  async function newerRequestIsInFlight() {
+    await waitFor(function() { return fetch('/lifecycle-state').then(function(response) { return response.status === 200; }); }, 'newer request in flight', 2000);
+  }
+  async function run() {
+    await waitFor(function() { return !!row('event-0'); }, 'initial lifecycle row');
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_thread_execution_started', task_id:'task-lifecycle-mixed-failure-browser', project_id:'project-lifecycle-mixed-failure-browser'}}));
+    await newerRequestIsInFlight();
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_lifecycle_execution_changed', task_id:'task-lifecycle-mixed-failure-browser', project_id:'project-lifecycle-mixed-failure-browser'}}));
+    await waitFor(function() { return !!row('event-1'); }, 'full refresh retry after newer failure', 4000);
+    if (document.querySelector('[data-lifecycle-refresh-error]')) fail('full refresh retry left a refresh error');
+    await report('pass', '');
+  }
+  run().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+
+	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-mixed-failure.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-mixed-failure-profile")
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		server.URL+"/tasks/task-lifecycle-mixed-failure-browser",
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome lifecycle mixed failure fixture: %v", err)
+	}
+
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail: timed out waiting for lifecycle browser result"
+	}
+	stopBrowserProcess(cmd)
+	if outcome != "pass:" {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(stderr) > 8000 {
+			stderr = stderr[len(stderr)-8000:]
+		}
+		t.Fatalf("Task Detail Lifecycle mixed failure browser regression failed: %s\nChrome stderr tail:\n%s", outcome, stderr)
+	}
+
+	mu.Lock()
+	gotInitialCalls, gotNewerCalls := initialCalls, newerCalls
+	gotProject, gotLimit := sawProject, sawLimit
+	mu.Unlock()
+	if gotInitialCalls != 2 || gotNewerCalls != 1 {
+		t.Fatalf("mixed failure fixture received initial=%d newer=%d requests, want initial, one failing newer, and one retried full refresh", gotInitialCalls, gotNewerCalls)
+	}
+	if !gotProject || !gotLimit {
+		t.Fatalf("mixed failure lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
+	}
+}
+
+func TestTaskDetailLifecycleReconnectReconcilesInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := &models.Task{
+		ID:        "task-lifecycle-reconnect-browser",
+		ProjectID: "project-lifecycle-reconnect-browser",
+		Title:     "Lifecycle reconnect browser fixture",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+	var fragment bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &fragment); err != nil {
+		t.Fatalf("render TaskDetailContent: %v", err)
+	}
+	row := func(id string, hour int) map[string]any {
+		return map[string]any{
+			"id":              id,
+			"when":            "after_complete",
+			"skill_key":       "hook-" + id,
+			"status":          "completed",
+			"output_contract": "activity_summary",
+			"summary":         "summary for " + id,
+			"started_at":      time.Date(2026, time.January, 1, hour, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		}
+	}
+	writePage := func(w http.ResponseWriter, items []map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "has_more": false, "next_cursor": ""})
+	}
+
+	var mu sync.Mutex
+	initialCalls := 0
+	sawProject := false
+	sawLimit := false
+	page := ""
+	browserResult := make(chan string, 1)
+	fixtureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/browser-result":
+			select {
+			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case "/tasks/task-lifecycle-reconnect-browser":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+			return
+		case "/api/tasks/task-lifecycle-reconnect-browser/lifecycle-executions":
+		default:
+			http.NotFound(w, r)
+			return
+		}
+
+		query := r.URL.Query()
+		if query.Get("before") != "" || query.Get("after") != "" {
+			http.Error(w, "unexpected lifecycle cursor", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		if query.Get("project_id") == task.ProjectID {
+			sawProject = true
+		}
+		if query.Get("limit") == "20" {
+			sawLimit = true
+		}
+		initialCalls++
+		currentInitialCall := initialCalls
+		mu.Unlock()
+		if currentInitialCall == 1 {
+			writePage(w, []map[string]any{row("event-0", 0)})
+			return
+		}
+		writePage(w, []map[string]any{row("event-1", 1), row("event-0", 0)})
+	})
+	server := httptest.NewServer(fixtureHandler)
+	defer server.Close()
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+  function waitFor(check, label, timeout) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try { if (check()) { resolve(); return; } } catch (error) { reject(error); return; }
+        if (performance.now() - started > (timeout || 6000)) { reject(new Error('timed out waiting for ' + label)); return; }
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  function report(status, message) {
+    return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
+  }
+  function row(id) { return document.querySelector('[data-lifecycle-execution-id="' + id + '"]'); }
+  async function run() {
+    await waitFor(function() { return !!row('event-0'); }, 'initial lifecycle row');
+    window.dispatchEvent(new CustomEvent('sse-live-connected', {detail:{reconnected:true}}));
+    await waitFor(function() { return !!row('event-1'); }, 'lifecycle reconnect reconciliation', 3000);
+    await report('pass', '');
+  }
+  run().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+
+	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-reconnect.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-reconnect-profile")
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		server.URL+"/tasks/task-lifecycle-reconnect-browser",
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome lifecycle reconnect fixture: %v", err)
+	}
+
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail: timed out waiting for lifecycle browser result"
+	}
+	stopBrowserProcess(cmd)
+	if outcome != "pass:" {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(stderr) > 8000 {
+			stderr = stderr[len(stderr)-8000:]
+		}
+		t.Fatalf("Task Detail Lifecycle reconnect browser regression failed: %s\nChrome stderr tail:\n%s", outcome, stderr)
+	}
+
+	mu.Lock()
+	gotInitialCalls := initialCalls
+	gotProject, gotLimit := sawProject, sawLimit
+	mu.Unlock()
+	if gotInitialCalls != 2 {
+		t.Fatalf("reconnect lifecycle fixture received %d initial-page requests, want initial page and reconnect refresh", gotInitialCalls)
+	}
+	if !gotProject || !gotLimit {
+		t.Fatalf("reconnect lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
+	}
+}
+
+func TestTaskDetailLifecycleFullInvalidationDuringOlderFailureInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := &models.Task{
+		ID:        "task-lifecycle-older-failure-browser",
+		ProjectID: "project-lifecycle-older-failure-browser",
+		Title:     "Lifecycle older failure browser fixture",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+	var fragment bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &fragment); err != nil {
+		t.Fatalf("render TaskDetailContent: %v", err)
+	}
+	row := func(id string, hour int) map[string]any {
+		return map[string]any{
+			"id":              id,
+			"when":            "after_complete",
+			"skill_key":       "hook-" + id,
+			"status":          "completed",
+			"output_contract": "activity_summary",
+			"summary":         "summary for " + id,
+			"started_at":      time.Date(2026, time.January, 1, hour, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		}
+	}
+	writePage := func(w http.ResponseWriter, items []map[string]any, hasMore bool, cursor string) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "has_more": hasMore, "next_cursor": cursor})
+	}
+
+	var mu sync.Mutex
+	initialCalls := 0
+	olderInFlight := false
+	sawProject := false
+	sawLimit := false
+	page := ""
+	browserResult := make(chan string, 1)
+	fixtureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/browser-result":
+			select {
+			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case "/lifecycle-state":
+			mu.Lock()
+			inFlight := olderInFlight
+			mu.Unlock()
+			if inFlight {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("1"))
+			} else {
+				w.WriteHeader(http.StatusNoContent)
+			}
+			return
+		case "/tasks/task-lifecycle-older-failure-browser":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+			return
+		case "/api/tasks/task-lifecycle-older-failure-browser/lifecycle-executions":
+		default:
+			http.NotFound(w, r)
+			return
+		}
+
+		query := r.URL.Query()
+		if query.Get("after") != "" {
+			http.Error(w, "unexpected newer cursor", http.StatusBadRequest)
+			return
+		}
+		if before := query.Get("before"); before != "" {
+			if before != "cursor-0" {
+				http.Error(w, "unexpected older cursor", http.StatusBadRequest)
+				return
+			}
+			mu.Lock()
+			olderInFlight = true
+			mu.Unlock()
+			time.Sleep(300 * time.Millisecond)
+			mu.Lock()
+			olderInFlight = false
+			mu.Unlock()
+			http.Error(w, "fixture older failure", http.StatusServiceUnavailable)
+			return
+		}
+
+		mu.Lock()
+		if query.Get("project_id") == task.ProjectID {
+			sawProject = true
+		}
+		if query.Get("limit") == "20" {
+			sawLimit = true
+		}
+		initialCalls++
+		currentInitialCall := initialCalls
+		replacementSawOlder := olderInFlight
+		mu.Unlock()
+		if currentInitialCall == 1 {
+			writePage(w, []map[string]any{row("event-0", 0)}, true, "cursor-0")
+			return
+		}
+		if replacementSawOlder {
+			http.Error(w, "full refresh raced older request", http.StatusServiceUnavailable)
+			return
+		}
+		writePage(w, []map[string]any{row("event-1", 1), row("event-0", 0)}, false, "")
+	})
+	server := httptest.NewServer(fixtureHandler)
+	defer server.Close()
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+  function waitFor(check, label, timeout) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        Promise.resolve().then(check).then(function(ok) {
+          if (ok) { resolve(); return; }
+          if (performance.now() - started > (timeout || 6000)) { reject(new Error('timed out waiting for ' + label)); return; }
+          setTimeout(poll, 10);
+        }).catch(reject);
+      }
+      poll();
+    });
+  }
+  function report(status, message) {
+    return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
+  }
+  async function olderRequestIsInFlight() {
+    await waitFor(function() { return fetch('/lifecycle-state').then(function(response) { return response.status === 200; }); }, 'older request in flight', 2000);
+  }
+  async function run() {
+    await waitFor(function() { return !!document.querySelector('[data-lifecycle-execution-id="event-0"]'); }, 'initial lifecycle row');
+    var older = document.querySelector('[data-lifecycle-load-older]');
+    if (!older) throw new Error('initial lifecycle page did not expose older loader');
+    older.click();
+    await olderRequestIsInFlight();
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_lifecycle_execution_changed', task_id:'task-lifecycle-older-failure-browser', project_id:'project-lifecycle-older-failure-browser'}}));
+    await waitFor(function() { return !!document.querySelector('[data-lifecycle-execution-id="event-1"]'); }, 'full refresh retry after older failure', 4000);
+    if (document.querySelector('[data-lifecycle-refresh-error]')) throw new Error('full refresh retry left a refresh error');
+    await report('pass', '');
+  }
+  run().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+
+	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-older-failure.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-older-failure-profile")
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		server.URL+"/tasks/task-lifecycle-older-failure-browser",
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome lifecycle older failure fixture: %v", err)
+	}
+
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail: timed out waiting for lifecycle browser result"
+	}
+	stopBrowserProcess(cmd)
+	if outcome != "pass:" {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(stderr) > 8000 {
+			stderr = stderr[len(stderr)-8000:]
+		}
+		t.Fatalf("Task Detail Lifecycle older failure browser regression failed: %s\nChrome stderr tail:\n%s", outcome, stderr)
+	}
+
+	mu.Lock()
+	gotInitialCalls := initialCalls
+	gotProject, gotLimit := sawProject, sawLimit
+	mu.Unlock()
+	if gotInitialCalls != 2 {
+		t.Fatalf("older failure fixture received %d initial-page requests, want initial and retried full refresh", gotInitialCalls)
+	}
+	if !gotProject || !gotLimit {
+		t.Fatalf("older failure lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
+	}
+}
