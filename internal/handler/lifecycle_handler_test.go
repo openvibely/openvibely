@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -186,7 +189,10 @@ func TestTaskDetailLifecycleTabRendersSelectedMemoryClientUI(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	for _, want := range []string{"Selected memories", "Selected skills", "badge badge-outline", "renderBadgeRow", "r.selected_skills", "r.selected_memories"} {
+	for _, want := range []string{
+		"Selected memories", "Selected skills", "badge badge-outline", "renderBadgeRow", "row.selected_skills", "row.selected_memories",
+		`id="lifecycle-activity-scroll"`, `data-lifecycle-scrollport="true"`, `limit=' + pageSize`, "before=", "after=", "has_more", "next_cursor", "sse-task-event", "requestVersion", "data-lifecycle-load-older", "data-lifecycle-no-more",
+	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("expected lifecycle tab script to render lifecycle lists as badge rows containing %q, got:\n%s", want, body)
 		}
@@ -434,19 +440,19 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	var got []viewmodels.LifecycleExecutionView
+	var got viewmodels.LifecycleExecutionPageView
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(got) != 6 {
-		t.Fatalf("expected 6 views, got %d", len(got))
+	if len(got.Items) != 6 {
+		t.Fatalf("expected 6 views, got %d", len(got.Items))
 	}
 	summaries := map[string]string{}
 	byKey := map[string]viewmodels.LifecycleExecutionView{}
 	var route viewmodels.LifecycleExecutionView
 	var recall viewmodels.LifecycleExecutionView
 	var beforeRecall viewmodels.LifecycleExecutionView
-	for _, row := range got {
+	for _, row := range got.Items {
 		key := row.When + "/" + row.SkillKey
 		summaries[key] = row.Summary
 		byKey[key] = row
@@ -496,5 +502,193 @@ func TestHandler_GetTaskLifecycleExecutions_ReturnsPromptSafeView(t *testing.T) 
 		if bytes.Contains(rec.Body.Bytes(), forbidden) {
 			t.Fatalf("raw or unsafe lifecycle output leaked through prompt-safe view: %s", forbidden)
 		}
+	}
+}
+
+func TestHandler_GetTaskLifecycleExecutions_PaginatesAndPreservesProjectBoundary(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+
+	project := createProject(t, h, "lifecycle-page-handler")
+	task := createTask(t, h, project.ID, "Paged lifecycle task")
+	agent := &models.Agent{Name: "paged-lifecycle-agent", SystemPrompt: "x"}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	rows := []struct {
+		id string
+		at string
+	}{
+		{id: "handler-a", at: "2000-01-01 10:00:00"},
+		{id: "handler-b", at: "2000-01-01 11:00:00"},
+		{id: "handler-c", at: "2000-01-01 12:00:00"},
+		{id: "handler-d", at: "2000-01-01 13:00:00"},
+	}
+	for _, row := range rows {
+		exec := &models.LifecycleExecution{
+			TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete,
+			SkillKey: row.id, OutputContract: models.OutputContractActivitySummary,
+			Status: models.LifecycleExecCompleted, InputJSON: strings.Repeat("private input ", 500),
+			OutputJSON: `{"summary":"visible summary"}`,
+		}
+		if err := lifecycleRepo.CreateExecution(t.Context(), exec); err != nil {
+			t.Fatalf("create execution %s: %v", row.id, err)
+		}
+		if _, err := db.ExecContext(t.Context(), `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, row.id, row.at, exec.ID); err != nil {
+			t.Fatalf("set execution %s: %v", row.id, err)
+		}
+	}
+
+	getPage := func(path string) viewmodels.LifecycleExecutionPageView {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s returned %d: %s", path, rec.Code, rec.Body.String())
+		}
+		if strings.Contains(rec.Body.String(), "private input") {
+			t.Fatalf("paged lifecycle response leaked raw input payload")
+		}
+		var page viewmodels.LifecycleExecutionPageView
+		if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		return page
+	}
+
+	basePath := "/api/tasks/" + task.ID + "/lifecycle-executions?project_id=" + url.QueryEscape(project.ID) + "&limit=2"
+	first := getPage(basePath)
+	if got := lifecycleViewIDs(first.Items); !reflect.DeepEqual(got, []string{"handler-d", "handler-c"}) {
+		t.Fatalf("first page IDs = %v, want newest-first page", got)
+	}
+	if !first.HasMore || first.NextCursor == "" {
+		t.Fatalf("first page = %+v, want continuation cursor", first)
+	}
+	for _, item := range first.Items {
+		if item.Summary != "visible summary" {
+			t.Fatalf("page item lost compact summary: %+v", item)
+		}
+	}
+
+	second := getPage(basePath + "&before=" + url.QueryEscape(first.NextCursor))
+	if got := lifecycleViewIDs(second.Items); !reflect.DeepEqual(got, []string{"handler-b", "handler-a"}) {
+		t.Fatalf("second page IDs = %v, want older rows", got)
+	}
+	if second.HasMore || second.NextCursor != "" {
+		t.Fatalf("second page = %+v, want no more results", second)
+	}
+
+	newExec := &models.LifecycleExecution{
+		TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete,
+		SkillKey: "handler-new", OutputContract: models.OutputContractActivitySummary,
+		Status: models.LifecycleExecRunning, OutputJSON: `{"summary":"new insert"}`,
+	}
+	if err := lifecycleRepo.CreateExecution(t.Context(), newExec); err != nil {
+		t.Fatalf("create newer execution: %v", err)
+	}
+	if _, err := db.ExecContext(t.Context(), `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, "handler-new", "2000-01-01 14:00:00", newExec.ID); err != nil {
+		t.Fatalf("set newer execution: %v", err)
+	}
+	newer := getPage(basePath + "&after=" + url.QueryEscape(first.Items[0].ID))
+	if got := lifecycleViewIDs(newer.Items); !reflect.DeepEqual(got, []string{"handler-new"}) {
+		t.Fatalf("newer page IDs = %v, want live insert in fetch order", got)
+	}
+
+	for _, path := range []string{
+		basePath + "&before=not-a-cursor",
+		basePath + "&before=" + url.QueryEscape(first.NextCursor) + "&after=" + url.QueryEscape(first.Items[0].ID),
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET %s returned %d, want 400: %s", path, rec.Code, rec.Body.String())
+		}
+	}
+
+	foreignProject := createProject(t, h, "lifecycle-page-foreign")
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+task.ID+"/lifecycle-executions?project_id="+url.QueryEscape(foreignProject.ID), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound || strings.Contains(rec.Body.String(), "handler-") {
+		t.Fatalf("foreign lifecycle page response = %d %s, want isolated 404", rec.Code, rec.Body.String())
+	}
+}
+
+func lifecycleViewIDs(rows []viewmodels.LifecycleExecutionView) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids
+}
+
+func TestHandler_GetTaskLifecycleExecutions_BoundsPromptSafeDetailPayload(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+
+	project := createProject(t, h, "lifecycle-payload-bounds")
+	task := createTask(t, h, project.ID, "Bound lifecycle payload")
+	agent := &models.Agent{Name: "payload-agent", SystemPrompt: "x"}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	memories := make([]map[string]string, maxLifecycleMemoryViews+8)
+	for i := range memories {
+		memories[i] = map[string]string{"file": "memory-" + strconv.Itoa(i) + ".md", "summary": strings.Repeat("detail ", 80)}
+	}
+	memoryOutput, err := json.Marshal(map[string]any{"memories": memories})
+	if err != nil {
+		t.Fatalf("marshal memories: %v", err)
+	}
+	longSummary := strings.Repeat("summary ", 100)
+	for _, exec := range []*models.LifecycleExecution{
+		{
+			TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete,
+			SkillKey: "large-summary", OutputContract: models.OutputContractActivitySummary,
+			Status: models.LifecycleExecFailed, Error: strings.Repeat("error ", 100),
+			OutputJSON: `{"summary":"` + longSummary + `"}`,
+		},
+		{
+			TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleRouteTask,
+			SkillKey: "large-memory", OutputContract: models.OutputContractSelectedMemories,
+			Status: models.LifecycleExecCompleted, OutputJSON: string(memoryOutput),
+		},
+	} {
+		if err := lifecycleRepo.CreateExecution(t.Context(), exec); err != nil {
+			t.Fatalf("create execution: %v", err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+task.ID+"/lifecycle-executions?project_id="+url.QueryEscape(project.ID)+"&limit=2", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var page viewmodels.LifecycleExecutionPageView
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("expected two bounded detail views, got %d", len(page.Items))
+	}
+	for _, item := range page.Items {
+		if len(item.Summary) > maxLifecycleDisplayTextLen+3 || len(item.Error) > maxLifecycleDisplayTextLen+3 {
+			t.Fatalf("unbounded summary/error in lifecycle view: summary=%d error=%d", len(item.Summary), len(item.Error))
+		}
+		if len(item.SelectedMemories) > maxLifecycleMemoryViews {
+			t.Fatalf("unbounded selected memories in lifecycle view: %d", len(item.SelectedMemories))
+		}
+	}
+	if len(rec.Body.Bytes()) > 25000 {
+		t.Fatalf("lifecycle detail page payload is too large: %d bytes", len(rec.Body.Bytes()))
 	}
 }

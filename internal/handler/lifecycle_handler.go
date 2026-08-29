@@ -3,13 +3,16 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/lifecycle"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/viewmodels"
 )
 
@@ -179,19 +182,20 @@ func (h *Handler) reconcileAgentLifecycleHooks(ctx context.Context, agentID stri
 // summaries in task activity without cluttering the normal task board.
 //
 // @Summary List lifecycle executions for a task
-// @Description Returns lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task.
+// @Description Returns one bounded page of lifecycle hook invocations (routing, before-run preparation, after-complete learning) recorded for the given task. Results are newest-first; use next_cursor with before for older activity and the newest execution ID with after for live inserts.
 // @Tags Lifecycle
 // @Produce json
 // @Param id path string true "Task ID"
-// @Success 200 {array} viewmodels.LifecycleExecutionView
-// @Failure 400 {object} ErrorResponse "Invalid task ID"
+// @Param project_id query string false "Project ID"
+// @Param limit query int false "Page size (default 20, maximum 50)"
+// @Param before query string false "Opaque cursor for the next older page"
+// @Param after query string false "Newest execution ID or newer-page cursor"
+// @Success 200 {object} viewmodels.LifecycleExecutionPageView
+// @Failure 400 {object} ErrorResponse "Invalid task ID or page cursor"
 // @Failure 404 {object} ErrorResponse "Task not found"
 // @Failure 500 {object} ErrorResponse "Internal server error"
 // @Router /api/tasks/{id}/lifecycle-executions [get]
 func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
-	if h.lifecycleRepo == nil {
-		return c.JSON(http.StatusOK, []viewmodels.LifecycleExecutionView{})
-	}
 	taskID := strings.TrimSpace(c.Param("id"))
 	if taskID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "task id is required")
@@ -208,16 +212,50 @@ func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
 	if task == nil || task.ProjectID != projectID {
 		return echo.NewHTTPError(http.StatusNotFound, "task not found")
 	}
-	execs, err := h.lifecycleRepo.ListExecutionsForTask(c.Request().Context(), taskID)
+	if h.lifecycleRepo == nil {
+		return c.JSON(http.StatusOK, viewmodels.LifecycleExecutionPageView{
+			Items: make([]viewmodels.LifecycleExecutionView, 0),
+		})
+	}
+
+	before := strings.TrimSpace(c.QueryParam("before"))
+	after := strings.TrimSpace(c.QueryParam("after"))
+	if before != "" && after != "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "before and after cannot be used together")
+	}
+	limit := repository.LifecycleExecutionPageDefaultLimit
+	if rawLimit := strings.TrimSpace(c.QueryParam("limit")); rawLimit != "" {
+		if parsed, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsed > 0 {
+			limit = parsed
+			if limit > repository.LifecycleExecutionPageMaxLimit {
+				limit = repository.LifecycleExecutionPageMaxLimit
+			}
+		}
+	}
+	var page models.LifecycleExecutionPage
+	if before != "" {
+		page, err = h.lifecycleRepo.ListExecutionsForTaskPage(c.Request().Context(), taskID, limit, before)
+	} else if after != "" {
+		page, err = h.lifecycleRepo.ListExecutionsForTaskNewerPage(c.Request().Context(), taskID, limit, after)
+	} else {
+		page, err = h.lifecycleRepo.ListExecutionsForTaskPage(c.Request().Context(), taskID, limit, "")
+	}
 	if err != nil {
+		if errors.Is(err, repository.ErrLifecycleExecutionCursor) {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid lifecycle execution cursor")
+		}
 		applog.Infof("[handler] GetTaskLifecycleExecutions task=%s error: %v", taskID, err)
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	views := make([]viewmodels.LifecycleExecutionView, 0, len(execs))
-	for _, e := range execs {
+	views := make([]viewmodels.LifecycleExecutionView, 0, len(page.Items))
+	for _, e := range page.Items {
 		views = append(views, toLifecycleExecutionView(e))
 	}
-	return c.JSON(http.StatusOK, views)
+	return c.JSON(http.StatusOK, viewmodels.LifecycleExecutionPageView{
+		Items:      views,
+		HasMore:    page.HasMore,
+		NextCursor: page.NextCursor,
+	})
 }
 
 // GetLifecycleExecutionEvents returns the durable trace for one lifecycle execution.
@@ -268,9 +306,8 @@ func toLifecycleExecutionView(e models.LifecycleExecution) viewmodels.LifecycleE
 		SkillKey:       e.SkillKey,
 		Status:         string(e.Status),
 		OutputContract: string(e.OutputContract),
-		Error:          e.Error,
-		StartedAt:      e.StartedAt,
-		CompletedAt:    e.CompletedAt,
+		Error:          truncateLifecycleDisplay(e.Error),
+		StartedAt:      e.StartedAt, CompletedAt: e.CompletedAt,
 	}
 	if e.OutputJSON != "" {
 		v.Summary = extractStructuredSummary(e.OutputContract, e.OutputJSON)
@@ -305,17 +342,17 @@ func extractStructuredSummary(contract models.LifecycleOutputContract, raw strin
 	switch contract {
 	case models.OutputContractContextBlock:
 		if s, ok := probe["title"].(string); ok && s != "" {
-			return s
+			return truncateLifecycleDisplay(s)
 		}
 	case models.OutputContractActivitySummary,
 		models.OutputContractLearningSummary,
 		models.OutputContractLibraryUpdateSummary:
 		if s, ok := probe["summary"].(string); ok {
-			return s
+			return truncateLifecycleDisplay(s)
 		}
 	case models.OutputContractSelectedMode:
 		if s, ok := probe["mode"].(string); ok {
-			return s
+			return truncateLifecycleDisplay(s)
 		}
 	case models.OutputContractSelectedSkills:
 		if summary := selectedSkillsSummary(probe); summary != "" {
@@ -326,13 +363,12 @@ func extractStructuredSummary(contract models.LifecycleOutputContract, raw strin
 	}
 	return ""
 }
-
 func selectedSkillsSummary(probe map[string]any) string {
 	parts := selectedSkillsFromProbe(probe)
 	if len(parts) == 0 {
 		return ""
 	}
-	return "Selected skills: " + strings.Join(parts, ", ")
+	return truncateLifecycleDisplay("Selected skills: " + strings.Join(parts, ", "))
 }
 
 func extractSelectedSkills(contract models.LifecycleOutputContract, raw string) []string {
@@ -366,12 +402,24 @@ func selectedSkillsFromProbe(probe map[string]any) []string {
 			continue
 		}
 		seen[s] = struct{}{}
+		if len(s) > maxLifecycleSkillLen {
+			s = s[:maxLifecycleSkillLen] + "..."
+		}
 		parts = append(parts, s)
+		if len(parts) == maxLifecycleSelectedSkills {
+			break
+		}
 	}
 	return parts
 }
 
-const maxLifecycleMemoryDetailLen = 240
+const (
+	maxLifecycleMemoryDetailLen = 240
+	maxLifecycleSelectedSkills  = 32
+	maxLifecycleSkillLen        = 160
+	maxLifecycleMemoryViews     = 24
+	maxLifecycleDisplayTextLen  = 240
+)
 
 func extractSelectedMemoryViews(e models.LifecycleExecution, raw string) []viewmodels.SelectedMemoryView {
 	if e.OutputContract == models.OutputContractSelectedMemories {
@@ -391,6 +439,9 @@ func extractSelectedMemoryViews(e models.LifecycleExecution, raw string) []viewm
 	out := make([]viewmodels.SelectedMemoryView, 0, len(cb.SelectedMemories)+len(cb.Sources))
 	seen := map[string]struct{}{}
 	for _, memory := range cb.SelectedMemories {
+		if len(out) >= maxLifecycleMemoryViews {
+			break
+		}
 		file := sanitizeMemoryIdentifier(memory.File)
 		if strings.TrimSpace(memory.File) != "" && file == "" {
 			continue
@@ -412,6 +463,9 @@ func extractSelectedMemoryViews(e models.LifecycleExecution, raw string) []viewm
 		})
 	}
 	for _, source := range cb.Sources {
+		if len(out) >= maxLifecycleMemoryViews {
+			break
+		}
 		file := sanitizeMemoryIdentifier(source)
 		if file == "" {
 			continue
@@ -434,6 +488,9 @@ func selectedMemoryViewsFromProbe(probe map[string]any) []viewmodels.SelectedMem
 	out := make([]viewmodels.SelectedMemoryView, 0, len(rawMemories))
 	seen := map[string]struct{}{}
 	for _, raw := range rawMemories {
+		if len(out) >= maxLifecycleMemoryViews {
+			break
+		}
 		entry, ok := raw.(map[string]any)
 		if !ok {
 			continue
@@ -477,6 +534,13 @@ func sanitizeMemoryIdentifier(value string) string {
 		return ""
 	}
 	return truncateLifecycleMemoryDetail(value)
+}
+
+func truncateLifecycleDisplay(value string) string {
+	if len(value) <= maxLifecycleDisplayTextLen {
+		return value
+	}
+	return value[:maxLifecycleDisplayTextLen] + "..."
 }
 
 func truncateLifecycleMemoryDetail(value string) string {

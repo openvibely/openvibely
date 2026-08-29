@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -527,6 +529,176 @@ func TestLifecycleRepo_ListExecutionsForTaskQueryPlanUsesTaskStartedIndex(t *tes
 	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
 		t.Fatalf("lifecycle list plan = %q, want no temporary sort", plan)
 	}
+}
+
+func TestLifecycleRepo_ListExecutionsForTaskPage_BoundedKeysetAndDirection(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Lifecycle Page Test", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	rows := []struct {
+		id string
+		at string
+	}{
+		{id: "exec-a", at: "2000-01-01 10:00:00"},
+		{id: "exec-b", at: "2000-01-01 11:00:00"},
+		{id: "exec-c", at: "2000-01-01 12:00:00"},
+		{id: "exec-d", at: "2000-01-01 12:00:00"},
+		{id: "exec-e", at: "2000-01-01 13:00:00"},
+	}
+	for _, row := range rows {
+		exec := &models.LifecycleExecution{
+			TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete,
+			SkillKey: row.id, OutputContract: models.OutputContractActivitySummary,
+			Status: models.LifecycleExecCompleted, OutputJSON: `{"summary":"compact"}`,
+		}
+		if err := repo.CreateExecution(ctx, exec); err != nil {
+			t.Fatalf("create execution %s: %v", row.id, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, row.id, row.at, exec.ID); err != nil {
+			t.Fatalf("set execution %s: %v", row.id, err)
+		}
+	}
+
+	first, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 2, "")
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if got := lifecycleExecutionIDs(first.Items); !reflect.DeepEqual(got, []string{"exec-e", "exec-d"}) {
+		t.Fatalf("first page IDs = %v, want newest-first page", got)
+	}
+	if !first.HasMore || first.NextCursor == "" {
+		t.Fatalf("first page = %+v, want older continuation cursor", first)
+	}
+
+	second, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 2, first.NextCursor)
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if got := lifecycleExecutionIDs(second.Items); !reflect.DeepEqual(got, []string{"exec-c", "exec-b"}) {
+		t.Fatalf("second page IDs = %v, want stable tie-break and older order", got)
+	}
+	third, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 2, second.NextCursor)
+	if err != nil {
+		t.Fatalf("third page: %v", err)
+	}
+	if got := lifecycleExecutionIDs(third.Items); !reflect.DeepEqual(got, []string{"exec-a"}) {
+		t.Fatalf("third page IDs = %v, want final row", got)
+	}
+	if third.HasMore || third.NextCursor != "" {
+		t.Fatalf("final page = %+v, want no more results", third)
+	}
+
+	for _, row := range []struct {
+		id string
+		at string
+	}{{id: "exec-f", at: "2000-01-01 14:00:00"}, {id: "exec-g", at: "2000-01-01 15:00:00"}} {
+		exec := &models.LifecycleExecution{
+			TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete,
+			SkillKey: row.id, OutputContract: models.OutputContractActivitySummary,
+			Status: models.LifecycleExecCompleted,
+		}
+		if err := repo.CreateExecution(ctx, exec); err != nil {
+			t.Fatalf("create newer execution %s: %v", row.id, err)
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE lifecycle_executions SET id = ?, started_at = ? WHERE id = ?`, row.id, row.at, exec.ID); err != nil {
+			t.Fatalf("set newer execution %s: %v", row.id, err)
+		}
+	}
+
+	newer, err := repo.ListExecutionsForTaskNewerPage(ctx, task.ID, 1, first.Items[0].ID)
+	if err != nil {
+		t.Fatalf("newer page: %v", err)
+	}
+	if got := lifecycleExecutionIDs(newer.Items); !reflect.DeepEqual(got, []string{"exec-f"}) {
+		t.Fatalf("newer page IDs = %v, want oldest-first inserts", got)
+	}
+	if !newer.HasMore || newer.NextCursor == "" {
+		t.Fatalf("newer page = %+v, want newer continuation cursor", newer)
+	}
+	newest, err := repo.ListExecutionsForTaskNewerPage(ctx, task.ID, 1, newer.NextCursor)
+	if err != nil {
+		t.Fatalf("newer continuation: %v", err)
+	}
+	if got := lifecycleExecutionIDs(newest.Items); !reflect.DeepEqual(got, []string{"exec-g"}) {
+		t.Fatalf("newer continuation IDs = %v, want next insert", got)
+	}
+	if newest.HasMore {
+		t.Fatalf("newer final page = %+v, want no more results", newest)
+	}
+
+	if _, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 2, "not-a-valid-cursor"); !errors.Is(err, ErrLifecycleExecutionCursor) {
+		t.Fatalf("invalid older cursor error = %v, want %v", err, ErrLifecycleExecutionCursor)
+	}
+	if _, err := repo.ListExecutionsForTaskNewerPage(ctx, task.ID, 2, first.NextCursor); !errors.Is(err, ErrLifecycleExecutionCursor) {
+		t.Fatalf("older cursor accepted for newer page: %v", err)
+	}
+	if strings.Contains(listExecutionsForTaskPageSQL, "input_json") || strings.Contains(listExecutionsForTaskPageSQL, "task_run_id") {
+		t.Fatalf("page projection contains protected lifecycle detail columns: %s", listExecutionsForTaskPageSQL)
+	}
+}
+
+func TestLifecycleRepo_ListExecutionsForTaskPage_LimitAndQueryPlan(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	plan := explainLifecycleRepoQueryPlan(t, db, listExecutionsForTaskPageSQL, "large-page-task", 51)
+	if !strings.Contains(plan, "idx_lifecycle_executions_task_started") {
+		t.Fatalf("lifecycle page plan = %q, want task started index", plan)
+	}
+	if strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("lifecycle page plan = %q, want no temporary sort", plan)
+	}
+	for name, query := range map[string]string{
+		"older": listExecutionsForTaskOlderPageSQL,
+		"newer": listExecutionsForTaskNewerPageSQL,
+	} {
+		plan := explainLifecycleRepoQueryPlan(t, db, query, "large-page-task", "large-page-task", "cursor", 51)
+		if !strings.Contains(plan, "idx_lifecycle_executions_task_started") || strings.Contains(plan, "USE TEMP B-TREE FOR ORDER BY") {
+			t.Fatalf("lifecycle %s page plan = %q, want task started index without temporary sort", name, plan)
+		}
+	}
+
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+	agent := createLifecycleTestAgent(t, agentRepo)
+	task := &models.Task{ProjectID: "default", Title: "Large Lifecycle Page", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	for i := 0; i < 75; i++ {
+		exec := &models.LifecycleExecution{
+			TaskID: task.ID, AgentID: agent.ID, When: models.LifecycleAfterComplete,
+			SkillKey: fmt.Sprintf("large-%03d", i), OutputContract: models.OutputContractActivitySummary,
+			Status: models.LifecycleExecCompleted,
+		}
+		if err := repo.CreateExecution(ctx, exec); err != nil {
+			t.Fatalf("create large execution %d: %v", i, err)
+		}
+	}
+	page, err := repo.ListExecutionsForTaskPage(ctx, task.ID, 1000, "")
+	if err != nil {
+		t.Fatalf("large page: %v", err)
+	}
+	if len(page.Items) != LifecycleExecutionPageMaxLimit || !page.HasMore || page.NextCursor == "" {
+		t.Fatalf("large page len=%d has_more=%v cursor=%q, want bounded max page", len(page.Items), page.HasMore, page.NextCursor)
+	}
+}
+
+func lifecycleExecutionIDs(rows []models.LifecycleExecution) []string {
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	return ids
 }
 
 func explainLifecycleRepoQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) string {

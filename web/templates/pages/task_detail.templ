@@ -916,33 +916,138 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 			</div>
 		</div>
 		<!-- End Tab: Attachments -->
-		<!-- Tab: Lifecycle (runbook §Rollout step 17) -->
-		<div id="tab-lifecycle" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "lifecycle") }>
-			<div class="card bg-base-100 shadow-sm border border-base-300">
-				<div class="card-body">
-					<div class="flex items-center justify-between mb-3">
-						<h4 class="text-lg font-bold">Lifecycle Activity</h4>
-						<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
-					</div>
-						<p class="text-sm opacity-70 mb-3">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p>
-						<div id="lifecycle-activity-list" data-task-id={ task.ID } data-project-id={ task.ProjectID } class="space-y-2">
-							<p class="text-sm opacity-50">Loading lifecycle activity...</p>
+			<!-- Tab: Lifecycle (runbook §Rollout step 17) -->
+			<div id="tab-lifecycle" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "lifecycle") }>
+				<div class="card bg-base-100 shadow-sm border border-base-300">
+					<div class="card-body">
+						<div class="flex items-center justify-between mb-3">
+							<h4 class="text-lg font-bold">Lifecycle Activity</h4>
+							<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
 						</div>
+						<p class="text-sm opacity-70 mb-3">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p>
+						<div id="lifecycle-activity-scroll" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-lifecycle-scrollport="true" tabindex="0" aria-label="Lifecycle activity" class="max-h-128 overflow-y-auto pr-1" style="max-height: 32rem;">
+							<div id="lifecycle-activity-list" data-task-id={ task.ID } data-project-id={ task.ProjectID } class="space-y-2">
+								<p class="text-sm opacity-50">Loading lifecycle activity...</p>
+							</div>
+						</div>
+					</div>
 				</div>
-			</div>
-			<script>
-				(function() {
-					function statusBadge(status) {
-						var map = { completed: 'badge-success', failed: 'badge-error', skipped: 'badge-ghost', queued: 'badge-info', running: 'badge-warning' };
-						var cls = map[status] || 'badge-ghost';
-						return '<span class="badge ' + cls + ' badge-sm">' + status + '</span>';
-					}
+				<script>
+					(function() {
+						var pageSize = 20;
+						var states = window._taskLifecycleActivityStates = window._taskLifecycleActivityStates || {};
+						var previousHandlers = window._taskLifecycleActivityHandlers;
+						if (previousHandlers && previousHandlers.cleanup) previousHandlers.cleanup();
+
+						function stateKey(taskID, projectID) {
+							return String(projectID || '') + ':' + String(taskID || '');
+						}
+
+						function getState(taskID, projectID) {
+							var key = stateKey(taskID, projectID);
+							var state = states[key];
+							if (!state) {
+								state = {
+									taskID: taskID,
+									projectID: projectID,
+									records: Object.create(null),
+									order: [],
+									initialized: false,
+									olderCursor: '',
+									olderHasMore: false,
+									loadedOlder: false,
+									olderLoading: false,
+									olderError: '',
+									newerLoading: false,
+									newerError: '',
+									refreshLoading: false,
+									refreshError: '',
+									initialLoading: false,
+									requestVersion: 0,
+									requestSerial: 0,
+									refreshRequestID: 0,
+									olderRequestID: 0,
+									newerRequestID: 0,
+									container: null,
+									scrollTop: 0,
+									anchorID: '',
+									anchorOffset: 0,
+									savedScrollTop: null,
+									savedAnchorID: '',
+									savedAnchorOffset: 0,
+									restoreSerial: 0,
+									liveTimer: null
+								};
+								states[key] = state;
+							}
+							state.taskID = taskID;
+							state.projectID = projectID;
+							return state;
+						}
+
+						function lifecycleContainer(taskID, projectID) {
+							var container = document.getElementById('lifecycle-activity-list');
+							if (!container) return null;
+							if (taskID && container.dataset.taskId !== taskID) return null;
+							if (projectID && container.dataset.projectId !== projectID) return null;
+							return container;
+						}
+
+						function scrollport(container) {
+							var current = container;
+							while (current) {
+								if (current.hasAttribute && current.hasAttribute('data-lifecycle-scrollport')) return current;
+								current = current.parentElement;
+							}
+							return container;
+						}
+
+						function captureScroll(state, container) {
+							var port = scrollport(container);
+							if (!port) return;
+							state.scrollTop = port.scrollTop || 0;
+							var bounds = port.getBoundingClientRect();
+							var rows = container.querySelectorAll('[data-lifecycle-execution-id]');
+							state.anchorID = '';
+							state.anchorOffset = 0;
+							for (var i = 0; i < rows.length; i++) {
+								var rect = rows[i].getBoundingClientRect();
+								if (rect.bottom > bounds.top + 1 && rect.top < bounds.bottom + 1) {
+									state.anchorID = rows[i].getAttribute('data-lifecycle-execution-id') || '';
+									state.anchorOffset = rect.top - bounds.top;
+									break;
+								}
+							}
+						}
+
+						function rememberAllScroll() {
+							Object.keys(states).forEach(function(key) {
+								var state = states[key];
+								if (!state.container) return;
+								captureScroll(state, state.container);
+								state.savedScrollTop = state.scrollTop;
+								state.savedAnchorID = state.anchorID;
+								state.savedAnchorOffset = state.anchorOffset;
+							});
+						}
+
 						function escapeText(value) {
 							return String(value == null ? '' : value)
 								.replace(/&/g, '&amp;')
 								.replace(/</g, '&lt;')
 								.replace(/>/g, '&gt;');
 						}
+
+						function escapeAttribute(value) {
+							return escapeText(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+						}
+
+						function statusBadge(status) {
+							var map = { completed: 'badge-success', failed: 'badge-error', skipped: 'badge-ghost', queued: 'badge-info', running: 'badge-warning', pending: 'badge-info' };
+							var cls = map[status] || 'badge-ghost';
+							return '<span class="badge ' + cls + ' badge-sm">' + escapeText(status) + '</span>';
+						}
+
 						function renderBadgeRow(label, values) {
 							if (!Array.isArray(values) || values.length === 0) return '';
 							var seen = Object.create(null);
@@ -953,65 +1058,371 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								badges.push('<span class="font-mono text-xs badge badge-outline">' + escapeText(value) + '</span>');
 							});
 							if (badges.length === 0) return '';
-							return '<p class="text-sm mt-1 flex items-center gap-2 flex-wrap">' +
-								'<span>' + escapeText(label) + ':</span> ' + badges.join(' ') +
-							'</p>';
+							return '<p class="text-sm mt-1 flex items-center gap-2 flex-wrap"><span>' + escapeText(label) + ':</span> ' + badges.join(' ') + '</p>';
 						}
+
 						function memoryLabels(memories) {
 							if (!Array.isArray(memories)) return [];
-							return memories.map(function(m) { return m.file || m.topic || ''; });
+							return memories.map(function(memory) { return memory && (memory.file || memory.topic) || ''; });
 						}
-							window.refreshLifecycleActivity = async function(taskID, projectID) {
-								var container = document.getElementById('lifecycle-activity-list');
-								if (!container) return;
-								projectID = projectID || container.dataset.projectId || '';
-								var query = projectID ? '?project_id=' + encodeURIComponent(projectID) : '';
-								try {
-									var response = await fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions' + query, { headers: { 'Accept': 'application/json' } });
-								if (!response.ok) throw new Error('failed to load lifecycle executions');
-								var rows = await response.json();
-								if (!Array.isArray(rows) || rows.length === 0) {
-									container.innerHTML = '<p class="text-sm opacity-50">No lifecycle activity recorded yet.</p>';
-									return;
-								}
-									container.innerHTML = rows.map(function(r) {
-										var selectedSkills = renderBadgeRow('Selected skills', r.selected_skills);
-										var selectedMemories = renderBadgeRow('Selected memories', memoryLabels(r.selected_memories));
-										var hasStructuredRoute = selectedSkills || selectedMemories;
-										var summary = r.summary && !hasStructuredRoute ? '<p class="text-sm mt-1">' + escapeText(r.summary) + '</p>' : '';
-										var error = r.error ? '<p class="text-xs text-error mt-1">' + escapeText(r.error) + '</p>' : '';
-										var when = r.completed_at ? new Date(r.completed_at).toLocaleString() : new Date(r.started_at).toLocaleString();
-										return '<div class="border border-base-300 rounded-lg p-3">' +
-											'<div class="flex items-center justify-between flex-wrap gap-2">' +
-												'<div class="flex items-center gap-2 flex-wrap">' +
-													'<span class="font-mono text-xs opacity-70">' + escapeText(r.when || '') + '</span>' +
-													'<span class="text-sm font-medium">' + escapeText(r.skill_key || '') + '</span>' +
-													statusBadge(r.status || '') +
-												'</div>' +
-												'<span class="text-xs opacity-60">' + escapeText(when) + '</span>' +
-											'</div>' +
-											summary + selectedSkills + selectedMemories + error +
-										'</div>';
-									}).join('');
-							} catch (err) {
-							container.innerHTML = '<p class="text-sm text-error">' + escapeText(err.message || err) + '</p>';
+
+						function displayTime(value) {
+							var date = new Date(value);
+							return isNaN(date.getTime()) ? String(value || '') : date.toLocaleString();
 						}
-					};
-					if (document.querySelector('[data-tab="lifecycle"].tab-active')) {
-						var el = document.getElementById('lifecycle-activity-list');
-						if (el) window.refreshLifecycleActivity(el.dataset.taskId);
+
+						function timestamp(value) {
+							var parsed = Date.parse(value || '');
+							return isNaN(parsed) ? 0 : parsed;
+						}
+
+						function sortRecords(state) {
+							state.order = Object.keys(state.records).sort(function(leftID, rightID) {
+								var left = state.records[leftID] || {};
+								var right = state.records[rightID] || {};
+								var timeDifference = timestamp(right.started_at) - timestamp(left.started_at);
+								if (timeDifference !== 0) return timeDifference;
+								if (String(right.id || '') === String(left.id || '')) return 0;
+								return String(right.id || '') < String(left.id || '') ? 1 : -1;
+							});
 					}
-					document.addEventListener('click', function(ev) {
-						var tab = ev.target.closest && ev.target.closest('[data-tab="lifecycle"]');
-						if (!tab) return;
-						var el = document.getElementById('lifecycle-activity-list');
-						if (el) window.refreshLifecycleActivity(el.dataset.taskId);
-					});
+
+						function mergeRows(state, rows) {
+							if (!Array.isArray(rows)) return;
+							rows.forEach(function(row) {
+								if (!row || !row.id) return;
+								state.records[String(row.id)] = row;
+							});
+						sortRecords(state);
+						}
+
+						function rowMarkup(row) {
+							var selectedSkills = renderBadgeRow('Selected skills', row.selected_skills);
+							var selectedMemories = renderBadgeRow('Selected memories', memoryLabels(row.selected_memories));
+							var hasStructuredRoute = selectedSkills || selectedMemories;
+							var summary = row.summary && !hasStructuredRoute ? '<p class="text-sm mt-1">' + escapeText(row.summary) + '</p>' : '';
+							var error = row.error ? '<p class="text-xs text-error mt-1">' + escapeText(row.error) + '</p>' : '';
+							var when = row.completed_at ? displayTime(row.completed_at) : displayTime(row.started_at);
+							return '<div data-lifecycle-execution-id="' + escapeAttribute(row.id) + '" class="border border-base-300 rounded-lg p-3">' +
+								'<div class="flex items-center justify-between flex-wrap gap-2">' +
+								'<div class="flex items-center gap-2 flex-wrap">' +
+								'<span class="font-mono text-xs opacity-70">' + escapeText(row.when || '') + '</span>' +
+								'<span class="text-sm font-medium">' + escapeText(row.skill_key || '') + '</span>' +
+								statusBadge(row.status || '') +
+								'</div><span class="text-xs opacity-60">' + escapeText(when) + '</span></div>' +
+								summary + selectedSkills + selectedMemories + error + '</div>';
+						}
+
+						function renderState(state, container, preservePosition) {
+							var previousContainer = state.container;
+							if (preservePosition && previousContainer === container) captureScroll(state, container);
+							var anchorID = state.anchorID;
+							var anchorOffset = state.anchorOffset;
+							var savedScrollTop = state.scrollTop;
+							if (preservePosition && previousContainer !== container && state.savedAnchorID) {
+								anchorID = state.savedAnchorID;
+								anchorOffset = state.savedAnchorOffset;
+								savedScrollTop = state.savedScrollTop == null ? 0 : state.savedScrollTop;
+							}
+							state.container = container;
+							var html = '';
+							if (state.order.length === 0) {
+								if (state.initialLoading) {
+									html = '<p data-lifecycle-loading class="text-sm opacity-50">Loading lifecycle activity...</p>';
+												} else if (state.refreshLoading) {
+													html = '<p data-lifecycle-refresh-loading class="text-sm opacity-50">Refreshing lifecycle activity...</p>';
+												} else if (state.refreshError) {									html = '<p data-lifecycle-error class="text-sm text-error">' + escapeText(state.refreshError) + ' <button type="button" data-lifecycle-retry="refresh" class="btn btn-ghost btn-xs">Retry</button></p>';
+								} else if (state.initialized) {
+									html = '<p data-lifecycle-empty class="text-sm opacity-50">No lifecycle activity recorded yet.</p>';
+								}
+								} else {
+									state.order.forEach(function(id) { html += rowMarkup(state.records[id]); });
+									if (state.olderLoading) {									html += '<p data-lifecycle-loading-older class="text-xs opacity-50 text-center py-2">Loading older lifecycle activity...</p>';
+								} else if (state.olderError) {
+									html += '<p data-lifecycle-older-error class="text-xs text-error text-center py-2">' + escapeText(state.olderError) + ' <button type="button" data-lifecycle-retry="older" class="btn btn-ghost btn-xs">Retry</button></p>';
+								} else if (state.olderHasMore) {
+									html += '<p class="text-center py-2"><button type="button" data-lifecycle-load-older class="btn btn-ghost btn-sm">Load older lifecycle activity</button></p>';
+									} else {
+										html += '<p data-lifecycle-no-more class="text-xs opacity-40 text-center py-2">No more lifecycle activity.</p>';
+									}
+									if (state.refreshLoading) html += '<p data-lifecycle-refresh-loading class="text-xs opacity-50">Refreshing lifecycle activity...</p>';
+									if (state.refreshError) html += '<p data-lifecycle-refresh-error class="text-xs text-error">' + escapeText(state.refreshError) + ' <button type="button" data-lifecycle-retry="refresh" class="btn btn-ghost btn-xs">Retry</button></p>';
+									if (state.newerLoading) html += '<p data-lifecycle-loading-newer class="text-xs opacity-50 text-center py-2">Checking for new lifecycle activity...</p>';								if (state.newerError) html += '<p data-lifecycle-newer-error class="text-xs text-error text-center py-2">' + escapeText(state.newerError) + ' <button type="button" data-lifecycle-retry="newer" class="btn btn-ghost btn-xs">Retry</button></p>';
+							}
+							container.innerHTML = html;
+							var renderID = ++state.restoreSerial;
+							if (!preservePosition) return;
+							var apply = function() {
+								if (state.container !== container || state.restoreSerial !== renderID) return;
+								var port = scrollport(container);
+								var row = anchorID && container.querySelector('[data-lifecycle-execution-id="' + escapeAttribute(anchorID) + '"]');
+								state.restoring = true;
+								if (row) {
+									var portRect = port.getBoundingClientRect();
+									var rowRect = row.getBoundingClientRect();
+									port.scrollTop += (rowRect.top - portRect.top) - anchorOffset;
+								} else {
+									port.scrollTop = savedScrollTop || 0;
+								}
+								setTimeout(function() {
+									if (state.container === container && state.restoreSerial === renderID) state.restoring = false;
+								}, 0);
+							};
+							apply();
+							if (window.requestAnimationFrame) window.requestAnimationFrame(apply); else setTimeout(apply, 0);
+							if (previousContainer !== container) {
+								state.savedScrollTop = null;
+								state.savedAnchorID = '';
+							}
+						}
+
+						function normalizePage(payload) {
+							if (Array.isArray(payload)) return { items: payload, hasMore: false, nextCursor: '' };
+							if (!payload || !Array.isArray(payload.items)) throw new Error('invalid lifecycle page response');
+							return {
+								items: payload.items,
+								hasMore: payload.has_more === true && !!payload.next_cursor,
+								nextCursor: String(payload.next_cursor || '')
+							};
+						}
+
+						function fetchPage(taskID, projectID, direction, cursor) {
+							var params = ['project_id=' + encodeURIComponent(projectID || ''), 'limit=' + pageSize];
+							if (cursor) params.push((direction === 'older' ? 'before=' : 'after=') + encodeURIComponent(cursor));
+							return fetch('/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions?' + params.join('&'), { headers: { 'Accept': 'application/json' } }).then(function(response) {
+								if (!response.ok) throw new Error('failed to load lifecycle executions');
+								return response.json();
+							}).then(normalizePage);
+						}
+
+						function requestIsCurrent(state, container, version, requestID, direction) {
+							if (state.requestVersion !== version || state.container !== container) return false;
+							if (!document.documentElement || !document.documentElement.contains(container)) return false;
+							if (direction === 'refresh') return state.refreshRequestID === requestID;
+							if (direction === 'older') return state.olderRequestID === requestID;
+							return state.newerRequestID === requestID;
+						}
+
+						function refreshLifecycleActivity(taskID, projectID) {
+							var container = lifecycleContainer(taskID, projectID);
+							if (!container) return Promise.resolve();
+							projectID = projectID || container.dataset.projectId || '';
+							var state = getState(taskID, projectID);
+							var version = ++state.requestVersion;
+							var requestID = ++state.requestSerial;
+							state.refreshRequestID = requestID;
+							state.olderRequestID = 0;
+							state.newerRequestID = 0;
+							state.olderLoading = false;
+							state.newerLoading = false;
+							state.olderError = '';
+							state.newerError = '';
+							state.refreshLoading = true;
+							state.refreshError = '';
+							state.initialLoading = !state.initialized && state.order.length === 0;
+							renderState(state, container, state.order.length > 0);
+							return fetchPage(taskID, projectID, 'initial', '').then(function(page) {
+								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return;
+								var firstLoad = !state.initialized;
+								if (!state.loadedOlder) {
+									state.records = Object.create(null);
+									state.order = [];
+								}
+								mergeRows(state, page.items);
+								if (firstLoad || !state.loadedOlder) {
+									state.olderCursor = page.nextCursor || '';
+									state.olderHasMore = page.hasMore;
+								}
+								state.initialized = true;
+								state.initialLoading = false;
+								state.refreshLoading = false;
+								state.refreshError = '';
+								state.newerError = '';
+								renderState(state, container, true);
+							}).catch(function(error) {
+								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return;
+								state.initialLoading = false;
+								state.refreshLoading = false;
+								state.refreshError = error && error.message || 'Unable to load lifecycle activity';
+								renderState(state, container, state.order.length > 0);
+							});
+						}
+
+						function loadOlder(taskID, projectID) {
+							var container = lifecycleContainer(taskID, projectID);
+							if (!container) return Promise.resolve();
+							projectID = projectID || container.dataset.projectId || '';
+							var state = getState(taskID, projectID);
+							if (!state.initialized || !state.olderHasMore || state.olderLoading) return Promise.resolve();
+							var cursor = state.olderCursor;
+							if (!cursor) {
+								state.olderHasMore = false;
+								renderState(state, container, true);
+								return Promise.resolve();
+							}
+							var version = state.requestVersion;
+							var requestID = ++state.requestSerial;
+							state.olderRequestID = requestID;
+							state.olderLoading = true;
+							state.olderError = '';
+							renderState(state, container, true);
+							return fetchPage(taskID, projectID, 'older', cursor).then(function(page) {
+								if (!requestIsCurrent(state, container, version, requestID, 'older')) return;
+								mergeRows(state, page.items);
+								state.loadedOlder = true;
+								state.olderCursor = page.nextCursor || '';
+								state.olderHasMore = page.hasMore && page.items.length > 0;
+								state.olderLoading = false;
+								state.olderError = '';
+								renderState(state, container, true);
+							}).catch(function(error) {
+								if (!requestIsCurrent(state, container, version, requestID, 'older')) return;
+								state.olderLoading = false;
+								state.olderError = error && error.message || 'Unable to load older lifecycle activity';
+								renderState(state, container, true);
+							});
+						}
+
+						function loadNewer(taskID, projectID, catchupCount) {
+							var container = lifecycleContainer(taskID, projectID);
+							if (!container) return Promise.resolve();
+							projectID = projectID || container.dataset.projectId || '';
+							var state = getState(taskID, projectID);
+							if (!state.initialized) return refreshLifecycleActivity(taskID, projectID);
+							if (state.newerLoading) return Promise.resolve();
+							var newest = state.order.length > 0 && state.records[state.order[0]];
+							if (!newest || !newest.id) return refreshLifecycleActivity(taskID, projectID);
+							var version = state.requestVersion;
+							var requestID = ++state.requestSerial;
+							state.newerRequestID = requestID;
+							state.newerLoading = true;
+							state.newerError = '';
+							renderState(state, container, true);
+							return fetchPage(taskID, projectID, 'newer', newest.id).then(function(page) {
+								if (!requestIsCurrent(state, container, version, requestID, 'newer')) return;
+								mergeRows(state, page.items);
+								state.newerLoading = false;
+								state.newerError = '';
+							renderState(state, container, true);
+								if (page.hasMore && page.items.length > 0 && (catchupCount || 0) < 4) {
+									setTimeout(function() { loadNewer(taskID, projectID, (catchupCount || 0) + 1); }, 0);
+								}
+							}).catch(function(error) {
+								if (!requestIsCurrent(state, container, version, requestID, 'newer')) return;
+								state.newerLoading = false;
+								state.newerError = error && error.message || 'Unable to check for new lifecycle activity';
+								renderState(state, container, true);
+							});
+						}
+
+						function scheduleLiveRefresh(taskID, projectID, mode) {
+							var state = getState(taskID, projectID);
+							if (state.liveTimer) clearTimeout(state.liveTimer);
+							state.liveTimer = setTimeout(function() {
+								state.liveTimer = null;
+								if (mode === 'newer') loadNewer(taskID, projectID, 0);
+								else refreshLifecycleActivity(taskID, projectID);
+							}, 150);
+						}
+
+						function handleScroll() {
+							var container = document.getElementById('lifecycle-activity-list');
+							var panel = document.getElementById('tab-lifecycle');
+							if (!container || (panel && panel.classList.contains('hidden'))) return;
+							var state = getState(container.dataset.taskId, container.dataset.projectId || '');
+							if (!state.initialized || state.restoring || state.olderLoading || !state.olderHasMore) return;
+							captureScroll(state, container);
+							var port = scrollport(container);
+							var nearBottom = port !== container ? port.scrollHeight - port.scrollTop - port.clientHeight < 180 : container.getBoundingClientRect().bottom - window.innerHeight < 180;
+							if (nearBottom) loadOlder(state.taskID, state.projectID);
+						}
+
+						function handleClick(event) {
+							var target = event.target;
+							var olderButton = target && target.closest && target.closest('[data-lifecycle-load-older]');
+							if (olderButton) {
+								event.preventDefault();
+								var olderContainer = document.getElementById('lifecycle-activity-list');
+								if (olderContainer) loadOlder(olderContainer.dataset.taskId, olderContainer.dataset.projectId || '');
+								return;
+							}
+							var retry = target && target.closest && target.closest('[data-lifecycle-retry]');
+							if (retry) {
+								event.preventDefault();
+								var retryContainer = document.getElementById('lifecycle-activity-list');
+								if (retryContainer) {
+									if (retry.getAttribute('data-lifecycle-retry') === 'older') loadOlder(retryContainer.dataset.taskId, retryContainer.dataset.projectId || '');
+									else if (retry.getAttribute('data-lifecycle-retry') === 'newer') loadNewer(retryContainer.dataset.taskId, retryContainer.dataset.projectId || '', 0);
+									else refreshLifecycleActivity(retryContainer.dataset.taskId, retryContainer.dataset.projectId || '');
+								}
+								return;
+							}
+							var tab = target && target.closest && target.closest('[data-tab="lifecycle"]');
+							if (!tab) return;
+							var tabContainer = document.getElementById('lifecycle-activity-list');
+							if (tabContainer) refreshLifecycleActivity(tabContainer.dataset.taskId, tabContainer.dataset.projectId || '');
+						}
+
+						function handleTaskEvent(event) {
+							var data = event && event.detail || {};
+							if (typeof data === 'string') {
+								try { data = JSON.parse(data); } catch (error) { return; }
+							}
+							var container = document.getElementById('lifecycle-activity-list');
+							if (!container || !data || data.task_id !== container.dataset.taskId) return;
+							if (data.project_id && data.project_id !== container.dataset.projectId) return;
+							var relevant = {
+								task_status_changed: true,
+								task_category_changed: true,
+								task_thread_execution_started: true,
+								task_thread_input_applied: true,
+								task_thread_input_queued: true,
+								task_thread_input_steered: true
+							};
+							if (relevant[data.type]) scheduleLiveRefresh(container.dataset.taskId, container.dataset.projectId || '', data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied' ? 'newer' : 'refresh');
+						}
+
+						function handleBeforeSwap(event) {
+							var target = event && event.detail && event.detail.target;
+							if (!target) return;
+							if (target.id === 'main-content' || target.id === 'task-detail-content' || (target.querySelector && target.querySelector('#lifecycle-activity-list'))) {
+								rememberAllScroll();
+								cleanup();
+							}
+						}
+
+						function cleanup() {
+							rememberAllScroll();
+							document.removeEventListener('click', handleClick);
+							document.removeEventListener('scroll', handleScroll, true);
+							window.removeEventListener('scroll', handleScroll, true);
+							window.removeEventListener('sse-task-event', handleTaskEvent);
+							document.body && document.body.removeEventListener('htmx:beforeSwap', handleBeforeSwap);
+							Object.keys(states).forEach(function(key) {
+								if (states[key].liveTimer) {
+									clearTimeout(states[key].liveTimer);
+									states[key].liveTimer = null;
+								}
+							});
+						}
+
+						window.refreshLifecycleActivity = refreshLifecycleActivity;
+						window._taskLifecycleActivityHandlers = { cleanup: cleanup };
+					document.addEventListener('click', handleClick);
+					document.addEventListener('scroll', handleScroll, true);
+					window.addEventListener('scroll', handleScroll, true);
+					window.addEventListener('sse-task-event', handleTaskEvent);
+					if (document.body) document.body.addEventListener('htmx:beforeSwap', handleBeforeSwap);
+
+					if (document.querySelector('[data-tab="lifecycle"].tab-active')) {
+						var initial = document.getElementById('lifecycle-activity-list');
+						if (initial) refreshLifecycleActivity(initial.dataset.taskId, initial.dataset.projectId || '');
+					}
 				})();
-			</script>
-		</div>
-		<!-- End Tab: Lifecycle -->
-		<!-- Tab: Changes -->
+				</script>
+			</div>
+			<!-- End Tab: Lifecycle -->
+			<!-- Tab: Changes -->
 		<div id="tab-changes" class={ "task-tab-panel flex-shrink-0", templ.KV("hidden", defaultTab != "changes") }>
 			<div
 				id="changes-content"
