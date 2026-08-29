@@ -494,6 +494,193 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 }
 
+func TestTaskDetailLifecyclePendingFullRefreshFailureInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := &models.Task{
+		ID:        "task-lifecycle-full-refresh-failure-browser",
+		ProjectID: "project-lifecycle-full-refresh-failure-browser",
+		Title:     "Lifecycle full refresh failure browser fixture",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+	var fragment bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &fragment); err != nil {
+		t.Fatalf("render TaskDetailContent: %v", err)
+	}
+	row := func(id string, hour int) map[string]any {
+		return map[string]any{
+			"id":              id,
+			"when":            "after_complete",
+			"skill_key":       "hook-" + id,
+			"status":          "completed",
+			"output_contract": "activity_summary",
+			"summary":         "summary for " + id,
+			"started_at":      time.Date(2026, time.January, 1, hour, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		}
+	}
+	writePage := func(w http.ResponseWriter, items []map[string]any, hasMore bool, cursor string) {
+		if items == nil {
+			items = []map[string]any{}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "has_more": hasMore, "next_cursor": cursor})
+	}
+
+	var mu sync.Mutex
+	initialCalls := 0
+	refreshInFlight := false
+	sawProject := false
+	sawLimit := false
+	page := ""
+	browserResult := make(chan string, 1)
+	fixtureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/browser-result":
+			select {
+			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case "/tasks/task-lifecycle-full-refresh-failure-browser":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+			return
+		case "/api/tasks/task-lifecycle-full-refresh-failure-browser/lifecycle-executions":
+		default:
+			http.NotFound(w, r)
+			return
+		}
+
+		query := r.URL.Query()
+		if query.Get("before") != "" || query.Get("after") != "" {
+			http.Error(w, "unexpected lifecycle cursor", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		if query.Get("project_id") == task.ProjectID {
+			sawProject = true
+		}
+		if query.Get("limit") == "20" {
+			sawLimit = true
+		}
+		initialCalls++
+		currentInitialCall := initialCalls
+		if currentInitialCall == 2 {
+			refreshInFlight = true
+		}
+		replacementSawInFlight := refreshInFlight
+		mu.Unlock()
+
+		switch currentInitialCall {
+		case 1:
+			writePage(w, []map[string]any{row("event-0", 0)}, false, "")
+		case 2:
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			time.Sleep(300 * time.Millisecond)
+			_, _ = w.Write([]byte("{"))
+			mu.Lock()
+			refreshInFlight = false
+			mu.Unlock()
+		case 3:
+			if replacementSawInFlight {
+				http.Error(w, "replacement refresh raced original", http.StatusServiceUnavailable)
+				return
+			}
+			writePage(w, []map[string]any{row("event-1", 1), row("event-0", 0)}, false, "")
+		default:
+			writePage(w, []map[string]any{row("event-1", 1), row("event-0", 0)}, false, "")
+		}
+	})
+	server := httptest.NewServer(fixtureHandler)
+	server.Config.SetKeepAlivesEnabled(false)
+	defer server.Close()
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+  function waitFor(check, label, timeout) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try { if (check()) { resolve(); return; } } catch (error) { reject(error); return; }
+        if (performance.now() - started > (timeout || 6000)) { reject(new Error('timed out waiting for ' + label)); return; }
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  function report(status, message) {
+    return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
+  }
+  function fail(message) { throw new Error(message); }
+  function list() { return document.getElementById('lifecycle-activity-list'); }
+  async function run() {
+    await waitFor(function() { return list().querySelector('[data-lifecycle-execution-id="event-0"]'); }, 'initial lifecycle row');
+    // Collapse the production debounce only in this fixture so the in-flight refresh race is deterministic.
+    var nativeSetTimeout = window.setTimeout;
+    window.setTimeout = function(callback, delay) { return nativeSetTimeout(callback, delay === 150 ? 0 : delay); };
+    var refresh = window.refreshLifecycleActivity('task-lifecycle-full-refresh-failure-browser', 'project-lifecycle-full-refresh-failure-browser');
+    await wait(50);
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_lifecycle_execution_changed', task_id:'task-lifecycle-full-refresh-failure-browser', project_id:'project-lifecycle-full-refresh-failure-browser'}}));
+    await refresh;
+    await waitFor(function() { return list().querySelector('[data-lifecycle-execution-id="event-1"]'); }, 'pending full-refresh retry', 2000);
+    if (list().querySelector('[data-lifecycle-refresh-error]')) fail('successful pending full refresh left a stale refresh error');
+    await report('pass', '');
+  }
+  run().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:140px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+
+	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-full-refresh-failure.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-full-refresh-failure-profile")
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		server.URL+"/tasks/task-lifecycle-full-refresh-failure-browser",
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome lifecycle full refresh failure fixture: %v", err)
+	}
+
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail: timed out waiting for lifecycle browser result"
+	}
+	stopBrowserProcess(cmd)
+	if outcome != "pass:" {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(stderr) > 8000 {
+			stderr = stderr[len(stderr)-8000:]
+		}
+		t.Fatalf("Task Detail Lifecycle full refresh failure browser regression failed: %s\nChrome stderr tail:\n%s", outcome, stderr)
+	}
+
+	mu.Lock()
+	gotInitialCalls, gotProject, gotLimit := initialCalls, sawProject, sawLimit
+	mu.Unlock()
+	if gotInitialCalls != 3 {
+		t.Fatalf("full refresh failure fixture received %d initial-page requests, want initial, failed refresh, and pending retry", gotInitialCalls)
+	}
+	if !gotProject || !gotLimit {
+		t.Fatalf("full refresh failure lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
+	}
+}
+
 func TestTaskDetailLifecycleRefreshPreservesAnchorBeyondLatestWindowInChrome(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
 	task := &models.Task{

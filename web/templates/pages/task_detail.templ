@@ -961,7 +961,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 										newerLoading: false,
 										newerPending: false,
 										newerRetryTimer: null,
-										newerError: '',									refreshLoading: false,
+										newerError: '',
+										refreshPending: false,
+										refreshRetryTimer: null,
+										refreshLoading: false,
 									refreshError: '',
 									initialLoading: false,
 									requestVersion: 0,
@@ -1213,6 +1216,19 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							}, 0);
 						}
 
+						function schedulePendingRefresh(state, taskID, projectID) {
+							if (!state.refreshPending || state.refreshLoading || state.refreshRetryTimer) return;
+							state.refreshPending = false;
+							state.refreshRetryTimer = setTimeout(function() {
+								state.refreshRetryTimer = null;
+								if (state.refreshLoading) {
+									state.refreshPending = true;
+									return;
+								}
+								refreshLifecycleActivity(taskID, projectID);
+							}, 0);
+						}
+
 						function refreshLifecycleActivity(taskID, projectID) {
 							var container = lifecycleContainer(taskID, projectID);
 							if (!container) return Promise.resolve();
@@ -1257,6 +1273,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								state.newerError = '';
 								renderState(state, container, true);
 								schedulePendingNewer(state, taskID, projectID);
+								schedulePendingRefresh(state, taskID, projectID);
 							}).catch(function(error) {
 								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return;
 								state.initialLoading = false;
@@ -1264,6 +1281,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								state.refreshError = error && error.message || 'Unable to load lifecycle activity';
 								renderState(state, container, state.order.length > 0);
 								schedulePendingNewer(state, taskID, projectID);
+								schedulePendingRefresh(state, taskID, projectID);
 							});
 						}
 
@@ -1352,10 +1370,15 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							}
 						function scheduleLiveRefresh(taskID, projectID, mode) {
 							var state = getState(taskID, projectID);
+							if (mode !== 'newer' && state.refreshLoading) {
+								state.refreshPending = true;
+								return;
+							}
 							if (state.liveTimer) clearTimeout(state.liveTimer);
 							state.liveTimer = setTimeout(function() {
 								state.liveTimer = null;
 								if (mode === 'newer') loadNewer(taskID, projectID, 0);
+								else if (state.refreshLoading) state.refreshPending = true;
 								else refreshLifecycleActivity(taskID, projectID);
 							}, 150);
 						}
@@ -1439,11 +1462,16 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									clearTimeout(states[key].liveTimer);
 									states[key].liveTimer = null;
 								}
-								if (states[key].newerRetryTimer) {
-									clearTimeout(states[key].newerRetryTimer);
-									states[key].newerRetryTimer = null;
-								}
-								states[key].newerPending = false;
+									if (states[key].newerRetryTimer) {
+										clearTimeout(states[key].newerRetryTimer);
+										states[key].newerRetryTimer = null;
+									}
+									if (states[key].refreshRetryTimer) {
+										clearTimeout(states[key].refreshRetryTimer);
+										states[key].refreshRetryTimer = null;
+									}
+									states[key].newerPending = false;
+									states[key].refreshPending = false;
 							});
 						}
 
