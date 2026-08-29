@@ -84,13 +84,9 @@ func (r *agentRoutingStrategy) resolveVisionRoutingDecision(ctx context.Context,
 	}
 
 	configs, listErr := r.svc.llmConfigRepo.ListVisionSelectionOptions(ctx)
-	if listErr != nil || len(configs) == 0 {
-		if listErr != nil {
-			decision.Reason = "vision_config_lookup_failed"
-			decision.Detail = listErr.Error()
-		} else {
-			decision.Reason = "no_model_configs_available"
-		}
+	if listErr != nil {
+		decision.Reason = "vision_config_lookup_failed"
+		decision.Detail = listErr.Error()
 		return decision
 	}
 
