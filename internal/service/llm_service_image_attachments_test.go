@@ -217,7 +217,54 @@ func TestLLMService_ImageAttachments_VisionRoutingKeepsNoQueryFastPaths(t *testi
 	}{
 		{name: "no attachments", reason: "no_attachments", agent: *textOnly},
 		{name: "non-image attachment", attachments: []models.Attachment{{MediaType: "text/plain"}}, reason: "no_image_attachments", agent: *textOnly},
-		{name: "already vision capable", attachments: []models.Attachment{{MediaType: "image/png"}}, reason: "agent_already_vision_capable", agent: *vision},
+		{name: "already vision capable", attachments: []models.Attachment{{MediaType: "image/png"}}, agent: *vision, reason: "agent_already_vision_capable"},
+		{
+			name: "already vision capable Anthropic OAuth",
+			agent: models.LLMConfig{
+				Name:             "Fast-path Anthropic OAuth model",
+				Provider:         models.ProviderAnthropic,
+				AuthMethod:       models.AuthMethodOAuth,
+				OAuthAccessToken: "anthropic-access-token",
+				Model:            "claude-sonnet-4-5-20250929",
+			},
+			attachments: []models.Attachment{{MediaType: "image/png"}},
+			reason:      "agent_already_vision_capable",
+		},
+		{
+			name: "already vision capable OpenAI API",
+			agent: models.LLMConfig{
+				Name:       "Fast-path OpenAI API model",
+				Provider:   models.ProviderOpenAI,
+				AuthMethod: models.AuthMethodAPIKey,
+				APIKey:     "openai-api-key",
+				Model:      "gpt-4o",
+			},
+			attachments: []models.Attachment{{MediaType: "image/png"}},
+			reason:      "agent_already_vision_capable",
+		},
+		{
+			name: "already vision capable OpenAI OAuth",
+			agent: models.LLMConfig{
+				Name:             "Fast-path OpenAI OAuth model",
+				Provider:         models.ProviderOpenAI,
+				AuthMethod:       models.AuthMethodOAuth,
+				OAuthAccessToken: "openai-access-token",
+				Model:            "gpt-4o",
+			},
+			attachments: []models.Attachment{{MediaType: "image/png"}},
+			reason:      "agent_already_vision_capable",
+		},
+		{
+			name: "already vision capable Ollama",
+			agent: models.LLMConfig{
+				Name:       "Fast-path Ollama model",
+				Provider:   models.ProviderOllama,
+				AuthMethod: models.AuthMethodAPIKey,
+				Model:      "llava",
+			},
+			attachments: []models.Attachment{{MediaType: "image/png"}},
+			reason:      "agent_already_vision_capable",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -227,6 +274,9 @@ func TestLLMService_ImageAttachments_VisionRoutingKeepsNoQueryFastPaths(t *testi
 			counter.SetEnabled(false)
 			if decision.Reason != tc.reason {
 				t.Fatalf("reason = %q, want %q", decision.Reason, tc.reason)
+			}
+			if decision.Changed || decision.Agent != tc.agent {
+				t.Fatalf("fast path decision = %#v, want unchanged agent %#v", decision, tc.agent)
 			}
 			if statements := counter.Statements(); len(statements) != 0 {
 				t.Fatalf("fast path executed model queries: %#v", statements)
@@ -548,6 +598,58 @@ func TestLLMService_ExecuteTaskWithAgent_ImageAttachmentsPassHydratedVisionConfi
 	}
 	if compactQueries != 1 {
 		t.Fatalf("task vision routing should use one compact selection query, statements=%#v", counter.Statements())
+	}
+}
+
+func TestLLMService_ImageAttachments_VisionRoutingHandlesNoStoredModels(t *testing.T) {
+	ctx := context.Background()
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	repo := repository.NewLLMConfigRepo(db)
+	if _, err := db.Exec(`DELETE FROM agent_configs`); err != nil {
+		t.Fatalf("clear model configs: %v", err)
+	}
+
+	svc := NewLLMService(repo, nil, nil, nil, nil, nil)
+	textOnly := models.LLMConfig{
+		Name:       "Unstored text-only model",
+		Provider:   models.ProviderOpenAICompatible,
+		AuthMethod: models.AuthMethodAPIKey,
+		APIKey:     "text-only-key",
+		Model:      "text-only-model",
+	}
+	attachments := []models.Attachment{{MediaType: "image/png"}}
+
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	counter.Reset()
+	counter.SetEnabled(true)
+	withoutFallback := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, "describe this screenshot", attachments, textOnly, "Test", "")
+	counter.SetEnabled(false)
+	if withoutFallback.Changed || withoutFallback.Reason != "no_vision_fallback_available" {
+		t.Fatalf("no stored models without environment fallback = %#v, want unchanged agent and no-vision result", withoutFallback)
+	}
+	assertCompactVisionSelectionStatement(t, counter.Statements())
+
+	t.Setenv("ANTHROPIC_API_KEY", "environment-vision-key")
+	counter.Reset()
+	counter.SetEnabled(true)
+	withFallback := svc.ensureRoutingStrategy().resolveVisionRoutingDecision(ctx, "describe this screenshot", attachments, textOnly, "Test", "")
+	counter.SetEnabled(false)
+	if !withFallback.Changed || withFallback.Reason != "vision_env_fallback" || withFallback.Agent.APIKey != "environment-vision-key" {
+		t.Fatalf("no stored models with environment fallback = %#v, want environment vision agent", withFallback)
+	}
+	assertCompactVisionSelectionStatement(t, counter.Statements())
+}
+
+func assertCompactVisionSelectionStatement(t *testing.T, statements []string) {
+	t.Helper()
+	if len(statements) != 1 {
+		t.Fatalf("vision routing statements = %#v, want one compact selection query", statements)
+	}
+	stmt := strings.ToLower(strings.Join(strings.Fields(statements[0]), " "))
+	projection := strings.Split(stmt, " from agent_configs ")[0]
+	wantProjection := "select id, name, provider, model, auth_method, is_default, case when coalesce(api_key, '') != '' then 1 else 0 end, case when coalesce(oauth_access_token, '') != '' then 1 else 0 end"
+	if projection != wantProjection {
+		t.Fatalf("vision selection projection = %q, want %q", projection, wantProjection)
 	}
 }
 

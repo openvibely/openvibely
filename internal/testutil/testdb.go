@@ -25,10 +25,11 @@ var (
 // SQLStatementCounter records complete database/sql query and exec operations.
 // Counting can be disabled around timed benchmarks to avoid measurement noise.
 type SQLStatementCounter struct {
-	mu         sync.Mutex
-	enabled    bool
-	statements []string
-	observer   func(context.Context, string)
+	mu                sync.Mutex
+	enabled           bool
+	statements        []string
+	observer          func(context.Context, string)
+	rowsCloseObserver func(context.Context, string)
 }
 
 func (c *SQLStatementCounter) SetEnabled(enabled bool) {
@@ -53,6 +54,31 @@ func (c *SQLStatementCounter) SetObserver(observer func(context.Context, string)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.observer = observer
+}
+
+// SetRowsCloseObserver installs a test-only callback invoked immediately before
+// an instrumented query releases its database connection through rows.Close.
+// The callback is not installed into rows that were created before this method
+// was called, and callers must clear it after use.
+func (c *SQLStatementCounter) SetRowsCloseObserver(observer func(context.Context, string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.rowsCloseObserver = observer
+}
+
+func (c *SQLStatementCounter) hasRowsCloseObserver() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.rowsCloseObserver != nil
+}
+
+func (c *SQLStatementCounter) recordRowsClose(ctx context.Context, query string) {
+	c.mu.Lock()
+	observer := c.rowsCloseObserver
+	c.mu.Unlock()
+	if observer != nil {
+		observer(ctx, query)
+	}
 }
 
 func (c *SQLStatementCounter) record(ctx context.Context, query string) {
@@ -119,7 +145,14 @@ func (c *statementCountingConn) QueryContext(ctx context.Context, query string, 
 		return nil, driver.ErrSkip
 	}
 	c.counter.record(ctx, query)
-	return conn.QueryContext(ctx, query, args)
+	rows, err := conn.QueryContext(ctx, query, args)
+	if err != nil {
+		return nil, err
+	}
+	if !c.counter.hasRowsCloseObserver() {
+		return rows, nil
+	}
+	return &statementCountingRows{Rows: rows, ctx: ctx, query: query, counter: c.counter}, nil
 }
 
 func (c *statementCountingConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
@@ -178,7 +211,14 @@ func (s *statementCountingStmt) Exec(args []driver.Value) (driver.Result, error)
 
 func (s *statementCountingStmt) Query(args []driver.Value) (driver.Rows, error) {
 	s.counter.record(context.Background(), s.query)
-	return s.Stmt.Query(args)
+	rows, err := s.Stmt.Query(args)
+	if err != nil {
+		return nil, err
+	}
+	if !s.counter.hasRowsCloseObserver() {
+		return rows, nil
+	}
+	return &statementCountingRows{Rows: rows, ctx: context.Background(), query: s.query, counter: s.counter}, nil
 }
 
 func (s *statementCountingStmt) ExecContext(ctx context.Context, args []driver.NamedValue) (driver.Result, error) {
@@ -192,9 +232,31 @@ func (s *statementCountingStmt) ExecContext(ctx context.Context, args []driver.N
 func (s *statementCountingStmt) QueryContext(ctx context.Context, args []driver.NamedValue) (driver.Rows, error) {
 	if stmt, ok := s.Stmt.(driver.StmtQueryContext); ok {
 		s.counter.record(ctx, s.query)
-		return stmt.QueryContext(ctx, args)
+		rows, err := stmt.QueryContext(ctx, args)
+		if err != nil {
+			return nil, err
+		}
+		if !s.counter.hasRowsCloseObserver() {
+			return rows, nil
+		}
+		return &statementCountingRows{Rows: rows, ctx: ctx, query: s.query, counter: s.counter}, nil
 	}
 	return nil, driver.ErrSkip
+}
+
+type statementCountingRows struct {
+	driver.Rows
+	ctx       context.Context
+	query     string
+	counter   *SQLStatementCounter
+	closeOnce sync.Once
+}
+
+func (r *statementCountingRows) Close() error {
+	r.closeOnce.Do(func() {
+		r.counter.recordRowsClose(r.ctx, r.query)
+	})
+	return r.Rows.Close()
 }
 
 func init() {
