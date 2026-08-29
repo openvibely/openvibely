@@ -51,6 +51,12 @@ type Instance struct {
 	UpdateCoordinator *update.Coordinator
 }
 
+var (
+	newDatabaseConnections           = database.NewReadWrite
+	registerDedicatedWriter          = repository.RegisterDedicatedWriter
+	loadAutomationConfirmationSecret = service.LoadOrCreateAutomationConfirmationSecret
+)
+
 func migrateLegacyStorage(cfg *config.Config) error {
 	if cfg == nil || os.Getenv("OPENVIBELY_DISABLE_LEGACY_STORAGE_MIGRATION") != "" {
 		return nil
@@ -436,13 +442,13 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	handler.SetUploadsDir(uploadsPath)
 
 	// Database
-	databaseConnections, err := database.NewReadWrite(cfg.DatabasePath)
+	databaseConnections, err := newDatabaseConnections(cfg.DatabasePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 	db := databaseConnections.Reader
 	writeDB := databaseConnections.Writer
-	unregisterDedicatedWriter := repository.RegisterDedicatedWriter(db, writeDB)
+	unregisterDedicatedWriter := registerDedicatedWriter(db, writeDB)
 	closeDatabase := func() {
 		unregisterDedicatedWriter()
 		_ = databaseConnections.Close()
@@ -699,8 +705,9 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 	automationCompiler := service.NewAutomationCompiler(automationRepo, taskSvc, taskRepo, scheduleRepo, automationSaveValidator)
 	automationCompiler.SetAgentRepository(agentRepo)
 	automationLifecycleSvc := service.NewAutomationLifecycleService(automationRepo, scheduleRepo, taskSvc)
-	automationConfirmationSecret, confirmationSecretErr := service.LoadOrCreateAutomationConfirmationSecret(context.Background(), settingsRepo)
+	automationConfirmationSecret, confirmationSecretErr := loadAutomationConfirmationSecret(context.Background(), settingsRepo)
 	if confirmationSecretErr != nil {
+		closeDatabase()
 		return nil, fmt.Errorf("initializing automation confirmation secret: %w", confirmationSecretErr)
 	}
 	automationConfirmationSvc := service.NewAutomationConfirmationService(automationRepo, execRepo, automationConfirmationSecret)

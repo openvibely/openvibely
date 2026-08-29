@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	fileDatabasePoolSize = 2
-	sqliteBusyTimeoutMS  = 5000
+	fileDatabasePoolSize       = 2
+	fileDatabaseReaderPoolSize = 1
+	sqliteBusyTimeoutMS        = 5000
 )
 
 type Connections struct {
@@ -65,8 +66,8 @@ func NewReadWrite(dsn string) (*Connections, error) {
 		_ = writer.Close()
 		return nil, fmt.Errorf("opening read database: %w", err)
 	}
-	reader.SetMaxOpenConns(fileDatabasePoolSize)
-	reader.SetMaxIdleConns(fileDatabasePoolSize)
+	reader.SetMaxOpenConns(fileDatabaseReaderPoolSize)
+	reader.SetMaxIdleConns(fileDatabaseReaderPoolSize)
 	if err := reader.Ping(); err != nil {
 		_ = reader.Close()
 		_ = writer.Close()

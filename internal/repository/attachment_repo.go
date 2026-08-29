@@ -24,7 +24,7 @@ func (r *AttachmentRepo) Create(ctx context.Context, att *models.Attachment) err
 		VALUES (?, ?, ?, ?, ?)
 		RETURNING id, created_at
 	`
-	err := r.db.QueryRowContext(ctx, query,
+	err := queryRowBoundSQLite(ctx, r.db, query,
 		att.TaskID,
 		att.FileName,
 		att.FilePath,

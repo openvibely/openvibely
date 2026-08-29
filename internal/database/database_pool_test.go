@@ -333,13 +333,13 @@ func TestNewReadWrite_DedicatesWriterAndQueryOnlyReaders(t *testing.T) {
 	if got := connections.Writer.Stats().MaxOpenConnections; got != 1 {
 		t.Fatalf("writer MaxOpenConnections = %d, want 1", got)
 	}
-	if got := connections.Reader.Stats().MaxOpenConnections; got != 2 {
-		t.Fatalf("reader MaxOpenConnections = %d, want 2", got)
+	if got := connections.Reader.Stats().MaxOpenConnections; got != 1 {
+		t.Fatalf("reader MaxOpenConnections = %d, want 1", got)
 	}
 
 	ctx := context.Background()
-	readers := make([]*sql.Conn, 0, 2)
-	for i := 0; i < 2; i++ {
+	readers := make([]*sql.Conn, 0, connections.Reader.Stats().MaxOpenConnections)
+	for i := 0; i < connections.Reader.Stats().MaxOpenConnections; i++ {
 		conn, err := connections.Reader.Conn(ctx)
 		if err != nil {
 			t.Fatal(err)
