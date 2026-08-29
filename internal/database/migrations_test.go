@@ -1191,57 +1191,149 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
-func TestMigration173AddsReceiptOwnershipAndExpiresLegacyProcessingLeases(t *testing.T) {
-	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "x-receipt-token-173.db"))
-	goose.SetBaseFS(migrations.FS)
-	defer goose.SetBaseFS(nil)
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		t.Fatal(err)
-	}
-	if err := goose.UpTo(db, ".", 172); err != nil {
-		t.Fatalf("migrate to 172: %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO projects(id, name, description, repo_path) VALUES('x-173-project', 'X 173', '', '')`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO x_inbound_receipts(tweet_id, project_id, status, lease_expires_at) VALUES('legacy-processing', 'x-173-project', 'processing', datetime('now', '+1 hour'))`); err != nil {
-		t.Fatal(err)
-	}
-	if err := goose.UpTo(db, ".", 173); err != nil {
-		t.Fatalf("migrate to 173: %v", err)
-	}
-	var token string
-	var expired int
-	if err := db.QueryRow(`SELECT lease_token, lease_expires_at < datetime('now') FROM x_inbound_receipts WHERE tweet_id='legacy-processing'`).Scan(&token, &expired); err != nil {
-		t.Fatal(err)
-	}
-	if token != "" || expired != 1 {
-		t.Fatalf("legacy processing receipt token=%q expired=%d, want empty token and expired lease", token, expired)
-	}
-}
-
-func TestMigration174AddsFailClosedXOriginAccountBindings(t *testing.T) {
-	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "x-origin-account-174.db"))
-	goose.SetBaseFS(migrations.FS)
-	defer goose.SetBaseFS(nil)
-	if err := goose.SetDialect("sqlite3"); err != nil {
-		t.Fatal(err)
-	}
-	if err := goose.UpTo(db, ".", 173); err != nil {
-		t.Fatalf("migrate to 173: %v", err)
-	}
-	if err := goose.UpTo(db, ".", 174); err != nil {
-		t.Fatalf("migrate to 174: %v", err)
-	}
-	for table, column := range map[string]string{"x_task_context": "account_id", "thread_inputs": "x_account_id"} {
-		if !tableHasColumn(t, db, table, column) {
-			t.Fatalf("expected %s.%s after migration 174", table, column)
+func assertXChannelSchema175(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, table := range []string{"x_authorized_users", "x_user_projects", "x_task_context", "x_inbound_receipts"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
 		}
+		if count != 1 {
+			t.Fatalf("expected table %s", table)
+		}
+	}
+	for table, columns := range map[string][]string{
+		"x_task_context":     {"account_id", "conversation_id", "reply_to_tweet_id", "x_user_id", "username"},
+		"x_inbound_receipts": {"lease_token", "lease_expires_at", "task_id"},
+		"thread_inputs":      {"x_account_id", "x_conversation_id", "x_reply_to_tweet_id", "x_user_id", "x_username"},
+	} {
+		for _, column := range columns {
+			if !tableHasColumn(t, db, table, column) {
+				t.Fatalf("expected %s.%s after consolidated X migration", table, column)
+			}
+		}
+	}
+	for _, index := range []string{"idx_x_authorized_users_project", "idx_x_user_projects_project", "idx_x_task_context_conversation", "idx_x_inbound_receipts_project", "idx_x_inbound_receipts_task"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, index).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("expected index %s", index)
+		}
+	}
+}
+
+func TestMigration175CreatesConsolidatedXSchemaFromPublicBaseline(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "x-consolidated-fresh-175.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 171); err != nil {
+		t.Fatalf("migrate to public baseline 171: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("apply consolidated X migration: %v", err)
+	}
+	assertXChannelSchema175(t, db)
+	var maxVersion int
+	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
+		t.Fatal(err)
+	}
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
+	}
+}
+
+func TestMigration175RepairsAlreadyAppliedLocalXChain(t *testing.T) {
+	for _, variant := range []struct {
+		name           string
+		appliedThrough int
+	}{
+		{name: "base schema only", appliedThrough: 172},
+		{name: "receipt lease ownership", appliedThrough: 173},
+		{name: "origin account binding", appliedThrough: 174},
+	} {
+		t.Run(variant.name, func(t *testing.T) {
+			db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "x-consolidated-local-175.db"))
+			goose.SetBaseFS(migrations.FS)
+			defer goose.SetBaseFS(nil)
+			if err := goose.SetDialect("sqlite3"); err != nil {
+				t.Fatal(err)
+			}
+			if err := goose.UpTo(db, ".", 171); err != nil {
+				t.Fatalf("migrate to public baseline 171: %v", err)
+			}
+			if _, err := db.Exec(`
+				CREATE TABLE x_authorized_users (
+					id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))), project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+					x_user_id TEXT NOT NULL, username TEXT NOT NULL DEFAULT '', added_at DATETIME NOT NULL DEFAULT (datetime('now')), UNIQUE(project_id, x_user_id));
+				CREATE INDEX idx_x_authorized_users_project ON x_authorized_users(project_id);
+				CREATE TABLE x_user_projects (x_user_id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, updated_at DATETIME NOT NULL DEFAULT (datetime('now')));
+				CREATE INDEX idx_x_user_projects_project ON x_user_projects(project_id);
+				CREATE TABLE x_task_context (
+					task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+					conversation_id TEXT NOT NULL, reply_to_tweet_id TEXT NOT NULL, x_user_id TEXT NOT NULL, username TEXT NOT NULL DEFAULT '',
+					created_at DATETIME NOT NULL DEFAULT (datetime('now')), updated_at DATETIME NOT NULL DEFAULT (datetime('now')));
+				CREATE INDEX idx_x_task_context_conversation ON x_task_context(project_id, conversation_id);
+				CREATE TABLE x_inbound_receipts (
+					tweet_id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+					status TEXT NOT NULL CHECK (status IN ('processing', 'completed')), lease_expires_at DATETIME,
+					task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL, created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+					updated_at DATETIME NOT NULL DEFAULT (datetime('now')));
+				CREATE INDEX idx_x_inbound_receipts_project ON x_inbound_receipts(project_id);
+				CREATE INDEX idx_x_inbound_receipts_task ON x_inbound_receipts(task_id) WHERE task_id IS NOT NULL;
+				ALTER TABLE thread_inputs ADD COLUMN x_conversation_id TEXT NOT NULL DEFAULT '';
+				ALTER TABLE thread_inputs ADD COLUMN x_reply_to_tweet_id TEXT NOT NULL DEFAULT '';
+				ALTER TABLE thread_inputs ADD COLUMN x_user_id TEXT NOT NULL DEFAULT '';
+				ALTER TABLE thread_inputs ADD COLUMN x_username TEXT NOT NULL DEFAULT '';
+				INSERT INTO projects(id, name, description, repo_path) VALUES('x-local-project', 'X local', '', '');
+				INSERT INTO x_authorized_users(project_id, x_user_id, username) VALUES('x-local-project', 'author', 'alice');
+				INSERT INTO x_inbound_receipts(tweet_id, project_id, status, lease_expires_at) VALUES('local-processing', 'x-local-project', 'processing', datetime('now', '+1 hour'));
+				INSERT INTO goose_db_version(version_id, is_applied) VALUES(172, 1);
+			`); err != nil {
+				t.Fatalf("simulate local X migration 172: %v", err)
+			}
+			if variant.appliedThrough >= 173 {
+				if _, err := db.Exec(`
+					ALTER TABLE x_inbound_receipts ADD COLUMN lease_token TEXT NOT NULL DEFAULT '';
+					INSERT INTO goose_db_version(version_id, is_applied) VALUES(173, 1);
+				`); err != nil {
+					t.Fatalf("simulate local X migration 173: %v", err)
+				}
+			}
+			if variant.appliedThrough >= 174 {
+				if _, err := db.Exec(`
+					ALTER TABLE x_task_context ADD COLUMN account_id TEXT NOT NULL DEFAULT '';
+					ALTER TABLE thread_inputs ADD COLUMN x_account_id TEXT NOT NULL DEFAULT '';
+					INSERT INTO goose_db_version(version_id, is_applied) VALUES(174, 1);
+				`); err != nil {
+					t.Fatalf("simulate local X migration 174: %v", err)
+				}
+			}
+			if err := goose.Up(db, "."); err != nil {
+				t.Fatalf("apply consolidated X migration to local chain: %v", err)
+			}
+			assertXChannelSchema175(t, db)
+			var username, token string
+			var expired int
+			if err := db.QueryRow(`SELECT username FROM x_authorized_users WHERE project_id = 'x-local-project' AND x_user_id = 'author'`).Scan(&username); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow(`SELECT lease_token, lease_expires_at < datetime('now') FROM x_inbound_receipts WHERE tweet_id = 'local-processing'`).Scan(&token, &expired); err != nil {
+				t.Fatal(err)
+			}
+			if username != "alice" || token != "" || expired != 1 {
+				t.Fatalf("local data username=%q token=%q expired=%d, want preserved user and expired tokenless lease", username, token, expired)
+			}
+		})
 	}
 }
 
@@ -1380,8 +1472,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
@@ -1829,8 +1921,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
@@ -2165,8 +2257,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 174 {
-		t.Fatalf("max goose version = %d, want 174", maxVersion)
+	if maxVersion != 175 {
+		t.Fatalf("max goose version = %d, want 175", maxVersion)
 	}
 }
 
