@@ -1728,7 +1728,11 @@ func TestLLMConfigRepo_VisionSelectionProjectionMeetsPerformanceTargetOnLargeFix
 		minFullListImprovement = 20
 	)
 	t.Logf("full List: %d ns/op, %d B/op; compact vision selection+GetByID: %d ns/op, %d B/op (targets <= %s, <= %d B/op, >= %dx improvement)", fullList.NsPerOp(), fullList.AllocedBytesPerOp(), compactThenGet.NsPerOp(), compactThenGet.AllocedBytesPerOp(), maxCompactDuration, maxCompactBytesPerOp, minFullListImprovement)
-	if compactThenGet.NsPerOp() > maxCompactDuration.Nanoseconds() {
+	// Coverage instrumentation adds enough overhead to make an absolute
+	// wall-clock target machine-dependent. Keep enforcing the allocation and
+	// relative-improvement guards under coverage; enforce latency on normal
+	// builds where the measurement represents production code.
+	if testing.CoverMode() == "" && compactThenGet.NsPerOp() > maxCompactDuration.Nanoseconds() {
 		t.Fatalf("compact vision selection took %d ns/op, want <= %s", compactThenGet.NsPerOp(), maxCompactDuration)
 	}
 	if compactThenGet.AllocedBytesPerOp() > maxCompactBytesPerOp {
