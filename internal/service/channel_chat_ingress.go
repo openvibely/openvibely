@@ -357,35 +357,7 @@ func promoteQueuedChannelChatAfterCompletion(ctx context.Context, taskRepo *repo
 }
 
 func resolveChannelTaskReference(ctx context.Context, taskRepo *repository.TaskRepo, projectID, taskID, title string) (*models.Task, error) {
-	if taskRepo == nil {
-		return nil, fmt.Errorf("task repository not configured")
-	}
-	if strings.TrimSpace(taskID) != "" {
-		taskID = strings.TrimSpace(taskID)
-		task, err := taskRepo.GetByID(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("error looking up task %s: %w", taskID, err)
-		}
-		if task == nil {
-			return nil, fmt.Errorf("task %s not found", taskID)
-		}
-		if task.ProjectID != projectID {
-			return nil, fmt.Errorf("task %s belongs to a different project", taskID)
-		}
-		return task, nil
-	}
-	title = strings.TrimSpace(title)
-	if title != "" {
-		tasks, err := taskRepo.SearchByTitle(ctx, projectID, title)
-		if err != nil {
-			return nil, fmt.Errorf("error searching for task %q: %w", title, err)
-		}
-		if len(tasks) == 0 {
-			return nil, fmt.Errorf("no task found matching %q", title)
-		}
-		return &tasks[0], nil
-	}
-	return nil, fmt.Errorf("no task_id or title provided")
+	return ResolveTaskReference(ctx, taskRepo, projectID, taskID, title, TaskReferenceResolutionOptions{})
 }
 
 func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts channelTaskThreadSendOptions) string {
