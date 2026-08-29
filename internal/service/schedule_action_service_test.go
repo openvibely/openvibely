@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -592,6 +593,82 @@ func TestScheduleActionServiceToggleFiredOneTimeRequiresNewTimeWithoutMutation(t
 	require.Equal(t, models.StatusCompleted, updatedTask.Status)
 }
 
+func TestScheduleActionServiceToggleSkipsLifecycleWhenPauseWinsAfterEnable(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Resume pause interleaving"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Paused cancelled task", Prompt: "retry later",
+		Category: models.CategoryScheduled, Status: models.StatusCancelled, Priority: 2,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{
+		TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour),
+		RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: false,
+	}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+
+	_, err := db.ExecContext(ctx, fmt.Sprintf(`
+		CREATE TRIGGER pause_schedule_after_enable
+		AFTER UPDATE OF enabled ON schedules
+		WHEN NEW.id = '%s' AND NEW.enabled = 1
+		BEGIN
+			UPDATE schedules SET enabled = 0 WHERE id = NEW.id;
+		END`, schedule.ID))
+	require.NoError(t, err)
+
+	result, err := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc).Toggle(ctx, project.ID, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule)
+	storedSchedule, err := scheduleRepo.GetByID(ctx, schedule.ID)
+	require.NoError(t, err)
+	require.False(t, storedSchedule.Enabled)
+	storedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, storedTask.Status)
+	require.True(t, workerSvc.IsCancellationRequested(task.ID))
+}
+
+func TestScheduleActionServiceResumeLifecycleSkipsTaskResetAfterPauseWins(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Resume pause ordering"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Paused terminal task", Prompt: "retry later",
+		Category: models.CategoryScheduled, Status: models.StatusCancelled, Priority: 2,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{
+		TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour),
+		RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: false,
+	}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+
+	result := &ScheduleActionResult{Task: task, Schedule: schedule}
+	svc := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc)
+	svc.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{
+		ResetTerminal:          true,
+		RequireEnabledSchedule: true,
+	})
+
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, updatedTask.Status)
+	require.True(t, workerSvc.IsCancellationRequested(task.ID))
+	require.Empty(t, result.Warnings)
+}
 func TestScheduleActionServiceToggleResetsTerminalTaskOnlyWhenResumingRunnableSchedule(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

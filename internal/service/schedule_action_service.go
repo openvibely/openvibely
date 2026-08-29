@@ -92,8 +92,9 @@ type ModifyAbsoluteScheduleRequest struct {
 }
 
 type scheduleTaskLifecycleOptions struct {
-	PromoteToScheduled bool
-	ResetTerminal      bool
+	PromoteToScheduled     bool
+	ResetTerminal          bool
+	RequireEnabledSchedule bool
 }
 
 func NewScheduleActionService(taskRepo *repository.TaskRepo, scheduleRepo *repository.ScheduleRepo, workerSvc ...*WorkerService) *ScheduleActionService {
@@ -223,8 +224,11 @@ func (s *ScheduleActionService) Toggle(ctx context.Context, projectID, scheduleI
 		if err := s.refreshScheduleNextRun(ctx, updated, task.ID); err != nil {
 			return result, actionError(ScheduleActionPersistError, "", err)
 		}
-		if updated.NextRun != nil {
-			s.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{ResetTerminal: true})
+		if updated.Enabled && updated.NextRun != nil {
+			s.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{
+				ResetTerminal:          true,
+				RequireEnabledSchedule: true,
+			})
 		}
 	}
 	return result, nil
@@ -377,6 +381,33 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 	if len(changes) == 0 {
 		return result, nil
 	}
+	applyEnabled := func() error {
+		updated, err := s.scheduleRepo.SetEnabledForTask(ctx, schedule.ID, task.ID, *req.Enabled)
+		if err != nil {
+			return actionError(ScheduleActionPersistError, "", err)
+		}
+		if updated == nil {
+			current, lookupErr := s.scheduleRepo.GetByID(ctx, schedule.ID)
+			if lookupErr != nil {
+				return actionError(ScheduleActionPersistError, "", lookupErr)
+			}
+			if current == nil || current.TaskID != task.ID {
+				return actionError(ScheduleActionReferenceError, "", fmt.Errorf("schedule %s not found", schedule.ID))
+			}
+			if *req.Enabled && current.RepeatType == models.RepeatOnce && current.NextRun == nil {
+				return actionError(ScheduleActionTimeError, "", fmt.Errorf("one-time schedule has already run; supply a new time before resuming"))
+			}
+			return actionError(ScheduleActionPersistError, "", fmt.Errorf("schedule changed while updating enabled state"))
+		}
+		schedule = updated
+		result.Schedule = schedule
+		if schedule.Enabled {
+			if err := s.refreshScheduleNextRun(ctx, schedule, task.ID); err != nil {
+				return actionError(ScheduleActionPersistError, "", err)
+			}
+		}
+		return nil
+	}
 	if timeChanged {
 		if schedule.RepeatType == models.RepeatOnce {
 			runAt := schedule.RunAt
@@ -387,30 +418,14 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 		if err := s.scheduleRepo.UpdateForTask(ctx, schedule, task.ID); err != nil {
 			return result, actionError(ScheduleActionPersistError, "", err)
 		}
+		if req.Enabled != nil {
+			if err := applyEnabled(); err != nil {
+				return result, err
+			}
+		}
 	} else if req.Enabled != nil {
-		updated, err := s.scheduleRepo.SetEnabledForTask(ctx, schedule.ID, task.ID, *req.Enabled)
-		if err != nil {
-			return result, actionError(ScheduleActionPersistError, "", err)
-		}
-		if updated == nil {
-			current, lookupErr := s.scheduleRepo.GetByID(ctx, schedule.ID)
-			if lookupErr != nil {
-				return result, actionError(ScheduleActionPersistError, "", lookupErr)
-			}
-			if current == nil || current.TaskID != task.ID {
-				return result, actionError(ScheduleActionReferenceError, "", fmt.Errorf("schedule %s not found", schedule.ID))
-			}
-			if *req.Enabled && current.RepeatType == models.RepeatOnce && current.NextRun == nil {
-				return result, actionError(ScheduleActionTimeError, "", fmt.Errorf("one-time schedule has already run; supply a new time before resuming"))
-			}
-			return result, actionError(ScheduleActionPersistError, "", fmt.Errorf("schedule changed while updating enabled state"))
-		}
-		schedule = updated
-		result.Schedule = schedule
-		if schedule.Enabled {
-			if err := s.refreshScheduleNextRun(ctx, schedule, task.ID); err != nil {
-				return result, actionError(ScheduleActionPersistError, "", err)
-			}
+		if err := applyEnabled(); err != nil {
+			return result, err
 		}
 		if req.ClearContextOnStart != nil {
 			if err := s.scheduleRepo.UpdateClearContextOnStart(ctx, schedule.ID, task.ID, *req.ClearContextOnStart); err != nil {
@@ -425,7 +440,11 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 		schedule.ClearContextOnStart = *req.ClearContextOnStart
 	}
 	if schedule.NextRun != nil && (timeChanged || (req.Enabled != nil && *req.Enabled)) {
-		s.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{ResetTerminal: true})
+		lifecycleOptions := scheduleTaskLifecycleOptions{ResetTerminal: true}
+		if req.Enabled != nil && *req.Enabled {
+			lifecycleOptions.RequireEnabledSchedule = true
+		}
+		s.applyScheduleTaskLifecycle(ctx, result, lifecycleOptions)
 	}
 	return result, nil
 }
@@ -481,15 +500,32 @@ func (s *ScheduleActionService) applyScheduleTaskLifecycle(ctx context.Context, 
 		}
 	}
 	shouldResetStatus := task.Status != models.StatusPending && task.Status != models.StatusRunning && (opts.ResetTerminal || categoryChanged)
+	statusChanged := false
 	if shouldResetStatus {
-		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
+		if opts.RequireEnabledSchedule {
+			scheduleID := ""
+			if result.Schedule != nil {
+				scheduleID = result.Schedule.ID
+			}
+			if scheduleID == "" {
+				result.Warnings = append(result.Warnings, fmt.Errorf("scheduled lifecycle reset requires a schedule"))
+			} else if updated, err := s.taskRepo.SetPendingIfNotRunningOrQueuedForEnabledSchedule(ctx, task.ID, scheduleID); err != nil {
+				result.Warnings = append(result.Warnings, err)
+			} else if updated {
+				task.Status = models.StatusPending
+				statusChanged = true
+			}
+		} else if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
 			result.Warnings = append(result.Warnings, err)
 		} else {
 			task.Status = models.StatusPending
+			statusChanged = true
 		}
 	}
 	if task.Category == models.CategoryScheduled && task.Status == models.StatusPending && s.workerSvc != nil {
-		s.workerSvc.ClearCancellationRequested(task.ID)
+		if !opts.RequireEnabledSchedule || statusChanged {
+			s.workerSvc.ClearCancellationRequested(task.ID)
+		}
 	}
 	return categoryChanged
 }
