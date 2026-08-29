@@ -208,6 +208,60 @@ func BenchmarkExecutionRepoListChatHistory50kProject(b *testing.B) {
 	}
 }
 
+func BenchmarkExecutionRepoViewTaskThreadPage(b *testing.B) {
+	db := testutil.NewTestDB(b)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewExecutionRepo(db)
+	ctx := context.Background()
+	task := &models.Task{
+		ProjectID: "default",
+		Title:     "View task thread benchmark",
+		Category:  models.CategoryBacklog,
+		Status:    models.StatusCompleted,
+		Prompt:    "benchmark prompt",
+	}
+	if err := taskRepo.Create(ctx, task); err != nil {
+		b.Fatalf("create task: %v", err)
+	}
+	prompt := strings.Repeat("p", 4*1024)
+	output := strings.Repeat("o", 64*1024)
+	for i := 0; i < 200; i++ {
+		if _, err := db.ExecContext(ctx, `INSERT INTO executions (id, task_id, status, prompt_sent, output)
+			VALUES (?, ?, ?, ?, ?)`, fmt.Sprintf("thread-bench-exec-%03d", i), task.ID, models.ExecCompleted, prompt, output); err != nil {
+			b.Fatalf("insert execution %d: %v", i, err)
+		}
+	}
+
+	b.Run("unbounded_history", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			executions, err := repo.ListByTaskChronological(ctx, task.ID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if len(executions) != 200 {
+				b.Fatalf("executions = %d, want 200", len(executions))
+			}
+		}
+	})
+	b.Run("count_plus_20_row_page", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			total, err := repo.CountByTask(ctx, task.ID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			page, err := repo.ListByTaskChronologicalPage(ctx, task.ID, 0, 20)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if total != 200 || len(page) != 20 {
+				b.Fatalf("total/page = %d/%d, want 200/20", total, len(page))
+			}
+		}
+	})
+}
+
 func legacyChatHistorySQL() string {
 	return `SELECT ` + executionSelectColumnsAliasLight + `
 		 FROM executions e

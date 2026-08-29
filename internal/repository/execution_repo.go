@@ -50,6 +50,15 @@ const executionSelectColumnsAliasLight = `e.id, e.task_id, COALESCE(e.agent_conf
 
 const taskExecutionHistoryPageSQL = `SELECT ` + executionSelectColumnsLight + ` FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT ?`
 
+const taskExecutionCountSQL = `SELECT COUNT(*) FROM executions WHERE task_id = ?`
+
+// taskThreadExecutionSelectColumns contains only the fields needed to render a
+// runtime task-thread transcript. It deliberately omits execution metadata and
+// detail-only payloads that the formatter never reads.
+const taskThreadExecutionSelectColumns = `id, task_id, status, prompt_sent, output, error_message, is_followup, started_at`
+
+const taskExecutionChronologicalPageSQL = `SELECT ` + taskThreadExecutionSelectColumns + ` FROM executions WHERE task_id = ? ORDER BY started_at ASC, rowid ASC LIMIT ? OFFSET ?`
+
 const taskExecutionMetricsSQL = `SELECT
 	(SELECT started_at FROM executions WHERE task_id = ? ORDER BY started_at DESC, rowid DESC LIMIT 1) AS latest_started_at,
 	COALESCE((SELECT duration_ms FROM executions WHERE task_id = ? AND duration_ms > 0 ORDER BY started_at DESC, rowid DESC LIMIT 1), 0) AS latest_duration_ms`
@@ -64,6 +73,14 @@ func scanExecutionRow(scanner interface {
 	err := scanner.Scan(&e.ID, &e.TaskID, &e.AgentConfigID, &e.Status, &e.PromptSent,
 		&e.Output, &e.ReasoningContent, &e.ErrorMessage, &e.TokensUsed, &e.DurationMs, &e.IsFollowup,
 		&e.StartsNewContext, &e.DiffOutput, &e.CliSessionID, &e.DispatchID, &e.StartedAt, &e.CompletedAt)
+	return e, err
+}
+
+func scanTaskThreadExecutionRow(scanner interface {
+	Scan(dest ...interface{}) error
+}) (models.Execution, error) {
+	var e models.Execution
+	err := scanner.Scan(&e.ID, &e.TaskID, &e.Status, &e.PromptSent, &e.Output, &e.ErrorMessage, &e.IsFollowup, &e.StartedAt)
 	return e, err
 }
 
@@ -920,6 +937,50 @@ func chatHistoryPageSQL(projectID, beforeExecID string, limit int) (string, []in
 	query += ` ORDER BY e.started_at DESC, e.history_order DESC LIMIT ?`
 	args = append(args, limit)
 	return query, args
+}
+
+// CountByTask returns the number of executions belonging to a task without
+// selecting any execution payload columns.
+func (r *ExecutionRepo) CountByTask(ctx context.Context, taskID string) (int, error) {
+	var total int
+	if err := r.db.QueryRowContext(ctx, taskExecutionCountSQL, taskID).Scan(&total); err != nil {
+		return 0, fmt.Errorf("counting task executions: %w", err)
+	}
+	return total, nil
+}
+
+// ListByTaskChronologicalPage returns one chronological execution page. The
+// query applies both bounds in SQL so callers do not materialize executions
+// outside the requested window.
+func (r *ExecutionRepo) ListByTaskChronologicalPage(ctx context.Context, taskID string, offset, limit int) ([]models.Execution, error) {
+	if limit <= 0 {
+		return []models.Execution{}, nil
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := r.db.QueryContext(ctx, taskExecutionChronologicalPageSQL, taskID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("listing executions chronological page: %w", err)
+	}
+	defer rows.Close()
+
+	return scanTaskThreadExecutions(rows, limit)
+}
+
+func scanTaskThreadExecutions(rows *sql.Rows, capacity int) ([]models.Execution, error) {
+	if capacity > 64 {
+		capacity = 64
+	}
+	execs := make([]models.Execution, 0, capacity)
+	for rows.Next() {
+		e, err := scanTaskThreadExecutionRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scanning task-thread execution: %w", err)
+		}
+		execs = append(execs, e)
+	}
+	return execs, rows.Err()
 }
 
 // ListByTaskChronological returns all executions for a task ordered chronologically (oldest first).

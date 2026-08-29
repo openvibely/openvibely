@@ -2906,11 +2906,68 @@ func (h *Handler) executeViewTaskThreadRequest(ctx context.Context, params strea
 	if err != nil {
 		return "", err
 	}
-	executions, err := h.execRepo.ListByTaskChronological(ctx, task.ID)
+	total, err := h.execRepo.CountByTask(ctx, task.ID)
 	if err != nil {
-		return "", fmt.Errorf("retrieving thread for task %q: %w", task.Title, err)
+		return "", fmt.Errorf("counting thread executions for task %q: %w", task.Title, err)
 	}
-	return strings.TrimSpace(h.formatThreadTranscript(task, executions, req.Offset, req.Limit)), nil
+
+	offset := req.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	var executions []models.Execution
+	if total > 0 && offset < total {
+		if req.Limit > 0 {
+			executions, err = h.execRepo.ListByTaskChronologicalPage(ctx, task.ID, offset, req.Limit)
+		} else {
+			executions, err = h.loadTaskThreadExecutions(ctx, task, total, offset)
+		}
+		if err != nil {
+			return "", fmt.Errorf("retrieving thread for task %q: %w", task.Title, err)
+		}
+	}
+	return strings.TrimSpace(h.formatThreadTranscriptWithTotal(task, executions, total, offset)), nil
+}
+
+// taskThreadExecutionFetchBatchSize keeps zero-limit runtime reads bounded. The
+// loader fetches chronological pages until the formatter reaches its 80 KiB
+// transcript budget, so a long history does not require an unbounded payload
+// read merely to discover where the transcript must stop.
+const taskThreadExecutionFetchBatchSize = 20
+
+func (h *Handler) loadTaskThreadExecutions(ctx context.Context, task *models.Task, total, offset int) ([]models.Execution, error) {
+	if task == nil || total <= 0 || offset < 0 || offset >= total {
+		return []models.Execution{}, nil
+	}
+
+	executions := make([]models.Execution, 0, minInt(taskThreadExecutionFetchBatchSize, total-offset))
+	nextOffset := offset
+	for nextOffset < total {
+		batchLimit := minInt(taskThreadExecutionFetchBatchSize, total-nextOffset)
+		batch, err := h.execRepo.ListByTaskChronologicalPage(ctx, task.ID, nextOffset, batchLimit)
+		if err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		executions = append(executions, batch...)
+		if h.formatThreadTranscriptPage(task, executions, total, offset).budgetExceeded {
+			break
+		}
+		if len(batch) < batchLimit {
+			break
+		}
+		nextOffset += len(batch)
+	}
+	return executions, nil
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // executeChatScheduleRequests schedules tasks from typed runtime-tool requests.
@@ -3084,6 +3141,31 @@ const maxPerMessageBytes = 50 * 1024
 // limit is the max number of executions to include (0 = all).
 func (h *Handler) formatThreadTranscript(task *models.Task, executions []models.Execution, offset, limit int) string {
 	total := len(executions)
+	if offset > 0 {
+		if offset >= total {
+			return h.formatThreadTranscriptPage(task, nil, total, offset).transcript
+		}
+		executions = executions[offset:]
+	}
+	if limit > 0 && limit < len(executions) {
+		executions = executions[:limit]
+	}
+	return h.formatThreadTranscriptWithTotal(task, executions, total, offset)
+}
+
+// formatThreadTranscriptWithTotal formats a page that has already been bounded
+// by the repository. total is the full execution count used for pagination
+// metadata and executions starts at offset.
+func (h *Handler) formatThreadTranscriptWithTotal(task *models.Task, executions []models.Execution, total, offset int) string {
+	return h.formatThreadTranscriptPage(task, executions, total, offset).transcript
+}
+
+type threadTranscriptFormatResult struct {
+	transcript     string
+	budgetExceeded bool
+}
+
+func (h *Handler) formatThreadTranscriptPage(task *models.Task, executions []models.Execution, total, offset int) threadTranscriptFormatResult {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("\n\n---\n**Thread history for task: \"%s\"** [TASK_ID:%s]\n", task.Title, task.ID))
 	sb.WriteString(fmt.Sprintf("Status: %s | Category: %s | Priority: %d\n", task.Status, task.Category, task.Priority))
@@ -3091,21 +3173,11 @@ func (h *Handler) formatThreadTranscript(task *models.Task, executions []models.
 
 	if total == 0 {
 		sb.WriteString("No execution history found for this task.\n")
-		return sb.String()
+		return threadTranscriptFormatResult{transcript: sb.String()}
 	}
-
-	// Apply offset
-	if offset > 0 {
-		if offset >= total {
-			sb.WriteString(fmt.Sprintf("Offset %d exceeds total executions (%d). Use a lower offset.\n", offset, total))
-			return sb.String()
-		}
-		executions = executions[offset:]
-	}
-
-	// Apply limit
-	if limit > 0 && limit < len(executions) {
-		executions = executions[:limit]
+	if offset > 0 && offset >= total {
+		sb.WriteString(fmt.Sprintf("Offset %d exceeds total executions (%d). Use a lower offset.\n", offset, total))
+		return threadTranscriptFormatResult{transcript: sb.String()}
 	}
 
 	// Format each execution, tracking total size
@@ -3157,7 +3229,7 @@ func (h *Handler) formatThreadTranscript(task *models.Task, executions []models.
 		sb.WriteString(fmt.Sprintf("\n---\nShowing executions %d–%d of %d.\n", offset+1, offset+included, total))
 	}
 
-	return sb.String()
+	return threadTranscriptFormatResult{transcript: sb.String(), budgetExceeded: budgetExceeded}
 }
 
 // executeListPersonalities returns all available personality presets.
