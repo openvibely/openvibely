@@ -172,6 +172,37 @@ func TestEmailPollOnceBatchesReceiptRecoveryWithNewHandoff(t *testing.T) {
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
 	assert.Equal(t, 1, client.storeCalls)
 	assert.Equal(t, [][]uint32{{1, 2}}, client.storeBatches())
+	assert.Equal(t, 1, client.fullBodyFetches)
+	assert.Equal(t, [][]uint32{{2}}, client.fullBodyFetchIDs, "already-receipted messages must be excluded from the full fetch")
+}
+
+func TestEmailPollOnceUsesMIMEMessageIDBeforeEnvelopeAndUID(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	cfg := EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"}
+	receipts := repository.NewEmailInboundReceiptRepo(db)
+	mailboxIdentity := emailMailboxIdentity(cfg)
+	require.NoError(t, receipts.Record(ctx, mailboxIdentity, "message-id:<message-1@example.com>"))
+	message := testIMAPMessageWithBody(1, "already handed off", "alice@example.com", "body")
+	message.Envelope.MessageId = "<envelope-identity@example.com>"
+	client := newFakeEmailIMAPClient(message)
+	client.uidValidity = 77
+	processed := 0
+	svc := &EmailService{emailInboundReceiptStore: receipts}
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool {
+		processed++
+		return true
+	}
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+
+	svc.pollOnce(ctx, cfg)
+
+	assert.Zero(t, processed)
+	assert.Equal(t, []uint32{1}, client.seenIDs())
+	assert.Equal(t, 1, client.fetchCount)
+	assert.Equal(t, [][]uint32{{1}}, client.fetchIDs)
+	assert.Equal(t, [][]imap.FetchItem{{imap.FetchEnvelope, imap.FetchUid, emailMessageIDHeaderSection().FetchItem()}}, client.fetchItems)
+	assert.Zero(t, client.fullBodyFetches, "MIME Message-ID from bounded headers must deduplicate before BODY[]")
 }
 
 func TestEmailPollOnceDoesNotRepeatDurableHandoffAfterStoreFailure(t *testing.T) {
@@ -203,6 +234,7 @@ func TestEmailPollOnceDoesNotRepeatDurableHandoffAfterStoreFailure(t *testing.T)
 	assert.Equal(t, []uint32{1, 2}, client.seenIDs())
 	assert.Equal(t, 2, processed)
 	assert.Equal(t, [][]uint32{{1, 2}, {1, 2}}, client.storeBatches())
+	assert.Equal(t, 1, client.fullBodyFetches, "receipt recovery must not fetch full MIME bodies again")
 }
 
 func TestEmailPollOnceSkipsPostSuccessRecordAfterFirstTurnWithHandoff(t *testing.T) {
@@ -461,6 +493,102 @@ func BenchmarkEmailAcknowledgements(b *testing.B) {
 	}
 }
 
+type benchmarkEmailInboundReceiptStore struct {
+	received         map[string]struct{}
+	existsCalls      int
+	recordCalls      int
+	withHandoffCalls int
+}
+
+func (s *benchmarkEmailInboundReceiptStore) Exists(_ context.Context, _, messageKey string) (bool, error) {
+	s.existsCalls++
+	_, ok := s.received[messageKey]
+	return ok, nil
+}
+
+func (s *benchmarkEmailInboundReceiptStore) Record(_ context.Context, _, _ string) error {
+	s.recordCalls++
+	return nil
+}
+
+func (s *benchmarkEmailInboundReceiptStore) WithHandoff(_ context.Context, _, _ string, _ func(repository.SQLExecutor) error) (bool, error) {
+	s.withHandoffCalls++
+	return false, nil
+}
+
+func newEmailPollBenchmarkFixture(messageCount, receiptedCount int) (*fakeEmailIMAPClient, *benchmarkEmailInboundReceiptStore, *EmailService) {
+	messages := make([]*imap.Message, 0, messageCount)
+	received := make(map[string]struct{}, receiptedCount)
+	body := strings.Repeat("x", 4*1024)
+	for i := 0; i < messageCount; i++ {
+		id := uint32(i + 1)
+		messages = append(messages, testIMAPMessageWithBody(id, fmt.Sprintf("message-%d", id), "alice@example.com", body))
+		if i < receiptedCount {
+			received[fmt.Sprintf("message-id:<message-%d@example.com>", id)] = struct{}{}
+		}
+	}
+	client := newFakeEmailIMAPClient(messages...)
+	client.uidValidity = 77
+	receipts := &benchmarkEmailInboundReceiptStore{received: received}
+	svc := &EmailService{emailInboundReceiptStore: receipts}
+	svc.processIncomingMessageFn = func(context.Context, EmailInboundMessage) bool { return true }
+	svc.connectIMAP = func(context.Context, EmailRuntimeConfig) (emailIMAPClient, error) { return client, nil }
+	return client, receipts, svc
+}
+
+func BenchmarkEmailPollOnceReceiptDeduplication(b *testing.B) {
+	for _, messageCount := range []int{10, 100, 1000} {
+		for _, mix := range []struct {
+			name          string
+			receiptedRate int
+		}{
+			{name: "0%", receiptedRate: 0},
+			{name: "50%", receiptedRate: 50},
+			{name: "100%", receiptedRate: 100},
+		} {
+			b.Run(fmt.Sprintf("%d/%s", messageCount, mix.name), func(b *testing.B) {
+				b.ReportAllocs()
+				var fetchCalls, fetchIDs, fetchItems int
+				var fullBodyBytes, parsedMessages, receiptLookups, storeCalls int64
+				var elapsed time.Duration
+				for i := 0; i < b.N; i++ {
+					b.StopTimer()
+					receiptedCount := messageCount * mix.receiptedRate / 100
+					client, receipts, svc := newEmailPollBenchmarkFixture(messageCount, receiptedCount)
+					b.StartTimer()
+					started := time.Now()
+					svc.pollOnce(context.Background(), EmailRuntimeConfig{Address: "bot@example.com", IMAPHost: "imap.example.com"})
+					elapsed += time.Since(started)
+					b.StopTimer()
+
+					fetchCalls += len(client.fetchItems)
+					for _, ids := range client.fetchIDs {
+						fetchIDs += len(ids)
+					}
+					for _, items := range client.fetchItems {
+						fetchItems += len(items)
+					}
+					fullBodyBytes += client.fullBodyBytes
+					for _, ids := range client.fullBodyFetchIDs {
+						parsedMessages += int64(len(ids))
+					}
+					receiptLookups += int64(receipts.existsCalls)
+					storeCalls += int64(client.storeCalls)
+				}
+
+				b.ReportMetric(float64(fetchCalls)/float64(b.N), "fetch_calls/op")
+				b.ReportMetric(float64(fetchIDs)/float64(b.N), "fetch_ids/op")
+				b.ReportMetric(float64(fetchItems)/float64(b.N), "fetch_items/op")
+				b.ReportMetric(float64(fullBodyBytes)/float64(b.N), "full_body_bytes/op")
+				b.ReportMetric(float64(parsedMessages)/float64(b.N), "parsed_messages/op")
+				b.ReportMetric(float64(receiptLookups)/float64(b.N), "receipt_lookups/op")
+				b.ReportMetric(float64(storeCalls)/float64(b.N), "store_calls/op")
+				b.ReportMetric(float64(elapsed)/float64(b.N), "elapsed_ns/op")
+			})
+		}
+	}
+}
+
 func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
 	client := newFakeEmailIMAPClient(testIMAPMessage(1, "malformed", ""))
 	svc := &EmailService{}
@@ -477,18 +605,24 @@ func TestEmailPollOnceLeavesParseFailuresUnread(t *testing.T) {
 	assert.Empty(t, client.seenIDs())
 	assert.Zero(t, client.storeCalls)
 	assert.Zero(t, processed)
-	assert.Equal(t, 2, client.fetchCount)
+	assert.Equal(t, 4, client.fetchCount)
+	assert.Equal(t, 2, client.fullBodyFetches)
 }
 
 type fakeEmailIMAPClient struct {
-	messages      map[uint32]*imap.Message
-	seen          map[uint32]bool
-	fetchCount    int
-	storeCalls    int
-	storedIDs     [][]uint32
-	storeFailures int
-	storeDelay    time.Duration
-	uidValidity   uint32
+	messages         map[uint32]*imap.Message
+	seen             map[uint32]bool
+	fetchCount       int
+	fullBodyFetches  int
+	fullBodyFetchIDs [][]uint32
+	fullBodyBytes    int64
+	fetchItems       [][]imap.FetchItem
+	fetchIDs         [][]uint32
+	storeCalls       int
+	storedIDs        [][]uint32
+	storeFailures    int
+	storeDelay       time.Duration
+	uidValidity      uint32
 }
 
 func newFakeEmailIMAPClient(messages ...*imap.Message) *fakeEmailIMAPClient {
@@ -515,28 +649,41 @@ func testIMAPMessageWithoutMessageID(id, uid uint32, subject, from, body string)
 		SeqNum:   id,
 		Uid:      uid,
 		Envelope: &imap.Envelope{Subject: subject, From: []*imap.Address{{MailboxName: parts[0], HostName: parts[1]}}},
-		Body:     map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)},
+		Body:     testIMAPBodySections(raw),
+	}
+}
+
+func testIMAPBodySections(raw string) map[*imap.BodySectionName]imap.Literal {
+	header := raw
+	if headerEnd := strings.Index(header, "\r\n\r\n"); headerEnd >= 0 {
+		header = header[:headerEnd+len("\r\n\r\n")]
+	}
+	responseSection := emailMessageIDHeaderSection()
+	responseSection.Peek = false
+	return map[*imap.BodySectionName]imap.Literal{
+		&imap.BodySectionName{}: bytes.NewBufferString(raw),
+		responseSection:         bytes.NewBufferString(header),
 	}
 }
 
 func testIMAPMessageWithBody(id uint32, subject, from, body string) *imap.Message {
 	msg := testIMAPMessage(id, subject, from)
 	raw := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s", from, subject, id, body)
-	msg.Body = map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)}
+	msg.Body = testIMAPBodySections(raw)
 	return msg
 }
 
 func testIMAPReplyWithBody(id uint32, subject, from, references, body string) *imap.Message {
 	msg := testIMAPMessage(id, subject, from)
 	raw := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\nReferences: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s", from, subject, id, references, body)
-	msg.Body = map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)}
+	msg.Body = testIMAPBodySections(raw)
 	return msg
 }
 
 func testIMAPReplyInReplyToOnlyWithBody(id uint32, subject, from, inReplyTo, body string) *imap.Message {
 	msg := testIMAPMessage(id, subject, from)
 	raw := fmt.Sprintf("From: %s\r\nSubject: %s\r\nMessage-ID: <message-%d@example.com>\r\nIn-Reply-To: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s", from, subject, id, inReplyTo, body)
-	msg.Body = map[*imap.BodySectionName]imap.Literal{&imap.BodySectionName{}: bytes.NewBufferString(raw)}
+	msg.Body = testIMAPBodySections(raw)
 	return msg
 }
 
@@ -553,13 +700,38 @@ func (c *fakeEmailIMAPClient) Search(*imap.SearchCriteria) ([]uint32, error) {
 	}
 	return ids, nil
 }
-func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, _ []imap.FetchItem, ch chan *imap.Message) error {
+func (c *fakeEmailIMAPClient) Fetch(seqset *imap.SeqSet, items []imap.FetchItem, ch chan *imap.Message) error {
 	c.fetchCount++
-	defer close(ch)
-	for id := uint32(1); id <= uint32(len(c.messages)); id++ {
+	c.fetchItems = append(c.fetchItems, append([]imap.FetchItem(nil), items...))
+	var fetchedIDs []uint32
+	for id := range c.messages {
 		if seqset.Contains(id) {
-			ch <- c.messages[id]
+			fetchedIDs = append(fetchedIDs, id)
 		}
+	}
+	sort.Slice(fetchedIDs, func(i, j int) bool { return fetchedIDs[i] < fetchedIDs[j] })
+	c.fetchIDs = append(c.fetchIDs, append([]uint32(nil), fetchedIDs...))
+	fullBody := false
+	for _, item := range items {
+		if item == (&imap.BodySectionName{}).FetchItem() {
+			fullBody = true
+			break
+		}
+	}
+	if fullBody {
+		c.fullBodyFetches++
+		c.fullBodyFetchIDs = append(c.fullBodyFetchIDs, append([]uint32(nil), fetchedIDs...))
+		for _, id := range fetchedIDs {
+			if body := c.messages[id].GetBody(&imap.BodySectionName{}); body != nil {
+				if sized, ok := body.(interface{ Len() int }); ok {
+					c.fullBodyBytes += int64(sized.Len())
+				}
+			}
+		}
+	}
+	defer close(ch)
+	for _, id := range fetchedIDs {
+		ch <- c.messages[id]
 	}
 	return nil
 }
