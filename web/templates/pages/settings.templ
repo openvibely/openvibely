@@ -1837,7 +1837,12 @@ templ settingsContent(view ChannelsSettingsView) {
 
 					function resetOutboundTargetAddForm() {
 						const form = document.getElementById('outbound-target-add-form');
-						if (form) form.reset();
+						if (form) {
+							form.reset();
+							delete form.dataset.editingRowKey;
+							const submit = form.querySelector('button[type="submit"]');
+							if (submit) submit.textContent = 'Add Target';
+						}
 						const platformSel = document.getElementById('outbound-target-platform-select');
 						if (platformSel) outboundTargetKindOnPlatformChange(platformSel);
 					}
@@ -1877,12 +1882,42 @@ templ settingsContent(view ChannelsSettingsView) {
 						return input;
 					}
 
+					function outboundTargetsFindDraftGroup(rowKey) {
+						const fields = document.getElementById('outbound-targets-draft-fields');
+						if (!fields) return null;
+						const groups = fields.querySelectorAll('[data-outbound-target-draft-key]');
+						for (let i = 0; i < groups.length; i++) {
+							if (groups[i].getAttribute('data-outbound-target-draft-key') === rowKey) return groups[i];
+						}
+						return null;
+					}
+
+					function outboundTargetsFindDraftRow(rowKey) {
+						const tbody = document.getElementById('outbound-targets-draft-tbody');
+						if (!tbody) return null;
+						const rows = tbody.querySelectorAll('tr[data-outbound-target-draft-key]');
+						for (let i = 0; i < rows.length; i++) {
+							if (rows[i].getAttribute('data-outbound-target-draft-key') === rowKey) return rows[i];
+						}
+						return null;
+					}
+
+					function outboundTargetsDraftValue(group, name) {
+						const input = group ? group.querySelector('input[name="' + name + '"]') : null;
+						return input ? input.value : '';
+					}
+
 					function outboundTargetsAppendDraftFields(rowKey, id, platform, targetKind, name, targetID, threadID, isHome, defaultSubject) {
 						const fields = document.getElementById('outbound-targets-draft-fields');
 						if (!fields) return;
-						const group = document.createElement('div');
-						group.id = 'outbound-target-draft-fields-' + rowKey;
-						group.setAttribute('data-outbound-target-draft-key', rowKey);
+						let group = outboundTargetsFindDraftGroup(rowKey);
+						if (!group) {
+							group = document.createElement('div');
+							group.id = 'outbound-target-draft-fields-' + rowKey;
+							group.setAttribute('data-outbound-target-draft-key', rowKey);
+							fields.appendChild(group);
+						}
+						while (group.firstChild) group.removeChild(group.firstChild);
 						group.appendChild(outboundTargetsDraftInput('target_row_id', id));
 						group.appendChild(outboundTargetsDraftInput('target_platform', platform));
 						group.appendChild(outboundTargetsDraftInput('target_kind', targetKind));
@@ -1891,7 +1926,6 @@ templ settingsContent(view ChannelsSettingsView) {
 						group.appendChild(outboundTargetsDraftInput('target_thread_id', threadID));
 						group.appendChild(outboundTargetsDraftInput('target_is_home', isHome ? 'true' : 'false'));
 						group.appendChild(outboundTargetsDraftInput('target_default_subject', defaultSubject));
-						fields.appendChild(group);
 					}
 
 					function outboundTargetsEscape(value) {
@@ -1926,11 +1960,51 @@ templ settingsContent(view ChannelsSettingsView) {
 								}
 							}
 
-						function addOutboundTargetDraft(event) {
+					function outboundTargetsRenderDraftRow(rowKey, platform, targetKind, name, targetID, threadID, isHome) {
+						const escapedRowKey = outboundTargetsEscape(rowKey);
+						const fieldsID = 'outbound-target-draft-fields-' + escapedRowKey;
+						const testLabelID = 'outbound-target-test-label-' + escapedRowKey;
+						const typeCell = targetKind === 'user' ? '<span class="badge badge-sm badge-outline">User DM</span>' : '<span class="opacity-60 text-xs">' + outboundTargetsEscape(targetKind) + '</span>';
+						return '<td>' + outboundTargetsEscape(platform) + '</td>' +
+							'<td>' + typeCell + '</td>' +
+							'<td>' + (name ? '<span>#' + outboundTargetsEscape(name) + '</span>' : '<span class="opacity-50">unnamed</span>') + '</td>' +
+							'<td class="font-mono text-xs break-all">' + outboundTargetsEscape(targetID) + '</td>' +
+							'<td class="font-mono text-xs">' + outboundTargetsEscape(threadID) + '</td>' +
+							'<td class="outbound-target-home-cell">' + (isHome ? '<span class="badge badge-sm badge-primary">Home</span>' : '') + '</td>' +
+							'<td class="text-right whitespace-nowrap"><span class="badge badge-sm badge-ghost mr-2">Unsaved</span><button type="button" class="btn btn-xs mr-1" onclick="editOutboundTargetDraft(this)">Edit</button><button type="button" class="btn btn-xs mr-1" hx-post="/channels/outbound-targets/test-draft" hx-include="#' + fieldsID + ', #outbound-targets-policy-form input[name=project_id]" hx-target="#' + testLabelID + '" hx-swap="innerHTML" hx-on::before-request="outboundTargetTestBefore(this)" hx-on::after-request="outboundTargetTestAfter(this, event)"><span id="' + testLabelID + '" data-outbound-target-test-label aria-live="polite">Test</span></button><button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button></td>';
+					}
+
+					function editOutboundTargetDraft(button) {
+						const row = button ? button.closest('tr[data-outbound-target-draft-key]') : null;
+						const form = document.getElementById('outbound-target-add-form');
+						if (!row || !form) return;
+						const rowKey = row.getAttribute('data-outbound-target-draft-key') || '';
+						const group = outboundTargetsFindDraftGroup(rowKey);
+						if (!rowKey || !group) return;
+						form.reset();
+						form.elements.platform.value = outboundTargetsDraftValue(group, 'target_platform');
+						form.elements.target_kind.value = outboundTargetsDraftValue(group, 'target_kind') || 'channel';
+						form.elements.name.value = outboundTargetsDraftValue(group, 'target_name');
+						form.elements.target_id.value = outboundTargetsDraftValue(group, 'target_target_id');
+						form.elements.thread_id.value = outboundTargetsDraftValue(group, 'target_thread_id');
+						form.elements.is_home.checked = outboundTargetsDraftValue(group, 'target_is_home') === 'true';
+						form.elements.default_subject.value = outboundTargetsDraftValue(group, 'target_default_subject');
+						form.dataset.editingRowKey = rowKey;
+						const submit = form.querySelector('button[type="submit"]');
+						if (submit) submit.textContent = 'Update Target';
+						const platformSel = document.getElementById('outbound-target-platform-select');
+						if (platformSel) outboundTargetKindOnPlatformChange(platformSel);
+					}
+
+					function addOutboundTargetDraft(event) {
 						if (event) event.preventDefault();
 						const form = document.getElementById('outbound-target-add-form');
 						const tbody = document.getElementById('outbound-targets-draft-tbody');
 						if (!form || !tbody) return false;
+						const editingRowKey = form.dataset.editingRowKey || '';
+						const editingRow = editingRowKey ? outboundTargetsFindDraftRow(editingRowKey) : null;
+						const editingGroup = editingRowKey ? outboundTargetsFindDraftGroup(editingRowKey) : null;
+						if (editingRowKey && (!editingRow || !editingGroup)) return false;
 						const platform = (form.elements.platform.value || '').trim().toLowerCase();
 						const targetKind = platform === 'telegram' ? 'chat' : platform === 'email' ? 'email' : (form.elements.target_kind.value || 'channel').trim().toLowerCase();
 						const name = (form.elements.name.value || '').trim().replace(/^#+/, '').toLowerCase();
@@ -1949,22 +2023,24 @@ templ settingsContent(view ChannelsSettingsView) {
 								if (platformInput && homeInput && platformInput.value === platform) homeInput.value = 'false';
 							});
 						}
-						const rowKey = 'draft-' + Date.now() + '-' + Math.random().toString(36).slice(2);
-						const emptyRow = document.getElementById('outbound-targets-empty-row');
-						if (emptyRow) emptyRow.remove();
-						const row = document.createElement('tr');
-						row.setAttribute('data-outbound-target-draft-key', rowKey);
-						row.setAttribute('data-platform', platform);
-						const typeCell = targetKind === 'user' ? '<span class="badge badge-sm badge-outline">User DM</span>' : '<span class="opacity-60 text-xs">' + outboundTargetsEscape(targetKind) + '</span>';
-						row.innerHTML = '<td>' + outboundTargetsEscape(platform) + '</td>' +
-							'<td>' + typeCell + '</td>' +
-							'<td>' + (name ? '<span>#' + outboundTargetsEscape(name) + '</span>' : '<span class="opacity-50">unnamed</span>') + '</td>' +
-							'<td class="font-mono text-xs break-all">' + outboundTargetsEscape(targetID) + '</td>' +
-							'<td class="font-mono text-xs">' + outboundTargetsEscape(threadID) + '</td>' +
-							'<td class="outbound-target-home-cell">' + (isHome ? '<span class="badge badge-sm badge-primary">Home</span>' : '') + '</td>' +
-								'<td class="text-right whitespace-nowrap"><span class="badge badge-sm badge-ghost mr-2">Unsaved</span><button type="button" class="btn btn-xs mr-1" hx-post="/channels/outbound-targets/test-draft" hx-include="#outbound-target-draft-fields-' + rowKey + ', #outbound-targets-policy-form input[name=project_id]" hx-target="#outbound-target-test-label-' + rowKey + '" hx-swap="innerHTML" hx-on::before-request="outboundTargetTestBefore(this)" hx-on::after-request="outboundTargetTestAfter(this, event)"><span id="outbound-target-test-label-' + rowKey + '" data-outbound-target-test-label aria-live="polite">Test</span></button><button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button></td>';						tbody.appendChild(row);
-						outboundTargetsAppendDraftFields(rowKey, '', platform, targetKind, name, targetID, threadID, isHome, defaultSubject);
-						if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(row);
+						if (!editingRowKey) {
+							const rowKey = 'draft-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+							const emptyRow = document.getElementById('outbound-targets-empty-row');
+							if (emptyRow) emptyRow.remove();
+							const row = document.createElement('tr');
+							row.setAttribute('data-outbound-target-draft-key', rowKey);
+							row.setAttribute('data-platform', platform);
+							row.innerHTML = outboundTargetsRenderDraftRow(rowKey, platform, targetKind, name, targetID, threadID, isHome);
+							tbody.appendChild(row);
+							outboundTargetsAppendDraftFields(rowKey, '', platform, targetKind, name, targetID, threadID, isHome, defaultSubject);
+							if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(row);
+						} else {
+							const id = outboundTargetsDraftValue(editingGroup, 'target_row_id') || editingRowKey;
+							editingRow.setAttribute('data-platform', platform);
+							editingRow.innerHTML = outboundTargetsRenderDraftRow(editingRowKey, platform, targetKind, name, targetID, threadID, isHome);
+							outboundTargetsAppendDraftFields(editingRowKey, id, platform, targetKind, name, targetID, threadID, isHome, defaultSubject);
+							if (window.htmx && typeof window.htmx.process === 'function') window.htmx.process(editingRow);
+						}
 						resetOutboundTargetAddForm();
 						return false;
 					}
@@ -1973,9 +2049,11 @@ templ settingsContent(view ChannelsSettingsView) {
 						const row = button ? button.closest('tr[data-outbound-target-draft-key]') : null;
 						if (!row) return;
 						const rowKey = row.getAttribute('data-outbound-target-draft-key');
+						const form = document.getElementById('outbound-target-add-form');
 						row.remove();
-						const group = document.querySelector('#outbound-targets-draft-fields [data-outbound-target-draft-key="' + rowKey + '"]');
+						const group = outboundTargetsFindDraftGroup(rowKey);
 						if (group) group.remove();
+						if (form && form.dataset.editingRowKey === rowKey) resetOutboundTargetAddForm();
 						const tbody = document.getElementById('outbound-targets-draft-tbody');
 						if (tbody && !tbody.querySelector('tr[data-outbound-target-draft-key]')) {
 							const empty = document.createElement('tr');
@@ -2256,15 +2334,17 @@ templ OutboundTargetsSection(currentProjectID string, targets []models.ChannelTa
 									</td>
 									<td class="font-mono text-xs break-all">{ target.TargetID }</td>
 									<td class="font-mono text-xs">{ target.ThreadID }</td>
-										<td class="outbound-target-home-cell">
-											if target.Home {
-												<span class="badge badge-sm badge-primary">Home</span>
-											}
-										</td>
-											<td class="text-right whitespace-nowrap">
-												<button type="button" class="btn btn-xs mr-1" hx-post={ "/channels/outbound-targets/" + target.ID + "/test?project_id=" + currentProjectID } hx-target={ "#outbound-target-test-label-" + target.ID } hx-swap="innerHTML" hx-on::before-request="outboundTargetTestBefore(this)" hx-on::after-request="outboundTargetTestAfter(this, event)"><span id={ "outbound-target-test-label-" + target.ID } data-outbound-target-test-label aria-live="polite">Test</span></button>
-												<button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button>
-											</td>								</tr>
+									<td class="outbound-target-home-cell">
+										if target.Home {
+											<span class="badge badge-sm badge-primary">Home</span>
+										}
+									</td>
+									<td class="text-right whitespace-nowrap">
+										<button type="button" class="btn btn-xs mr-1" onclick="editOutboundTargetDraft(this)">Edit</button>
+										<button type="button" class="btn btn-xs mr-1" hx-post={ "/channels/outbound-targets/" + target.ID + "/test?project_id=" + currentProjectID } hx-target={ "#outbound-target-test-label-" + target.ID } hx-swap="innerHTML" hx-on::before-request="outboundTargetTestBefore(this)" hx-on::after-request="outboundTargetTestAfter(this, event)"><span id={ "outbound-target-test-label-" + target.ID } data-outbound-target-test-label aria-live="polite">Test</span></button>
+										<button type="button" class="btn btn-xs btn-error" onclick="removeOutboundTargetDraft(this)">Delete</button>
+									</td>
+								</tr>
 							}
 						</tbody>
 					</table>

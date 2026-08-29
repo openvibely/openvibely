@@ -1199,7 +1199,6 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	workDir := ""
 	repoDir := "" // original repo dir (for worktree setup and post-execution)
 	managedWorktree := false
-	startupWorktreeContext := ""
 	if task.ProjectID != "" && s.projectRepo != nil {
 		project, projErr := s.projectRepo.GetByID(ctx, task.ProjectID)
 		if projErr != nil {
@@ -1271,46 +1270,40 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 			applog.Infof("[agent-svc] ExecuteTaskWithAgent using worktree workDir=%s branch=%s", workDir, wtBranch)
 
 			if syncErr := s.worktreeSvc.SyncWorktreeFromMainAtStart(ctx, &task, repoDir); syncErr != nil {
-				var conflictErr *StartupSyncConflictError
-				if errors.As(syncErr, &conflictErr) {
-					startupWorktreeContext = StartupSyncConflictContext(conflictErr)
-					applog.Infof("[agent-svc] ExecuteTaskWithAgent startup worktree sync conflict task=%s, continuing in preserved worktree: %v", task.ID, syncErr)
+				applog.Infof("[agent-svc] ExecuteTaskWithAgent startup worktree auto-merge failed task=%s: %v", task.ID, syncErr)
+				if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", syncErr.Error(), 0, 0); completeErr != nil {
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after startup auto-merge failure: %v", completeErr)
 				} else {
-					applog.Infof("[agent-svc] ExecuteTaskWithAgent startup worktree auto-merge failed task=%s: %v", task.ID, syncErr)
-					if completeErr := s.execRepo.Complete(finalizeCtx, exec.ID, models.ExecFailed, "", syncErr.Error(), 0, 0); completeErr != nil {
-						applog.Infof("[agent-svc] ExecuteTaskWithAgent error completing execution after startup auto-merge failure: %v", completeErr)
-					} else {
-						s.publishExecutionTerminal(exec.ID, models.ExecFailed, syncErr.Error())
-					}
-					if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
-						applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after startup auto-merge failure: %v", statusErr)
-					}
-					if task.Category == models.CategoryActive {
-						if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
-							applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving startup-auto-merge-failed task to completed category: %v", categoryErr)
-						} else {
-							applog.Infof("[agent-svc] ExecuteTaskWithAgent moved startup-auto-merge-failed task=%s to completed category", task.ID)
-						}
-					}
-					if s.alertSvc != nil {
-						if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, syncErr.Error()); alertErr != nil {
-							applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating startup auto-merge failure alert: %v", alertErr)
-						}
-					}
-					exec.Status = models.ExecFailed
-					exec.ErrorMessage = syncErr.Error()
-					if s.telegramSvc != nil {
-						s.telegramSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
-					}
-					if s.slackSvc != nil {
-						s.slackSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
-					}
-					if s.discordSvc != nil {
-						s.discordSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
-					}
-					s.promoteQueuedTaskThreadAfterCompletion(task.ID)
-					return exec, llmcontracts.ChatContext{}, fmt.Errorf("startup worktree auto-merge failed: %w", syncErr)
+					s.publishExecutionTerminal(exec.ID, models.ExecFailed, syncErr.Error())
 				}
+				if statusErr := s.taskRepo.UpdateStatus(finalizeCtx, task.ID, models.StatusFailed); statusErr != nil {
+					applog.Infof("[agent-svc] ExecuteTaskWithAgent error updating task status after startup auto-merge failure: %v", statusErr)
+				}
+				if task.Category == models.CategoryActive {
+					if categoryErr := s.taskRepo.UpdateCategory(finalizeCtx, task.ID, models.CategoryCompleted); categoryErr != nil {
+						applog.Infof("[agent-svc] ExecuteTaskWithAgent error moving startup-auto-merge-failed task to completed category: %v", categoryErr)
+					} else {
+						applog.Infof("[agent-svc] ExecuteTaskWithAgent moved startup-auto-merge-failed task=%s to completed category", task.ID)
+					}
+				}
+				if s.alertSvc != nil {
+					if alertErr := s.alertSvc.CreateTaskFailedAlert(finalizeCtx, task.ProjectID, task.ID, exec.ID, task.Title, syncErr.Error()); alertErr != nil {
+						applog.Infof("[agent-svc] ExecuteTaskWithAgent error creating startup auto-merge failure alert: %v", alertErr)
+					}
+				}
+				exec.Status = models.ExecFailed
+				exec.ErrorMessage = syncErr.Error()
+				if s.telegramSvc != nil {
+					s.telegramSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
+				}
+				if s.slackSvc != nil {
+					s.slackSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
+				}
+				if s.discordSvc != nil {
+					s.discordSvc.SendTaskCompletionNotification(finalizeCtx, task, "", syncErr.Error())
+				}
+				s.promoteQueuedTaskThreadAfterCompletion(task.ID)
+				return exec, llmcontracts.ChatContext{}, fmt.Errorf("startup worktree auto-merge failed: %w", syncErr)
 			}
 		}
 	}
@@ -1352,7 +1345,7 @@ func (s *LLMService) executeTaskWithAgent(ctx context.Context, task models.Task,
 	if agentSkillTools := s.agentDeclaredSkillRuntimeTools(ctx, task, agentDef, workDir); agentSkillTools != nil {
 		runtimeTools = llmcontracts.CompositeRuntimeTools(runtimeTools, agentSkillTools)
 	}
-	projectInstructions := combineProjectInstructions(additionalProjectInstructionsFromContext(ctx), startupWorktreeContext, loadRootProjectInstructions(repoDir))
+	projectInstructions := combineProjectInstructions(additionalProjectInstructionsFromContext(ctx), loadRootProjectInstructions(repoDir))
 	if projectInstructions != "" {
 		applog.Infof("[agent-svc] ExecuteTaskWithAgent prepared project instructions (%d bytes)", len(projectInstructions))
 	}

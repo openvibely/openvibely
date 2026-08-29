@@ -393,6 +393,7 @@ func (h *Handler) HandleWebhookCreate(c echo.Context) error {
 	if w.Name == "" {
 		w.Name = "New Webhook"
 	}
+	w.Enabled = true
 
 	if err := h.webhookRepo.Create(c.Request().Context(), w); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create webhook: "+err.Error())

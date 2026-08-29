@@ -272,12 +272,13 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	targetRepo := repository.NewChannelTargetRepo(db)
 	h.SetChannelTargetRepo(targetRepo)
 	seedTarget := models.ChannelTarget{
-		ID:        repository.NewID(),
-		ProjectID: "default",
-		Platform:  "email",
-		Name:      "client",
-		TargetID:  "client@example.com",
-		Home:      true,
+		ID:             repository.NewID(),
+		ProjectID:      "default",
+		Platform:       "email",
+		Name:           "client",
+		TargetID:       "client@example.com",
+		Home:           true,
+		DefaultSubject: "Original subject",
 	}
 	if err := targetRepo.Upsert(context.Background(), seedTarget); err != nil {
 		t.Fatalf("failed to seed outbound target: %v", err)
@@ -332,6 +333,29 @@ func TestChannelsPageOutboundTargetsRenderAsPermanentTopEditCard(t *testing.T) {
 	}
 	if !strings.Contains(body, `onsubmit="return addOutboundTargetDraft(event)"`) || !strings.Contains(body, `client@example.com`) {
 		t.Fatal("expected staged outbound target controls inside modal")
+	}
+	savedRowStart := strings.Index(body, `<tr data-outbound-target-draft-key="`)
+	if savedRowStart == -1 {
+		t.Fatalf("expected saved outbound target row markup, body=%q", body)
+	}
+	savedRowEnd := strings.Index(body[savedRowStart:], `</tr>`)
+	if savedRowEnd == -1 {
+		t.Fatalf("expected saved outbound target row to close, body=%q", body)
+	}
+	savedRow := body[savedRowStart : savedRowStart+savedRowEnd+len(`</tr>`)]
+	if strings.Count(savedRow, `onclick="editOutboundTargetDraft(this)"`) != 1 {
+		t.Fatalf("expected one discoverable Edit action for the saved outbound target, row=%q", savedRow)
+	}
+	for _, want := range []string{
+		"function editOutboundTargetDraft",
+		"outboundTargetsFindDraftGroup",
+		"form.dataset.editingRowKey",
+		"Update Target",
+		"const fieldsID = 'outbound-target-draft-fields-'", `name="target_default_subject" value="Original subject"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected saved target edit flow to contain %q, body=%q", want, body)
+		}
 	}
 	if strings.Count(body, `data-channel-type="outbound-targets"`) != 1 {
 		t.Fatalf("expected exactly one outbound targets card on page, got %d", strings.Count(body, `data-channel-type="outbound-targets"`))
