@@ -2262,6 +2262,40 @@ func TestTaskRepo_ListBoardByProjectWithCategorySorts_ProjectsUnicodePromptPrevi
 	}
 }
 
+func TestTaskRepo_ListBoardByProjectWithCategorySorts_ProjectsFailedAndMergedState(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	repo := NewTaskRepo(db, nil)
+	ctx := context.Background()
+
+	failed := &models.Task{ProjectID: "default", Title: "Failed board task", Category: models.CategoryBacklog, Status: models.StatusFailed, Prompt: strings.Repeat("f", BoardPromptPreviewCodePoints+25), Priority: 2}
+	merged := &models.Task{ProjectID: "default", Title: "Merged board task", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusMerged, Prompt: strings.Repeat("m", BoardPromptPreviewCodePoints+25), Priority: 2}
+	for _, task := range []*models.Task{failed, merged} {
+		if err := repo.Create(ctx, task); err != nil {
+			t.Fatalf("Create %q: %v", task.Title, err)
+		}
+	}
+
+	boardTasks, err := repo.ListBoardByProjectWithCategorySorts(ctx, "default", "", "", "")
+	if err != nil {
+		t.Fatalf("ListBoardByProjectWithCategorySorts: %v", err)
+	}
+	byID := make(map[string]models.Task, len(boardTasks))
+	for _, task := range boardTasks {
+		byID[task.ID] = task
+	}
+	if got := byID[failed.ID]; got.Status != models.StatusFailed {
+		t.Fatalf("failed board status = %q, want %q", got.Status, models.StatusFailed)
+	}
+	if got := byID[merged.ID]; got.Status != models.StatusCompleted || got.MergeStatus != models.MergeStatusMerged {
+		t.Fatalf("merged board state = status %q merge %q, want completed/merged", got.Status, got.MergeStatus)
+	}
+	for _, task := range boardTasks {
+		if len([]rune(task.Prompt)) > BoardPromptPreviewCodePoints {
+			t.Fatalf("board state projection hydrated an unbounded prompt for %q", task.Title)
+		}
+	}
+}
+
 func TestTaskRepo_ListBoardByProjectWithCategorySorts_PreservesOrderingAndMetadata(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := NewTaskRepo(db, nil)
