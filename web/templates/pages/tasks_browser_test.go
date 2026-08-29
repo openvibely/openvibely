@@ -115,6 +115,19 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   function zone(category) { return document.querySelector('.category-drop-zone[data-category="' + category + '"]:not([data-drop-type="status"])'); }
   function ids(category) { return Array.from(zone(category).querySelectorAll(':scope > [data-task-id]')).map(function(card) { return card.dataset.taskId; }); }
+  function taskState(id) {
+    var card = document.getElementById('task-' + id);
+    var icon = card && card.querySelector('[data-task-state-icon]');
+    return icon && icon.dataset.taskState;
+  }
+  function assertStateIconBeforeTitle(id, expected) {
+    var card = document.getElementById('task-' + id);
+    var icon = card && card.querySelector('[data-task-state-icon]');
+    var title = card && card.querySelector('[data-task-title]');
+    if (!icon || !title || icon.nextElementSibling !== title) fail(id + ' state icon is not immediately before title');
+    if (icon.dataset.taskState !== expected) fail(id + ': expected state ' + expected + ', got ' + icon.dataset.taskState);
+    if (!icon.getAttribute('aria-label') || icon.getAttribute('role') !== 'img') fail(id + ' state icon is not accessible');
+  }
   function assertOrder(category, expected, label) {
     var actual = ids(category);
     if (actual.join(',') !== expected.join(',')) fail(label + ': expected ' + expected.join(',') + ', got ' + actual.join(','));
@@ -136,15 +149,19 @@ window.addEventListener('DOMContentLoaded', function() {
     htmx.process(document.body);
     assertOrder('backlog', ['backlog-new', 'backlog-old'], 'default Backlog creation order');
     assertOrder('completed', ['completed-new', 'completed-legacy', 'completed-old'], 'default Completed completion order');
+    assertStateIconBeforeTitle('backlog-old', 'pending');
+    assertStateIconBeforeTitle('active-move', 'queued');
+    assertStateIconBeforeTitle('completed-old', 'completed');
     if (!activeSort('backlog', 'created_desc')) fail('Backlog default sort control is not active');
     if (!activeSort('completed', 'completed_desc')) fail('Completed default sort control is not active');
 
     await fetch('/browser-add?phase=default', {method:'POST'});
     window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{type:'task_updated', project_id:'project-tasks-browser'}}));
-    await waitFor(function() { return document.getElementById('task-backlog-live') && ids('backlog')[0] === 'backlog-live'; }, 'default live refresh');
+    await waitFor(function() { return document.getElementById('task-backlog-live') && ids('backlog')[0] === 'backlog-live' && taskState('backlog-old') === 'failed' && taskState('completed-old') === 'merged'; }, 'default live refresh and state icon morph');
     assertOrder('backlog', ['backlog-live', 'backlog-new', 'backlog-old'], 'live Backlog creation order');
     assertOrder('completed', ['completed-live', 'completed-new', 'completed-legacy', 'completed-old'], 'live Completed completion order');
-
+    assertStateIconBeforeTitle('backlog-old', 'failed');
+    assertStateIconBeforeTitle('completed-old', 'merged');
     var card = document.getElementById('task-active-move');
     var completedZone = zone('completed');
     var cardRect = card.getBoundingClientRect();
@@ -227,8 +244,15 @@ window.addEventListener('DOMContentLoaded', function() {
 			clock = clock.Add(time.Minute)
 			created := clock
 			if r.URL.Query().Get("phase") == "default" {
-				tasks = append(tasks,
-					models.Task{ID: "backlog-live", ProjectID: project.ID, Title: "Omega Backlog", Category: models.CategoryBacklog, Status: models.StatusPending, CreatedAt: created, UpdatedAt: created, DisplayOrder: 2},
+				for i := range tasks {
+					switch tasks[i].ID {
+					case "backlog-old":
+						tasks[i].Status = models.StatusFailed
+					case "completed-old":
+						tasks[i].MergeStatus = models.MergeStatusMerged
+					}
+				}
+				tasks = append(tasks, models.Task{ID: "backlog-live", ProjectID: project.ID, Title: "Omega Backlog", Category: models.CategoryBacklog, Status: models.StatusPending, CreatedAt: created, UpdatedAt: created, DisplayOrder: 2},
 					models.Task{ID: "completed-live", ProjectID: project.ID, Title: "Omega Completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, CreatedAt: base, UpdatedAt: created, CompletedAt: &created, DisplayOrder: 3},
 				)
 			} else {
@@ -277,6 +301,108 @@ window.addEventListener('DOMContentLoaded', function() {
 		requests := strings.Join(requestLog, "\n")
 		requestMu.Unlock()
 		t.Fatalf("Tasks browser regression failed: %s\nRequests:\n%s\nChrome:\n%s", outcome, requests, strings.TrimSpace(string(stderr)))
+	}
+}
+
+func TestTaskCardStateIconStaysVisibleWithLongTitleAtMobileWidthInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := models.Task{
+		ID:          "mobile-merged",
+		ProjectID:   "default",
+		Title:       strings.Repeat("LongUnbrokenTaskTitle", 12),
+		Category:    models.CategoryCompleted,
+		Status:      models.StatusCompleted,
+		MergeStatus: models.MergeStatusMerged,
+	}
+	var card bytes.Buffer
+	if err := components.TaskCard(task, "default", "completed", nil, nil).Render(context.Background(), &card); err != nil {
+		t.Fatalf("render task card: %v", err)
+	}
+
+	fixture := `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+	* { box-sizing: border-box; }
+	body { margin: 0; padding: 8px; width: 100%; overflow-x: hidden; font: 16px/1.375 sans-serif; }
+	.card { position: relative; width: 100%; max-width: 100%; border: 1px solid #bbb; }
+	.card-body { padding: 16px; padding-top: 56px; }
+	.flex { display: flex; }
+	.inline-flex { display: inline-flex; }
+	.items-start { align-items: flex-start; }
+	.items-center { align-items: center; }
+	.justify-center { justify-content: center; }
+	.flex-1 { flex: 1 1 0%; }
+	.min-w-0 { min-width: 0; }
+	.max-w-full { max-width: 100%; }
+	.shrink-0 { flex-shrink: 0; }
+	.gap-2 { gap: 8px; }
+	.h-5 { height: 20px; }
+	.w-5 { width: 20px; }
+	.h-4 { height: 16px; }
+	.w-4 { width: 16px; }
+	.break-words { overflow-wrap: anywhere; word-break: break-word; }
+	.absolute { position: absolute; }
+	.dropdown, button { display: none; }
+	</style></head><body>` + card.String() + `<script>
+	(function() {
+	  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+	  try {
+	    var card = document.getElementById('task-mobile-merged');
+	    var link = card && card.querySelector('a[title]');
+	    var icon = card && card.querySelector('[data-task-state-icon]');
+	    var title = card && card.querySelector('[data-task-title]');
+	    if (!card || !link || !icon || !title) throw new Error('missing mobile task title state markup');
+	    var cardRect = card.getBoundingClientRect(), iconRect = icon.getBoundingClientRect(), titleRect = title.getBoundingClientRect();
+	    if (icon.dataset.taskState !== 'merged') throw new Error('merged state icon was not preserved');
+	    if (icon.nextElementSibling !== title) throw new Error('state icon is not immediately before mobile title');
+	    if (Math.abs(iconRect.width - 20) > 0.5 || Math.abs(iconRect.height - 20) > 0.5) throw new Error('state icon shrank at mobile width: ' + iconRect.width + 'x' + iconRect.height);
+	    if (iconRect.left >= titleRect.left) throw new Error('state icon is not positioned before title');
+	    if (titleRect.height <= 30) throw new Error('long mobile title did not wrap');
+	    if (card.scrollWidth > card.clientWidth + 1 || titleRect.right > cardRect.right + 1) throw new Error('long mobile title overflowed task card');
+	    report('pass', '');
+	  } catch (error) { report('fail', String(error && error.stack || error)); }
+	})();
+	</script></body></html>`
+
+	browserResult := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(fixture))
+		case "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "task-state-mobile-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--window-size=390,700", "--user-data-dir="+filepath.Join(t.TempDir(), "task-state-mobile-browser-profile"),
+		server.URL,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(15 * time.Second):
+		outcome = "fail:timed out waiting for browser result"
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("Task state mobile browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
 	}
 }
 
@@ -410,5 +536,384 @@ func TestTaskCardKebabMenuEscapesCardAndRepositionsAtDropZoneBottomInChrome(t *t
 	if !strings.HasPrefix(outcome, "pass:") {
 		stderr, _ := os.ReadFile(stderrPath)
 		t.Fatalf("Task card menu browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
+	}
+}
+
+func TestTaskBoardDeleteAllConfirmationFlowInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatalf("read pinned HTMX fixture: %v", err)
+	}
+
+	project := models.Project{ID: "project-task-delete-modal", Name: "Task Delete Modal"}
+	otherProject := models.Project{ID: "project-task-delete-foreign", Name: "Foreign Project"}
+	base := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	initialTasks := []models.Task{
+		{ID: "completed-one", ProjectID: project.ID, Title: "Completed One", Category: models.CategoryCompleted, Status: models.StatusCompleted, CreatedAt: base, UpdatedAt: base},
+		{ID: "completed-two", ProjectID: project.ID, Title: "Completed Two", Category: models.CategoryCompleted, Status: models.StatusCompleted, CreatedAt: base.Add(time.Minute), UpdatedAt: base.Add(time.Minute)},
+		{ID: "backlog-one", ProjectID: project.ID, Title: "Backlog One", Category: models.CategoryBacklog, Status: models.StatusPending, CreatedAt: base, UpdatedAt: base},
+		{ID: "foreign-completed", ProjectID: otherProject.ID, Title: "Foreign Completed", Category: models.CategoryCompleted, Status: models.StatusCompleted, CreatedAt: base, UpdatedAt: base},
+		{ID: "foreign-backlog", ProjectID: otherProject.ID, Title: "Foreign Backlog", Category: models.CategoryBacklog, Status: models.StatusPending, CreatedAt: base, UpdatedAt: base},
+	}
+	var mu sync.Mutex
+	tasks := append([]models.Task(nil), initialTasks...)
+	failNextCompletedDelete := true
+	deleteRequests := 0
+
+	projectTasks := func() []models.Task {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make([]models.Task, 0, len(tasks))
+		for _, task := range tasks {
+			if task.ProjectID == project.ID {
+				out = append(out, task)
+			}
+		}
+		return out
+	}
+	renderBoard := func() string {
+		var out bytes.Buffer
+		if err := components.KanbanBoard(projectTasks(), project.ID, "created_desc", "completed_desc", nil, nil).Render(context.Background(), &out); err != nil {
+			t.Fatalf("render delete-all board: %v", err)
+		}
+		return out.String()
+	}
+	renderPage := func() string {
+		var out bytes.Buffer
+		if err := Tasks([]models.Project{project}, &project, projectTasks(), nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
+			t.Fatalf("render delete-all page: %v", err)
+		}
+		return out.String()
+	}
+	state := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		counts := map[string]int{}
+		for _, task := range tasks {
+			key := task.ProjectID + "-" + string(task.Category)
+			counts[key]++
+		}
+		return "project-completed=" + strconv.Itoa(counts[project.ID+"-completed"]) +
+			";project-backlog=" + strconv.Itoa(counts[project.ID+"-backlog"]) +
+			";foreign-completed=" + strconv.Itoa(counts[otherProject.ID+"-completed"]) +
+			";foreign-backlog=" + strconv.Itoa(counts[otherProject.ID+"-backlog"]) +
+			";requests=" + strconv.Itoa(deleteRequests)
+	}
+
+	fixtureCSS := `<style>
+.dropdown { position: relative; }
+.dropdown-content { display: none; }
+.dropdown:focus-within > .dropdown-content { display: block; }
+dialog:not([open]) { display: none; }
+.modal-action { display: flex; gap: 8px; }
+</style>`
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+  function fail(message) { throw new Error(message); }
+  function waitFor(check, label) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try { if (check()) return resolve(); } catch (error) { return reject(error); }
+        if (performance.now() - started > 8000) return reject(new Error('timed out waiting for ' + label));
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  function currentState() { return fetch('/browser-state').then(function(response) { return response.text(); }); }
+  function action(category) {
+    return document.querySelector('button[data-delete-all-tasks-category="' + category + '"]');
+  }
+  function openAction(category) {
+    var button = action(category);
+    if (!button) fail('missing ' + category + ' Delete All action');
+    var dropdown = button.closest('.dropdown');
+    var menuTrigger = dropdown && dropdown.querySelector('label');
+    if (!menuTrigger) fail('missing ' + category + ' dropzone menu trigger');
+    menuTrigger.focus();
+    menuTrigger.click();
+    button.focus();
+    button.click();
+    return button;
+  }
+  function modalCancel(modal) { return modal.querySelector('.modal-action button:not(.btn-error)'); }
+  function modalConfirm(modal) { return modal.querySelector('.modal-action button.btn-error'); }
+  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
+  (async function() {
+    await waitFor(function() { return window.htmx && action('completed') && action('backlog'); }, 'task-board delete controls');
+    htmx.process(document.body);
+    var modal = document.getElementById('delete_all_tasks_confirm_modal');
+    if (!modal) fail('missing shared delete-all confirmation modal');
+    if (window.innerWidth <= 500) {
+      var modalRect = modal.getBoundingClientRect();
+      if (Math.abs(modalRect.width - window.innerWidth) > 1) fail('mobile confirmation modal is not viewport width: ' + modalRect.width + ' vs ' + window.innerWidth);
+    }
+    var initialState = await currentState();
+    var completedAction = openAction('completed');
+    await waitFor(function() { return modal.open; }, 'completed confirmation modal');
+    if (modal.querySelector('#delete_all_tasks_confirm_name').textContent !== 'completed tasks') fail('completed confirmation name was not rendered');
+    var cancel = modalCancel(modal);
+    var confirm = modalConfirm(modal);
+    if (!cancel || !confirm) fail('shared confirmation modal is missing semantic actions');
+    if (document.activeElement !== cancel) fail('opening confirmation did not focus Cancel');
+    if ((await currentState()) !== initialState) fail('opening confirmation deleted tasks before explicit confirmation');
+    cancel.click();
+    await waitFor(function() { return !modal.open; }, 'cancel close');
+    await new Promise(function(resolve) { setTimeout(resolve, 50); });
+    var completedMenuTrigger = completedAction.closest('.dropdown').querySelector('label');
+    if (document.activeElement !== completedMenuTrigger) fail('cancel focus restoration active=' + (document.activeElement && document.activeElement.outerHTML || 'none'));
+    if ((await currentState()) !== initialState) fail('cancelling confirmation changed task state');
+
+    completedAction = openAction('completed');
+    await waitFor(function() { return modal.open; }, 'Escape confirmation modal');
+    cancel = modalCancel(modal);
+    cancel.dispatchEvent(new KeyboardEvent('keydown', {bubbles:true, cancelable:true, key:'Escape'}));
+    completedMenuTrigger = completedAction.closest('.dropdown').querySelector('label');
+    await waitFor(function() { return !modal.open && document.activeElement === completedMenuTrigger; }, 'Escape close and focus restoration');
+    if ((await currentState()) !== initialState) fail('Escape cancellation changed task state');
+
+    completedAction = openAction('completed');
+    await waitFor(function() { return modal.open; }, 'failed completed confirmation modal');
+    confirm = modalConfirm(modal);
+    confirm.focus();
+    confirm.click();
+    confirm.click();
+    await waitFor(function() { return !window.deleteAllTasksRequestInFlight; }, 'failed delete request completion');
+    if (modal.open) fail('failed delete request left confirmation modal open');
+    if (document.getElementById('task-completed-one') === null) fail('failed delete request removed a task');
+    var failedState = await currentState();
+    if (failedState !== 'project-completed=2;project-backlog=1;foreign-completed=1;foreign-backlog=1;requests=1') fail('failed delete state was unexpected: ' + failedState);
+
+    completedAction = openAction('completed');
+    await waitFor(function() { return modal.open; }, 'retry completed confirmation modal');
+    confirm = modalConfirm(modal);
+    confirm.focus();
+    confirm.click();
+    confirm.click();
+    await waitFor(function() { return !document.getElementById('task-completed-one') && document.querySelector('[data-category="completed"] .text-center'); }, 'successful completed board refresh');
+    var completedState = await currentState();
+    if (completedState !== 'project-completed=0;project-backlog=1;foreign-completed=1;foreign-backlog=1;requests=2') fail('successful completed delete state was unexpected: ' + completedState);
+
+    var backlogAction = openAction('backlog');
+    await waitFor(function() { return modal.open; }, 'backlog confirmation modal');
+    if (modal.querySelector('#delete_all_tasks_confirm_name').textContent !== 'backlog tasks') fail('backlog confirmation name was not rendered');
+    modalCancel(modal).click();
+    var backlogMenuTrigger = backlogAction.closest('.dropdown').querySelector('label');
+    await waitFor(function() { return !modal.open && document.activeElement === backlogMenuTrigger; }, 'backlog cancel focus restoration');
+    backlogAction = openAction('backlog');
+    await waitFor(function() { return modal.open; }, 'backlog confirmation retry');
+    confirm = modalConfirm(modal);
+    confirm.focus();
+    confirm.click();
+    confirm.click();
+    await waitFor(function() { return !document.getElementById('task-backlog-one') && document.querySelector('[data-category="backlog"] .text-center'); }, 'successful backlog board refresh');
+    var finalState = await currentState();
+    if (finalState !== 'project-completed=0;project-backlog=0;foreign-completed=1;foreign-backlog=1;requests=3') fail('successful backlog delete state was unexpected: ' + finalState);
+    await report('pass', 'delete-all confirmation flow');
+  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+
+	browserResult := make(chan string, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch {
+		case r.URL.Path == "/htmx-2.0.4.min.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write(htmxJS)
+		case r.URL.Path == "/tasks" && r.Method == http.MethodGet:
+			if r.Header.Get("HX-Request") == "true" {
+				_, _ = w.Write([]byte(renderBoard()))
+				return
+			}
+			page := strings.Replace(renderPage(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
+			_, _ = w.Write([]byte(page))
+		case (r.URL.Path == "/tasks/completed" || r.URL.Path == "/tasks/backlog") && r.Method == http.MethodDelete:
+			mu.Lock()
+			deleteRequests++
+			category := strings.TrimPrefix(r.URL.Path, "/tasks/")
+			if r.URL.Query().Get("project_id") != project.ID {
+				mu.Unlock()
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte("wrong project"))
+				return
+			}
+			if category == "completed" && failNextCompletedDelete {
+				failNextCompletedDelete = false
+				mu.Unlock()
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte("delete failed"))
+				return
+			}
+			remaining := tasks[:0]
+			for _, task := range tasks {
+				if task.ProjectID != project.ID || string(task.Category) != category {
+					remaining = append(remaining, task)
+				}
+			}
+			tasks = remaining
+			mu.Unlock()
+			_, _ = w.Write([]byte(renderBoard()))
+		case r.URL.Path == "/browser-state":
+			_, _ = w.Write([]byte(state()))
+		case r.URL.Path == "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "tasks-delete-all-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "tasks-delete-all-browser-profile"),
+		server.URL+"/tasks?project_id="+project.ID,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail:timed out waiting for browser result"
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		mu.Lock()
+		requestCount := deleteRequests
+		mu.Unlock()
+		t.Fatalf("Task-board delete-all browser regression failed: %s (delete requests=%d)\nChrome:\n%s", outcome, requestCount, strings.TrimSpace(string(stderr)))
+	}
+}
+
+func TestTaskBoardDeleteAllConfirmationResponsiveInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatalf("read pinned HTMX fixture: %v", err)
+	}
+
+	project := models.Project{ID: "project-task-delete-mobile", Name: "Task Delete Mobile"}
+	tasks := []models.Task{{
+		ID:        "mobile-completed",
+		ProjectID: project.ID,
+		Title:     "Mobile Completed",
+		Category:  models.CategoryCompleted,
+		Status:    models.StatusCompleted,
+		CreatedAt: time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC),
+	}}
+	var browserResult = make(chan string, 2)
+	fixtureCSS := `<style>
+.dropdown { position: relative; }
+.dropdown-content { display: none; }
+.dropdown:focus-within > .dropdown-content { display: block; }
+dialog:not([open]) { display: none; }
+.modal-action { display: flex; gap: 8px; }
+</style>`
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+  function fail(message) { throw new Error(message); }
+  function waitFor(check, label) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try { if (check()) return resolve(); } catch (error) { return reject(error); }
+        if (performance.now() - started > 8000) return reject(new Error('timed out waiting for ' + label));
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  (async function() {
+    await waitFor(function() { return window.htmx && document.querySelector('button[data-delete-all-tasks-category="completed"]'); }, 'mobile task-board delete control');
+    htmx.process(document.body);
+    if (window.innerWidth > 500) fail('mobile regression ran at desktop width: ' + window.innerWidth);
+    var modal = document.getElementById('delete_all_tasks_confirm_modal');
+    var action = document.querySelector('button[data-delete-all-tasks-category="completed"]');
+    var menuTrigger = action && action.closest('.dropdown').querySelector('label');
+    if (!modal || !action || !menuTrigger) fail('mobile confirmation controls are missing');
+    menuTrigger.focus();
+    menuTrigger.click();
+    action.focus();
+    action.click();
+    await waitFor(function() { return modal.open; }, 'mobile confirmation modal');
+    var modalRect = modal.getBoundingClientRect();
+    var modalBox = modal.querySelector('.modal-box');
+    var modalBoxRect = modalBox.getBoundingClientRect();
+    if (Math.abs(modalRect.width - window.innerWidth) > 1 || Math.abs(modalBoxRect.width - window.innerWidth) > 1) fail('mobile confirmation is not viewport width: dialog=' + modalRect.width + ' box=' + modalBoxRect.width + ' viewport=' + window.innerWidth);
+    var cancel = modal.querySelector('.modal-action button:not(.btn-error)');
+    if (!cancel || document.activeElement !== cancel) fail('mobile confirmation did not focus Cancel');
+    cancel.click();
+    await waitFor(function() { return !modal.open && document.activeElement === menuTrigger; }, 'mobile cancellation focus restoration');
+    await report('pass', 'mobile delete-all confirmation');
+  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/htmx-2.0.4.min.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write(htmxJS)
+		case "/tasks":
+			var out bytes.Buffer
+			if err := Tasks([]models.Project{project}, &project, tasks, nil, nil, "created_desc", "completed_desc").Render(context.Background(), &out); err != nil {
+				t.Fatalf("render mobile delete-all page: %v", err)
+			}
+			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, "</head>", fixtureCSS+runner+"</head>", 1)
+			_, _ = w.Write([]byte(page))
+		case "/browser-result":
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "tasks-delete-all-mobile-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--window-size=375,667", "--user-data-dir="+filepath.Join(t.TempDir(), "tasks-delete-all-mobile-browser-profile"),
+		server.URL+"/tasks?project_id="+project.ID,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail: timed out waiting for browser result"
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("Task-board delete-all mobile browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
 	}
 }

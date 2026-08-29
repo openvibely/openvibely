@@ -28,6 +28,18 @@ func NewScheduleRepo(db *sql.DB) *ScheduleRepo {
 	return &ScheduleRepo{db: db}
 }
 
+func normalizeScheduleTime(value time.Time) time.Time {
+	return value.Round(0)
+}
+
+func normalizeScheduleNextRun(nextRun *time.Time) *time.Time {
+	if nextRun == nil {
+		return nil
+	}
+	normalized := normalizeScheduleTime(*nextRun)
+	return &normalized
+}
+
 func (r *ScheduleRepo) ListByTask(ctx context.Context, taskID string) ([]models.Schedule, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run, last_run, created_at, updated_at
@@ -40,6 +52,7 @@ func (r *ScheduleRepo) ListByTask(ctx context.Context, taskID string) ([]models.
 }
 
 func (r *ScheduleRepo) ListDue(ctx context.Context, now time.Time) ([]models.Schedule, error) {
+	now = normalizeScheduleTime(now).UTC()
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run, last_run, created_at, updated_at
 		 FROM schedules WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ?
@@ -228,6 +241,8 @@ func (r *ScheduleRepo) Create(ctx context.Context, s *models.Schedule) error {
 	if err := models.ValidateScheduleRepeatInterval(s.RepeatInterval); err != nil {
 		return fmt.Errorf("creating schedule: %w", err)
 	}
+	s.RunAt = normalizeScheduleTime(s.RunAt)
+	s.NextRun = normalizeScheduleNextRun(s.NextRun)
 	// Compute initial next_run
 	if s.NextRun == nil {
 		t := s.RunAt
@@ -249,9 +264,11 @@ func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
 	if err := models.ValidateScheduleRepeatInterval(s.RepeatInterval); err != nil {
 		return fmt.Errorf("updating schedule: %w", err)
 	}
+	s.RunAt = normalizeScheduleTime(s.RunAt)
+	s.NextRun = normalizeScheduleNextRun(s.NextRun)
 	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE schedules SET run_at = ?, repeat_type = ?, repeat_interval = ?,
-		 enabled = ?, clear_context_on_start = ?, next_run = ?, updated_at = datetime('now')
+			enabled = ?, clear_context_on_start = ?, next_run = ?, updated_at = datetime('now')
 		 WHERE id = ?`,
 		s.RunAt, s.RepeatType, s.RepeatInterval, s.Enabled, s.ClearContextOnStart, s.NextRun, s.ID)
 	if err != nil {
@@ -291,6 +308,8 @@ func (r *ScheduleRepo) UpdateBatchForProject(ctx context.Context, projectID stri
 			if err := move(&schedule); err != nil {
 				return fmt.Errorf("moving schedule %s in batch: %w", scheduleID, err)
 			}
+			schedule.RunAt = normalizeScheduleTime(schedule.RunAt)
+			schedule.NextRun = normalizeScheduleNextRun(schedule.NextRun)
 			result, err := exec.ExecContext(ctx,
 				`UPDATE schedules SET run_at = ?, next_run = ?, updated_at = datetime('now')
 				 WHERE id = ? AND enabled = 1 AND EXISTS (
@@ -311,6 +330,33 @@ func (r *ScheduleRepo) UpdateBatchForProject(ctx context.Context, projectID stri
 	})
 }
 
+// UpdateForTask updates timing and schedule-owned policy only while the row is
+// still owned by the supplied task. It deliberately leaves enabled unchanged:
+// stale timing snapshots must not restore a pause that won the race.
+func (r *ScheduleRepo) UpdateForTask(ctx context.Context, s *models.Schedule, taskID string) error {
+	if err := models.ValidateScheduleRepeatInterval(s.RepeatInterval); err != nil {
+		return fmt.Errorf("updating schedule: %w", err)
+	}
+	s.RunAt = normalizeScheduleTime(s.RunAt)
+	s.NextRun = normalizeScheduleNextRun(s.NextRun)
+	result, err := execBoundSQLite(ctx, r.db,
+		`UPDATE schedules SET run_at = ?, repeat_type = ?, repeat_interval = ?,
+			clear_context_on_start = ?, next_run = ?, updated_at = datetime('now')
+		 WHERE id = ? AND task_id = ?`,
+		s.RunAt, s.RepeatType, s.RepeatInterval, s.ClearContextOnStart, s.NextRun, s.ID, taskID)
+	if err != nil {
+		return fmt.Errorf("updating schedule: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("checking schedule update: %w", err)
+	}
+	if rowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (r *ScheduleRepo) UpdateClearContextOnStart(ctx context.Context, id, taskID string, clearContextOnStart bool) error {
 	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE schedules SET clear_context_on_start = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
@@ -322,13 +368,47 @@ func (r *ScheduleRepo) UpdateClearContextOnStart(ctx context.Context, id, taskID
 }
 
 func (r *ScheduleRepo) MarkRan(ctx context.Context, id string, lastRun time.Time, nextRun *time.Time) error {
+	lastRun = normalizeScheduleTime(lastRun)
+	nextRun = normalizeScheduleNextRun(nextRun)
 	_, err := execBoundSQLite(ctx, r.db,
-		`UPDATE schedules SET last_run = ?, next_run = ?, updated_at = datetime('now') WHERE id = ?`,
+		`UPDATE schedules SET last_run = ?, next_run = ?, updated_at = datetime('now') WHERE id = ? AND enabled = 1`,
 		lastRun, nextRun, id)
 	if err != nil {
 		return fmt.Errorf("marking schedule ran: %w", err)
 	}
 	return nil
+}
+
+// UpdateNextRunIfCurrent advances an enabled schedule only if its ownership and
+// next-run value are unchanged since the caller read it. This prevents a stale
+// resume from overwriting a scheduler advancement or another schedule edit.
+func (r *ScheduleRepo) UpdateNextRunIfCurrent(ctx context.Context, id, taskID string, expected, nextRun *time.Time) (bool, error) {
+	where := `id = ? AND task_id = ? AND enabled = 1`
+	var nextRunValue *time.Time
+	if nextRun != nil {
+		normalized := normalizeScheduleTime(*nextRun)
+		nextRunValue = &normalized
+	}
+	args := []interface{}{nextRunValue, id, taskID}
+	if expected == nil {
+		where += ` AND next_run IS NULL`
+	} else {
+		where += ` AND (next_run = ? OR next_run LIKE ?)`
+		normalized := normalizeScheduleTime(*expected)
+		legacyPrefix := expected.Round(0).Format("2006-01-02 15:04:05.999999999 -0700 MST") + "%"
+		args = append(args, normalized, legacyPrefix)
+	}
+	result, err := execBoundSQLite(ctx, r.db,
+		`UPDATE schedules SET next_run = ?, updated_at = datetime('now') WHERE `+where,
+		args...)
+	if err != nil {
+		return false, fmt.Errorf("updating schedule next run: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("checking schedule next-run update: %w", err)
+	}
+	return rowsAffected > 0, nil
 }
 
 func (r *ScheduleRepo) Delete(ctx context.Context, id string) error {
@@ -347,6 +427,55 @@ func (r *ScheduleRepo) ToggleEnabled(ctx context.Context, id string, enabled boo
 		return fmt.Errorf("toggling schedule: %w", err)
 	}
 	return nil
+}
+
+// SetEnabledForTask changes only the enabled flag and returns the exact row
+// changed. Re-enabling a fired one-time schedule is rejected by the predicate
+// instead of persisting an enabled schedule with no due occurrence.
+func (r *ScheduleRepo) SetEnabledForTask(ctx context.Context, id, taskID string, enabled bool) (*models.Schedule, error) {
+	where := `id = ? AND task_id = ?`
+	args := []interface{}{enabled, id, taskID}
+	if enabled {
+		where += ` AND (repeat_type <> ? OR next_run IS NOT NULL)`
+		args = append(args, models.RepeatOnce)
+	}
+	var s models.Schedule
+	err := queryRowBoundSQLite(ctx, r.db,
+		`UPDATE schedules SET enabled = ?, updated_at = datetime('now') WHERE `+where+`
+		 RETURNING id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start,
+		           next_run, last_run, created_at, updated_at`,
+		args...).Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval, &s.Enabled,
+		&s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("setting schedule enabled: %w", err)
+	}
+	return &s, nil
+}
+
+// ToggleEnabledForTask flips the enabled flag atomically while retaining the
+// schedule's timing fields. The task ownership predicate prevents a stale or
+// foreign schedule ID from changing another task's schedule.
+func (r *ScheduleRepo) ToggleEnabledForTask(ctx context.Context, id, taskID string) (*models.Schedule, error) {
+	var s models.Schedule
+	err := queryRowBoundSQLite(ctx, r.db,
+		`UPDATE schedules
+		 SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END, updated_at = datetime('now')
+		 WHERE id = ? AND task_id = ?
+		   AND (enabled = 1 OR repeat_type <> ? OR next_run IS NOT NULL)
+		 RETURNING id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start,
+		           next_run, last_run, created_at, updated_at`,
+		id, taskID, models.RepeatOnce).Scan(&s.ID, &s.TaskID, &s.RunAt, &s.RepeatType, &s.RepeatInterval, &s.Enabled,
+		&s.ClearContextOnStart, &s.NextRun, &s.LastRun, &s.CreatedAt, &s.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("toggling schedule enabled: %w", err)
+	}
+	return &s, nil
 }
 
 func (r *ScheduleRepo) DeleteOrphan(ctx context.Context, id, taskID string) error {

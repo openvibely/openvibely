@@ -3,8 +3,10 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -517,6 +519,7 @@ func TestScheduleRepo_ToggleEnabled_Persistence(t *testing.T) {
 	// Set NextRun to the past so it would normally be due.
 	past := time.Now().Add(-time.Hour).UTC()
 	sched.ID = schedID
+	sched.Enabled = false
 	sched.NextRun = &past
 	if err := repo.Update(ctx, sched); err != nil {
 		t.Fatalf("Update NextRun to past: %v", err)
@@ -529,6 +532,233 @@ func TestScheduleRepo_ToggleEnabled_Persistence(t *testing.T) {
 		if d.ID == schedID {
 			t.Error("disabled schedule must not appear in ListDue")
 		}
+	}
+}
+
+func TestScheduleRepo_UpdateNextRunIfCurrent(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+	task := createTestTask(t, taskRepo)
+
+	runAt := time.Now().Add(-25 * time.Hour)
+	schedule := &models.Schedule{
+		TaskID: task.ID, RunAt: runAt, RepeatType: models.RepeatDaily,
+		RepeatInterval: 1, Enabled: false,
+	}
+	if err := repo.Create(ctx, schedule); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := repo.SetEnabledForTask(ctx, schedule.ID, task.ID, true); err != nil {
+		t.Fatalf("SetEnabledForTask: %v", err)
+	}
+	current, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	nextRun := time.Now().UTC().Add(time.Hour)
+	changed, err := repo.UpdateNextRunIfCurrent(ctx, schedule.ID, task.ID, current.NextRun, &nextRun)
+	if err != nil {
+		t.Fatalf("UpdateNextRunIfCurrent: %v", err)
+	}
+	if !changed {
+		t.Fatalf("expected compare-and-set to match persisted next_run=%v", current.NextRun)
+	}
+	updated, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID after update: %v", err)
+	}
+	if updated.NextRun == nil || !updated.NextRun.Equal(nextRun) {
+		t.Fatalf("expected next_run=%v, got %v", nextRun, updated.NextRun)
+	}
+}
+
+func TestScheduleRepo_UpdateForTaskPreservesConcurrentPause(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+	task := createTestTask(t, taskRepo)
+
+	originalRunAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	schedule := &models.Schedule{
+		TaskID: task.ID, RunAt: originalRunAt, RepeatType: models.RepeatDaily,
+		RepeatInterval: 1, Enabled: true, ClearContextOnStart: true,
+	}
+	if err := repo.Create(ctx, schedule); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stale, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID before stale update: %v", err)
+	}
+	if stale == nil || !stale.Enabled {
+		t.Fatalf("expected enabled stale snapshot, got %#v", stale)
+	}
+
+	paused, err := repo.ToggleEnabledForTask(ctx, schedule.ID, task.ID)
+	if err != nil {
+		t.Fatalf("pause schedule: %v", err)
+	}
+	if paused == nil || paused.Enabled {
+		t.Fatalf("expected pause to disable schedule, got %#v", paused)
+	}
+
+	stale.RunAt = originalRunAt.Add(24 * time.Hour)
+	stale.NextRun = &stale.RunAt
+	stale.ClearContextOnStart = false
+	if err := repo.UpdateForTask(ctx, stale, task.ID); err != nil {
+		t.Fatalf("UpdateForTask stale snapshot: %v", err)
+	}
+
+	stored, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID after stale update: %v", err)
+	}
+	if stored.Enabled {
+		t.Fatal("stale timing update must not restore enabled=true after pause")
+	}
+	if !stored.RunAt.Equal(stale.RunAt) || stored.NextRun == nil || !stored.NextRun.Equal(*stale.NextRun) {
+		t.Fatalf("expected timing update to persist, got run_at=%v next_run=%v", stored.RunAt, stored.NextRun)
+	}
+	if stored.ClearContextOnStart {
+		t.Fatal("expected intentional policy update to persist")
+	}
+}
+
+func TestScheduleRepo_UpdateForTaskRejectsReassignedSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+	originalTask := createTestTask(t, taskRepo)
+	newTask := &models.Task{ProjectID: "default", Title: "Reassigned schedule owner", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "test prompt"}
+	if err := taskRepo.Create(ctx, newTask); err != nil {
+		t.Fatalf("creating reassigned owner: %v", err)
+	}
+
+	originalRunAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	schedule := &models.Schedule{
+		TaskID: originalTask.ID, RunAt: originalRunAt, RepeatType: models.RepeatDaily,
+		RepeatInterval: 1, Enabled: true, ClearContextOnStart: true,
+	}
+	if err := repo.Create(ctx, schedule); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stale, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID before reassignment: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE schedules SET task_id = ? WHERE id = ?`, newTask.ID, schedule.ID); err != nil {
+		t.Fatalf("reassign schedule: %v", err)
+	}
+
+	stale.RunAt = originalRunAt.Add(24 * time.Hour)
+	stale.NextRun = &stale.RunAt
+	if err := repo.UpdateForTask(ctx, stale, originalTask.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("UpdateForTask after reassignment error = %v, want sql.ErrNoRows", err)
+	}
+
+	stored, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID after rejected update: %v", err)
+	}
+	if stored.TaskID != newTask.ID {
+		t.Fatalf("schedule owner = %s, want reassigned task %s", stored.TaskID, newTask.ID)
+	}
+	if !stored.RunAt.Equal(originalRunAt) || stored.NextRun == nil || !stored.NextRun.Equal(originalRunAt) {
+		t.Fatalf("rejected stale update changed timing: run_at=%v next_run=%v", stored.RunAt, stored.NextRun)
+	}
+}
+
+func TestScheduleRepo_ToggleEnabledForTaskIsAtomicAndTaskScoped(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+	owner := createTestTask(t, taskRepo)
+	foreign := &models.Task{ProjectID: "default", Title: "Foreign owner", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "foreign"}
+	if err := taskRepo.Create(ctx, foreign); err != nil {
+		t.Fatalf("creating foreign task: %v", err)
+	}
+	runAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	schedule := &models.Schedule{TaskID: owner.ID, RunAt: runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+	if err := repo.Create(ctx, schedule); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	original, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+
+	foreignResult, err := repo.ToggleEnabledForTask(ctx, schedule.ID, foreign.ID)
+	if err != nil {
+		t.Fatalf("foreign toggle: %v", err)
+	}
+	if foreignResult != nil {
+		t.Fatal("foreign task must not toggle the schedule")
+	}
+	unchanged, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID after foreign toggle: %v", err)
+	}
+	if !unchanged.Enabled || unchanged.NextRun == nil || !unchanged.NextRun.Equal(*original.NextRun) {
+		t.Fatalf("foreign toggle changed schedule: %#v", unchanged)
+	}
+
+	const concurrentToggles = 20
+	errs := make(chan error, concurrentToggles)
+	var wg sync.WaitGroup
+	wg.Add(concurrentToggles)
+	for i := 0; i < concurrentToggles; i++ {
+		go func() {
+			defer wg.Done()
+			_, toggleErr := repo.ToggleEnabledForTask(context.Background(), schedule.ID, owner.ID)
+			errs <- toggleErr
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for toggleErr := range errs {
+		if toggleErr != nil {
+			t.Fatalf("concurrent toggle: %v", toggleErr)
+		}
+	}
+	final, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID after concurrent toggles: %v", err)
+	}
+	if !final.Enabled {
+		t.Fatal("an even number of atomic toggles must restore enabled state")
+	}
+	if final.NextRun == nil || !final.NextRun.Equal(*original.NextRun) {
+		t.Fatalf("concurrent toggles changed timing: got %v want %v", final.NextRun, original.NextRun)
+	}
+
+	once := &models.Schedule{TaskID: owner.ID, RunAt: time.Now().UTC().Add(-time.Hour), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	if err := repo.Create(ctx, once); err != nil {
+		t.Fatalf("create one-time schedule: %v", err)
+	}
+	if err := repo.MarkRan(ctx, once.ID, time.Now(), nil); err != nil {
+		t.Fatalf("mark one-time schedule ran: %v", err)
+	}
+	if err := repo.ToggleEnabled(ctx, once.ID, false); err != nil {
+		t.Fatalf("disable fired one-time schedule: %v", err)
+	}
+	firedResult, err := repo.ToggleEnabledForTask(ctx, once.ID, owner.ID)
+	if err != nil {
+		t.Fatalf("resume fired one-time schedule: %v", err)
+	}
+	if firedResult != nil {
+		t.Fatal("fired one-time schedule must not be enabled without a new time")
+	}
+	fired, err := repo.GetByID(ctx, once.ID)
+	if err != nil {
+		t.Fatalf("get fired one-time schedule: %v", err)
+	}
+	if fired.Enabled || fired.NextRun != nil {
+		t.Fatalf("fired one-time schedule changed: %#v", fired)
 	}
 }
 

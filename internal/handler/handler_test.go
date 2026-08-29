@@ -3792,6 +3792,16 @@ func TestHandler_DeleteAllTasksByCategory(t *testing.T) {
 
 			rec := htmxDelete(e, tc.endpoint+"?project_id="+project1.ID)
 			assertCode(t, rec, http.StatusOK)
+			body := rec.Body.String()
+			if !strings.HasPrefix(strings.TrimSpace(body), `<div id="kanban-board"`) {
+				t.Fatalf("expected delete-all response to refresh kanban board, got %s", body)
+			}
+			if strings.Contains(body, tc.name+" Task 1") || strings.Contains(body, tc.name+" Task 2") {
+				t.Fatalf("delete-all response still contains deleted %s tasks: %s", tc.name, body)
+			}
+			if !strings.Contains(body, `data-category="`+string(tc.category)+`"`) || !strings.Contains(body, "Drop tasks here") {
+				t.Fatalf("delete-all response must render the empty category state for %s: %s", tc.name, body)
+			}
 
 			for _, id := range []string{task1.ID, task2.ID} {
 				if got, _ := h.taskSvc.GetByID(ctx, id); got != nil {
@@ -3805,6 +3815,83 @@ func TestHandler_DeleteAllTasksByCategory(t *testing.T) {
 				t.Error("expected other project task to still exist")
 			}
 		})
+	}
+}
+
+func TestHandler_ListTasks_DeleteAllUsesSharedConfirmationModal(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Delete All Modal Project")
+	createTask(t, h, project.ID, "Completed Delete All Task", func(task *models.Task) {
+		task.Category = models.CategoryCompleted
+		task.Status = models.StatusCompleted
+	})
+	createTask(t, h, project.ID, "Backlog Delete All Task", func(task *models.Task) {
+		task.Category = models.CategoryBacklog
+		task.Status = models.StatusPending
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/tasks?project_id="+url.QueryEscape(project.ID), nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	assertCode(t, rec, http.StatusOK)
+	body := rec.Body.String()
+
+	for _, want := range []string{
+		`id="delete_all_tasks_confirm_modal" class="modal" data-destructive-confirm-dialog`,
+		`aria-labelledby="delete_all_tasks_confirm_modal_title"`,
+		`aria-describedby="delete_all_tasks_confirm_modal_description"`,
+		`id="delete_all_tasks_confirm_name"`,
+		`autofocus`,
+		`onclick="openDeleteAllTasksConfirm(this)"`,
+		`data-delete-all-tasks-category="completed"`,
+		`data-delete-all-tasks-category="backlog"`,
+		`data-project-id="` + project.ID + `"`,
+		`function openDeleteAllTasksConfirm(button)`,
+		`function confirmDeleteAllTasks()`,
+		`htmx.ajax('DELETE', requestURL`,
+		`target: '#kanban-board'`,
+		`swap: 'outerHTML'`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected task-board delete-all confirmation contract to contain %q", want)
+		}
+	}
+	for _, forbidden := range []string{
+		`hx-confirm="Are you sure you want to delete all completed tasks? This action cannot be undone."`,
+		`hx-confirm="Are you sure you want to delete all backlog tasks? This action cannot be undone."`,
+		`hx-delete="/tasks/completed`,
+		`hx-delete="/tasks/backlog`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("task-board delete-all action must not retain direct deletion wiring %q", forbidden)
+		}
+	}
+}
+
+func TestHandler_DeleteAllTasksByCategory_CancelledRequestPreservesProjectTasks(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	project := createProject(t, h, "Cancelled Delete All Project")
+	task := createTask(t, h, project.ID, "Task preserved after failure", func(task *models.Task) {
+		task.Category = models.CategoryCompleted
+		task.Status = models.StatusCompleted
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest(http.MethodDelete, "/tasks/completed?project_id="+url.QueryEscape(project.ID), nil).WithContext(ctx)
+	req.Header.Set("HX-Request", "true")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code < http.StatusBadRequest {
+		t.Fatalf("expected cancelled delete-all request to fail, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	remaining, err := h.taskSvc.GetByID(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("get preserved task: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("cancelled delete-all request deleted the project task")
 	}
 }
 

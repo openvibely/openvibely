@@ -54,6 +54,19 @@ func (s *outboundTargetTestSlack) SendOutboundDirectMessage(_ context.Context, u
 	return service.SendMessageResult{OK: true, Platform: "slack", Target: "slack:" + userID, MessageID: "dm.1"}
 }
 
+type outboundTargetTestEmail struct {
+	to      string
+	subject string
+	text    string
+}
+
+func (e *outboundTargetTestEmail) SendOutboundMessage(_ context.Context, to, subject, body string) service.SendMessageResult {
+	e.to = to
+	e.subject = subject
+	e.text = body
+	return service.SendMessageResult{OK: true, Platform: "email", Target: "email:" + to, MessageID: "email-1"}
+}
+
 func TestOutboundTargetHandlersDenyCrossProjectTargetIDs(t *testing.T) {
 	tc := NewTestContext(t)
 	ownerProject := tc.CreateProject().WithName("Owner Project").Build()
@@ -258,6 +271,92 @@ func TestOutboundTargetsPersistOnlyOnSaveSettings(t *testing.T) {
 	targetsAfterDuplicate, err := targetRepo.ListByProject(context.Background(), project.ID)
 	if err != nil || len(targetsAfterDuplicate) != 3 {
 		t.Fatalf("duplicate validation should not mutate saved targets, targets=%+v err=%v", targetsAfterDuplicate, err)
+	}
+}
+
+func TestEditingOutboundTargetPreservesIDAndTestsEditedDraft(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().WithName("Edited Outbound Target Project").Build()
+	targetRepo := repository.NewChannelTargetRepo(tc.db)
+	email := &outboundTargetTestEmail{}
+	router := service.NewChannelMessageRouter(targetRepo, tc.settingsRepo)
+	router.SetEmailService(email)
+	tc.handler.SetChannelTargetRepo(targetRepo)
+	tc.handler.SetChannelMessageRouter(router)
+
+	target := models.ChannelTarget{
+		ID:             repository.NewID(),
+		ProjectID:      project.ID,
+		Platform:       "email",
+		TargetKind:     "email",
+		Name:           "original",
+		TargetID:       "original@example.com",
+		Home:           true,
+		ThreadID:       "old-thread",
+		DefaultSubject: "Original subject",
+	}
+	if err := targetRepo.Upsert(context.Background(), target); err != nil {
+		t.Fatalf("upsert target: %v", err)
+	}
+
+	editForm := url.Values{}
+	editForm.Set("project_id", project.ID)
+	editForm.Add("target_row_id", target.ID)
+	editForm.Add("target_platform", "email")
+	editForm.Add("target_kind", "email")
+	editForm.Add("target_name", "#Renamed Client")
+	editForm.Add("target_target_id", "Edited Client <EDITED@Example.com>")
+	editForm.Add("target_thread_id", "new-thread")
+	editForm.Add("target_is_home", "false")
+	editForm.Add("target_default_subject", " Updated subject ")
+	editRec := tc.HTMX().Post("/channels/send-message-explicit-targets").WithForm(editForm).Execute()
+	if editRec.Code != http.StatusOK || editRec.Header().Get("HX-Trigger") != "outbound-targets-card-refresh" {
+		t.Fatalf("edit save status=%d trigger=%q body=%s", editRec.Code, editRec.Header().Get("HX-Trigger"), editRec.Body.String())
+	}
+
+	targets, err := targetRepo.ListByProject(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("list edited targets: %v", err)
+	}
+	if len(targets) != 1 {
+		t.Fatalf("expected exactly one target after editing, got %+v", targets)
+	}
+	edited := targets[0]
+	if edited.ID != target.ID || edited.ProjectID != project.ID {
+		t.Fatalf("editing must preserve the project-scoped target ID, original=%+v edited=%+v", target, edited)
+	}
+	if edited.Name != "renamed client" || edited.TargetID != "edited@example.com" || edited.ThreadID != "new-thread" || edited.DefaultSubject != "Updated subject" || edited.Home {
+		t.Fatalf("edited target was not normalized and persisted, got %+v", edited)
+	}
+
+	draftForm := url.Values{}
+	draftForm.Set("project_id", project.ID)
+	draftForm.Set("target_platform", "email")
+	draftForm.Set("target_kind", "email")
+	draftForm.Set("target_target_id", edited.TargetID)
+	draftForm.Set("target_default_subject", edited.DefaultSubject)
+	draftRec := tc.HTMX().Post("/channels/outbound-targets/test-draft").WithForm(draftForm).Execute()
+	if draftRec.Code != http.StatusOK || email.to != edited.TargetID || email.subject != edited.DefaultSubject || email.text != "Test message from OpenVibely" {
+		t.Fatalf("edited draft test did not use edited target values, status=%d to=%q subject=%q body=%q response=%s", draftRec.Code, email.to, email.subject, email.text, draftRec.Body.String())
+	}
+
+	invalidForm := url.Values{}
+	invalidForm.Set("project_id", project.ID)
+	invalidForm.Add("target_row_id", target.ID)
+	invalidForm.Add("target_platform", "email")
+	invalidForm.Add("target_kind", "email")
+	invalidForm.Add("target_name", "broken")
+	invalidForm.Add("target_target_id", "not-an-email")
+	invalidForm.Add("target_thread_id", "")
+	invalidForm.Add("target_is_home", "true")
+	invalidForm.Add("target_default_subject", "Should not persist")
+	invalidRec := tc.HTMX().Post("/channels/send-message-explicit-targets").WithForm(invalidForm).Execute()
+	if invalidRec.Code != http.StatusOK || invalidRec.Header().Get("HX-Trigger") != "outbound-targets-save-error" || !strings.Contains(invalidRec.Body.String(), "invalid email recipient") {
+		t.Fatalf("expected invalid edit to be rejected, status=%d trigger=%q body=%s", invalidRec.Code, invalidRec.Header().Get("HX-Trigger"), invalidRec.Body.String())
+	}
+	stored, err := targetRepo.GetByID(context.Background(), target.ID)
+	if err != nil || stored == nil || stored.TargetID != "edited@example.com" || stored.DefaultSubject != "Updated subject" || stored.Home {
+		t.Fatalf("invalid edit must not partially change the saved target, target=%+v err=%v", stored, err)
 	}
 }
 

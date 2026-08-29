@@ -153,11 +153,57 @@ func TestKanbanColumn_BacklogPriorityActionsDoNotHardcodePriorityLabels(t *testi
 	}
 }
 
+func TestKanbanColumn_DeleteAllActionsOpenSharedConfirmation(t *testing.T) {
+	cases := []struct {
+		category  models.TaskCategory
+		name      string
+		ariaLabel string
+	}{
+		{models.CategoryCompleted, "completed tasks", "Delete all completed tasks"},
+		{models.CategoryBacklog, "backlog tasks", "Delete all backlog tasks"},
+	}
+
+	for _, tc := range cases {
+		t.Run(string(tc.category), func(t *testing.T) {
+			body := renderKanbanColumnForCategoryTest(t, tc.category, []models.Task{{
+				ID:        "task-1",
+				ProjectID: "project-1",
+				Title:     "Task to delete",
+				Category:  tc.category,
+				Status:    models.StatusCompleted,
+			}})
+
+			for _, want := range []string{
+				`data-delete-all-tasks-category="` + string(tc.category) + `"`,
+				`data-delete-all-tasks-name="` + tc.name + `"`,
+				`data-project-id="project-1"`,
+				`aria-label="` + tc.ariaLabel + `"`,
+				`onclick="openDeleteAllTasksConfirm(this)"`,
+				`Delete All</button>`,
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("expected %s delete action to contain %q, got %s", tc.category, want, body)
+				}
+			}
+			if strings.Contains(body, `hx-confirm="Are you sure you want to delete all`) {
+				t.Fatalf("%s delete-all action must not use the browser confirmation attribute", tc.category)
+			}
+			if strings.Contains(body, `hx-delete="/tasks/`+string(tc.category)) {
+				t.Fatalf("%s delete-all action must not delete before the shared modal is confirmed", tc.category)
+			}
+		})
+	}
+}
+
 func renderKanbanColumnForTest(t *testing.T, tasks []models.Task) string {
+	return renderKanbanColumnForCategoryTest(t, models.CategoryBacklog, tasks)
+}
+
+func renderKanbanColumnForCategoryTest(t *testing.T, category models.TaskCategory, tasks []models.Task) string {
 	t.Helper()
 	var buf bytes.Buffer
-	if err := KanbanColumn(tasks, "project-1", models.CategoryBacklog, "", "", nil, nil).Render(context.Background(), &buf); err != nil {
-		t.Fatalf("render backlog column: %v", err)
+	if err := KanbanColumn(tasks, "project-1", category, "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render %s column: %v", category, err)
 	}
 	return buf.String()
 }

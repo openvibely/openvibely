@@ -247,6 +247,90 @@ func swarmSummary(task models.Task) string {
 	return fmt.Sprintf("%d workers · %d/%d done · %d running · %d blocked", workers, done, len(task.SwarmChildren), running, blocked)
 }
 
+type taskCardState struct {
+	Key       string
+	Label     string
+	TextClass string
+}
+
+func taskCardDisplayState(task models.Task) taskCardState {
+	if task.Status == models.StatusCompleted && task.MergeStatus == models.MergeStatusMerged {
+		return taskCardState{Key: "merged", Label: "Merged", TextClass: "text-success"}
+	}
+
+	label := StatusLabelForTask(task.Status, task.Category)
+	switch task.Status {
+	case models.StatusPending:
+		if task.Category == models.CategoryBacklog {
+			return taskCardState{Key: "pending", Label: label, TextClass: "text-base-content/45"}
+		}
+		return taskCardState{Key: "queued", Label: label, TextClass: "text-info"}
+	case models.StatusQueued:
+		return taskCardState{Key: "queued", Label: label, TextClass: "text-info"}
+	case models.StatusRunning:
+		return taskCardState{Key: "running", Label: label, TextClass: "text-warning"}
+	case models.StatusCompleted:
+		return taskCardState{Key: "completed", Label: label, TextClass: "text-success"}
+	case models.StatusFailed:
+		return taskCardState{Key: "failed", Label: label, TextClass: "text-error"}
+	case models.StatusCancelled:
+		return taskCardState{Key: "cancelled", Label: label, TextClass: "text-base-content/45"}
+	case models.StatusBlocked:
+		return taskCardState{Key: "blocked", Label: label, TextClass: "text-warning"}
+	default:
+		return taskCardState{Key: "pending", Label: "Pending", TextClass: "text-base-content/45"}
+	}
+}
+
+templ taskCardStateIcon(task models.Task) {
+	{{ state := taskCardDisplayState(task) }}
+	<span
+		data-task-state-icon
+		data-task-state={ state.Key }
+		class={ "tooltip tooltip-bottom inline-flex h-5 w-5 shrink-0 items-center justify-center", state.TextClass }
+		data-tip={ state.Label }
+		role="img"
+		aria-label={ "Task state: " + state.Label }
+	>
+		switch state.Key {
+			case "merged":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 3v12a4 4 0 004 4h6m0 0l-3-3m3 3l-3 3M17 3v6a4 4 0 01-4 4H7m0-10L4 6m3-3l3 3"></path>
+				</svg>
+			case "queued":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 2m6-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+				</svg>
+			case "running":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+				</svg>
+			case "completed":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+				</svg>
+			case "failed":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+				</svg>
+			case "cancelled":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-12.728 12.728M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+				</svg>
+			case "blocked":
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+				</svg>
+			default:
+				<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+					<circle cx="12" cy="12" r="9" stroke-width="2"></circle>
+					<circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"></circle>
+				</svg>
+		}
+	</span>
+}
+
 templ TaskCard(task models.Task, projectID string, viewingCategory string, llmModels []models.LLMConfig, agentDefs []models.Agent) {
 	<div
 		id={ fmt.Sprintf("task-%s", task.ID) }
@@ -331,10 +415,11 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
 						hx-target="#main-content"
 						hx-swap="innerHTML"
 						hx-push-url={ fmt.Sprintf("/tasks/%s?from=tasks", task.ID) }
-						class="font-medium hover:underline cursor-pointer block break-words sm:truncate leading-snug"
+						class="font-medium hover:underline cursor-pointer flex items-start gap-2 min-w-0 max-w-full leading-snug"
 						title={ task.Title }
 					>
-						{ task.Title }
+						@taskCardStateIcon(task)
+						<span data-task-title class="min-w-0 flex-1 break-words sm:truncate">{ task.Title }</span>
 					</a>
 					if task.Prompt != "" {
 						<p class="text-sm opacity-60 mt-1 line-clamp-3 sm:line-clamp-2 break-words">{ task.Prompt }</p>
