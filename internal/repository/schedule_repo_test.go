@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -626,6 +627,51 @@ func TestScheduleRepo_UpdateForTaskPreservesConcurrentPause(t *testing.T) {
 	}
 }
 
+func TestScheduleRepo_UpdateForTaskRejectsReassignedSchedule(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+	originalTask := createTestTask(t, taskRepo)
+	newTask := &models.Task{ProjectID: "default", Title: "Reassigned schedule owner", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "test prompt"}
+	if err := taskRepo.Create(ctx, newTask); err != nil {
+		t.Fatalf("creating reassigned owner: %v", err)
+	}
+
+	originalRunAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	schedule := &models.Schedule{
+		TaskID: originalTask.ID, RunAt: originalRunAt, RepeatType: models.RepeatDaily,
+		RepeatInterval: 1, Enabled: true, ClearContextOnStart: true,
+	}
+	if err := repo.Create(ctx, schedule); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	stale, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID before reassignment: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE schedules SET task_id = ? WHERE id = ?`, newTask.ID, schedule.ID); err != nil {
+		t.Fatalf("reassign schedule: %v", err)
+	}
+
+	stale.RunAt = originalRunAt.Add(24 * time.Hour)
+	stale.NextRun = &stale.RunAt
+	if err := repo.UpdateForTask(ctx, stale, originalTask.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("UpdateForTask after reassignment error = %v, want sql.ErrNoRows", err)
+	}
+
+	stored, err := repo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		t.Fatalf("GetByID after rejected update: %v", err)
+	}
+	if stored.TaskID != newTask.ID {
+		t.Fatalf("schedule owner = %s, want reassigned task %s", stored.TaskID, newTask.ID)
+	}
+	if !stored.RunAt.Equal(originalRunAt) || stored.NextRun == nil || !stored.NextRun.Equal(originalRunAt) {
+		t.Fatalf("rejected stale update changed timing: run_at=%v next_run=%v", stored.RunAt, stored.NextRun)
+	}
+}
+
 func TestScheduleRepo_ToggleEnabledForTaskIsAtomicAndTaskScoped(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	taskRepo := NewTaskRepo(db, nil)
@@ -1133,4 +1179,116 @@ func drainScheduleDiscoveryRows(tb testing.TB, rows *sql.Rows) int {
 		tb.Fatalf("schedule discovery rows: %v", err)
 	}
 	return count
+}
+
+func TestScheduleRepo_UpdateBatchForProjectUsesCurrentRowsWithoutOverwritingConcurrentChanges(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	firstTask := createTestTask(t, taskRepo)
+	secondTask := &models.Task{ProjectID: "default", Title: "Concurrent second schedule", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "test prompt"}
+	if err := taskRepo.Create(ctx, secondTask); err != nil {
+		t.Fatal(err)
+	}
+	makeSchedule := func(taskID string, hour int) *models.Schedule {
+		t.Helper()
+		runAt := time.Date(2031, 1, 2, hour, 0, 0, 0, time.UTC)
+		schedule := &models.Schedule{TaskID: taskID, RunAt: runAt, RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: true}
+		if err := repo.Create(ctx, schedule); err != nil {
+			t.Fatal(err)
+		}
+		return schedule
+	}
+	first := makeSchedule(firstTask.ID, 9)
+	second := makeSchedule(secondTask.ID, 11)
+	staleFirst, _ := repo.GetByID(ctx, first.ID)
+
+	if err := repo.UpdateClearContextOnStart(ctx, first.ID, first.TaskID, true); err != nil {
+		t.Fatal(err)
+	}
+	lastRun := time.Date(2031, 1, 2, 10, 0, 0, 0, time.UTC)
+	freshNextRun := time.Date(2031, 1, 3, 9, 0, 0, 0, time.UTC)
+	if err := repo.MarkRan(ctx, first.ID, lastRun, &freshNextRun); err != nil {
+		t.Fatal(err)
+	}
+
+	if staleFirst.ClearContextOnStart || staleFirst.NextRun == nil || staleFirst.NextRun.Equal(freshNextRun) {
+		t.Fatal("fixture did not retain a stale pre-concurrency snapshot")
+	}
+	if err := repo.UpdateBatchForProject(ctx, "default", []string{first.ID, second.ID}, func(schedule *models.Schedule) error {
+		if schedule.ID == first.ID {
+			if !schedule.ClearContextOnStart || schedule.NextRun == nil || !schedule.NextRun.Equal(freshNextRun) {
+				return fmt.Errorf("batch callback received stale row: clear=%t next_run=%v", schedule.ClearContextOnStart, schedule.NextRun)
+			}
+		}
+		schedule.RunAt = schedule.RunAt.Add(3 * time.Hour)
+		if schedule.NextRun != nil {
+			next := schedule.NextRun.Add(3 * time.Hour)
+			schedule.NextRun = &next
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := repo.GetByID(ctx, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stored.ClearContextOnStart {
+		t.Fatal("grouped movement overwrote a concurrent clear-context policy update")
+	}
+	expectedNextRun := freshNextRun.Add(3 * time.Hour)
+	if stored.NextRun == nil || !stored.NextRun.Equal(expectedNextRun) {
+		t.Fatalf("grouped movement used stale scheduler state: next_run=%v, want %v", stored.NextRun, expectedNextRun)
+	}
+	if stored.LastRun == nil || !stored.LastRun.Equal(lastRun) {
+		t.Fatalf("grouped movement changed scheduler last_run: %v", stored.LastRun)
+	}
+}
+
+func TestScheduleRepo_UpdateBatchForProjectRollsBackOnFailure(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewScheduleRepo(db)
+	ctx := context.Background()
+
+	firstTask := createTestTask(t, taskRepo)
+	secondTask := &models.Task{ProjectID: "default", Title: "Second scheduled task", Category: models.CategoryScheduled, Status: models.StatusPending, Prompt: "test prompt"}
+	if err := taskRepo.Create(ctx, secondTask); err != nil {
+		t.Fatalf("creating second test task: %v", err)
+	}
+	first := &models.Schedule{TaskID: firstTask.ID, RunAt: time.Date(2031, 1, 2, 9, 15, 0, 0, time.UTC), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	second := &models.Schedule{TaskID: secondTask.ID, RunAt: time.Date(2031, 1, 2, 11, 45, 0, 0, time.UTC), RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}
+	if err := repo.Create(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Create(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	originalFirst := first.RunAt
+	originalSecond := second.RunAt
+	first.RunAt = first.RunAt.Add(3 * time.Hour)
+	first.NextRun = &first.RunAt
+	second.RunAt = second.RunAt.Add(3 * time.Hour)
+	second.NextRun = &second.RunAt
+
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_second_schedule_update BEFORE UPDATE ON schedules WHEN OLD.id = '`+second.ID+`' BEGIN SELECT RAISE(ABORT, 'forced batch failure'); END`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	if err := repo.UpdateBatchForProject(ctx, "default", []string{first.ID, second.ID}, func(schedule *models.Schedule) error {
+		schedule.RunAt = schedule.RunAt.Add(3 * time.Hour)
+		schedule.NextRun = &schedule.RunAt
+		return nil
+	}); err == nil {
+		t.Fatal("expected forced batch update failure")
+	}
+
+	storedFirst, _ := repo.GetByID(ctx, first.ID)
+	storedSecond, _ := repo.GetByID(ctx, second.ID)
+	if !storedFirst.RunAt.Equal(originalFirst) || !storedSecond.RunAt.Equal(originalSecond) {
+		t.Fatalf("batch failure must roll back every schedule: first=%v second=%v", storedFirst.RunAt, storedSecond.RunAt)
+	}
 }

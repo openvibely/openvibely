@@ -570,77 +570,133 @@ func (h *Handler) ModelWorkerStats(c echo.Context) error {
 	return render(c, http.StatusOK, pages.ModelStatsTableBody(modelStats))
 }
 
+func parseScheduleSelection(anchorID, raw string) ([]string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return []string{anchorID}, nil
+	}
+	seen := make(map[string]struct{})
+	ids := make([]string, 0)
+	for _, part := range strings.Split(raw, ",") {
+		id := strings.TrimSpace(part)
+		if id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+		if len(ids) > 100 {
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "too many schedules selected")
+		}
+	}
+	if len(ids) == 0 {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "no schedules selected")
+	}
+	if _, ok := seen[anchorID]; !ok {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "dragged schedule is not in the selection")
+	}
+	return ids, nil
+}
+
+func updateScheduleAfterMove(schedule *models.Schedule, move func(time.Time) time.Time, now time.Time) {
+	if schedule.RepeatType.IsSubDaily() {
+		base := schedule.RunAt
+		if schedule.NextRun != nil {
+			base = *schedule.NextRun
+		}
+		next := move(base)
+		schedule.NextRun = &next
+	} else {
+		schedule.RunAt = move(schedule.RunAt)
+		if schedule.NextRun != nil {
+			next := move(*schedule.NextRun)
+			schedule.NextRun = &next
+		} else {
+			next := schedule.RunAt
+			schedule.NextRun = &next
+		}
+	}
+	if schedule.NextRun != nil && schedule.NextRun.Before(now) {
+		if nextRun := schedule.ComputeNextRun(now); nextRun != nil && nextRun.After(now) {
+			schedule.NextRun = nextRun
+		}
+	}
+}
+
 func (h *Handler) RescheduleTask(c echo.Context) error {
 	scheduleID := c.Param("scheduleId")
 	newDateStr := c.FormValue("new_date")
 	hourStr := c.FormValue("hour")
 	applog.Infof("[handler] RescheduleTask schedule=%s new_date=%s hour=%s", scheduleID, newDateStr, hourStr)
 
-	// Parse the new date and hour
 	newDate, err := time.Parse("2006-01-02", newDateStr)
 	if err != nil {
-		applog.Infof("[handler] RescheduleTask invalid date: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid date format")
 	}
-
 	hour, err := strconv.Atoi(hourStr)
 	if err != nil || hour < 0 || hour > 23 {
-		applog.Infof("[handler] RescheduleTask invalid hour: %v", err)
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid hour")
 	}
-
-	// Get the existing schedule and verify it belongs to the requested project.
-	schedule, task, err := h.requireScheduleInRequestProject(c.Request().Context(), scheduleID, h.mutationProjectID(c))
+	ids, err := parseScheduleSelection(scheduleID, c.FormValue("schedule_ids"))
 	if err != nil {
-		applog.Infof("[handler] RescheduleTask error getting schedule: %v", err)
 		return err
 	}
+	projectID := h.mutationProjectID(c)
 
-	// Preserve the minute and second from the original RunAt (in local time for display consistency)
-	runAtLocal := schedule.RunAt.Local()
-	minute := runAtLocal.Minute()
-	second := runAtLocal.Second()
-
-	// Create the new scheduled time in local timezone (hour from form is local),
-	// then convert to UTC for consistent storage
-	newScheduleTime := time.Date(newDate.Year(), newDate.Month(), newDate.Day(), hour, minute, second, 0, time.Local).UTC()
-
-	// For sub-daily schedules (seconds, minutes, hours), only update NextRun.
-	// RunAt defines when the schedule originally started, which controls calendar display.
-	// Changing RunAt would shift the display start point and hide earlier entries.
-	if schedule.RepeatType.IsSubDaily() {
-		schedule.NextRun = &newScheduleTime
+	// Preserve the established exact-target behavior for ordinary single-card drags.
+	if len(ids) == 1 {
+		schedule, task, err := h.requireScheduleInRequestProject(c.Request().Context(), scheduleID, projectID)
+		if err != nil {
+			return err
+		}
+		runAtLocal := schedule.RunAt.Local()
+		newScheduleTime := time.Date(newDate.Year(), newDate.Month(), newDate.Day(), hour, runAtLocal.Minute(), runAtLocal.Second(), 0, time.Local).UTC()
+		updateScheduleAfterMove(schedule, func(time.Time) time.Time { return newScheduleTime }, time.Now())
+		if err := h.scheduleRepo.UpdateForTask(c.Request().Context(), schedule, task.ID); err != nil {
+			applog.Infof("[handler] RescheduleTask error updating schedule: %v", err)
+			return err
+		}
 	} else {
-		// For daily/weekly/monthly, update both RunAt and NextRun
-		// RunAt defines the base time-of-day pattern, NextRun is when it actually executes next
-		schedule.RunAt = newScheduleTime
-		schedule.NextRun = &newScheduleTime
-	}
-
-	// CRITICAL: If drag/drop results in a past time, compute the next FUTURE occurrence.
-	// This prevents the scheduler from immediately executing the task as a "missed schedule."
-	// Users expect drag/drop to reschedule the task, not trigger immediate execution.
-	now := time.Now()
-	if schedule.NextRun != nil && schedule.NextRun.Before(now) {
-		nextRun := schedule.ComputeNextRun(now)
-		if nextRun != nil && nextRun.After(now) {
-			schedule.NextRun = nextRun
-			applog.Infof("[handler] RescheduleTask adjusted past time to next occurrence: %v → %v", newScheduleTime, *nextRun)
+		if projectID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "project_id is required for grouped rescheduling")
+		}
+		sourceDate, err := time.Parse("2006-01-02", c.FormValue("source_date"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid source date format")
+		}
+		sourceHour, err := strconv.Atoi(c.FormValue("source_hour"))
+		if err != nil || sourceHour < 0 || sourceHour > 23 {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid source hour")
+		}
+		calendarDayDelta := int(time.Date(newDate.Year(), newDate.Month(), newDate.Day(), 0, 0, 0, 0, time.UTC).
+			Sub(time.Date(sourceDate.Year(), sourceDate.Month(), sourceDate.Day(), 0, 0, 0, 0, time.UTC)).Hours() / 24)
+		hourDelta := hour - sourceHour
+		move := func(value time.Time) time.Time {
+			local := value.Local().AddDate(0, 0, calendarDayDelta)
+			moved := time.Date(local.Year(), local.Month(), local.Day(), local.Hour()+hourDelta,
+				local.Minute(), local.Second(), local.Nanosecond(), time.Local)
+			return moved.UTC()
+		}
+		for _, id := range ids {
+			schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), id, projectID)
+			if err != nil {
+				return err
+			}
+			if !schedule.Enabled {
+				return echo.NewHTTPError(http.StatusBadRequest, "disabled schedules cannot be moved as part of a selection")
+			}
+		}
+		now := time.Now()
+		if err := h.scheduleRepo.UpdateBatchForProject(c.Request().Context(), projectID, ids, func(schedule *models.Schedule) error {
+			updateScheduleAfterMove(schedule, move, now)
+			return nil
+		}); err != nil {
+			return err
 		}
 	}
 
-	if err := h.scheduleRepo.UpdateForTask(c.Request().Context(), schedule, task.ID); err != nil {
-		applog.Infof("[handler] RescheduleTask error updating schedule: %v", err)
-		return err
-	}
-
-	applog.Infof("[handler] RescheduleTask success schedule=%s new_time=%v next_run=%v", scheduleID, newScheduleTime, schedule.NextRun)
-
-	// NOTE: Do NOT reset task status to pending here. Drag-and-drop reschedule
-	// should only update the schedule time. The scheduler will handle status
-	// management (resetting to pending, submitting to worker) when the scheduled
-	// time arrives and next_run becomes due.
-
+	applog.Infof("[handler] RescheduleTask success schedule=%s selected=%d", scheduleID, len(ids))
 	if isHTMX(c) {
 		return c.NoContent(http.StatusNoContent)
 	}

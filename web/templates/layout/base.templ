@@ -365,9 +365,15 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 					z-index: 10;
 					box-shadow: 0 3px 8px rgba(0,0,0,0.5);
 				}
-				.task-selected .btn-circle {
-					display: none;
-				}
+					.task-selected .btn-circle {
+						display: none;
+					}
+					.schedule-selected {
+						outline: 2px solid oklch(var(--p));
+						outline-offset: 1px;
+						background: oklch(var(--p) / 0.35) !important;
+						box-shadow: 0 0 0 2px oklch(var(--p) / 0.2);
+					}
 				/* Modal layering */
 				dialog.modal {
 					z-index: 1200;
@@ -2562,20 +2568,21 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 				let autoScrollInterval = null;
 				let currentScrollZone = null;
 
-				function updateSelectionCounter() {
-					const counter = document.getElementById('selection-counter');
-					if (!counter) return;
+					function updateSelectionCounter() {
+						const counter = document.getElementById('selection-counter');
+						if (!counter) return;
 
-					if (selectedTasks.size > 0) {
-						counter.querySelector('#selection-count').textContent = selectedTasks.size;
-						counter.classList.add('visible');
-					} else {
-						counter.classList.remove('visible');
+						if (selectedTasks.size > 0) {
+							counter.querySelector('#selection-count').textContent = selectedTasks.size;
+							counter.querySelector('#selection-label').textContent = selectedTasks.size === 1 ? 'task selected' : 'tasks selected';
+							window.clearActiveSelection = clearSelection;
+							counter.classList.add('visible');
+						} else {
+							counter.classList.remove('visible');
+						}
 					}
-				}
 
-			// ── Tab Visibility Manager ──
-			// Centralized manager to pause/resume SSE connections and HTMX polling
+				// ── Tab Visibility Manager ──			// Centralized manager to pause/resume SSE connections and HTMX polling
 			// when a tab is hidden/visible. Prevents resource exhaustion with multiple tabs.
 			window._tabVisibility = (function() {
 				let sseConnections = {}; // name → { url, onmessage, onerror, onopen, instance }
@@ -4091,9 +4098,8 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<!-- Selection Counter -->
 			<div id="selection-counter">
 				<span id="selection-count">0</span>
-				<span>tasks selected</span>
-				<button onclick="clearSelection()" class="btn btn-sm btn-ghost">Clear</button>
+				<span id="selection-label">tasks selected</span>
+				<button onclick="if (window.clearActiveSelection) window.clearActiveSelection()" class="btn btn-sm btn-ghost">Clear</button>
 			</div>
-		</body>
-	</html>
+		</body>	</html>
 }
