@@ -203,7 +203,7 @@ func TestBoundSQLiteBusyTimeoutToContextRestoresSameConnection(t *testing.T) {
 	defer conn.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
-	restore, err := boundSQLiteBusyTimeoutToContext(ctx, conn)
+	restore, err := database.BindSQLiteBusyTimeoutToContext(ctx, conn)
 	if err != nil {
 		t.Fatal(err)
 	}

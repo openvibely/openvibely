@@ -285,6 +285,44 @@ func TestNew_MultipleReadersUseDistinctPhysicalConnections(t *testing.T) {
 	}
 }
 
+func TestBindSQLiteBusyTimeoutToContextRestoresOnce(t *testing.T) {
+	db, err := New(filepath.Join(t.TempDir(), "shared-busy-timeout.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	restore, err := BindSQLiteBusyTimeoutToContext(ctx, conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bounded int
+	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&bounded); err != nil {
+		t.Fatal(err)
+	}
+	if bounded != 50 {
+		t.Fatalf("bounded busy_timeout = %d, want 50", bounded)
+	}
+
+	restore()
+	restore()
+	var restored int
+	if err := conn.QueryRowContext(context.Background(), `PRAGMA busy_timeout`).Scan(&restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored != sqliteBusyTimeoutMS {
+		t.Fatalf("restored busy_timeout = %d, want %d", restored, sqliteBusyTimeoutMS)
+	}
+}
+
 func TestNewReadWrite_DedicatesWriterAndQueryOnlyReaders(t *testing.T) {
 	connections, err := NewReadWrite(filepath.Join(t.TempDir(), "split.db"))
 	if err != nil {

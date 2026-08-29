@@ -3,11 +3,9 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
-	"fmt"
-	"strings"
 	"sync"
-	"time"
+
+	"github.com/openvibely/openvibely/internal/database"
 )
 
 type SQLExecutor interface {
@@ -97,15 +95,15 @@ func withBoundSQLiteConn(ctx context.Context, db *sql.DB, fn func(*sql.Conn) err
 		return err
 	}
 	defer conn.Close()
-	restoreBusyTimeout, err := boundSQLiteBusyTimeoutToContext(ctx, conn)
+	restoreBusyTimeout, err := database.BindSQLiteBusyTimeoutToContext(ctx, conn)
 	if err != nil {
 		return err
 	}
 	defer restoreBusyTimeout()
 	for {
 		err := fn(conn)
-		if !shouldRetrySQLiteBusyUntilCancellation(ctx, err) {
-			if ctx.Err() != nil && isSQLiteBusy(err) {
+		if !database.ShouldRetrySQLiteBusyUntilCancellation(ctx, err) {
+			if ctx.Err() != nil && database.IsSQLiteBusy(err) {
 				return ctx.Err()
 			}
 			return err
@@ -119,19 +117,19 @@ func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), err
 	if err != nil {
 		return nil, nil, err
 	}
-	restoreBusyTimeout, err := boundSQLiteBusyTimeoutToContext(ctx, conn)
+	restoreBusyTimeout, err := database.BindSQLiteBusyTimeoutToContext(ctx, conn)
 	if err != nil {
 		_ = conn.Close()
 		return nil, nil, err
 	}
 	for {
 		_, err = conn.ExecContext(ctx, `BEGIN IMMEDIATE`)
-		if !shouldRetrySQLiteBusyUntilCancellation(ctx, err) {
+		if !database.ShouldRetrySQLiteBusyUntilCancellation(ctx, err) {
 			break
 		}
 	}
 	if err != nil {
-		if ctx.Err() != nil && isSQLiteBusy(err) {
+		if ctx.Err() != nil && database.IsSQLiteBusy(err) {
 			err = ctx.Err()
 		}
 		restoreBusyTimeout()
@@ -144,93 +142,12 @@ func beginImmediateConn(ctx context.Context, db *sql.DB) (*sql.Conn, func(), err
 			return
 		}
 		cleaned = true
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), sqliteBusyTimeoutRestoreReserve)
+		rollbackCtx, cancel := database.NewSQLiteBusyTimeoutRestoreContext(context.Background())
 		defer cancel()
 		_, _ = conn.ExecContext(rollbackCtx, `ROLLBACK`)
 		restoreBusyTimeout()
 		_ = conn.Close()
 	}, nil
-}
-
-const (
-	sqliteBusyTimeoutRestoreReserve = 250 * time.Millisecond
-	sqliteCancellationPollInterval  = 50 * time.Millisecond
-)
-
-func boundSQLiteBusyTimeoutToContext(ctx context.Context, conn *sql.Conn) (func(), error) {
-	deadline, hasDeadline := ctx.Deadline()
-	if !hasDeadline && ctx.Done() == nil {
-		return func() {}, nil
-	}
-	var previousMS int
-	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&previousMS); err != nil {
-		return nil, err
-	}
-	boundedMS := int(sqliteCancellationPollInterval / time.Millisecond)
-	if hasDeadline {
-		deadlineBoundMS := int((time.Until(deadline) - sqliteBusyTimeoutRestoreReserve) / time.Millisecond)
-		if deadlineBoundMS < 1 {
-			deadlineBoundMS = 1
-		}
-		if deadlineBoundMS < boundedMS {
-			boundedMS = deadlineBoundMS
-		}
-	}
-	if previousMS > 0 && previousMS <= boundedMS {
-		return func() {}, nil
-	}
-
-	var restoreOnce sync.Once
-	restore := func() {
-		restoreOnce.Do(func() {
-			// A canceled modernc statement can finish applying a PRAGMA before it
-			// reports the context error. Let interruption cleanup settle first.
-			if ctx.Err() != nil {
-				time.Sleep(sqliteCancellationPollInterval)
-			}
-			restoreCtx, cancel := context.WithTimeout(context.Background(), sqliteBusyTimeoutRestoreReserve)
-			defer cancel()
-			query := fmt.Sprintf(`PRAGMA busy_timeout=%d`, previousMS)
-			for restoreCtx.Err() == nil {
-				if _, err := conn.ExecContext(restoreCtx, query); err == nil {
-					var restoredMS int
-					if err := conn.QueryRowContext(restoreCtx, `PRAGMA busy_timeout`).Scan(&restoredMS); err == nil && restoredMS == previousMS {
-						return
-					}
-				}
-				time.Sleep(5 * time.Millisecond)
-			}
-			// Never return a connection with altered connection-local state.
-			_ = conn.Raw(func(raw any) error {
-				if driverConn, ok := raw.(driver.Conn); ok {
-					_ = driverConn.Close()
-				}
-				return driver.ErrBadConn
-			})
-		})
-	}
-	if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA busy_timeout=%d`, boundedMS)); err != nil {
-		// SQLite may apply the PRAGMA before modernc reports cancellation.
-		restore()
-		return nil, err
-	}
-	return restore, nil
-}
-
-func shouldRetrySQLiteBusyUntilCancellation(ctx context.Context, err error) bool {
-	if err == nil || ctx.Err() != nil || ctx.Done() == nil {
-		return false
-	}
-	return isSQLiteBusy(err)
-}
-
-func isSQLiteBusy(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToUpper(err.Error())
-	return !strings.Contains(message, "BUSY_SNAPSHOT") &&
-		(strings.Contains(message, "SQLITE_BUSY") || strings.Contains(message, "DATABASE IS LOCKED"))
 }
 
 type manualTx struct {
@@ -270,7 +187,7 @@ func (t *manualTx) Rollback() error {
 	rollbackCtx := t.ctx
 	cancel := func() {}
 	if rollbackCtx.Err() != nil {
-		rollbackCtx, cancel = context.WithTimeout(context.WithoutCancel(t.ctx), sqliteBusyTimeoutRestoreReserve)
+		rollbackCtx, cancel = database.NewSQLiteBusyTimeoutRestoreContext(context.WithoutCancel(t.ctx))
 	}
 	defer cancel()
 	_, err := t.conn.ExecContext(rollbackCtx, `ROLLBACK`)
