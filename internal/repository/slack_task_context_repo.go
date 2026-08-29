@@ -41,7 +41,9 @@ var slackTaskContextLifecycle = taskContextLifecycle[models.SlackTaskContext]{
 }
 
 func (r *SlackTaskContextRepo) Upsert(ctx context.Context, stc *models.SlackTaskContext) error {
-	return r.UpsertWithExecutor(ctx, r.db, stc)
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return r.UpsertWithExecutor(ctx, conn, stc)
+	})
 }
 
 // UpsertWithExecutor persists Slack task context using the caller's transaction.

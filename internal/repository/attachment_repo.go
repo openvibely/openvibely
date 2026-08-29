@@ -24,7 +24,7 @@ func (r *AttachmentRepo) Create(ctx context.Context, att *models.Attachment) err
 		VALUES (?, ?, ?, ?, ?)
 		RETURNING id, created_at
 	`
-	err := r.db.QueryRowContext(ctx, query,
+	err := queryRowBoundSQLite(ctx, r.db, query,
 		att.TaskID,
 		att.FileName,
 		att.FilePath,
@@ -126,7 +126,7 @@ func (r *AttachmentRepo) DeleteByIDForProject(ctx context.Context, id, projectID
 }
 
 func (r *AttachmentRepo) deleteByQuery(ctx context.Context, query string, args ...any) error {
-	result, err := r.db.ExecContext(ctx, query, args...)
+	result, err := execBoundSQLite(ctx, r.db, query, args...)
 	if err != nil {
 		return fmt.Errorf("deleting attachment: %w", err)
 	}
@@ -142,7 +142,7 @@ func (r *AttachmentRepo) deleteByQuery(ctx context.Context, query string, args .
 
 func (r *AttachmentRepo) DeleteByTask(ctx context.Context, taskID string) error {
 	query := `DELETE FROM task_attachments WHERE task_id = ?`
-	_, err := r.db.ExecContext(ctx, query, taskID)
+	_, err := execBoundSQLite(ctx, r.db, query, taskID)
 	if err != nil {
 		return fmt.Errorf("deleting task attachments: %w", err)
 	}

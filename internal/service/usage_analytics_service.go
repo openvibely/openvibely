@@ -144,6 +144,84 @@ func (s *UsageAnalyticsService) BuildLocalAnalyticsUsage(ctx context.Context, fi
 	return view, nil
 }
 
+type UsageFilterInput struct {
+	ProjectID string
+	Provider  string
+	GroupBy   string
+	Range     string
+	DateFrom  string
+	DateTo    string
+	Refresh   bool
+}
+
+// NormalizeUsageFilter applies the shared date, range, and grouping semantics
+// used by the web usage API and the view_usage_analytics action.
+func NormalizeUsageFilter(input UsageFilterInput) (repository.UsageFilter, string) {
+	return normalizeUsageFilterAt(input, time.Now())
+}
+
+func normalizeUsageFilterAt(input UsageFilterInput, now time.Time) (repository.UsageFilter, string) {
+	rangeValue := strings.TrimSpace(input.Range)
+	if rangeValue == "" {
+		rangeValue = "30d"
+	}
+	filter := repository.UsageFilter{
+		ProjectID: strings.TrimSpace(input.ProjectID),
+		Provider:  strings.TrimSpace(input.Provider),
+		GroupBy:   strings.TrimSpace(input.GroupBy),
+		Refresh:   input.Refresh,
+	}
+	if filter.GroupBy == "" {
+		filter.GroupBy = "day"
+	}
+	if from := ParseUsageAnalyticsTime(input.DateFrom); !from.IsZero() {
+		filter.DateFrom = from
+	}
+	if to := ParseUsageAnalyticsTime(input.DateTo); !to.IsZero() {
+		filter.DateTo = to
+	}
+	if filter.DateFrom.IsZero() && filter.DateTo.IsZero() {
+		if days, ok := ParseUsageAnalyticsRangeDays(rangeValue); ok {
+			filter.DateFrom = now.AddDate(0, 0, -days)
+			filter.DateTo = now
+		} else {
+			switch rangeValue {
+			case "month":
+				filter.DateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+				filter.DateTo = now
+			case "all":
+			default:
+				rangeValue = "30d"
+				filter.DateFrom = now.AddDate(0, 0, -30)
+				filter.DateTo = now
+			}
+		}
+	}
+	return filter, rangeValue
+}
+
+func ParseUsageAnalyticsTime(value string) time.Time {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse(time.RFC3339, value); err == nil {
+		return t.UTC()
+	}
+	if t, err := time.Parse("2006-01-02", value); err == nil {
+		return t.UTC()
+	}
+	return time.Time{}
+}
+
+func ParseUsageAnalyticsRangeDays(value string) (int, bool) {
+	if !strings.HasSuffix(value, "d") {
+		return 0, false
+	}
+	days, err := strconv.Atoi(strings.TrimSuffix(value, "d"))
+	return days, err == nil && days > 0
+}
+
 type usageAnalyticsActionInput struct {
 	Range             string `json:"range"`
 	Provider          string `json:"provider"`
@@ -233,40 +311,16 @@ func ExecuteViewUsageAnalyticsTool(ctx context.Context, usageAnalyticsSvc *Usage
 }
 
 func usageAnalyticsActionFilterFromInput(projectID string, req usageAnalyticsActionInput) (repository.UsageFilter, usageAnalyticsActionFilter) {
-	rangeValue := strings.TrimSpace(req.Range)
-	if rangeValue == "" {
-		rangeValue = "30d"
-	}
-	groupBy := strings.TrimSpace(req.GroupBy)
-	if groupBy == "" {
-		groupBy = "day"
-	}
-	filter := repository.UsageFilter{ProjectID: projectID, Provider: strings.TrimSpace(req.Provider), GroupBy: groupBy, Refresh: false}
-	if from := parseUsageAnalyticsActionTime(strings.TrimSpace(req.DateFrom)); !from.IsZero() {
-		filter.DateFrom = from
-	}
-	if to := parseUsageAnalyticsActionTime(strings.TrimSpace(req.DateTo)); !to.IsZero() {
-		filter.DateTo = to
-	}
-	if filter.DateFrom.IsZero() && filter.DateTo.IsZero() {
-		now := time.Now()
-		if days, ok := usageAnalyticsActionRangeDays(rangeValue); ok {
-			filter.DateFrom = now.AddDate(0, 0, -days)
-			filter.DateTo = now
-		} else {
-			switch rangeValue {
-			case "month":
-				filter.DateFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
-				filter.DateTo = now
-			case "all":
-			default:
-				rangeValue = "30d"
-				filter.DateFrom = now.AddDate(0, 0, -30)
-				filter.DateTo = now
-			}
-		}
-	}
-	summary := usageAnalyticsActionFilter{Range: rangeValue, Provider: filter.Provider, GroupBy: groupBy}
+	filter, rangeValue := NormalizeUsageFilter(UsageFilterInput{
+		ProjectID: projectID,
+		Provider:  req.Provider,
+		GroupBy:   req.GroupBy,
+		Range:     req.Range,
+		DateFrom:  req.DateFrom,
+		DateTo:    req.DateTo,
+		Refresh:   false,
+	})
+	summary := usageAnalyticsActionFilter{Range: rangeValue, Provider: filter.Provider, GroupBy: filter.GroupBy}
 	if !filter.DateFrom.IsZero() {
 		summary.DateFrom = filter.DateFrom.UTC().Format(time.RFC3339)
 	}
@@ -274,27 +328,6 @@ func usageAnalyticsActionFilterFromInput(projectID string, req usageAnalyticsAct
 		summary.DateTo = filter.DateTo.UTC().Format(time.RFC3339)
 	}
 	return filter, summary
-}
-
-func parseUsageAnalyticsActionTime(value string) time.Time {
-	if value == "" {
-		return time.Time{}
-	}
-	if t, err := time.Parse(time.RFC3339, value); err == nil {
-		return t.UTC()
-	}
-	if t, err := time.Parse("2006-01-02", value); err == nil {
-		return t.UTC()
-	}
-	return time.Time{}
-}
-
-func usageAnalyticsActionRangeDays(value string) (int, bool) {
-	if !strings.HasSuffix(value, "d") {
-		return 0, false
-	}
-	days, err := strconv.Atoi(strings.TrimSuffix(value, "d"))
-	return days, err == nil && days > 0
 }
 
 func compactUsageAnalyticsActionResponse(projectID string, filter usageAnalyticsActionFilter, view *models.AnalyticsUsageViewModel, topLimit int, recentLimit *int) usageAnalyticsActionResponse {

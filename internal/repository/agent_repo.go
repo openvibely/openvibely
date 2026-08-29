@@ -324,6 +324,35 @@ func (r *AgentRepo) ListPickerOptions(ctx context.Context) ([]AgentPickerOption,
 	return options, rows.Err()
 }
 
+// ListPickerOptionsForProject returns compact options for global agents and
+// project-scoped agents owned by projectID. It intentionally keeps the picker
+// projection small because the settings page only needs IDs and names.
+func (r *AgentRepo) ListPickerOptionsForProject(ctx context.Context, projectID string) ([]AgentPickerOption, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name
+		FROM agents
+		WHERE COALESCE(generated_status, 'user_edited') <> 'archived'
+		  AND (
+			COALESCE(scope, 'global') <> 'project'
+			OR (project_id IS NOT NULL AND project_id <> '' AND project_id = ?)
+		  )
+		ORDER BY name ASC`, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("listing project agent picker options: %w", err)
+	}
+	defer rows.Close()
+
+	var options []AgentPickerOption
+	for rows.Next() {
+		var option AgentPickerOption
+		if err := rows.Scan(&option.ID, &option.Name); err != nil {
+			return nil, fmt.Errorf("scanning project agent picker option: %w", err)
+		}
+		options = append(options, option)
+	}
+	return options, rows.Err()
+}
+
 func (r *AgentRepo) ListSkillCatalogRefs(ctx context.Context) ([]AgentSkillCatalogRef, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, COALESCE(key, ''), project_id

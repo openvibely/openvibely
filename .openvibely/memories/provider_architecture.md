@@ -2,9 +2,9 @@
 name: provider_architecture
 type: project
 created: 2026-05-09
-updated: 2026-08-23
+updated: 2026-08-28
 source: consolidation
-source_id: memory_consolidation_2026_08_23
+source_id: memory_consolidation_2026_08_28
 confidence: high
 title: Provider Architecture
 ---
@@ -24,6 +24,7 @@ Provider and model selection:
 - Provider/model selection is based on selected `models.LLMConfig`, especially `Provider`, `Model`, and `AuthMethod`; model string alone does not choose the provider.
 - Normal task runs and task-thread execution starts select model config in this order: current `Task.AgentID`, project `DefaultAgentConfigID`, global default `agent_configs.is_default = 1`. Stored per-run/queued model IDs are history/accounting evidence, not immutable rerun assignment.
 - Interactive Chat model selection: explicit `agent_id` uses that model config; empty/`auto` triggers complexity/vision-based selection; browser `agent_id=default` resolves after selected-project loading, preferring `projects.default_agent_config_id` before global default. Queued browser Chat inputs preserve the same project-aware effective model ID.
+- Vision-capable Chat/task fallback uses `resolveVisionRoutingDecision`: compact routing rows retain model identity/tier/default/provider/auth metadata and non-secret credential-presence flags, then only the selected stored model is fully hydrated through `GetByID`. No-attachment/already-capable paths remain query-free; legacy Anthropic CLI filtering and `AuthMethod` semantics remain intact.
 - API Chat immediate and queued execution paths should use compact model-selection/context rows before auto-selection or prompt-context rendering, then hydrate only the selected full `LLMConfig` at provider execution.
 - Runtime `create_task` model selection in browser Chat and shared channel/Automation paths uses compact task-creation selection rows containing only `ID`, `Name`, `Provider`, `Model`, `IsDefault`, and `AutoStartTasks`; full configs should be hydrated only when provider execution needs them.
 - `Task.AgentDefinitionID` selects persona/system prompt/skills, not provider/model.
@@ -71,6 +72,7 @@ OAuth account facts:
 - Durable direction is a provider-account token table with model configs referencing shared provider-account credentials; Anthropic needs a reliable account identity source before this can be keyed.
 - Provider 401 recovery reloads the model config from DB and may refresh/persist rotated tokens; it does not reread OAuth token material from disk, keychain, or environment.
 - Built-in OpenAI/Anthropic OAuth callbacks persist tokens only when the target still matches the initiating provider, `auth_method='oauth'`, and `oauth_config_revision`; deleted or stale-edited targets fail without reporting success or writing credentials. Zero-row token updates are failures; custom OpenAI-compatible revision guards remain intact.
+- Built-in OpenAI/Anthropic OAuth callbacks reject missing, empty, or whitespace-only `access_token` values before expiry derivation or repository mutation, preserving prior credentials; custom OpenAI-compatible strict validation remains separate.
 - Chat model discovery currently omits the connected/expired/not-connected OAuth status shown on model cards; issue `#695` tracks compact status exposure.
 
 Provider-native and runtime tools:

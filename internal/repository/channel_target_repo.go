@@ -133,11 +133,13 @@ func (r *ChannelTargetRepo) FindByTargetAndKind(ctx context.Context, projectID, 
 }
 
 func (r *ChannelTargetRepo) Upsert(ctx context.Context, target models.ChannelTarget) error {
-	return upsertChannelTarget(ctx, r.db, target)
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return upsertChannelTarget(ctx, conn, target)
+	})
 }
 
 func (r *ChannelTargetRepo) Delete(ctx context.Context, id string) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM channel_targets WHERE id = ?`, id)
+	res, err := execBoundSQLite(ctx, r.db, `DELETE FROM channel_targets WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete channel target: %w", err)
 	}
@@ -148,7 +150,7 @@ func (r *ChannelTargetRepo) Delete(ctx context.Context, id string) error {
 }
 
 func (r *ChannelTargetRepo) DeleteForProject(ctx context.Context, projectID, id string) error {
-	res, err := r.db.ExecContext(ctx, `DELETE FROM channel_targets WHERE project_id = ? AND id = ?`, projectID, id)
+	res, err := execBoundSQLite(ctx, r.db, `DELETE FROM channel_targets WHERE project_id = ? AND id = ?`, projectID, id)
 	if err != nil {
 		return fmt.Errorf("delete channel target: %w", err)
 	}
@@ -175,18 +177,18 @@ func (r *ChannelTargetRepo) DeleteProjectExcept(ctx context.Context, projectID s
 			query += ` AND id NOT IN (` + strings.Join(placeholders, ",") + `)`
 		}
 	}
-	if _, err := r.db.ExecContext(ctx, query, args...); err != nil {
+	if _, err := execBoundSQLite(ctx, r.db, query, args...); err != nil {
 		return fmt.Errorf("delete removed channel targets: %w", err)
 	}
 	return nil
 }
 
 func (r *ChannelTargetRepo) ReplaceProjectTargets(ctx context.Context, projectID string, targets []models.ChannelTarget) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin replace channel targets: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	keepIDs := make([]string, 0, len(targets))
 	for _, target := range targets {
@@ -227,7 +229,7 @@ func (r *ChannelTargetRepo) RecordSend(ctx context.Context, send models.ChannelM
 	if strings.TrimSpace(send.ID) == "" {
 		return fmt.Errorf("channel message send id is required")
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
 		INSERT INTO channel_message_sends (id, project_id, platform, target_kind, target_id, thread_id, requested_by_surface, requested_by_user, message_preview, success, error)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		send.ID, send.ProjectID, normalizeChannelTargetField(send.Platform), strings.TrimSpace(send.TargetKind), strings.TrimSpace(send.TargetID), strings.TrimSpace(send.ThreadID), strings.TrimSpace(send.RequestedBySurface), strings.TrimSpace(send.RequestedByUser), strings.TrimSpace(send.MessagePreview), send.Success, strings.TrimSpace(send.Error))

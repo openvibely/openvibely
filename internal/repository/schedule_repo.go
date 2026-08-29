@@ -233,7 +233,7 @@ func (r *ScheduleRepo) Create(ctx context.Context, s *models.Schedule) error {
 		t := s.RunAt
 		s.NextRun = &t
 	}
-	err := r.db.QueryRowContext(ctx,
+	err := queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO schedules (id, task_id, run_at, repeat_type, repeat_interval, enabled, clear_context_on_start, next_run)
 		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
@@ -249,7 +249,7 @@ func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
 	if err := models.ValidateScheduleRepeatInterval(s.RepeatInterval); err != nil {
 		return fmt.Errorf("updating schedule: %w", err)
 	}
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE schedules SET run_at = ?, repeat_type = ?, repeat_interval = ?,
 		 enabled = ?, clear_context_on_start = ?, next_run = ?, updated_at = datetime('now')
 		 WHERE id = ?`,
@@ -261,7 +261,7 @@ func (r *ScheduleRepo) Update(ctx context.Context, s *models.Schedule) error {
 }
 
 func (r *ScheduleRepo) UpdateClearContextOnStart(ctx context.Context, id, taskID string, clearContextOnStart bool) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE schedules SET clear_context_on_start = ?, updated_at = datetime('now') WHERE id = ? AND task_id = ?`,
 		clearContextOnStart, id, taskID)
 	if err != nil {
@@ -271,7 +271,7 @@ func (r *ScheduleRepo) UpdateClearContextOnStart(ctx context.Context, id, taskID
 }
 
 func (r *ScheduleRepo) MarkRan(ctx context.Context, id string, lastRun time.Time, nextRun *time.Time) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE schedules SET last_run = ?, next_run = ?, updated_at = datetime('now') WHERE id = ?`,
 		lastRun, nextRun, id)
 	if err != nil {
@@ -281,7 +281,7 @@ func (r *ScheduleRepo) MarkRan(ctx context.Context, id string, lastRun time.Time
 }
 
 func (r *ScheduleRepo) Delete(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM schedules WHERE id = ?`, id)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM schedules WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("deleting schedule: %w", err)
 	}
@@ -289,7 +289,7 @@ func (r *ScheduleRepo) Delete(ctx context.Context, id string) error {
 }
 
 func (r *ScheduleRepo) ToggleEnabled(ctx context.Context, id string, enabled bool) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE schedules SET enabled = ?, updated_at = datetime('now') WHERE id = ?`,
 		enabled, id)
 	if err != nil {
@@ -299,7 +299,7 @@ func (r *ScheduleRepo) ToggleEnabled(ctx context.Context, id string, enabled boo
 }
 
 func (r *ScheduleRepo) DeleteOrphan(ctx context.Context, id, taskID string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM schedules
 		 WHERE id = ? AND task_id = ? AND NOT EXISTS (SELECT 1 FROM tasks WHERE tasks.id = schedules.task_id)`,
 		id, taskID)

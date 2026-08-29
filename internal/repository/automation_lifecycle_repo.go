@@ -14,20 +14,11 @@ import (
 var ErrAutomationDispatchInFlight = errors.New("automation has in-flight dispatch work")
 
 func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automationID string) ([]models.Task, error) {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	var current models.AutomationLifecycleState
 	var versionID sql.NullString
@@ -48,7 +39,6 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, err
 		}
-		committed = true
 		return nil, nil
 	}
 
@@ -210,10 +200,7 @@ func (r *AutomationRepo) ResumeAutomation(ctx context.Context, projectID, automa
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, err
 	}
-	committed = true
-	if err := conn.Close(); err != nil {
-		return nil, err
-	}
+	finishImmediate()
 
 	admittedTasks := make([]models.Task, 0, len(admittedTaskIDs))
 	taskRepo := NewTaskRepo(r.db, nil)
@@ -241,20 +228,11 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 	if state != models.AutomationPaused && state != models.AutomationArchived {
 		return errors.New("unsupported automation lifecycle state")
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	var current models.AutomationLifecycleState
 	var published sql.NullString
 	if err := conn.QueryRowContext(ctx, `SELECT lifecycle_state, published_version_id FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&current, &published); err != nil {
@@ -321,7 +299,6 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	eventName := "automation.lifecycle.paused"
 	if state == models.AutomationArchived {
 		eventName = "automation.lifecycle.archived"
@@ -337,20 +314,11 @@ func (r *AutomationRepo) SetAutomationLifecycle(ctx context.Context, projectID, 
 // its Automation-owned metadata. Existing domain tasks remain authoritative;
 // trigger schedules exclusively owned by the Automation are deleted before metadata cascades.
 func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automationID string) error {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	var versionID sql.NullString
 	if err := conn.QueryRowContext(ctx, `SELECT published_version_id FROM automations WHERE project_id = ? AND id = ?`, projectID, automationID).Scan(&versionID); err != nil {
@@ -396,7 +364,6 @@ func (r *AutomationRepo) DeleteAutomation(ctx context.Context, projectID, automa
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	automationobs.Event("automation.lifecycle.deleted",
 		automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
 		automationobs.String("version_id", versionID.String), automationobs.String("state", "deleted"))

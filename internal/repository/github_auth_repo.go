@@ -106,14 +106,14 @@ func (r *GitHubAuthRepo) UpsertAuthorizedActor(ctx context.Context, actor *model
 		return fmt.Errorf("find github authorized actor: %w", err)
 	}
 	if err == sql.ErrNoRows {
-		err = r.db.QueryRowContext(ctx,
+		err = queryRowBoundSQLite(ctx, r.db,
 			`INSERT INTO github_authorized_actors (github_user_id, github_login, display_name, permission, added_by)
 			 VALUES (?, ?, ?, ?, ?)
 			 RETURNING id, github_user_id, added_at`,
 			githubUserID, actor.GitHubLogin, actor.DisplayName, actor.Permission, actor.AddedBy).
 			Scan(&actor.ID, &githubUserID, &actor.AddedAt)
 	} else {
-		err = r.db.QueryRowContext(ctx,
+		err = queryRowBoundSQLite(ctx, r.db,
 			`UPDATE github_authorized_actors
 			 SET github_user_id = COALESCE(?, github_user_id),
 				display_name = CASE WHEN ? != '' THEN ? ELSE display_name END,
@@ -133,7 +133,7 @@ func (r *GitHubAuthRepo) UpsertAuthorizedActor(ctx context.Context, actor *model
 
 // DeleteAuthorizedActor removes an authorized GitHub actor by ID.
 func (r *GitHubAuthRepo) DeleteAuthorizedActor(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM github_authorized_actors WHERE id = ?`, strings.TrimSpace(id))
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM github_authorized_actors WHERE id = ?`, strings.TrimSpace(id))
 	if err != nil {
 		return fmt.Errorf("delete github authorized actor: %w", err)
 	}
@@ -172,7 +172,7 @@ func (r *GitHubAuthRepo) UpsertProjectInbox(ctx context.Context, inbox *models.G
 	if inbox.Enabled {
 		enabled = 1
 	}
-	err := r.db.QueryRowContext(ctx,
+	err := queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO github_project_inboxes (project_id, github_user_id, github_login, agent_id, enabled)
 		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT(project_id) DO UPDATE SET

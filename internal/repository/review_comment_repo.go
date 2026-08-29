@@ -20,7 +20,7 @@ func NewReviewCommentRepo(db *sql.DB) *ReviewCommentRepo {
 
 // Create adds a new review comment.
 func (r *ReviewCommentRepo) Create(ctx context.Context, c *models.ReviewComment) error {
-	return r.db.QueryRowContext(ctx,
+	return queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO review_comments (task_id, file_path, line_number, line_type, comment_text, reviewed_by)
 		 VALUES (?, ?, ?, ?, ?, ?)
 		 RETURNING id, created_at`,
@@ -64,7 +64,7 @@ func (r *ReviewCommentRepo) CountByTask(ctx context.Context, taskID string) (int
 
 // UpdateText updates the comment text of a review comment by ID.
 func (r *ReviewCommentRepo) UpdateText(ctx context.Context, id, commentText string) error {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE review_comments SET comment_text = ? WHERE id = ?`, commentText, id)
 	if err != nil {
 		return fmt.Errorf("update review comment: %w", err)
@@ -78,7 +78,7 @@ func (r *ReviewCommentRepo) UpdateText(ctx context.Context, id, commentText stri
 
 // Delete removes a review comment by ID.
 func (r *ReviewCommentRepo) Delete(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM review_comments WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete review comment: %w", err)
@@ -92,7 +92,7 @@ func (r *ReviewCommentRepo) Delete(ctx context.Context, id string) error {
 
 // DeleteByTask removes all review comments for a task.
 func (r *ReviewCommentRepo) DeleteByTask(ctx context.Context, taskID string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM review_comments WHERE task_id = ?`, taskID)
 	if err != nil {
 		return fmt.Errorf("delete review comments by task: %w", err)

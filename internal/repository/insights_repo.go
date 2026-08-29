@@ -19,7 +19,7 @@ func NewInsightsRepo(db *sql.DB) *InsightsRepo {
 // --- Insights ---
 
 func (r *InsightsRepo) CreateInsight(ctx context.Context, i *models.Insight) error {
-	return r.db.QueryRowContext(ctx, `
+	return queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO insights (project_id, type, severity, status, title, description, evidence, suggestion, impact, task_id, confidence)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at, updated_at`,
@@ -89,17 +89,17 @@ func (r *InsightsRepo) UpdateStatus(ctx context.Context, id string, status model
 	if status == models.InsightStatusResolved {
 		query = `UPDATE insights SET status = ?, updated_at = datetime('now'), resolved_at = datetime('now') WHERE id = ?`
 	}
-	_, err := r.db.ExecContext(ctx, query, status, id)
+	_, err := execBoundSQLite(ctx, r.db, query, status, id)
 	return err
 }
 
 func (r *InsightsRepo) LinkTask(ctx context.Context, insightID, taskID string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE insights SET task_id = ?, status = 'accepted', updated_at = datetime('now') WHERE id = ?`, taskID, insightID)
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE insights SET task_id = ?, status = 'accepted', updated_at = datetime('now') WHERE id = ?`, taskID, insightID)
 	return err
 }
 
 func (r *InsightsRepo) DeleteInsight(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM insights WHERE id = ?`, id)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM insights WHERE id = ?`, id)
 	return err
 }
 
@@ -174,7 +174,7 @@ func (r *InsightsRepo) ExistingInsight(ctx context.Context, projectID string, ti
 // --- Insight Reports ---
 
 func (r *InsightsRepo) CreateReport(ctx context.Context, rpt *models.InsightReport) error {
-	return r.db.QueryRowContext(ctx, `
+	return queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO insight_reports (project_id, report_date, summary, insight_ids, stats, analysis_log)
 		VALUES (?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at`,
@@ -223,7 +223,7 @@ func (r *InsightsRepo) ListReports(ctx context.Context, projectID string, limit 
 // --- Knowledge Entries ---
 
 func (r *InsightsRepo) CreateKnowledge(ctx context.Context, k *models.KnowledgeEntry) error {
-	return r.db.QueryRowContext(ctx, `
+	return queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO knowledge_entries (project_id, topic, content, source, source_ref, tags)
 		VALUES (?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at, updated_at`,
@@ -269,7 +269,7 @@ func (r *InsightsRepo) ListKnowledge(ctx context.Context, projectID string, limi
 }
 
 func (r *InsightsRepo) DeleteKnowledge(ctx context.Context, id string) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM knowledge_entries WHERE id = ?`, id)
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM knowledge_entries WHERE id = ?`, id)
 	return err
 }
 
@@ -372,7 +372,7 @@ func (r *InsightsRepo) GetSlowExecutions(ctx context.Context, projectID string, 
 // --- Health Checks ---
 
 func (r *InsightsRepo) CreateHealthCheck(ctx context.Context, hc *models.HealthCheck) error {
-	return r.db.QueryRowContext(ctx, `
+	return queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO health_checks (project_id, grade, strengths, improvements, assessment, how_to_improve, tasks_total, tasks_completed, tasks_failed, tasks_pending, backlog_size, avg_completion_pct)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at`,
@@ -536,7 +536,7 @@ func (r *InsightsRepo) GetTagDistribution(ctx context.Context, projectID string)
 // --- Idea Grades ---
 
 func (r *InsightsRepo) CreateIdeaGrade(ctx context.Context, ig *models.IdeaGrade) error {
-	return r.db.QueryRowContext(ctx, `
+	return queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO idea_grades (project_id, grade, summary, strengths, improvements, how_to_next_grade, next_grade, tasks_evaluated, clarity_score, ambition_score, follow_through, diversity_score, strategy_score)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		RETURNING id, created_at`,

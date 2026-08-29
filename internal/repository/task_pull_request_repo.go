@@ -71,7 +71,7 @@ func (r *TaskPullRequestRepo) Upsert(ctx context.Context, pr *models.TaskPullReq
 	if pr == nil {
 		return fmt.Errorf("task pull request is nil")
 	}
-	return r.db.QueryRowContext(ctx,
+	return queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO task_pull_requests (id, task_id, pr_number, pr_url, pr_state, published_head_sha, issue_number, issue_url)
 				 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(task_id) DO UPDATE SET

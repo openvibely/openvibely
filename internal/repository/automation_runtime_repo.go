@@ -233,20 +233,11 @@ func automationOccurrenceKey(scheduleID string, due time.Time) string {
 }
 
 func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID, automationID string, now time.Time) ([]models.AutomationInvocation, []models.AutomationDispatch, error) {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	var versionID, adapterKey, automationName string
 	var lifecycle models.AutomationLifecycleState
@@ -381,7 +372,6 @@ func (r *AutomationRepo) ClaimManualAutomationRun(ctx context.Context, projectID
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, nil, err
 	}
-	committed = true
 	for _, invocation := range invocations {
 		automationobs.Event("automation.invocation.created",
 			automationobs.String("project_id", projectID), automationobs.String("automation_id", automationID),
@@ -405,20 +395,11 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	}
 	due := schedule.NextRun.UTC()
 	occurrenceKey := automationOccurrenceKey(schedule.ID, due)
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	if existing, dispatch, err := loadInvocationForOccurrence(ctx, conn, schedule.ID, occurrenceKey); err != nil {
 		return nil, nil, err
@@ -432,7 +413,6 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, nil, err
 		}
-		committed = true
 		return existing, dispatch, nil
 	}
 
@@ -572,7 +552,6 @@ func (r *AutomationRepo) ClaimScheduledOccurrence(ctx context.Context, schedule 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, nil, err
 	}
-	committed = true
 	automationobs.Event("automation.invocation.created",
 		automationobs.String("project_id", owner.ProjectID), automationobs.String("automation_id", owner.AutomationID),
 		automationobs.String("version_id", owner.VersionID), automationobs.String("invocation_id", invocation.ID),
@@ -649,13 +628,18 @@ func (r *AutomationRepo) LeaseNextDispatch(ctx context.Context, claimant string,
 	if lease <= 0 || lease > 10*time.Minute {
 		lease = time.Minute
 	}
-	dispatch, err := scanAutomationDispatch(r.db.QueryRowContext(ctx, `UPDATE automation_dispatch_outbox
-		SET status = 'processing', claimed_by = ?, claim_expires_at = ?, attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP
-		WHERE id = (SELECT id FROM automation_dispatch_outbox
-			WHERE next_attempt_at <= ? AND (status = 'pending' OR (status = 'processing' AND claim_expires_at <= ?))
-			ORDER BY next_attempt_at, created_at, id LIMIT 1)
-		RETURNING id, invocation_id, task_id, COALESCE(execution_id, ''), status, attempts, claimed_by,
-		claim_expires_at, next_attempt_at, last_error, created_at, updated_at`, claimant, now.UTC().Add(lease), now.UTC(), now.UTC()))
+	var dispatch *models.AutomationDispatch
+	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		var err error
+		dispatch, err = scanAutomationDispatch(conn.QueryRowContext(ctx, `UPDATE automation_dispatch_outbox
+			SET status = 'processing', claimed_by = ?, claim_expires_at = ?, attempts = attempts + 1, updated_at = CURRENT_TIMESTAMP
+			WHERE id = (SELECT id FROM automation_dispatch_outbox
+				WHERE next_attempt_at <= ? AND (status = 'pending' OR (status = 'processing' AND claim_expires_at <= ?))
+				ORDER BY next_attempt_at, created_at, id LIMIT 1)
+			RETURNING id, invocation_id, task_id, COALESCE(execution_id, ''), status, attempts, claimed_by,
+			claim_expires_at, next_attempt_at, last_error, created_at, updated_at`, claimant, now.UTC().Add(lease), now.UTC(), now.UTC()))
+		return err
+	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -673,20 +657,11 @@ func (r *AutomationRepo) LeaseNextDispatch(ctx context.Context, claimant string,
 }
 
 func (r *AutomationRepo) RenewDispatchLease(ctx context.Context, dispatchID, claimant string, expires time.Time) error {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	result, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET claim_expires_at = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND status = 'processing' AND claimed_by = ?`, expires.UTC(), dispatchID, claimant)
 	if err != nil {
@@ -706,38 +681,30 @@ func (r *AutomationRepo) RenewDispatchLease(ctx context.Context, dispatchID, cla
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	return nil
 }
 
 func (r *AutomationRepo) MarkDispatchQueued(ctx context.Context, dispatchID, claimant string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = NULL,
-		claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND status = 'processing' AND claimed_by = ?`, dispatchID, claimant)
-	if err != nil {
-		return err
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return ErrAutomationDispatchLease
-	}
-	return nil
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		result, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = NULL,
+			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND status = 'processing' AND claimed_by = ?`, dispatchID, claimant)
+		if err != nil {
+			return err
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return ErrAutomationDispatchLease
+		}
+		return nil
+	})
 }
 
 func (r *AutomationRepo) AbandonQueuedDispatch(ctx context.Context, dispatchID, message string) error {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	var invocationID string
 	if err := conn.QueryRowContext(ctx, `SELECT invocation_id FROM automation_dispatch_outbox
 		WHERE id = ? AND status = 'submitted' AND execution_id IS NULL`, dispatchID).Scan(&invocationID); err != nil {
@@ -761,7 +728,6 @@ func (r *AutomationRepo) AbandonQueuedDispatch(ctx context.Context, dispatchID, 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	return nil
 }
 
@@ -793,36 +759,29 @@ func (r *AutomationRepo) ListAbandonedQueuedDispatches(ctx context.Context, limi
 }
 
 func (r *AutomationRepo) MarkDispatchSubmitted(ctx context.Context, dispatchID, claimant, executionID string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = ?,
-		claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
-		WHERE id = ? AND status = 'processing' AND claimed_by = ?`, executionID, dispatchID, claimant)
-	if err != nil {
-		return err
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		return ErrAutomationDispatchLease
-	}
-	return nil
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		result, err := conn.ExecContext(ctx, `UPDATE automation_dispatch_outbox SET status = 'submitted', execution_id = ?,
+			claimed_by = '', claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+			WHERE id = ? AND status = 'processing' AND claimed_by = ?`, executionID, dispatchID, claimant)
+		if err != nil {
+			return err
+		}
+		if changed, _ := result.RowsAffected(); changed != 1 {
+			return ErrAutomationDispatchLease
+		}
+		return nil
+	})
 }
 
 func (r *AutomationRepo) FailDispatch(ctx context.Context, dispatchID, claimant, message string, maxAttempts int, now time.Time) error {
 	if maxAttempts <= 0 {
 		maxAttempts = 5
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	var attempts int
 	var invocationID string
 	if err := conn.QueryRowContext(ctx, `SELECT attempts, invocation_id FROM automation_dispatch_outbox
@@ -855,7 +814,6 @@ func (r *AutomationRepo) FailDispatch(ctx context.Context, dispatchID, claimant,
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	if attempts >= maxAttempts {
 		automationobs.Event("automation.dispatch.failed",
 			automationobs.String("dispatch_id", dispatchID), automationobs.String("invocation_id", invocationID),
@@ -909,20 +867,11 @@ func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, execu
 		return fmt.Errorf("automation dispatch requires terminal execution status, got %q", status)
 	}
 
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	var invocationID, projectID, automationID, versionID, nodeID, taskID, taskTitle string
 	var taskCategory models.TaskCategory
 	if err := conn.QueryRowContext(ctx, `SELECT i.id, i.project_id, i.automation_id, i.version_id, i.trigger_node_id,
@@ -994,7 +943,6 @@ func (r *AutomationRepo) CompleteDispatch(ctx context.Context, dispatchID, execu
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	if taskChanged == 1 && r.broadcaster != nil {
 		r.broadcaster.Publish(events.TaskEvent{
 			Type: events.TaskStatusChanged, TaskID: taskID, TaskName: taskTitle, ProjectID: projectID,
@@ -1022,7 +970,7 @@ func (r *AutomationRepo) ReconcileInvocationCompletions(ctx context.Context, lim
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_invocations SET
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE automation_invocations SET
 		status = CASE WHEN EXISTS (SELECT 1 FROM automation_activities a
 			WHERE a.invocation_id = automation_invocations.id AND a.status IN ('failed','cancelled'))
 			THEN 'failed' ELSE 'completed' END,
@@ -1051,7 +999,7 @@ func (r *AutomationRepo) PruneTerminalizedAutomationPositions(ctx context.Contex
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	result, err := r.db.ExecContext(ctx, `DELETE FROM automation_work_item_positions
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM automation_work_item_positions
 		WHERE rowid IN (
 			SELECT p.rowid
 			FROM automation_work_item_positions p
@@ -1078,20 +1026,11 @@ func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projec
 	if r == nil || projectID == "" || executionID == "" || status == models.ExecRunning {
 		return nil
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	type target struct {
 		binding    models.AutomationBinding
 		adapterKey string
@@ -1206,7 +1145,6 @@ func (r *AutomationRepo) FinalizeExecutionProjection(ctx context.Context, projec
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return err
 	}
-	committed = true
 	for _, binding := range changed {
 		r.PublishInvalidation(events.AutomationTransitionCreated, projectID, binding)
 	}
@@ -1242,20 +1180,11 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 		strings.TrimSpace(in.SourceBinding.WorkItemID) == "" || strings.TrimSpace(in.TargetNodeID) == "" {
 		return nil, false, errors.New("complete Automation GitHub issue task provenance is required")
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, false, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, false, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	binding := in.SourceBinding
 	var valid int
@@ -1312,7 +1241,6 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, false, err
 		}
-		committed = true
 		return existing, false, nil
 	}
 
@@ -1348,7 +1276,6 @@ func (r *AutomationRepo) CreateOrGetGitHubIssueTask(ctx context.Context, taskRep
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, false, err
 	}
-	committed = true
 	r.PublishInvalidation(events.AutomationTransitionCreated, in.ProjectID, targetBinding)
 	return in.Task, true, nil
 }
@@ -1357,20 +1284,11 @@ func (r *AutomationRepo) RecordProjectionEvent(ctx context.Context, in Automatio
 	if in.Context.ProjectID == "" || in.Binding.AutomationID == "" || in.Binding.VersionID == "" || in.Binding.NodeID == "" {
 		return nil, nil, errors.New("complete automation binding is required")
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	workItem, activity, err := recordProjectionEventWithExecutor(ctx, conn, in)
 	if err != nil {
 		if strings.TrimSpace(in.EventKey) != "" {
@@ -1387,7 +1305,6 @@ func (r *AutomationRepo) RecordProjectionEvent(ctx context.Context, in Automatio
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, nil, err
 	}
-	committed = true
 	binding := in.Binding
 	if workItem != nil {
 		binding.WorkItemID = workItem.ID
@@ -2330,11 +2247,11 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 			return AutomationGitHubIssueDedupClaim{}, errors.New("complete GitHub issue projection binding is required")
 		}
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return AutomationGitHubIssueDedupClaim{}, err
 	}
-	defer conn.Close()
+	defer finishImmediate()
 	source, err = enrichGitHubIssueDedupSource(ctx, conn, projectID, source)
 	if err != nil {
 		return AutomationGitHubIssueDedupClaim{}, err
@@ -2343,15 +2260,6 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 	if err != nil {
 		return AutomationGitHubIssueDedupClaim{}, fmt.Errorf("encoding GitHub issue projection source: %w", err)
 	}
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return AutomationGitHubIssueDedupClaim{}, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
 	expiresAt := now.UTC().Add(leaseDuration)
 	result, err := conn.ExecContext(ctx, `INSERT INTO automation_github_issue_dedup_leases
 		(project_id, repository_full_name, title_fingerprint, owner_token, lease_expires_at, mutation_state, projection_source_json)
@@ -2389,7 +2297,6 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 			if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 				return AutomationGitHubIssueDedupClaim{}, err
 			}
-			committed = true
 			claim.IssueNumber = int(createdIssueNumber.Int64)
 			return claim, nil
 		}
@@ -2421,12 +2328,11 @@ func (r *AutomationRepo) AcquireGitHubIssueDedupLease(ctx context.Context, proje
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return AutomationGitHubIssueDedupClaim{}, err
 	}
-	committed = true
 	return claim, nil
 }
 
 func (r *AutomationRepo) MarkGitHubIssueDedupDispatched(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE automation_github_issue_dedup_leases
 		SET mutation_state = 'dispatched', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
 			AND mutation_state = 'reserved' AND created_issue_number IS NULL`,
@@ -2446,7 +2352,7 @@ func (r *AutomationRepo) CompleteGitHubIssueDedupLease(ctx context.Context, proj
 	if issueNumber <= 0 {
 		return errors.New("created GitHub issue number is required")
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE automation_github_issue_dedup_leases
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE automation_github_issue_dedup_leases
 		SET created_issue_number = ?, mutation_state = 'completed', updated_at = CURRENT_TIMESTAMP
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
 			AND (mutation_state = 'dispatched' OR (mutation_state = 'completed' AND created_issue_number = ?))`,
@@ -2464,7 +2370,7 @@ func (r *AutomationRepo) CompleteGitHubIssueDedupLease(ctx context.Context, proj
 }
 
 func (r *AutomationRepo) ReleaseGitHubIssueDedupLease(ctx context.Context, projectID, repositoryFullName, titleFingerprint, ownerToken string) error {
-	result, err := r.db.ExecContext(ctx, `DELETE FROM automation_github_issue_dedup_leases
+	result, err := execBoundSQLite(ctx, r.db, `DELETE FROM automation_github_issue_dedup_leases
 		WHERE project_id = ? AND repository_full_name = ? AND title_fingerprint = ? AND owner_token = ?
 			AND mutation_state = 'reserved' AND created_issue_number IS NULL`,
 		strings.TrimSpace(projectID), strings.ToLower(strings.TrimSpace(repositoryFullName)), strings.TrimSpace(titleFingerprint), strings.TrimSpace(ownerToken))
@@ -2483,20 +2389,11 @@ func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID 
 	if projectID == "" || binding.AutomationID == "" || binding.VersionID == "" || binding.NodeID == "" || binding.InvocationID == "" || strings.TrimSpace(activityKey) == "" {
 		return "", errors.New("complete invocation binding is required for an external mutation")
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return "", err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 	var activityID string
 	err = conn.QueryRowContext(ctx, `INSERT INTO automation_activities
 		(project_id, automation_id, version_id, node_id, invocation_id, activity_key, activity_type, status)
@@ -2526,7 +2423,6 @@ func (r *AutomationRepo) ReserveExternalActivity(ctx context.Context, projectID 
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return "", err
 	}
-	committed = true
 	if resourceID != "" {
 		return resourceID, nil
 	}
@@ -2545,7 +2441,7 @@ func (r *AutomationRepo) ReleaseExternalActivityReservation(ctx context.Context,
 	if projectID == "" || binding.AutomationID == "" || binding.VersionID == "" || binding.NodeID == "" || binding.InvocationID == "" || strings.TrimSpace(activityKey) == "" {
 		return errors.New("complete invocation binding is required to release an external mutation reservation")
 	}
-	_, err := r.db.ExecContext(ctx, `DELETE FROM automation_activities
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM automation_activities
 		WHERE project_id = ? AND automation_id = ? AND version_id = ? AND node_id = ? AND invocation_id = ?
 		  AND activity_key = ? AND status = 'pending'
 		  AND NOT EXISTS (SELECT 1 FROM automation_activity_resources WHERE activity_id = automation_activities.id)`,
@@ -2780,25 +2676,18 @@ func (r *AutomationRepo) RepairExecutionProjection(ctx context.Context, repair A
 	case models.ExecCancelled:
 		activityStatus = models.AutomationActivityCancelled
 	}
-	conn, err := r.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	rows, err := conn.QueryContext(ctx, `UPDATE automation_activities SET status = ?,
-		completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE NULL END,
-		error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
-		AND id IN (SELECT activity_id FROM automation_activity_resources
-		WHERE resource_type = 'execution' AND resource_id = ?) RETURNING id`, activityStatus, activityStatus,
-		strings.TrimSpace(repair.Error), repair.ExecutionID)
-	if err != nil {
-		_ = conn.Close()
-		return err
-	}
-	if err := syncAutomationLiveActivityStateRows(ctx, conn, rows); err != nil {
-		_ = conn.Close()
-		return err
-	}
-	if err := conn.Close(); err != nil {
+	if err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx, `UPDATE automation_activities SET status = ?,
+			completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE NULL END,
+			error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
+			AND id IN (SELECT activity_id FROM automation_activity_resources
+			WHERE resource_type = 'execution' AND resource_id = ?) RETURNING id`, activityStatus, activityStatus,
+			strings.TrimSpace(repair.Error), repair.ExecutionID)
+		if err != nil {
+			return err
+		}
+		return syncAutomationLiveActivityStateRows(ctx, conn, rows)
+	}); err != nil {
 		return err
 	}
 	return r.FinalizeExecutionProjection(ctx, repair.ProjectID, repair.ExecutionID, repair.Status)
@@ -2954,7 +2843,7 @@ func (r *AutomationRepo) BindThreadInput(ctx context.Context, inputID string, au
 	if inputID == "" || automationContext.ProjectID == "" || strings.TrimSpace(bindingKey) == "" || len(automationContext.Bindings) == 0 {
 		return errors.New("thread input and automation bindings are required")
 	}
-	return NewThreadInputRepo(r.db).WithImmediateTx(ctx, func(exec SQLExecutor) error {
+	return withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
 		return bindAutomationThreadInputWithExecutor(ctx, exec, inputID, automationContext, strings.TrimSpace(bindingKey))
 	})
 }

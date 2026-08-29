@@ -91,7 +91,7 @@ func (r *SettingsRepo) observeQueryAcquired(query string) {
 
 // Set upserts a setting value.
 func (r *SettingsRepo) Set(ctx context.Context, key, value string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
 		key, value)
 	return err

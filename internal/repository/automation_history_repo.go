@@ -592,7 +592,7 @@ func (r *AutomationRepo) RecomputeAutomationHealth(ctx context.Context, projectI
 		health.State = models.AutomationHealthHealthy
 		health.Reason = "Recent triggers and dispatches completed without systemic errors"
 	}
-	result, err := r.db.ExecContext(ctx, `UPDATE automations SET health_state = ?, health_reason = ?,
+	result, err := execBoundSQLite(ctx, r.db, `UPDATE automations SET health_state = ?, health_reason = ?,
 		health_evaluated_at = ? WHERE project_id = ? AND id = ?`, health.State, health.Reason, health.EvaluatedAt, projectID, automationID)
 	if err != nil {
 		return health, err

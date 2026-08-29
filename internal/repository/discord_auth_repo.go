@@ -93,7 +93,7 @@ func (r *DiscordAuthRepo) Create(ctx context.Context, u *models.DiscordAuthorize
 // DeleteByProject removes all system-level Discord authorized users.
 // projectID is accepted for compatibility but does not scope inbound authorization.
 func (r *DiscordAuthRepo) DeleteByProject(ctx context.Context, projectID string) error {
-	if _, err := r.allowlist.db.ExecContext(ctx, `DELETE FROM discord_authorized_users`); err != nil {
+	if _, err := execBoundSQLite(ctx, r.allowlist.db, `DELETE FROM discord_authorized_users`); err != nil {
 		return fmt.Errorf("delete discord auth users: %w", err)
 	}
 	return nil

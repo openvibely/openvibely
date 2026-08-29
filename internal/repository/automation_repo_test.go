@@ -97,6 +97,56 @@ func TestAutomationRepoPublishRegisteredAndQuerySurfaces(t *testing.T) {
 	}
 }
 
+func TestAutomationRepoExistsUsesProjectScopedIdentityLookup(t *testing.T) {
+	db, counter := testutil.NewStatementCountingTestDB(t)
+	ctx := context.Background()
+	projectRepo := NewProjectRepo(db)
+	project := models.Project{Name: "Automation existence project"}
+	otherProject := models.Project{Name: "Other existence project"}
+	if err := projectRepo.Create(ctx, &project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := projectRepo.Create(ctx, &otherProject); err != nil {
+		t.Fatalf("create other project: %v", err)
+	}
+	automationID := NewID()
+	if _, err := db.ExecContext(ctx, `INSERT INTO automations (id, project_id, stable_key, name) VALUES (?, ?, ?, ?)`, automationID, project.ID, "exists/automation", "Exists automation"); err != nil {
+		t.Fatalf("insert automation: %v", err)
+	}
+
+	repo := NewAutomationRepo(db)
+	counter.Reset()
+	counter.SetEnabled(true)
+	exists, err := repo.Exists(ctx, project.ID, automationID)
+	if err != nil {
+		t.Fatalf("Exists existing automation: %v", err)
+	}
+	if !exists {
+		t.Fatal("Exists existing automation = false, want true")
+	}
+	statements := counter.Statements()
+	if len(statements) != 1 || statements[0] != "SELECT EXISTS(SELECT 1 FROM automations WHERE project_id = ? AND id = ?)" {
+		t.Fatalf("Exists statements = %#v, want one identity-only query", statements)
+	}
+
+	counter.Reset()
+	exists, err = repo.Exists(ctx, otherProject.ID, automationID)
+	if err != nil {
+		t.Fatalf("Exists project-mismatched automation: %v", err)
+	}
+	if exists {
+		t.Fatal("Exists project-mismatched automation = true, want false")
+	}
+	counter.Reset()
+	exists, err = repo.Exists(ctx, project.ID, "missing")
+	if err != nil {
+		t.Fatalf("Exists missing automation: %v", err)
+	}
+	if exists {
+		t.Fatal("Exists missing automation = true, want false")
+	}
+}
+
 func TestAutomationRepoPublishRegisteredValidationErrors(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

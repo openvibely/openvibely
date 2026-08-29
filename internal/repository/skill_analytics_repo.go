@@ -60,7 +60,7 @@ func (r *SkillAnalyticsRepo) RecordEvent(ctx context.Context, event *models.Skil
 		createdAt = time.Now().UTC()
 	}
 	var createdRaw string
-	err := r.db.QueryRowContext(ctx, `
+	err := queryRowBoundSQLite(ctx, r.db, `
 		INSERT INTO skill_analytics_events (
 			id, created_at, project_id, task_id, execution_id, thread_id, agent_id,
 			skill_scope, skill_handle, event_type, source, surface

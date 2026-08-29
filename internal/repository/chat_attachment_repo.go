@@ -18,7 +18,9 @@ func NewChatAttachmentRepo(db *sql.DB) *ChatAttachmentRepo {
 }
 
 func (r *ChatAttachmentRepo) Create(ctx context.Context, att *models.ChatAttachment) error {
-	return r.CreateWithExecutor(ctx, r.db, att)
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return r.CreateWithExecutor(ctx, conn, att)
+	})
 }
 
 // CreateWithExecutor persists a chat attachment using the caller's transaction.
@@ -160,7 +162,7 @@ func (r *ChatAttachmentRepo) ListByExecutionIDs(ctx context.Context, execIDs []s
 
 func (r *ChatAttachmentRepo) Delete(ctx context.Context, id string) error {
 	query := `DELETE FROM chat_attachments WHERE id = ?`
-	result, err := r.db.ExecContext(ctx, query, id)
+	result, err := execBoundSQLite(ctx, r.db, query, id)
 	if err != nil {
 		return fmt.Errorf("deleting chat attachment: %w", err)
 	}
@@ -184,7 +186,7 @@ func (r *ChatAttachmentRepo) DeleteByIDForProject(ctx context.Context, id, proje
 			WHERE e.id = chat_attachments.execution_id AND t.project_id = ?
 		)
 	`
-	result, err := r.db.ExecContext(ctx, query, id, projectID)
+	result, err := execBoundSQLite(ctx, r.db, query, id, projectID)
 	if err != nil {
 		return fmt.Errorf("deleting chat attachment for project: %w", err)
 	}
@@ -200,7 +202,7 @@ func (r *ChatAttachmentRepo) DeleteByIDForProject(ctx context.Context, id, proje
 
 func (r *ChatAttachmentRepo) DeleteByExecution(ctx context.Context, executionID string) error {
 	query := `DELETE FROM chat_attachments WHERE execution_id = ?`
-	_, err := r.db.ExecContext(ctx, query, executionID)
+	_, err := execBoundSQLite(ctx, r.db, query, executionID)
 	if err != nil {
 		return fmt.Errorf("deleting chat attachments by execution: %w", err)
 	}

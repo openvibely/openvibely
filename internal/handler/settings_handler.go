@@ -309,10 +309,10 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		webhooks, _ = h.webhookRepo.ListCardsByProject(ctx, resolvedProjectID)
 	}
 
-	// Load compact agents for webhook agent selection.
+	// Load compact agents for webhook agent selection in the current project.
 	var agentPickerOptions []repository.AgentPickerOption
-	if h.agentRepo != nil {
-		agentPickerOptions, _ = h.agentRepo.ListPickerOptions(ctx)
+	if h.agentRepo != nil && resolvedProjectID != "" {
+		agentPickerOptions, _ = h.agentRepo.ListPickerOptionsForProject(ctx, resolvedProjectID)
 	}
 
 	webhookAgents := map[string][]models.WebhookEndpointAgent{}

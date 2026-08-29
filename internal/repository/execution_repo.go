@@ -248,7 +248,9 @@ func (r *ExecutionRepo) GetLatestCompletedByTask(ctx context.Context, taskID str
 }
 
 func (r *ExecutionRepo) Create(ctx context.Context, e *models.Execution) error {
-	return r.CreateWithExecutor(ctx, r.db, e)
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		return r.CreateWithExecutor(ctx, conn, e)
+	})
 }
 
 // CreateWithExecutor persists an execution using the caller's transaction.
@@ -272,7 +274,7 @@ func (r *ExecutionRepo) MarkRunning(ctx context.Context, id string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	res, err := r.db.ExecContext(ctx,
+	res, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions
 		 SET status = ?, started_at = datetime('now'), completed_at = NULL
 		 WHERE id = ? AND status IN (?, ?)`,
@@ -300,7 +302,7 @@ func (r *ExecutionRepo) CreateDirectTaskFollowupOrQueue(ctx context.Context, e *
 	}
 	threadRepo := NewThreadInputRepo(r.db)
 	started := false
-	err := threadRepo.WithImmediateTx(ctx, func(dbexec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(dbexec SQLExecutor) error {
 		var status models.TaskStatus
 		var projectID string
 		if err := dbexec.QueryRowContext(ctx, `SELECT status, project_id FROM tasks WHERE id = ?`, e.TaskID).Scan(&status, &projectID); err != nil {
@@ -363,7 +365,7 @@ func (r *ExecutionRepo) CreateDirectTaskFollowup(ctx context.Context, e *models.
 }
 
 func (r *ExecutionRepo) SetAgentConfigIfEmpty(ctx context.Context, id, agentConfigID string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE executions SET agent_config_id = NULLIF(?, '')
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE executions SET agent_config_id = NULLIF(?, '')
 		WHERE id = ? AND (agent_config_id IS NULL OR agent_config_id = '')`, agentConfigID, id)
 	if err != nil {
 		return fmt.Errorf("updating execution agent config: %w", err)
@@ -372,8 +374,11 @@ func (r *ExecutionRepo) SetAgentConfigIfEmpty(ctx context.Context, id, agentConf
 }
 
 func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output string) error {
-	_, err := r.db.ExecContext(ctx,
-		`UPDATE executions SET output = ? WHERE id = ?`, output, id)
+	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx,
+			`UPDATE executions SET output = ? WHERE id = ? AND status = 'running'`, output, id)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("updating execution output: %w", err)
 	}
@@ -381,7 +386,7 @@ func (r *ExecutionRepo) UpdateOutput(ctx context.Context, id string, output stri
 }
 
 func (r *ExecutionRepo) UpdateReasoningContent(ctx context.Context, id, reasoningContent string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions SET reasoning_content = ? WHERE id = ?`, reasoningContent, id)
 	if err != nil {
 		return fmt.Errorf("updating execution reasoning content: %w", err)
@@ -390,11 +395,11 @@ func (r *ExecutionRepo) UpdateReasoningContent(ctx context.Context, id, reasonin
 }
 
 func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasoningContent string, messages []models.ExecutionReplayMessage) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("starting execution replay transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE executions SET reasoning_content = ? WHERE id = ?`, reasoningContent, id); err != nil {
@@ -409,7 +414,7 @@ func (r *ExecutionRepo) ReplaceReasoningReplay(ctx context.Context, id, reasonin
 	return nil
 }
 
-func replaceExecutionReplayMessages(ctx context.Context, tx *sql.Tx, id string, messages []models.ExecutionReplayMessage) error {
+func replaceExecutionReplayMessages(ctx context.Context, tx SQLExecutor, id string, messages []models.ExecutionReplayMessage) error {
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM execution_replay_messages WHERE execution_id = ?`, id); err != nil {
 		return fmt.Errorf("clearing execution replay messages: %w", err)
@@ -511,7 +516,7 @@ func (r *ExecutionRepo) Complete(ctx context.Context, id string, status models.E
 	// streaming writer during LLM execution. Failure completion paths frequently
 	// call Complete with empty output while the streamed transcript already exists
 	// in the row; preserving it keeps thread continuity after failures/retries.
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN output ELSE ? END, error_message = ?,
 		 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
 		 WHERE id = ?`,
@@ -552,25 +557,21 @@ func (r *ExecutionRepo) syncAutomationActivitiesForExecution(ctx context.Context
 	} else if status == models.ExecRunning {
 		activityStatus = models.AutomationActivityRunning
 	}
-	conn, err := r.db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	rows, err := conn.QueryContext(ctx, `UPDATE automation_activities SET status = ?,
-		completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN CURRENT_TIMESTAMP ELSE NULL END,
-		error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
-		AND id IN (SELECT activity_id FROM automation_activity_resources
-		WHERE resource_type = 'execution' AND resource_id = ?) RETURNING id`, activityStatus, activityStatus, strings.TrimSpace(message), executionID)
-	if err != nil {
-		return fmt.Errorf("updating automation execution activities: %w", err)
-	}
-	if err := syncAutomationLiveActivityStateRows(ctx, conn, rows); err != nil {
-		return fmt.Errorf("syncing automation execution activity state: %w", err)
-	}
-	return nil
+	return withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx, `UPDATE automation_activities SET status = ?,
+			completed_at = CASE WHEN ? IN ('completed','failed','cancelled') THEN CURRENT_TIMESTAMP ELSE NULL END,
+			error_message = ? WHERE activity_type IN ('task_execution','thread_input_execution')
+			AND id IN (SELECT activity_id FROM automation_activity_resources
+			WHERE resource_type = 'execution' AND resource_id = ?) RETURNING id`, activityStatus, activityStatus, strings.TrimSpace(message), executionID)
+		if err != nil {
+			return fmt.Errorf("updating automation execution activities: %w", err)
+		}
+		if err := syncAutomationLiveActivityStateRows(ctx, conn, rows); err != nil {
+			return fmt.Errorf("syncing automation execution activity state: %w", err)
+		}
+		return nil
+	})
 }
-
 func (r *ExecutionRepo) CancelActiveByTask(ctx context.Context, taskID string) (int64, error) {
 	ids, err := r.CancelActiveByTaskReturningIDs(ctx, taskID)
 	if err != nil {
@@ -580,26 +581,32 @@ func (r *ExecutionRepo) CancelActiveByTask(ctx context.Context, taskID string) (
 }
 
 func (r *ExecutionRepo) CancelActiveByTaskReturningIDs(ctx context.Context, taskID string) ([]string, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`UPDATE executions
-			 SET status = ?, error_message = 'cancelled', completed_at = datetime('now')
-			 WHERE task_id = ? AND status IN (?, ?)
-			 RETURNING id`,
-		models.ExecCancelled, taskID, models.ExecRunning, models.ExecQueued)
-	if err != nil {
-		return nil, fmt.Errorf("cancelling active task executions: %w", err)
-	}
-	defer rows.Close()
 	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scanning cancelled active execution id: %w", err)
+	err := withBoundSQLiteConn(ctx, r.db, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx,
+			`UPDATE executions
+				 SET status = ?, error_message = 'cancelled', completed_at = datetime('now')
+				 WHERE task_id = ? AND status IN (?, ?)
+				 RETURNING id`,
+			models.ExecCancelled, taskID, models.ExecRunning, models.ExecQueued)
+		if err != nil {
+			return fmt.Errorf("cancelling active task executions: %w", err)
 		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("scanning cancelled active execution ids: %w", err)
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("scanning cancelled active execution id: %w", err)
+			}
+			ids = append(ids, id)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("scanning cancelled active execution ids: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return ids, nil
 }
@@ -618,7 +625,7 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 	// streaming writer during LLM execution. Failure completion paths frequently
 	// call Complete with empty output while the streamed transcript already exists
 	// in the row; preserving it keeps thread continuity after failures/retries.
-	res, err := r.db.ExecContext(ctx,
+	res, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions SET status = ?, output = CASE WHEN ? = '' THEN output ELSE ? END, error_message = '',
 		 tokens_used = ?, duration_ms = ?, completed_at = datetime('now')
 		 WHERE id = ?
@@ -658,9 +665,8 @@ func (r *ExecutionRepo) CompleteSuccessIfNoPendingSteering(ctx context.Context, 
 }
 
 func (r *ExecutionRepo) RecoverPreRestartRunningTaskExecutions(ctx context.Context) (int64, error) {
-	threadRepo := NewThreadInputRepo(r.db)
 	var recovered int64
-	err := threadRepo.WithImmediateTx(ctx, func(exec SQLExecutor) error {
+	err := withImmediateTx(ctx, r.db, func(exec SQLExecutor) error {
 		// No direct or promoted task-thread runner survives a process restart.
 		// Automation dispatches retain a durable dispatch identity/reservation and
 		// are deliberately left to Automation reconciliation.
@@ -741,7 +747,7 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 			t.category != 'chat'
 			AND (t.status NOT IN ('queued', 'running')
 			     OR t.category NOT IN ('active', 'scheduled'))`
-	if _, err := r.db.ExecContext(ctx, `
+	if _, err := execBoundSQLite(ctx, r.db, `
 		UPDATE thread_inputs
 		SET input_mode = 'queued', turn_id = NULL, expected_turn_id = NULL, updated_at = datetime('now')
 		WHERE input_status = 'pending'
@@ -756,7 +762,7 @@ func (r *ExecutionRepo) RecoverStaleRunningTaskExecutions(ctx context.Context) (
 		  )`); err != nil {
 		return 0, fmt.Errorf("requeueing stale running task steering inputs: %w", err)
 	}
-	res, err := r.db.ExecContext(ctx, `
+	res, err := execBoundSQLite(ctx, r.db, `
 		UPDATE executions
 		SET status = CASE
 				WHEN (SELECT t.status FROM tasks t WHERE t.id = executions.task_id) = 'cancelled' THEN 'cancelled'
@@ -1009,7 +1015,7 @@ func scanExecutionsNewestFirstAsChronological(rows *sql.Rows) ([]models.Executio
 }
 
 func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOutput string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions SET diff_output = ? WHERE id = ?`, diffOutput, id)
 	if err != nil {
 		return fmt.Errorf("updating execution diff output: %w", err)
@@ -1019,7 +1025,7 @@ func (r *ExecutionRepo) UpdateDiffOutput(ctx context.Context, id string, diffOut
 
 func (r *ExecutionRepo) UpsertSwarmParentResult(ctx context.Context, parentTaskID, mergerExecutionID, output, diffOutput string, durationMs int64) error {
 	prompt := "Swarm merger final result from execution " + mergerExecutionID
-	res, err := r.db.ExecContext(ctx,
+	res, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions
 		 SET output = ?, diff_output = ?, duration_ms = ?, completed_at = datetime('now')
 		 WHERE task_id = ? AND prompt_sent = ? AND status = ?`,
@@ -1030,7 +1036,7 @@ func (r *ExecutionRepo) UpsertSwarmParentResult(ctx context.Context, parentTaskI
 	if rows, err := res.RowsAffected(); err == nil && rows > 0 {
 		return nil
 	}
-	_, err = r.db.ExecContext(ctx,
+	_, err = execBoundSQLite(ctx, r.db,
 		`INSERT INTO executions (id, task_id, agent_config_id, status, prompt_sent, output, diff_output, duration_ms, completed_at)
 		 VALUES (lower(hex(randomblob(16))), ?, NULL, ?, ?, ?, ?, ?, datetime('now'))`,
 		parentTaskID, models.ExecCompleted, prompt, output, diffOutput, durationMs)
@@ -1058,7 +1064,7 @@ func (r *ExecutionRepo) GetLatestNonEmptyDiffOutput(ctx context.Context, taskID 
 }
 
 func (r *ExecutionRepo) UpdateCliSessionID(ctx context.Context, id string, sessionID string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`UPDATE executions SET cli_session_id = ? WHERE id = ?`, sessionID, id)
 	if err != nil {
 		return fmt.Errorf("updating execution cli_session_id: %w", err)

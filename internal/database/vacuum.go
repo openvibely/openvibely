@@ -17,25 +17,36 @@ const (
 )
 
 // StartIncrementalVacuum reclaims free pages in small batches on a ticker.
-// Batches are kept small deliberately: the pool is capped at one connection, so
-// each pass blocks all other queries for its duration. It returns immediately;
+// Batches are kept small deliberately: SQLite still permits only one writer, so
+// each pass briefly competes with other writes while WAL readers continue. It returns immediately;
 // the goroutine exits when ctx is cancelled.
 func StartIncrementalVacuum(ctx context.Context, db *sql.DB) {
+	startIncrementalVacuum(ctx, db, vacuumInterval, nil)
+}
+
+func startIncrementalVacuum(ctx context.Context, db *sql.DB, interval time.Duration, beforeWrite func()) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(vacuumInterval)
+		defer close(done)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				reclaimOnce(ctx, db)
+				reclaimOnceWithHook(ctx, db, beforeWrite)
 			}
 		}
 	}()
+	return done
 }
 
 func reclaimOnce(ctx context.Context, db *sql.DB) {
+	reclaimOnceWithHook(ctx, db, nil)
+}
+
+func reclaimOnceWithHook(ctx context.Context, db *sql.DB, beforeWrite func()) {
 	var free, total int
 	if err := db.QueryRowContext(ctx, "PRAGMA freelist_count").Scan(&free); err != nil {
 		return
@@ -46,9 +57,39 @@ func reclaimOnce(ctx context.Context, db *sql.DB) {
 	if free < vacuumMinPages || total == 0 || free*100/total < vacuumMinPercent {
 		return
 	}
-	if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA incremental_vacuum(%d)", vacuumBatchPages)); err != nil {
-		applog.Infof("database: incremental vacuum failed: %v", err)
+	if beforeWrite != nil {
+		beforeWrite()
+	}
+	if err := execIncrementalVacuum(ctx, db); err != nil {
+		if ctx.Err() == nil && !IsSQLiteBusy(err) {
+			applog.Infof("database: incremental vacuum failed: %v", err)
+		}
 		return
 	}
 	applog.Infof("database: reclaimed up to %d pages (%d free of %d)", vacuumBatchPages, free, total)
+}
+
+func execIncrementalVacuum(ctx context.Context, db *sql.DB) error {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	restore, err := BindSQLiteBusyTimeoutToContext(ctx, conn)
+	if err != nil {
+		return err
+	}
+	defer restore()
+
+	query := fmt.Sprintf("PRAGMA incremental_vacuum(%d)", vacuumBatchPages)
+	for {
+		_, err = conn.ExecContext(ctx, query)
+		if !ShouldRetrySQLiteBusyUntilCancellation(ctx, err) {
+			if ctx.Err() != nil && IsSQLiteBusy(err) {
+				return ctx.Err()
+			}
+			return err
+		}
+	}
 }

@@ -2,9 +2,9 @@
 name: coding_agent_product_discipline
 type: feedback
 created: 2026-05-11
-updated: 2026-08-27
-source: after_complete_update
-source_id: 7993e3214b0f822ca6f84a591fcfe1e3:1b3d9bb68d134ead
+updated: 2026-08-28
+source: consolidation
+source_id: memory_consolidation_2026_08_28
 confidence: high
 title: Coding Agent Product Discipline
 ---
@@ -14,71 +14,71 @@ This memory stores durable user preferences and product-discipline decisions for
 User interaction and scope preferences:
 - For design, behavior, or feasibility questions, answer directly without making implementation changes unless explicitly requested.
 - Prefer prompt or configuration corrections when they are sufficient; change runtime/product code only when an authoritative invariant must cover manual, forged, or prompt-bypassing inputs.
-- For maintained Automation template changes, bump the template revision and expose the explicit update/edit/save/recreation path; do not hardcode hidden runtime swaps to paper over point-in-time saved template state.
+- Maintained Automation template changes require a template-revision bump plus an explicit update/edit/save/recreation path; do not hide point-in-time saved-template changes behind runtime swaps.
 - Do not describe unreleased feature contracts as legacy or preserve compatibility shims for unreleased API/UI shapes unless explicitly requested.
 - If a prior response made an unsolicited code change, acknowledge it and revert or ask before proceeding.
 - Ask before rewriting or collapsing meaningful Git history. Preserve a clearly named backup ref when history must be recovered or rewritten, but do not treat that backup as approval.
 - Treat memory/skill-maintenance-only requests, explicit path limits, and audit exclusions as hard scope boundaries. Do not add repository changes, generated files, tests, rebase work, or implementation work outside the requested boundary.
-- For narrow rebase or fast-forward-conflict repair requests, do not expand into Docker/Linux reproduction or broad CI triage unless the user explicitly asks; complete the requested rebase/publication verification and report remaining CI state separately.
-- When managed memory is explicitly excluded from an audit, do not inspect, cite, reconcile, or use it as evidence. When memory/skill drift must be ignored, inspect repository/worktree evidence first and ground the verdict there.
-- Do not delegate tasks or create child-agent work unless the user explicitly asks. This applies especially to memory updates.
-- When diagnosing autonomous loops or system-owned schedules, do not manually push live objects through as a substitute for fixing the product path; validation should prove the scheduled/tool/runtime behavior works end-to-end.
-- Do not introduce role/task-type-specific runtime tool narrowing for Automation-owned scheduled tasks. Keep them ordinary generic OpenVibely tasks with the shared tool surface; add missing tools to shared allow-lists and tighten service-layer authorization when a tool is too permissive.
-- If the user already requested an outbound send action, attempt the configured/runtime mechanism instead of asking for redundant confirmation; if no viable send path exists, report the limitation clearly.
-- Prefer plain, direct explanations over jargon. If the user asks for “no word salad,” give a terse concrete summary and one or two examples.
-- Bug explanations should include the causal chain, concrete failure mode, and affected path when the user asks for detail.
-- Summaries should be concrete: cite files/symbols/tests/behavior/verification and whether a real git diff exists when relevant.
+- For narrow rebase or fast-forward-conflict repair requests, do not expand into Docker/Linux reproduction or broad CI triage unless explicitly asked; complete the requested rebase/publication verification and report remaining CI state separately.
+- When managed memory is explicitly excluded from an audit, do not inspect, cite, reconcile, or use it as evidence. Ground the verdict in repository/worktree evidence.
+- Do not delegate tasks or create child-agent work unless explicitly asked, especially for memory updates. If an audit must stay in the current task, perform it here rather than creating or polling another task.
+- When diagnosing autonomous loops or system-owned schedules, do not manually push live objects through as a substitute for fixing the product path; validation must prove scheduled/tool/runtime behavior end to end.
+- Do not introduce role/task-type-specific runtime tool narrowing for Automation-owned scheduled tasks. Keep them ordinary generic tasks with the shared tool surface; add missing tools to shared allow-lists and enforce excessive authority at the service layer.
+- If an outbound send was already requested, attempt the configured/runtime mechanism instead of asking for redundant confirmation; report a missing send path clearly.
+- Prefer plain, direct explanations. When asked for “no word salad,” give a terse concrete summary and one or two examples.
+- Detailed bug explanations should include the causal chain, concrete failure mode, and affected path. Summaries should cite files, symbols, tests, behavior, verification, and whether a real git diff exists when relevant.
 
 Audit and review discipline:
-- Broad reviews should actively look for mistakes, unintended diff, dead code, and verification gaps. If repeated reviews find one issue at a time, the user may request audit-only mode with a consolidated ranked problem list before fixes.
-- When a task requires a final audit-only review, perform it in a separate strictly read-only turn after implementation and fixes are complete. If it finds a material issue, stop after reporting it; fix it only later, then run a fresh audit-only review from scratch.
-- Do not present an audit verdict, “no material issues” conclusion, or “strictly read-only” compliance claim unless repository inspection and validation were actually performed in that turn. If build/tests/generation checks are skipped, state the limitation.
-- When multiple findings are variants of one bug class, fix or audit the whole analogous class.
-- Audit-only turns must use available repository/file-reading tools before claiming a tooling blocker. Capability listing alone is not evidence that coding tools are unavailable.
-- Code review/audit work may use memory or skills only when not explicitly excluded, and only as background context; verdicts must be grounded in repository/publication evidence.
-- When reviewing a messy fix stack, inspect actual commit diffs and rerun relevant validation before recommending keep/drop.
-- If a user challenges a claimed coding change with no diff, inspect branch pointers, status, reflog, and file contents, then correct the summary plainly.
-- A strict audit pass that edits files or runs write-capable formatting, build, test, generation, or other mutating commands is invalid even if the final worktree is clean; disclose the violation and require a fresh audit from scratch. This was confirmed by the 2026-08-27 `#842` lifecycle turn.
-- For runtime numeric presence tracking, account for `encoding/json`'s case-insensitive matching of struct fields when inspecting raw keys. The 2026-08-27 `#842` audit missed that exact-key presence detection let an explicit `{"Limit":0}` bypass the intended invalid-zero validation and take the omitted/default path; PR `#849` corrected this with case-insensitive matching and shared-core, Web/API, and Automation no-provider-call regressions.
+- Broad reviews should look for unintended diff, dead code, mistakes, and verification gaps. When repeated reviews find one issue at a time, an audit-only turn may first produce a consolidated ranked problem list before fixes.
+- A required final audit-only review is a separate strictly read-only turn after implementation and fixes. If it finds a material issue, stop and report it; fix later and run a fresh audit from scratch.
+- Do not claim an audit verdict, “no material issues,” or strict read-only compliance without repository inspection and the validation actually performed. Disclose skipped build, tests, generation, or publication checks.
+- Fix or audit the whole analogous bug class when findings share one mechanism.
+- Audit-only turns must use repository/file-reading tools before claiming a tooling blocker. Capability listing alone is not evidence.
+- Code review may use memory or skills only as background unless explicitly excluded; verdicts must rest on repository and publication evidence.
+- When reviewing a fix stack, inspect actual commit diffs and rerun relevant validation before recommending keep/drop. If a claimed change has no diff, inspect branch pointers, status, reflog, and file contents, then correct the summary plainly.
+- A strict audit must not edit files or run write-capable formatting, build, test, generation, or other mutating commands, even if the final worktree is clean. Disclose any violation and require a fresh audit.
+- Raw-key presence checks for JSON numeric fields must account for `encoding/json` case-insensitive struct-field matching; explicit `{"Limit":0}` must not bypass invalid-zero validation through an omitted/default path.
+- Stateful mutations must preserve and verify pre-mutation eligibility before stop/cancel side effects. Reloading after a category write can lose the origin state and cancel work that was not originally Active.
+- Validation claims must match the exact reviewed head/base. If a broad suite fails on a baseline or unrelated regression, report the narrower passing scope and the broad failure rather than claiming the broad suite passed.
+- PR handoffs have repeatedly exposed stale publication metadata. Re-read the authoritative live PR body, head, file list, target, checks, and issue linkage; if a supported reuse path ignores `pr_body` and no body-only operation exists, report the handoff blocker instead of unsafe branch publication or unauthorized API mutation.
 
 Prompt and model-facing preferences:
-- Use direct role/capability wording over low-value internal labels unless the label affects authorization, routing, or correctness.
-- Avoid backend provenance/category labels that do not help the LLM. Prefer behavior terms like “standalone skills,” “protected agents,” “user-managed agents,” and “assigned agent.”
-- For protected or scheduled agents, `System:` may remain in storage/UI names when it is real identity, but model-facing prompts and hook inputs should avoid it unless behavior depends on it.
+- Use direct role/capability wording over low-value internal labels unless a label affects authorization, routing, or correctness.
+- Avoid backend provenance/category labels that do not help the LLM. Prefer “standalone skills,” “protected agents,” “user-managed agents,” and “assigned agent.”
+- `System:` may remain in storage/UI names for real identity, but model-facing prompts and hook inputs should avoid it unless behavior depends on it.
 - Do not inject the product/project name into prompts merely to sound project-specific.
-- Prefer long model prompts as readable const templates with dynamic context interpolated, not chains of `WriteString` calls.
-- Reusable skills/runbooks should avoid naming specific current-release features as examples; encode generic decision rules and feature-neutral examples.
-- Goal Agent behavior must preserve the generic model-evaluator design and avoid deterministic/objective-keyword completion logic.
-- For GitHub/Native SDLC duplicate prevention, lead with user-visible behavior: list existing bot-created issues/notifications, compare candidates, hydrate only likely matches, skip covered findings, continue searching, and create at most one new finding per run. Do not frame the answer around `idempotency_key` unless explaining why it remains outside SDLC finder prompts.
-- Draft reusable skills not yet approved for publication should stay local/ignored by default. If the user wants in-app testing before release, keep the skill indexed and ensure the package body exists in the checkout the app loads.
-- When a feature consumes an established skill's prompts/assets, keep the skill behavior/docs intact unless redesign was requested. Prefer the smallest shared canonical asset extraction or mirroring needed by the new consumer, and disclose provenance/runtime formatting dependencies.
+- Prefer long model prompts as readable const templates with interpolated dynamic context, not chains of `WriteString` calls.
+- Reusable skills/runbooks should use generic decision rules and feature-neutral examples rather than naming current-release features.
+- Goal Agent behavior must remain a generic model evaluator; do not add deterministic or objective-keyword completion logic.
+- GitHub/Native SDLC duplicate prevention should lead with user-visible behavior: list existing bot-created work, compare candidates, hydrate only likely matches, skip covered findings, continue searching, and create at most one new finding per run. Mention `idempotency_key` only when explaining why it remains outside finder prompts.
+- Draft reusable skills not yet approved for publication should stay local/ignored by default. For in-app testing, keep the skill indexed and ensure its package body exists in the checkout loaded by the app.
+- When a feature consumes an established skill's prompts/assets, keep the skill behavior/docs intact unless redesign was requested; extract or mirror only the smallest canonical asset and disclose provenance/runtime formatting dependencies.
 
 Documentation, logging, validation, and release preferences:
 - Preserve useful README content and commented multi-line command examples unless there is a specific reason to trim them.
-- Preserve liked README/docs structure while folding in stronger positioning/selling points. Keep root `docs/` in sync with README/docs-site positioning when overlapping product concepts change.
-- Root README should stay succinct and high-level, point to `https://docs.openvibely.ai` plus the docs source repo, and keep detailed environment-variable reference in `docs/environment.md`.
-- Docker storage docs should state the essential requirement that mounted `/data` be writable by UID/GID `10001:10001`; do not add legacy-volume migration prose/commands/tests/compatibility guidance unless the user reverses this.
+- Preserve liked README/docs structure while folding in stronger positioning. Keep root `docs/` synchronized with README/docs-site positioning when overlapping concepts change.
+- Root README stays succinct and high-level, points to `https://docs.openvibely.ai` plus the docs source repo, and keeps detailed environment-variable reference in `docs/environment.md`.
+- Docker storage docs must state that mounted `/data` be writable by UID/GID `10001:10001`; do not add legacy-volume migration prose, commands, tests, or compatibility guidance unless requested.
 - Published docs links in README/project-facing docs should use new-tab HTML anchors where supported; local relative links stay Markdown.
 - Very high-frequency or low-value debug traces should be commented `applog.Debugf` examples instead of active gated calls when method-call overhead could accumulate.
-- Full validation should prefer project Makefile targets or `go test ./... -count=1 -timeout 120s`; prompt-only changes use focused prompt/template contract tests plus normal build/suite when shared templates are affected.
-- For coverage tasks, the user expects real tests and realistic hosted-coverage estimates; do not substitute Codecov config/profile workarounds or optimistic local statement percentages for actual covered-line gains.
-- For Markdown-only merge-conflict resolutions, the user prefers skipping tests/build unless code or generated artifacts are touched.
-- Release workflow must include a documentation update pass for new or meaningfully changed features before publishing/tagging.
+- Full validation should prefer project Makefile targets or `go test ./... -count=1 -timeout 120s`; prompt-only changes use focused prompt/template contract tests plus the normal build/suite when shared templates are affected.
+- Coverage work requires real tests and realistic hosted-coverage estimates, not Codecov configuration/profile workarounds or optimistic local percentages.
+- For Markdown-only merge-conflict resolutions, skip tests/build unless code or generated artifacts are touched.
+- Release workflow includes a documentation update pass for new or meaningfully changed features before publishing/tagging.
 - Release agents should install missing required local tools such as `gh` when feasible; hand back only if installation/authentication fails or requires unavailable credentials/permissions.
 - Docker image publishing remains manual/pending unless explicit Docker credentials/tooling are present.
 
 Release-note and release-boundary preferences:
 - Release notes are AI-synthesized from structured unreleased commit context because commit subjects are often terse.
-- `Highlights` must summarize what is new in the target release, not repeat static product feature bullets. `What's Changed` is the detailed changelog section.
+- `Highlights` summarizes what is new in the target release; `What's Changed` is the detailed changelog.
 - Describe user-facing capability by what it does, not by incidental controls or generic labels.
-- Omit CI/test infrastructure, terminal log verbosity, low-level bug patches, and minor UI polish from high-level release notes unless they affect a core workflow.
-- Release-note bullets should use bolded lead labels such as `- **Feature or theme** — Details...`.
-- Verify live git refs, tags, and GitHub release state before resuming any release; stored release snapshots are not authoritative.
+- Omit CI/test infrastructure, terminal log verbosity, low-level patches, and minor UI polish from high-level notes unless they affect a core workflow.
+- Release-note bullets use bolded lead labels such as `- **Feature or theme** — Details...`.
+- Verify live git refs, tags, and GitHub release state before resuming a release; stored snapshots are not authoritative.
 - Release artifacts normally cover macOS desktop bundles and darwin/linux/Windows server archives with checksums. Windows desktop packaging requires a MinGW cross-compiler; Docker publishing remains pending when credentials are unavailable.
 - Release version policy is centralized in `.openvibely/skills/openvibely_release_workflow/scripts/release-version.sh`.
-- Release-build invariants include preserving `OpenVibely.app` as the zip root, making dry runs fully non-writing, avoiding managed worktree cleanup paths for real builds, and using script-default or absolute dist paths.
+- Release-build invariants include preserving `OpenVibely.app` as the zip root, making dry runs fully non-writing, avoiding managed-worktree cleanup paths for real builds, and using script-default or absolute dist paths.
 - `.openvibely/skills/openvibely_release_workflow/scripts/release.sh` is tracked without executable bit; invoke release rehearsals through `bash` until mode is corrected.
 
 Current durable rotation guidance:
-- Redundancy Finder should choose a new bounded component rather than immediately rechecking recently inspected areas unless explicitly asked to revisit them.
-- Bug Finder should likewise choose a new bounded component; revisit a known issue only when requested or when its state materially changes.
+- Redundancy Finder and Bug Finder should choose a new bounded component rather than immediately rechecking recently inspected areas, unless explicitly asked to revisit them or their state materially changes.

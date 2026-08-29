@@ -22,6 +22,122 @@ import (
 	openaiclient "github.com/openvibely/openvibely/pkg/openai_client"
 )
 
+func TestNormalizeUsageFilter_RangeSemantics(t *testing.T) {
+	oldLocal := time.Local
+	loc, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatalf("load local timezone: %v", err)
+	}
+	t.Cleanup(func() { time.Local = oldLocal })
+	time.Local = loc
+
+	now := time.Date(2024, 11, 3, 12, 0, 0, 0, loc)
+	tests := []struct {
+		name       string
+		rangeValue string
+		canonical  string
+		days       int
+		month      bool
+		all        bool
+	}{
+		{name: "missing", canonical: "30d", days: 30},
+		{name: "seven days", rangeValue: "7d", canonical: "7d", days: 7},
+		{name: "thirty days", rangeValue: "30d", canonical: "30d", days: 30},
+		{name: "ninety days", rangeValue: "90d", canonical: "90d", days: 90},
+		{name: "year", rangeValue: "365d", canonical: "365d", days: 365},
+		{name: "trimmed range", rangeValue: " 7d ", canonical: "7d", days: 7},
+		{name: "month", rangeValue: "month", canonical: "month", month: true},
+		{name: "all", rangeValue: "all", canonical: "all", all: true},
+		{name: "unknown", rangeValue: "quarter", canonical: "30d", days: 30},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filter, canonical := normalizeUsageFilterAt(UsageFilterInput{
+				ProjectID: " project-id ",
+				Provider:  " openai ",
+				Range:     tt.rangeValue,
+				Refresh:   true,
+			}, now)
+			if canonical != tt.canonical {
+				t.Fatalf("canonical range = %q, want %q", canonical, tt.canonical)
+			}
+			if filter.ProjectID != "project-id" || filter.Provider != "openai" {
+				t.Fatalf("filter scope = project=%q provider=%q", filter.ProjectID, filter.Provider)
+			}
+			if filter.GroupBy != "day" {
+				t.Fatalf("GroupBy = %q, want day", filter.GroupBy)
+			}
+			if !filter.Refresh {
+				t.Fatal("Refresh = false, want true")
+			}
+			if tt.all {
+				if !filter.DateFrom.IsZero() || !filter.DateTo.IsZero() {
+					t.Fatalf("all range has date bounds: from=%v to=%v", filter.DateFrom, filter.DateTo)
+				}
+				return
+			}
+			if filter.DateTo.IsZero() || !filter.DateTo.Equal(now) {
+				t.Fatalf("DateTo = %v, want %v", filter.DateTo, now)
+			}
+			var wantFrom time.Time
+			switch {
+			case tt.month:
+				wantFrom = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc)
+			default:
+				wantFrom = now.AddDate(0, 0, -tt.days)
+			}
+			if !filter.DateFrom.Equal(wantFrom) {
+				t.Fatalf("DateFrom = %v, want %v", filter.DateFrom, wantFrom)
+			}
+		})
+	}
+}
+
+func TestNormalizeUsageFilter_ExplicitBounds(t *testing.T) {
+	filter, canonical := normalizeUsageFilterAt(UsageFilterInput{
+		ProjectID: " project-id ",
+		Provider:  " anthropic ",
+		GroupBy:   " hour ",
+		Range:     " 90d ",
+		DateFrom:  " 2024-03-10T01:30:00-08:00 ",
+		DateTo:    " 2024-03-11 ",
+		Refresh:   true,
+	}, time.Date(2024, 11, 3, 12, 0, 0, 0, time.UTC))
+
+	if canonical != "90d" {
+		t.Fatalf("canonical range = %q, want 90d", canonical)
+	}
+	if filter.ProjectID != "project-id" || filter.Provider != "anthropic" || filter.GroupBy != "hour" || !filter.Refresh {
+		t.Fatalf("normalized filter = %+v", filter)
+	}
+	wantFrom := time.Date(2024, 3, 10, 9, 30, 0, 0, time.UTC)
+	wantTo := time.Date(2024, 3, 11, 0, 0, 0, 0, time.UTC)
+	if !filter.DateFrom.Equal(wantFrom) || !filter.DateTo.Equal(wantTo) {
+		t.Fatalf("explicit bounds = %v to %v, want %v to %v", filter.DateFrom, filter.DateTo, wantFrom, wantTo)
+	}
+}
+
+func TestUsageAnalyticsActionFilterFromInput_UsesNormalizedSummary(t *testing.T) {
+	filter, summary := usageAnalyticsActionFilterFromInput(" project-id ", usageAnalyticsActionInput{
+		Range:    " quarter ",
+		Provider: " openai ",
+		GroupBy:  " ",
+	})
+
+	if filter.ProjectID != "project-id" || filter.Provider != "openai" || filter.GroupBy != "day" {
+		t.Fatalf("normalized action filter = %+v", filter)
+	}
+	if filter.Refresh {
+		t.Fatal("Chat usage filter unexpectedly enables provider refresh")
+	}
+	if summary.Range != "30d" || summary.Provider != "openai" || summary.GroupBy != "day" {
+		t.Fatalf("action filter summary = %+v", summary)
+	}
+	if summary.DateFrom == "" || summary.DateTo == "" {
+		t.Fatalf("action filter summary omitted fallback bounds: %+v", summary)
+	}
+}
 func TestRecordUsageFromResult_PersistsOpenAICompatibleUsageAndAggregates(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	repo := repository.NewUsageRepo(db)

@@ -317,6 +317,14 @@ func TestParseSkillAnalyticsFilter_YearRange(t *testing.T) {
 	}
 }
 
+func TestParseSkillAnalyticsFilter_WhitespaceRangeFallsBackToDefault(t *testing.T) {
+	filter := parseSkillAnalyticsFilter(echoContext("/api/analytics/skills?range=%207d%20"))
+	diff := filter.DateTo.Sub(filter.DateFrom)
+	if diff < 29*24*time.Hour || diff > 31*24*time.Hour {
+		t.Errorf("expected whitespace-padded range to retain Skill Analytics default 30d behavior, got %v", diff)
+	}
+}
+
 func TestGetSkillAnalyticsUsesCompactAgentCatalogProjectionAndPreservesEnabledSkills(t *testing.T) {
 	db, counter := testutil.NewStatementCountingTestDB(t)
 	ctx := context.Background()

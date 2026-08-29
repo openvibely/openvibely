@@ -20,7 +20,7 @@ func NewCustomPersonalityRepo(db *sql.DB) *CustomPersonalityRepo {
 
 // Create inserts a new custom personality.
 func (r *CustomPersonalityRepo) Create(ctx context.Context, p *models.CustomPersonality) error {
-	return r.db.QueryRowContext(ctx,
+	return queryRowBoundSQLite(ctx, r.db,
 		`INSERT INTO custom_personalities (name, key, description, system_prompt)
 		 VALUES (?, ?, ?, ?)
 		 RETURNING id, created_at, updated_at`,
@@ -71,7 +71,7 @@ func (r *CustomPersonalityRepo) List(ctx context.Context) ([]models.CustomPerson
 
 // Update modifies an existing custom personality identified by key.
 func (r *CustomPersonalityRepo) Update(ctx context.Context, key string, p *models.CustomPersonality) error {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE custom_personalities SET name = ?, description = ?, system_prompt = ?, updated_at = datetime('now')
 		 WHERE key = ?`,
 		p.Name, p.Description, p.SystemPrompt, key)
@@ -87,7 +87,7 @@ func (r *CustomPersonalityRepo) Update(ctx context.Context, key string, p *model
 
 // Delete removes a custom personality by key.
 func (r *CustomPersonalityRepo) Delete(ctx context.Context, key string) error {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM custom_personalities WHERE key = ?`, key)
 	if err != nil {
 		return fmt.Errorf("delete custom personality: %w", err)

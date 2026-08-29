@@ -76,12 +76,11 @@ func TestTaskGoalRepo_BlockedAuditAndStaleGoalGuard(t *testing.T) {
 	}
 }
 
-func TestTaskRepo_ImmediateTransactionCommitUsesCallerContext(t *testing.T) {
+func TestWithImmediateTxCommitUsesCallerContext(t *testing.T) {
 	db := testutil.NewTestDB(t)
-	repo := NewTaskRepo(db, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	err := repo.withImmediateTx(ctx, func(sqlExecutor) error {
+	err := withImmediateTx(ctx, db, func(SQLExecutor) error {
 		cancel()
 		return nil
 	})

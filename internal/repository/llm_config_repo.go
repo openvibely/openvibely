@@ -111,7 +111,7 @@ func validateLLMConfigModel(a *models.LLMConfig) error {
 	return nil
 }
 
-func validateLLMConfigNameAvailableTx(ctx context.Context, tx *sql.Tx, name, excludeID string) (string, error) {
+func validateLLMConfigNameAvailableTx(ctx context.Context, tx SQLExecutor, name, excludeID string) (string, error) {
 	normalized, err := normalizeLLMConfigName(name)
 	if err != nil {
 		return "", err
@@ -137,19 +137,7 @@ func validateLLMConfigNameAvailableTx(ctx context.Context, tx *sql.Tx, name, exc
 }
 
 func (r *LLMConfigRepo) ValidateNameAvailable(ctx context.Context, name, excludeID string) (string, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", fmt.Errorf("begin validate model config name tx: %w", err)
-	}
-	defer tx.Rollback()
-	normalized, err := validateLLMConfigNameAvailableTx(ctx, tx, name, excludeID)
-	if err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", fmt.Errorf("commit validate model config name tx: %w", err)
-	}
-	return normalized, nil
+	return validateLLMConfigNameAvailableTx(ctx, r.db, name, excludeID)
 }
 
 func (r *LLMConfigRepo) List(ctx context.Context) ([]models.LLMConfig, error) {
@@ -504,7 +492,7 @@ func (r *LLMConfigRepo) GetDefault(ctx context.Context) (*models.LLMConfig, erro
 	return &a, nil
 }
 
-func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx *sql.Tx) error {
+func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx SQLExecutor) error {
 	var total int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_configs`).Scan(&total); err != nil {
 		return fmt.Errorf("counting model configs: %w", err)
@@ -535,7 +523,7 @@ func (r *LLMConfigRepo) ensureDefaultModelTx(ctx context.Context, tx *sql.Tx) er
 	return nil
 }
 
-func (r *LLMConfigRepo) deleteWithTx(ctx context.Context, tx *sql.Tx, id string) error {
+func (r *LLMConfigRepo) deleteWithTx(ctx context.Context, tx SQLExecutor, id string) error {
 	// Nullify FK references in tasks and executions before deleting
 	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET agent_id = NULL WHERE agent_id = ?`, id); err != nil {
 		return fmt.Errorf("nullifying model config in tasks: %w", err)
@@ -554,11 +542,11 @@ func (r *LLMConfigRepo) Create(ctx context.Context, a *models.LLMConfig) error {
 		return err
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin create model config tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	name, err := validateLLMConfigNameAvailableTx(ctx, tx, a.Name, "")
 	if err != nil {
@@ -613,11 +601,11 @@ func (r *LLMConfigRepo) Update(ctx context.Context, a *models.LLMConfig) error {
 		return err
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin update model config tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	name, err := validateLLMConfigNameAvailableTx(ctx, tx, a.Name, a.ID)
 	if err != nil {
@@ -673,12 +661,12 @@ func (r *LLMConfigRepo) UpdateOAuthTokens(ctx context.Context, id string, access
 		err    error
 	)
 	if len(accountID) > 0 {
-		result, err = r.db.ExecContext(ctx,
+		result, err = execBoundSQLite(ctx, r.db,
 			`UPDATE agent_configs SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
 			accessToken, refreshToken, expiresAt, accountID[0], id)
 	} else {
-		result, err = r.db.ExecContext(ctx,
+		result, err = execBoundSQLite(ctx, r.db,
 			`UPDATE agent_configs SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, updated_at = datetime('now')
 			 WHERE id = ?`,
 			accessToken, refreshToken, expiresAt, id)
@@ -702,13 +690,13 @@ func (r *LLMConfigRepo) UpdateStandardOAuthTokensIfRevision(ctx context.Context,
 		err    error
 	)
 	if len(accountID) > 0 {
-		result, err = r.db.ExecContext(ctx,
+		result, err = execBoundSQLite(ctx, r.db,
 			`UPDATE agent_configs
 			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, oauth_account_id = ?, updated_at = datetime('now')
 			 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
 			accessToken, refreshToken, expiresAt, accountID[0], id, expectedRevision, provider, models.AuthMethodOAuth)
 	} else {
-		result, err = r.db.ExecContext(ctx,
+		result, err = execBoundSQLite(ctx, r.db,
 			`UPDATE agent_configs
 			 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, updated_at = datetime('now')
 			 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
@@ -725,7 +713,7 @@ func (r *LLMConfigRepo) UpdateStandardOAuthTokensIfRevision(ctx context.Context,
 }
 
 func (r *LLMConfigRepo) UpdateCustomAuthState(ctx context.Context, id, stateJSON string) error {
-	if _, err := r.db.ExecContext(ctx,
+	if _, err := execBoundSQLite(ctx, r.db,
 		`UPDATE agent_configs SET custom_auth_state_json = ?, updated_at = datetime('now') WHERE id = ?`,
 		stateJSON, id); err != nil {
 		return fmt.Errorf("updating custom authentication state: %w", err)
@@ -737,7 +725,7 @@ func (r *LLMConfigRepo) UpdateCustomAuthState(ctx context.Context, id, stateJSON
 // required to use them, so a connected token is never stored without its
 // mandatory request metadata.
 func (r *LLMConfigRepo) UpdateCustomOAuthConnection(ctx context.Context, id, accessToken, refreshToken string, expiresAt int64, stateJSON string) error {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE agent_configs
 		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?,
 		     custom_auth_state_json = ?, updated_at = datetime('now')
@@ -755,7 +743,7 @@ func (r *LLMConfigRepo) UpdateCustomOAuthConnection(ctx context.Context, id, acc
 }
 
 func (r *LLMConfigRepo) UpdateCustomOAuthConnectionIfRevision(ctx context.Context, id string, expectedRevision int64, accessToken, refreshToken string, expiresAt int64, stateJSON string) (bool, error) {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE agent_configs
 		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?,
 		     custom_auth_state_json = ?, updated_at = datetime('now')
@@ -777,7 +765,7 @@ func (r *LLMConfigRepo) UpdateCustomOAuthConnectionIfRevision(ctx context.Contex
 // refreshes that were created from an earlier generation.
 func (r *LLMConfigRepo) AdvanceCustomOAuthRevision(ctx context.Context, id string) (int64, bool, error) {
 	var revision int64
-	err := r.db.QueryRowContext(ctx,
+	err := queryRowBoundSQLite(ctx, r.db,
 		`UPDATE agent_configs
 		 SET oauth_config_revision = oauth_config_revision + 1
 		 WHERE id = ? AND provider = ? AND auth_method = ?
@@ -794,7 +782,7 @@ func (r *LLMConfigRepo) AdvanceCustomOAuthRevision(ctx context.Context, id strin
 }
 
 func (r *LLMConfigRepo) UpdateCustomOAuthTokensIfRevision(ctx context.Context, id string, expectedRevision int64, accessToken, refreshToken string, expiresAt int64) (bool, error) {
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`UPDATE agent_configs
 		 SET oauth_access_token = ?, oauth_refresh_token = ?, oauth_expires_at = ?, updated_at = datetime('now')
 		 WHERE id = ? AND oauth_config_revision = ? AND provider = ? AND auth_method = ?`,
@@ -817,7 +805,7 @@ func (r *LLMConfigRepo) TryAcquireOAuthRefreshLease(ctx context.Context, configI
 		return false, fmt.Errorf("complete OAuth refresh lease identity is required")
 	}
 	nowMillis := now.UTC().UnixMilli()
-	result, err := r.db.ExecContext(ctx,
+	result, err := execBoundSQLite(ctx, r.db,
 		`INSERT INTO oauth_refresh_leases (config_id, owner_token, lease_expires_at)
 		 VALUES (?, ?, ?)
 		 ON CONFLICT(config_id) DO UPDATE SET
@@ -837,7 +825,7 @@ func (r *LLMConfigRepo) TryAcquireOAuthRefreshLease(ctx context.Context, configI
 }
 
 func (r *LLMConfigRepo) ReleaseOAuthRefreshLease(ctx context.Context, configID, ownerToken string) error {
-	if _, err := r.db.ExecContext(ctx,
+	if _, err := execBoundSQLite(ctx, r.db,
 		`DELETE FROM oauth_refresh_leases WHERE config_id = ? AND owner_token = ?`,
 		strings.TrimSpace(configID), strings.TrimSpace(ownerToken)); err != nil {
 		return fmt.Errorf("releasing OAuth refresh lease: %w", err)
@@ -855,11 +843,11 @@ func (r *LLMConfigRepo) Count(ctx context.Context) (int, error) {
 }
 
 func (r *LLMConfigRepo) TransferDefaultAndDelete(ctx context.Context, deleteID, newDefaultID string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin transfer default tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	// Set the new default (unsets all others first)
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_configs SET is_default = 0`); err != nil {
@@ -914,11 +902,11 @@ func (r *LLMConfigRepo) GetByIDs(ctx context.Context, ids []string) (map[string]
 }
 
 func (r *LLMConfigRepo) Delete(ctx context.Context, id string) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, cleanup, err := beginImmediateTx(ctx, r.db)
 	if err != nil {
 		return fmt.Errorf("begin delete model config tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer cleanup()
 
 	if err := r.deleteWithTx(ctx, tx, id); err != nil {
 		return err

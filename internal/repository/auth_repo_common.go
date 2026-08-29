@@ -11,7 +11,7 @@ import (
 // deleteByID deletes a single row identified by id from table and returns a
 // not-found error (naming entityLabel) when no row matched.
 func deleteByID(ctx context.Context, db *sql.DB, table, entityLabel, id string) error {
-	result, err := db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE id = ?`, table), id)
+	result, err := execBoundSQLite(ctx, db, fmt.Sprintf(`DELETE FROM %s WHERE id = ?`, table), id)
 	if err != nil {
 		return fmt.Errorf("delete %s: %w", entityLabel, err)
 	}
@@ -50,7 +50,7 @@ func upsertUserProject(ctx context.Context, db *sql.DB, table, keyCol, keyVal, p
 		 ON CONFLICT(%s) DO UPDATE
 		 SET project_id = excluded.project_id, updated_at = datetime('now')`,
 		table, keyCol, keyCol)
-	if _, err := db.ExecContext(ctx, query, keyVal, projectID); err != nil {
+	if _, err := execBoundSQLite(ctx, db, query, keyVal, projectID); err != nil {
 		return fmt.Errorf("set %s: %w", errLabel, err)
 	}
 	return nil
@@ -76,7 +76,7 @@ func getUserProject(ctx context.Context, db *sql.DB, table, keyCol, keyVal, errL
 // selection. errLabel is used only in the wrapped error message on failure.
 func deleteUserProject(ctx context.Context, db *sql.DB, table, keyCol, keyVal, errLabel string) error {
 	query := fmt.Sprintf(`DELETE FROM %s WHERE %s = ?`, table, keyCol)
-	if _, err := db.ExecContext(ctx, query, keyVal); err != nil {
+	if _, err := execBoundSQLite(ctx, db, query, keyVal); err != nil {
 		return fmt.Errorf("delete %s: %w", errLabel, err)
 	}
 	return nil
@@ -144,7 +144,7 @@ func (h taskContextLifecycle[T]) GetByTaskID(ctx context.Context, db *sql.DB, ta
 // deleteByTaskID removes a task-context row keyed by task_id from table.
 // errLabel is used only in the wrapped error message on failure.
 func deleteByTaskID(ctx context.Context, db *sql.DB, table, taskID, errLabel string) error {
-	_, err := db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE task_id = ?`, table), taskID)
+	_, err := execBoundSQLite(ctx, db, fmt.Sprintf(`DELETE FROM %s WHERE task_id = ?`, table), taskID)
 	if err != nil {
 		return fmt.Errorf("delete %s: %w", errLabel, err)
 	}
@@ -285,7 +285,7 @@ func (h singleIdentifierAllowlist[T]) Create(ctx context.Context, projectID, ide
 
 	var id string
 	var addedAt time.Time
-	if err := h.db.QueryRowContext(ctx, query, projectID, identity, displayName, addedBy).Scan(&id, &addedAt); err != nil {
+	if err := queryRowBoundSQLite(ctx, h.db, query, projectID, identity, displayName, addedBy).Scan(&id, &addedAt); err != nil {
 		return identity, "", time.Time{}, err
 	}
 	return identity, id, addedAt, nil

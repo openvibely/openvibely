@@ -1579,13 +1579,7 @@ func (s *SlackService) getActiveProject(ctx context.Context, teamID, userID stri
 	if len(projects) == 0 {
 		return "", nil
 	}
-	selected := projects[0].ID
-	for _, p := range projects {
-		if p.IsDefault {
-			selected = p.ID
-			break
-		}
-	}
+	selected := fallbackProjectID(projects)
 	s.mu.Lock()
 	s.userProjects[key] = selected
 	s.mu.Unlock()

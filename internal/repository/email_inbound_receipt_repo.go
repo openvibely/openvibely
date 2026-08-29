@@ -29,7 +29,7 @@ func (r *EmailInboundReceiptRepo) Exists(ctx context.Context, mailboxAddress, me
 }
 
 func (r *EmailInboundReceiptRepo) Record(ctx context.Context, mailboxAddress, messageKey string) error {
-	_, err := r.db.ExecContext(ctx,
+	_, err := execBoundSQLite(ctx, r.db,
 		`INSERT INTO email_inbound_receipts (mailbox_address, message_key) VALUES (?, ?)
 		 ON CONFLICT(mailbox_address, message_key) DO NOTHING`,
 		mailboxAddress, messageKey,

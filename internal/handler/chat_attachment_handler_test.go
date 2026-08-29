@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v4"
+	"github.com/openvibely/openvibely/internal/database"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/internal/repository"
 	"github.com/openvibely/openvibely/internal/service"
@@ -383,7 +384,9 @@ func TestUploadChatAttachment_RejectsRetiredSessionWithoutRecreatingDirectory(t 
 func TestUploadChatAttachment_SerializesPublicationWithConcurrentRetirement(t *testing.T) {
 	useTempUploadsDir(t)
 
-	db := testutil.NewTestDB(t)
+	db, err := database.New(filepath.Join(t.TempDir(), "attachment-retirement.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, db.Close()) })
 	h := &Handler{
 		chatAttachmentRepo: repository.NewChatAttachmentRepo(db),
 		threadInputRepo:    repository.NewThreadInputRepo(db),

@@ -31,13 +31,17 @@ func (s *AutomationExternalStateService) Refresh(ctx context.Context, projectID,
 	if s == nil || s.automations == nil || s.pulls == nil || s.projects == nil || s.github == nil {
 		return models.AutomationExternalState{}, errors.New("automation external refresh is unavailable")
 	}
-	definition, err := s.automations.GetDefinition(ctx, projectID, automationID)
+	exists, err := s.automations.Exists(ctx, projectID, automationID)
 	if err != nil {
 		return models.AutomationExternalState{}, err
 	}
-	if definition == nil {
+	if !exists {
 		return models.AutomationExternalState{}, errors.New("automation not found")
 	}
+	return s.refreshAfterValidation(ctx, projectID, automationID, now)
+}
+
+func (s *AutomationExternalStateService) refreshAfterValidation(ctx context.Context, projectID, automationID string, now time.Time) (models.AutomationExternalState, error) {
 	pulls, err := s.automations.ListAutomationPullRequests(ctx, projectID, automationID, 20)
 	if err != nil {
 		return models.AutomationExternalState{}, err

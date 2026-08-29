@@ -2,81 +2,46 @@
 name: worktree_and_lineage
 type: project
 created: 2026-05-09
-updated: 2026-08-23
+updated: 2026-08-28
 source: consolidation
-source_id: memory_consolidation_2026_08_23
+source_id: memory_consolidation_2026_08_28
 confidence: high
 title: Worktree and Lineage
 ---
 
-Task execution uses isolated git worktrees in `.worktrees/task_<id>` with task-scoped branches `task/<id_prefix>-<slug>`. LLM task prompts include explicit worktree path orientation when a workdir is present, while runtime workdir enforcement remains the source of truth. Coding changes for assigned tasks must be made in the assigned task worktree, not the main checkout, unless the user explicitly asks for main-checkout changes.
+Task execution uses isolated git worktrees in `.worktrees/task_<id>` with task-scoped branches `task/<id_prefix>-<slug>`. Coding changes for assigned tasks belong in the assigned worktree, not the main checkout, unless the user explicitly requests main-checkout changes. Prompts should orient to the worktree, but runtime workdir enforcement is the source of truth.
 
-Worktree path discipline is mandatory when a task provides a worktree path: relative tool paths resolve against the agent's working directory, not automatically against the task worktree.
+Worktree path and lifecycle:
+- When a task provides a worktree path, relative tool paths resolve against the agent working directory, not automatically against that task worktree. Default relative file/shell operations should use the assigned worktree as effective repository root whenever `tasks.worktree_path` exists.
+- `LLMService.ExecuteTaskWithAgent` creates the worktree before execution, synchronizes from the selected target/default branch when clean, and handles post-execution merge. Startup sync is a real `git merge --no-edit <target>`; initial conflicts fail before model dispatch, while follow-up conflicts can continue in a preserved clean worktree with recovery context.
+- Startup sync uses `MergeTargetBranch` when set, otherwise local `main`, detected default branch, or `main` fallback. Local branches are the source of truth by default; remote-tracking branches must not be fetched/merged implicitly. A local `master` without `main` is supported when default detection resolves it.
+- Worktree setup fails closed. Local commits need no remote, but an unborn repository has no tree for `git worktree add`; provide initial-commit guidance and never dispatch the coding model in the main checkout.
+- Auto-merge and Task Changes support merge commit, fast-forward-only, and squash. Rebase is shown only when both branches have unique commits and no active conflict. Cleanup supports after-merge, keep, and manual policies, preserves active follow-up lineage, and skips locked, dirty, or unmerged worktrees. Chained tasks carry `base_branch`, `base_commit_sha`, and `lineage_depth`.
+- Active managed-worktree diffs resolve the target/task merge base against current working-tree state, including committed, staged, unstaged, and untracked files. Full Changes, file summaries, lazy cards, live fragments, periodic snapshots, follow-up persistence, and direct `?tab=changes`/file requests must share live-worktree versus preserved-diff resolution.
 
-Durable worktree model:
-- Auto-merge and Task Changes local actions support merge commit, fast-forward only, and squash merge. Rebase is shown only when target and task branches both have unique commits and no active merge/conflict state is present.
-- `LLMService.ExecuteTaskWithAgent` creates the worktree before execution, runs startup sync from the latest target/default branch when the worktree is clean, and handles post-execution merge.
-- Startup sync is a real `git merge --no-edit <target>` inside the task worktree. Initial conflicts fail before model dispatch; follow-up conflicts may continue in the preserved clean worktree with recovery context.
-- Startup sync uses stored `MergeTargetBranch` when set. Without target it prefers local `main`, then `GetDefaultBranch`; `GetDefaultBranch` uses `origin/HEAD`, local `main`, local `master`, then hardcoded `main`. `upstream/HEAD` is not consulted.
-- Startup sync treats the selected local branch as source of truth by default. Having `origin/<branch>` must not cause fetch/merge/rebase from remote-tracking branch unless an explicit opt-in policy exists.
-- Repos with local `master` and no local `main` should sync from local `master` when default-branch detection resolves to it; if `origin/HEAD` points to absent `main`, worktree creation/startup merge may fail.
-- Worktree setup fails closed. A local commit needs no remote, but an unborn repository lacks a tree for `git worktree add`, so execution/follow-ups must provide initial-commit guidance and never dispatch the coding model in main checkout.
-- Active managed-worktree diffs resolve target/task merge base to current working tree state, including committed, staged, unstaged, and untracked files. `git diff HEAD` and stored execution diffs are restricted to non-worktree execution views or fallback when no live managed worktree exists.
-- Full Changes, file summaries, lazy file cards, live fragments, periodic streaming snapshots, follow-up completion persistence, and worktree-specific fragments must use the same state resolution for live worktree vs preserved execution diff fallback.
-- Direct task-detail `?tab=changes` and `/tasks/:id/changes/file` lazy requests hit the same recovery/diff resolution paths as lazy tab loads.
-- Direct task attachment/worktree changes remain project-scoped; an agent under another project cannot rerun/reconcile a task in a different project.
-- Cleanup policy supports after-merge, keep, and manual. Periodic cleanup removes merged worktrees and detects orphaned worktrees with compact task projections while preserving merged-branch detection, target fallback, descendant-guarded branch deletion, active follow-up lineage, and skipped locked/dirty/unmerged worktrees.
-- Chained tasks carry git lineage through `base_branch`, `base_commit_sha`, and `lineage_depth`.
+Known worktree, diff, and review gaps:
+- Open security bug `#30`: untracked-file diff synthesis follows Git paths with `os.Stat`/`os.ReadFile`, so an untracked symlink can expose contents outside the repo. Skip symlinks and enforce resolved-worktree containment before reading.
+- Task chaining still has gaps around persisted `ChildModel`, already-created blocked children after `ChildAgentID` edits, durable handoff failure evidence, Chaining-tab child title/prompt editing (`#276`, `#773`), and navigable ordinary parent/child context (`#255`).
+- Task Changes review supports inline comments and feedback follow-ups but does not persist an explicit human approval/changes-requested outcome (`#221`). Comment update/delete ownership checks (`#271`), GitHub PR comment synchronization (`#284`), and the dead/wrong-method Cancel Review path (`#286`) remain open.
+- `task_commit_stats` is not exposed as per-task evidence across Task Detail surfaces (`#723`). Changes-file parsing uses one `parseWorktreeNameStatus` decoder for tracked name-status records while preserving rename/copy pathspecs, malformed-row skips, deterministic ordering, live untracked enumeration, and state fallback.
 
-Known worktree, diff, and lineage gaps:
-- Open security bug `#30`: untracked-file diff synthesis follows Git paths with `os.Stat`/`os.ReadFile`, so an untracked symlink can expose target contents outside the repo. Diff capture must inspect without following symlinks, skip symlinks, and enforce resolved-worktree containment before reading.
-- Known task-chaining gaps `#276`: child creation/activation does not consume persisted `ChildModel`; later `ChildAgentID` edits do not update already blocked child; chain handoff failures may leave pre-created child blocked without durable user-facing failure evidence.
-- Known task-chaining UI gap `#773`: Task Detail's Chaining tab cannot name or prompt-shape follow-up child tasks even though persisted chain fields `ChildTitle` and `ChildPromptPrefix` affect child creation and are exposed through Chat/API schema.
-- Task Changes supports inline comments and `Submit Review`, but submission queues feedback back to the agent, clears comments, and does not persist explicit human approval/changes-requested outcome; gap `#221`.
-- Known task-detail lineage gap `#255`: ordinary chained tasks persist parent relationship and inherited git lineage, but Task Details lacks navigable parent/child context outside swarms.
-- Known task-detail commit-summary gap `#723`: `task_commit_stats` stores app-produced task commit summaries, but Task Detail does not expose this per-task evidence in Details/Thread/Changes/Schedules/Chaining/Attachments/Lifecycle surfaces.
-- Known review-comment scoping gap `#271`: inline review comment update/delete endpoints do not verify the comment belongs to requesting task/project.
-- Known one-way sync gap `#284`: Task Review UI comments are not posted back to linked GitHub PRs, while GitHub PR feedback can already be forwarded to tasks.
-- Known diff-viewer Cancel Review gap `#286`: inline code-review UI's cancel function is dead/unwired and would use wrong HTTP method if invoked.
+Sandbox escape direction:
+- A confirmed incident edited the main checkout when prompt/tool orientation pointed there despite an assigned worktree. The durable fix direction is one `executionRoot` derived from `tasks.worktree_path`, shared by shell/file resolution for initial runs and follow-ups.
+- Writes outside the sandbox require explicit outside-workspace permission/bypass, not only prompt instructions, because absolute file paths and shell `cd` can escape cwd. Intentional project-root writers such as `.openvibely` system agents retain explicit scope configurations; normal scoped roots resolve against `executionRoot`.
+- Automation-generated implementation prompts must not present the main checkout as the operative repository root. Do not add hard containment, confirmation prompts, or deterministic prompt rewriting unless explicitly requested; intentional absolute paths remain a separate policy choice.
 
-Worktree sandbox escape incident and direction:
-- Confirmed 2026 incident: an assigned task with a worktree edited the main checkout because prompt/tool orientation pointed at the main repo path. The assigned worktree stayed clean and edits had to be manually copied and committed to the worktree.
-- Fix direction: compute a single `executionRoot` per task run derived from `tasks.worktree_path` when set, and make shell/file tool path resolution honor it for both initial execution and follow-up/chat handler execution through a shared contract.
-- Outside-sandbox writes require explicit outside-workspace permission/bypass mode, not just prompt instruction, because default file tools allow absolute paths and shell can escape cwd.
-- Agents with `DisableRuntimeWorktree` or explicit scope configs that intentionally write project root, such as `.openvibely` system agents, should keep explicit config paths rather than hidden exceptions. Scoped-dir roots for normal task agents should resolve against execution root.
-- Default relative file/shell operations for task execution should use assigned worktree as effective repository root whenever `tasks.worktree_path` exists. Intentional absolute paths and `cd /other/project` commands are separate policy choices; do not add hard containment, confirmation prompts, or deterministic prompt rewriting unless explicitly requested.
-- Automation-generated implementation prompts must not present the main checkout path as operative repository root when runner executes in a worktree.
+Commit and follow-up lineage:
+- Auto-commit and GitHub publication subjects are generated from actual worktree diff facts, not task title/prompt/output when they conflict. Subjects are concise, capitalized imperative plain language, with no provider/tool/status boilerplate, task scopes, machinery, or `Changed files:` body. Deterministic fallbacks use diff/path/status facts. Untracked symlinks must not be followed while collecting snippets.
+- Follow-ups to merged, stale, conflict-aborted, or squash-accepted tasks must not merge current target into an old historical branch blindly. Historical branches become read-only lineage; fresh `task/<id>-followup-*` lineage starts from the current target, while an active dirty/local follow-up worktree is reused.
+- Startup-conflict recovery uses typed `StartupSyncConflictError` with target branch, task branch, worktree, and conflicted files. Failed merge aborts, dirty worktrees, missing branches, setup failures, and non-conflict Git errors remain fatal.
 
-Commit-message direction:
-- Task execution auto-commits and GitHub API-backed PR publication commits use generated descriptive commit subjects driven by actual worktree diff.
-- Commit-message generation collects compact diff facts/hunks from `git status`, staged/unstaged diffs, and snippets for untracked text files, then asks the LLM for one plain subject.
-- Task title, prompt, and execution output are supporting context only and must be ignored when they conflict with the diff. Stored execution text must not become the subject by itself.
-- If no usable LLM summary exists, fall back deterministically from diff/path/status facts with plain subject-only summaries such as `Add <label>`, `Update <label>`, `Remove <label>`, `Update <area> files`, `Update <n> files`, `Update changes`, `Refine changes`, or `Prepare changes for merge`.
-- Commit-summary diff context must not follow untracked symlinks or read snippets outside worktree.
-- Task-execution commit subjects should be concise, subject-only, plain language, capitalized imperative mood, and strip provider/status/tool boilerplate, conventional prefixes, and body/file-list headings. Do not add `Changed files:` bodies, task scopes, task/worktree machinery mentions, or generic `Task completed:`/`Followup:` subjects.
+Merge, publication, and recovery evidence:
+- Manual merge conflicts are handled results. Changes-tab rebase conflicts abort rebase and surface guidance; an aborted rebase alone must not persist `MergeStatusConflict`. Fast-forward-only merges skip unnecessary rebase when ancestry already permits it. Dirty but non-overlapping target changes are allowed, while Git overwrite/refusal without unmerged files remains a merge failure.
+- Revalidate stale `merge_status` and recover conventional worktree metadata before hiding/rejecting merge actions. A conflict-resolution commit in a task worktree does not itself clear persisted conflict status. A branch is merged only when fully reachable from target.
+- Local commits, task records, or a clean worktree do not prove remote publication. Verify configured remote, task-branch tip, live PR head, live target ref, current-base file list, checks, issue closure, and review state. Durable publication evidence is `task_pull_requests.published_head_sha` matched to live GitHub `head.sha`; compare against the live target branch, not assumed local `origin/main`.
+- Repeated handoff contamination occurred when a task branch merged local-only `main` after publication or when PR-body reconciliation republished branch state. Before repair, preserve advanced/polluted tips on named backup refs; then align the task branch to the verified live PR head and validate scope against the live base. Never use a body update as permission to publish unrelated branch commits.
+- Some supported PR reuse paths return success while ignoring a supplied `pr_body`. Re-read the authoritative body after reconciliation; stale broad-suite claims or obsolete timings are a handoff blocker. If no authorized body-only action exists, report it rather than using unsafe branch replacement or unauthorized API mutation. Require a fresh strict read-only audit after repair. Current #880 handoff evidence is concrete: PR #893's source branch and `refs/pull/893/head` point to live SHA `38deecc`, whose tree matches local implementation commit `edb8d68`; the local worktree is clean and both local/live diffs contain the same six issue-scoped paths. The fresh 2026-08-28 audit still found the PR body stale because it reports only the 50-node direct benchmark and omits the required 10-node and end-to-end/contention measurements. No authorized body-only update capability is available, no unauthorized fallback is permitted, and the non-experimental macOS Intel desktop packaged-update check is failing.
 
-Follow-up lineage direction:
-- Task-thread follow-ups to terminal merged/stale tasks are guarded against blindly merging current target into old historical branch/worktree.
-- Historical original task branches are read-only lineage when their work has been merged, conflict-aborted, or made stale by squash/duplicate acceptance.
-- Follow-up execution continues from current merge target on fresh `task/<id>-followup-*` lineage when old branch is stale. Active follow-up worktrees remain the task's current lineage; dirty/local follow-up work is reused.
-- Startup-conflict recovery for follow-ups uses typed `StartupSyncConflictError` with target branch, task branch, worktree path, and conflicted files. Reactivated running tasks can continue in preserved clean worktree with instructions to merge, resolve, build, test, and commit.
-- Failed merge aborts, dirty worktrees, missing branches, setup failures, and non-conflict Git errors remain fatal.
-
-Merge, metadata, and publication direction:
-- Manual merge conflicts from `/tasks/:id/worktree/merge` are handled results, not ordinary request failures. Changes-tab rebase conflicts abort rebase and surface guidance; an aborted rebase alone should not leave `MergeStatusConflict`.
-- Fast-forward-only task merges skip unnecessary auto-rebase when ancestry already permits `--ff-only`; if target is not ancestor, existing auto-rebase applies.
-- Local merges do not use blanket dirty-target guard; dirty-but-non-overlapping target checkout changes are allowed. Git overwrite/refusal cases without unmerged files surface as merge failures rather than conflict-resolution states.
-- Changes-tab and local merge handlers revalidate stale `merge_status` and recover conventional worktree metadata before hiding/rejecting merge actions. A conflict-resolution commit made directly in a task worktree does not itself clear persisted `MergeStatusConflict`.
-- A task branch is already merged only when fully reachable from target.
-- Local worktree commits are not remote publication. Verify configured remote and task-branch tip before claiming a fix is available outside local app/worktree.
-- Live GitHub PR state and head are authoritative. Successful local commit, branch replacement, or local task-record response does not prove a linked PR is open, current, scoped, or complete.
-- For task PR publication, durable evidence is recorded `task_pull_requests.published_head_sha` from successful publish matched against live GitHub PR `head.sha`. Compare PR diffs against the live target branch ref from GitHub, not assumed local `origin/main`.
-- Repeated 2026 PR handoff incidents showed stale/polluted remote PR heads despite clean local task candidates. Durable response is to verify local candidate scope, live source/PR heads, live PR file list, target branch, validation evidence, and issue closure before claiming publication is current.
-- Automation authorization failures are explicit publication blockers and must not be bypassed by ordinary agents. Manual publication repair is exceptional: preserve stale remote heads in clearly named backup refs, verify issue-scoped diffs and live refs, use guarded `--force-with-lease`, then reconcile/reopen the PR and run a fresh audit.
-
-Diagnostics and recurring lessons:
-- Branch/ref/worktree registrations plus persisted task metadata are the evidence for lineage drift. A missing assigned directory is a recovery case, never permission to edit the main checkout.
-- A local merge error reporting an unexpected task branch indicates branch/metadata drift; identify which registered lineage owns the diff before acting.
-- A newer empty follow-up worktree can coexist with implementation commits on an earlier follow-up branch. Missing merge options or apparently lost changes may be lineage/metadata drift, not lost code.
-- If server-rendered Task Changes HTML contains merge actions but the browser does not, suspect stale HTMX/page state or dropdown visibility before ancestry.
-- Worktree status `exit status 128` may be transient; a genuinely missing assigned directory absent from `git worktree list` requires metadata recovery.
+Diagnostics:
+- Branch/ref/worktree registrations plus persisted task metadata are evidence for lineage drift. A missing assigned directory is a recovery case, never permission to edit the main checkout. An unexpected branch in a local merge error, a newer empty follow-up alongside older implementation commits, or missing merge options may indicate metadata/lineage drift rather than lost code.
+- A server-rendered Changes page containing merge actions while the browser does not usually indicates stale HTMX/page state or dropdown visibility before ancestry. Worktree status `exit status 128` may be transient; absence from both the filesystem and `git worktree list` requires metadata recovery.

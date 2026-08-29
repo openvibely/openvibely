@@ -29,20 +29,11 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 	if r == nil || child == nil || parent.ID == "" || child.ID == "" || event.Context.ProjectID == "" || event.EventKey == "" {
 		return nil, nil, false, errors.New("complete automation task handoff is required")
 	}
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, nil, false, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, nil, false, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	var parentProject, parentCreatedVia string
 	if err := conn.QueryRowContext(ctx, `SELECT project_id, created_via FROM tasks WHERE id = ?`, parent.ID).Scan(&parentProject, &parentCreatedVia); err != nil {
@@ -104,7 +95,6 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 		if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 			return nil, nil, false, err
 		}
-		committed = true
 		child.Status = previousStatus
 		child.Category = previousCategory
 		return nil, nil, previousStatus == models.StatusPending && previousCategory == models.CategoryActive, nil
@@ -133,7 +123,6 @@ func (r *TaskRepo) ActivateAutomationChainedTask(ctx context.Context, parent mod
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, nil, false, err
 	}
-	committed = true
 	child.Status = models.StatusPending
 	child.Category = effectiveCategory
 	if r.broadcaster != nil {
@@ -207,20 +196,11 @@ func (r *TaskRepo) ClaimQueuedAutomationDispatch(ctx context.Context, dispatchID
 }
 
 func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, claimant string, queued bool, claimedTask **models.Task) (*models.Execution, error) {
-	conn, err := r.db.Conn(ctx)
+	conn, finishImmediate, err := beginImmediateConn(ctx, r.db)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
-	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_, _ = conn.ExecContext(context.Background(), `ROLLBACK`)
-		}
-	}()
+	defer finishImmediate()
 
 	var invocationID, taskID, projectID, versionID, automationID, nodeID string
 	var leaseExpiry sql.NullTime
@@ -341,8 +321,7 @@ func (r *TaskRepo) claimAutomationDispatch(ctx context.Context, dispatchID, clai
 	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
 		return nil, err
 	}
-	committed = true
-	_ = conn.Close()
+	finishImmediate()
 
 	execution, err := NewExecutionRepo(r.db).GetByID(ctx, executionID)
 	if err != nil {

@@ -27,7 +27,7 @@ func (r *TaskCommitStatRepo) UpsertProducedCommitStat(ctx context.Context, stat 
 	if stat == nil {
 		return fmt.Errorf("task commit stat is nil")
 	}
-	_, err := r.db.ExecContext(ctx, `
+	_, err := execBoundSQLite(ctx, r.db, `
 		INSERT INTO task_commit_stats (
 			project_id, task_id, execution_id, commit_sha, short_sha, subject, author,
 			produced_at, insertions, deletions, files_changed, changed_files_json
