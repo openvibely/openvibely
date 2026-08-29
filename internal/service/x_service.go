@@ -27,6 +27,7 @@ const (
 	XSettingPollIntervalSeconds = "x_poll_interval_seconds"
 	XSettingSendResponses       = "x_send_responses"
 	XSettingSinceID             = "x_mentions_since_id"
+	XSettingAccountID           = "x_account_id"
 	xProcessTimeout             = 5 * time.Minute
 	xReceiptLease               = 10 * time.Minute
 	xMaxMentionPages            = 10
@@ -75,6 +76,7 @@ type XService struct {
 	runDone                  chan struct{}
 	running                  bool
 	me                       XUser
+	connected                bool
 	lastError                string
 	pollInterval             time.Duration
 	now                      func() time.Time
@@ -153,6 +155,7 @@ func (s *XService) StartVerified(me XUser) error {
 		return fmt.Errorf("X authenticated user is required")
 	}
 	s.me = me
+	s.connected = true
 	s.lastError = ""
 	s.running = true
 	s.runDone = make(chan struct{})
@@ -168,6 +171,7 @@ func (s *XService) Stop() {
 	s.cancel()
 	done := s.runDone
 	s.running = false
+	s.connected = false
 	s.mu.Unlock()
 	if done != nil {
 		<-done
@@ -176,7 +180,7 @@ func (s *XService) Stop() {
 func (s *XService) Status() XConnectionStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return XConnectionStatus{Configured: s.credentials.Ready(), Connected: s.me.ID != "", Running: s.running, Username: s.me.Username, LastError: s.lastError}
+	return XConnectionStatus{Configured: s.credentials.Ready(), Connected: s.connected, Running: s.running, Username: s.me.Username, LastError: s.lastError}
 }
 func (s *XService) TestConnection(ctx context.Context) (XUser, error) { return s.api.Me(ctx) }
 func (s *XService) SetPollInterval(d time.Duration) {
@@ -185,14 +189,27 @@ func (s *XService) SetPollInterval(d time.Duration) {
 	}
 }
 
+func (s *XService) recordPollResult(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.connected = false
+		s.lastError = err.Error()
+		return
+	}
+	s.connected = true
+	s.lastError = ""
+}
+
 func (s *XService) poll(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	for {
-		if err := s.pollOnce(ctx); err != nil && ctx.Err() == nil {
-			s.mu.Lock()
-			s.lastError = err.Error()
-			s.mu.Unlock()
-			applog.Infof("[x] mention polling failed: %v", err)
+		err := s.pollOnce(ctx)
+		if ctx.Err() == nil {
+			s.recordPollResult(err)
+			if err != nil {
+				applog.Infof("[x] mention polling failed: %v", err)
+			}
 		}
 		timer := time.NewTimer(s.pollInterval)
 		select {
@@ -276,7 +293,7 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 	if err != nil {
 		return false, err
 	}
-	switch claim {
+	switch claim.Result {
 	case repository.XReceiptCompleted:
 		return true, nil
 	case repository.XReceiptActive:
@@ -285,20 +302,17 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 		return false, nil
 	case repository.XReceiptClaimed:
 	default:
-		return false, fmt.Errorf("unexpected X receipt claim state %q", claim)
+		return false, fmt.Errorf("unexpected X receipt claim state %q", claim.Result)
 	}
 	text := strings.TrimSpace(strings.ReplaceAll(tweet.Text, "@"+s.me.Username, ""))
 	if text == "" {
-		_ = s.receiptRepo.Release(context.Background(), tweet.ID)
-		return true, nil
+		_, err := s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, claim.Token, nil, nil)
+		return err == nil, err
 	}
-	handed, taskID := s.ingestMention(ctx, projectID, tweet, user, text)
+	handed, _ := s.ingestMention(ctx, projectID, tweet, user, text, claim.Token)
 	if !handed {
-		_ = s.receiptRepo.Release(context.Background(), tweet.ID)
+		_ = s.receiptRepo.Release(context.Background(), tweet.ID, claim.Token)
 		return false, nil
-	}
-	if err := s.receiptRepo.Complete(context.Background(), tweet.ID, taskID); err != nil {
-		return false, err
 	}
 	return true, nil
 }
@@ -331,7 +345,7 @@ func (s *XService) projectForUser(ctx context.Context, userID string) (string, e
 	}
 	return "", nil
 }
-func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XTweet, user XUser, text string) (bool, string) {
+func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XTweet, user XUser, text, receiptToken string) (bool, string) {
 	ctx, cancel := context.WithTimeout(ctx, xProcessTimeout)
 	defer cancel()
 	handed := false
@@ -340,19 +354,57 @@ func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XT
 	if conversationID == "" {
 		conversationID = tweet.ID
 	}
-	runChannelChatIngress(ctx, channelChatIngressOptions{Platform: "x", ProjectID: projectID, Message: text, Source: models.TaskOriginX, Surface: chatcontrol.SurfaceX, Start: s.now(), TaskRepo: s.taskRepo, ExecRepo: s.execRepo, ThreadInputRepo: s.threadInputRepo, LLMConfigRepo: s.llmConfigRepo, ScheduleRepo: s.scheduleRepo, AgentRepo: s.agentRepo, SettingsRepo: s.settingsRepo, CustomPersonalityRepo: s.customPersonalityRepo, ProjectRepo: s.projectRepo, TaskSvc: s.taskSvc, ChatBroadcaster: s.chatBroadcaster, FindActiveExecution: s.execRepo.FindLatestActiveChatExecution, NewQueuedInput: func() *models.ThreadInput {
-		return &models.ThreadInput{XConversationID: conversationID, XReplyToTweetID: tweet.ID, XUserID: user.ID, XUsername: user.Username}
-	}, OnDurableHandoff: func() { handed = true }, FirstTurn: channelChatIngressFirstTurnOptions{Task: &models.Task{Title: fmt.Sprintf("X @%s: %s", user.Username, util.Truncate(text, 48)), CreatedVia: models.TaskOriginX}, RuntimeToolsForTask: func(string) *llmcontracts.RuntimeTools {
-		return s.runtimeTools(taskID, projectID, user.ID, conversationID, tweet.ID, user.Username)
-	}, ReplyContext: ChannelReplyContext{Source: models.TaskOriginX, XConversationID: conversationID, XReplyToTweetID: tweet.ID, XUserID: user.ID, XUsername: user.Username}, ChannelChatRunner: s.channelChatRunner, CompleteExecution: channelCompletionFunc("x", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter), CreateTaskContext: func(ctx context.Context, id string) error {
-		taskID = id
-		if s.taskContextRepo == nil {
-			return fmt.Errorf("X task context repository is not configured")
-		}
-		return s.taskContextRepo.Upsert(ctx, &models.XTaskContext{TaskID: id, ProjectID: projectID, ConversationID: conversationID, ReplyToTweetID: tweet.ID, XUserID: user.ID, Username: user.Username})
-	}, ListChatHistory: func(ctx context.Context, pid string) ([]models.Execution, error) {
-		return s.execRepo.ListChatHistory(ctx, pid, 50)
-	}, FilterChatHistory: filterXChatHistory}})
+	completeWithHandoff := func(ctx context.Context, taskID *string, persist func(repository.SQLExecutor) error) (bool, error) {
+		return s.receiptRepo.CompleteWithHandoff(ctx, tweet.ID, receiptToken, taskID, persist)
+	}
+	runChannelChatIngress(ctx, channelChatIngressOptions{
+		Platform: "x", ProjectID: projectID, Message: text, Source: models.TaskOriginX, Surface: chatcontrol.SurfaceX, Start: s.now(),
+		TaskRepo: s.taskRepo, ExecRepo: s.execRepo, ThreadInputRepo: s.threadInputRepo, LLMConfigRepo: s.llmConfigRepo,
+		ScheduleRepo: s.scheduleRepo, AgentRepo: s.agentRepo, SettingsRepo: s.settingsRepo, CustomPersonalityRepo: s.customPersonalityRepo,
+		ProjectRepo: s.projectRepo, TaskSvc: s.taskSvc, ChatBroadcaster: s.chatBroadcaster,
+		FindActiveExecution: s.execRepo.FindLatestActiveChatExecution,
+		NewQueuedInput: func() *models.ThreadInput {
+			return &models.ThreadInput{XConversationID: conversationID, XReplyToTweetID: tweet.ID, XUserID: user.ID, XUsername: user.Username}
+		},
+		CreateQueuedInput: func(ctx context.Context, input *models.ThreadInput) (bool, error) {
+			if s.threadInputRepo == nil {
+				return false, fmt.Errorf("thread input repository is not configured")
+			}
+			return completeWithHandoff(ctx, nil, func(exec repository.SQLExecutor) error {
+				return s.threadInputRepo.CreateQueuedWithExecutor(ctx, exec, input)
+			})
+		},
+		OnDurableHandoff: func() { handed = true },
+		FirstTurn: channelChatIngressFirstTurnOptions{
+			Task: &models.Task{Title: fmt.Sprintf("X @%s: %s", user.Username, util.Truncate(text, 48)), CreatedVia: models.TaskOriginX},
+			RuntimeToolsForTask: func(string) *llmcontracts.RuntimeTools {
+				return s.runtimeTools(taskID, projectID, user.ID, conversationID, tweet.ID, user.Username)
+			},
+			ReplyContext:      ChannelReplyContext{Source: models.TaskOriginX, XConversationID: conversationID, XReplyToTweetID: tweet.ID, XUserID: user.ID, XUsername: user.Username},
+			ChannelChatRunner: s.channelChatRunner,
+			CompleteExecution: channelCompletionFunc("x", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
+			CreateDurableFirstTurn: func(ctx context.Context, task *models.Task, execution *models.Execution, _ []models.ChatAttachment) (bool, error) {
+				if s.taskContextRepo == nil {
+					return false, fmt.Errorf("X task context repository is not configured")
+				}
+				return completeWithHandoff(ctx, &task.ID, func(exec repository.SQLExecutor) error {
+					if err := s.taskRepo.CreateWithExecutor(ctx, exec, task); err != nil {
+						return err
+					}
+					taskID = task.ID
+					if err := s.taskContextRepo.UpsertWithExecutor(ctx, exec, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, ConversationID: conversationID, ReplyToTweetID: tweet.ID, XUserID: user.ID, Username: user.Username}); err != nil {
+						return err
+					}
+					execution.TaskID = task.ID
+					return s.execRepo.CreateWithExecutor(ctx, exec, execution)
+				})
+			},
+			ListChatHistory: func(ctx context.Context, pid string) ([]models.Execution, error) {
+				return s.execRepo.ListChatHistory(ctx, pid, 50)
+			},
+			FilterChatHistory: filterXChatHistory,
+		},
+	})
 	return handed, taskID
 }
 func filterXChatHistory(execs []models.Execution, current string) []models.Execution {

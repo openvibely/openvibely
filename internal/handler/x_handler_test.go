@@ -30,11 +30,16 @@ func (f failingXSettingsAPI) Post(context.Context, string, string) (string, erro
 }
 
 type readyXSettingsAPI struct {
-	newest string
+	accountID string
+	newest    string
 }
 
 func (f *readyXSettingsAPI) Me(context.Context) (service.XUser, error) {
-	return service.XUser{ID: "bot", Username: "openvibely"}, nil
+	accountID := f.accountID
+	if accountID == "" {
+		accountID = "bot"
+	}
+	return service.XUser{ID: accountID, Username: "openvibely"}, nil
 }
 func (f *readyXSettingsAPI) Mentions(context.Context, string, string, string) (service.XMentionsResponse, error) {
 	var out service.XMentionsResponse
@@ -177,6 +182,57 @@ func TestXConfigureInitializesCursorAndCancelsReplacedService(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "99", cursor)
 	require.True(t, h.xService.Status().Running)
+}
+
+func TestXConfigurePreservesCursorForSameAccountAndBaselinesAccountChange(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.SetXRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db))
+	ctx := context.Background()
+	require.NoError(t, h.settingsRepo.SetMany(ctx, map[string]string{
+		service.XSettingConsumerKey: "old-key", service.XSettingConsumerSecret: "old-secret",
+		service.XSettingAccessToken: "old-token", service.XSettingAccessTokenSecret: "old-token-secret",
+		service.XSettingAccountID: "bot", service.XSettingSinceID: "42",
+	}))
+	originalFactory := newXAPIClientForSettings
+	api := &readyXSettingsAPI{accountID: "bot", newest: "99"}
+	newXAPIClientForSettings = func(service.XCredentials) service.XAPI { return api }
+	t.Cleanup(func() {
+		newXAPIClientForSettings = originalFactory
+		h.StopXService()
+	})
+	form := url.Values{"x_poll_interval_seconds": {"45"}, "x_send_responses": {"true"}}
+	require.NoError(t, h.handleXConfigure(xFormContext(e, http.MethodPost, "/channels/x/configure", form)))
+	cursor, err := h.settingsRepo.Get(ctx, service.XSettingSinceID)
+	require.NoError(t, err)
+	require.Equal(t, "42", cursor, "routine same-account edits must preserve pending mentions")
+
+	api.accountID = "different-account"
+	api.newest = "120"
+	require.NoError(t, h.handleXConfigure(xFormContext(e, http.MethodPost, "/channels/x/configure", form)))
+	cursor, err = h.settingsRepo.Get(ctx, service.XSettingSinceID)
+	require.NoError(t, err)
+	require.Equal(t, "120", cursor, "account changes must establish a safe current baseline")
+	accountID, err := h.settingsRepo.Get(ctx, service.XSettingAccountID)
+	require.NoError(t, err)
+	require.Equal(t, "different-account", accountID)
+}
+
+func TestXStopServiceStopsDynamicallyInstalledPoller(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	api := &cancelAwareXAPI{started: make(chan struct{}), cancelled: make(chan struct{})}
+	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetAPI(api)
+	svc.SetRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db), h.threadInputRepo)
+	require.NoError(t, svc.StartVerified(service.XUser{ID: "dynamic", Username: "dynamic"}))
+	<-api.started
+	h.SetXService(svc)
+	h.StopXService()
+	select {
+	case <-api.cancelled:
+	case <-time.After(time.Second):
+		t.Fatal("dynamic X service was not stopped")
+	}
+	require.Nil(t, h.getXService())
 }
 
 func TestXQueuedInputRuntimePreservesAuthorizedProjectSwitchPersistence(t *testing.T) {

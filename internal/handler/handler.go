@@ -518,6 +518,21 @@ func (h *Handler) swapXService(svc *service.XService) *service.XService {
 	return old
 }
 
+// StopXService stops whichever dynamically configured X service is currently
+// active. Server shutdown must not retain only the startup instance because the
+// Channels settings flow can replace it at runtime.
+func (h *Handler) StopXService() {
+	h.xConfigMu.Lock()
+	defer h.xConfigMu.Unlock()
+	old := h.swapXService(nil)
+	if h.channelMessageRouter != nil {
+		h.channelMessageRouter.SetXService(nil)
+	}
+	if old != nil {
+		old.Stop()
+	}
+}
+
 func (h *Handler) SetChannelMessageRouter(router *service.ChannelMessageRouter) {
 	h.channelMessageRouter = router
 }

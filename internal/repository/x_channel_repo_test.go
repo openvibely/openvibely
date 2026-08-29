@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -39,17 +40,49 @@ func TestXChannelRepositoriesProjectIsolationAndReceiptLease(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim, err := receipts.Claim(ctx, "tweet-1", p1.ID, now, time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, XReceiptClaimed, claim)
+	require.Equal(t, XReceiptClaimed, claim.Result)
+	firstToken := claim.Token
 	claim, err = receipts.Claim(ctx, "tweet-1", p1.ID, now.Add(30*time.Second), time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, XReceiptActive, claim)
+	require.Equal(t, XReceiptActive, claim.Result)
 	claim, err = receipts.Claim(ctx, "tweet-1", p1.ID, now.Add(2*time.Minute), time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, XReceiptClaimed, claim)
-	require.NoError(t, receipts.Complete(ctx, "tweet-1", ""))
+	require.Equal(t, XReceiptClaimed, claim.Result)
+	require.NotEqual(t, firstToken, claim.Token)
+	require.ErrorIs(t, receipts.Release(ctx, "tweet-1", firstToken), nil)
+	active, err := receipts.Claim(ctx, "tweet-1", p1.ID, now.Add(2*time.Minute+time.Second), time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, XReceiptActive, active.Result, "stale release must not remove a newer lease")
+	_, err = receipts.CompleteWithHandoff(ctx, "tweet-1", claim.Token, nil, nil)
+	require.NoError(t, err)
 	claim, err = receipts.Claim(ctx, "tweet-1", p1.ID, now.Add(4*time.Minute), time.Minute)
 	require.NoError(t, err)
-	require.Equal(t, XReceiptCompleted, claim)
+	require.Equal(t, XReceiptCompleted, claim.Result)
+}
+
+func TestXReceiptCompleteWithHandoffRollsBackWorkAndKeepsLeaseRetryable(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	project := &models.Project{Name: "X Atomic Handoff"}
+	require.NoError(t, NewProjectRepo(db).Create(ctx, project))
+	receipts := NewXInboundReceiptRepo(db)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim, err := receipts.Claim(ctx, "tweet-atomic", project.ID, now, time.Minute)
+	require.NoError(t, err)
+
+	_, err = receipts.CompleteWithHandoff(ctx, "tweet-atomic", claim.Token, nil, func(exec SQLExecutor) error {
+		if _, err := exec.ExecContext(ctx, `INSERT INTO x_user_projects(x_user_id, project_id) VALUES('atomic-user', ?)`, project.ID); err != nil {
+			return err
+		}
+		return fmt.Errorf("forced handoff failure")
+	})
+	require.ErrorContains(t, err, "forced handoff failure")
+	selected, err := NewXUserProjectRepo(db).GetUserProject(ctx, "atomic-user")
+	require.NoError(t, err)
+	require.Empty(t, selected, "durable work must roll back when receipt completion fails")
+	active, err := receipts.Claim(ctx, "tweet-atomic", project.ID, now.Add(30*time.Second), time.Minute)
+	require.NoError(t, err)
+	require.Equal(t, XReceiptActive, active.Result)
 }
 
 func TestThreadInputRepoPreservesXReplyMetadataAndPromotesContextAtomically(t *testing.T) {

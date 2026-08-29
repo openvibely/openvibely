@@ -122,50 +122,93 @@ const (
 	XReceiptCompleted XReceiptClaimResult = "completed"
 )
 
+var ErrXReceiptLeaseLost = fmt.Errorf("X receipt lease is no longer owned")
+
+type XReceiptClaim struct {
+	Result XReceiptClaimResult
+	Token  string
+}
+
 type XInboundReceiptRepo struct{ db *sql.DB }
 
 func NewXInboundReceiptRepo(db *sql.DB) *XInboundReceiptRepo { return &XInboundReceiptRepo{db: db} }
-func (r *XInboundReceiptRepo) Claim(ctx context.Context, tweetID, projectID string, now time.Time, lease time.Duration) (XReceiptClaimResult, error) {
+func (r *XInboundReceiptRepo) Claim(ctx context.Context, tweetID, projectID string, now time.Time, lease time.Duration) (XReceiptClaim, error) {
 	var status string
 	var leaseExpiresAt sql.NullTime
 	err := r.db.QueryRowContext(ctx, `SELECT status, lease_expires_at FROM x_inbound_receipts WHERE tweet_id = ?`, tweetID).Scan(&status, &leaseExpiresAt)
 	if err != nil && err != sql.ErrNoRows {
-		return "", fmt.Errorf("load X receipt before claim: %w", err)
+		return XReceiptClaim{}, fmt.Errorf("load X receipt before claim: %w", err)
 	}
 	if err == nil {
 		if status == "completed" {
-			return XReceiptCompleted, nil
+			return XReceiptClaim{Result: XReceiptCompleted}, nil
 		}
 		if leaseExpiresAt.Valid && leaseExpiresAt.Time.After(now) {
-			return XReceiptActive, nil
+			return XReceiptClaim{Result: XReceiptActive}, nil
 		}
 	}
-	row := queryRowBoundSQLite(ctx, r.db, `INSERT INTO x_inbound_receipts(tweet_id, project_id, status, lease_expires_at) VALUES(?, ?, 'processing', ?)
-		ON CONFLICT(tweet_id) DO UPDATE SET project_id=excluded.project_id, status='processing', lease_expires_at=excluded.lease_expires_at, updated_at=datetime('now')
-		WHERE x_inbound_receipts.status='processing' AND x_inbound_receipts.lease_expires_at <= ? RETURNING tweet_id`, tweetID, projectID, now.Add(lease).UTC(), now.UTC())
+	token := NewID()
+	row := queryRowBoundSQLite(ctx, r.db, `INSERT INTO x_inbound_receipts(tweet_id, project_id, status, lease_expires_at, lease_token) VALUES(?, ?, 'processing', ?, ?)
+		ON CONFLICT(tweet_id) DO UPDATE SET project_id=excluded.project_id, status='processing', lease_expires_at=excluded.lease_expires_at, lease_token=excluded.lease_token, updated_at=datetime('now')
+		WHERE x_inbound_receipts.status='processing' AND x_inbound_receipts.lease_expires_at <= ? RETURNING tweet_id`, tweetID, projectID, now.Add(lease).UTC(), token, now.UTC())
 	var id string
 	err = row.Scan(&id)
 	if err == sql.ErrNoRows {
 		// A concurrent claimant or completer won after the advisory read.
 		err = r.db.QueryRowContext(ctx, `SELECT status FROM x_inbound_receipts WHERE tweet_id = ?`, tweetID).Scan(&status)
 		if err != nil {
-			return "", fmt.Errorf("reload X receipt after claim conflict: %w", err)
+			return XReceiptClaim{}, fmt.Errorf("reload X receipt after claim conflict: %w", err)
 		}
 		if status == "completed" {
-			return XReceiptCompleted, nil
+			return XReceiptClaim{Result: XReceiptCompleted}, nil
 		}
-		return XReceiptActive, nil
+		return XReceiptClaim{Result: XReceiptActive}, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("claim X receipt: %w", err)
+		return XReceiptClaim{}, fmt.Errorf("claim X receipt: %w", err)
 	}
-	return XReceiptClaimed, nil
+	return XReceiptClaim{Result: XReceiptClaimed, Token: token}, nil
 }
-func (r *XInboundReceiptRepo) Complete(ctx context.Context, tweetID, taskID string) error {
-	_, err := execBoundSQLite(ctx, r.db, `UPDATE x_inbound_receipts SET status='completed', lease_expires_at=NULL, task_id=NULLIF(?, ''), updated_at=datetime('now') WHERE tweet_id=? AND status='processing'`, taskID, tweetID)
-	return err
+
+// CompleteWithHandoff commits durable ingress work and receipt completion in one
+// immediate transaction. The lease token prevents an expired claimant from
+// completing or releasing a receipt reclaimed by a newer worker.
+func (r *XInboundReceiptRepo) CompleteWithHandoff(ctx context.Context, tweetID, token string, taskID *string, persist func(SQLExecutor) error) (alreadyHandedOff bool, err error) {
+	err = withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		var status, currentToken string
+		if err := tx.QueryRowContext(ctx, `SELECT status, lease_token FROM x_inbound_receipts WHERE tweet_id = ?`, tweetID).Scan(&status, &currentToken); err != nil {
+			return fmt.Errorf("load X receipt for handoff: %w", err)
+		}
+		if status == "completed" {
+			alreadyHandedOff = true
+			return nil
+		}
+		if token == "" || currentToken != token {
+			return ErrXReceiptLeaseLost
+		}
+		if persist != nil {
+			if err := persist(tx); err != nil {
+				return err
+			}
+		}
+		resolvedTaskID := ""
+		if taskID != nil {
+			resolvedTaskID = *taskID
+		}
+		res, err := tx.ExecContext(ctx, `UPDATE x_inbound_receipts SET status='completed', lease_expires_at=NULL, lease_token='', task_id=NULLIF(?, ''), updated_at=datetime('now') WHERE tweet_id=? AND status='processing' AND lease_token=?`, resolvedTaskID, tweetID, token)
+		if err != nil {
+			return err
+		}
+		changed, _ := res.RowsAffected()
+		if changed != 1 {
+			return ErrXReceiptLeaseLost
+		}
+		return nil
+	})
+	return alreadyHandedOff, err
 }
-func (r *XInboundReceiptRepo) Release(ctx context.Context, tweetID string) error {
-	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM x_inbound_receipts WHERE tweet_id=? AND status='processing'`, tweetID)
+
+func (r *XInboundReceiptRepo) Release(ctx context.Context, tweetID, token string) error {
+	_, err := execBoundSQLite(ctx, r.db, `DELETE FROM x_inbound_receipts WHERE tweet_id=? AND status='processing' AND lease_token=?`, tweetID, token)
 	return err
 }

@@ -1268,9 +1268,7 @@ func Start(ctx context.Context, cfg *config.Config) (*Instance, error) {
 		if discordSvc != nil {
 			discordSvc.Stop()
 		}
-		if xSvc != nil {
-			xSvc.Stop()
-		}
+		h.StopXService()
 		e.Close()
 		closeDatabase()
 		close(shutdownDone)

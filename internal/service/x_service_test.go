@@ -129,6 +129,13 @@ func TestXAuthorizedMentionUsesSharedIngressAndAdvancesCursorAfterDurableHandoff
 	meta, err := svc.taskContextRepo.GetByTaskID(ctx, tasks[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, "20", meta.ReplyToTweetID)
+
+	// Provider redelivery after the durable transaction must observe the completed
+	// receipt and never create duplicate work.
+	require.NoError(t, svc.pollOnce(ctx))
+	tasks, err = svc.taskRepo.ListByProject(ctx, project.ID, string(models.CategoryChat))
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
 }
 
 func TestXPollActiveReceiptLeaseDoesNotAdvanceCursor(t *testing.T) {
@@ -143,7 +150,7 @@ func TestXPollActiveReceiptLeaseDoesNotAdvanceCursor(t *testing.T) {
 	receipts := svc.receiptRepo
 	claim, err := receipts.Claim(ctx, "10", project.ID, svc.now(), xReceiptLease)
 	require.NoError(t, err)
-	require.Equal(t, repository.XReceiptClaimed, claim)
+	require.Equal(t, repository.XReceiptClaimed, claim.Result)
 
 	require.Error(t, svc.pollOnce(ctx))
 	cursor, err := settings.Get(ctx, XSettingSinceID)
@@ -199,6 +206,23 @@ func TestXDisconnectedAndResponsesDisabledFailClosed(t *testing.T) {
 	require.NoError(t, settings.Set(ctx, XSettingSendResponses, "false"))
 	svc.SendReply(ctx, "tweet", "response", "")
 	require.Empty(t, api.posted)
+}
+
+func TestXReadinessTracksPollingFailureAndRecovery(t *testing.T) {
+	_, svc, _, _, _, _, _ := setupXServiceTest(t)
+	svc.running = true
+	svc.connected = true
+	svc.me = XUser{ID: "bot", Username: "openvibely"}
+	svc.recordPollResult(errors.New("mention access revoked"))
+	status := svc.Status()
+	require.True(t, status.Running, "poller liveness remains distinct from provider readiness")
+	require.False(t, status.Connected)
+	require.Contains(t, status.LastError, "revoked")
+
+	svc.recordPollResult(nil)
+	status = svc.Status()
+	require.True(t, status.Connected)
+	require.Empty(t, status.LastError)
 }
 
 func TestXOutboundRejectsUnsupportedTargetAndOversizeAndPropagatesProviderFailure(t *testing.T) {
