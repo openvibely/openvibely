@@ -228,6 +228,7 @@ type EmailService struct {
 	sendMail                 func(ctx context.Context, cfg EmailRuntimeConfig, to, subject, body, messageID, inReplyTo, references string) error
 	configLoader             func(context.Context) (EmailRuntimeConfig, error)
 	processIncomingMessageFn func(context.Context, EmailInboundMessage) bool
+	parseIMAPMessageFn       func(*imap.Message, *imap.BodySectionName, bool) (EmailInboundMessage, error)
 }
 
 type EmailRuntimeConfig struct {
@@ -548,7 +549,7 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 		for _, candidate := range unresolved {
 			unresolvedIDs = append(unresolvedIDs, candidate.ID)
 		}
-		messages, err := fetchEmailMessages(client, unresolvedIDs, cfg.SkipAttachments)
+		messages, err := s.fetchEmailMessages(client, unresolvedIDs, cfg.SkipAttachments)
 		if err != nil {
 			applog.Infof("[email] fetch messages failed: %v", err)
 		} else {
@@ -562,22 +563,24 @@ func (s *EmailService) pollOnce(ctx context.Context, cfg EmailRuntimeConfig) {
 					continue
 				}
 				messageKey := candidate.MessageKey
-				if messageKey == "" {
+				if strings.TrimSpace(fetched.Message.MessageID) != "" {
+					messageKey, _ = emailInboundMessageKey(fetched.Message, mailbox.UidValidity, fetched.UID)
+				} else if messageKey == "" {
 					messageKey, ok = emailInboundMessageKey(fetched.Message, mailbox.UidValidity, fetched.UID)
 					if !ok {
 						applog.Infof("[email] message %d has no stable Message-ID or IMAP UID identity; leaving unread", fetched.ID)
 						continue
 					}
-					if s.emailInboundReceiptStore != nil {
-						received, err := s.emailInboundReceiptStore.Exists(ctx, mailboxIdentity, messageKey)
-						if err != nil {
-							applog.Infof("[email] check receipt for message %d failed: %v", fetched.ID, err)
-							continue
-						}
-						if received {
-							acknowledgementSet[fetched.ID] = struct{}{}
-							continue
-						}
+				}
+				if s.emailInboundReceiptStore != nil && messageKey != candidate.MessageKey {
+					received, err := s.emailInboundReceiptStore.Exists(ctx, mailboxIdentity, messageKey)
+					if err != nil {
+						applog.Infof("[email] check receipt for message %d failed: %v", fetched.ID, err)
+						continue
+					}
+					if received {
+						acknowledgementSet[fetched.ID] = struct{}{}
+						continue
 					}
 				}
 				result := emailIncomingProcessResult{}
@@ -715,7 +718,19 @@ func fetchEmailMessageMetadata(client emailIMAPClient, ids []uint32) ([]emailMes
 	return metadata, nil
 }
 
+func (s *EmailService) fetchEmailMessages(client emailIMAPClient, ids []uint32, skipAttachments bool) ([]fetchedEmailMessage, error) {
+	parseFn := s.parseIMAPMessageFn
+	if parseFn == nil {
+		parseFn = parseIMAPMessage
+	}
+	return fetchEmailMessagesWithParser(client, ids, skipAttachments, parseFn)
+}
+
 func fetchEmailMessages(client emailIMAPClient, ids []uint32, skipAttachments bool) ([]fetchedEmailMessage, error) {
+	return fetchEmailMessagesWithParser(client, ids, skipAttachments, parseIMAPMessage)
+}
+
+func fetchEmailMessagesWithParser(client emailIMAPClient, ids []uint32, skipAttachments bool, parseFn func(*imap.Message, *imap.BodySectionName, bool) (EmailInboundMessage, error)) ([]fetchedEmailMessage, error) {
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(ids...)
 	section := &imap.BodySectionName{}
@@ -729,7 +744,7 @@ func fetchEmailMessages(client emailIMAPClient, ids []uint32, skipAttachments bo
 		if msg == nil {
 			continue
 		}
-		inbound, err := parseIMAPMessage(msg, section, skipAttachments)
+		inbound, err := parseFn(msg, section, skipAttachments)
 		if err != nil {
 			applog.Infof("[email] parse message %d failed: %v", msg.SeqNum, err)
 			continue
