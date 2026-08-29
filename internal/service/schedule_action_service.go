@@ -500,30 +500,39 @@ func (s *ScheduleActionService) applyScheduleTaskLifecycle(ctx context.Context, 
 		}
 	}
 	shouldResetStatus := task.Status != models.StatusPending && task.Status != models.StatusRunning && (opts.ResetTerminal || categoryChanged)
-	statusChanged := false
-	if shouldResetStatus {
-		if opts.RequireEnabledSchedule {
-			scheduleID := ""
-			if result.Schedule != nil {
-				scheduleID = result.Schedule.ID
-			}
-			if scheduleID == "" {
+	scheduleEligible := false
+	if opts.RequireEnabledSchedule {
+		scheduleID := ""
+		if result.Schedule != nil {
+			scheduleID = result.Schedule.ID
+		}
+		if scheduleID == "" {
+			if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
 				result.Warnings = append(result.Warnings, fmt.Errorf("scheduled lifecycle reset requires a schedule"))
-			} else if updated, err := s.taskRepo.SetPendingIfNotRunningOrQueuedForEnabledSchedule(ctx, task.ID, scheduleID); err != nil {
+			}
+		} else if task.Status != models.StatusRunning && task.Status != models.StatusQueued {
+			// Run the schedule guard even when the task is already pending. A
+			// successful resume must clear stale cancellation intent without
+			// allowing a paused schedule to do so.
+			updated, err := s.taskRepo.SetPendingIfNotRunningOrQueuedForEnabledSchedule(ctx, task.ID, scheduleID)
+			if err != nil {
 				result.Warnings = append(result.Warnings, err)
 			} else if updated {
-				task.Status = models.StatusPending
-				statusChanged = true
+				scheduleEligible = true
+				if task.Status != models.StatusPending {
+					task.Status = models.StatusPending
+				}
 			}
-		} else if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
+		}
+	} else if shouldResetStatus {
+		if err := s.taskRepo.UpdateStatus(ctx, task.ID, models.StatusPending); err != nil {
 			result.Warnings = append(result.Warnings, err)
 		} else {
 			task.Status = models.StatusPending
-			statusChanged = true
 		}
 	}
 	if task.Category == models.CategoryScheduled && task.Status == models.StatusPending && s.workerSvc != nil {
-		if !opts.RequireEnabledSchedule || statusChanged {
+		if !opts.RequireEnabledSchedule || scheduleEligible {
 			s.workerSvc.ClearCancellationRequested(task.ID)
 		}
 	}

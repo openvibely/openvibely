@@ -593,6 +593,38 @@ func TestScheduleActionServiceToggleFiredOneTimeRequiresNewTimeWithoutMutation(t
 	require.Equal(t, models.StatusCompleted, updatedTask.Status)
 }
 
+func TestScheduleActionServiceToggleClearsCancellationMarkerForAlreadyPendingTask(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	projectRepo := repository.NewProjectRepo(db)
+	taskRepo := repository.NewTaskRepo(db, nil)
+	scheduleRepo := repository.NewScheduleRepo(db)
+	workerSvc := newTestWorkerService(t)
+	project := &models.Project{Name: "Pending resume marker"}
+	require.NoError(t, projectRepo.Create(ctx, project))
+	task := &models.Task{
+		ProjectID: project.ID, Title: "Pending scheduled task", Prompt: "run again",
+		Category: models.CategoryScheduled, Status: models.StatusPending, Priority: 2,
+	}
+	require.NoError(t, taskRepo.Create(ctx, task))
+	schedule := &models.Schedule{
+		TaskID: task.ID, RunAt: time.Now().UTC().Add(time.Hour),
+		RepeatType: models.RepeatDaily, RepeatInterval: 1, Enabled: false,
+	}
+	require.NoError(t, scheduleRepo.Create(ctx, schedule))
+	workerSvc.MarkCancellationRequested(task.ID)
+
+	result, err := NewScheduleActionService(taskRepo, scheduleRepo, workerSvc).Toggle(ctx, project.ID, schedule.ID)
+	require.NoError(t, err)
+	require.NotNil(t, result.Schedule)
+	require.True(t, result.Schedule.Enabled)
+	require.False(t, workerSvc.IsCancellationRequested(task.ID), "successful resume must clear stale cancellation marker even when task is already pending")
+
+	updatedTask, err := taskRepo.GetByID(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPending, updatedTask.Status)
+}
+
 func TestScheduleActionServiceToggleSkipsLifecycleWhenPauseWinsAfterEnable(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()
