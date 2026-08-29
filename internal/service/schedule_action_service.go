@@ -388,33 +388,9 @@ func (s *ScheduleActionService) applyScheduleTaskLifecycle(ctx context.Context, 
 }
 
 func (s *ScheduleActionService) resolveTask(ctx context.Context, projectID, taskID, title string) (*models.Task, error) {
-	if s.taskRepo == nil {
-		return nil, fmt.Errorf("task repository not configured")
-	}
-	if taskID = strings.TrimSpace(taskID); taskID != "" {
-		task, err := s.taskRepo.GetByID(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("error looking up task %s: %w", taskID, err)
-		}
-		if task == nil {
-			return nil, fmt.Errorf("task %s not found", taskID)
-		}
-		if projectID != "" && task.ProjectID != projectID {
-			return nil, fmt.Errorf("task %s belongs to a different project", taskID)
-		}
-		return task, nil
-	}
-	if title = strings.TrimSpace(title); title != "" {
-		tasks, err := s.taskRepo.SearchByTitle(ctx, projectID, title)
-		if err != nil {
-			return nil, fmt.Errorf("error searching for task %q: %w", title, err)
-		}
-		if len(tasks) == 0 {
-			return nil, fmt.Errorf("no task found matching %q", title)
-		}
-		return &tasks[0], nil
-	}
-	return nil, fmt.Errorf("no task_id or title provided")
+	return ResolveTaskReference(ctx, s.taskRepo, projectID, taskID, title, TaskReferenceResolutionOptions{
+		AllowUnscopedProject: true,
+	})
 }
 
 func (s *ScheduleActionService) resolveSchedule(ctx context.Context, projectID, scheduleID, taskID, title string) (*models.Schedule, *models.Task, error) {

@@ -3046,30 +3046,7 @@ func (h *Handler) executeChatModifyScheduleRequests(ctx context.Context, project
 
 // resolveTaskReference finds a task by ID or title within the current project.
 func (h *Handler) resolveTaskReference(ctx context.Context, projectID, taskID, title string) (*models.Task, error) {
-	if taskID = strings.TrimSpace(taskID); taskID != "" {
-		task, err := h.taskRepo.GetByID(ctx, taskID)
-		if err != nil {
-			return nil, fmt.Errorf("error looking up task %s: %w", taskID, err)
-		}
-		if task == nil {
-			return nil, fmt.Errorf("task %s not found", taskID)
-		}
-		if task.ProjectID != projectID {
-			return nil, fmt.Errorf("task %s belongs to a different project", taskID)
-		}
-		return task, nil
-	}
-	if title = strings.TrimSpace(title); title != "" {
-		tasks, err := h.taskRepo.SearchByTitle(ctx, projectID, title)
-		if err != nil {
-			return nil, fmt.Errorf("error searching for task %q: %w", title, err)
-		}
-		if len(tasks) == 0 {
-			return nil, fmt.Errorf("no task found matching %q", title)
-		}
-		return &tasks[0], nil
-	}
-	return nil, fmt.Errorf("no task_id or title provided")
+	return service.ResolveTaskReference(ctx, h.taskRepo, projectID, taskID, title, service.TaskReferenceResolutionOptions{})
 }
 
 // maxThreadTranscriptBytes is the total size budget for a thread transcript (80KB).
