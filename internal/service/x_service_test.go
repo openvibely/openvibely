@@ -38,6 +38,7 @@ func setupXServiceTest(t *testing.T) (context.Context, *XService, *repository.Se
 	require.NoError(t, projects.Create(ctx, p1))
 	require.NoError(t, projects.Create(ctx, p2))
 	settings := repository.NewSettingsRepo(db)
+	require.NoError(t, settings.SetMany(ctx, map[string]string{XSettingAccountID: "bot", XSettingSinceID: ""}))
 	auth := repository.NewXAuthRepo(db)
 	selections := repository.NewXUserProjectRepo(db)
 	svc := NewXService(
@@ -90,6 +91,27 @@ func TestXPollBoundsPaginationWithoutAdvancingCursor(t *testing.T) {
 	cursor, err := settings.Get(ctx, XSettingSinceID)
 	require.NoError(t, err)
 	require.Empty(t, cursor)
+}
+
+func TestXPollCannotOverwriteCursorAfterAccountReplacement(t *testing.T) {
+	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
+	require.NoError(t, settings.SetMany(ctx, map[string]string{XSettingAccountID: "new-account", XSettingSinceID: "50"}))
+	api := &fakeXAPI{me: XUser{ID: "old-account"}}
+	api.mentions.Meta.NewestID = "99"
+	svc.setAPI(api)
+	svc.me = api.me
+	require.ErrorContains(t, svc.pollOnce(ctx), "configuration changed")
+	cursor, err := settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Equal(t, "50", cursor)
+}
+
+func TestXTestConnectionRequiresMentionReadAccess(t *testing.T) {
+	ctx, svc, _, _, _, _, _ := setupXServiceTest(t)
+	api := &fakeXAPI{me: XUser{ID: "bot"}, mentionsErr: errors.New("mention access revoked")}
+	svc.setAPI(api)
+	_, err := svc.TestConnection(ctx)
+	require.ErrorContains(t, err, "mention access")
 }
 
 func TestXPollProviderFailureDoesNotAdvanceCursor(t *testing.T) {

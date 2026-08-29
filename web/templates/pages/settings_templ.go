@@ -344,7 +344,7 @@ func settingsContent(view ChannelsSettingsView) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			if view.XStatus.Running {
+			if view.XStatus.Connected {
 				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<span class=\"badge badge-success\">Connected</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err

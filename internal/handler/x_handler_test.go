@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,11 +71,52 @@ func (f *cancelAwareXAPI) Mentions(ctx context.Context, _, _, _ string) (service
 }
 func (f *cancelAwareXAPI) Post(context.Context, string, string) (string, error) { return "", nil }
 
+type blockingXSettingsAPI struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (f *blockingXSettingsAPI) Me(context.Context) (service.XUser, error) {
+	return service.XUser{ID: "old-account", Username: "old"}, nil
+}
+func (f *blockingXSettingsAPI) Mentions(context.Context, string, string, string) (service.XMentionsResponse, error) {
+	f.once.Do(func() { close(f.started) })
+	<-f.release
+	var out service.XMentionsResponse
+	out.Meta.NewestID = "90"
+	return out, nil
+}
+func (f *blockingXSettingsAPI) Post(context.Context, string, string) (string, error) { return "", nil }
+
 func xFormContext(e *echo.Echo, method, path string, values url.Values) echo.Context {
 	req := httptest.NewRequest(method, path, strings.NewReader(values.Encode()))
 	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationForm)
 	return e.NewContext(req, httptest.NewRecorder())
 }
+
+func TestXConnectionTestReportsMentionReadFailureForConfiguredService(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetAPI(xMentionFailureAPI{})
+	h.SetXService(svc)
+	recorder := httptest.NewRecorder()
+	ctx := e.NewContext(httptest.NewRequest(http.MethodPost, "/channels/x/test", nil), recorder)
+
+	require.NoError(t, h.handleXTest(ctx))
+	require.Contains(t, recorder.Body.String(), "Connection failed: verify X mention access")
+	require.NotContains(t, recorder.Body.String(), "service not configured")
+}
+
+type xMentionFailureAPI struct{}
+
+func (xMentionFailureAPI) Me(context.Context) (service.XUser, error) {
+	return service.XUser{ID: "bot", Username: "openvibely"}, nil
+}
+func (xMentionFailureAPI) Mentions(context.Context, string, string, string) (service.XMentionsResponse, error) {
+	return service.XMentionsResponse{}, errors.New("mention access revoked")
+}
+func (xMentionFailureAPI) Post(context.Context, string, string) (string, error) { return "", nil }
 
 func TestXCredentialsBlankFieldsPreserveSavedSecrets(t *testing.T) {
 	h, e, _ := setupTestHandler(t)
@@ -185,36 +227,65 @@ func TestXConfigureInitializesCursorAndCancelsReplacedService(t *testing.T) {
 }
 
 func TestXConfigurePreservesCursorForSameAccountAndBaselinesAccountChange(t *testing.T) {
+	credentials := service.XCredentials{ConsumerKey: "key", ConsumerSecret: "secret", AccessToken: "token", AccessTokenSecret: "token-secret"}
+	existing := map[string]string{
+		service.XSettingConsumerKey: credentials.ConsumerKey, service.XSettingConsumerSecret: credentials.ConsumerSecret,
+		service.XSettingAccessToken: credentials.AccessToken, service.XSettingAccessTokenSecret: credentials.AccessTokenSecret,
+		service.XSettingAccountID: "bot", service.XSettingSinceID: "42",
+	}
+	require.Equal(t, "42", xCursorForConfiguration(existing, credentials, "bot", "99"))
+	existing[service.XSettingSinceID] = ""
+	require.Empty(t, xCursorForConfiguration(existing, credentials, "bot", "110"), "same-account edits must preserve an intentionally empty cursor")
+	require.Equal(t, "120", xCursorForConfiguration(existing, credentials, "different-account", "120"), "account changes must establish a safe current baseline")
+	delete(existing, service.XSettingAccountID)
+	require.Empty(t, xCursorForConfiguration(existing, credentials, "bot", "130"), "legacy unchanged credentials must preserve an empty cursor")
+}
+
+func TestXReconfigurationFencesOldInFlightCursorWrite(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
-	h.SetXRepositories(repository.NewXAuthRepo(db), repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db))
+	auth := repository.NewXAuthRepo(db)
+	selections := repository.NewXUserProjectRepo(db)
+	contexts := repository.NewXTaskContextRepo(db)
+	receipts := repository.NewXInboundReceiptRepo(db)
+	h.SetXRepositories(auth, selections, contexts, receipts)
 	ctx := context.Background()
 	require.NoError(t, h.settingsRepo.SetMany(ctx, map[string]string{
 		service.XSettingConsumerKey: "old-key", service.XSettingConsumerSecret: "old-secret",
 		service.XSettingAccessToken: "old-token", service.XSettingAccessTokenSecret: "old-token-secret",
-		service.XSettingAccountID: "bot", service.XSettingSinceID: "42",
+		service.XSettingAccountID: "old-account", service.XSettingSinceID: "10",
 	}))
+	oldAPI := &blockingXSettingsAPI{started: make(chan struct{}), release: make(chan struct{})}
+	old := service.NewXService(service.XCredentials{ConsumerKey: "old-key", ConsumerSecret: "old-secret", AccessToken: "old-token", AccessTokenSecret: "old-token-secret"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	old.SetAPI(oldAPI)
+	old.SetRepositories(auth, selections, contexts, receipts, h.threadInputRepo)
+	require.NoError(t, old.StartVerified(service.XUser{ID: "old-account", Username: "old"}))
+	<-oldAPI.started
+	h.SetXService(old)
+
 	originalFactory := newXAPIClientForSettings
-	api := &readyXSettingsAPI{accountID: "bot", newest: "99"}
-	newXAPIClientForSettings = func(service.XCredentials) service.XAPI { return api }
+	newXAPIClientForSettings = func(service.XCredentials) service.XAPI {
+		return &readyXSettingsAPI{accountID: "new-account", newest: "200"}
+	}
 	t.Cleanup(func() {
 		newXAPIClientForSettings = originalFactory
 		h.StopXService()
 	})
-	form := url.Values{"x_poll_interval_seconds": {"45"}, "x_send_responses": {"true"}}
-	require.NoError(t, h.handleXConfigure(xFormContext(e, http.MethodPost, "/channels/x/configure", form)))
+	form := url.Values{
+		"x_consumer_key": {"new-key"}, "x_consumer_secret": {"new-secret"},
+		"x_access_token": {"new-token"}, "x_access_token_secret": {"new-token-secret"},
+		"x_poll_interval_seconds": {"30"},
+	}
+	done := make(chan error, 1)
+	go func() { done <- h.handleXConfigure(xFormContext(e, http.MethodPost, "/channels/x/configure", form)) }()
+	require.Eventually(t, func() bool {
+		accountID, _ := h.settingsRepo.Get(ctx, service.XSettingAccountID)
+		return accountID == "new-account"
+	}, time.Second, 10*time.Millisecond)
+	close(oldAPI.release)
+	require.NoError(t, <-done)
 	cursor, err := h.settingsRepo.Get(ctx, service.XSettingSinceID)
 	require.NoError(t, err)
-	require.Equal(t, "42", cursor, "routine same-account edits must preserve pending mentions")
-
-	api.accountID = "different-account"
-	api.newest = "120"
-	require.NoError(t, h.handleXConfigure(xFormContext(e, http.MethodPost, "/channels/x/configure", form)))
-	cursor, err = h.settingsRepo.Get(ctx, service.XSettingSinceID)
-	require.NoError(t, err)
-	require.Equal(t, "120", cursor, "account changes must establish a safe current baseline")
-	accountID, err := h.settingsRepo.Get(ctx, service.XSettingAccountID)
-	require.NoError(t, err)
-	require.Equal(t, "different-account", accountID)
+	require.Equal(t, "200", cursor)
 }
 
 func TestXStopServiceStopsDynamicallyInstalledPoller(t *testing.T) {
@@ -260,6 +331,29 @@ func TestXQueuedInputRuntimePreservesAuthorizedProjectSwitchPersistence(t *testi
 	require.Equal(t, p2.ID, selected)
 }
 
+func TestGenericChannelStatusReportsRunningButUnhealthyXAsNotConnected(t *testing.T) {
+	h, _, _, db := setupTestHandlerWithDB(t)
+	project := createProject(t, h, "X Degraded Status")
+	auth := repository.NewXAuthRepo(db)
+	selections := repository.NewXUserProjectRepo(db)
+	contexts := repository.NewXTaskContextRepo(db)
+	receipts := repository.NewXInboundReceiptRepo(db)
+	h.SetXRepositories(auth, selections, contexts, receipts)
+	svc := service.NewXService(service.XCredentials{ConsumerKey: "a", ConsumerSecret: "b", AccessToken: "c", AccessTokenSecret: "d"}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+	svc.SetAPI(failingXSettingsAPI{err: errors.New("mention access revoked")})
+	svc.SetRepositories(auth, selections, contexts, receipts, h.threadInputRepo)
+	require.NoError(t, svc.StartVerified(service.XUser{ID: "bot", Username: "openvibely"}))
+	t.Cleanup(svc.Stop)
+	h.SetXService(svc)
+	require.Eventually(t, func() bool { return !svc.Status().Connected && svc.Status().Running }, time.Second, 10*time.Millisecond)
+
+	summary := h.buildChannelStatusSummary(context.Background(), project.ID)
+	require.False(t, summary.X.Connected)
+	require.True(t, summary.X.Running)
+	require.Equal(t, "configured_not_connected", summary.X.Status)
+	require.Contains(t, summary.X.LastError, "revoked")
+}
+
 func TestGenericChannelStatusRetainsXReadinessAndAuthorization(t *testing.T) {
 	h, _, _, db := setupTestHandlerWithDB(t)
 	project := createProject(t, h, "X Status")
@@ -282,6 +376,25 @@ func TestGenericChannelStatusRetainsXReadinessAndAuthorization(t *testing.T) {
 	require.True(t, summary.X.Running)
 	require.Equal(t, "openvibely", summary.X.Username)
 	require.Equal(t, 1, summary.X.AuthorizedUserCount)
+}
+
+func TestXAuthorizationCreateUsesExplicitFormProject(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	p1 := createProject(t, h, "X Explicit One")
+	p2 := createProject(t, h, "X Explicit Two")
+	auth := repository.NewXAuthRepo(db)
+	h.SetXRepositories(auth, repository.NewXUserProjectRepo(db), repository.NewXTaskContextRepo(db), repository.NewXInboundReceiptRepo(db))
+	ctx := xFormContext(e, http.MethodPost, "/channels/x/authorized-users", url.Values{
+		"project_id": {p2.ID}, "x_user_id": {"123"}, "x_username": {"alice"},
+	})
+
+	require.NoError(t, h.AddXAuthorizedUser(ctx))
+	authorizedOne, err := auth.IsAuthorized(context.Background(), p1.ID, "123")
+	require.NoError(t, err)
+	require.False(t, authorizedOne)
+	authorizedTwo, err := auth.IsAuthorized(context.Background(), p2.ID, "123")
+	require.NoError(t, err)
+	require.True(t, authorizedTwo)
 }
 
 func TestXAuthorizationDeleteIsProjectScoped(t *testing.T) {

@@ -36,6 +36,23 @@ func (h *Handler) xCredentials(ctx context.Context, form echo.Context) (service.
 	return service.XCredentials{ConsumerKey: value("x_consumer_key", service.XSettingConsumerKey), ConsumerSecret: value("x_consumer_secret", service.XSettingConsumerSecret), AccessToken: value("x_access_token", service.XSettingAccessToken), AccessTokenSecret: value("x_access_token_secret", service.XSettingAccessTokenSecret)}, nil
 }
 
+func xCursorForConfiguration(existing map[string]string, credentials service.XCredentials, accountID, baseline string) string {
+	existingCredentials := service.XCredentials{
+		ConsumerKey: existing[service.XSettingConsumerKey], ConsumerSecret: existing[service.XSettingConsumerSecret],
+		AccessToken: existing[service.XSettingAccessToken], AccessTokenSecret: existing[service.XSettingAccessTokenSecret],
+	}
+	sameAccount := strings.TrimSpace(existing[service.XSettingAccountID]) == accountID
+	if strings.TrimSpace(existing[service.XSettingAccountID]) == "" && existingCredentials == credentials {
+		// Backward compatibility for configurations saved before account IDs were
+		// persisted: unchanged credentials imply the same authenticated account.
+		sameAccount = true
+	}
+	if sameAccount {
+		return existing[service.XSettingSinceID]
+	}
+	return baseline
+}
+
 func (h *Handler) handleXConfigure(c echo.Context) error {
 	h.xConfigMu.Lock()
 	defer h.xConfigMu.Unlock()
@@ -68,20 +85,7 @@ func (h *Handler) handleXConfigure(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "Failed to load X settings")
 	}
-	existingCredentials := service.XCredentials{
-		ConsumerKey: existing[service.XSettingConsumerKey], ConsumerSecret: existing[service.XSettingConsumerSecret],
-		AccessToken: existing[service.XSettingAccessToken], AccessTokenSecret: existing[service.XSettingAccessTokenSecret],
-	}
-	cursor := baselineCursor
-	sameAccount := strings.TrimSpace(existing[service.XSettingAccountID]) == me.ID
-	if strings.TrimSpace(existing[service.XSettingAccountID]) == "" && existingCredentials == creds {
-		// Backward compatibility for configurations saved before account IDs were
-		// persisted: unchanged credentials imply the same authenticated account.
-		sameAccount = true
-	}
-	if sameAccount && strings.TrimSpace(existing[service.XSettingSinceID]) != "" {
-		cursor = existing[service.XSettingSinceID]
-	}
+	cursor := xCursorForConfiguration(existing, creds, me.ID, baselineCursor)
 	values := map[string]string{
 		service.XSettingConsumerKey: creds.ConsumerKey, service.XSettingConsumerSecret: creds.ConsumerSecret,
 		service.XSettingAccessToken: creds.AccessToken, service.XSettingAccessTokenSecret: creds.AccessTokenSecret,
@@ -113,7 +117,7 @@ func (h *Handler) handleXTest(c echo.Context) error {
 		return renderStandardChannelConnectionTestFeedback(c, "X", false, fmt.Errorf("channel is not running"), channelConnectionTestFeedbackOptions{})
 	}
 	_, err := svc.TestConnection(c.Request().Context())
-	return renderStandardChannelConnectionTestFeedback(c, "X", err == nil, err, channelConnectionTestFeedbackOptions{})
+	return renderStandardChannelConnectionTestFeedback(c, "X", true, err, channelConnectionTestFeedbackOptions{})
 }
 func (h *Handler) handleXRemove(c echo.Context) error {
 	h.xConfigMu.Lock()
@@ -137,11 +141,25 @@ func (h *Handler) handleXRemove(c echo.Context) error {
 	}
 	return returnToChannels(c)
 }
+func (h *Handler) xAuthorizedUserProjectID(c echo.Context) (string, error) {
+	if projectID := strings.TrimSpace(c.FormValue("project_id")); projectID != "" {
+		project, err := h.projectSvc.GetByID(c.Request().Context(), projectID)
+		if err != nil {
+			return "", err
+		}
+		if project == nil {
+			return "", fmt.Errorf("project not found")
+		}
+		return projectID, nil
+	}
+	return h.getCurrentProjectID(c)
+}
+
 func (h *Handler) AddXAuthorizedUser(c echo.Context) error {
 	if h.xAuthRepo == nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "X authorization repository not configured")
 	}
-	projectID, err := h.getCurrentProjectID(c)
+	projectID, err := h.xAuthorizedUserProjectID(c)
 	if err != nil || projectID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "project is required")
 	}

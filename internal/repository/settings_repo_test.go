@@ -8,6 +8,26 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestSettingsRepoCompareAndSetRequiresExpectedValueAndGuards(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	ctx := context.Background()
+	repo := NewSettingsRepo(db)
+	require.NoError(t, repo.SetMany(ctx, map[string]string{"cursor": "10", "account": "one"}))
+
+	updated, err := repo.CompareAndSet(ctx, "cursor", "10", "20", map[string]string{"account": "one"})
+	require.NoError(t, err)
+	require.True(t, updated)
+	updated, err = repo.CompareAndSet(ctx, "cursor", "10", "30", map[string]string{"account": "one"})
+	require.NoError(t, err)
+	require.False(t, updated)
+	updated, err = repo.CompareAndSet(ctx, "cursor", "20", "30", map[string]string{"account": "two"})
+	require.NoError(t, err)
+	require.False(t, updated)
+	cursor, err := repo.Get(ctx, "cursor")
+	require.NoError(t, err)
+	require.Equal(t, "20", cursor)
+}
+
 func TestSettingsRepoSetManyRollsBackWholeSnapshot(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	ctx := context.Background()

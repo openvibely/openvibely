@@ -237,8 +237,8 @@ templ settingsContent(view ChannelsSettingsView) {
 								<div class="dropdown dropdown-end" onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" aria-label="X channel actions">⋮</button><ul class="dropdown-content menu bg-base-100 rounded-box shadow z-10 w-32"><li><button type="button" onclick="openXConfigModal()">Edit</button></li><li><button type="button" class="text-error" onclick="openDeleteChannelConfirm('X (formerly Twitter)', '/channels/x/remove', 'POST')">Delete</button></li></ul></div>
 							</div>
 							<div class="mt-3 flex gap-2">
-							if view.XStatus.Running {
-								<span class="badge badge-success">Connected</span>
+								if view.XStatus.Connected {
+									<span class="badge badge-success">Connected</span>
 							} else if view.XStatus.Configured {
 								<span class="badge badge-warning">Configured, polling offline</span>
 							} else {

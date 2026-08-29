@@ -106,6 +106,44 @@ func (r *SettingsRepo) SetMany(ctx context.Context, values map[string]string) er
 	})
 }
 
+// CompareAndSet updates one setting only when its current value and every guard
+// still match. The immediate transaction makes the read/guard/write decision
+// atomic with concurrent coherent settings replacement.
+func (r *SettingsRepo) CompareAndSet(ctx context.Context, key, expected, value string, guards map[string]string) (bool, error) {
+	updated := false
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		read := func(settingKey string) (string, error) {
+			var current string
+			err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT value FROM app_settings WHERE key = ?), '')`, settingKey).Scan(&current)
+			return current, err
+		}
+		current, err := read(key)
+		if err != nil {
+			return err
+		}
+		if current != expected {
+			return nil
+		}
+		for guardKey, guardValue := range guards {
+			currentGuard, err := read(guardKey)
+			if err != nil {
+				return err
+			}
+			if currentGuard != guardValue {
+				return nil
+			}
+		}
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+			key, value); err != nil {
+			return err
+		}
+		updated = true
+		return nil
+	})
+	return updated, err
+}
+
 // Set upserts a setting value.
 func (r *SettingsRepo) Set(ctx context.Context, key, value string) error {
 	_, err := execBoundSQLite(ctx, r.db,

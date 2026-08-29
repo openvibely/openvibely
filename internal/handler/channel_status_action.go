@@ -264,7 +264,7 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 		xStatus = xService.Status()
 	}
 	xStatus.Configured = xStatus.Configured || (get(service.XSettingConsumerKey) != "" && get(service.XSettingConsumerSecret) != "" && get(service.XSettingAccessToken) != "" && get(service.XSettingAccessTokenSecret) != "")
-	resp.X = xChannelStatusSummary{Configured: xStatus.Configured, Connected: xStatus.Connected, Running: xStatus.Running, Status: runningStatus(xStatus.Configured, xStatus.Running), Username: strings.TrimSpace(xStatus.Username), SendResponses: !isFalse(service.XSettingSendResponses), LastError: safeSingleLine(xStatus.LastError)}
+	resp.X = xChannelStatusSummary{Configured: xStatus.Configured, Connected: xStatus.Connected, Running: xStatus.Running, Status: connectedStatus(xStatus.Configured, xStatus.Connected), Username: strings.TrimSpace(xStatus.Username), SendResponses: !isFalse(service.XSettingSendResponses), LastError: safeSingleLine(xStatus.LastError)}
 	if h.xAuthRepo != nil {
 		if count, err := h.xAuthRepo.CountByProject(ctx, projectID); err == nil {
 			resp.X.AuthorizedUserCount = count

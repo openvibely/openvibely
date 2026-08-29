@@ -10,6 +10,23 @@ import (
 	"github.com/openvibely/openvibely/internal/service"
 )
 
+func TestSettingsContentRendersXPollingFailureAsOffline(t *testing.T) {
+	var buf bytes.Buffer
+	view := defaultChannelsSettingsView("project-1")
+	view.HasXChannel = true
+	view.XStatus = service.XConnectionStatus{Configured: true, Connected: false, Running: true, Username: "openvibely", LastError: "mention access revoked"}
+	if err := SettingsContent(view).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render failed: %v", err)
+	}
+	output := buf.String()
+	if !strings.Contains(output, "Configured, polling offline") || !strings.Contains(output, "mention access revoked") {
+		t.Fatalf("expected degraded X readiness, got %s", output)
+	}
+	if strings.Contains(output, `badge badge-success">Connected`) {
+		t.Fatal("polling failure must not render a connected badge")
+	}
+}
+
 func TestSettingsContentRendersXConfigurationWithoutSecrets(t *testing.T) {
 	var buf bytes.Buffer
 	view := defaultChannelsSettingsView("project-1")

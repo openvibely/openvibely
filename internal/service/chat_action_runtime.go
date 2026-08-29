@@ -1200,7 +1200,7 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		Configured:    xStatus.Configured,
 		Connected:     xStatus.Connected,
 		Running:       xStatus.Running,
-		Status:        channelRunningStatus(xStatus.Configured, xStatus.Running),
+		Status:        channelConnectedStatus(xStatus.Configured, xStatus.Connected),
 		Username:      strings.TrimSpace(xStatus.Username),
 		SendResponses: !isFalse(XSettingSendResponses),
 		LastError:     channelSafeSingleLine(xStatus.LastError),

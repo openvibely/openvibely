@@ -136,6 +136,19 @@ func (s *XService) Start() error {
 		s.mu.Unlock()
 		return err
 	}
+	if s.settingsRepo != nil {
+		accountID, err := s.settingsRepo.Get(s.ctx, XSettingAccountID)
+		if err != nil {
+			return fmt.Errorf("load X account identity: %w", err)
+		}
+		if strings.TrimSpace(accountID) == "" {
+			if err := s.settingsRepo.Set(s.ctx, XSettingAccountID, me.ID); err != nil {
+				return fmt.Errorf("save X account identity: %w", err)
+			}
+		} else if accountID != me.ID {
+			return fmt.Errorf("configured X account does not match persisted mention cursor")
+		}
+	}
 	return s.StartVerified(me)
 }
 
@@ -182,7 +195,10 @@ func (s *XService) Status() XConnectionStatus {
 	defer s.mu.RUnlock()
 	return XConnectionStatus{Configured: s.credentials.Ready(), Connected: s.connected, Running: s.running, Username: s.me.Username, LastError: s.lastError}
 }
-func (s *XService) TestConnection(ctx context.Context) (XUser, error) { return s.api.Me(ctx) }
+func (s *XService) TestConnection(ctx context.Context) (XUser, error) {
+	me, _, err := s.PrepareConnection(ctx)
+	return me, err
+}
 func (s *XService) SetPollInterval(d time.Duration) {
 	if d >= 15*time.Second {
 		s.pollInterval = d
@@ -265,8 +281,12 @@ func (s *XService) pollOnce(ctx context.Context) error {
 		}
 	}
 	if newest != "" && s.settingsRepo != nil {
-		if err := s.settingsRepo.Set(ctx, XSettingSinceID, newest); err != nil {
+		updated, err := s.settingsRepo.CompareAndSet(ctx, XSettingSinceID, sinceID, newest, map[string]string{XSettingAccountID: s.me.ID})
+		if err != nil {
 			return fmt.Errorf("save X mention cursor: %w", err)
+		}
+		if !updated {
+			return fmt.Errorf("X mention cursor configuration changed during polling")
 		}
 	}
 	return nil
