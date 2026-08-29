@@ -668,25 +668,23 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 												}
 											</div>
 											<div class="flex gap-1">
-												if s.Enabled {
-													<button
-														class="btn btn-xs btn-ghost"
-														hx-post={ fmt.Sprintf("/schedules/%s/toggle", s.ID) }
-														hx-target="#task-detail-content"
-														hx-swap="outerHTML"
-													>
-														Pause
-													</button>
-												} else {
-													<button
-														class="btn btn-xs btn-outline btn-warning"
-														hx-post={ fmt.Sprintf("/schedules/%s/toggle", s.ID) }
-														hx-target="#task-detail-content"
-														hx-swap="outerHTML"
-													>
-														Resume
-													</button>
-												}
+												<form
+													method="post"
+													action={ fmt.Sprintf("/schedules/%s/toggle?project_id=%s", s.ID, task.ProjectID) }
+													hx-post={ fmt.Sprintf("/schedules/%s/toggle?project_id=%s", s.ID, task.ProjectID) }
+													hx-target="#task-detail-content"
+													hx-swap="outerHTML"
+												>
+													if s.Enabled {
+														<button type="submit" class="btn btn-xs btn-ghost" aria-label="Pause schedule">
+															Pause
+														</button>
+													} else {
+														<button type="submit" class="btn btn-xs btn-outline btn-warning" aria-label="Resume schedule">
+															Resume
+														</button>
+													}
+												</form>
 												<button
 													class="btn btn-xs btn-ghost"
 													onclick={ templ.ComponentScript{Call: fmt.Sprintf("document.getElementById('schedule-view-%s').classList.add('hidden'); document.getElementById('schedule-edit-%s').classList.remove('hidden')", s.ID, s.ID)} }

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -275,55 +276,53 @@ func (h *Handler) UpdateSchedule(c echo.Context) error {
 }
 
 type scheduleToggleResult struct {
-	schedule          *models.Schedule
-	nextRunUpdateErr  error
-	errorOperation    string
-	finalLookupFailed bool
+	schedule       *models.Schedule
+	errorOperation string
+}
+
+func scheduleToggleHTTPError(err error) error {
+	var actionErr *service.ScheduleActionError
+	if !errors.As(err, &actionErr) {
+		return err
+	}
+	switch actionErr.Kind {
+	case service.ScheduleActionReferenceError:
+		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
+	case service.ScheduleActionTimeError, service.ScheduleActionRepeatError,
+		service.ScheduleActionDaysError, service.ScheduleActionIntervalError:
+		return echo.NewHTTPError(http.StatusBadRequest, actionErr.Error())
+	default:
+		return err
+	}
 }
 
 // toggleScheduleEnabled performs the schedule state transition shared by the
 // browser and JSON API transports.
 func (h *Handler) toggleScheduleEnabled(ctx context.Context, id, projectID string) (scheduleToggleResult, error) {
 	var result scheduleToggleResult
-	schedule, _, err := h.requireScheduleInRequestProject(ctx, id, projectID)
-	if err != nil {
+	if schedule, _, err := h.requireScheduleInRequestProject(ctx, id, projectID); err != nil {
 		result.errorOperation = "lookup"
 		return result, err
+	} else {
+		result.schedule = schedule
 	}
-	result.schedule = schedule
 
-	newEnabled := !schedule.Enabled
-	if err := h.scheduleRepo.ToggleEnabled(ctx, id, newEnabled); err != nil {
+	actionResult, err := service.NewScheduleActionService(h.taskRepo, h.scheduleRepo, h.workerSvc).Toggle(ctx, projectID, id)
+	if err != nil {
 		result.errorOperation = "toggle"
 		return result, err
 	}
-	schedule.Enabled = newEnabled
-
-	if newEnabled {
-		refreshed, refreshErr := h.scheduleRepo.GetByID(ctx, id)
-		if refreshErr == nil && refreshed != nil {
-			now := time.Now()
-			if refreshed.NextRun == nil || refreshed.NextRun.Before(now) {
-				if nextRun := refreshed.ComputeNextRun(now); nextRun != nil {
-					refreshed.NextRun = nextRun
-					result.nextRunUpdateErr = h.scheduleRepo.Update(ctx, refreshed)
-				}
-			}
-		}
+	if actionResult == nil || actionResult.Schedule == nil {
+		result.errorOperation = "toggle"
+		return result, echo.NewHTTPError(http.StatusNotFound, "schedule not found")
 	}
-
-	final, err := h.scheduleRepo.GetByID(ctx, id)
-	if err != nil || final == nil {
-		result.finalLookupFailed = true
-		return result, nil
-	}
-	result.schedule = final
+	result.schedule = actionResult.Schedule
 	return result, nil
 }
 
 // ToggleScheduleEnabled pauses or resumes a schedule.
-// When re-enabling a schedule whose NextRun has already passed, the next
-// future occurrence is recomputed so the scheduler picks it up correctly.
+// When re-enabling a schedule whose NextRun has already passed, the shared
+// schedule action service recomputes the next recurring occurrence.
 func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 	id := c.Param("id")
 	ctx := c.Request().Context()
@@ -335,23 +334,32 @@ func (h *Handler) ToggleScheduleEnabled(c echo.Context) error {
 		} else {
 			applog.Infof("[handler] ToggleScheduleEnabled error toggling: %v", err)
 		}
-		return err
+		if isHTMX(c) && result.schedule != nil {
+			var actionErr *service.ScheduleActionError
+			if errors.As(err, &actionErr) && actionErr.Kind == service.ScheduleActionTimeError {
+				setHTMXToast(c, actionErr.Error(), "failed")
+				return h.renderScheduleTaskDetail(c, result.schedule.TaskID, "", true)
+			}
+		}
+		return scheduleToggleHTTPError(err)
 	}
 	if result.schedule == nil {
 		applog.Infof("[handler] ToggleScheduleEnabled schedule not found id=%s", id)
 		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
 	}
-	if result.nextRunUpdateErr != nil {
-		applog.Infof("[handler] ToggleScheduleEnabled error updating NextRun: %v", result.nextRunUpdateErr)
-	}
 	applog.Infof("[handler] ToggleScheduleEnabled id=%s enabled=%v", id, result.schedule.Enabled)
 
 	taskID := result.schedule.TaskID
 	if isHTMX(c) {
+		message := "Schedule paused"
+		if result.schedule.Enabled {
+			message = "Schedule resumed"
+		}
+		setHTMXToast(c, message, "success")
 		return h.renderScheduleTaskDetail(c, taskID, "", true)
 	}
 
-	return c.Redirect(http.StatusSeeOther, "/tasks/"+taskID)
+	return h.redirectToTaskSchedules(c, taskID)
 }
 
 // APIToggleScheduleEnabled pauses or resumes a schedule (JSON API).
@@ -367,10 +375,7 @@ func (h *Handler) APIToggleScheduleEnabled(c echo.Context) error {
 	id := c.Param("id")
 	result, err := h.toggleScheduleEnabled(c.Request().Context(), id, h.mutationProjectID(c))
 	if err != nil {
-		return err
-	}
-	if result.finalLookupFailed {
-		return echo.NewHTTPError(http.StatusNotFound, "schedule not found after toggle")
+		return scheduleToggleHTTPError(err)
 	}
 	if result.schedule == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "schedule not found")
@@ -585,7 +590,7 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 	}
 
 	// Get the existing schedule and verify it belongs to the requested project.
-	schedule, _, err := h.requireScheduleInRequestProject(c.Request().Context(), scheduleID, h.mutationProjectID(c))
+	schedule, task, err := h.requireScheduleInRequestProject(c.Request().Context(), scheduleID, h.mutationProjectID(c))
 	if err != nil {
 		applog.Infof("[handler] RescheduleTask error getting schedule: %v", err)
 		return err
@@ -624,7 +629,7 @@ func (h *Handler) RescheduleTask(c echo.Context) error {
 		}
 	}
 
-	if err := h.scheduleRepo.Update(c.Request().Context(), schedule); err != nil {
+	if err := h.scheduleRepo.UpdateForTask(c.Request().Context(), schedule, task.ID); err != nil {
 		applog.Infof("[handler] RescheduleTask error updating schedule: %v", err)
 		return err
 	}

@@ -113,7 +113,7 @@ func TestRegistry_AllActionsHaveDescription(t *testing.T) {
 
 func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 	readActions := []string{"list_automations", "get_automation", "preview_automation_description"}
-	writeActions := []string{"save_automation", "update_automation_template", "run_automation_now", "pause_automation", "resume_automation"}
+	writeActions := []string{"save_automation", "update_automation_template", "run_automation_now", "pause_automation", "resume_automation", "delete_automation"}
 	for _, name := range append(readActions, writeActions...) {
 		def := Get(name)
 		if def == nil || def.Domain != DomainAutomations {
@@ -178,6 +178,19 @@ func TestRegistry_AutomationActionsEnforceModeAndSurfacePolicies(t *testing.T) {
 		if strings.Contains(strings.ToLower(def.Name), "delete") || strings.Contains(strings.ToLower(def.Description), "delete") {
 			t.Fatalf("%s must not expose Automation deletion", name)
 		}
+	}
+	deleteAutomation := Get("delete_automation")
+	if deleteAutomation == nil {
+		t.Fatal("delete_automation is not registered")
+	}
+	if deleteAutomation.Access != AccessWrite || deleteAutomation.Sensitivity != SensitivityDestructive || !deleteAutomation.NeedsConfirmation {
+		t.Fatalf("delete_automation policy = access=%q sensitivity=%q confirmation=%v, want write/destructive/true", deleteAutomation.Access, deleteAutomation.Sensitivity, deleteAutomation.NeedsConfirmation)
+	}
+	if !strings.Contains(string(deleteAutomation.Parameters), `"automation_id"`) || !strings.Contains(string(deleteAutomation.Parameters), `"name"`) {
+		t.Fatal("delete_automation must accept automation_id and name selectors")
+	}
+	if !strings.Contains(strings.ToLower(deleteAutomation.Description), "explicit confirmation") {
+		t.Fatalf("delete_automation description should require explicit confirmation, got %q", deleteAutomation.Description)
 	}
 	for _, removed := range []string{"create_automation_draft", "plan_automation_publication", "publish_automation_draft", "plan_automation_save"} {
 		if Get(removed) != nil {
@@ -448,7 +461,7 @@ func TestToolDefsForContext_PlanWeb(t *testing.T) {
 		"set_personality", "save_custom_personality", "schedule_task", "delete_schedule", "modify_schedule",
 		"create_alert", "create_notification", "decide_alert", "delete_alert", "toggle_alert", "create_project", "update_project_settings", "switch_project",
 		"set_chat_mode", "send_to_task", "send_message", "github_create_issue", "github_comment_on_issue", "github_add_issue_labels", "github_close_issue", "github_open_pull_request", "github_replace_pull_request_branch", "github_forward_pr_feedback_to_tasks",
-		"save_automation", "run_automation_now", "pause_automation", "resume_automation")
+		"save_automation", "run_automation_now", "pause_automation", "resume_automation", "delete_automation")
 
 	// Must have read actions
 	mustContain(t, names, "list_projects", "list_models", "list_alerts",

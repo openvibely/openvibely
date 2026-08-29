@@ -178,7 +178,7 @@ func (s *ScheduleActionService) ModifyAbsolute(ctx context.Context, req ModifyAb
 	}
 	schedule.NextRun = &req.RunAt
 	result.Changes = []string{"absolute_form"}
-	if err := s.scheduleRepo.Update(ctx, schedule); err != nil {
+	if err := s.scheduleRepo.UpdateForTask(ctx, schedule, task.ID); err != nil {
 		return result, actionError(ScheduleActionPersistError, "", err)
 	}
 	if err := s.applyPrimaryAgentAssignment(ctx, task, req.AgentDefinitionPresent, req.AgentDefinitionID); err != nil {
@@ -188,6 +188,77 @@ func (s *ScheduleActionService) ModifyAbsolute(ctx context.Context, req ModifyAb
 		ResetTerminal: schedule.NextRun != nil,
 	})
 	return result, nil
+}
+
+// Toggle atomically flips a schedule's enabled state within its linked task's
+// ownership boundary. Pausing leaves the occurrence untouched; resuming only
+// repairs stale recurring occurrences and never calls ComputeNextRun for a
+// one-time schedule.
+func (s *ScheduleActionService) Toggle(ctx context.Context, projectID, scheduleID string) (*ScheduleActionResult, error) {
+	schedule, task, err := s.resolveSchedule(ctx, projectID, scheduleID, "", "")
+	if err != nil {
+		return nil, actionError(ScheduleActionReferenceError, "", err)
+	}
+	result := &ScheduleActionResult{Task: task, Schedule: schedule}
+
+	updated, err := s.scheduleRepo.ToggleEnabledForTask(ctx, schedule.ID, task.ID)
+	if err != nil {
+		return result, actionError(ScheduleActionPersistError, "", err)
+	}
+	if updated == nil {
+		current, lookupErr := s.scheduleRepo.GetByID(ctx, schedule.ID)
+		if lookupErr != nil {
+			return result, actionError(ScheduleActionPersistError, "", lookupErr)
+		}
+		if current == nil || current.TaskID != task.ID {
+			return result, actionError(ScheduleActionReferenceError, "", fmt.Errorf("schedule %s not found", schedule.ID))
+		}
+		if !current.Enabled && current.RepeatType == models.RepeatOnce && current.NextRun == nil {
+			return result, actionError(ScheduleActionTimeError, "", fmt.Errorf("one-time schedule has already run; supply a new time before resuming"))
+		}
+		return result, actionError(ScheduleActionPersistError, "", fmt.Errorf("schedule changed while toggling"))
+	}
+	result.Schedule = updated
+	if updated.Enabled {
+		if err := s.refreshScheduleNextRun(ctx, updated, task.ID); err != nil {
+			return result, actionError(ScheduleActionPersistError, "", err)
+		}
+		if updated.NextRun != nil {
+			s.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{ResetTerminal: true})
+		}
+	}
+	return result, nil
+}
+
+func (s *ScheduleActionService) refreshScheduleNextRun(ctx context.Context, schedule *models.Schedule, taskID string) error {
+	if schedule == nil || !schedule.Enabled || schedule.RepeatType == models.RepeatOnce {
+		return nil
+	}
+	now := time.Now()
+	if schedule.NextRun != nil && !schedule.NextRun.Before(now) {
+		return nil
+	}
+	nextRun := schedule.ComputeNextRun(now)
+	if nextRun == nil {
+		return nil
+	}
+	changed, err := s.scheduleRepo.UpdateNextRunIfCurrent(ctx, schedule.ID, taskID, schedule.NextRun, nextRun)
+	if err != nil {
+		return err
+	}
+	if changed {
+		schedule.NextRun = nextRun
+		return nil
+	}
+	current, err := s.scheduleRepo.GetByID(ctx, schedule.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil || current.TaskID != taskID {
+		return fmt.Errorf("schedule %s no longer belongs to task %s", schedule.ID, taskID)
+	}
+	*schedule = *current
+	return nil
 }
 
 func (s *ScheduleActionService) Create(ctx context.Context, projectID string, req ScheduleTaskRequest) (*ScheduleActionResult, error) {
@@ -307,15 +378,51 @@ func (s *ScheduleActionService) Modify(ctx context.Context, projectID string, re
 		return result, nil
 	}
 	if timeChanged {
-		schedule.NextRun = schedule.ComputeNextRun(time.Now())
-	} else if req.Enabled != nil && *req.Enabled {
-		now := time.Now()
-		if schedule.NextRun == nil || schedule.NextRun.Before(now) {
-			schedule.NextRun = schedule.ComputeNextRun(now)
+		if schedule.RepeatType == models.RepeatOnce {
+			runAt := schedule.RunAt
+			schedule.NextRun = &runAt
+		} else {
+			schedule.NextRun = schedule.ComputeNextRun(time.Now())
 		}
-	}
-	if err := s.scheduleRepo.Update(ctx, schedule); err != nil {
-		return result, actionError(ScheduleActionPersistError, "", err)
+		if err := s.scheduleRepo.UpdateForTask(ctx, schedule, task.ID); err != nil {
+			return result, actionError(ScheduleActionPersistError, "", err)
+		}
+	} else if req.Enabled != nil {
+		updated, err := s.scheduleRepo.SetEnabledForTask(ctx, schedule.ID, task.ID, *req.Enabled)
+		if err != nil {
+			return result, actionError(ScheduleActionPersistError, "", err)
+		}
+		if updated == nil {
+			current, lookupErr := s.scheduleRepo.GetByID(ctx, schedule.ID)
+			if lookupErr != nil {
+				return result, actionError(ScheduleActionPersistError, "", lookupErr)
+			}
+			if current == nil || current.TaskID != task.ID {
+				return result, actionError(ScheduleActionReferenceError, "", fmt.Errorf("schedule %s not found", schedule.ID))
+			}
+			if *req.Enabled && current.RepeatType == models.RepeatOnce && current.NextRun == nil {
+				return result, actionError(ScheduleActionTimeError, "", fmt.Errorf("one-time schedule has already run; supply a new time before resuming"))
+			}
+			return result, actionError(ScheduleActionPersistError, "", fmt.Errorf("schedule changed while updating enabled state"))
+		}
+		schedule = updated
+		result.Schedule = schedule
+		if schedule.Enabled {
+			if err := s.refreshScheduleNextRun(ctx, schedule, task.ID); err != nil {
+				return result, actionError(ScheduleActionPersistError, "", err)
+			}
+		}
+		if req.ClearContextOnStart != nil {
+			if err := s.scheduleRepo.UpdateClearContextOnStart(ctx, schedule.ID, task.ID, *req.ClearContextOnStart); err != nil {
+				return result, actionError(ScheduleActionPersistError, "", err)
+			}
+			schedule.ClearContextOnStart = *req.ClearContextOnStart
+		}
+	} else if req.ClearContextOnStart != nil {
+		if err := s.scheduleRepo.UpdateClearContextOnStart(ctx, schedule.ID, task.ID, *req.ClearContextOnStart); err != nil {
+			return result, actionError(ScheduleActionPersistError, "", err)
+		}
+		schedule.ClearContextOnStart = *req.ClearContextOnStart
 	}
 	if schedule.NextRun != nil && (timeChanged || (req.Enabled != nil && *req.Enabled)) {
 		s.applyScheduleTaskLifecycle(ctx, result, scheduleTaskLifecycleOptions{ResetTerminal: true})

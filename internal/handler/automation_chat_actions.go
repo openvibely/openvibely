@@ -310,6 +310,10 @@ func (h *Handler) executeResumeAutomationTool(ctx context.Context, params stream
 	return h.executeAutomationLifecycleAction(ctx, params, input, "resume_automation")
 }
 
+func (h *Handler) executeDeleteAutomationTool(ctx context.Context, params streamingResponseParams, input json.RawMessage) (string, error) {
+	return h.executeAutomationLifecycleAction(ctx, params, input, "delete_automation")
+}
+
 func (h *Handler) executeAutomationLifecycleAction(ctx context.Context, params streamingResponseParams, input json.RawMessage, action string) (string, error) {
 	if h.automationGraphSvc == nil {
 		return "", fmt.Errorf("%s: automations unavailable", action)
@@ -338,11 +342,23 @@ func (h *Handler) executeAutomationLifecycleAction(ctx context.Context, params s
 		err = h.automationLifecycleSvc.Pause(ctx, projectID, card.Automation.ID)
 	case "resume_automation":
 		err = h.automationLifecycleSvc.Resume(ctx, projectID, card.Automation.ID)
+	case "delete_automation":
+		err = h.automationLifecycleSvc.Delete(ctx, projectID, card.Automation.ID)
 	default:
 		err = fmt.Errorf("unsupported Automation lifecycle action %q", action)
 	}
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", action, err)
+	}
+	if action == "delete_automation" {
+		return marshalAutomationActionResult(map[string]any{
+			"action":          action,
+			"automation_id":   card.Automation.ID,
+			"name":            card.Automation.Name,
+			"lifecycle_state": "deleted",
+			"deleted":         true,
+			"message":         fmt.Sprintf("Automation %q was deleted", card.Automation.Name),
+		})
 	}
 
 	fresh, err := h.automationCardByID(ctx, projectID, card.Automation.ID)
