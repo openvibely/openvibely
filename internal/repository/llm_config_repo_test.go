@@ -1792,7 +1792,7 @@ func BenchmarkVisionModelSelectionSingleConnectionContention(b *testing.B) {
 	}
 
 	b.Run("full_list", func(b *testing.B) {
-		benchmarkVisionSelectionWithContention(b, counter, func() error {
+		benchmarkVisionSelectionWithContention(b, db, counter, 1, func() error {
 			configs, err := repo.List(ctx)
 			if err != nil {
 				return err
@@ -1804,7 +1804,7 @@ func BenchmarkVisionModelSelectionSingleConnectionContention(b *testing.B) {
 		}, lightweightLookup)
 	})
 	b.Run("compact_selection_plus_get_by_id", func(b *testing.B) {
-		benchmarkVisionSelectionWithContention(b, counter, func() error {
+		benchmarkVisionSelectionWithContention(b, db, counter, 2, func() error {
 			options, err := repo.ListVisionSelectionOptions(ctx)
 			if err != nil {
 				return err
@@ -1824,47 +1824,98 @@ func BenchmarkVisionModelSelectionSingleConnectionContention(b *testing.B) {
 	})
 }
 
-func benchmarkVisionSelectionWithContention(b *testing.B, counter *testutil.SQLStatementCounter, lookup func() error, lightweightLookup func() error) {
+func benchmarkVisionSelectionWithContention(b *testing.B, db *sql.DB, counter *testutil.SQLStatementCounter, expectedModelQueryCloses int, lookup func() error, lightweightLookup func() error) {
 	b.Helper()
 	b.ReportAllocs()
+	if expectedModelQueryCloses < 1 {
+		b.Fatal("expected at least one model query close")
+	}
+
 	var totalLightweightWait time.Duration
 	for i := 0; i < b.N; i++ {
-		queryStarted := make(chan struct{})
-		var once sync.Once
-		counter.SetObserver(func(_ context.Context, query string) {
-			if strings.Contains(strings.ToLower(query), "from agent_configs") {
-				once.Do(func() { close(queryStarted) })
+		func() {
+			releaseRows := make(chan struct{})
+			var releaseOnce sync.Once
+			release := func() {
+				releaseOnce.Do(func() { close(releaseRows) })
 			}
-		})
+			defer func() {
+				release()
+				counter.SetRowsCloseObserver(nil)
+			}()
 
-		resultCh := make(chan error, 1)
-		go func() { resultCh <- lookup() }()
-		var lookupErr error
-		lookupComplete := false
-		select {
-		case <-queryStarted:
-		case lookupErr = <-resultCh:
-			lookupComplete = true
-		case <-time.After(2 * time.Second):
-			b.Fatalf("vision model lookup query did not start")
-		}
+			finalModelRowsClosing := make(chan struct{})
+			modelQueryCloses := 0
+			counter.SetRowsCloseObserver(func(_ context.Context, query string) {
+				if !strings.Contains(strings.ToLower(query), "from agent_configs") {
+					return
+				}
+				modelQueryCloses++
+				if modelQueryCloses == expectedModelQueryCloses {
+					// The row set is fully materialized. The observer runs before the
+					// wrapped rows.Close calls the underlying driver, so the single
+					// pool connection is still held while the competing query waits.
+					close(finalModelRowsClosing)
+					<-releaseRows
+				}
+			})
 
-		lightweightStart := time.Now()
-		if err := lightweightLookup(); err != nil {
-			b.Fatalf("lightweight project lookup: %v", err)
-		}
-		totalLightweightWait += time.Since(lightweightStart)
+			lookupResult := make(chan error, 1)
+			go func() { lookupResult <- lookup() }()
 
-		if !lookupComplete {
-			lookupErr = <-resultCh
-		}
-		counter.SetObserver(nil)
-		if lookupErr != nil {
-			b.Fatal(lookupErr)
-		}
+			var lookupErr error
+			select {
+			case <-finalModelRowsClosing:
+			case lookupErr = <-lookupResult:
+				b.Fatalf("vision model lookup completed before its final rows-close boundary: %v", lookupErr)
+			case <-time.After(2 * time.Second):
+				b.Fatalf("vision model lookup did not reach its final rows-close boundary")
+			}
+
+			waitCountBefore := db.Stats().WaitCount
+			waitDurationBefore := db.Stats().WaitDuration
+			lightweightResult := make(chan error, 1)
+			go func() { lightweightResult <- lightweightLookup() }()
+
+			waitObserved := false
+			waitDeadline := time.NewTimer(2 * time.Second)
+			waitPoll := time.NewTicker(time.Millisecond)
+			for !waitObserved {
+				if db.Stats().WaitCount > waitCountBefore {
+					waitObserved = true
+					break
+				}
+				select {
+				case err := <-lightweightResult:
+					b.Fatalf("competing lightweight query completed before observing a pool wait: %v", err)
+				case <-waitPoll.C:
+				case <-waitDeadline.C:
+					b.Fatalf("competing lightweight query did not enter the single-connection pool wait")
+				}
+			}
+			waitPoll.Stop()
+			if !waitDeadline.Stop() {
+				select {
+				case <-waitDeadline.C:
+				default:
+				}
+			}
+
+			release()
+			if lookupErr = <-lookupResult; lookupErr != nil {
+				b.Fatal(lookupErr)
+			}
+			if err := <-lightweightResult; err != nil {
+				b.Fatalf("lightweight project lookup: %v", err)
+			}
+			if modelQueryCloses != expectedModelQueryCloses {
+				b.Fatalf("model query closes = %d, want %d", modelQueryCloses, expectedModelQueryCloses)
+			}
+			totalLightweightWait += db.Stats().WaitDuration - waitDurationBefore
+		}()
 	}
 	b.StopTimer()
-	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_ns/op")
+	b.ReportMetric(float64(totalLightweightWait.Nanoseconds())/float64(b.N), "lightweight_db_wait_after_full_model_path_ns/op")
 }
 
 func TestLLMConfigRepo_BrowserChatContextModelLoadingProjectionIsFasterAndLowerAllocationThanFullListOnLargeFixture(t *testing.T) {

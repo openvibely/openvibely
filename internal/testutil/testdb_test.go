@@ -48,7 +48,36 @@ func TestStatementCountingTestDBRecordsCompleteOperations(t *testing.T) {
 	}
 }
 
-// TestNewTestDBPragmas verifies every fixture retains the production
+func TestStatementCountingTestDBRowsCloseObserver(t *testing.T) {
+	db, counter := NewStatementCountingTestDB(t)
+	observed := make(chan string, 1)
+	counter.SetRowsCloseObserver(func(_ context.Context, query string) {
+		observed <- query
+	})
+	defer counter.SetRowsCloseObserver(nil)
+
+	rows, err := db.QueryContext(context.Background(), "SELECT 1")
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if !rows.Next() {
+		rows.Close()
+		t.Fatal("query returned no row")
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close rows: %v", err)
+	}
+
+	select {
+	case query := <-observed:
+		if query != "SELECT 1" {
+			t.Fatalf("observed query = %q, want SELECT 1", query)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("rows-close observer was not called")
+	}
+}
+
 // connection-local pragmas and single-connection pool configuration.
 func TestNewTestDBPragmas(t *testing.T) {
 	db := NewTestDB(t)
