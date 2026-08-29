@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -32,6 +33,8 @@ const (
 	xReceiptLease               = 10 * time.Minute
 	xMaxMentionPages            = 10
 )
+
+var errXReceiptActive = errors.New("X mention receipt is actively leased")
 
 type XConnectionStatus struct {
 	Configured bool
@@ -206,6 +209,9 @@ func (s *XService) SetPollInterval(d time.Duration) {
 }
 
 func (s *XService) recordPollResult(err error) {
+	if errors.Is(err, errXReceiptActive) {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
@@ -270,6 +276,9 @@ func (s *XService) pollOnce(ctx context.Context) error {
 	}
 	sort.SliceStable(mentions, func(i, j int) bool { return xTweetIDLess(mentions[i].ID, mentions[j].ID) })
 	for _, tweet := range mentions {
+		if strings.TrimSpace(tweet.AuthorID) == "" {
+			return fmt.Errorf("X mention %s is missing immutable author_id", tweet.ID)
+		}
 		if tweet.AuthorID == s.me.ID {
 			continue
 		}
@@ -330,9 +339,20 @@ func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser)
 	case repository.XReceiptCompleted:
 		return true, nil
 	case repository.XReceiptActive:
-		// Another process may still be between receipt claim and durable ingress.
-		// Do not advance the cursor until that lease completes or expires.
-		return false, nil
+		// Another same-account poller may still be between receipt claim and
+		// durable ingress. Keep the cursor retryable without degrading the
+		// verified replacement service's provider readiness.
+		if s.settingsRepo == nil {
+			return false, fmt.Errorf("X settings are unavailable while receipt was actively leased")
+		}
+		accountID, err := s.settingsRepo.Get(ctx, XSettingAccountID)
+		if err != nil {
+			return false, fmt.Errorf("reload X account for active receipt: %w", err)
+		}
+		if accountID != s.me.ID {
+			return false, fmt.Errorf("X configuration changed while receipt was actively leased")
+		}
+		return false, errXReceiptActive
 	case repository.XReceiptClaimed:
 	default:
 		return false, fmt.Errorf("unexpected X receipt claim state %q", claim.Result)
@@ -490,6 +510,9 @@ func (s *XService) runtimeTools(callerTaskID, projectID, accountID, userID, conv
 		Platform: "x", ProjectID: projectID, Surface: chatcontrol.SurfaceX, Source: models.TaskOriginX, ActorID: userID,
 		TaskRepo: s.taskRepo, ExecRepo: s.execRepo, ThreadInputRepo: s.threadInputRepo, LLMConfigRepo: s.llmConfigRepo,
 		SettingsRepo: s.settingsRepo, CustomPersonalityRepo: s.customPersonalityRepo, ChannelTaskRunner: s.channelTaskRunner,
+		RuntimeToolsForTask: func(taskID string) *llmcontracts.RuntimeTools {
+			return s.runtimeTools(taskID, projectID, accountID, userID, conversationID, replyToTweetID, username)
+		},
 		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
 		CompleteExecution:        channelCompletionFunc("x", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
 		ChannelMessageRouter:     s.channelMessageRouter,

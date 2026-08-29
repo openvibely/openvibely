@@ -44,6 +44,7 @@ type ChannelTaskRunRequest struct {
 	Surface         chatcontrol.Surface
 	AgentDefinition *models.Agent
 	ReplyContext    ChannelReplyContext
+	RuntimeTools    *llmcontracts.RuntimeTools
 }
 
 type ChannelReplyContext struct {

@@ -129,6 +129,7 @@ type channelThreadActionHandlerOptions struct {
 	SettingsRepo             *repository.SettingsRepo
 	CustomPersonalityRepo    *repository.CustomPersonalityRepo
 	ChannelTaskRunner        ChannelTaskRunner
+	RuntimeToolsForTask      func(taskID string) *llmcontracts.RuntimeTools
 	QueuedTaskThreadPromoter func(taskID string)
 	CompleteExecution        func(context.Context, string, string, string, string, int, int64)
 	ChannelMessageRouter     *ChannelMessageRouter
@@ -725,6 +726,7 @@ func runChannelSendToTaskAction(ctx context.Context, opts channelThreadActionHan
 		SettingsRepo:             opts.SettingsRepo,
 		CustomPersonalityRepo:    opts.CustomPersonalityRepo,
 		ChannelTaskRunner:        opts.ChannelTaskRunner,
+		RuntimeToolsForTask:      opts.RuntimeToolsForTask,
 		QueuedTaskThreadPromoter: opts.QueuedTaskThreadPromoter,
 		CompleteExecution:        opts.CompleteExecution,
 		NewQueuedInput:           opts.NewQueuedInput,

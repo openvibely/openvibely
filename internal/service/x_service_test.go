@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -185,6 +186,25 @@ func TestXAuthorizedMentionUsesAuthorIDWhenExpansionIsMissing(t *testing.T) {
 	require.Equal(t, "21", cursor)
 }
 
+func TestXMissingAuthorIDFailsClosedWithoutAdvancingCursor(t *testing.T) {
+	ctx, svc, settings, _, _, project, otherProject := setupXServiceTest(t)
+	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
+	api.mentions.Meta.NewestID = "22"
+	api.mentions.Data = []XTweet{{ID: "22", Text: "@openvibely ship it", ConversationID: "conversation"}}
+	svc.setAPI(api)
+	svc.me = api.me
+
+	require.ErrorContains(t, svc.pollOnce(ctx), "author_id")
+	cursor, err := settings.Get(ctx, XSettingSinceID)
+	require.NoError(t, err)
+	require.Empty(t, cursor)
+	for _, projectID := range []string{project.ID, otherProject.ID} {
+		tasks, err := svc.taskRepo.ListByProject(ctx, projectID, string(models.CategoryChat))
+		require.NoError(t, err)
+		require.Empty(t, tasks)
+	}
+}
+
 func TestXSameAccountCursorRaceIsBenign(t *testing.T) {
 	ctx, svc, settings, _, _, _, _ := setupXServiceTest(t)
 	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
@@ -218,24 +238,31 @@ func TestXReplyRequiresOriginatingAccount(t *testing.T) {
 	require.Equal(t, []string{"tweet|response"}, api.posted)
 }
 
-func TestXPollActiveReceiptLeaseDoesNotAdvanceCursor(t *testing.T) {
-	ctx, svc, settings, auth, _, project, _ := setupXServiceTest(t)
+func TestXPollActiveReceiptLeaseDoesNotAdvanceCursorOrDegradeReplacementHealth(t *testing.T) {
+	ctx, old, settings, auth, selections, project, _ := setupXServiceTest(t)
 	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "author"}))
 	api := &fakeXAPI{me: XUser{ID: "bot", Username: "openvibely"}}
 	api.mentions.Meta.NewestID = "10"
 	api.mentions.Data = []XTweet{{ID: "10", Text: "@openvibely hello", AuthorID: "author", ConversationID: "conversation"}}
 	api.mentions.Includes.Users = []XUser{{ID: "author", Username: "alice"}}
-	svc.setAPI(api)
-	svc.me = api.me
-	receipts := svc.receiptRepo
-	claim, err := receipts.Claim(ctx, "10", project.ID, svc.now(), xReceiptLease)
+	claim, err := old.receiptRepo.Claim(ctx, "10", project.ID, old.now(), xReceiptLease)
 	require.NoError(t, err)
 	require.Equal(t, repository.XReceiptClaimed, claim.Result)
 
-	require.Error(t, svc.pollOnce(ctx))
+	replacement := NewXService(old.credentials, settings, old.projectRepo, old.llmConfigRepo, old.taskRepo, old.execRepo, old.scheduleRepo, old.taskSvc)
+	replacement.SetRepositories(auth, selections, old.taskContextRepo, old.receiptRepo, old.threadInputRepo)
+	replacement.setAPI(api)
+	replacement.me = api.me
+	replacement.running = true
+	replacement.connected = true
+	err = replacement.pollOnce(ctx)
+	require.Error(t, err)
+	replacement.recordPollResult(err)
 	cursor, err := settings.Get(ctx, XSettingSinceID)
 	require.NoError(t, err)
 	require.Empty(t, cursor)
+	require.True(t, replacement.Status().Connected)
+	require.Empty(t, replacement.Status().LastError)
 }
 
 func TestXRuntimeOwnsOnlyIdentitySensitiveOverrides(t *testing.T) {
@@ -251,6 +278,37 @@ func TestXRuntimeOwnsOnlyIdentitySensitiveOverrides(t *testing.T) {
 	require.True(t, names["send_to_task"])
 	require.False(t, names["list_channels"], "generic handler must retain complete cross-channel status dependencies")
 	require.False(t, names["view_pulse"], "generic handler must retain complete upcoming-work dependencies")
+}
+
+func TestXImmediateTaskThreadRunCarriesAuthorizedRuntimeTools(t *testing.T) {
+	ctx, svc, _, auth, selections, project, targetProject := setupXServiceTest(t)
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: project.ID, XUserID: "123"}))
+	require.NoError(t, auth.Create(ctx, &models.XAuthorizedUser{ProjectID: targetProject.ID, XUserID: "123"}))
+	agent := &models.LLMConfig{Name: "X Task Agent", Provider: models.ProviderTest, Model: "test", IsDefault: true}
+	require.NoError(t, svc.llmConfigRepo.Create(ctx, agent))
+	task := &models.Task{ProjectID: project.ID, Title: "X follow-up target", Prompt: "initial", Category: models.CategoryBacklog, Status: models.StatusPending, Priority: 2, AgentID: &agent.ID}
+	require.NoError(t, svc.taskRepo.Create(ctx, task))
+	var run ChannelTaskRunRequest
+	svc.SetRuntime(nil, nil, nil, nil, nil, func(_ context.Context, req ChannelTaskRunRequest) { run = req }, nil, nil, nil)
+
+	runtime := svc.RuntimeTools("caller", project.ID, "bot", "123", "conversation", "tweet", "alice")
+	payload, err := json.Marshal(SendToTaskRequest{TaskID: task.ID, Message: "continue"})
+	require.NoError(t, err)
+	output, handled, isError, err := runtime.Executor(ctx, "send_to_task", payload)
+	require.True(t, handled)
+	require.False(t, isError)
+	require.NoError(t, err)
+	require.Contains(t, output, "started processing")
+	require.NotNil(t, run.RuntimeTools)
+
+	output, handled, isError, err = run.RuntimeTools.Executor(ctx, "switch_project", json.RawMessage(`{"project":"Two"}`))
+	require.True(t, handled)
+	require.False(t, isError)
+	require.NoError(t, err)
+	require.Contains(t, output, "Two")
+	selected, err := selections.GetUserProject(ctx, "123")
+	require.NoError(t, err)
+	require.Equal(t, targetProject.ID, selected)
 }
 
 func TestXPollAcknowledgesUnauthorizedMentionsWithoutCreatingWork(t *testing.T) {
