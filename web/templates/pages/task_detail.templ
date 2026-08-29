@@ -1028,7 +1028,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 						function rememberAllScroll() {
 							Object.keys(states).forEach(function(key) {
 								var state = states[key];
-								if (!state.container) return;
+								if (!state.container || !document.documentElement || !document.documentElement.contains(state.container)) return;
 								captureScroll(state, state.container);
 								state.savedScrollTop = state.scrollTop;
 								state.savedAnchorID = state.anchorID;

@@ -1797,3 +1797,207 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("HTMX swap lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
 	}
 }
+
+func TestTaskDetailLifecycleHTMXSwapPreservesAnchorInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := &models.Task{
+		ID:        "task-lifecycle-htmx-anchor-browser",
+		ProjectID: "project-lifecycle-htmx-anchor-browser",
+		Title:     "Lifecycle HTMX anchor browser fixture",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+	var fragment bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &fragment); err != nil {
+		t.Fatalf("render TaskDetailContent: %v", err)
+	}
+
+	row := func(id string, hour int, summary string) map[string]any {
+		return map[string]any{
+			"id":              id,
+			"when":            "after_complete",
+			"skill_key":       "hook-" + id,
+			"status":          "completed",
+			"output_contract": "activity_summary",
+			"summary":         summary,
+			"started_at":      time.Date(2026, time.January, 1, hour, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		}
+	}
+	initialItems := []map[string]any{
+		row("event-4", 4, "initial row 4"),
+		row("event-3", 3, "initial row 3"),
+		row("event-2", 2, "initial row 2"),
+		row("event-1", 1, "initial row 1"),
+		row("event-0", 0, "initial row 0"),
+	}
+	refreshedItems := []map[string]any{
+		row("event-new", 5, "new row inserted above the anchor with a deliberately long summary that changes its height after the HTMX replacement"),
+		row("event-4", 4, "initial row 4"),
+		row("event-3", 3, "initial row 3"),
+		row("event-2", 2, "initial row 2"),
+		row("event-1", 1, "initial row 1"),
+		row("event-0", 0, "initial row 0"),
+	}
+	writePage := func(w http.ResponseWriter, items []map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"items": items, "has_more": false, "next_cursor": ""})
+	}
+
+	var mu sync.Mutex
+	initialCalls := 0
+	sawProject := false
+	sawLimit := false
+	page := ""
+	browserResult := make(chan string, 1)
+	fixtureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/browser-result":
+			select {
+			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case "/tasks/task-lifecycle-htmx-anchor-browser":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+			return
+		case "/api/tasks/task-lifecycle-htmx-anchor-browser/lifecycle-executions":
+		default:
+			http.NotFound(w, r)
+			return
+		}
+
+		query := r.URL.Query()
+		if query.Get("before") != "" || query.Get("after") != "" {
+			http.Error(w, "unexpected lifecycle cursor", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		if query.Get("project_id") == task.ProjectID {
+			sawProject = true
+		}
+		if query.Get("limit") == "20" {
+			sawLimit = true
+		}
+		initialCalls++
+		call := initialCalls
+		mu.Unlock()
+		if call == 1 {
+			writePage(w, initialItems)
+			return
+		}
+		writePage(w, refreshedItems)
+	})
+	server := httptest.NewServer(fixtureHandler)
+	defer server.Close()
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+  function waitFor(check, label, timeout) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        try { if (check()) { resolve(); return; } } catch (error) { reject(error); return; }
+        if (performance.now() - started > (timeout || 6000)) { reject(new Error('timed out waiting for ' + label)); return; }
+        setTimeout(poll, 10);
+      }
+      poll();
+    });
+  }
+  function report(status, message) {
+    return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
+  }
+  function fail(message) { throw new Error(message); }
+  function list() { return document.getElementById('lifecycle-activity-list'); }
+  function port() { return document.getElementById('lifecycle-activity-scroll'); }
+  function row(id) { return list().querySelector('[data-lifecycle-execution-id="' + id + '"]'); }
+  async function run() {
+    await waitFor(function() { return !!row('event-2'); }, 'initial lifecycle rows');
+    await wait(50);
+    var lifecyclePort = port();
+    var initialAnchor = row('event-2');
+    var portRect = lifecyclePort.getBoundingClientRect();
+    lifecyclePort.scrollTop += initialAnchor.getBoundingClientRect().top - portRect.top - 40;
+    lifecyclePort.dispatchEvent(new Event('scroll', {bubbles:true}));
+    await wait(20);
+    var anchorBeforeSwap = row('event-2').getBoundingClientRect().top - portRect.top;
+    if (Math.abs(anchorBeforeSwap - 40) > 2) fail('failed to position lifecycle anchor before swap');
+
+    var oldRoot = document.getElementById('task-detail-content');
+    if (!oldRoot) fail('missing original task detail root');
+    var lifecycleScriptSource = '';
+    Array.prototype.some.call(document.getElementsByTagName('script'), function(script) {
+      if (script.textContent.indexOf('window._taskLifecycleActivityHandlers') < 0) return false;
+      lifecycleScriptSource = script.textContent;
+      return true;
+    });
+    if (!lifecycleScriptSource) fail('missing lifecycle script source');
+
+    oldRoot.dispatchEvent(new CustomEvent('htmx:beforeSwap', {bubbles:true, detail:{target:oldRoot}}));
+    oldRoot.outerHTML = '<div id="task-detail-content" class="replacement h-full flex flex-col">' +
+      '<div><a data-tab="details">Details</a><a data-tab="lifecycle" class="tab-active">Lifecycle</a></div>' +
+      '<div id="tab-lifecycle" class="task-tab-panel">' +
+      '<div id="lifecycle-activity-scroll" data-lifecycle-scrollport="true" style="height:240px;overflow-y:auto;">' +
+      '<div id="lifecycle-activity-list" data-task-id="task-lifecycle-htmx-anchor-browser" data-project-id="project-lifecycle-htmx-anchor-browser"></div>' +
+      '</div></div></div>';
+    var reboundScript = document.createElement('script');
+    reboundScript.textContent = lifecycleScriptSource;
+    document.body.appendChild(reboundScript);
+
+    await waitFor(function() { return !!row('event-new'); }, 'lifecycle rebound anchor refresh', 4000);
+    var replacementPortRect = port().getBoundingClientRect();
+    var anchorAfterSwap = row('event-2').getBoundingClientRect().top - replacementPortRect.top;
+    if (Math.abs(anchorAfterSwap - anchorBeforeSwap) > 2) fail('HTMX swap moved the lifecycle reading anchor: before=' + anchorBeforeSwap + ' after=' + anchorAfterSwap);
+    await report('pass', '');
+  }
+  run().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{height:80px!important;min-height:80px!important;box-sizing:border-box;}#lifecycle-activity-list [data-lifecycle-execution-id=\"event-new\"]{height:240px!important;}#task-detail-content.replacement #lifecycle-activity-list [data-lifecycle-execution-id=\"event-4\"]{height:200px!important;} .hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+
+	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-htmx-anchor.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-htmx-anchor-profile")
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		server.URL+"/tasks/task-lifecycle-htmx-anchor-browser",
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome lifecycle HTMX anchor fixture: %v", err)
+	}
+
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail: timed out waiting for lifecycle browser result"
+	}
+	stopBrowserProcess(cmd)
+	if outcome != "pass:" {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(stderr) > 8000 {
+			stderr = stderr[len(stderr)-8000:]
+		}
+		t.Fatalf("Task Detail Lifecycle HTMX swap anchor browser regression failed: %s\nChrome stderr tail:\n%s", outcome, stderr)
+	}
+
+	mu.Lock()
+	gotInitialCalls := initialCalls
+	gotProject, gotLimit := sawProject, sawLimit
+	mu.Unlock()
+	if gotInitialCalls != 2 {
+		t.Fatalf("HTMX swap anchor lifecycle fixture received %d initial-page requests, want initial and rebound refresh", gotInitialCalls)
+	}
+	if !gotProject || !gotLimit {
+		t.Fatalf("HTMX swap anchor lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
+	}
+}
