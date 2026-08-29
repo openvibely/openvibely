@@ -20,6 +20,7 @@ type channelStatusToolResponse struct {
 	Slack                  slackChannelStatusSummary    `json:"slack"`
 	Telegram               telegramChannelStatusSummary `json:"telegram"`
 	Discord                discordChannelStatusSummary  `json:"discord"`
+	X                      xChannelStatusSummary        `json:"x"`
 	Email                  emailChannelStatusSummary    `json:"email"`
 	Webhooks               webhookStatusSummary         `json:"webhooks"`
 	OutboundTargets        outboundTargetsStatusSummary `json:"outbound_message_targets"`
@@ -68,6 +69,17 @@ type discordChannelStatusSummary struct {
 	SendResponses       bool   `json:"send_responses"`
 	LastError           string `json:"last_error,omitempty"`
 	AuthorizedUserCount int    `json:"authorized_user_count"`
+}
+
+type xChannelStatusSummary struct {
+	Configured          bool   `json:"configured"`
+	Connected           bool   `json:"connected"`
+	Running             bool   `json:"running"`
+	Status              string `json:"status"`
+	Username            string `json:"username,omitempty"`
+	SendResponses       bool   `json:"send_responses"`
+	AuthorizedUserCount int    `json:"authorized_user_count"`
+	LastError           string `json:"last_error,omitempty"`
 }
 
 type emailChannelStatusSummary struct {
@@ -247,6 +259,21 @@ func (h *Handler) buildChannelStatusSummary(ctx context.Context, projectID strin
 		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "discord")
 	}
 
+	xStatus := service.XConnectionStatus{}
+	if h.xService != nil {
+		xStatus = h.xService.Status()
+	}
+	xStatus.Configured = xStatus.Configured || (get(service.XSettingConsumerKey) != "" && get(service.XSettingConsumerSecret) != "" && get(service.XSettingAccessToken) != "" && get(service.XSettingAccessTokenSecret) != "")
+	resp.X = xChannelStatusSummary{Configured: xStatus.Configured, Connected: xStatus.Connected, Running: xStatus.Running, Status: runningStatus(xStatus.Configured, xStatus.Running), Username: strings.TrimSpace(xStatus.Username), SendResponses: !isFalse(service.XSettingSendResponses), LastError: safeSingleLine(xStatus.LastError)}
+	if h.xAuthRepo != nil {
+		if count, err := h.xAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.X.AuthorizedUserCount = count
+		}
+	}
+	if resp.X.Configured {
+		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "x")
+	}
+
 	email := service.EmailConnectionStatus{Provider: service.EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
 	if h.emailService != nil {
 		email = h.emailService.GetConnectionStatus(ctx)
@@ -333,6 +360,11 @@ func (h *Handler) channelStatusSettings(ctx context.Context, projectID string) m
 		service.TelegramSettingRichMessagesV2,
 		service.DiscordSettingBotToken,
 		service.DiscordSettingSendResponses,
+		service.XSettingConsumerKey,
+		service.XSettingConsumerSecret,
+		service.XSettingAccessToken,
+		service.XSettingAccessTokenSecret,
+		service.XSettingSendResponses,
 		service.EmailSettingProvider,
 		service.EmailSettingAddress,
 		service.EmailSettingPassword,

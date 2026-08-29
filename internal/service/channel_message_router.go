@@ -37,6 +37,10 @@ type outboundTelegramSender interface {
 	SendOutboundMessage(ctx context.Context, chatID int64, threadID int, text string) SendMessageResult
 }
 
+type outboundXSender interface {
+	SendOutboundMessage(ctx context.Context, targetID, threadID, text string) SendMessageResult
+}
+
 type outboundEmailSender interface {
 	SendOutboundMessage(ctx context.Context, to, subject, body string) SendMessageResult
 }
@@ -66,6 +70,7 @@ type ChannelMessageRouter struct {
 	telegram     outboundTelegramSender
 	email        outboundEmailSender
 	discord      outboundDiscordSender
+	x            outboundXSender
 	slackAuth    outboundAuthorizedUserStore
 	telegramAuth outboundTelegramAuthorizedUserStore
 	emailAuth    outboundAuthorizedUserStore
@@ -112,6 +117,7 @@ func (r *ChannelMessageRouter) SetSlackService(svc outboundSlackSender)       { 
 func (r *ChannelMessageRouter) SetTelegramService(svc outboundTelegramSender) { r.telegram = svc }
 func (r *ChannelMessageRouter) SetEmailService(svc outboundEmailSender)       { r.email = svc }
 func (r *ChannelMessageRouter) SetDiscordService(svc outboundDiscordSender)   { r.discord = svc }
+func (r *ChannelMessageRouter) SetXService(svc outboundXSender)               { r.x = svc }
 func (r *ChannelMessageRouter) SetSlackAuthStore(store outboundAuthorizedUserStore) {
 	r.slackAuth = store
 }
@@ -435,6 +441,11 @@ func (r *ChannelMessageRouter) dispatch(ctx context.Context, req SendMessageRequ
 			return dmSender.SendOutboundDirectMessage(ctx, target.TargetID, req.Message)
 		}
 		return r.discord.SendOutboundMessage(ctx, target.TargetID, target.ThreadID, req.Message)
+	case "x":
+		if r.x == nil {
+			return sendMessageError("X channel is not configured")
+		}
+		return r.x.SendOutboundMessage(ctx, target.TargetID, target.ThreadID, req.Message)
 	default:
 		return sendMessageError("unknown platform")
 	}
@@ -478,7 +489,7 @@ func parseSendMessageTarget(raw string) (platform, ref, threadID string, err err
 	parts := strings.Split(raw, ":")
 	platform = strings.ToLower(strings.TrimSpace(parts[0]))
 	switch platform {
-	case "slack", "telegram", "email", "discord":
+	case "slack", "telegram", "email", "discord", "x":
 	default:
 		return "", "", "", fmt.Errorf("Unknown send_message platform %q", platform)
 	}
@@ -524,6 +535,8 @@ func isNativeTarget(platform, ref string) bool {
 		return ref != "" && strings.Contains(ref, "@")
 	case "discord":
 		return ref != ""
+	case "x":
+		return ref == "me"
 	default:
 		return false
 	}
@@ -552,7 +565,7 @@ func NormalizeOutboundChannelTarget(target models.ChannelTarget) (models.Channel
 	target.ThreadID = strings.TrimSpace(target.ThreadID)
 	target.DefaultSubject = strings.TrimSpace(target.DefaultSubject)
 
-	if target.Platform != "slack" && target.Platform != "telegram" && target.Platform != "email" && target.Platform != "discord" {
+	if target.Platform != "slack" && target.Platform != "telegram" && target.Platform != "email" && target.Platform != "discord" && target.Platform != "x" {
 		return target, fmt.Errorf("Unsupported platform")
 	}
 	if target.TargetKind == "" {
@@ -567,6 +580,12 @@ func NormalizeOutboundChannelTarget(target models.ChannelTarget) (models.Channel
 		target.TargetKind = "chat"
 	case "email":
 		target.TargetKind = "email"
+	case "x":
+		target.TargetKind = "account"
+		target.TargetID = strings.ToLower(target.TargetID)
+		if target.ThreadID != "" {
+			return target, fmt.Errorf("X outbound targets do not support thread IDs")
+		}
 	}
 	if target.TargetID == "" {
 		return target, fmt.Errorf("Target ID is required")

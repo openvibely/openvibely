@@ -59,11 +59,16 @@ type Handler struct {
 	fileChangeBroadcaster      *events.FileChangeBroadcaster
 	executionStreamHub         *events.ExecutionStreamHub
 	telegramService            *service.TelegramService
+	xService                   *service.XService
 	emailService               EmailServiceProvider
 	telegramAuthRepo           *repository.TelegramAuthRepo
 	slackAuthRepo              *repository.SlackAuthRepo
 	emailAuthRepo              *repository.EmailAuthRepo
 	discordAuthRepo            *repository.DiscordAuthRepo
+	xAuthRepo                  *repository.XAuthRepo
+	xUserProjectRepo           *repository.XUserProjectRepo
+	xTaskContextRepo           *repository.XTaskContextRepo
+	xInboundReceiptRepo        *repository.XInboundReceiptRepo
 	emailTaskContextRepo       *repository.EmailTaskContextRepo
 	slackTaskContextRepo       *repository.SlackTaskContextRepo
 	discordTaskContextRepo     *repository.DiscordTaskContextRepo
@@ -484,6 +489,17 @@ func (h *Handler) SetDiscordService(svc DiscordServiceProvider) {
 	h.wireChannelIntegrationSummaryDeps(svc)
 }
 
+func (h *Handler) SetXRepositories(auth *repository.XAuthRepo, selections *repository.XUserProjectRepo, contexts *repository.XTaskContextRepo, receipts *repository.XInboundReceiptRepo) {
+	h.xAuthRepo = auth
+	h.xUserProjectRepo = selections
+	h.xTaskContextRepo = contexts
+	h.xInboundReceiptRepo = receipts
+}
+
+func (h *Handler) SetXService(svc *service.XService) {
+	h.xService = svc
+}
+
 func (h *Handler) SetChannelMessageRouter(router *service.ChannelMessageRouter) {
 	h.channelMessageRouter = router
 }
@@ -835,6 +851,11 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.POST("/channels/discord/configure", h.handleDiscordConfigure)
 	e.POST("/channels/discord/remove", h.handleDiscordRemove)
 	e.POST("/channels/discord/test", h.handleDiscordTest)
+	e.POST("/channels/x/configure", h.handleXConfigure)
+	e.POST("/channels/x/test", h.handleXTest)
+	e.POST("/channels/x/remove", h.handleXRemove)
+	e.POST("/channels/x/authorized-users", h.AddXAuthorizedUser)
+	e.DELETE("/channels/x/authorized-users/:id", h.RemoveXAuthorizedUser)
 	e.POST("/channels/email/configure", h.handleEmailConfigure)
 	e.POST("/channels/email/remove", h.handleEmailRemove)
 	e.POST("/channels/email/test", h.handleEmailTest)

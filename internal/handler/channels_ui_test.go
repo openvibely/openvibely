@@ -18,6 +18,49 @@ import (
 	"github.com/openvibely/openvibely/internal/testutil"
 )
 
+func TestChannelsPageRendersConfiguredXWithoutOAuthSecrets(t *testing.T) {
+	h, e, _ := setupTestHandler(t)
+	ctx := context.Background()
+	secrets := map[string]string{
+		service.XSettingConsumerKey:       "browser-x-consumer-key",
+		service.XSettingConsumerSecret:    "browser-x-consumer-secret",
+		service.XSettingAccessToken:       "browser-x-access-token",
+		service.XSettingAccessTokenSecret: "browser-x-access-token-secret",
+	}
+	for key, value := range secrets {
+		if err := h.settingsRepo.Set(ctx, key, value); err != nil {
+			t.Fatalf("save X setting %s: %v", key, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/channels?project_id=default", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, expected := range []string{
+		`data-channel-type="x"`,
+		`id="x_config_modal"`,
+		`hx-post="/channels/x/configure"`,
+		`name="x_consumer_key"`,
+		`name="x_consumer_secret"`,
+		`name="x_access_token"`,
+		`name="x_access_token_secret"`,
+		`type="password"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected configured X page to contain %q", expected)
+		}
+	}
+	for _, secret := range secrets {
+		if strings.Contains(body, secret) {
+			t.Fatalf("configured X page exposed OAuth secret %q", secret)
+		}
+	}
+}
+
 func cardSectionByType(body, channelType string) string {
 	start := strings.Index(body, `data-channel-type="`+channelType+`"`)
 	if start == -1 {

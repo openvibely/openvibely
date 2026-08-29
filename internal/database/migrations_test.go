@@ -1191,8 +1191,8 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 171 {
-		t.Fatalf("max goose version = %d, want 171", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
 	}
 }
 
@@ -1331,8 +1331,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 171 {
-		t.Fatalf("max goose version = %d, want 171", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
 	}
 }
 
@@ -1780,8 +1780,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 171 {
-		t.Fatalf("max goose version = %d, want 171", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
 	}
 }
 
@@ -2116,8 +2116,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 171 {
-		t.Fatalf("max goose version = %d, want 171", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
 	}
 }
 

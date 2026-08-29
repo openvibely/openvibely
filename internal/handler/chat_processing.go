@@ -1367,11 +1367,12 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		task.CreatedVia = models.TaskOriginEmail
 	} else if input.Source == models.TaskOriginDiscord {
 		task.CreatedVia = models.TaskOriginDiscord
+	} else if input.Source == models.TaskOriginX {
+		task.CreatedVia = models.TaskOriginX
 	}
-	exec := &models.Execution{
-		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
-		PromptSent:    input.Content,
+	exec := &models.Execution{AgentConfigID: agent.ID,
+		Status:     models.ExecRunning,
+		PromptSent: input.Content,
 	}
 	var slackContext *models.SlackTaskContext
 	if input.Source == models.TaskOriginSlack {
@@ -1485,6 +1486,8 @@ func surfaceForThreadInput(input models.ThreadInput) chatcontrol.Surface {
 		return chatcontrol.SurfaceEmail
 	case models.TaskOriginDiscord:
 		return chatcontrol.SurfaceDiscord
+	case models.TaskOriginX:
+		return chatcontrol.SurfaceX
 	default:
 		return chatcontrol.SurfaceWeb
 	}
@@ -1565,6 +1568,10 @@ func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyC
 		DiscordThreadID:  input.DiscordThreadID,
 		DiscordMessageID: input.DiscordMessageID,
 		DiscordUserID:    input.DiscordUserID,
+		XConversationID:  input.XConversationID,
+		XReplyToTweetID:  input.XReplyToTweetID,
+		XUserID:          input.XUserID,
+		XUsername:        input.XUsername,
 	}
 }
 
@@ -2168,6 +2175,12 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 		}
 		return
 	}
+	if reply.Source == models.TaskOriginX && reply.XReplyToTweetID != "" {
+		if h.xService != nil {
+			h.xService.SendReply(ctx, reply.XReplyToTweetID, output, errMsg)
+		}
+		return
+	}
 	switch task.CreatedVia {
 	case models.TaskOriginTelegram:
 		if h.telegramService == nil {
@@ -2198,6 +2211,10 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 			h.emailService.SendChatResponse(ctx, *task, output, errMsg)
 		} else {
 			h.emailService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
+		}
+	case models.TaskOriginX:
+		if h.xService != nil {
+			h.xService.SendChatResponse(ctx, *task, output, errMsg)
 		}
 	case models.TaskOriginDiscord:
 		if task.Category == models.CategoryChat {

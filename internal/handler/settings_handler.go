@@ -105,8 +105,13 @@ func (h *Handler) handleChannels(c echo.Context) error {
 			service.SlackSettingSendResponses,
 			service.DiscordSettingBotToken,
 			service.DiscordSettingSendResponses,
-			service.EmailSettingProvider,
-			service.EmailSettingAddress,
+			service.XSettingConsumerKey,
+			service.XSettingConsumerSecret,
+			service.XSettingAccessToken,
+			service.XSettingAccessTokenSecret,
+			service.XSettingPollIntervalSeconds,
+			service.XSettingSendResponses,
+			service.EmailSettingProvider, service.EmailSettingAddress,
 			service.EmailSettingPassword,
 			service.EmailSettingIMAPHost,
 			service.EmailSettingIMAPPort,
@@ -152,6 +157,11 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		discordAuthorizedUsers, _ = h.discordAuthRepo.ListByProject(ctx, resolvedProjectID)
 	}
 
+	var xAuthorizedUsers []models.XAuthorizedUser
+	if h.xAuthRepo != nil && resolvedProjectID != "" {
+		xAuthorizedUsers, _ = h.xAuthRepo.ListByProject(ctx, resolvedProjectID)
+	}
+
 	// Load Telegram settings (default: enabled)
 	sendResponses := true
 	richMessagesV2 := true
@@ -187,6 +197,21 @@ func (h *Handler) handleChannels(c echo.Context) error {
 	discordStatus := service.DiscordConnectionStatus{SendResponses: true}
 	discordBotToken := ""
 	discordSendResponses := true
+	xStatus := service.XConnectionStatus{}
+	xPollIntervalSeconds := strings.TrimSpace(setting(service.XSettingPollIntervalSeconds))
+	if xPollIntervalSeconds == "" {
+		xPollIntervalSeconds = "30"
+	}
+	xSendResponses := !strings.EqualFold(strings.TrimSpace(setting(service.XSettingSendResponses)), "false")
+	xHasConsumerKey := strings.TrimSpace(setting(service.XSettingConsumerKey)) != ""
+	xHasConsumerSecret := strings.TrimSpace(setting(service.XSettingConsumerSecret)) != ""
+	xHasAccessToken := strings.TrimSpace(setting(service.XSettingAccessToken)) != ""
+	xHasAccessTokenSecret := strings.TrimSpace(setting(service.XSettingAccessTokenSecret)) != ""
+	if h.xService != nil {
+		xStatus = h.xService.Status()
+	} else {
+		xStatus.Configured = xHasConsumerKey && xHasConsumerSecret && xHasAccessToken && xHasAccessTokenSecret
+	}
 	emailStatus := service.EmailConnectionStatus{Provider: service.EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
 	emailPasswordValue := ""
 	emailHasPassword := false
@@ -291,6 +316,7 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		slackHasClientID || slackHasClientSecret || slackHasAppToken || slackHasBotToken || slackHasOAuthBotToken
 	hasEmailChannel := emailStatus.Configured || emailStatus.Running || strings.TrimSpace(emailStatus.Address) != "" || strings.TrimSpace(emailStatus.IMAPHost) != "" || strings.TrimSpace(emailStatus.SMTPHost) != "" || emailHasPassword
 	hasDiscordChannel := discordStatus.Configured || discordStatus.Connected || strings.TrimSpace(discordBotToken) != ""
+	hasXChannel := xStatus.Configured || xStatus.Connected || xHasConsumerKey || xHasConsumerSecret || xHasAccessToken || xHasAccessTokenSecret
 
 	var channelTargets []models.ChannelTarget
 	sendMessageExplicitTargets := false
@@ -323,6 +349,14 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		AuthorizedUsers:              authorizedUsers,
 		SlackAuthorizedUsers:         slackAuthorizedUsers,
 		DiscordAuthorizedUsers:       discordAuthorizedUsers,
+		XAuthorizedUsers:             xAuthorizedUsers,
+		XStatus:                      xStatus,
+		XHasConsumerKey:              xHasConsumerKey,
+		XHasConsumerSecret:           xHasConsumerSecret,
+		XHasAccessToken:              xHasAccessToken,
+		XHasAccessTokenSecret:        xHasAccessTokenSecret,
+		XPollIntervalSeconds:         xPollIntervalSeconds,
+		XSendResponses:               xSendResponses,
 		CurrentProjectID:             resolvedProjectID,
 		SendResponses:                sendResponses,
 		RichMessagesV2:               richMessagesV2,
@@ -360,12 +394,12 @@ func (h *Handler) handleChannels(c echo.Context) error {
 		HasGitHubChannel:             hasGitHubChannel,
 		HasSlackChannel:              hasSlackChannel,
 		HasDiscordChannel:            hasDiscordChannel,
-		HasEmailChannel:              hasEmailChannel,
-		Webhooks:                     webhooks,
-		AgentPickerOptions:           agentPickerOptions,
-		WebhookAgents:                webhookAgents,
-		ChannelTargets:               channelTargets,
-		SendMessageExplicitTargets:   sendMessageExplicitTargets,
+		HasXChannel:                  hasXChannel,
+		HasEmailChannel:              hasEmailChannel, Webhooks: webhooks,
+		AgentPickerOptions:         agentPickerOptions,
+		WebhookAgents:              webhookAgents,
+		ChannelTargets:             channelTargets,
+		SendMessageExplicitTargets: sendMessageExplicitTargets,
 	}
 
 	if isHTMX(c) {

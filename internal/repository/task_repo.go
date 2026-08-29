@@ -1996,6 +1996,15 @@ func (r *TaskRepo) UpdateDiscordOrigin(ctx context.Context, id string) error {
 	return nil
 }
 
+// UpdateXOrigin marks a task as created through X.
+func (r *TaskRepo) UpdateXOrigin(ctx context.Context, id string) error {
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE tasks SET created_via = 'x', updated_at = datetime('now') WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("updating X origin: %w", err)
+	}
+	return nil
+}
+
 func (r *TaskRepo) CountRunningByProject(ctx context.Context, projectID string) (int, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx,

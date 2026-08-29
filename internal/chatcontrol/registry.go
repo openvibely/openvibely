@@ -59,10 +59,11 @@ const (
 	SurfaceSlack    Surface = "slack"
 	SurfaceEmail    Surface = "email"
 	SurfaceDiscord  Surface = "discord"
+	SurfaceX        Surface = "x"
 )
 
 // AllSurfaces is the full set of supported surfaces.
-var AllSurfaces = []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord}
+var AllSurfaces = []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord, SurfaceX, SurfaceX}
 
 // AccessLevel classifies read vs write.
 type AccessLevel string
@@ -1026,7 +1027,7 @@ var registry = []ActionDef{
 // helpers
 
 func allSurfaces() []Surface {
-	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord}
+	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord, SurfaceX}
 }
 
 func bothModes() []models.ChatMode {
@@ -1038,7 +1039,7 @@ func webAPISurfaces() []Surface {
 }
 
 func chatSurfacesExceptEmail() []Surface {
-	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceDiscord}
+	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceDiscord, SurfaceX}
 }
 
 // ---- Public query API ----

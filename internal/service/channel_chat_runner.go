@@ -62,6 +62,10 @@ type ChannelReplyContext struct {
 	DiscordThreadID  string
 	DiscordMessageID string
 	DiscordUserID    string
+	XConversationID  string
+	XReplyToTweetID  string
+	XUserID          string
+	XUsername        string
 }
 
 type ChannelTaskRunner func(context.Context, ChannelTaskRunRequest)

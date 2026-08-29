@@ -632,3 +632,31 @@ func TestChannelMessageRouter_AuditRowIncludesTargetKind(t *testing.T) {
 	require.True(t, sawChannel, "expected channel send audit row")
 	require.True(t, sawUser, "expected user DM send audit row")
 }
+
+type fakeXOutbound struct{ target, thread, text string }
+
+func (f *fakeXOutbound) SendOutboundMessage(_ context.Context, target, thread, text string) SendMessageResult {
+	f.target, f.thread, f.text = target, thread, text
+	return SendMessageResult{OK: true, Platform: "x", Target: "x:" + target, MessageID: "tweet-1"}
+}
+
+func TestChannelMessageRouterXUsesSavedAccountTargetAndAudit(t *testing.T) {
+	ctx, targetRepo, _, _, _, _, _, project, router, _, _, _, _ := setupChannelMessageRouterTest(t)
+	sender := &fakeXOutbound{}
+	router.SetXService(sender)
+	target, err := NormalizeOutboundChannelTarget(models.ChannelTarget{ID: "x-home", ProjectID: project.ID, Platform: "x", TargetID: "me", Home: true})
+	require.NoError(t, err)
+	require.Equal(t, "account", target.TargetKind)
+	require.NoError(t, targetRepo.Upsert(ctx, target))
+	result := router.Send(ctx, project.ID, SendMessageRequest{Target: "x", Message: "release update"})
+	require.True(t, result.OK)
+	require.Equal(t, "me", sender.target)
+	require.Equal(t, "release update", sender.text)
+	sends, err := targetRepo.ListSendsByProject(ctx, project.ID)
+	require.NoError(t, err)
+	require.Len(t, sends, 1)
+	require.Equal(t, "x", sends[0].Platform)
+	require.Equal(t, "account", sends[0].TargetKind)
+	bad := router.Send(ctx, project.ID, SendMessageRequest{Target: "x:not-me", Message: "blocked"})
+	require.False(t, bad.OK)
+}

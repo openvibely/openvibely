@@ -57,6 +57,7 @@ OpenVibely is organized around a selected project. The sidebar project selector 
 | Slack | [Slack Channels Setup](./slack-channels-setup.md) |
 | Discord | [Discord Channels Setup](./discord-channels-setup.md) |
 | Telegram | [Telegram Channels Setup](./telegram-channels-setup.md) |
+| X (formerly Twitter) | [X Channel Setup](./x-channel-setup.md) |
 | Email | [Email Channel Setup](./email-channels-setup.md) |
 | GitHub | [GitHub Channels Setup](./github-channels-setup.md) |
 | GitHub autonomous SDLC | [GitHub Autonomous SDLC User Guide](./github-autonomous-sdlc-user-guide.md) |

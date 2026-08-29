@@ -1,0 +1,450 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"github.com/openvibely/openvibely/internal/applog"
+	"github.com/openvibely/openvibely/internal/chatcontrol"
+	"github.com/openvibely/openvibely/internal/events"
+	llmcontracts "github.com/openvibely/openvibely/internal/llm/contracts"
+	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/repository"
+	"github.com/openvibely/openvibely/internal/util"
+)
+
+const (
+	XSettingConsumerKey         = "x_consumer_key"
+	XSettingConsumerSecret      = "x_consumer_secret"
+	XSettingAccessToken         = "x_access_token"
+	XSettingAccessTokenSecret   = "x_access_token_secret"
+	XSettingPollIntervalSeconds = "x_poll_interval_seconds"
+	XSettingSendResponses       = "x_send_responses"
+	XSettingSinceID             = "x_mentions_since_id"
+	xProcessTimeout             = 5 * time.Minute
+	xReceiptLease               = 10 * time.Minute
+)
+
+type XConnectionStatus struct {
+	Configured bool
+	Connected  bool
+	Running    bool
+	Username   string
+	LastError  string
+}
+type xAPI interface {
+	Me(context.Context) (XUser, error)
+	Mentions(context.Context, string, string, string) (xMentionsResponse, error)
+	Post(context.Context, string, string) (string, error)
+}
+
+type XService struct {
+	mu                       sync.RWMutex
+	api                      xAPI
+	credentials              XCredentials
+	settingsRepo             *repository.SettingsRepo
+	projectRepo              *repository.ProjectRepo
+	llmConfigRepo            *repository.LLMConfigRepo
+	taskRepo                 *repository.TaskRepo
+	execRepo                 *repository.ExecutionRepo
+	scheduleRepo             *repository.ScheduleRepo
+	threadInputRepo          *repository.ThreadInputRepo
+	authRepo                 *repository.XAuthRepo
+	userProjectRepo          *repository.XUserProjectRepo
+	taskContextRepo          *repository.XTaskContextRepo
+	receiptRepo              *repository.XInboundReceiptRepo
+	taskSvc                  *TaskService
+	customPersonalityRepo    *repository.CustomPersonalityRepo
+	agentRepo                *repository.AgentRepo
+	chatBroadcaster          *events.ChatBroadcaster
+	executionStreamHub       *events.ExecutionStreamHub
+	channelChatRunner        ChannelChatRunner
+	channelTaskRunner        ChannelTaskRunner
+	queuedTurnPromoter       func(string)
+	queuedTaskThreadPromoter func(string)
+	channelMessageRouter     *ChannelMessageRouter
+	ctx                      context.Context
+	cancel                   context.CancelFunc
+	runDone                  chan struct{}
+	running                  bool
+	me                       XUser
+	lastError                string
+	pollInterval             time.Duration
+	now                      func() time.Time
+}
+
+func NewXService(credentials XCredentials, settings *repository.SettingsRepo, projects *repository.ProjectRepo, configs *repository.LLMConfigRepo, tasks *repository.TaskRepo, execs *repository.ExecutionRepo, schedules *repository.ScheduleRepo, taskSvc *TaskService) *XService {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &XService{api: NewXAPIClient(credentials), credentials: credentials, settingsRepo: settings, projectRepo: projects, llmConfigRepo: configs, taskRepo: tasks, execRepo: execs, scheduleRepo: schedules, taskSvc: taskSvc, ctx: ctx, cancel: cancel, pollInterval: 30 * time.Second, now: time.Now}
+}
+func (s *XService) SetRepositories(auth *repository.XAuthRepo, selections *repository.XUserProjectRepo, contexts *repository.XTaskContextRepo, receipts *repository.XInboundReceiptRepo, inputs *repository.ThreadInputRepo) {
+	s.authRepo = auth
+	s.userProjectRepo = selections
+	s.taskContextRepo = contexts
+	s.receiptRepo = receipts
+	s.threadInputRepo = inputs
+}
+func (s *XService) SetRuntime(agent *repository.AgentRepo, personalities *repository.CustomPersonalityRepo, broadcaster *events.ChatBroadcaster, hub *events.ExecutionStreamHub, chatRunner ChannelChatRunner, taskRunner ChannelTaskRunner, chatPromoter, taskPromoter func(string), router *ChannelMessageRouter) {
+	s.agentRepo = agent
+	s.customPersonalityRepo = personalities
+	s.chatBroadcaster = broadcaster
+	s.executionStreamHub = hub
+	s.channelChatRunner = chatRunner
+	s.channelTaskRunner = taskRunner
+	s.queuedTurnPromoter = chatPromoter
+	s.queuedTaskThreadPromoter = taskPromoter
+	s.channelMessageRouter = router
+}
+func (s *XService) setAPI(api xAPI) { s.api = api }
+
+func (s *XService) Start() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running {
+		return nil
+	}
+	if !s.credentials.Ready() {
+		return fmt.Errorf("X OAuth 1.0a credentials are incomplete")
+	}
+	me, err := s.api.Me(s.ctx)
+	if err != nil {
+		s.lastError = err.Error()
+		return err
+	}
+	s.me = me
+	s.lastError = ""
+	s.running = true
+	s.runDone = make(chan struct{})
+	go s.poll(s.ctx, s.runDone)
+	return nil
+}
+func (s *XService) Stop() {
+	s.mu.Lock()
+	if !s.running {
+		s.mu.Unlock()
+		return
+	}
+	s.cancel()
+	done := s.runDone
+	s.running = false
+	s.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+}
+func (s *XService) Status() XConnectionStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return XConnectionStatus{Configured: s.credentials.Ready(), Connected: s.me.ID != "", Running: s.running, Username: s.me.Username, LastError: s.lastError}
+}
+func (s *XService) TestConnection(ctx context.Context) (XUser, error) { return s.api.Me(ctx) }
+func (s *XService) SetPollInterval(d time.Duration) {
+	if d >= 15*time.Second {
+		s.pollInterval = d
+	}
+}
+
+func (s *XService) poll(ctx context.Context, done chan struct{}) {
+	defer close(done)
+	for {
+		if err := s.pollOnce(ctx); err != nil && ctx.Err() == nil {
+			s.mu.Lock()
+			s.lastError = err.Error()
+			s.mu.Unlock()
+			applog.Infof("[x] mention polling failed: %v", err)
+		}
+		timer := time.NewTimer(s.pollInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+}
+func (s *XService) pollOnce(ctx context.Context) error {
+	if s.receiptRepo == nil || s.authRepo == nil || s.projectRepo == nil {
+		return fmt.Errorf("X channel persistence is not configured")
+	}
+	sinceID := ""
+	if s.settingsRepo != nil {
+		sinceID, _ = s.settingsRepo.Get(ctx, XSettingSinceID)
+	}
+	pagination := ""
+	newest := ""
+	var mentions []XTweet
+	users := map[string]XUser{}
+	for {
+		page, err := s.api.Mentions(ctx, s.me.ID, sinceID, pagination)
+		if err != nil {
+			return err
+		}
+		if newest == "" {
+			newest = page.Meta.NewestID
+		}
+		mentions = append(mentions, page.Data...)
+		for _, u := range page.Includes.Users {
+			users[u.ID] = u
+		}
+		pagination = page.Meta.NextToken
+		if pagination == "" {
+			break
+		}
+	}
+	sort.SliceStable(mentions, func(i, j int) bool { return xTweetIDLess(mentions[i].ID, mentions[j].ID) })
+	for _, tweet := range mentions {
+		if tweet.AuthorID == s.me.ID {
+			continue
+		}
+		user := users[tweet.AuthorID]
+		if ok, err := s.processMention(ctx, tweet, user); err != nil {
+			return err
+		} else if !ok {
+			return fmt.Errorf("X mention %s was not durably handed off", tweet.ID)
+		}
+	}
+	if newest != "" && s.settingsRepo != nil {
+		if err := s.settingsRepo.Set(ctx, XSettingSinceID, newest); err != nil {
+			return fmt.Errorf("save X mention cursor: %w", err)
+		}
+	}
+	return nil
+}
+func xTweetIDLess(a, b string) bool {
+	a = strings.TrimLeft(a, "0")
+	b = strings.TrimLeft(b, "0")
+	if len(a) != len(b) {
+		return len(a) < len(b)
+	}
+	return a < b
+}
+
+func (s *XService) processMention(ctx context.Context, tweet XTweet, user XUser) (bool, error) {
+	projectID, err := s.projectForUser(ctx, user.ID)
+	if err != nil {
+		return false, err
+	}
+	if projectID == "" {
+		applog.Infof("[x] ignored unauthorized user id=%s", user.ID)
+		return true, nil
+	}
+	claimed, err := s.receiptRepo.Claim(ctx, tweet.ID, projectID, s.now(), xReceiptLease)
+	if err != nil || !claimed {
+		return !claimed, err
+	}
+	text := strings.TrimSpace(strings.ReplaceAll(tweet.Text, "@"+s.me.Username, ""))
+	if text == "" {
+		_ = s.receiptRepo.Release(context.Background(), tweet.ID)
+		return true, nil
+	}
+	handed, taskID := s.ingestMention(ctx, projectID, tweet, user, text)
+	if !handed {
+		_ = s.receiptRepo.Release(context.Background(), tweet.ID)
+		return false, nil
+	}
+	if err := s.receiptRepo.Complete(context.Background(), tweet.ID, taskID); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+func (s *XService) projectForUser(ctx context.Context, userID string) (string, error) {
+	if s.userProjectRepo != nil {
+		if id, err := s.userProjectRepo.GetUserProject(ctx, userID); err != nil {
+			return "", err
+		} else if id != "" {
+			ok, err := s.authRepo.IsAuthorized(ctx, id, userID)
+			if err != nil {
+				return "", err
+			}
+			if ok {
+				return id, nil
+			}
+		}
+	}
+	projects, err := s.projectRepo.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range projects {
+		ok, err := s.authRepo.IsAuthorized(ctx, p.ID, userID)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return p.ID, nil
+		}
+	}
+	return "", nil
+}
+func (s *XService) ingestMention(ctx context.Context, projectID string, tweet XTweet, user XUser, text string) (bool, string) {
+	ctx, cancel := context.WithTimeout(ctx, xProcessTimeout)
+	defer cancel()
+	handed := false
+	taskID := ""
+	conversationID := tweet.ConversationID
+	if conversationID == "" {
+		conversationID = tweet.ID
+	}
+	runChannelChatIngress(ctx, channelChatIngressOptions{Platform: "x", ProjectID: projectID, Message: text, Source: models.TaskOriginX, Surface: chatcontrol.SurfaceX, Start: s.now(), TaskRepo: s.taskRepo, ExecRepo: s.execRepo, ThreadInputRepo: s.threadInputRepo, LLMConfigRepo: s.llmConfigRepo, ScheduleRepo: s.scheduleRepo, AgentRepo: s.agentRepo, SettingsRepo: s.settingsRepo, CustomPersonalityRepo: s.customPersonalityRepo, ProjectRepo: s.projectRepo, TaskSvc: s.taskSvc, ChatBroadcaster: s.chatBroadcaster, FindActiveExecution: s.execRepo.FindLatestActiveChatExecution, NewQueuedInput: func() *models.ThreadInput {
+		return &models.ThreadInput{XConversationID: conversationID, XReplyToTweetID: tweet.ID, XUserID: user.ID, XUsername: user.Username}
+	}, OnDurableHandoff: func() { handed = true }, FirstTurn: channelChatIngressFirstTurnOptions{Task: &models.Task{Title: fmt.Sprintf("X @%s: %s", user.Username, util.Truncate(text, 48)), CreatedVia: models.TaskOriginX}, RuntimeToolsForTask: func(string) *llmcontracts.RuntimeTools {
+		return s.runtimeTools(taskID, projectID, user.ID, conversationID, tweet.ID, user.Username)
+	}, ReplyContext: ChannelReplyContext{Source: models.TaskOriginX, XConversationID: conversationID, XReplyToTweetID: tweet.ID, XUserID: user.ID, XUsername: user.Username}, ChannelChatRunner: s.channelChatRunner, CompleteExecution: channelCompletionFunc("x", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter), CreateTaskContext: func(ctx context.Context, id string) error {
+		taskID = id
+		if s.taskContextRepo == nil {
+			return fmt.Errorf("X task context repository is not configured")
+		}
+		return s.taskContextRepo.Upsert(ctx, &models.XTaskContext{TaskID: id, ProjectID: projectID, ConversationID: conversationID, ReplyToTweetID: tweet.ID, XUserID: user.ID, Username: user.Username})
+	}, ListChatHistory: func(ctx context.Context, pid string) ([]models.Execution, error) {
+		return s.execRepo.ListChatHistory(ctx, pid, 50)
+	}, FilterChatHistory: filterXChatHistory}})
+	return handed, taskID
+}
+func filterXChatHistory(execs []models.Execution, current string) []models.Execution {
+	out := make([]models.Execution, 0, len(execs))
+	for _, e := range execs {
+		if e.ID != current && e.Status != models.ExecRunning {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func (s *XService) runtimeTools(callerTaskID, projectID, userID, conversationID, replyToTweetID, username string) *llmcontracts.RuntimeTools {
+	handlers := map[string]chatcontrol.RuntimeActionHandler{}
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelTaskActionHandlers(channelTaskActionHandlerOptions{
+		ProjectID: projectID,
+		TaskSvc:   s.taskSvc, TaskRepo: s.taskRepo, ExecRepo: s.execRepo,
+		ThreadInputRepo: s.threadInputRepo, ExecutionStreamHub: s.executionStreamHub,
+		LLMConfigRepo: s.llmConfigRepo, SwarmSvc: swarmFromTaskService(s.taskSvc),
+		OnTasksCreated: func(ctx context.Context, _ []TaskCreationRequest, tasks []models.Task) error {
+			if s.taskContextRepo == nil {
+				return fmt.Errorf("X task context repository is not configured")
+			}
+			for _, task := range tasks {
+				if err := s.taskRepo.UpdateXOrigin(ctx, task.ID); err != nil {
+					return err
+				}
+				if err := s.taskContextRepo.Upsert(ctx, &models.XTaskContext{TaskID: task.ID, ProjectID: projectID, ConversationID: conversationID, ReplyToTweetID: replyToTweetID, XUserID: userID, Username: username}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}))
+	if s.taskSvc != nil {
+		mergeChannelRuntimeActionHandlers(handlers, buildChannelGoalActionHandlers(channelGoalActionHandlerOptions{ProjectID: projectID, TaskRepo: s.taskRepo, TaskGoalSvc: s.taskSvc.goalSvc}))
+	}
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelThreadActionHandlers(channelThreadActionHandlerOptions{
+		Platform: "x", ProjectID: projectID, Surface: chatcontrol.SurfaceX, Source: models.TaskOriginX, ActorID: userID,
+		TaskRepo: s.taskRepo, ExecRepo: s.execRepo, ThreadInputRepo: s.threadInputRepo, LLMConfigRepo: s.llmConfigRepo,
+		SettingsRepo: s.settingsRepo, CustomPersonalityRepo: s.customPersonalityRepo, ChannelTaskRunner: s.channelTaskRunner,
+		QueuedTaskThreadPromoter: s.queuedTaskThreadPromoter,
+		CompleteExecution:        channelCompletionFunc("x", s.execRepo, s.taskRepo, s.executionStreamHub, s.queuedTurnPromoter),
+		ChannelMessageRouter:     s.channelMessageRouter,
+		ReplyContext:             ChannelReplyContext{Source: models.TaskOriginX, XConversationID: conversationID, XReplyToTweetID: replyToTweetID, XUserID: userID, XUsername: username},
+		NewQueuedInput: func(_ *models.Task, _, _ string) *models.ThreadInput {
+			return &models.ThreadInput{XConversationID: conversationID, XReplyToTweetID: replyToTweetID, XUserID: userID, XUsername: username}
+		},
+		FilterHistory: filterXChatHistory,
+	}))
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelUtilityActionHandlers(channelUtilityActionHandlerOptions{
+		ProjectID: projectID, CallerTaskID: callerTaskID, TaskRepo: s.taskRepo, ScheduleRepo: s.scheduleRepo,
+		WorkerSvc: workerFromTaskService(s.taskSvc), LLMConfigRepo: s.llmConfigRepo, AgentRepo: s.agentRepo,
+		SettingsRepo: s.settingsRepo, CustomPersonalityRepo: s.customPersonalityRepo, ProjectRepo: s.projectRepo,
+		UsageAnalyticsSvc: usageAnalyticsServiceFromRepos(nil, s.execRepo, s.llmConfigRepo), XStatus: s.Status, XAuthRepo: s.authRepo,
+		ChannelTargets:        channelTargetsFromRouter(s.channelMessageRouter),
+		UnavailableAgentsText: "Agent listing is currently unavailable on X (no agent repository configured on this surface).",
+	}))
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelProjectActionHandlers(channelProjectActionHandlerOptions{
+		ProjectID: projectID, ProjectRepo: s.projectRepo, LLMConfigRepo: s.llmConfigRepo, WorkerSvc: workerFromTaskService(s.taskSvc),
+		SwitchProject: func(ctx context.Context, project *models.Project) error {
+			if project == nil || s.authRepo == nil || s.userProjectRepo == nil {
+				return fmt.Errorf("X project switching is unavailable")
+			}
+			allowed, err := s.authRepo.IsAuthorized(ctx, project.ID, userID)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return fmt.Errorf("X user is not authorized for project %s", project.Name)
+			}
+			return s.userProjectRepo.SetUserProject(ctx, userID, project.ID)
+		},
+	}))
+	mergeChannelRuntimeActionHandlers(handlers, buildChannelContextModeActionHandlers(channelContextModeActionHandlerOptions{ChannelDisplayName: "X", ProjectID: projectID, ProjectRepo: s.projectRepo}))
+
+	defs := make([]llmcontracts.RuntimeToolDefinition, 0, len(handlers))
+	for _, def := range actionToolDefinitions(chatcontrol.SurfaceX, true) {
+		if _, ok := handlers[def.Name]; ok {
+			defs = append(defs, def)
+		}
+	}
+	return &llmcontracts.RuntimeTools{Definitions: defs, Executor: func(ctx context.Context, name string, input json.RawMessage) (string, bool, bool, error) {
+		handler, ok := handlers[name]
+		if !ok {
+			return "", false, false, nil
+		}
+		out, err := handler(ctx, input)
+		return out, true, err != nil, err
+	}}
+}
+
+func (s *XService) SendOutboundMessage(ctx context.Context, targetID, threadID, text string) SendMessageResult {
+	if threadID != "" {
+		return sendMessageError("X outbound targets do not support thread IDs")
+	}
+	if targetID != "me" {
+		return sendMessageError("X outbound targets only support the authenticated account target x:me")
+	}
+	if utf8.RuneCountInString(text) > 280 {
+		return sendMessageError("X posts are limited to 280 characters")
+	}
+	id, err := s.api.Post(ctx, text, "")
+	if err != nil {
+		return sendMessageError(err.Error())
+	}
+	return SendMessageResult{OK: true, Platform: "x", Target: "x:" + targetID, MessageID: id}
+}
+func (s *XService) SendReply(ctx context.Context, replyTo, output, errMsg string) {
+	if s.settingsRepo != nil {
+		enabled, _ := s.settingsRepo.Get(ctx, XSettingSendResponses)
+		if strings.EqualFold(strings.TrimSpace(enabled), "false") {
+			return
+		}
+	}
+	text := strings.TrimSpace(output)
+	if errMsg != "" {
+		text = "Error: " + strings.TrimSpace(errMsg)
+	}
+	text = truncateXPost(text)
+	if text == "" {
+		return
+	}
+	if _, err := s.api.Post(ctx, text, replyTo); err != nil {
+		applog.Infof("[x] failed to send reply: %v", err)
+	}
+}
+func (s *XService) SendChatResponse(ctx context.Context, task models.Task, output, errMsg string) {
+	if s.taskContextRepo == nil {
+		return
+	}
+	meta, err := s.taskContextRepo.GetByTaskID(ctx, task.ID)
+	if err != nil || meta == nil {
+		return
+	}
+	s.SendReply(ctx, meta.ReplyToTweetID, output, errMsg)
+}
+func truncateXPost(v string) string {
+	r := []rune(strings.TrimSpace(v))
+	if len(r) <= 280 {
+		return string(r)
+	}
+	return string(r[:279]) + "…"
+}
