@@ -71,7 +71,12 @@ templ TasksContent(project *models.Project, tasks []models.Task, agents []models
 				var confirmButton = modal && modal.querySelector('.modal-action button.btn-error');
 				deleteAllTasksRequestInFlight = true;
 				if (confirmButton) confirmButton.disabled = true;
-				if (modal && modal.open) modal.close();
+				if (modal && modal.open) {
+					modal.__openVibelyDestructiveTrigger = null;
+					modal.close();
+					var restoredFocus = document.activeElement;
+					if (restoredFocus && restoredFocus.closest && restoredFocus.closest('.dropdown')) restoredFocus.blur();
+				}
 				htmx.ajax('DELETE', requestURL, {
 					target: '#kanban-board',
 					swap: 'outerHTML'

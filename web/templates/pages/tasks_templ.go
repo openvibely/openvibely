@@ -159,7 +159,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, " <script>\n\t\t\tvar deleteAllTasksURL = '';\n\t\t\tvar deleteAllTasksRequestInFlight = false;\n\n\t\t\tfunction openDeleteAllTasksConfirm(button) {\n\t\t\t\tif (!button || deleteAllTasksRequestInFlight) return;\n\t\t\t\tvar modal = document.getElementById('delete_all_tasks_confirm_modal');\n\t\t\t\tif (!modal || modal.open) return;\n\t\t\t\tvar category = button.dataset.deleteAllTasksCategory || '';\n\t\t\t\tvar projectID = button.dataset.projectId || '';\n\t\t\t\tvar displayName = button.dataset.deleteAllTasksName || '';\n\t\t\t\tif ((category !== 'completed' && category !== 'backlog') || !projectID || !displayName) return;\n\t\t\t\tdeleteAllTasksURL = '/tasks/' + category + '?project_id=' + encodeURIComponent(projectID);\n\t\t\t\tbutton.focus({preventScroll: true});\n\t\t\t\twindow.openDestructiveConfirmDialog('delete_all_tasks_confirm_modal', 'delete_all_tasks_confirm_name', displayName);\n\t\t\t}\n\n\t\t\tfunction confirmDeleteAllTasks() {\n\t\t\t\tif (deleteAllTasksRequestInFlight || !deleteAllTasksURL) return;\n\t\t\t\tvar requestURL = deleteAllTasksURL;\n\t\t\t\tvar modal = document.getElementById('delete_all_tasks_confirm_modal');\n\t\t\t\tvar confirmButton = modal && modal.querySelector('.modal-action button.btn-error');\n\t\t\t\tdeleteAllTasksRequestInFlight = true;\n\t\t\t\tif (confirmButton) confirmButton.disabled = true;\n\t\t\t\tif (modal && modal.open) modal.close();\n\t\t\t\thtmx.ajax('DELETE', requestURL, {\n\t\t\t\t\ttarget: '#kanban-board',\n\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tif (!window._tasksDeleteAllRequestHandlerAttached) {\n\t\t\t\twindow._tasksDeleteAllRequestHandlerAttached = true;\n\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\tvar detail = event && event.detail;\n\t\t\t\t\tvar requestConfig = detail && detail.requestConfig;\n\t\t\t\t\tif (!requestConfig || requestConfig.path !== deleteAllTasksURL) return;\n\t\t\t\t\tdeleteAllTasksRequestInFlight = false;\n\t\t\t\t\tvar modal = document.getElementById('delete_all_tasks_confirm_modal');\n\t\t\t\t\tvar confirmButton = modal && modal.querySelector('.modal-action button.btn-error');\n\t\t\t\t\tif (confirmButton) confirmButton.disabled = false;\n\t\t\t\t\tvar status = detail.xhr && detail.xhr.status;\n\t\t\t\t\tif (status >= 200 && status < 300) deleteAllTasksURL = '';\n\t\t\t\t});\n\t\t\t}\n\t\t</script>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, " <script>\n\t\t\tvar deleteAllTasksURL = '';\n\t\t\tvar deleteAllTasksRequestInFlight = false;\n\n\t\t\tfunction openDeleteAllTasksConfirm(button) {\n\t\t\t\tif (!button || deleteAllTasksRequestInFlight) return;\n\t\t\t\tvar modal = document.getElementById('delete_all_tasks_confirm_modal');\n\t\t\t\tif (!modal || modal.open) return;\n\t\t\t\tvar category = button.dataset.deleteAllTasksCategory || '';\n\t\t\t\tvar projectID = button.dataset.projectId || '';\n\t\t\t\tvar displayName = button.dataset.deleteAllTasksName || '';\n\t\t\t\tif ((category !== 'completed' && category !== 'backlog') || !projectID || !displayName) return;\n\t\t\t\tdeleteAllTasksURL = '/tasks/' + category + '?project_id=' + encodeURIComponent(projectID);\n\t\t\t\tbutton.focus({preventScroll: true});\n\t\t\t\twindow.openDestructiveConfirmDialog('delete_all_tasks_confirm_modal', 'delete_all_tasks_confirm_name', displayName);\n\t\t\t}\n\n\t\t\tfunction confirmDeleteAllTasks() {\n\t\t\t\tif (deleteAllTasksRequestInFlight || !deleteAllTasksURL) return;\n\t\t\t\tvar requestURL = deleteAllTasksURL;\n\t\t\t\tvar modal = document.getElementById('delete_all_tasks_confirm_modal');\n\t\t\t\tvar confirmButton = modal && modal.querySelector('.modal-action button.btn-error');\n\t\t\t\tdeleteAllTasksRequestInFlight = true;\n\t\t\t\tif (confirmButton) confirmButton.disabled = true;\n\t\t\t\tif (modal && modal.open) {\n\t\t\t\t\tmodal.__openVibelyDestructiveTrigger = null;\n\t\t\t\t\tmodal.close();\n\t\t\t\t\tvar restoredFocus = document.activeElement;\n\t\t\t\t\tif (restoredFocus && restoredFocus.closest && restoredFocus.closest('.dropdown')) restoredFocus.blur();\n\t\t\t\t}\n\t\t\t\thtmx.ajax('DELETE', requestURL, {\n\t\t\t\t\ttarget: '#kanban-board',\n\t\t\t\t\tswap: 'outerHTML'\n\t\t\t\t});\n\t\t\t}\n\n\t\t\tif (!window._tasksDeleteAllRequestHandlerAttached) {\n\t\t\t\twindow._tasksDeleteAllRequestHandlerAttached = true;\n\t\t\t\tdocument.body.addEventListener('htmx:afterRequest', function(event) {\n\t\t\t\t\tvar detail = event && event.detail;\n\t\t\t\t\tvar requestConfig = detail && detail.requestConfig;\n\t\t\t\t\tif (!requestConfig || requestConfig.path !== deleteAllTasksURL) return;\n\t\t\t\t\tdeleteAllTasksRequestInFlight = false;\n\t\t\t\t\tvar modal = document.getElementById('delete_all_tasks_confirm_modal');\n\t\t\t\t\tvar confirmButton = modal && modal.querySelector('.modal-action button.btn-error');\n\t\t\t\t\tif (confirmButton) confirmButton.disabled = false;\n\t\t\t\t\tvar status = detail.xhr && detail.xhr.status;\n\t\t\t\t\tif (status >= 200 && status < 300) deleteAllTasksURL = '';\n\t\t\t\t});\n\t\t\t}\n\t\t</script>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -184,7 +184,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.ResolveAttributeValue(fmt.Sprintf("/tasks?project_id=%s", project.ID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 106, Col: 63}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 111, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var6)
 			if templ_7745c5c3_Err != nil {
@@ -202,7 +202,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(agent.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 133, Col: 33}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 138, Col: 33}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
 				if templ_7745c5c3_Err != nil {
@@ -215,7 +215,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(agent.Name)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 134, Col: 22}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 139, Col: 22}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -253,7 +253,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var9 string
 					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 148, Col: 31}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 153, Col: 31}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var9)
 					if templ_7745c5c3_Err != nil {
@@ -266,7 +266,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var10 string
 					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.ResolveAttributeValue(ad.Model)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 148, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 153, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var10)
 					if templ_7745c5c3_Err != nil {
@@ -279,7 +279,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 					var templ_7745c5c3_Var11 string
 					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 149, Col: 20}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 154, Col: 20}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 					if templ_7745c5c3_Err != nil {
@@ -297,7 +297,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 						var templ_7745c5c3_Var12 string
 						templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(ad.Model)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 151, Col: 23}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 156, Col: 23}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 						if templ_7745c5c3_Err != nil {
@@ -330,7 +330,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var13 string
 				templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.ResolveAttributeValue(string(cat))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 162, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 167, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var13)
 				if templ_7745c5c3_Err != nil {
@@ -343,7 +343,7 @@ func TasksContent(project *models.Project, tasks []models.Task, agents []models.
 				var templ_7745c5c3_Var14 string
 				templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(string(cat))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 163, Col: 24}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/pages/tasks.templ`, Line: 168, Col: 24}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 				if templ_7745c5c3_Err != nil {

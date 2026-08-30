@@ -811,6 +811,13 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   function modalCancel(modal) { return modal.querySelector('.modal-action button:not(.btn-error)'); }
   function modalConfirm(modal) { return modal.querySelector('.modal-action button.btn-error'); }
+  function assertDropzoneMenuClosed(button, label) {
+    var dropdown = button && button.closest('.dropdown');
+    var menu = dropdown && dropdown.querySelector('.dropdown-content');
+    if (!dropdown || !menu) fail('missing ' + label + ' dropzone menu');
+    if (menu.getClientRects().length) fail(label + ' confirmation reopened the dropzone menu');
+    if (dropdown.contains(document.activeElement)) fail(label + ' confirmation restored focus into the closed dropzone menu');
+  }
   window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
   (async function() {
     await waitFor(function() { return window.htmx && action('completed') && action('backlog'); }, 'task-board delete controls');
@@ -851,6 +858,8 @@ window.addEventListener('DOMContentLoaded', function() {
     confirm.focus();
     confirm.click();
     confirm.click();
+    await new Promise(function(resolve) { setTimeout(resolve, 50); });
+    assertDropzoneMenuClosed(completedAction, 'failed delete');
     await waitFor(function() { return !window.deleteAllTasksRequestInFlight; }, 'failed delete request completion');
     if (modal.open) fail('failed delete request left confirmation modal open');
     if (document.getElementById('task-completed-one') === null) fail('failed delete request removed a task');
@@ -915,6 +924,7 @@ window.addEventListener('DOMContentLoaded', function() {
 			if category == "completed" && failNextCompletedDelete {
 				failNextCompletedDelete = false
 				mu.Unlock()
+				time.Sleep(150 * time.Millisecond)
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte("delete failed"))
 				return
