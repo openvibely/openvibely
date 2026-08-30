@@ -45,15 +45,18 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 	h.worktreeSvc = service.NewWorktreeService(h.taskRepo, h.projectRepo, nil)
 	ctx := context.Background()
 	repoDir := t.TempDir()
-	run := func(args ...string) string {
+	runIn := func(dir string, args ...string) string {
 		t.Helper()
 		cmd := exec.Command("git", args...)
-		cmd.Dir = repoDir
+		cmd.Dir = dir
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 		return strings.TrimSpace(string(out))
+	}
+	run := func(args ...string) string {
+		return runIn(repoDir, args...)
 	}
 	run("init", "-b", "main")
 	run("config", "user.email", "test@example.com")
@@ -150,6 +153,21 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 	}
 	run("worktree", "unlock", worktreePath)
 
+	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("task conflict\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runIn(worktreePath, "add", "README.md")
+	runIn(worktreePath, "commit", "-m", "add task conflict")
+	if err := os.WriteFile(filepath.Join(repoDir, "README.md"), []byte("main conflict\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README.md")
+	run("commit", "-m", "add main conflict")
+	mergeCmd := exec.Command("git", "merge", "task/card-merge")
+	mergeCmd.Dir = repoDir
+	if out, err := mergeCmd.CombinedOutput(); err == nil {
+		t.Fatalf("expected task merge conflict, output=%s", out)
+	}
 	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusConflict); err != nil {
 		t.Fatal(err)
 	}
@@ -167,6 +185,7 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 	if got := run("rev-parse", "main"); got == run("rev-parse", "task/card-merge") {
 		t.Fatal("stale conflict card request mutated the target branch")
 	}
+	run("merge", "--abort")
 
 	if err := h.taskRepo.UpdateMergeStatus(ctx, task.ID, models.MergeStatusPending); err != nil {
 		t.Fatal(err)
@@ -210,6 +229,67 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("serialized card mutation did not resume after repository lock release")
+	}
+}
+
+func TestHandler_TaskCardMergeOptionsUseCanonicalMergeEligibility(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     models.TaskStatus
+		branch     string
+		target     string
+		wantReason string
+		wantPR     bool
+	}{
+		{name: "pending task", status: models.StatusPending, branch: "task/existing", target: "main", wantReason: "pending", wantPR: true},
+		{name: "blocked task", status: models.StatusBlocked, branch: "task/existing", target: "main", wantReason: "blocked", wantPR: true},
+		{name: "missing task branch", status: models.StatusCompleted, branch: "task/missing", target: "main", wantReason: "task branch does not exist", wantPR: true},
+		{name: "missing target branch", status: models.StatusCompleted, branch: "task/existing", target: "missing-target", wantReason: "target branch does not exist", wantPR: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, e, _, db := setupTestHandlerWithDB(t)
+			h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+			h.SetGitHubService(&fakeGitHubService{})
+			ctx := context.Background()
+			repoDir := createHandlerTestGitRepo(t)
+			target := service.GetCurrentBranch(repoDir)
+			runGit(t, repoDir, "checkout", "-b", "task/existing")
+			if err := os.WriteFile(filepath.Join(repoDir, "card-eligibility.txt"), []byte("task branch\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, repoDir, "add", "card-eligibility.txt")
+			runGit(t, repoDir, "commit", "-m", "add task branch change")
+			runGit(t, repoDir, "checkout", target)
+			project := &models.Project{Name: tt.name, RepoPath: repoDir, IsDefault: true}
+			if err := h.projectSvc.Create(ctx, project); err != nil {
+				t.Fatal(err)
+			}
+			mergeTarget := tt.target
+			if mergeTarget == "main" {
+				mergeTarget = target
+			}
+			task := &models.Task{
+				ProjectID: project.ID, Title: "Card eligibility", Prompt: "test", Category: models.CategoryCompleted,
+				Status: tt.status, WorktreeBranch: tt.branch, MergeTargetBranch: mergeTarget, MergeStatus: models.MergeStatusPending,
+			}
+			if err := h.taskRepo.Create(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+
+			rec := worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
+			body := rec.Body.String()
+			if rec.Code != http.StatusOK {
+				t.Fatalf("options status=%d body=%s", rec.Code, body)
+			}
+			if strings.Contains(body, "data-task-card-merge-action") || !strings.Contains(body, "Merge unavailable") || !strings.Contains(strings.ToLower(body), tt.wantReason) {
+				t.Fatalf("ineligible card state exposed local merge controls or omitted reason %q: %s", tt.wantReason, body)
+			}
+			if got := strings.Contains(body, "data-task-card-pr-action"); got != tt.wantPR {
+				t.Fatalf("PR eligibility changed: got action=%v want=%v body=%s", got, tt.wantPR, body)
+			}
+		})
 	}
 }
 

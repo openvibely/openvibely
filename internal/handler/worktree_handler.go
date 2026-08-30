@@ -27,20 +27,19 @@ func (h *Handler) taskCardMergeEligibility(ctx context.Context, task *models.Tas
 		return state, false, "The project has no repository path."
 	}
 	state = h.resolveTaskMergeActionState(ctx, task)
-	if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
-		return state, false, "The task worktree is currently in use."
-	}
 	if service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
 		return state, false, "The task worktree is locked."
 	}
-	if state.BranchAlreadyMerged || task.MergeStatus == models.MergeStatusMerged {
-		return state, false, "This task branch is already merged."
-	}
-	if len(service.ActiveConflictFiles(project.RepoPath)) > 0 || task.MergeStatus == models.MergeStatusConflict {
+	eligibility := h.resolveTaskMergeEligibility(ctx, task, project, state.BranchAlreadyMerged)
+	if eligibility.ConflictRecovery {
 		return state, false, "Resolve or abort the active merge conflict first."
 	}
-	if !state.UseWorktreeContent {
-		return state, false, "No mergeable task branch is available."
+	if !eligibility.MergeAvailable {
+		reason := strings.TrimSpace(eligibility.Reason)
+		if reason == "" {
+			reason = "No mergeable task branch is available."
+		}
+		return state, false, reason
 	}
 	if mergeType == "rebase" && !state.RebaseAvailable {
 		return state, false, "Rebase is not available for the current branch state."
