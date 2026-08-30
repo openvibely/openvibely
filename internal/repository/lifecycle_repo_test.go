@@ -455,6 +455,87 @@ func TestLifecycleRepo_ListExecutionEventsForProjectFiltersOwnership(t *testing.
 	}
 }
 
+func TestLifecycleRepo_GetExecutionForTaskProjectFiltersOwnership(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	projectRepo := NewProjectRepo(db)
+	agentRepo := NewAgentRepo(db)
+	taskRepo := NewTaskRepo(db, nil)
+	repo := NewLifecycleRepo(db)
+	ctx := context.Background()
+
+	projectA := &models.Project{Name: "Lifecycle Execution Project A"}
+	if err := projectRepo.Create(ctx, projectA); err != nil {
+		t.Fatalf("create project A: %v", err)
+	}
+	projectB := &models.Project{Name: "Lifecycle Execution Project B"}
+	if err := projectRepo.Create(ctx, projectB); err != nil {
+		t.Fatalf("create project B: %v", err)
+	}
+	agent := createLifecycleTestAgent(t, agentRepo)
+	taskA := &models.Task{ProjectID: projectA.ID, Title: "Execution A", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, taskA); err != nil {
+		t.Fatalf("create task A: %v", err)
+	}
+	taskB := &models.Task{ProjectID: projectB.ID, Title: "Execution B", Category: models.CategoryActive, Status: models.StatusPending, Prompt: "p"}
+	if err := taskRepo.Create(ctx, taskB); err != nil {
+		t.Fatalf("create task B: %v", err)
+	}
+
+	exec := &models.LifecycleExecution{
+		TaskID:         taskA.ID,
+		AgentID:        agent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "summarize_activity",
+		OutputContract: models.OutputContractActivitySummary,
+		Status:         models.LifecycleExecRunning,
+		InputJSON:      `{"secret":"must not be selected by the handler"}`,
+		OutputJSON:     `{"summary":"running"}`,
+	}
+	if err := repo.CreateExecution(ctx, exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+	completedAt := time.Date(2026, time.January, 1, 0, 5, 0, 0, time.UTC)
+	exec.Status = models.LifecycleExecCompleted
+	exec.OutputJSON = `{"summary":"finished"}`
+	exec.CompletedAt = &completedAt
+	if err := repo.UpdateExecution(ctx, exec); err != nil {
+		t.Fatalf("update execution: %v", err)
+	}
+
+	got, found, err := repo.GetExecutionForTaskProject(ctx, taskA.ID, exec.ID, projectA.ID)
+	if err != nil {
+		t.Fatalf("get same-project execution: %v", err)
+	}
+	if !found || got == nil || got.ID != exec.ID || got.Status != models.LifecycleExecCompleted || got.OutputJSON != `{"summary":"finished"}` {
+		t.Fatalf("unexpected same-project execution: found=%v execution=%+v", found, got)
+	}
+	if got.CompletedAt == nil || !got.CompletedAt.Equal(completedAt) {
+		t.Fatalf("expected terminal completion timestamp, got %+v", got.CompletedAt)
+	}
+	if got.InputJSON != "" {
+		t.Fatalf("compact execution lookup selected protected input: %q", got.InputJSON)
+	}
+
+	for name, pair := range map[string][2]string{
+		"foreign project":   {taskA.ID, projectB.ID},
+		"foreign task":      {taskB.ID, projectA.ID},
+		"unknown execution": {taskA.ID, projectA.ID},
+	} {
+		taskID, projectID := pair[0], pair[1]
+		executionID := exec.ID
+		if name == "unknown execution" {
+			executionID = "missing-execution"
+		}
+		got, found, err := repo.GetExecutionForTaskProject(ctx, taskID, executionID, projectID)
+		if err != nil {
+			t.Fatalf("get %s: %v", name, err)
+		}
+		if found || got != nil {
+			t.Fatalf("expected %s to be hidden, found=%v execution=%+v", name, found, got)
+		}
+	}
+}
+
 // TestLifecycleRepo_ListExecutionsForTask_NewestFirst verifies that
 // ListExecutionsForTask returns executions in descending started_at order so
 // the newest lifecycle event is visible at the top of the UI without scrolling.

@@ -1059,6 +1059,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/tasks/{id}/lifecycle-executions/{executionID}": {
+            "get": {
+                "description": "Returns the prompt-safe current state of one lifecycle hook invocation when it belongs to the requested task and project.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Lifecycle"
+                ],
+                "summary": "Get one lifecycle execution for a task",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Task ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Lifecycle execution ID",
+                        "name": "executionID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Project ID",
+                        "name": "project_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/viewmodels.LifecycleExecutionView"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid task or execution ID",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Task or lifecycle execution not found",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/handler.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/tasks/{id}/swarm": {
             "get": {
                 "produces": [

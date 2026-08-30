@@ -258,6 +258,49 @@ func (h *Handler) GetTaskLifecycleExecutions(c echo.Context) error {
 	})
 }
 
+// GetTaskLifecycleExecution returns one compact lifecycle execution for a task.
+// It is used by live reconciliation when a retained row may have fallen outside
+// the newest lifecycle page.
+//
+// @Summary Get one lifecycle execution for a task
+// @Description Returns the prompt-safe current state of one lifecycle hook invocation when it belongs to the requested task and project.
+// @Tags Lifecycle
+// @Produce json
+// @Param id path string true "Task ID"
+// @Param executionID path string true "Lifecycle execution ID"
+// @Param project_id query string false "Project ID"
+// @Success 200 {object} viewmodels.LifecycleExecutionView
+// @Failure 400 {object} ErrorResponse "Invalid task or execution ID"
+// @Failure 404 {object} ErrorResponse "Task or lifecycle execution not found"
+// @Failure 500 {object} ErrorResponse "Internal server error"
+// @Router /api/tasks/{id}/lifecycle-executions/{executionID} [get]
+func (h *Handler) GetTaskLifecycleExecution(c echo.Context) error {
+	taskID := strings.TrimSpace(c.Param("id"))
+	if taskID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "task id is required")
+	}
+	executionID := strings.TrimSpace(c.Param("executionID"))
+	if executionID == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "lifecycle execution id is required")
+	}
+	projectID, err := h.getCurrentProjectID(c)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if h.lifecycleRepo == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "lifecycle execution not found")
+	}
+	execution, found, err := h.lifecycleRepo.GetExecutionForTaskProject(c.Request().Context(), taskID, executionID, projectID)
+	if err != nil {
+		applog.Infof("[handler] GetTaskLifecycleExecution task=%s exec=%s error: %v", taskID, executionID, err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if !found {
+		return echo.NewHTTPError(http.StatusNotFound, "lifecycle execution not found")
+	}
+	return c.JSON(http.StatusOK, toLifecycleExecutionView(*execution))
+}
+
 // GetLifecycleExecutionEvents returns the durable trace for one lifecycle execution.
 // @Summary Get lifecycle execution trace events
 // @Description Returns prompt-safe trace events for one lifecycle hook invocation.

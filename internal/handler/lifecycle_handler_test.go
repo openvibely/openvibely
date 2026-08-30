@@ -270,6 +270,70 @@ func TestHandler_GetLifecycleExecutionEvents_RejectsForeignProject(t *testing.T)
 	}
 }
 
+func TestHandler_GetTaskLifecycleExecution_ReturnsPromptSafeViewAndRejectsForeign(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetLifecycleRepo(lifecycleRepo)
+
+	projectA := createProject(t, h, "execution-project-a")
+	projectB := createProject(t, h, "execution-project-b")
+	taskA := createTask(t, h, projectA.ID, "Execution Task A")
+	taskB := createTask(t, h, projectB.ID, "Execution Task B")
+	agent := &models.Agent{Name: "execution-view-agent", SystemPrompt: "x"}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	exec := &models.LifecycleExecution{
+		TaskID:         taskA.ID,
+		AgentID:        agent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "summarize_activity",
+		OutputContract: models.OutputContractActivitySummary,
+		Status:         models.LifecycleExecCompleted,
+		InputJSON:      `{"prompt":"sensitive input"}`,
+		OutputJSON:     `{"summary":"safe summary","skills":["safe-skill"]}`,
+		Error:          "safe error",
+	}
+	if err := lifecycleRepo.CreateExecution(t.Context(), exec); err != nil {
+		t.Fatalf("create execution: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/tasks/"+taskA.ID+"/lifecycle-executions/"+exec.ID+"?project_id="+projectA.ID, nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got viewmodels.LifecycleExecutionView
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode execution view: %v", err)
+	}
+	if got.ID != exec.ID || got.Status != string(models.LifecycleExecCompleted) || got.Summary != "safe summary" {
+		t.Fatalf("unexpected execution view: %+v", got)
+	}
+	if strings.Contains(rec.Body.String(), "sensitive input") || strings.Contains(rec.Body.String(), "input_json") {
+		t.Fatalf("execution view leaked protected input data: %s", rec.Body.String())
+	}
+
+	for name, path := range map[string]string{
+		"foreign project": "/api/tasks/" + taskA.ID + "/lifecycle-executions/" + exec.ID + "?project_id=" + projectB.ID,
+		"foreign task":    "/api/tasks/" + taskB.ID + "/lifecycle-executions/" + exec.ID + "?project_id=" + projectA.ID,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), "sensitive input") || strings.Contains(rec.Body.String(), "safe summary") {
+				t.Fatalf("foreign execution response leaked data: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandler_GetLifecycleActivity_UnknownIDsReturnControlledNotFound(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	lifecycleRepo := repository.NewLifecycleRepo(db)

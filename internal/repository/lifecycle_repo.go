@@ -286,9 +286,16 @@ const listExecutionsForTaskNewerPageSQL = `
 				SELECT started_at, id
 				FROM lifecycle_executions
 				WHERE task_id = ? AND id = ?
-		  )
+			)
 		ORDER BY started_at ASC, id ASC
 		LIMIT ?`
+
+const getLifecycleExecutionForTaskProjectSQL = `
+		SELECT le.id, le.agent_id, le.when_slot, le.skill_key, le.output_contract, le.status,
+		       le.output_json, le.error, le.started_at, le.completed_at
+		FROM lifecycle_executions le
+		JOIN tasks t ON t.id = le.task_id
+		WHERE le.id = ? AND le.task_id = ? AND t.project_id = ?`
 
 func lifecycleExecutionPageLimit(limit int) int {
 	if limit <= 0 {
@@ -539,6 +546,20 @@ func (r *LifecycleRepo) ListExecutionsForTask(ctx context.Context, taskID string
 		out = append(out, *e)
 	}
 	return out, rows.Err()
+}
+
+// GetExecutionForTaskProject returns one compact lifecycle execution only when
+// the execution belongs to taskID and that task belongs to projectID. The
+// boolean distinguishes an unknown or foreign row from a database failure.
+func (r *LifecycleRepo) GetExecutionForTaskProject(ctx context.Context, taskID, executionID, projectID string) (*models.LifecycleExecution, bool, error) {
+	e, err := scanExecutionList(r.db.QueryRowContext(ctx, getLifecycleExecutionForTaskProjectSQL, executionID, taskID, projectID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("getting lifecycle execution %s for task %s: %w", executionID, taskID, err)
+	}
+	return e, true, nil
 }
 
 // ListExecutionsForTaskPage returns the first or next older compact page for a

@@ -2001,3 +2001,229 @@ window.addEventListener('DOMContentLoaded', function() {
 		t.Fatalf("HTMX swap anchor lifecycle requests did not preserve project scope and bounded limit: project=%v limit=%v", gotProject, gotLimit)
 	}
 }
+
+func TestTaskDetailLifecycleRetainedRowFinalizationRehydratesInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	task := &models.Task{
+		ID:        "task-lifecycle-retained-finalization-browser",
+		ProjectID: "project-lifecycle-retained-finalization-browser",
+		Title:     "Lifecycle retained finalization browser fixture",
+		Status:    models.StatusCompleted,
+		Category:  models.CategoryCompleted,
+	}
+	var fragment bytes.Buffer
+	if err := TaskDetailContent(task, nil, nil, nil, nil, nil, nil, "lifecycle", nil).Render(context.Background(), &fragment); err != nil {
+		t.Fatalf("render TaskDetailContent: %v", err)
+	}
+
+	row := func(id, status string, hour int, completedAt string) map[string]any {
+		result := map[string]any{
+			"id":              id,
+			"when":            "after_complete",
+			"skill_key":       "hook-" + id,
+			"status":          status,
+			"output_contract": "activity_summary",
+			"summary":         "summary for " + id,
+			"started_at":      time.Date(2026, time.January, 1, hour, 0, 0, 0, time.UTC).Format(time.RFC3339),
+		}
+		if completedAt != "" {
+			result["completed_at"] = completedAt
+		}
+		return result
+	}
+	initialItems := make([]map[string]any, 0, 20)
+	for hour := 19; hour >= 2; hour-- {
+		initialItems = append(initialItems, row("event-"+strconv.Itoa(hour), "completed", hour, ""))
+	}
+	initialItems = append(initialItems, row("event-reconnect", "running", 1, ""))
+	initialItems = append(initialItems, row("event-target", "running", 0, ""))
+	latestItems := make([]map[string]any, 0, 20)
+	for hour := 39; hour >= 20; hour-- {
+		latestItems = append(latestItems, row("event-new-"+strconv.Itoa(hour), "completed", hour, ""))
+	}
+	finalizedTarget := row("event-target", "completed", 0, "2026-01-01T00:05:00Z")
+	finalizedTarget["error"] = "terminal target error"
+	runningReconnectTarget := row("event-reconnect", "running", 1, "")
+	finalizedReconnectTarget := row("event-reconnect", "failed", 1, "2026-01-01T01:05:00Z")
+	finalizedReconnectTarget["error"] = "reconnected target error"
+	writeJSON := func(w http.ResponseWriter, value any) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(value)
+	}
+	writePage := func(w http.ResponseWriter, items []map[string]any) {
+		writeJSON(w, map[string]any{"items": items, "has_more": false, "next_cursor": ""})
+	}
+
+	var mu sync.Mutex
+	initialCalls := 0
+	targetCalls := 0
+	reconnectTargetCalls := 0
+	sawProject := false
+	sawLimit := false
+	sawTargetProject := false
+	page := ""
+	browserResult := make(chan string, 1)
+	fixtureHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/browser-result":
+			select {
+			case browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message"):
+			default:
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case "/tasks/task-lifecycle-retained-finalization-browser":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(page))
+			return
+		case "/api/tasks/task-lifecycle-retained-finalization-browser/lifecycle-executions":
+			query := r.URL.Query()
+			if query.Get("before") != "" || query.Get("after") != "" {
+				http.Error(w, "unexpected lifecycle cursor", http.StatusBadRequest)
+				return
+			}
+			mu.Lock()
+			if query.Get("project_id") == task.ProjectID {
+				sawProject = true
+			}
+			if query.Get("limit") == "20" {
+				sawLimit = true
+			}
+			initialCalls++
+			call := initialCalls
+			mu.Unlock()
+			if call == 1 {
+				writePage(w, initialItems)
+			} else {
+				writePage(w, latestItems)
+			}
+			return
+		case "/api/tasks/task-lifecycle-retained-finalization-browser/lifecycle-executions/event-target":
+			if r.URL.Query().Get("project_id") == task.ProjectID {
+				mu.Lock()
+				sawTargetProject = true
+				mu.Unlock()
+			}
+			mu.Lock()
+			targetCalls++
+			mu.Unlock()
+			writeJSON(w, finalizedTarget)
+			return
+		case "/api/tasks/task-lifecycle-retained-finalization-browser/lifecycle-executions/event-reconnect":
+			if r.URL.Query().Get("project_id") == task.ProjectID {
+				mu.Lock()
+				sawTargetProject = true
+				mu.Unlock()
+			}
+			mu.Lock()
+			reconnectTargetCalls++
+			call := reconnectTargetCalls
+			mu.Unlock()
+			if call == 1 {
+				writeJSON(w, runningReconnectTarget)
+			} else {
+				writeJSON(w, finalizedReconnectTarget)
+			}
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	})
+	server := httptest.NewServer(fixtureHandler)
+	defer server.Close()
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function waitFor(check, label, timeout) {
+    var started = performance.now();
+    return new Promise(function(resolve, reject) {
+      function poll() {
+        Promise.resolve().then(check).then(function(ok) {
+          if (ok) { resolve(); return; }
+          if (performance.now() - started > (timeout || 6000)) { reject(new Error('timed out waiting for ' + label)); return; }
+          setTimeout(poll, 10);
+        }).catch(reject);
+      }
+      poll();
+    });
+  }
+  function report(status, message) {
+    return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}).catch(function() {});
+  }
+  function lifecycleRow(id) { return document.querySelector('[data-lifecycle-execution-id="' + id + '"]'); }
+  function lifecycleStatus(id) {
+    var target = lifecycleRow(id);
+    var badges = target && target.querySelectorAll('.badge');
+    return badges && badges.length ? badges[badges.length - 1].textContent.trim() : '';
+  }
+  async function run() {
+    await waitFor(function() { return !!lifecycleRow('event-target') && lifecycleStatus('event-target') === 'running' && lifecycleStatus('event-reconnect') === 'running'; }, 'initial retained running rows');
+    window.dispatchEvent(new CustomEvent('sse-task-event', {detail:{
+      type:'task_lifecycle_execution_changed',
+      task_id:'task-lifecycle-retained-finalization-browser',
+      project_id:'project-lifecycle-retained-finalization-browser',
+      exec_id:'event-target',
+      status:'completed'
+    }}));
+    await waitFor(function() { return lifecycleStatus('event-target') === 'completed'; }, 'retained row terminal rehydration', 4000);
+    var completed = lifecycleRow('event-target').querySelector('.text-xs.opacity-60');
+    var error = lifecycleRow('event-target').querySelector('.text-error');
+    if (!completed || completed.textContent.indexOf(':05:') < 0) throw new Error('retained row did not render refreshed completion time: ' + (completed && completed.textContent || '<missing>'));
+    if (!error || error.textContent.indexOf('terminal target error') < 0) throw new Error('retained row did not render refreshed terminal error');
+    if (lifecycleStatus('event-reconnect') !== 'running') throw new Error('first refresh unexpectedly finalized reconnect target');
+    window.dispatchEvent(new CustomEvent('sse-live-connected', {detail:{reconnected:true}}));
+    await waitFor(function() { return lifecycleStatus('event-reconnect') === 'failed'; }, 'retained row reconnect rehydration', 4000);
+    var reconnectError = lifecycleRow('event-reconnect').querySelector('.text-error');
+    if (!reconnectError || reconnectError.textContent.indexOf('reconnected target error') < 0) throw new Error('reconnect did not render retained terminal error');
+    await report('pass', '');
+  }
+  run().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;}#lifecycle-activity-scroll{height:240px!important;max-height:240px!important;overflow-y:scroll!important;}#lifecycle-activity-list [data-lifecycle-execution-id]{min-height:80px;box-sizing:border-box;}.hidden{display:none!important;}</style></head><body>" + fragment.String() + runner + "</body></html>"
+
+	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-retained-finalization.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatalf("create Chrome stderr: %v", err)
+	}
+	defer stderrFile.Close()
+	profileDir := filepath.Join(t.TempDir(), "task-detail-lifecycle-retained-finalization-profile")
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling",
+		"--no-first-run", "--no-default-browser-check", "--user-data-dir="+profileDir,
+		server.URL+"/tasks/task-lifecycle-retained-finalization-browser",
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome lifecycle retained finalization fixture: %v", err)
+	}
+
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(30 * time.Second):
+		outcome = "fail: timed out waiting for lifecycle browser result"
+	}
+	stopBrowserProcess(cmd)
+	if outcome != "pass:" {
+		stderr, _ := os.ReadFile(stderrPath)
+		if len(stderr) > 8000 {
+			stderr = stderr[len(stderr)-8000:]
+		}
+		t.Fatalf("Task Detail Lifecycle retained finalization browser regression failed: %s\nChrome stderr tail:\n%s", outcome, stderr)
+	}
+
+	mu.Lock()
+	gotInitialCalls, gotTargetCalls, gotReconnectTargetCalls := initialCalls, targetCalls, reconnectTargetCalls
+	gotProject, gotLimit, gotTargetProject := sawProject, sawLimit, sawTargetProject
+	mu.Unlock()
+	if gotInitialCalls != 3 || gotTargetCalls != 1 || gotReconnectTargetCalls != 2 {
+		t.Fatalf("retained finalization fixture received page=%d target=%d reconnect_target=%d requests, want initial/event/reconnect pages and bounded targeted refreshes", gotInitialCalls, gotTargetCalls, gotReconnectTargetCalls)
+	}
+	if !gotProject || !gotLimit || !gotTargetProject {
+		t.Fatalf("retained finalization requests did not preserve project scope and bounded page size: project=%v limit=%v target_project=%v", gotProject, gotLimit, gotTargetProject)
+	}
+}

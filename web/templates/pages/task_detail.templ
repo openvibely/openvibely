@@ -966,6 +966,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 										refreshRetryTimer: null,
 										refreshLoading: false,
 										refreshError: '',
+										refreshExecutionIDs: Object.create(null),
 										initialLoading: false,
 										requestVersion: 0,
 										requestSerial: 0,
@@ -987,6 +988,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							}
 							state.taskID = taskID;
 							state.projectID = projectID;
+							if (!state.refreshExecutionIDs) state.refreshExecutionIDs = Object.create(null);
 							return state;
 						}
 
@@ -1200,6 +1202,44 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							}).then(normalizePage);
 						}
 
+						function fetchExecution(taskID, projectID, executionID) {
+							var url = '/api/tasks/' + encodeURIComponent(taskID) + '/lifecycle-executions/' + encodeURIComponent(executionID) + '?project_id=' + encodeURIComponent(projectID || '');
+							return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function(response) {
+								if (!response.ok) throw new Error('failed to refresh lifecycle execution');
+								return response.json();
+							}).then(function(row) {
+								if (!row || String(row.id || '') !== String(executionID)) throw new Error('invalid lifecycle execution response');
+								return row;
+							});
+						}
+
+						function markExecutionForRefresh(state, executionID) {
+							executionID = String(executionID || '');
+							if (executionID && state.records[executionID]) state.refreshExecutionIDs[executionID] = true;
+						}
+
+						function markRetainedNonterminalExecutions(state) {
+							state.order.forEach(function(executionID) {
+								var row = state.records[executionID] || {};
+								if (row.status === 'pending' || row.status === 'queued' || row.status === 'running') state.refreshExecutionIDs[executionID] = true;
+							});
+						}
+
+						function fetchRetainedExecutions(state, taskID, projectID, page) {
+							var pageIDs = Object.create(null);
+							page.items.forEach(function(row) {
+								if (row && row.id) pageIDs[String(row.id)] = true;
+							});
+							var executionIDs = Object.keys(state.refreshExecutionIDs).filter(function(executionID) {
+								return !pageIDs[executionID];
+							});
+							return Promise.all(executionIDs.map(function(executionID) {
+								return fetchExecution(taskID, projectID, executionID);
+							})).then(function(rows) {
+								return { page: page, pageIDs: pageIDs, executionIDs: executionIDs, rows: rows };
+							});
+						}
+
 						function requestIsCurrent(state, container, version, requestID, direction) {
 							if (state.requestVersion !== version || state.container !== container) return false;
 							if (!document.documentElement || !document.documentElement.contains(container)) return false;
@@ -1238,6 +1278,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							if (!container) return Promise.resolve();
 							projectID = projectID || container.dataset.projectId || '';
 							var state = getState(taskID, projectID);
+							markRetainedNonterminalExecutions(state);
 							if (fromPending && hasActiveLifecycleRequest(state)) {
 								state.refreshPending = true;
 								return Promise.resolve();
@@ -1273,7 +1314,11 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							state.initialLoading = !state.initialized && state.order.length === 0;
 							renderState(state, container, state.order.length > 0);
 							return fetchPage(taskID, projectID, 'initial', '').then(function(page) {
-								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return;
+								if (!requestIsCurrent(state, container, version, requestID, 'refresh')) return null;
+								return fetchRetainedExecutions(state, taskID, projectID, page);
+							}).then(function(result) {
+								if (!result || !requestIsCurrent(state, container, version, requestID, 'refresh')) return;
+								var page = result.page;
 								var firstLoad = !state.initialized;
 								var wasEmpty = state.order.length === 0;
 								if (page.items.length === 0) {
@@ -1287,6 +1332,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 									state.order = [];
 								}
 								mergeRows(state, page.items);
+								mergeRows(state, result.rows);
+								Object.keys(result.pageIDs).forEach(function(executionID) { delete state.refreshExecutionIDs[executionID]; });
+								result.executionIDs.forEach(function(executionID) { delete state.refreshExecutionIDs[executionID]; });
+								if (Object.keys(state.refreshExecutionIDs).length > 0) state.refreshPending = true;
 								if (firstLoad || wasEmpty) {
 									state.olderCursor = page.nextCursor || '';
 									state.olderHasMore = page.hasMore;
@@ -1484,6 +1533,8 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							if (!detail.reconnected) return;
 							var container = document.getElementById('lifecycle-activity-list');
 							if (!container) return;
+							var state = getState(container.dataset.taskId, container.dataset.projectId || '');
+							markRetainedNonterminalExecutions(state);
 							scheduleLiveRefresh(container.dataset.taskId, container.dataset.projectId || '', 'refresh');
 						}
 
@@ -1504,6 +1555,10 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 								task_thread_input_queued: true,
 								task_thread_input_steered: true
 							};
+							if (data.type === 'task_lifecycle_execution_changed' && data.exec_id) {
+								var state = getState(container.dataset.taskId, container.dataset.projectId || '');
+								markExecutionForRefresh(state, data.exec_id);
+							}
 							if (relevant[data.type]) scheduleLiveRefresh(container.dataset.taskId, container.dataset.projectId || '', data.type === 'task_thread_execution_started' || data.type === 'task_thread_input_applied' ? 'newer' : 'refresh');
 						}
 

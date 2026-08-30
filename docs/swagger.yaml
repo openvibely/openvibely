@@ -1647,6 +1647,47 @@ paths:
       summary: List lifecycle executions for a task
       tags:
       - Lifecycle
+  /api/tasks/{id}/lifecycle-executions/{executionID}:
+    get:
+      description: Returns the prompt-safe current state of one lifecycle hook invocation
+        when it belongs to the requested task and project.
+      parameters:
+      - description: Task ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Lifecycle execution ID
+        in: path
+        name: executionID
+        required: true
+        type: string
+      - description: Project ID
+        in: query
+        name: project_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/viewmodels.LifecycleExecutionView'
+        "400":
+          description: Invalid task or execution ID
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "404":
+          description: Task or lifecycle execution not found
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/handler.ErrorResponse'
+      summary: Get one lifecycle execution for a task
+      tags:
+      - Lifecycle
   /api/tasks/{id}/swarm:
     get:
       parameters:

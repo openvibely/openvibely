@@ -824,6 +824,7 @@ func (h *Handler) RegisterRoutes(e *echo.Echo) {
 	e.GET("/agents/:id/lifecycle-hooks", h.GetAgentLifecycleHooks)
 	e.PUT("/agents/:id/lifecycle-hooks", h.SaveAgentLifecycleHooks)
 	// Lifecycle execution activity (runbook §Rollout step 17)
+	e.GET("/api/tasks/:id/lifecycle-executions/:executionID", h.GetTaskLifecycleExecution)
 	e.GET("/api/tasks/:id/lifecycle-executions", h.GetTaskLifecycleExecutions)
 	e.GET("/api/lifecycle-executions/:id/events", h.GetLifecycleExecutionEvents)
 
