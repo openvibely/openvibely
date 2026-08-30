@@ -1169,11 +1169,11 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 
 					/* --- Buttons --- */
 					/* Dark-mode hover parity across web and desktop (deterministic, engine-agnostic). */
-					[data-theme="dark"] .btn:hover {
+					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn:hover {
 						background-color: #2f3540 !important;
 						border-color: #2f3540 !important;
 					}
-					[data-theme="dark"] .btn-primary:hover {
+					[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-primary:hover {
 						background-color: #646fe4 !important;
 						border-color: #646fe4 !important;
 					}
@@ -1248,16 +1248,16 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						border-color: #e66465 !important;
 					}
 					/* Light-mode hover parity matrix (mirrors dark-mode coverage). */
-					[data-theme="light"] .btn:hover {
+					[data-color-theme="openvibely-light"][data-theme="light"] .btn:hover {
 						background-color: var(--ov-l-surface-hover);
 						border-color: var(--ov-l-border);
 					}
-					[data-theme="light"] .btn-primary {
+					[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary {
 						background-color: var(--ov-l-accent);
 						border-color: var(--ov-l-accent);
 						color: #FFFFFF;
 					}
-					[data-theme="light"] .btn-primary:hover {
+					[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary:hover {
 						background-color: var(--ov-l-accent-hover);
 						border-color: var(--ov-l-accent-hover);
 					}

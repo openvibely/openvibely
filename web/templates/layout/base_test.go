@@ -1137,7 +1137,7 @@ func TestLightTheme_UsesLightModernTokens(t *testing.T) {
 		"background-color: var(--ov-l-surface);",
 		"[data-theme=\"light\"] #main-content {",
 		"background-color: var(--ov-l-surface);",
-		"[data-theme=\"light\"] .btn-primary {",
+		"[data-color-theme=\"openvibely-light\"][data-theme=\"light\"] .btn-primary {",
 		"background-color: var(--ov-l-accent);",
 		"[data-theme=\"light\"] .sidebar-aside {",
 		"background-color: #FAFAFA;",
@@ -1241,8 +1241,8 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 	}
 	sharedRule := strings.Index(html, `[data-color-theme] .btn-primary.chat-send-button {`)
 	for _, hoverSelector := range []string{
-		`[data-theme="dark"] .btn-primary:hover {`,
-		`[data-theme="light"] .btn-primary:hover {`,
+		`[data-color-theme="openvibely-dark"][data-theme="dark"] .btn-primary:hover {`,
+		`[data-color-theme="openvibely-light"][data-theme="light"] .btn-primary:hover {`,
 	} {
 		hoverRule := strings.Index(html, hoverSelector)
 		if sharedRule < 0 || hoverRule < sharedRule {
@@ -1288,8 +1288,8 @@ func TestDarkMode_ButtonHoverParity(t *testing.T) {
 	html := buf.String()
 
 	expected := []string{
-		"[data-theme=\"dark\"] .btn:hover {",
-		"[data-theme=\"dark\"] .btn-primary:hover {",
+		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn:hover {",
+		"[data-color-theme=\"openvibely-dark\"][data-theme=\"dark\"] .btn-primary:hover {",
 		"[data-theme=\"dark\"] .btn-secondary:hover {",
 		"[data-theme=\"dark\"] .btn-accent:hover {",
 		"[data-theme=\"dark\"] .btn-info:hover {",
@@ -1325,8 +1325,8 @@ func TestLightMode_ButtonHoverParity(t *testing.T) {
 	html := buf.String()
 
 	expected := []string{
-		"[data-theme=\"light\"] .btn:hover {",
-		"[data-theme=\"light\"] .btn-primary:hover {",
+		"[data-color-theme=\"openvibely-light\"][data-theme=\"light\"] .btn:hover {",
+		"[data-color-theme=\"openvibely-light\"][data-theme=\"light\"] .btn-primary:hover {",
 		"[data-theme=\"light\"] .btn-secondary:hover {",
 		"[data-theme=\"light\"] .btn-accent:hover {",
 		"[data-theme=\"light\"] .btn-info:hover {",

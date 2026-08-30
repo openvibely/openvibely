@@ -3,6 +3,9 @@ package pages
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -499,49 +503,19 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 	[data-color-theme="vscode-test"][data-theme="dark"] .btn-primary:hover { background-color: rgb(4, 5, 6); border-color: rgb(4, 5, 6); }
 	</style>`
 	html = strings.Replace(html, "</head>", importedCSS+"</head>", 1)
-	fixture := `<button class="btn btn-primary chat-send-button" data-test-send>Send</button><span class="task-state-running" data-test-running>Running</span><script>
-	window.addEventListener('DOMContentLoaded', function() {
-	  function color(selector, property) { return getComputedStyle(document.querySelector(selector))[property]; }
-	  function setTheme(mode, id) { document.documentElement.setAttribute('data-theme', mode); document.documentElement.setAttribute('data-color-theme', id); }
-	  function assertParity(label) {
-	    var send = color('[data-test-send]', 'backgroundColor');
-	    var running = color('[data-test-running]', 'color');
-	    if (send !== running) throw new Error(label + ' send and running colors differ: ' + send + ' vs ' + running);
-	    return send;
-	  }
-	  try {
-	    setTheme('dark', 'openvibely-dark');
-	    var nativeDark = assertParity('dark');
-	    setTheme('light', 'openvibely-light');
-	    assertParity('light');
-	    setTheme('dark', 'vscode-test');
-	    setTimeout(function() {
-	      try {
-	        var imported = assertParity('imported');
-	        if (imported === nativeDark) throw new Error('imported primary token fell back to native color: ' + imported);
-	        var hoverRule = Array.from(document.styleSheets).some(function(sheet) {
-	          try { return Array.from(sheet.cssRules || []).some(function(rule) { return rule.selectorText && rule.selectorText.indexOf('[data-color-theme="vscode-test"]') >= 0 && rule.selectorText.indexOf('.btn-primary:hover') >= 0 && rule.style.backgroundColor === 'rgb(4, 5, 6)'; }); } catch (_) { return false; }
-	        });
-	        if (!hoverRule) throw new Error('imported hover rule was lost');
-	        fetch('/browser-result?status=pass', {method:'POST'});
-	      } catch (error) { fetch('/browser-result?status=fail&message=' + encodeURIComponent(String(error && error.stack || error)), {method:'POST'}); }
-	    }, 400);
-	  } catch (error) { fetch('/browser-result?status=fail&message=' + encodeURIComponent(String(error && error.stack || error)), {method:'POST'}); }
-	});
-	</script>`
-	html = strings.Replace(html, "</body>", fixture+"</body>", 1)
 
-	browserResult := make(chan string, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/browser-result" {
-			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(html))
 	}))
 	defer server.Close()
+
+	debugListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve Chrome debugging port: %v", err)
+	}
+	debugPort := debugListener.Addr().(*net.TCPAddr).Port
+	_ = debugListener.Close()
 
 	stderrPath := filepath.Join(t.TempDir(), "primary-action-color-browser.stderr")
 	stderrFile, err := os.Create(stderrPath)
@@ -552,22 +526,159 @@ func TestTaskRunningIconSharesThemeAwareSendColorWithoutSuppressingHoverInChrome
 	cmd := exec.Command(chrome,
 		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
 		"--disable-dev-shm-usage", "--disable-background-networking", "--no-first-run", "--no-default-browser-check",
+		fmt.Sprintf("--remote-debugging-port=%d", debugPort),
 		"--user-data-dir="+filepath.Join(t.TempDir(), "primary-action-color-browser-profile"), server.URL,
 	)
 	cmd.Stderr = stderrFile
 	if err := startBrowserProcess(cmd); err != nil {
 		t.Fatalf("start Chrome: %v", err)
 	}
-	var outcome string
-	select {
-	case outcome = <-browserResult:
-	case <-time.After(15 * time.Second):
-		outcome = "fail:timed out waiting for browser result"
+	defer stopBrowserProcess(cmd)
+
+	type debugTarget struct {
+		URL                  string `json:"url"`
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
 	}
-	stopBrowserProcess(cmd)
-	if !strings.HasPrefix(outcome, "pass:") {
-		stderr, _ := os.ReadFile(stderrPath)
-		t.Fatalf("Primary action color browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
+	var target debugTarget
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, requestErr := http.Get(fmt.Sprintf("http://127.0.0.1:%d/json/list", debugPort))
+		if requestErr == nil {
+			var targets []debugTarget
+			decodeErr := json.NewDecoder(resp.Body).Decode(&targets)
+			_ = resp.Body.Close()
+			if decodeErr == nil {
+				for _, candidate := range targets {
+					if strings.TrimRight(candidate.URL, "/") == strings.TrimRight(server.URL, "/") && candidate.WebSocketDebuggerURL != "" {
+						target = candidate
+						break
+					}
+				}
+			}
+		}
+		if target.WebSocketDebuggerURL != "" {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if target.WebSocketDebuggerURL == "" {
+		t.Fatalf("find Chrome debugging target for %s", server.URL)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, target.WebSocketDebuggerURL, nil)
+	if err != nil {
+		t.Fatalf("connect to Chrome debugging target: %v", err)
+	}
+	defer conn.CloseNow()
+
+	nextID := 0
+	call := func(method string, params any, result any) {
+		t.Helper()
+		nextID++
+		request, marshalErr := json.Marshal(map[string]any{"id": nextID, "method": method, "params": params})
+		if marshalErr != nil {
+			t.Fatalf("marshal CDP %s request: %v", method, marshalErr)
+		}
+		if writeErr := conn.Write(ctx, websocket.MessageText, request); writeErr != nil {
+			t.Fatalf("write CDP %s request: %v", method, writeErr)
+		}
+		for {
+			_, message, readErr := conn.Read(ctx)
+			if readErr != nil {
+				t.Fatalf("read CDP %s response: %v", method, readErr)
+			}
+			var response struct {
+				ID     int             `json:"id"`
+				Result json.RawMessage `json:"result"`
+				Error  json.RawMessage `json:"error"`
+			}
+			if unmarshalErr := json.Unmarshal(message, &response); unmarshalErr != nil || response.ID != nextID {
+				continue
+			}
+			if len(response.Error) > 0 {
+				t.Fatalf("CDP %s error: %s", method, response.Error)
+			}
+			if result != nil && len(response.Result) > 0 {
+				if unmarshalErr := json.Unmarshal(response.Result, result); unmarshalErr != nil {
+					t.Fatalf("decode CDP %s result: %v", method, unmarshalErr)
+				}
+			}
+			return
+		}
+	}
+
+	evaluate := func(expression string) string {
+		t.Helper()
+		var response struct {
+			Result struct {
+				Value string `json:"value"`
+			} `json:"result"`
+		}
+		call("Runtime.evaluate", map[string]any{"expression": expression, "returnByValue": true}, &response)
+		return response.Result.Value
+	}
+	movePointer := func(x, y float64) {
+		t.Helper()
+		call("Input.dispatchMouseEvent", map[string]any{"type": "mouseMoved", "x": x, "y": y}, nil)
+	}
+
+	for time.Now().Before(deadline) && evaluate(`document.readyState`) != "complete" {
+		time.Sleep(25 * time.Millisecond)
+	}
+	evaluate(`document.body.innerHTML='<button class="btn btn-primary chat-send-button" style="position:fixed;left:20px;top:20px;width:100px;transform:none;transition:none;z-index:2147483647" data-test-send>Send</button><span class="task-state-running" style="position:fixed;left:20px;top:80px;z-index:2147483647" data-test-running>Running</span>'; ''`)
+	type themeCase struct {
+		name      string
+		mode      string
+		id        string
+		wantHover string
+	}
+	for _, tc := range []themeCase{
+		{name: "native dark", mode: "dark", id: "openvibely-dark", wantHover: "rgb(100, 111, 228)"},
+		{name: "native light", mode: "light", id: "openvibely-light", wantHover: "rgb(79, 60, 184)"},
+		{name: "imported", mode: "dark", id: "vscode-test", wantHover: "rgb(4, 5, 6)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			movePointer(1000, 1000)
+			evaluate(fmt.Sprintf(`document.documentElement.setAttribute('data-theme', %q); document.documentElement.setAttribute('data-color-theme', %q); ''`, tc.mode, tc.id))
+			time.Sleep(400 * time.Millisecond)
+			var normal struct {
+				Send    string     `json:"send"`
+				Running string     `json:"running"`
+				Center  [2]float64 `json:"center"`
+			}
+			if err := json.Unmarshal([]byte(evaluate(`JSON.stringify((function(){var b=document.querySelector('[data-test-send]'),r=b.getBoundingClientRect();return {send:getComputedStyle(b).backgroundColor,running:getComputedStyle(document.querySelector('[data-test-running]')).color,center:[r.left+r.width/2,r.top+r.height/2]};})())`)), &normal); err != nil {
+				t.Fatalf("decode normal colors: %v", err)
+			}
+			if normal.Send != normal.Running {
+				t.Fatalf("normal Send/running colors differ: %s vs %s", normal.Send, normal.Running)
+			}
+
+			movePointer(normal.Center[0], normal.Center[1])
+			time.Sleep(400 * time.Millisecond)
+			var hovered struct {
+				Send    string `json:"send"`
+				Running string `json:"running"`
+				Hovered bool   `json:"hovered"`
+				Hit     string `json:"hit"`
+			}
+			if err := json.Unmarshal([]byte(evaluate(fmt.Sprintf(`JSON.stringify({send:getComputedStyle(document.querySelector('[data-test-send]')).backgroundColor,running:getComputedStyle(document.querySelector('[data-test-running]')).color,hovered:document.querySelector('[data-test-send]').matches(':hover'),hit:(document.elementFromPoint(%f,%f)||{}).outerHTML||''})`, normal.Center[0], normal.Center[1]))), &hovered); err != nil {
+				t.Fatalf("decode hovered colors: %v", err)
+			}
+			if !hovered.Hovered {
+				t.Fatalf("Chrome pointer did not activate the Send button :hover state at %.1f,%.1f; hit %s", normal.Center[0], normal.Center[1], hovered.Hit)
+			}
+			if hovered.Send != tc.wantHover {
+				t.Fatalf("hover Send color = %s, want %s", hovered.Send, tc.wantHover)
+			}
+			if hovered.Send == normal.Send {
+				t.Fatalf("hover did not change Send color from %s", normal.Send)
+			}
+			if hovered.Running != normal.Running {
+				t.Fatalf("hover changed running icon color from %s to %s", normal.Running, hovered.Running)
+			}
+		})
 	}
 }
 
