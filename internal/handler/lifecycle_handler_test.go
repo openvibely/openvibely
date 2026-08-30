@@ -17,6 +17,275 @@ import (
 	"github.com/openvibely/openvibely/internal/viewmodels"
 )
 
+func TestHandler_AgentLifecycleHooks_RejectForeignProjectWithoutMutation(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+
+	projectA := createProject(t, h, "lifecycle project A")
+	projectB := createProject(t, h, "lifecycle project B")
+	agent := &models.Agent{
+		Name:                "Project B Agent",
+		Description:         "original description",
+		SystemPrompt:        "original prompt",
+		Model:               "inherit",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           projectB.ID,
+		Tools:               []string{},
+		SelectableAsPrimary: true,
+		Enabled:             true,
+	}
+	if err := agentRepo.Create(t.Context(), agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	originalHook := &models.AgentLifecycleHook{
+		AgentID:        agent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "project_b_skill",
+		Blocking:       true,
+		Enabled:        true,
+		PromptOverride: "project-b-secret-prompt",
+		RunPolicyJSON:  `{"retries":2}`,
+		OutputContract: models.OutputContractActivitySummary,
+	}
+	if err := lifecycleRepo.CreateHook(t.Context(), originalHook); err != nil {
+		t.Fatalf("create hook: %v", err)
+	}
+	beforeAgent, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("load original agent: %v", err)
+	}
+	beforeHooks, err := lifecycleRepo.HooksByAgent(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("load original hooks: %v", err)
+	}
+
+	foreignGET := httptest.NewRequest(http.MethodGet, "/agents/"+agent.ID+"/lifecycle-hooks?project_id="+projectA.ID, nil)
+	foreignGET.Header.Set(echo.HeaderAccept, "application/json")
+	foreignGETRecorder := httptest.NewRecorder()
+	e.ServeHTTP(foreignGETRecorder, foreignGET)
+	if foreignGETRecorder.Code != http.StatusNotFound {
+		t.Fatalf("foreign GET status=%d body=%s", foreignGETRecorder.Code, foreignGETRecorder.Body.String())
+	}
+	if strings.Contains(foreignGETRecorder.Body.String(), "project_b_skill") || strings.Contains(foreignGETRecorder.Body.String(), "project-b-secret-prompt") {
+		t.Fatalf("foreign GET leaked Project B hook data: %s", foreignGETRecorder.Body.String())
+	}
+
+	if err := h.settingsRepo.Set(t.Context(), uiPreferenceSelectedProjectIDKey, projectA.ID); err != nil {
+		t.Fatalf("select Project A: %v", err)
+	}
+	selectedGET := httptest.NewRequest(http.MethodGet, "/agents/"+agent.ID+"/lifecycle-hooks", nil)
+	selectedGETRecorder := httptest.NewRecorder()
+	e.ServeHTTP(selectedGETRecorder, selectedGET)
+	if selectedGETRecorder.Code != http.StatusNotFound {
+		t.Fatalf("selected-project GET status=%d body=%s", selectedGETRecorder.Code, selectedGETRecorder.Body.String())
+	}
+	if strings.Contains(selectedGETRecorder.Body.String(), "project-b-secret-prompt") {
+		t.Fatalf("selected-project GET leaked Project B hook data: %s", selectedGETRecorder.Body.String())
+	}
+
+	foreignPayload, _ := json.Marshal([]hookSavePayload{{
+		When:           string(models.LifecycleAfterComplete),
+		SkillKey:       "project_a_skill",
+		Enabled:        true,
+		PromptOverride: "project-a-replacement",
+		OutputContract: string(models.OutputContractActivitySummary),
+	}})
+	foreignPUT := httptest.NewRequest(http.MethodPut, "/agents/"+agent.ID+"/lifecycle-hooks?project_id="+projectA.ID, bytes.NewReader(foreignPayload))
+	foreignPUT.Header.Set(echo.HeaderContentType, "application/json")
+	foreignPUTRecorder := httptest.NewRecorder()
+	e.ServeHTTP(foreignPUTRecorder, foreignPUT)
+	if foreignPUTRecorder.Code != http.StatusNotFound {
+		t.Fatalf("foreign PUT status=%d body=%s", foreignPUTRecorder.Code, foreignPUTRecorder.Body.String())
+	}
+	if strings.Contains(foreignPUTRecorder.Body.String(), "project_b_skill") || strings.Contains(foreignPUTRecorder.Body.String(), "project-b-secret-prompt") {
+		t.Fatalf("foreign PUT leaked Project B hook data: %s", foreignPUTRecorder.Body.String())
+	}
+
+	form := url.Values{}
+	form.Set("name", "mutated from Project A")
+	form.Set("description", "mutated description")
+	form.Set("system_prompt", "mutated prompt")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("key", "project-b-agent")
+	form.Set("scope", string(models.AgentScopeProject))
+	form.Set("project_id", projectA.ID)
+	form.Set("selectable_as_primary", "false")
+	form.Set("enabled", "false")
+	form.Set("lifecycle_hooks_json", string(foreignPayload))
+	foreignUpdate := performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+agent.ID+"?project_id="+projectA.ID, form)
+	if foreignUpdate.Code != http.StatusNotFound {
+		t.Fatalf("foreign dialog update status=%d body=%s", foreignUpdate.Code, foreignUpdate.Body.String())
+	}
+	if strings.Contains(foreignUpdate.Body.String(), "project_b_skill") || strings.Contains(foreignUpdate.Body.String(), "project-b-secret-prompt") {
+		t.Fatalf("foreign dialog update leaked Project B hook data: %s", foreignUpdate.Body.String())
+	}
+
+	afterAgent, err := agentRepo.GetByID(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("load agent after foreign requests: %v", err)
+	}
+	if afterAgent == nil || beforeAgent == nil {
+		t.Fatalf("expected agent snapshots, before=%+v after=%+v", beforeAgent, afterAgent)
+	}
+	beforeAgent.CreatedAt = beforeAgent.CreatedAt.UTC()
+	beforeAgent.UpdatedAt = beforeAgent.UpdatedAt.UTC()
+	afterAgent.CreatedAt = afterAgent.CreatedAt.UTC()
+	afterAgent.UpdatedAt = afterAgent.UpdatedAt.UTC()
+	if !reflect.DeepEqual(*afterAgent, *beforeAgent) {
+		t.Fatalf("foreign dialog update mutated agent:\nbefore=%+v\nafter=%+v", *beforeAgent, *afterAgent)
+	}
+	afterHooks, err := lifecycleRepo.HooksByAgent(t.Context(), agent.ID)
+	if err != nil {
+		t.Fatalf("load hooks after foreign requests: %v", err)
+	}
+	if !reflect.DeepEqual(afterHooks, beforeHooks) {
+		t.Fatalf("foreign requests mutated hooks:\nbefore=%+v\nafter=%+v", beforeHooks, afterHooks)
+	}
+
+	unknownGET := httptest.NewRequest(http.MethodGet, "/agents/missing/lifecycle-hooks?project_id="+projectA.ID, nil)
+	unknownGETRecorder := httptest.NewRecorder()
+	e.ServeHTTP(unknownGETRecorder, unknownGET)
+	if unknownGETRecorder.Code != http.StatusNotFound {
+		t.Fatalf("unknown GET status=%d body=%s", unknownGETRecorder.Code, unknownGETRecorder.Body.String())
+	}
+}
+
+func TestHandler_AgentLifecycleHooks_AllowsOwningProjectAndGlobalContexts(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	agentRepo := repository.NewAgentRepo(db)
+	lifecycleRepo := repository.NewLifecycleRepo(db)
+	h.SetAgentRepo(agentRepo)
+	h.SetLifecycleRepo(lifecycleRepo)
+
+	projectA := createProject(t, h, "same-project A")
+	projectB := createProject(t, h, "same-project B")
+	projectAgent := &models.Agent{
+		Name:                "Project B Agent",
+		Description:         "before dialog save",
+		SystemPrompt:        "project work",
+		Model:               "inherit",
+		Scope:               models.AgentScopeProject,
+		ProjectID:           projectB.ID,
+		Key:                 "project-b-agent",
+		Tools:               []string{},
+		SelectableAsPrimary: true,
+		Enabled:             true,
+	}
+	if err := agentRepo.Create(t.Context(), projectAgent); err != nil {
+		t.Fatalf("create project agent: %v", err)
+	}
+	oldHook := &models.AgentLifecycleHook{
+		AgentID:        projectAgent.ID,
+		When:           models.LifecycleAfterComplete,
+		SkillKey:       "old_project_skill",
+		Enabled:        true,
+		PromptOverride: "old project prompt",
+	}
+	if err := lifecycleRepo.CreateHook(t.Context(), oldHook); err != nil {
+		t.Fatalf("create old project hook: %v", err)
+	}
+
+	ownerGET := httptest.NewRequest(http.MethodGet, "/agents/"+projectAgent.ID+"/lifecycle-hooks?project_id="+projectB.ID, nil)
+	ownerGETRecorder := httptest.NewRecorder()
+	e.ServeHTTP(ownerGETRecorder, ownerGET)
+	if ownerGETRecorder.Code != http.StatusOK || !strings.Contains(ownerGETRecorder.Body.String(), "old_project_skill") {
+		t.Fatalf("same-project GET status=%d body=%s", ownerGETRecorder.Code, ownerGETRecorder.Body.String())
+	}
+
+	directPayload, _ := json.Marshal([]hookSavePayload{{
+		When:           string(models.LifecycleAfterComplete),
+		SkillKey:       "same_project_skill",
+		Enabled:        true,
+		PromptOverride: "same project replacement",
+		OutputContract: string(models.OutputContractActivitySummary),
+	}})
+	ownerPUT := httptest.NewRequest(http.MethodPut, "/agents/"+projectAgent.ID+"/lifecycle-hooks?project_id="+projectB.ID, bytes.NewReader(directPayload))
+	ownerPUT.Header.Set(echo.HeaderContentType, "application/json")
+	ownerPUTRecorder := httptest.NewRecorder()
+	e.ServeHTTP(ownerPUTRecorder, ownerPUT)
+	if ownerPUTRecorder.Code != http.StatusOK {
+		t.Fatalf("same-project PUT status=%d body=%s", ownerPUTRecorder.Code, ownerPUTRecorder.Body.String())
+	}
+	projectHooks, err := lifecycleRepo.HooksByAgent(t.Context(), projectAgent.ID)
+	if err != nil {
+		t.Fatalf("load same-project hooks: %v", err)
+	}
+	if len(projectHooks) != 1 || projectHooks[0].SkillKey != "same_project_skill" || projectHooks[0].PromptOverride != "same project replacement" {
+		t.Fatalf("same-project PUT did not reconcile omitted hook: %+v", projectHooks)
+	}
+
+	dialogPayload, _ := json.Marshal([]hookSavePayload{{
+		When:           string(models.LifecycleAfterComplete),
+		SkillKey:       "dialog_project_skill",
+		Enabled:        true,
+		OutputContract: string(models.OutputContractActivitySummary),
+	}})
+	form := url.Values{}
+	form.Set("name", "Project B Agent")
+	form.Set("description", "after same-project dialog save")
+	form.Set("system_prompt", "project work")
+	form.Set("model", "inherit")
+	form.Set("tools_json", `[]`)
+	form.Set("plugins_json", `[]`)
+	form.Set("skills_json", `[]`)
+	form.Set("mcp_servers_json", `[]`)
+	form.Set("key", "project-b-agent")
+	form.Set("scope", string(models.AgentScopeProject))
+	form.Set("project_id", projectB.ID)
+	form.Set("selectable_as_primary", "true")
+	form.Set("enabled", "true")
+	form.Set("permission_defaults_json", `{}`)
+	form.Set("source_refs_json", `[]`)
+	form.Set("lifecycle_hooks_json", string(dialogPayload))
+	ownerUpdate := performAgentDialogRequest(t, e, http.MethodPut, "/agents/"+projectAgent.ID+"?project_id="+projectB.ID, form)
+	if ownerUpdate.Code != http.StatusOK {
+		t.Fatalf("same-project dialog update status=%d body=%s", ownerUpdate.Code, ownerUpdate.Body.String())
+	}
+	storedProjectAgent, err := agentRepo.GetByID(t.Context(), projectAgent.ID)
+	if err != nil {
+		t.Fatalf("reload same-project agent: %v", err)
+	}
+	if storedProjectAgent.Description != "after same-project dialog save" || storedProjectAgent.ProjectID != projectB.ID {
+		t.Fatalf("same-project dialog update did not persist expected agent: %+v", storedProjectAgent)
+	}
+	projectHooks, err = lifecycleRepo.HooksByAgent(t.Context(), projectAgent.ID)
+	if err != nil {
+		t.Fatalf("reload dialog hooks: %v", err)
+	}
+	if len(projectHooks) != 1 || projectHooks[0].SkillKey != "dialog_project_skill" {
+		t.Fatalf("same-project dialog save did not reconcile hooks: %+v", projectHooks)
+	}
+
+	globalAgent := &models.Agent{Name: "Global Agent", Scope: models.AgentScopeGlobal, Model: "inherit", Tools: []string{}, Enabled: true}
+	if err := agentRepo.Create(t.Context(), globalAgent); err != nil {
+		t.Fatalf("create global agent: %v", err)
+	}
+	if err := lifecycleRepo.CreateHook(t.Context(), &models.AgentLifecycleHook{AgentID: globalAgent.ID, When: models.LifecycleBeforeRun, SkillKey: "global_skill", Enabled: true}); err != nil {
+		t.Fatalf("create global hook: %v", err)
+	}
+	globalGET := httptest.NewRequest(http.MethodGet, "/agents/"+globalAgent.ID+"/lifecycle-hooks?project_id="+projectA.ID, nil)
+	globalGETRecorder := httptest.NewRecorder()
+	e.ServeHTTP(globalGETRecorder, globalGET)
+	if globalGETRecorder.Code != http.StatusOK || !strings.Contains(globalGETRecorder.Body.String(), "global_skill") {
+		t.Fatalf("global Agent GET from project context status=%d body=%s", globalGETRecorder.Code, globalGETRecorder.Body.String())
+	}
+
+	unknownPUT := httptest.NewRequest(http.MethodPut, "/agents/missing/lifecycle-hooks?project_id="+projectA.ID, bytes.NewReader([]byte(`[]`)))
+	unknownPUT.Header.Set(echo.HeaderContentType, "application/json")
+	unknownPUTRecorder := httptest.NewRecorder()
+	e.ServeHTTP(unknownPUTRecorder, unknownPUT)
+	if unknownPUTRecorder.Code != http.StatusNotFound {
+		t.Fatalf("unknown PUT status=%d body=%s", unknownPUTRecorder.Code, unknownPUTRecorder.Body.String())
+	}
+}
+
 func TestHandler_GetAgentLifecycleHooks_ReturnsAgentScopedHooks(t *testing.T) {
 	h, e, _, db := setupTestHandlerWithDB(t)
 	agentRepo := repository.NewAgentRepo(db)

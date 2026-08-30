@@ -20,12 +20,23 @@ import (
 // as JSON so the agent edit dialog (Lifecycle Hooks tab) can hydrate the form.
 // Runbook §Agent Create/Edit Dialog → Lifecycle Hooks Tab (lines 2203-2246).
 func (h *Handler) GetAgentLifecycleHooks(c echo.Context) error {
-	if h.lifecycleRepo == nil {
+	if h.lifecycleRepo == nil || h.agentRepo == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "lifecycle repo not configured")
 	}
 	agentID := strings.TrimSpace(c.Param("id"))
 	if agentID == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "agent id is required")
+	}
+	agent, err := h.agentRepo.GetByID(c.Request().Context(), agentID)
+	if err != nil {
+		applog.Infof("[handler] GetAgentLifecycleHooks agent=%s lookup error: %v", agentID, err)
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	if agent == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+	if err := h.ensureAgentProjectAccess(c, agent); err != nil {
+		return err
 	}
 	hooks, err := h.lifecycleRepo.HooksByAgent(c.Request().Context(), agentID)
 	if err != nil {
@@ -33,6 +44,38 @@ func (h *Handler) GetAgentLifecycleHooks(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	return c.JSON(http.StatusOK, hooks)
+}
+
+// ensureAgentProjectAccess prevents project-scoped agent configuration from
+// being read or changed through a different project context. An explicit
+// project_id in the URL is authoritative; form submissions may carry the same
+// value in the form body. When neither is present, resolve the selected project
+// so requests from a project context cannot silently fall through to the
+// agent's owning project. Project-scoped agents without a recorded ProjectID
+// retain the legacy fallback used by agent-owned skill routes.
+func (h *Handler) ensureAgentProjectAccess(c echo.Context, agent *models.Agent) error {
+	if agent == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+	if agent.Scope != models.AgentScopeProject || strings.TrimSpace(agent.ProjectID) == "" {
+		return nil
+	}
+
+	requestedProjectID := strings.TrimSpace(c.QueryParam("project_id"))
+	if requestedProjectID == "" && strings.HasPrefix(c.Request().Header.Get(echo.HeaderContentType), "application/x-www-form-urlencoded") {
+		requestedProjectID = strings.TrimSpace(c.FormValue("project_id"))
+	}
+	if requestedProjectID == "" && h.projectSvc != nil {
+		resolvedProjectID, err := h.getCurrentProjectID(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		}
+		requestedProjectID = strings.TrimSpace(resolvedProjectID)
+	}
+	if requestedProjectID != "" && requestedProjectID != strings.TrimSpace(agent.ProjectID) {
+		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+	return nil
 }
 
 // hookSavePayload is the wire format sent by the dialog's Lifecycle Hooks tab.
@@ -64,6 +107,9 @@ func (h *Handler) SaveAgentLifecycleHooks(c echo.Context) error {
 	agent, err := h.agentRepo.GetByID(c.Request().Context(), agentID)
 	if err != nil || agent == nil {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+	if err := h.ensureAgentProjectAccess(c, agent); err != nil {
+		return err
 	}
 	if agent.GeneratedStatus == models.AgentStatusProtected {
 		return echo.NewHTTPError(http.StatusForbidden, "lifecycle hooks for protected built-in agents cannot be modified through the dialog")
