@@ -2383,10 +2383,15 @@ window.addEventListener('DOMContentLoaded', function() {
     var root = document.getElementById('task-detail-content');
     var panel = document.getElementById('tab-lifecycle');
     var card = panel.querySelector('.card');
+    var description = card.querySelector('[data-lifecycle-description]');
+    var firstRow = document.querySelector('#lifecycle-activity-list [data-lifecycle-execution-id]');
     var port = document.getElementById('lifecycle-activity-scroll');
     var rootRect = root.getBoundingClientRect();
     var cardRect = card.getBoundingClientRect();
+    var descriptionRect = description.getBoundingClientRect();
+    var firstRowRect = firstRow.getBoundingClientRect();
     if (Math.abs(cardRect.bottom - rootRect.bottom) > 2) throw new Error('lifecycle card does not fill remaining height: card=' + cardRect.bottom + ' root=' + rootRect.bottom);
+    if (firstRowRect.top - descriptionRect.bottom > 32) throw new Error('lifecycle rows start too far below the description: gap=' + (firstRowRect.top - descriptionRect.bottom));
     if (port.clientHeight < 500) throw new Error('lifecycle scrollport is unexpectedly short: ' + port.clientHeight);
     if (port.scrollHeight <= port.clientHeight) throw new Error('lifecycle rows do not overflow their internal scrollport');
     if (root.scrollHeight > root.clientHeight + 2) throw new Error('lifecycle rows escaped into page-level overflow');
@@ -2396,7 +2401,7 @@ window.addEventListener('DOMContentLoaded', function() {
   run().catch(function(error) { report('fail', String(error && error.stack || error)); });
 });
 </script>`
-	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;display:flex;flex-direction:column;box-sizing:border-box;}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%}.flex-shrink-0{flex-shrink:0}.min-h-0{min-height:0}.hidden{display:none!important}.card{display:flex;flex-direction:column}.card-body{display:flex;flex:1 1 auto;flex-direction:column;min-height:0;padding:32px;box-sizing:border-box}.mb-6{margin-bottom:24px}.mb-3{margin-bottom:12px}#lifecycle-activity-scroll{overflow-y:auto}.space-y-2>[data-lifecycle-execution-id]{min-height:80px;margin-bottom:8px;box-sizing:border-box}</style></head><body>" + fragment.String() + runner + "</body></html>"
+	page = "<!doctype html><html><head><meta charset=\"utf-8\"><style>html,body{margin:0;padding:0;}#task-detail-content{height:900px;display:flex;flex-direction:column;box-sizing:border-box;}.flex{display:flex}.flex-col{flex-direction:column}.flex-1{flex:1 1 0%}.flex-none{flex:none}.flex-shrink-0{flex-shrink:0}.min-h-0{min-height:0}.hidden{display:none!important}.card{display:flex;flex-direction:column}.card-body{display:flex;flex:1 1 auto;flex-direction:column;min-height:0;padding:32px;box-sizing:border-box}.card-body>p{flex-grow:1}.mb-6{margin-bottom:24px}.mb-3{margin-bottom:12px}#lifecycle-activity-scroll{overflow-y:auto}.space-y-2>[data-lifecycle-execution-id]{min-height:80px;margin-bottom:8px;box-sizing:border-box}</style></head><body>" + fragment.String() + runner + "</body></html>"
 
 	stderrPath := filepath.Join(t.TempDir(), "task-detail-lifecycle-fill.stderr")
 	stderrFile, err := os.Create(stderrPath)

@@ -1738,7 +1738,7 @@ func TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *models
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\">Refresh</button></div><p class=\"text-sm opacity-70 mb-3 flex-shrink-0\">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p><div id=\"lifecycle-activity-scroll\" data-task-id=\"")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 179, "\">Refresh</button></div><div data-lifecycle-description class=\"text-sm opacity-70 mb-3 flex-shrink-0\">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</div><div id=\"lifecycle-activity-scroll\" data-task-id=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

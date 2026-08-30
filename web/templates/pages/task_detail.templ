@@ -924,7 +924,7 @@ templ TaskDetailContent(task *models.Task, goal *models.TaskGoal, metrics *model
 							<h4 class="text-lg font-bold">Lifecycle Activity</h4>
 							<button type="button" class="btn btn-ghost btn-xs" onclick={ templ.ComponentScript{Call: "refreshLifecycleActivity('" + task.ID + "', '" + task.ProjectID + "')"} }>Refresh</button>
 						</div>
-						<p class="text-sm opacity-70 mb-3 flex-shrink-0">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</p>
+						<div data-lifecycle-description class="text-sm opacity-70 mb-3 flex-shrink-0">Lifecycle hook invocations recorded for this task. Includes routing, before-run preparation, and after-complete learning.</div>
 						<div id="lifecycle-activity-scroll" data-task-id={ task.ID } data-project-id={ task.ProjectID } data-lifecycle-scrollport="true" tabindex="0" aria-label="Lifecycle activity" class="flex-1 min-h-0 overflow-y-auto pr-1">
 							<div id="lifecycle-activity-list" data-task-id={ task.ID } data-project-id={ task.ProjectID } class="space-y-2">
 								<p class="text-sm opacity-50">Loading lifecycle activity...</p>
