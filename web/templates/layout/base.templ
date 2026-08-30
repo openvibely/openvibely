@@ -177,7 +177,7 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 						--ov-link-color-visited: #7480ff;
 						--ov-link-focus-ring: rgba(116, 128, 255, 0.45);
 						--ov-link-decoration: rgba(116, 128, 255, 0.85);
-						--ov-primary-action-color: #646fe4;
+						--ov-primary-action-color: #7480ff;
 							--ov-diff-add-bg: #1E3A38;
 							--ov-diff-del-bg: #3D2C34;
 							--ov-diff-add-fg: #559B70;
@@ -194,9 +194,10 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 							transparent 6px
 						);
 					}
-					.chat-send-button {
-						background-color: var(--ov-primary-action-color) !important;
-						border-color: var(--ov-primary-action-color) !important;
+					[data-color-theme="openvibely-dark"] .btn-primary.chat-send-button,
+					[data-color-theme="openvibely-light"] .btn-primary.chat-send-button {
+						background-color: var(--ov-primary-action-color);
+						border-color: var(--ov-primary-action-color);
 					}
 					.task-state-running {
 						color: var(--ov-primary-action-color);

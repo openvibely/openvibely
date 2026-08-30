@@ -1214,17 +1214,37 @@ func TestTaskRunningStateMatchesChatSendButtonByTheme(t *testing.T) {
 
 	for _, fragment := range []string{
 		":root {",
-		"--ov-primary-action-color: #646fe4;",
+		"--ov-primary-action-color: #7480ff;",
 		"[data-theme=\"light\"] {",
 		"--ov-primary-action-color: #7480ff;",
-		".chat-send-button {",
-		"background-color: var(--ov-primary-action-color) !important;",
-		"border-color: var(--ov-primary-action-color) !important;",
+		"[data-color-theme=\"openvibely-dark\"] .btn-primary.chat-send-button,",
+		"[data-color-theme=\"openvibely-light\"] .btn-primary.chat-send-button {",
+		"background-color: var(--ov-primary-action-color);",
+		"border-color: var(--ov-primary-action-color);",
 		".task-state-running {",
 		"color: var(--ov-primary-action-color);",
 	} {
 		if !strings.Contains(html, fragment) {
 			t.Errorf("expected chat send button and task running state to share primary action token via %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{
+		"background-color: var(--ov-primary-action-color) !important;",
+		"border-color: var(--ov-primary-action-color) !important;",
+		"\n\t\t\t\t\t.chat-send-button {",
+	} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("shared normal send color must not override hover or imported-theme button styling via %q", forbidden)
+		}
+	}
+	nativeRule := strings.Index(html, `[data-color-theme="openvibely-dark"] .btn-primary.chat-send-button,`)
+	for _, hoverSelector := range []string{
+		`[data-theme="dark"] .btn-primary:hover {`,
+		`[data-theme="light"] .btn-primary:hover {`,
+	} {
+		hoverRule := strings.Index(html, hoverSelector)
+		if nativeRule < 0 || hoverRule < nativeRule {
+			t.Errorf("native send normal rule must precede %q so hover remains authoritative", hoverSelector)
 		}
 	}
 	if strings.Contains(html, "--ov-task-running:") {

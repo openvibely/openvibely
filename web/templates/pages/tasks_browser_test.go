@@ -17,6 +17,7 @@ import (
 
 	"github.com/openvibely/openvibely/internal/models"
 	"github.com/openvibely/openvibely/web/templates/components"
+	"github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func TestTasksDefaultAndPersistedSortsAcrossLiveRefreshAndDragInChrome(t *testing.T) {
@@ -482,6 +483,78 @@ data: {"type":"task_board_updated","project_id":"` + project.ID + `","task_id":"
 	if !strings.HasPrefix(outcome, "pass:") {
 		stderr, _ := os.ReadFile(stderrPath)
 		t.Fatalf("Automation capacity browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
+	}
+}
+
+func TestTaskRunningIconSharesNativeSendColorWithoutOverridingImportedThemeInChrome(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	var page bytes.Buffer
+	if err := layout.Base("Primary action color", nil, "").Render(context.Background(), &page); err != nil {
+		t.Fatalf("render base layout: %v", err)
+	}
+
+	html := page.String()
+	importedCSS := `<style>[data-color-theme="vscode-test"][data-theme="dark"] .btn-primary { background-color: rgb(1, 2, 3) !important; border-color: rgb(1, 2, 3) !important; }</style>`
+	html = strings.Replace(html, "</head>", importedCSS+"</head>", 1)
+	fixture := `<button class="btn btn-primary chat-send-button" data-test-send>Send</button><span class="task-state-running" data-test-running>Running</span><script>
+	window.addEventListener('DOMContentLoaded', function() {
+	  function color(selector, property) { return getComputedStyle(document.querySelector(selector))[property]; }
+	  function setTheme(mode, id) { document.documentElement.setAttribute('data-theme', mode); document.documentElement.setAttribute('data-color-theme', id); }
+	  function fail(message) { throw new Error(message); }
+	  try {
+	    setTheme('dark', 'openvibely-dark');
+	    if (color('[data-test-send]', 'backgroundColor') !== color('[data-test-running]', 'color')) fail('dark send and running colors differ');
+	    setTheme('light', 'openvibely-light');
+	    if (color('[data-test-send]', 'backgroundColor') !== color('[data-test-running]', 'color')) fail('light send and running colors differ');
+	    setTheme('dark', 'vscode-test');
+	    setTimeout(function() {
+	      try {
+	        if (color('[data-test-send]', 'backgroundColor') !== 'rgb(1, 2, 3)') fail('imported theme primary color was overridden: ' + color('[data-test-send]', 'backgroundColor'));
+	        fetch('/browser-result?status=pass', {method:'POST'});
+	      } catch (error) { fetch('/browser-result?status=fail&message=' + encodeURIComponent(String(error && error.stack || error)), {method:'POST'}); }
+	    }, 400);
+	  } catch (error) { fetch('/browser-result?status=fail&message=' + encodeURIComponent(String(error && error.stack || error)), {method:'POST'}); }
+	});
+	</script>`
+	html = strings.Replace(html, "</body>", fixture+"</body>", 1)
+
+	browserResult := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/browser-result" {
+			browserResult <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(html))
+	}))
+	defer server.Close()
+
+	stderrPath := filepath.Join(t.TempDir(), "primary-action-color-browser.stderr")
+	stderrFile, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderrFile.Close()
+	cmd := exec.Command(chrome,
+		"--headless=new", "--no-sandbox", "--disable-gpu", "--disable-software-rasterizer",
+		"--disable-dev-shm-usage", "--disable-background-networking", "--no-first-run", "--no-default-browser-check",
+		"--user-data-dir="+filepath.Join(t.TempDir(), "primary-action-color-browser-profile"), server.URL,
+	)
+	cmd.Stderr = stderrFile
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome string
+	select {
+	case outcome = <-browserResult:
+	case <-time.After(15 * time.Second):
+		outcome = "fail:timed out waiting for browser result"
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		stderr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("Primary action color browser regression failed: %s\nChrome:\n%s", outcome, strings.TrimSpace(string(stderr)))
 	}
 }
 
