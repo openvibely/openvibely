@@ -349,7 +349,7 @@ templ taskCardStateIcon(task models.Task) {
 	</span>
 }
 
-templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, rebaseAvailable bool, unavailableReason string, taskPR *models.TaskPullRequest) {
+templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, rebaseAvailable bool, unavailableReason string, taskPR *models.TaskPullRequest, prEligible bool, prUnavailableReason string) {
 	<li
 		data-task-card-merge-options
 		data-task-id={ task.ID }
@@ -374,8 +374,10 @@ templ TaskCardMergeOptions(task *models.Task, projectID string, eligible bool, r
 		}
 		if taskPR != nil && taskPR.PRURL != "" {
 			<a class="text-sm min-h-11" href={ templ.SafeURL(taskPR.PRURL) } target="_blank" rel="noopener noreferrer">View PR #{ fmt.Sprintf("%d", taskPR.PRNumber) }</a>
-		} else {
+		} else if prEligible {
 			<button type="button" class="text-sm min-h-11" data-task-card-pr-action data-task-id={ task.ID } data-project-id={ projectID } data-task-title={ task.Title } data-target-branch={ task.MergeTargetBranch } data-merge-type="pr" onclick="openTaskCardMergeConfirm(this)">Create PR</button>
+		} else {
+			<span class="text-sm min-h-11 opacity-50" aria-disabled="true" title={ prUnavailableReason }>Create PR unavailable</span>
 		}
 	</li>
 }

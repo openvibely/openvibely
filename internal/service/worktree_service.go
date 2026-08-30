@@ -169,6 +169,15 @@ func (ws *WorktreeService) SetupFollowupWorktree(ctx context.Context, task *mode
 }
 
 func (ws *WorktreeService) setupWorktree(ctx context.Context, task *models.Task, repoDir string, continueFromCurrentTarget bool) (worktreePath string, branchName string, err error) {
+	err = ws.WithRepositoryMutation(repoDir, func() error {
+		var setupErr error
+		worktreePath, branchName, setupErr = ws.setupWorktreeUnlocked(ctx, task, repoDir, continueFromCurrentTarget)
+		return setupErr
+	})
+	return worktreePath, branchName, err
+}
+
+func (ws *WorktreeService) setupWorktreeUnlocked(ctx context.Context, task *models.Task, repoDir string, continueFromCurrentTarget bool) (worktreePath string, branchName string, err error) {
 	if repoDir == "" || !IsGitRepo(repoDir) {
 		return "", "", fmt.Errorf("not a git repository: %s", repoDir)
 	}
@@ -461,6 +470,12 @@ func StartupSyncConflictContext(conflict *StartupSyncConflictError) string {
 // merge target/default branch before task execution begins. It only runs when
 // the worktree is clean and does not implicitly fetch or merge remote branches.
 func (ws *WorktreeService) SyncWorktreeFromMainAtStart(ctx context.Context, task *models.Task, repoDir string) error {
+	return ws.WithRepositoryMutation(repoDir, func() error {
+		return ws.syncWorktreeFromMainAtStartUnlocked(ctx, task, repoDir)
+	})
+}
+
+func (ws *WorktreeService) syncWorktreeFromMainAtStartUnlocked(ctx context.Context, task *models.Task, repoDir string) error {
 	if task == nil || task.WorktreePath == "" {
 		return nil
 	}
@@ -1902,6 +1917,12 @@ func (ws *WorktreeService) resolveConflictsWithAILocked(ctx context.Context, tas
 
 // CleanupWorktree removes the worktree and optionally deletes the branch.
 func (ws *WorktreeService) CleanupWorktree(ctx context.Context, task *models.Task, repoDir string, deleteBranch bool) error {
+	return ws.WithRepositoryMutation(repoDir, func() error {
+		return ws.cleanupWorktreeUnlocked(ctx, task, repoDir, deleteBranch)
+	})
+}
+
+func (ws *WorktreeService) cleanupWorktreeUnlocked(ctx context.Context, task *models.Task, repoDir string, deleteBranch bool) error {
 	if task.WorktreePath == "" {
 		return nil
 	}
@@ -2574,12 +2595,12 @@ func (ws *WorktreeService) HandlePostExecution(ctx context.Context, task *models
 		commitCtx.DiffSummary = ws.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, task.WorktreePath, *task.AgentID, commitCtx)
 	}
 	msg := BuildWorktreeCommitMessage(task.WorktreePath, commitCtx)
-	var commitErr error
-	if ws.llmSvc != nil {
-		commitErr = ws.llmSvc.CommitTaskWorktreeChanges(ctx, task, execModel, task.WorktreePath, msg)
-	} else {
-		commitErr = CommitWorktreeChanges(task.WorktreePath, msg)
-	}
+	commitErr := ws.WithRepositoryMutation(repoDir, func() error {
+		if ws.llmSvc != nil {
+			return ws.llmSvc.CommitTaskWorktreeChanges(ctx, task, execModel, task.WorktreePath, msg)
+		}
+		return CommitWorktreeChanges(task.WorktreePath, msg)
+	})
 	if commitErr != nil {
 		applog.Infof("[worktree] error committing changes for task %s: %v", task.ID, commitErr)
 		if ws.taskRepo != nil {
@@ -2832,58 +2853,117 @@ func (ws *WorktreeService) CleanupOrphanedWorktrees(ctx context.Context) (int, e
 				continue
 			}
 
-			deleteBranch := worktreeBranchSafeToDelete(ctx, project.RepoPath, worktree.Branch, targetBranch, knownLineageBranches)
-			if worktree.Branch != "" && !deleteBranch {
-				applog.Infof("[worktree] cleanup: orphaned worktree at %s has branch %s that is not safe to delete; removing worktree only", worktree.Path, worktree.Branch)
+			removed, err := ws.cleanupOrphanedWorktree(ctx, &project, worktree.Path)
+			if err != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return cleanedCount, ctxErr
+				}
+				applog.Infof("[worktree] cleanup: failed to revalidate/remove orphaned worktree %s: %v", worktree.Path, err)
+				continue
 			}
-
-			applog.Infof("[worktree] cleanup: found orphaned worktree at %s (branch: %s)", worktree.Path, worktree.Branch)
-
-			// Try to remove the worktree using git first
-			cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", worktree.Path)
-			cmd.Dir = project.RepoPath
-			if output, err := cmd.CombinedOutput(); err != nil {
-				outputText := string(output)
-				if err := ctx.Err(); err != nil {
-					return cleanedCount, err
-				}
-
-				// A locked worktree may still be actively initializing. Don't perform
-				// manual filesystem deletion in this case; retry on a future cleanup cycle.
-				if strings.Contains(outputText, "cannot remove a locked working tree") {
-					applog.Infof("[worktree] cleanup: skipping locked orphaned worktree at %s (output: %s)", worktree.Path, outputText)
-					continue
-				}
-
-				// If git worktree remove fails, try manual cleanup
-				applog.Infof("[worktree] cleanup: git worktree remove failed, attempting manual cleanup: %v (output: %s)", err, outputText)
-
-				// Remove the worktree directory manually
-				if err := os.RemoveAll(worktree.Path); err != nil {
-					applog.Infof("[worktree] cleanup: failed to remove orphaned worktree directory %s: %v", worktree.Path, err)
-					continue
-				}
-
-				// Prune stale worktree entries
-				pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
-				pruneCmd.Dir = project.RepoPath
-				_ = pruneCmd.Run() // Ignore errors
+			if removed {
+				cleanedCount++
 			}
-
-			// Delete the branch only when it is conclusively merged and unreferenced.
-			if deleteBranch {
-				cmd = exec.CommandContext(ctx, "git", "branch", "-D", worktree.Branch)
-				cmd.Dir = project.RepoPath
-				if out, err := cmd.CombinedOutput(); err != nil {
-					applog.Infof("[worktree] cleanup: failed to delete orphaned branch %s: %s", worktree.Branch, string(out))
-				}
-			}
-
-			cleanedCount++
 		}
 	}
 
 	return cleanedCount, nil
+}
+
+func (ws *WorktreeService) cleanupOrphanedWorktree(ctx context.Context, project *models.Project, candidatePath string) (bool, error) {
+	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
+		return false, nil
+	}
+	removed := false
+	err := ws.WithRepositoryMutation(project.RepoPath, func() error {
+		worktrees, err := ListGitWorktreesContext(ctx, project.RepoPath)
+		if err != nil {
+			return err
+		}
+		var candidate *WorktreeInfo
+		for i := range worktrees {
+			if filepath.Clean(worktrees[i].Path) == filepath.Clean(candidatePath) {
+				candidate = &worktrees[i]
+				break
+			}
+		}
+		if candidate == nil || candidate.IsMain {
+			return nil
+		}
+
+		allTasks, err := ws.taskRepo.ListByProject(ctx, project.ID, "")
+		if err != nil {
+			return err
+		}
+		knownPaths := make(map[string]bool)
+		knownTaskIDs := make(map[string]bool)
+		knownLineageBranches := make(map[string]string)
+		for _, task := range allTasks {
+			knownTaskIDs[task.ID] = true
+			if task.WorktreePath != "" {
+				knownPaths[filepath.Clean(task.WorktreePath)] = true
+			}
+			if task.WorktreeBranch != "" {
+				knownLineageBranches[task.WorktreeBranch] = task.ID
+			}
+			if task.BaseBranch != "" {
+				knownLineageBranches[task.BaseBranch] = task.ID
+			}
+		}
+		if knownPaths[filepath.Clean(candidate.Path)] {
+			return nil
+		}
+		if taskID, ok := taskIDFromWorktreePath(candidate.Path); ok && knownTaskIDs[taskID] {
+			return nil
+		}
+		if _, ok := knownLineageBranches[candidate.Branch]; ok {
+			return nil
+		}
+		if dirty, ok := worktreeDirtyState(ctx, candidate.Path); !ok || dirty {
+			return nil
+		}
+		targetBranch := ws.getGlobalMergeTarget(ctx)
+		if targetBranch == "" {
+			targetBranch = GetDefaultBranchContext(ctx, project.RepoPath)
+		}
+		if !worktreeHeadMergedIntoTarget(ctx, candidate.Path, targetBranch) {
+			return nil
+		}
+		deleteBranch := worktreeBranchSafeToDelete(ctx, project.RepoPath, candidate.Branch, targetBranch, knownLineageBranches)
+		if candidate.Branch != "" && !deleteBranch {
+			applog.Infof("[worktree] cleanup: orphaned worktree at %s has branch %s that is not safe to delete; removing worktree only", candidate.Path, candidate.Branch)
+		}
+		applog.Infof("[worktree] cleanup: found orphaned worktree at %s (branch: %s)", candidate.Path, candidate.Branch)
+
+		cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", candidate.Path)
+		cmd.Dir = project.RepoPath
+		if output, removeErr := cmd.CombinedOutput(); removeErr != nil {
+			outputText := string(output)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr
+			}
+			if strings.Contains(outputText, "cannot remove a locked working tree") {
+				return nil
+			}
+			applog.Infof("[worktree] cleanup: git worktree remove failed, attempting manual cleanup: %v (output: %s)", removeErr, outputText)
+			if err := os.RemoveAll(candidate.Path); err != nil {
+				return err
+			}
+			pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+			pruneCmd.Dir = project.RepoPath
+			_ = pruneCmd.Run()
+		}
+		if deleteBranch {
+			deleteCmd := exec.CommandContext(ctx, "git", "branch", "-D", candidate.Branch)
+			deleteCmd.Dir = project.RepoPath
+			if out, err := deleteCmd.CombinedOutput(); err != nil {
+				applog.Infof("[worktree] cleanup: failed to delete orphaned branch %s: %s", candidate.Branch, string(out))
+			}
+		}
+		removed = true
+		return nil
+	})
+	return removed, err
 }
 
 func taskIDFromWorktreePath(worktreePath string) (string, bool) {

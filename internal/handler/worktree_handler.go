@@ -79,6 +79,28 @@ func rejectTaskCardMutation(c echo.Context, message string) error {
 	return c.String(http.StatusConflict, message)
 }
 
+func (h *Handler) taskCardPullRequestEligibility(task *models.Task, project *models.Project) (bool, string) {
+	if task == nil || strings.TrimSpace(task.WorktreeBranch) == "" {
+		return false, "A task worktree branch is required."
+	}
+	if project == nil || strings.TrimSpace(project.RepoPath) == "" {
+		return false, "The project has no repository path."
+	}
+	if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
+		return false, "The task worktree is currently in use."
+	}
+	if service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
+		return false, "The task worktree is locked."
+	}
+	if h.githubSvc == nil {
+		return false, "GitHub integration is not configured."
+	}
+	if h.taskPullRequestRepo == nil {
+		return false, "Pull request storage is unavailable."
+	}
+	return true, ""
+}
+
 // GetTaskCardMergeOptions returns freshly validated merge actions for one Kanban card.
 func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
 	projectID := strings.TrimSpace(c.QueryParam("project_id"))
@@ -103,7 +125,8 @@ func (h *Handler) GetTaskCardMergeOptions(c echo.Context) error {
 	if h.taskPullRequestRepo != nil {
 		taskPR, _ = h.taskPullRequestRepo.GetByTaskID(c.Request().Context(), task.ID)
 	}
-	return render(c, http.StatusOK, components.TaskCardMergeOptions(task, projectID, eligible, state.RebaseAvailable, reason, taskPR))
+	prEligible, prUnavailableReason := h.taskCardPullRequestEligibility(task, project)
+	return render(c, http.StatusOK, components.TaskCardMergeOptions(task, projectID, eligible, state.RebaseAvailable, reason, taskPR, prEligible, prUnavailableReason))
 }
 
 // UpdateTaskAutoMerge toggles auto-merge for a task.
@@ -467,36 +490,29 @@ func (h *Handler) CreateTaskPullRequest(c echo.Context) error {
 	if err != nil || project == nil || project.RepoPath == "" {
 		return taskPullRequestFailure(c, fromTaskCard, "Project has no repository path configured")
 	}
-	unlock := h.lockWorktreeMutation(project.RepoPath)
-	defer unlock()
-	task, err = h.taskSvc.GetByID(c.Request().Context(), taskID)
-	if err != nil || task == nil {
-		return echo.NewHTTPError(http.StatusNotFound, "task not found")
-	}
-	if fromTaskCard {
-		if task.Status == models.StatusRunning || task.Status == models.StatusQueued {
-			return rejectTaskCardMutation(c, "The task worktree is currently in use.")
-		}
-		if task.WorktreeBranch == "" {
-			return rejectTaskCardMutation(c, "Task has no worktree branch.")
-		}
-		if service.IsGitWorktreeLocked(project.RepoPath, task.WorktreePath) {
-			return rejectTaskCardMutation(c, "The task worktree is locked.")
-		}
-	}
-	repoRef, err := h.githubSvc.ResolveRepo(c.Request().Context(), project.RepoURL, project.RepoPath)
-	if err != nil {
-		return taskPullRequestFailure(c, fromTaskCard, formatTaskPullRequestError(fmt.Errorf("resolving repository: %w", err)))
-	}
-	if err := service.ConfigureGitHubRepoEndpoint(repoRef, h.githubSvc.GlobalAPIEndpoint(c.Request().Context())); err != nil {
-		return taskPullRequestFailure(c, fromTaskCard, err.Error())
-	}
-
-	result, err := h.newTaskPullRequestService().OpenForTask(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
+	var eligibilityReason string
+	result, mutationErr := h.newTaskPullRequestService().OpenForTaskValidated(c.Request().Context(), project, task, service.OpenTaskPullRequestOptions{
 		CommitMessage: h.buildPullRequestPrepCommitMessage(c.Request().Context(), task),
+	}, func() (*models.Task, error) {
+		currentTask, loadErr := h.taskSvc.GetByID(c.Request().Context(), taskID)
+		if loadErr != nil || currentTask == nil {
+			eligibilityReason = "Task not found."
+			return nil, errTaskMutationEligibilityChanged
+		}
+		if fromTaskCard {
+			if eligible, reason := h.taskCardPullRequestEligibility(currentTask, project); !eligible {
+				eligibilityReason = reason
+				return nil, errTaskMutationEligibilityChanged
+			}
+		}
+		task = currentTask
+		return currentTask, nil
 	})
-	if err != nil {
-		return taskPullRequestFailure(c, fromTaskCard, formatTaskPullRequestError(err))
+	if errors.Is(mutationErr, errTaskMutationEligibilityChanged) {
+		return rejectTaskCardMutation(c, eligibilityReason)
+	}
+	if mutationErr != nil {
+		return taskPullRequestFailure(c, fromTaskCard, formatTaskPullRequestError(mutationErr))
 	}
 
 	if result.ReusedExistingRecord {

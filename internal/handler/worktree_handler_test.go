@@ -205,6 +205,47 @@ func TestHandler_TaskCardMergeOptionsUseAuthoritativeStateAndProjectOwnership(t 
 	}
 }
 
+func TestHandler_TaskCardCreatePROptionUsesAuthoritativeEligibility(t *testing.T) {
+	h, e, _, db := setupTestHandlerWithDB(t)
+	h.taskPullRequestRepo = repository.NewTaskPullRequestRepo(db)
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	cmd := exec.Command("git", "init", "-b", "main")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	project := &models.Project{Name: "PR eligibility", RepoPath: repoDir, IsDefault: true}
+	if err := h.projectSvc.Create(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	task := &models.Task{ProjectID: project.ID, Title: "No branch", Prompt: "test", Category: models.CategoryBacklog, Status: models.StatusPending}
+	if err := h.taskRepo.Create(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+
+	requestOptions := func() string {
+		t.Helper()
+		rec := worktreeExecute(e, httptest.NewRequest(http.MethodGet, "/tasks/"+task.ID+"/card/merge-options?project_id="+project.ID, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("options status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		return rec.Body.String()
+	}
+	if body := requestOptions(); strings.Contains(body, "data-task-card-pr-action") || !strings.Contains(body, "Create PR unavailable") {
+		t.Fatalf("task without branch should not expose Create PR: %s", body)
+	}
+
+	task.WorktreeBranch = "task/pr-eligibility"
+	task.Status = models.StatusRunning
+	if err := h.taskRepo.Update(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	if body := requestOptions(); strings.Contains(body, "data-task-card-pr-action") || !strings.Contains(body, "Create PR unavailable") {
+		t.Fatalf("running task should not expose Create PR: %s", body)
+	}
+}
+
 func TestHandler_UpdateTask_UnchecksAutoMerge(t *testing.T) {
 	// Bug: unchecking auto_merge in the edit form didn't update the task
 	// because unchecked checkboxes send no value and the handler skipped the update.

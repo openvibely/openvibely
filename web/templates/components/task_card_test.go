@@ -384,7 +384,7 @@ func TestTaskCard_LazilyLoadsAuthoritativeMergeOptions(t *testing.T) {
 func TestTaskCardMergeOptionsRemainRefreshableAndExposeCreatePR(t *testing.T) {
 	task := models.Task{ID: "merge-card-task", ProjectID: "project-1", Title: "Merge card task", MergeTargetBranch: "main"}
 	var buf bytes.Buffer
-	if err := TaskCardMergeOptions(&task, "project-1", true, false, "", nil).Render(context.Background(), &buf); err != nil {
+	if err := TaskCardMergeOptions(&task, "project-1", true, false, "", nil, true, "").Render(context.Background(), &buf); err != nil {
 		t.Fatal(err)
 	}
 	body := buf.String()

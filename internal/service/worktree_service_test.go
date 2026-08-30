@@ -73,6 +73,88 @@ func TestWorktreeServiceRepositoryMutationSerializesCanonicalAliasesAcrossInstan
 	}
 }
 
+func TestWorktreeRepositoryWritersShareCanonicalMutationBoundary(t *testing.T) {
+	tests := []struct {
+		name   string
+		invoke func(context.Context, *WorktreeService, string) error
+	}{
+		{
+			name: "setup",
+			invoke: func(ctx context.Context, ws *WorktreeService, repo string) error {
+				cancelled, cancel := context.WithCancel(ctx)
+				cancel()
+				_, _, err := ws.SetupWorktree(cancelled, &models.Task{ID: "12345678", Title: "setup"}, repo)
+				return err
+			},
+		},
+		{
+			name: "startup sync",
+			invoke: func(ctx context.Context, ws *WorktreeService, repo string) error {
+				return ws.SyncWorktreeFromMainAtStart(ctx, nil, repo)
+			},
+		},
+		{
+			name: "explicit cleanup",
+			invoke: func(ctx context.Context, ws *WorktreeService, repo string) error {
+				return ws.CleanupWorktree(ctx, &models.Task{}, repo, true)
+			},
+		},
+		{
+			name: "orphan cleanup",
+			invoke: func(ctx context.Context, ws *WorktreeService, repo string) error {
+				_, err := ws.cleanupOrphanedWorktree(ctx, &models.Project{ID: "project", RepoPath: repo}, filepath.Join(repo, ".worktrees", "missing"))
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoDir := createTestGitRepo(t)
+			alias := filepath.Join(t.TempDir(), "repo-alias")
+			if err := os.Symlink(repoDir, alias); err != nil {
+				t.Skipf("symlink repository alias: %v", err)
+			}
+			leaseEntered := make(chan struct{})
+			releaseLease := make(chan struct{})
+			leaseDone := make(chan error, 1)
+			go func() {
+				leaseDone <- WithRepositoryMutation(repoDir, func() error {
+					close(leaseEntered)
+					<-releaseLease
+					return nil
+				})
+			}()
+			select {
+			case <-leaseEntered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("repository mutation lease was not acquired")
+			}
+
+			writerDone := make(chan error, 1)
+			go func() { writerDone <- tt.invoke(context.Background(), &WorktreeService{}, alias) }()
+			select {
+			case err := <-writerDone:
+				t.Fatalf("writer bypassed canonical mutation boundary: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(releaseLease)
+			select {
+			case err := <-leaseDone:
+				if err != nil {
+					t.Fatalf("repository mutation lease: %v", err)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("repository mutation lease did not finish")
+			}
+			select {
+			case <-writerDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("writer did not resume after lease release")
+			}
+		})
+	}
+}
+
 func TestMergeBranchRejectsQueuedWriterWhenRepositoryHasActiveConflict(t *testing.T) {
 	repoDir := createTestGitRepo(t)
 	runGitTest(t, repoDir, "checkout", "-b", "task/conflicting")

@@ -2362,12 +2362,14 @@ func (h *Handler) captureTaskDiffOutput(ctx context.Context, task *models.Task, 
 					commitCtx.DiffSummary = h.llmSvc.SummarizeWorktreeCommitDiffForAgentID(ctx, workDir, exec.AgentConfigID, commitCtx)
 				}
 			}
-			if h.llmSvc != nil {
-				if err := h.llmSvc.CommitTaskWorktreeChanges(ctx, task, exec, workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx)); err != nil {
-					applog.Infof("[handler] error committing task follow-up worktree changes task=%s worktree=%s: %v", task.ID, workDir, err)
+			commitErr := service.WithRepositoryMutation(repoDir, func() error {
+				if h.llmSvc != nil {
+					return h.llmSvc.CommitTaskWorktreeChanges(ctx, task, exec, workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx))
 				}
-			} else if err := service.CommitWorktreeChanges(workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx)); err != nil {
-				applog.Infof("[handler] error committing task follow-up worktree changes task=%s worktree=%s: %v", task.ID, workDir, err)
+				return service.CommitWorktreeChanges(workDir, service.BuildWorktreeCommitMessage(workDir, commitCtx))
+			})
+			if commitErr != nil {
+				applog.Infof("[handler] error committing task follow-up worktree changes task=%s worktree=%s: %v", task.ID, workDir, commitErr)
 			}
 			return service.GetWorktreeDiffWithUncommitted(repoDir, worktreeBranch, targetBranch, workDir)
 		}

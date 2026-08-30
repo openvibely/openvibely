@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,6 +77,81 @@ func (f *fakeTaskPullRequestGitHubProvider) CreatePullRequest(ctx context.Contex
 
 func (f *fakeTaskPullRequestGitHubProvider) GlobalAPIEndpoint(_ context.Context) string {
 	return f.globalAPIEndpoint
+}
+
+func TestTaskPullRequestServiceOpenForTaskUsesCanonicalRepositoryMutationBoundary(t *testing.T) {
+	ctx := context.Background()
+	repoDir := t.TempDir()
+	aliasRoot := t.TempDir()
+	alias := filepath.Join(aliasRoot, "repo-alias")
+	if err := os.Symlink(repoDir, alias); err != nil {
+		t.Skipf("symlink repository alias: %v", err)
+	}
+	db := testutil.NewTestDB(t)
+	prRepo := repository.NewTaskPullRequestRepo(db)
+	publishEntered := make(chan struct{}, 1)
+	github := &fakeTaskPullRequestGitHubProvider{
+		publishBranchFn: func(context.Context, *GitHubRepoRef, GitHubPublishBranchRequest) (*GitHubPublishBranchResult, error) {
+			publishEntered <- struct{}{}
+			return nil, errors.New("stop after publication entry")
+		},
+	}
+	service := NewTaskPullRequestService(github, prRepo)
+	project := &models.Project{ID: "project", RepoPath: alias, RepoURL: "https://github.com/openvibely/openvibely"}
+	task := &models.Task{ID: "task", ProjectID: project.ID, Title: "Publish", WorktreeBranch: "task/publish", MergeTargetBranch: "main"}
+
+	leaseEntered := make(chan struct{})
+	releaseLease := make(chan struct{})
+	leaseDone := make(chan error, 1)
+	go func() {
+		leaseDone <- WithRepositoryMutation(repoDir, func() error {
+			close(leaseEntered)
+			<-releaseLease
+			return nil
+		})
+	}()
+	select {
+	case <-leaseEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("repository mutation lease was not acquired")
+	}
+
+	openDone := make(chan error, 1)
+	go func() {
+		_, err := service.OpenForTask(ctx, project, task, OpenTaskPullRequestOptions{})
+		openDone <- err
+	}()
+	select {
+	case <-publishEntered:
+		t.Fatal("direct pull-request publication bypassed canonical repository mutation boundary")
+	case err := <-openDone:
+		t.Fatalf("direct pull-request publication returned before lease release: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseLease)
+	select {
+	case err := <-leaseDone:
+		if err != nil {
+			t.Fatalf("repository mutation lease: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("repository mutation lease did not finish")
+	}
+	select {
+	case <-publishEntered:
+	case err := <-openDone:
+		t.Fatalf("publication did not enter after lease release: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("publication did not resume after lease release")
+	}
+	select {
+	case err := <-openDone:
+		if err == nil || !strings.Contains(err.Error(), "stop after publication entry") {
+			t.Fatalf("unexpected publication result: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("publication did not return")
+	}
 }
 
 func TestTaskPullRequestServiceReplaceBranchHeadForTaskUsesLinkedPRAndTaskBranch(t *testing.T) {
