@@ -198,13 +198,8 @@ window.addEventListener('DOMContentLoaded', function() {
 		"--user-data-dir="+profileDir, server.URL+"/channels?project_id="+projectOne.ID,
 	)
 	cmd.Stderr = stderrFile
-	require.NoError(t, cmd.Start())
-	defer func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		_, _ = cmd.Process.Wait()
-	}()
+	require.NoError(t, startHandlerBrowserProcess(cmd))
+	defer stopHandlerBrowserProcess(cmd)
 
 	var outcome string
 	deadline := time.After(30 * time.Second)
