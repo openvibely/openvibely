@@ -1411,6 +1411,93 @@ func TestToggleScheduleEnabled_HTMX_Returns200(t *testing.T) {
 		t.Fatalf("expected 200 HTMX response, got %d", rec.Code)
 	}
 	assertSchedulesTaskDetailFragment(t, rec.Body.String())
+	if !strings.Contains(rec.Body.String(), `Disabled`) || !strings.Contains(rec.Body.String(), `Resume`) {
+		t.Fatalf("expected refreshed paused schedule fragment, body=%s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "/schedules/"+s.ID+"/toggle?project_id="+project.ID) {
+		t.Fatalf("expected project-scoped toggle URL in refreshed fragment, body=%s", rec.Body.String())
+	}
+	var trigger struct {
+		Toast struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"openvibelyToast"`
+	}
+	if err := json.Unmarshal([]byte(rec.Header().Get("HX-Trigger")), &trigger); err != nil {
+		t.Fatalf("expected JSON toast trigger, got %q: %v", rec.Header().Get("HX-Trigger"), err)
+	}
+	if trigger.Toast.Message != "Schedule paused" || trigger.Toast.Status != "success" {
+		t.Fatalf("unexpected pause toast: %#v", trigger.Toast)
+	}
+
+	rec = tc.HTMX().Post("/schedules/" + s.ID + "/toggle?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 HTMX resume response, got %d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), `Disabled`) || !strings.Contains(rec.Body.String(), `Pause`) {
+		t.Fatalf("expected refreshed enabled schedule fragment, body=%s", rec.Body.String())
+	}
+	trigger = struct {
+		Toast struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"openvibelyToast"`
+	}{}
+	if err := json.Unmarshal([]byte(rec.Header().Get("HX-Trigger")), &trigger); err != nil {
+		t.Fatalf("expected JSON resume toast trigger, got %q: %v", rec.Header().Get("HX-Trigger"), err)
+	}
+	if trigger.Toast.Message != "Schedule resumed" || trigger.Toast.Status != "success" {
+		t.Fatalf("unexpected resume toast: %#v", trigger.Toast)
+	}
+}
+
+func TestToggleScheduleEnabled_FiredOneTimeReturnsBadRequestWithoutMutation(t *testing.T) {
+	tc := NewTestContext(t)
+	project := tc.CreateProject().Build()
+	task := tc.CreateTask(project.ID).Build()
+	s := tc.CreateSchedule(task.ID).WithRunAt(time.Now().Add(-time.Hour)).Build()
+	if err := tc.scheduleRepo.MarkRan(context.Background(), s.ID, time.Now(), nil); err != nil {
+		t.Fatalf("mark one-time schedule ran: %v", err)
+	}
+	if err := tc.scheduleRepo.ToggleEnabled(context.Background(), s.ID, false); err != nil {
+		t.Fatalf("pause one-time schedule: %v", err)
+	}
+
+	rec := tc.HTMX().Post("/schedules/" + s.ID + "/toggle?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 HTMX response with visible validation feedback, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertSchedulesTaskDetailFragment(t, rec.Body.String())
+	if !strings.Contains(rec.Body.String(), "Resume") {
+		t.Fatalf("expected fired schedule to remain resumable after rejected toggle, body=%s", rec.Body.String())
+	}
+	var trigger struct {
+		Toast struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+		} `json:"openvibelyToast"`
+	}
+	if err := json.Unmarshal([]byte(rec.Header().Get("HX-Trigger")), &trigger); err != nil {
+		t.Fatalf("expected JSON failure toast trigger, got %q: %v", rec.Header().Get("HX-Trigger"), err)
+	}
+	if trigger.Toast.Message != "one-time schedule has already run; supply a new time before resuming" || trigger.Toast.Status != "failed" {
+		t.Fatalf("unexpected fired-schedule toast: %#v", trigger.Toast)
+	}
+	stored, err := tc.scheduleRepo.GetByID(context.Background(), s.ID)
+	if err != nil {
+		t.Fatalf("get schedule after rejected HTMX resume: %v", err)
+	}
+	if stored.Enabled || stored.NextRun != nil {
+		t.Fatalf("rejected HTMX resume changed fired schedule: %#v", stored)
+	}
+
+	rec = tc.HTTP().Post("/schedules/" + s.ID + "/toggle?project_id=" + project.ID).Execute()
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for native resume of fired one-time schedule, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "supply a new time") {
+		t.Fatalf("expected actionable native time error, body=%s", rec.Body.String())
+	}
 }
 
 func TestToggleScheduleEnabled_NonHTMX_RedirectContainsTaskID(t *testing.T) {
@@ -1424,7 +1511,7 @@ func TestToggleScheduleEnabled_NonHTMX_RedirectContainsTaskID(t *testing.T) {
 		t.Fatalf("expected 303, got %d", rec.Code)
 	}
 	loc := rec.Header().Get("Location")
-	expected := "/tasks/" + task.ID
+	expected := "/tasks/" + task.ID + "?tab=schedules&project_id=" + project.ID
 	if loc != expected {
 		t.Errorf("expected redirect to %q, got %q", expected, loc)
 	}

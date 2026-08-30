@@ -89,6 +89,64 @@ func (r *SettingsRepo) observeQueryAcquired(query string) {
 	}
 }
 
+// SetMany atomically replaces a coherent settings snapshot.
+func (r *SettingsRepo) SetMany(ctx context.Context, values map[string]string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	return withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		for key, value := range values {
+			if _, err := tx.ExecContext(ctx,
+				"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+				key, value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// CompareAndSet updates one setting only when its current value and every guard
+// still match. The immediate transaction makes the read/guard/write decision
+// atomic with concurrent coherent settings replacement.
+func (r *SettingsRepo) CompareAndSet(ctx context.Context, key, expected, value string, guards map[string]string) (bool, error) {
+	updated := false
+	err := withImmediateTx(ctx, r.db, func(tx SQLExecutor) error {
+		matches, err := r.MatchesWithExecutor(ctx, tx, map[string]string{key: expected})
+		if err != nil || !matches {
+			return err
+		}
+		matches, err = r.MatchesWithExecutor(ctx, tx, guards)
+		if err != nil || !matches {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx,
+			"INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+			key, value); err != nil {
+			return err
+		}
+		updated = true
+		return nil
+	})
+	return updated, err
+}
+
+// MatchesWithExecutor checks an expected settings snapshot using the caller's
+// transaction. It lets durable channel handoffs assert configuration authority
+// in the same commit that creates work.
+func (r *SettingsRepo) MatchesWithExecutor(ctx context.Context, exec SQLExecutor, expected map[string]string) (bool, error) {
+	for key, value := range expected {
+		var current string
+		if err := exec.QueryRowContext(ctx, `SELECT COALESCE((SELECT value FROM app_settings WHERE key = ?), '')`, key).Scan(&current); err != nil {
+			return false, err
+		}
+		if current != value {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 // Set upserts a setting value.
 func (r *SettingsRepo) Set(ctx context.Context, key, value string) error {
 	_, err := execBoundSQLite(ctx, r.db,

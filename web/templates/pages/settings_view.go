@@ -13,6 +13,14 @@ type ChannelsSettingsView struct {
 	AuthorizedUsers              []models.TelegramAuthorizedUser
 	SlackAuthorizedUsers         []models.SlackAuthorizedUser
 	DiscordAuthorizedUsers       []models.DiscordAuthorizedUser
+	XAuthorizedUsers             []models.XAuthorizedUser
+	XStatus                      service.XConnectionStatus
+	XHasConsumerKey              bool
+	XHasConsumerSecret           bool
+	XHasAccessToken              bool
+	XHasAccessTokenSecret        bool
+	XPollIntervalSeconds         string
+	XSendResponses               bool
 	CurrentProjectID             string
 	SendResponses                bool
 	RichMessagesV2               bool
@@ -50,6 +58,7 @@ type ChannelsSettingsView struct {
 	HasGitHubChannel             bool
 	HasSlackChannel              bool
 	HasDiscordChannel            bool
+	HasXChannel                  bool
 	HasEmailChannel              bool
 	Webhooks                     []models.WebhookEndpoint
 	AgentPickerOptions           []repository.AgentPickerOption

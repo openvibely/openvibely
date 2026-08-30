@@ -129,6 +129,7 @@ type channelThreadActionHandlerOptions struct {
 	SettingsRepo             *repository.SettingsRepo
 	CustomPersonalityRepo    *repository.CustomPersonalityRepo
 	ChannelTaskRunner        ChannelTaskRunner
+	RuntimeToolsForTask      func(taskID string) *llmcontracts.RuntimeTools
 	QueuedTaskThreadPromoter func(taskID string)
 	CompleteExecution        func(context.Context, string, string, string, string, int, int64)
 	ChannelMessageRouter     *ChannelMessageRouter
@@ -349,6 +350,8 @@ type channelUtilityActionHandlerOptions struct {
 	TelegramAuthRepo          telegramAuthCountByProjectStore
 	DiscordStatus             func(context.Context) (DiscordConnectionStatus, error)
 	DiscordAuthRepo           *repository.DiscordAuthRepo
+	XStatus                   func() XConnectionStatus
+	XAuthRepo                 *repository.XAuthRepo
 	EmailStatus               func(context.Context) EmailConnectionStatus
 	EmailAuthRepo             *repository.EmailAuthRepo
 	WebhookRepo               *repository.WebhookRepo
@@ -723,6 +726,7 @@ func runChannelSendToTaskAction(ctx context.Context, opts channelThreadActionHan
 		SettingsRepo:             opts.SettingsRepo,
 		CustomPersonalityRepo:    opts.CustomPersonalityRepo,
 		ChannelTaskRunner:        opts.ChannelTaskRunner,
+		RuntimeToolsForTask:      opts.RuntimeToolsForTask,
 		QueuedTaskThreadPromoter: opts.QueuedTaskThreadPromoter,
 		CompleteExecution:        opts.CompleteExecution,
 		NewQueuedInput:           opts.NewQueuedInput,
@@ -920,6 +924,7 @@ type channelStatusActionResponse struct {
 	Slack                  channelSlackStatusActionSummary    `json:"slack"`
 	Telegram               channelTelegramStatusActionSummary `json:"telegram"`
 	Discord                channelDiscordStatusActionSummary  `json:"discord"`
+	X                      channelXStatusActionSummary        `json:"x"`
 	Email                  channelEmailStatusActionSummary    `json:"email"`
 	Webhooks               channelWebhookStatusActionSummary  `json:"webhooks"`
 	OutboundTargets        channelTargetStatusActionSummary   `json:"outbound_message_targets"`
@@ -964,6 +969,17 @@ type channelDiscordStatusActionSummary struct {
 	Running             bool   `json:"running"`
 	Status              string `json:"status"`
 	BotUserID           string `json:"bot_user_id,omitempty"`
+	SendResponses       bool   `json:"send_responses"`
+	LastError           string `json:"last_error,omitempty"`
+	AuthorizedUserCount int    `json:"authorized_user_count"`
+}
+
+type channelXStatusActionSummary struct {
+	Configured          bool   `json:"configured"`
+	Connected           bool   `json:"connected"`
+	Running             bool   `json:"running"`
+	Status              string `json:"status"`
+	Username            string `json:"username,omitempty"`
 	SendResponses       bool   `json:"send_responses"`
 	LastError           string `json:"last_error,omitempty"`
 	AuthorizedUserCount int    `json:"authorized_user_count"`
@@ -1176,6 +1192,30 @@ func channelListChannelsResult(ctx context.Context, opts channelUtilityActionHan
 		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "discord")
 	}
 
+	xConfigured := get(XSettingConsumerKey) != "" && get(XSettingConsumerSecret) != "" && get(XSettingAccessToken) != "" && get(XSettingAccessTokenSecret) != ""
+	xStatus := XConnectionStatus{Configured: xConfigured}
+	if opts.XStatus != nil {
+		xStatus = opts.XStatus()
+		xStatus.Configured = xStatus.Configured || xConfigured
+	}
+	resp.X = channelXStatusActionSummary{
+		Configured:    xStatus.Configured,
+		Connected:     xStatus.Connected,
+		Running:       xStatus.Running,
+		Status:        channelConnectedStatus(xStatus.Configured, xStatus.Connected),
+		Username:      strings.TrimSpace(xStatus.Username),
+		SendResponses: !isFalse(XSettingSendResponses),
+		LastError:     channelSafeSingleLine(xStatus.LastError),
+	}
+	if opts.XAuthRepo != nil {
+		if count, err := opts.XAuthRepo.CountByProject(ctx, projectID); err == nil {
+			resp.X.AuthorizedUserCount = count
+		}
+	}
+	if resp.X.Configured {
+		resp.ConfiguredChannels = append(resp.ConfiguredChannels, "x")
+	}
+
 	email := EmailConnectionStatus{Provider: EmailProviderCustom, IMAPPort: 993, SMTPPort: 587}
 	if opts.EmailStatus != nil {
 		email = opts.EmailStatus(ctx)
@@ -1269,6 +1309,11 @@ func channelStatusSettings(ctx context.Context, settingsRepo *repository.Setting
 		TelegramSettingRichMessagesV2,
 		DiscordSettingBotToken,
 		DiscordSettingSendResponses,
+		XSettingConsumerKey,
+		XSettingConsumerSecret,
+		XSettingAccessToken,
+		XSettingAccessTokenSecret,
+		XSettingSendResponses,
 		EmailSettingProvider,
 		EmailSettingAddress,
 		EmailSettingPassword,

@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -303,5 +304,167 @@ window.addEventListener('DOMContentLoaded', function() {
 	}
 	if strings.Contains(requestList, "PATCH /tasks/task-active-status-drag/reorder") {
 		t.Fatalf("Active status-lane drag must not be routed as a reorder:\n%s", requestList)
+	}
+}
+
+func TestScheduleCardsSupportModifierMultiSelectGroupedPointerDragAndRollback(t *testing.T) {
+	chrome := chatNavigationChromePath(t)
+	htmxJS, err := os.ReadFile(filepath.Join("..", "components", "testdata", "htmx-2.0.4.min.js"))
+	if err != nil {
+		t.Fatalf("read pinned HTMX fixture: %v", err)
+	}
+	project := models.Project{ID: "project-schedule-multi-drag", Name: "Schedule multi drag"}
+	start := getStartOfWeek(0).AddDate(0, 0, 1)
+	makeScheduled := func(id string, hour int) repository.TaskWithSchedule {
+		runAt := time.Date(start.Year(), start.Month(), start.Day(), hour, 0, 0, 0, time.Local)
+		return repository.TaskWithSchedule{Task: models.Task{ID: "task-" + id, ProjectID: project.ID, Title: id, Category: models.CategoryScheduled, Status: models.StatusPending, CreatedAt: start, UpdatedAt: start}, Schedule: &models.Schedule{ID: id, TaskID: "task-" + id, RunAt: runAt, NextRun: &runAt, RepeatType: models.RepeatOnce, RepeatInterval: 1, Enabled: true}}
+	}
+	scheduled := []repository.TaskWithSchedule{makeScheduled("schedule-multi-a", 8), makeScheduled("schedule-multi-b", 10), makeScheduled("schedule-single-c", 12)}
+
+	runner := `<script>
+window.addEventListener('DOMContentLoaded', function() {
+  function report(status, message) { return fetch('/browser-result?status=' + encodeURIComponent(status) + '&message=' + encodeURIComponent(message || ''), {method:'POST'}); }
+  function fail(message) { throw new Error(message); }
+  function waitFor(check, label) { var started = performance.now(); return new Promise(function(resolve, reject) { (function poll() { try { if (check()) return resolve(); } catch (error) { return reject(error); } if (performance.now() - started > 5000) return reject(new Error('timed out waiting for ' + label)); setTimeout(poll, 10); })(); }); }
+  function click(card, ctrl) { card.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true, ctrlKey:ctrl})); }
+  function point(card) { var r = card.getBoundingClientRect(); return {x:r.left + Math.min(8, r.width / 2), y:r.top + Math.min(8, r.height / 2)}; }
+  async function drag(card, target, pointerId) {
+    var start = point(card), rect = target.getBoundingClientRect(), x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
+    card.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true,cancelable:true,pointerId:pointerId,pointerType:'mouse',button:0,buttons:1,clientX:start.x,clientY:start.y}));
+    card.dispatchEvent(new PointerEvent('pointermove', {bubbles:true,cancelable:true,pointerId:pointerId,pointerType:'mouse',buttons:1,clientX:x,clientY:y}));
+    return {x:x,y:y};
+  }
+  window.addEventListener('error', function(event) { report('fail', String(event.error && event.error.stack || event.message)); });
+  (async function() {
+    var first = document.querySelector('[data-schedule-id="schedule-multi-a"]');
+    var second = document.querySelector('[data-schedule-id="schedule-multi-b"]');
+    var single = document.querySelector('[data-schedule-id="schedule-single-c"]');
+    if (!first || !second || !single) fail('expected all schedule cards');
+    click(single, true);
+    if (!single.classList.contains('schedule-selected') || document.querySelector('#selection-count').textContent !== '1') fail('modifier click must select one schedule');
+    if (document.querySelector('#selection-label').textContent.trim() !== 'schedule selected') fail('counter must use schedule-specific singular semantics');
+    document.querySelector('#selection-counter button').click();
+    if (single.classList.contains('schedule-selected') || document.getElementById('selection-counter').classList.contains('visible')) fail('Clear button must clear schedule selection');
+    click(single, true);
+    click(single, true);
+    if (single.classList.contains('schedule-selected') || document.getElementById('selection-counter').classList.contains('visible')) fail('second modifier click must clear selection');
+
+    click(first, true); click(second, true);
+    if (document.querySelector('#selection-label').textContent.trim() !== 'schedules selected') fail('counter must use schedule-specific plural semantics');
+    if (!first.classList.contains('schedule-selected') || !second.classList.contains('schedule-selected')) fail('modifier clicks must select both schedules');
+    var source = first.closest('.drop-zone');
+    var targetHour = Number(source.dataset.hour) + 4;
+    var target = document.querySelector('.drop-zone[data-date="' + source.dataset.date + '"][data-hour="' + targetHour + '"]');
+    var drop = await drag(first, target, 31);
+    if (!first.classList.contains('dragging') || !second.classList.contains('dragging')) fail('every selected schedule must enter dragging state');
+    if (getComputedStyle(first).position !== 'fixed' || getComputedStyle(second).position !== 'fixed') fail('every selected schedule card must visibly move');
+    if (first.style.transform === '' || first.style.transform !== second.style.transform) fail('selected schedules must move by the same pointer delta');
+    if (document.querySelectorAll('[data-pointer-drag-placeholder]').length !== 2) fail('each moved card needs a source placeholder');
+    first.dispatchEvent(new PointerEvent('pointerup', {bubbles:true,cancelable:true,pointerId:31,pointerType:'mouse',button:0,buttons:0,clientX:drop.x,clientY:drop.y}));
+    await waitFor(function() { return !first.classList.contains('dragging') && !second.classList.contains('dragging'); }, 'failed grouped drag rollback');
+    if (first.style.transform || second.style.transform || document.querySelector('[data-pointer-drag-placeholder]')) fail('failed grouped drag must restore every card');
+    if (document.getElementById('selection-counter').classList.contains('visible')) fail('drag completion must clear schedule selection');
+    await new Promise(function(resolve) { setTimeout(resolve, 20); });
+
+    click(first, true); click(second, true);
+    drop = await drag(first, target, 32);
+    first.dispatchEvent(new PointerEvent('pointerup', {bubbles:true,cancelable:true,pointerId:32,pointerType:'mouse',button:0,buttons:0,clientX:drop.x,clientY:drop.y}));
+    await waitFor(function() { return document.querySelectorAll('[data-schedule-id]').length === 3; }, 'successful grouped refresh');
+    await new Promise(function(resolve) { setTimeout(resolve, 20); });
+    var refreshed = document.querySelector('[data-schedule-id="schedule-single-c"]');
+    click(refreshed, true);
+    if (!refreshed.classList.contains('schedule-selected') || document.querySelector('#selection-count').textContent !== '1') fail('selection must reinitialize after authoritative refresh');
+    await report('pass', '');
+  })().catch(function(error) { report('fail', String(error && error.stack || error)); });
+});
+</script>`
+
+	var mu sync.Mutex
+	var mutations []url.Values
+	groupAttempts := 0
+	result := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		switch r.URL.Path {
+		case "/htmx-2.0.4.min.js":
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			_, _ = w.Write(htmxJS)
+		case "/schedule":
+			if r.Header.Get("HX-Request") == "true" {
+				var fragment bytes.Buffer
+				if err := ScheduleContent(&project, scheduled, 0, nil, nil).Render(context.Background(), &fragment); err != nil {
+					t.Errorf("render refreshed schedule content: %v", err)
+				}
+				_, _ = w.Write(fragment.Bytes())
+				return
+			}
+			var out bytes.Buffer
+			if err := Schedule([]models.Project{project}, &project, scheduled, 0, nil, nil).Render(context.Background(), &out); err != nil {
+				t.Fatalf("render schedule: %v", err)
+			}
+			page := strings.Replace(out.String(), "https://unpkg.com/htmx.org@2.0.4", "/htmx-2.0.4.min.js", 1)
+			page = strings.Replace(page, "</head>", runner+"</head>", 1)
+			_, _ = w.Write([]byte(page))
+		case "/schedules/schedule-multi-a/reschedule":
+			if r.Method != http.MethodPatch {
+				t.Errorf("expected PATCH, got %s", r.Method)
+			}
+			if r.URL.Query().Get("project_id") != project.ID {
+				t.Errorf("grouped mutation lost project scope: %s", r.URL.RawQuery)
+			}
+			_ = r.ParseMultipartForm(1 << 20)
+			mu.Lock()
+			mutations = append(mutations, r.Form)
+			groupAttempts++
+			attempt := groupAttempts
+			mu.Unlock()
+			if attempt == 1 {
+				http.Error(w, "forced grouped failure", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case "/browser-result":
+			result <- r.URL.Query().Get("status") + ":" + r.URL.Query().Get("message")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	stderrPath := filepath.Join(t.TempDir(), "schedule-multi-drag.stderr")
+	stderr, err := os.Create(stderrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderr.Close()
+	cmd := exec.Command(chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-background-timer-throttling", "--no-first-run", "--window-size=1280,900", "--user-data-dir="+filepath.Join(t.TempDir(), "schedule-multi-profile"), server.URL+"/schedule?project_id="+project.ID)
+	cmd.Stderr = stderr
+	if err := startBrowserProcess(cmd); err != nil {
+		t.Fatalf("start Chrome: %v", err)
+	}
+	var outcome string
+	select {
+	case outcome = <-result:
+	case <-time.After(20 * time.Second):
+		outcome = "fail:timed out"
+	}
+	stopBrowserProcess(cmd)
+	if !strings.HasPrefix(outcome, "pass:") {
+		browserErr, _ := os.ReadFile(stderrPath)
+		t.Fatalf("schedule multi-select browser regression failed: %s\n%s", outcome, browserErr)
+	}
+	mu.Lock()
+	got := append([]url.Values(nil), mutations...)
+	mu.Unlock()
+	if len(got) != 2 {
+		t.Fatalf("expected failed and successful grouped mutations, got %d", len(got))
+	}
+	for i, form := range got {
+		if form.Get("schedule_ids") != "schedule-multi-a,schedule-multi-b" {
+			t.Errorf("mutation %d schedule_ids=%q", i, form.Get("schedule_ids"))
+		}
+		if form.Get("source_date") == "" || form.Get("source_hour") != "8" || form.Get("hour") != "12" {
+			t.Errorf("mutation %d lost source/target slot: %v", i, form)
+		}
 	}
 }

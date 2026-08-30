@@ -69,6 +69,7 @@ type channelTaskThreadSendOptions struct {
 	SettingsRepo               *repository.SettingsRepo
 	CustomPersonalityRepo      *repository.CustomPersonalityRepo
 	ChannelTaskRunner          ChannelTaskRunner
+	RuntimeToolsForTask        func(taskID string) *llmcontracts.RuntimeTools
 	QueuedTaskThreadPromoter   func(taskID string)
 	CompleteExecution          func(context.Context, string, string, string, string, int, int64)
 	NewQueuedInput             func(*models.Task, string, string) *models.ThreadInput
@@ -507,7 +508,11 @@ func runChannelTaskThreadSend(ctx context.Context, task *models.Task, opts chann
 	if updatedTask, getErr := opts.TaskRepo.GetByID(ctx, task.ID); getErr == nil && updatedTask != nil {
 		task = updatedTask
 	}
-	opts.ChannelTaskRunner(context.Background(), ChannelTaskRunRequest{ExecID: exec.ID, TaskID: task.ID, ProjectID: task.ProjectID, Message: opts.Message, Agent: *agent, ChatHistory: priorHistory, SystemContext: systemContext, Surface: opts.Surface, ReplyContext: opts.ReplyContext})
+	var runtimeTools *llmcontracts.RuntimeTools
+	if opts.RuntimeToolsForTask != nil {
+		runtimeTools = opts.RuntimeToolsForTask(task.ID)
+	}
+	opts.ChannelTaskRunner(context.Background(), ChannelTaskRunRequest{ExecID: exec.ID, TaskID: task.ID, ProjectID: task.ProjectID, Message: opts.Message, Agent: *agent, ChatHistory: priorHistory, SystemContext: systemContext, Surface: opts.Surface, ReplyContext: opts.ReplyContext, RuntimeTools: runtimeTools})
 	if opts.StartedResult != nil {
 		return opts.StartedResult(task)
 	}

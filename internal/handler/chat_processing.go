@@ -1357,11 +1357,12 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		task.CreatedVia = models.TaskOriginEmail
 	} else if input.Source == models.TaskOriginDiscord {
 		task.CreatedVia = models.TaskOriginDiscord
+	} else if input.Source == models.TaskOriginX {
+		task.CreatedVia = models.TaskOriginX
 	}
-	exec := &models.Execution{
-		AgentConfigID: agent.ID,
-		Status:        models.ExecRunning,
-		PromptSent:    input.Content,
+	exec := &models.Execution{AgentConfigID: agent.ID,
+		Status:     models.ExecRunning,
+		PromptSent: input.Content,
 	}
 	var slackContext *models.SlackTaskContext
 	if input.Source == models.TaskOriginSlack {
@@ -1451,6 +1452,7 @@ func (h *Handler) startQueuedChatInput(ctx context.Context, input models.ThreadI
 		ChatMode:         chatMode,
 		Surface:          surfaceForThreadInput(input),
 		ChannelReply:     channelReplyFromThreadInput(input),
+		RuntimeTools:     h.xRuntimeToolsForThreadInput(task.ID, input),
 		updateWorkDone:   updateWorkDone,
 	})
 	updateWorkDone = nil
@@ -1475,6 +1477,8 @@ func surfaceForThreadInput(input models.ThreadInput) chatcontrol.Surface {
 		return chatcontrol.SurfaceEmail
 	case models.TaskOriginDiscord:
 		return chatcontrol.SurfaceDiscord
+	case models.TaskOriginX:
+		return chatcontrol.SurfaceX
 	default:
 		return chatcontrol.SurfaceWeb
 	}
@@ -1538,6 +1542,22 @@ func (h *Handler) cancelUnstartableQueuedInput(ctx context.Context, input models
 	}
 }
 
+func (h *Handler) xRuntimeToolsForThreadInput(taskID string, input models.ThreadInput) *llmcontracts.RuntimeTools {
+	if input.Source != models.TaskOriginX {
+		return nil
+	}
+	svc := h.getXService()
+	if svc == nil {
+		// Queued rows outlive channel connection state. Reconstruct only the
+		// identity/runtime adapter from durable dependencies so project switching
+		// remains authorized and persisted even while outbound X is disconnected.
+		svc = service.NewXService(service.XCredentials{}, h.settingsRepo, h.projectRepo, h.llmConfigRepo, h.taskRepo, h.execRepo, h.scheduleRepo, h.taskSvc)
+		svc.SetRepositories(h.xAuthRepo, h.xUserProjectRepo, h.xTaskContextRepo, h.xInboundReceiptRepo, h.threadInputRepo)
+		svc.SetRuntime(h.agentRepo, h.customPersonalityRepo, h.chatBroadcaster, h.executionStreamHub, h.StartChannelChatRun, h.StartChannelTaskRun, h.PromoteQueuedChatInput, h.PromoteQueuedTaskThreadInput, h.channelMessageRouter)
+	}
+	return svc.RuntimeTools(taskID, input.ProjectID, input.XAccountID, input.XUserID, input.XConversationID, input.XReplyToTweetID, input.XUsername)
+}
+
 func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyContext {
 	return service.ChannelReplyContext{
 		Source:           input.Source,
@@ -1555,6 +1575,11 @@ func channelReplyFromThreadInput(input models.ThreadInput) service.ChannelReplyC
 		DiscordThreadID:  input.DiscordThreadID,
 		DiscordMessageID: input.DiscordMessageID,
 		DiscordUserID:    input.DiscordUserID,
+		XAccountID:       input.XAccountID,
+		XConversationID:  input.XConversationID,
+		XReplyToTweetID:  input.XReplyToTweetID,
+		XUserID:          input.XUserID,
+		XUsername:        input.XUsername,
 	}
 }
 
@@ -1869,7 +1894,9 @@ func (h *Handler) startQueuedTaskThreadInput(ctx context.Context, input models.T
 		WorkDir:           workDir,
 		ImageAttachments:  imageAttachments,
 		IsTaskFollowup:    true,
+		Surface:           surfaceForThreadInput(input),
 		ChannelReply:      channelReplyFromThreadInput(input),
+		RuntimeTools:      h.xRuntimeToolsForThreadInput(task.ID, input),
 		InputOrigin:       string(input.Source),
 		InputOriginAgent:  input.OriginAgent,
 		Task:              task,
@@ -2158,6 +2185,12 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 		}
 		return
 	}
+	if reply.Source == models.TaskOriginX && reply.XReplyToTweetID != "" {
+		if xService := h.getXService(); xService != nil {
+			xService.SendReplyForAccount(ctx, reply.XAccountID, reply.XReplyToTweetID, output, errMsg)
+		}
+		return
+	}
 	switch task.CreatedVia {
 	case models.TaskOriginTelegram:
 		if h.telegramService == nil {
@@ -2188,6 +2221,10 @@ func (h *Handler) sendChannelResponse(ctx context.Context, task *models.Task, re
 			h.emailService.SendChatResponse(ctx, *task, output, errMsg)
 		} else {
 			h.emailService.SendTaskCompletionNotification(ctx, *task, output, errMsg)
+		}
+	case models.TaskOriginX:
+		if xService := h.getXService(); xService != nil {
+			xService.SendChatResponse(ctx, *task, output, errMsg)
 		}
 	case models.TaskOriginDiscord:
 		if task.Category == models.CategoryChat {

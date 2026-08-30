@@ -355,6 +355,84 @@ func activeStatusDropZone(t *testing.T, body, status string) string {
 	return body[start : start+len(marker)+next]
 }
 
+func TestTaskCard_RendersPersistentAccessibleStateIconBeforeTitle(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      models.TaskStatus
+		category    models.TaskCategory
+		mergeStatus models.MergeStatus
+		wantState   string
+		wantLabel   string
+	}{
+		{name: "backlog pending", status: models.StatusPending, category: models.CategoryBacklog, wantState: "pending", wantLabel: "Pending"},
+		{name: "active pending", status: models.StatusPending, category: models.CategoryActive, wantState: "queued", wantLabel: "Queued"},
+		{name: "queued", status: models.StatusQueued, category: models.CategoryActive, wantState: "queued", wantLabel: "Queued"},
+		{name: "running", status: models.StatusRunning, category: models.CategoryActive, wantState: "running", wantLabel: "In Progress"},
+		{name: "completed", status: models.StatusCompleted, category: models.CategoryCompleted, wantState: "completed", wantLabel: "Completed"},
+		{name: "failed", status: models.StatusFailed, category: models.CategoryBacklog, wantState: "failed", wantLabel: "Failed"},
+		{name: "cancelled", status: models.StatusCancelled, category: models.CategoryBacklog, wantState: "cancelled", wantLabel: "Cancelled"},
+		{name: "blocked", status: models.StatusBlocked, category: models.CategoryActive, wantState: "blocked", wantLabel: "Waiting for Parent"},
+		{name: "merged overrides completion", status: models.StatusCompleted, category: models.CategoryCompleted, mergeStatus: models.MergeStatusMerged, wantState: "merged", wantLabel: "Merged"},
+		{name: "stale merged does not override running", status: models.StatusRunning, category: models.CategoryActive, mergeStatus: models.MergeStatusMerged, wantState: "running", wantLabel: "In Progress"},
+		{name: "stale merged does not override failed", status: models.StatusFailed, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "failed", wantLabel: "Failed"},
+		{name: "stale merged does not override cancelled", status: models.StatusCancelled, category: models.CategoryBacklog, mergeStatus: models.MergeStatusMerged, wantState: "cancelled", wantLabel: "Cancelled"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := models.Task{
+				ID:          "state-card",
+				ProjectID:   "default",
+				Title:       "State title",
+				Category:    tt.category,
+				Status:      tt.status,
+				MergeStatus: tt.mergeStatus,
+			}
+			var buf bytes.Buffer
+			if err := TaskCard(task, "default", string(tt.category), nil, nil).Render(context.Background(), &buf); err != nil {
+				t.Fatalf("render task card: %v", err)
+			}
+			body := buf.String()
+			icon := `data-task-state-icon data-task-state="` + tt.wantState + `"`
+			if !strings.Contains(body, icon) {
+				t.Fatalf("expected %s state icon, got %s", tt.wantState, body)
+			}
+			for _, want := range []string{
+				`role="img"`,
+				`aria-label="Task state: ` + tt.wantLabel + `"`,
+				`data-tip="` + tt.wantLabel + `"`,
+				`aria-hidden="true"`,
+			} {
+				if !strings.Contains(body, want) {
+					t.Fatalf("expected accessible state icon markup %q, got %s", want, body)
+				}
+			}
+			if !strings.Contains(body, `</span><span data-task-title class="min-w-0 flex-1 break-words sm:truncate">State title</span>`) {
+				t.Fatalf("state icon must render immediately before the shrink-safe title, got %s", body)
+			}
+		})
+	}
+}
+
+func TestKanbanBoard_RendersStateIconsInEveryCardVariant(t *testing.T) {
+	tasks := []models.Task{
+		{ID: "backlog-failed", ProjectID: "default", Title: "Failed card", Category: models.CategoryBacklog, Status: models.StatusFailed},
+		{ID: "active-queued", ProjectID: "default", Title: "Queued card", Category: models.CategoryActive, Status: models.StatusQueued},
+		{ID: "active-running", ProjectID: "default", Title: "Running card", Category: models.CategoryActive, Status: models.StatusRunning},
+		{ID: "completed-merged", ProjectID: "default", Title: "Merged card", Category: models.CategoryCompleted, Status: models.StatusCompleted, MergeStatus: models.MergeStatusMerged},
+	}
+	var buf bytes.Buffer
+	if err := KanbanBoard(tasks, "default", "", "", nil, nil).Render(context.Background(), &buf); err != nil {
+		t.Fatalf("render kanban board: %v", err)
+	}
+	body := buf.String()
+	for _, state := range []string{"failed", "queued", "running", "merged"} {
+		if !strings.Contains(body, `data-task-state-icon data-task-state="`+state+`"`) {
+			t.Fatalf("expected %s icon in rendered board variants, got %s", state, body)
+		}
+	}
+}
+
 func TestTaskCard_UsesGrabCursorForDrag(t *testing.T) {
 	task := models.Task{
 		ID:        "task-1",

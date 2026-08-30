@@ -610,6 +610,53 @@ func (r *TaskRepo) SetPendingIfNotRunningOrQueued(ctx context.Context, id string
 	return updated, nil
 }
 
+// SetPendingIfNotRunningOrQueuedForEnabledSchedule sets status to pending only
+// while the task is still eligible through an enabled, runnable schedule. The
+// schedule predicate is evaluated in the same UPDATE as the task mutation so a
+// pause that commits first prevents linked-task reactivation.
+func (r *TaskRepo) SetPendingIfNotRunningOrQueuedForEnabledSchedule(ctx context.Context, id, scheduleID string) (bool, error) {
+	task, err := r.GetByID(ctx, id)
+	if err != nil {
+		return false, fmt.Errorf("getting task before scheduled pending update: %w", err)
+	}
+	if task == nil {
+		return false, fmt.Errorf("task not found: %s", id)
+	}
+
+	result, err := execBoundSQLite(ctx, r.db,
+		`UPDATE tasks SET status = 'pending', updated_at = datetime('now')
+			 WHERE id = ? AND status NOT IN ('running', 'queued')
+			   AND EXISTS (
+					SELECT 1 FROM schedules
+					 WHERE schedules.id = ?
+					   AND schedules.task_id = tasks.id
+					   AND schedules.enabled = 1
+					   AND (schedules.repeat_type <> ? OR schedules.next_run IS NOT NULL)
+				)`,
+		id, scheduleID, models.RepeatOnce)
+	if err != nil {
+		return false, fmt.Errorf("setting scheduled task pending with guard: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("scheduled pending update rows affected: %w", err)
+	}
+
+	updated := rows > 0
+	if updated && r.broadcaster != nil && task.Status != models.StatusPending {
+		r.broadcaster.Publish(events.TaskEvent{
+			Type:      events.TaskStatusChanged,
+			TaskID:    id,
+			TaskName:  task.Title,
+			ProjectID: task.ProjectID,
+			Status:    string(models.StatusPending),
+			OldStatus: string(task.Status),
+			Category:  string(task.Category),
+		})
+	}
+	return updated, nil
+}
+
 const taskThreadInputOwnsAdmissionPredicate = `EXISTS (
 	SELECT 1 FROM thread_inputs i
 	WHERE i.scope = 'task_thread' AND i.task_id = tasks.id AND i.input_status = 'pending'
@@ -2008,6 +2055,15 @@ func (r *TaskRepo) UpdateDiscordOrigin(ctx context.Context, id string) error {
 		id)
 	if err != nil {
 		return fmt.Errorf("updating discord origin: %w", err)
+	}
+	return nil
+}
+
+// UpdateXOrigin marks a task as created through X.
+func (r *TaskRepo) UpdateXOrigin(ctx context.Context, id string) error {
+	_, err := execBoundSQLite(ctx, r.db, `UPDATE tasks SET created_via = 'x', updated_at = datetime('now') WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("updating X origin: %w", err)
 	}
 	return nil
 }

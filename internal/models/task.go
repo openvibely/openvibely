@@ -183,6 +183,7 @@ const (
 	TaskOriginSlack       = "slack"
 	TaskOriginEmail       = "email"
 	TaskOriginDiscord     = "discord"
+	TaskOriginX           = "x"
 	TaskOriginSystemAgent = "system_agent"
 )
 

@@ -1191,8 +1191,110 @@ func TestMigration100_RepairsSkippedChannelTargetsWhenOldLocalDiscordUsed099(t *
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 171 {
-		t.Fatalf("max goose version = %d, want 171", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
+	}
+}
+
+func assertXChannelSchema172(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, table := range []string{"x_authorized_users", "x_user_projects", "x_task_context", "x_inbound_receipts"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("expected table %s", table)
+		}
+	}
+	for table, columns := range map[string][]string{
+		"x_task_context":     {"account_id", "conversation_id", "reply_to_tweet_id", "x_user_id", "username"},
+		"x_inbound_receipts": {"lease_token", "lease_expires_at", "task_id"},
+		"thread_inputs":      {"x_account_id", "x_conversation_id", "x_reply_to_tweet_id", "x_user_id", "x_username"},
+	} {
+		for _, column := range columns {
+			if !tableHasColumn(t, db, table, column) {
+				t.Fatalf("expected %s.%s after consolidated X migration", table, column)
+			}
+		}
+	}
+	for _, index := range []string{"idx_x_authorized_users_project", "idx_x_user_projects_project", "idx_x_task_context_conversation", "idx_x_inbound_receipts_project", "idx_x_inbound_receipts_task"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, index).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("expected index %s", index)
+		}
+	}
+}
+
+func TestMigration172CreatesConsolidatedXSchemaFromPublicBaseline(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "x-consolidated-fresh-172.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 171); err != nil {
+		t.Fatalf("migrate to public baseline 171: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("apply consolidated X migration: %v", err)
+	}
+	assertXChannelSchema172(t, db)
+	var maxVersion int
+	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
+		t.Fatal(err)
+	}
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
+	}
+}
+
+func TestMigration172RollsBackConsolidatedXSchemaToPublicBaseline(t *testing.T) {
+	db := openMigrationTestDB(t, filepath.Join(t.TempDir(), "x-consolidated-rollback-172.db"))
+	goose.SetBaseFS(migrations.FS)
+	defer goose.SetBaseFS(nil)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, ".", 171); err != nil {
+		t.Fatalf("migrate to public baseline 171: %v", err)
+	}
+	if err := goose.Up(db, "."); err != nil {
+		t.Fatalf("apply consolidated X migration: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO projects(id, name, description, repo_path) VALUES('x-rollback-project', 'X rollback', '', '');
+		INSERT INTO x_authorized_users(project_id, x_user_id, username) VALUES('x-rollback-project', 'author', 'alice');
+	`); err != nil {
+		t.Fatalf("seed X rollback data: %v", err)
+	}
+	if err := goose.DownTo(db, ".", 171); err != nil {
+		t.Fatalf("roll back consolidated X migration: %v", err)
+	}
+
+	for _, table := range []string{"x_authorized_users", "x_user_projects", "x_task_context", "x_inbound_receipts"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("expected table %s to be removed by rollback", table)
+		}
+	}
+	for _, column := range []string{"x_account_id", "x_conversation_id", "x_reply_to_tweet_id", "x_user_id", "x_username"} {
+		if tableHasColumn(t, db, "thread_inputs", column) {
+			t.Fatalf("expected thread_inputs.%s to be removed by rollback", column)
+		}
+	}
+	var projectName string
+	if err := db.QueryRow(`SELECT name FROM projects WHERE id = 'x-rollback-project'`).Scan(&projectName); err != nil {
+		t.Fatalf("public schema unusable after X rollback: %v", err)
+	}
+	if projectName != "X rollback" {
+		t.Fatalf("project name = %q, want X rollback", projectName)
 	}
 }
 
@@ -1331,8 +1433,8 @@ func TestMigration107_AllowsLocalDatabaseWithOldSwarmVersion106(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 171 {
-		t.Fatalf("max goose version = %d, want 171", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
 	}
 }
 
@@ -1780,8 +1882,8 @@ func TestMigration082_SkipsWhenLocalDevDBAlreadyApplied082(t *testing.T) {
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 171 {
-		t.Fatalf("max goose version = %d, want 171", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
 	}
 }
 
@@ -2116,8 +2218,8 @@ func TestMigration091_LocalDevAlreadyAppliedUsageChainStillMigrates(t *testing.T
 	if err := db.QueryRow(`SELECT MAX(version_id) FROM goose_db_version WHERE is_applied = 1`).Scan(&maxVersion); err != nil {
 		t.Fatalf("failed to read max goose version: %v", err)
 	}
-	if maxVersion != 171 {
-		t.Fatalf("max goose version = %d, want 171", maxVersion)
+	if maxVersion != 172 {
+		t.Fatalf("max goose version = %d, want 172", maxVersion)
 	}
 }
 

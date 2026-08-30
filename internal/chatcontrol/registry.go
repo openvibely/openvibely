@@ -13,7 +13,7 @@
 //   - personality: set_personality, save_custom_personality
 //   - projects: create_project, update_project_settings, switch_project
 //   - agents: create_agent, update_agent
-//   - automations: save_automation, update_automation_template, run_automation_now, pause_automation, resume_automation
+//   - automations: save_automation, update_automation_template, run_automation_now, pause_automation, resume_automation, delete_automation
 //   - chat: set_chat_mode
 //
 // Chat read-only (plan + orchestrate):
@@ -59,10 +59,11 @@ const (
 	SurfaceSlack    Surface = "slack"
 	SurfaceEmail    Surface = "email"
 	SurfaceDiscord  Surface = "discord"
+	SurfaceX        Surface = "x"
 )
 
 // AllSurfaces is the full set of supported surfaces.
-var AllSurfaces = []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord}
+var AllSurfaces = []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord, SurfaceX, SurfaceX}
 
 // AccessLevel classifies read vs write.
 type AccessLevel string
@@ -990,6 +991,17 @@ var registry = []ActionDef{
 		Surfaces:     allSurfaces(),
 		Parameters:   json.RawMessage(automationLifecycleParams),
 	},
+	{
+		Name:              "delete_automation",
+		Description:       "Permanently delete a saved Automation by ID or exact unambiguous name in the current project. This destructive action requires explicit confirmation and uses the same guarded lifecycle path as browser deletion; it preserves existing domain tasks and removes only Automation-owned trigger schedules. Do not infer deletion from a read or cleanup request.",
+		Domain:            DomainAutomations,
+		Access:            AccessWrite,
+		Sensitivity:       SensitivityDestructive,
+		NeedsConfirmation: true,
+		AllowedModes:      []models.ChatMode{models.ChatModeOrchestrate},
+		Surfaces:          allSurfaces(),
+		Parameters:        json.RawMessage(automationLifecycleParams),
+	},
 	// --- Chat domain ---
 	{
 		Name:         "get_chat_mode",
@@ -1026,7 +1038,7 @@ var registry = []ActionDef{
 // helpers
 
 func allSurfaces() []Surface {
-	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord}
+	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceEmail, SurfaceDiscord, SurfaceX}
 }
 
 func bothModes() []models.ChatMode {
@@ -1038,7 +1050,7 @@ func webAPISurfaces() []Surface {
 }
 
 func chatSurfacesExceptEmail() []Surface {
-	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceDiscord}
+	return []Surface{SurfaceWeb, SurfaceAPI, SurfaceTelegram, SurfaceSlack, SurfaceDiscord, SurfaceX}
 }
 
 // ---- Public query API ----
